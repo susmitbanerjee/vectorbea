@@ -1,0 +1,68 @@
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Claude Code ──────────────────────────────────────────────────────────────
+.claude/
+
+# ── Node / Next.js ───────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+.vercel/
+.turbo/
+*.tsbuildinfo
+vectorbee-ui/.next/
+vectorbee-ui/node_modules/
+vectorbee-ui/out/
+
+# ── Gradle / JVM ─────────────────────────────────────────────────────────────
+vectorbee-backend/build/
+vectorbee-backend/.gradle/
+vectorbee-proxy/build/
+vectorbee-proxy/.gradle/
+*.class
+*.jar
+*.war
+*.ear
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.*.local
+
+# ── Docker volumes / runtime ─────────────────────────────────────────────────
+*.log
+*.pid
+
+# ── Test artefacts ───────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+test-results/
+vectorbee-backend/src/test/resources/*.tmp
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+secrets/

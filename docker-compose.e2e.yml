@@ -1,0 +1,109 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: vectorbee-e2e-db
+    environment:
+      POSTGRES_USER: vectorbee
+      POSTGRES_PASSWORD: vectorbee
+      POSTGRES_DB: vectorbee_test
+    volumes:
+      - ./vectorbee-backend/supabase/migrations/20260405_000001_mvp_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./vectorbee-backend/supabase/migrations/20260405_000002_prompt_publish_status.sql:/docker-entrypoint-initdb.d/02-prompt-publish-status.sql:ro
+      - ./vectorbee-backend/supabase/migrations/20260408_000001_audit_split_latency.sql:/docker-entrypoint-initdb.d/03-audit-split-latency.sql:ro
+      - ./vectorbee-backend/supabase/migrations/20260408_000002_api_key_last_four.sql:/docker-entrypoint-initdb.d/04-api-key-last-four.sql:ro
+      - ./vectorbee-backend/supabase/migrations/20260409_000001_api_key_name.sql:/docker-entrypoint-initdb.d/05-api-key-name.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vectorbee -d vectorbee_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - vectorbee-e2e
+
+  backend:
+    build:
+      context: ./vectorbee-backend
+    container_name: vectorbee-e2e-backend
+    environment:
+      DATABASE_URL: postgresql://vectorbee:vectorbee@db:5432/vectorbee_test
+      DB_URL: jdbc:postgresql://db:5432/vectorbee_test
+      DB_USER: vectorbee
+      DB_PASSWORD: vectorbee
+      PORT: 8080
+      VECTORBEE_ALLOW_DEV_TOKEN: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/api/prompts >/dev/null 2>&1 || exit 1"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - vectorbee-e2e
+
+  frontend:
+    build:
+      context: ./vectorbee-ui
+    container_name: vectorbee-e2e-frontend
+    environment:
+      API_URL: http://backend:8080
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      PORT: 3000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:3000/settings >/dev/null 2>&1 || exit 1"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - vectorbee-e2e
+
+  agent-tester:
+    image: python:3.11-slim
+    container_name: vectorbee-e2e-agent-tester
+    env_file:
+      # Keys (OPENAI_API_KEY, VECTORBEE_API_KEY) are read directly from this
+      # file at container start — no host shell export required.
+      - ../vectorbee_client_project/.env
+    environment:
+      # Overrides the proxy URL from .env (if present) so traffic stays on
+      # the Docker bridge and never crosses the Windows NAT boundary.
+      VECTORBEE_PROXY_URL: http://backend:8080
+    volumes:
+      # SDK root — writable so pip can write vectorbee_client.egg-info on install.
+      - ../vectorbee_client_project:/app/sdk
+      # Tester folder — contains my_agent.py and test scripts.
+      - ../vectorbee_client_project/vectorbee_tester:/app/tester:ro
+    # Install the SDK in editable mode on start so the container is exec-ready
+    # immediately. The sleep loop keeps it alive for `docker exec` sessions.
+    command: >
+      sh -c "pip install --upgrade pip --quiet
+      && pip install -e /app/sdk --quiet --no-cache-dir
+      && pip install openai httpx --quiet --no-cache-dir
+      && tail -f /dev/null"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - vectorbee-e2e
+
+networks:
+  vectorbee-e2e:
+    driver: bridge
