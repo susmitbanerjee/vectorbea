@@ -74,9 +74,8 @@ export default function SettingsPage() {
           <CardContent>
             <div className="grid grid-cols-3 gap-3">
               {[
-                { id: "light", label: "Light", icon: Sun },
                 { id: "dark", label: "Dark", icon: Moon },
-                { id: "system", label: "System", icon: Globe },
+                { id: "light", label: "Dim", icon: Sun },
               ].map((opt) => {
                 const Icon = opt.icon;
                 const active = theme === opt.id;
