@@ -14,6 +14,7 @@ services:
       - ./vectorbee-backend/supabase/migrations/20260408_000001_audit_split_latency.sql:/docker-entrypoint-initdb.d/03-audit-split-latency.sql:ro
       - ./vectorbee-backend/supabase/migrations/20260408_000002_api_key_last_four.sql:/docker-entrypoint-initdb.d/04-api-key-last-four.sql:ro
       - ./vectorbee-backend/supabase/migrations/20260409_000001_api_key_name.sql:/docker-entrypoint-initdb.d/05-api-key-name.sql:ro
+      - ./vectorbee-backend/supabase/migrations/20260409_000002_enterprise_hierarchy_rbac.sql:/docker-entrypoint-initdb.d/06-enterprise-hierarchy-rbac.sql:ro
     ports:
       - "5432:5432"
     healthcheck:
