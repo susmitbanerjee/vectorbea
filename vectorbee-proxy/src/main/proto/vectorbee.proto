@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package vectorbee.v1;
+
+option java_multiple_files = true;
+option java_package = "com.vectorbee.proxy.grpc";
+option java_outer_classname = "VectorBeeProto";
+
+// Data plane RPCs served by the in-pod sidecar over a Unix Domain Socket.
+// Latency target: sub-millisecond p50, no TCP, no TLS, no JSON.
+service VectorBeeDataPlane {
+  // Fetch a (cached) prompt by name. Falls through to the central hub on
+  // a cache miss; subsequent reads are served from the local ConcurrentHashMap.
+  rpc GetPrompt(GetPromptRequest) returns (GetPromptResponse);
+
+  // Enqueue an audit event. Returns immediately after the event is accepted
+  // into the in-memory channel — the AuditDispatcher batches and POSTs to the
+  // hub asynchronously.
+  rpc LogAudit(LogAuditRequest) returns (LogAuditResponse);
+}
+
+message GetPromptRequest {
+  string name = 1;
+}
+
+message GetPromptResponse {
+  string prompt_id = 1;
+  string prompt_version_id = 2;
+  string organization_id = 3;
+  string name = 4;
+  string description = 5;
+  string version_tag = 6;
+  string template_text = 7;
+  // The structured parameters object is serialised as a JSON string here so
+  // we don't pull a transitive struct.proto dependency.
+  string parameters_json = 8;
+  string created_at = 9;
+}
+
+message LogAuditRequest {
+  string prompt_version_id = 1;
+  double proxy_latency_ms = 2;
+  int32 llm_latency_ms = 3;
+  int32 token_count = 4;
+  string metadata_json = 5;
+}
+
+message LogAuditResponse {
+  bool accepted = 1;
+}

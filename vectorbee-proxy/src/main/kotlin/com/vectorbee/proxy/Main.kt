@@ -3,6 +3,8 @@ package com.vectorbee.proxy
 import com.vectorbee.proxy.cache.PromptCache
 import com.vectorbee.proxy.client.HubClient
 import com.vectorbee.proxy.config.AppConfig
+import com.vectorbee.proxy.grpc.GrpcServer
+import com.vectorbee.proxy.grpc.VectorBeeGrpcService
 import com.vectorbee.proxy.http.SocketPermissions
 import com.vectorbee.proxy.model.AuditAcceptedResponse
 import com.vectorbee.proxy.model.AuditEvent
@@ -38,27 +40,36 @@ fun main() {
     val promptService = PromptService(promptCache, hubClient)
     val auditDispatcher = AuditDispatcher(config, hubClient)
 
-    SocketPermissions.prepareSocketPath(config.socketPath)
     auditDispatcher.start()
 
-    val server = embeddedServer(CIO, configure = {
-        unixConnector(config.socketPath)
+    // ── Ktor REST server (control plane) on its own UDS ────────────────────
+    SocketPermissions.prepareSocketPath(config.restSocketPath)
+    val restServer = embeddedServer(CIO, configure = {
+        unixConnector(config.restSocketPath)
     }) {
         vectorbeeModule(promptService, auditDispatcher, json)
     }
+    restServer.start(wait = false)
+
+    // ── gRPC data-plane server (hot path) on its own UDS ──────────────────
+    val grpcService = VectorBeeGrpcService(promptService, auditDispatcher, json)
+    val grpcServer = GrpcServer(config.grpcSocketPath, grpcService)
+    grpcServer.start()
 
     Runtime.getRuntime().addShutdownHook(Thread {
-        server.stop(1_000, 5_000)
+        grpcServer.stop()
+        restServer.stop(1_000, 5_000)
         auditDispatcher.stop()
     })
 
-    server.start(wait = false)
-
     runBlocking {
-        SocketPermissions.waitForSocketAndSetPermissions(config.socketPath)
+        SocketPermissions.waitForSocketAndSetPermissions(config.restSocketPath)
     }
 
-    println("vectorbee proxy listening on unix socket ${config.socketPath}")
+    println(
+        "vectorbee proxy ready — REST unix:${config.restSocketPath}, " +
+            "gRPC unix:${config.grpcSocketPath}"
+    )
     runBlocking {
         awaitCancellation()
     }
