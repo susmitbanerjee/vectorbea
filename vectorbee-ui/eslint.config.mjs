@@ -9,12 +9,6 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 
 const config = [
   ...compat.extends("next/core-web-vitals"),
-  {
-    rules: {
-      // Enforce no unused vars (warn only — upgrade to error when codebase is clean)
-      "@typescript-eslint/no-unused-vars": "warn",
-    },
-  },
 ];
 
 export default config;
