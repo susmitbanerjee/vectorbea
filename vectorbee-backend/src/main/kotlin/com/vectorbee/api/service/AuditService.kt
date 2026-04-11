@@ -10,7 +10,7 @@ import com.vectorbee.api.repository.AuditLogRepository
 import java.util.UUID
 
 class AuditService(private val auditLogRepository: AuditLogRepository) {
-    fun insertBatch(organizationId: UUID, request: AuditBatchRequest): AuditBatchResponse {
+    fun insertBatch(workspaceId: UUID, request: AuditBatchRequest): AuditBatchResponse {
         if (request.logs.isEmpty()) {
             throw HttpException(400, "logs must not be empty")
         }
@@ -30,19 +30,19 @@ class AuditService(private val auditLogRepository: AuditLogRepository) {
             }
         }
 
-        val count = auditLogRepository.insertBatch(organizationId, request.logs)
+        val count = auditLogRepository.insertBatch(workspaceId, request.logs)
         return AuditBatchResponse(insertedCount = count)
     }
 
-    fun listRecent(limit: Int = 20, organizationId: UUID? = null): List<AuditLogListItem> =
-        auditLogRepository.listRecent(limit, organizationId)
+    fun listRecent(limit: Int = 20, workspaceId: UUID): List<AuditLogListItem> =
+        auditLogRepository.listRecent(limit, workspaceId)
 
-    fun getDashboardSummary(organizationId: UUID? = null): DashboardSummary =
-        auditLogRepository.getDashboardSummary(organizationId)
+    fun getDashboardSummary(workspaceId: UUID): DashboardSummary =
+        auditLogRepository.getDashboardSummary(workspaceId)
 
-    fun getRequestsLast7Days(organizationId: UUID? = null): List<DailyRequestPoint> =
-        auditLogRepository.getRequestsLast7Days(organizationId)
+    fun getRequestsLast7Days(workspaceId: UUID): List<DailyRequestPoint> =
+        auditLogRepository.getRequestsLast7Days(workspaceId)
 
-    fun getConnectionStatus(organizationId: UUID) =
-        auditLogRepository.getConnectionStatus(organizationId)
+    fun getConnectionStatus(workspaceId: UUID) =
+        auditLogRepository.getConnectionStatus(workspaceId)
 }

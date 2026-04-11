@@ -7,39 +7,47 @@ import com.vectorbee.api.controller.ApiKeyController
 import com.vectorbee.api.controller.AuditController
 import com.vectorbee.api.controller.OrganizationController
 import com.vectorbee.api.controller.PromptController
+import com.vectorbee.api.controller.WorkspaceController
 import com.vectorbee.api.db.Database
+import com.vectorbee.api.db.SchemaMigrator
 import com.vectorbee.api.http.Router
 import com.vectorbee.api.repository.ApiKeyRepository
 import com.vectorbee.api.repository.AuditLogRepository
 import com.vectorbee.api.repository.OrganizationRepository
 import com.vectorbee.api.repository.PromptRepository
+import com.vectorbee.api.repository.WorkspaceRepository
 import com.vectorbee.api.service.ApiKeyService
 import com.vectorbee.api.service.AuditService
 import com.vectorbee.api.service.AuthService
 import com.vectorbee.api.service.OrganizationService
 import com.vectorbee.api.service.PromptService
+import com.vectorbee.api.service.WorkspaceService
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 
 fun main() {
     val config = AppConfig.fromEnv()
     val database = Database(config)
+    SchemaMigrator(database).migrate()
 
     val apiKeyRepository = ApiKeyRepository(database)
     val promptRepository = PromptRepository(database)
     val auditLogRepository = AuditLogRepository(database)
     val organizationRepository = OrganizationRepository(database)
+    val workspaceRepository = WorkspaceRepository(database)
 
-    val authService = AuthService(apiKeyRepository)
+    val authService = AuthService(apiKeyRepository, config.environment)
     val apiKeyService = ApiKeyService(apiKeyRepository)
     val promptService = PromptService(promptRepository)
     val auditService = AuditService(auditLogRepository)
     val organizationService = OrganizationService(organizationRepository)
+    val workspaceService = WorkspaceService(workspaceRepository)
 
     val apiKeyController = ApiKeyController(apiKeyService)
     val promptController = PromptController(promptService)
     val auditController = AuditController(auditService)
     val organizationController = OrganizationController(organizationService)
+    val workspaceController = WorkspaceController(workspaceService)
 
     val router = Router().apply {
         post("/api/keys") { exchange -> apiKeyController.create(exchange) }
@@ -47,6 +55,7 @@ fun main() {
         delete("/api/keys/:id") { exchange -> apiKeyController.delete(exchange) }
         get("/api/organizations") { exchange -> organizationController.list(exchange) }
         post("/api/organizations") { exchange -> organizationController.create(exchange) }
+        post("/api/workspaces") { exchange -> workspaceController.create(exchange) }
         post("/api/prompts") { exchange -> promptController.create(exchange) }
         get("/api/prompts") { exchange -> promptController.list(exchange) }
         get("/api/prompts/:id") { exchange -> promptController.getByReference(exchange) }
@@ -57,7 +66,7 @@ fun main() {
         get("/api/dashboard/summary") { exchange -> auditController.summary(exchange) }
         get("/api/dashboard/requests") { exchange -> auditController.requests(exchange) }
         get("/api/dashboard/connection-status") { exchange -> auditController.connectionStatus(exchange) }
-        post("/api/audit/batch", authRequired = true) { exchange -> auditController.batchInsert(exchange) }
+        post("/api/audit/batch") { exchange -> auditController.batchInsert(exchange) }
     }
 
     val server = HttpServer.create(InetSocketAddress(config.port), 0).apply {
@@ -65,12 +74,28 @@ fun main() {
             AuthFilter(
                 authService = authService,
                 protectedRoutes = listOf(
+                    // API key management — ADMIN only (enforced in controller)
+                    AuthFilter.RouteDefinition("POST", "/api/keys"),
+                    AuthFilter.RouteDefinition("GET", "/api/keys"),
+                    AuthFilter.RouteDefinition("DELETE", "/api/keys/:id"),
+                    // Organization management — authenticated
+                    AuthFilter.RouteDefinition("GET", "/api/organizations"),
+                    AuthFilter.RouteDefinition("POST", "/api/organizations"),
+                    // Workspace management — ADMIN only (enforced in controller)
+                    AuthFilter.RouteDefinition("POST", "/api/workspaces"),
+                    // Prompt operations — authenticated (role enforced in controller)
                     AuthFilter.RouteDefinition("POST", "/api/prompts"),
+                    AuthFilter.RouteDefinition("GET", "/api/prompts"),
                     AuthFilter.RouteDefinition("GET", "/api/prompts/:id"),
                     AuthFilter.RouteDefinition("GET", "/api/prompts/:id/versions"),
                     AuthFilter.RouteDefinition("POST", "/api/prompts/:id"),
                     AuthFilter.RouteDefinition("POST", "/api/prompts/:id/publish"),
-                    AuthFilter.RouteDefinition("POST", "/api/audit/batch")
+                    // Audit & dashboard — authenticated
+                    AuthFilter.RouteDefinition("GET", "/api/audit"),
+                    AuthFilter.RouteDefinition("POST", "/api/audit/batch"),
+                    AuthFilter.RouteDefinition("GET", "/api/dashboard/summary"),
+                    AuthFilter.RouteDefinition("GET", "/api/dashboard/requests"),
+                    AuthFilter.RouteDefinition("GET", "/api/dashboard/connection-status"),
                 )
             )
         )
@@ -78,5 +103,8 @@ fun main() {
     }
 
     server.start()
-    println("vectorbee Central Hub API listening on port ${config.port}")
+    println("vectorbee Central Hub API listening on port ${config.port} [env=${config.environment}]")
+    if (config.environment.isLocal) {
+        println("  ⚠  LOCAL mode: Bearer ${com.vectorbee.api.service.AuthService.LOCAL_BYPASS_TOKEN} accepted without DB lookup")
+    }
 }

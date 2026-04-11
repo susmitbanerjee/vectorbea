@@ -19,10 +19,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId");
     const payload = await request.json();
     const response = await apiFetch("/api/prompts", {
       method: "POST",
       body: JSON.stringify(payload),
+      workspaceId,
     });
     return NextResponse.json(response, { status: 201 });
   } catch (error) {

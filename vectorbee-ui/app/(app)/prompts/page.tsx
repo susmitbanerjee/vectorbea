@@ -1,4 +1,5 @@
 import { AppHeader } from "@/components/layout/app-header";
+import { RbacGuard } from "@/components/rbac-guard";
 import { CreatePromptDialog } from "@/components/prompts/create-prompt-dialog";
 import { PromptsTable } from "@/components/prompts/prompts-table";
 import { apiFetch, type PromptListItem } from "@/lib/api";
@@ -11,7 +12,7 @@ export default async function PromptsPage({
   searchParams: Promise<{ org?: string; q?: string }>;
 }) {
   const { org, q } = await searchParams;
-  const suffix = org ? `?organizationId=${org}` : "";
+  const suffix = org ? `?workspaceId=${org}` : "";
   const prompts = await apiFetch<PromptListItem[]>(`/api/prompts${suffix}`);
 
   return (
@@ -19,7 +20,11 @@ export default async function PromptsPage({
       <AppHeader
         title="Prompts"
         subtitle="Registry of versioned prompts, policies, and model configurations."
-        actions={<CreatePromptDialog />}
+        actions={
+          <RbacGuard requiredRole="editor">
+            <CreatePromptDialog />
+          </RbacGuard>
+        }
       />
       <div className="px-4 py-6 md:px-6 xl:px-8">
         <PromptsTable prompts={prompts} initialQuery={q ?? ""} />

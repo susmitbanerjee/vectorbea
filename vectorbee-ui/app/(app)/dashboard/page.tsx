@@ -23,7 +23,7 @@ export default async function DashboardPage({
   searchParams: Promise<{ org?: string; q?: string }>;
 }) {
   const { org, q } = await searchParams;
-  const suffix = org ? `?organizationId=${org}` : "";
+  const suffix = org ? `?workspaceId=${org}` : "";
   const auditLogs = await apiFetch<AuditLogView[]>(`/api/audit${suffix}`);
   const dashboardSummary = await apiFetch<DashboardSummary>(`/api/dashboard/summary${suffix}`);
   const requests = await apiFetch<DailyRequestPoint[]>(`/api/dashboard/requests${suffix}`);

@@ -9,13 +9,19 @@ import { useEffect, useState } from "react";
 
 import { NotificationsPopover } from "@/components/layout/notifications-popover";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { useRBAC } from "@/lib/workspace-context";
 import { cn } from "@/lib/utils";
 
-const mobileNavigation: Array<{ href: Route; label: string; icon: typeof LayoutDashboard }> = [
+const mobileNavigation: Array<{
+  href: Route;
+  label: string;
+  icon: typeof LayoutDashboard;
+  minRole?: "admin" | "editor" | "viewer";
+}> = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit", icon: Logs },
-  { href: "/api-keys", label: "Keys", icon: KeyRound },
+  { href: "/api-keys", label: "Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ];
 
@@ -33,6 +39,7 @@ export function AppHeader({
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [searchFocused, setSearchFocused] = useState(false);
+  const { isAdmin, isEditor } = useRBAC();
 
   useEffect(() => {
     setQuery(searchParams.get("q") ?? "");
@@ -63,6 +70,12 @@ export function AppHeader({
   };
 
   const currentQuery = searchParams.toString();
+  const visibleMobileNavigation = mobileNavigation.filter((item) => {
+    if (!item.minRole) return true;
+    if (item.minRole === "admin") return isAdmin;
+    if (item.minRole === "editor") return isEditor;
+    return true;
+  });
 
   return (
     <header className="sticky top-0 z-20 border-b border-border/50 bg-background/80 backdrop-blur-xl">
@@ -111,7 +124,7 @@ export function AppHeader({
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto pb-1 lg:hidden">
-          {mobileNavigation.map((item) => {
+          {visibleMobileNavigation.map((item) => {
             const Icon = item.icon;
             const active =
               item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);

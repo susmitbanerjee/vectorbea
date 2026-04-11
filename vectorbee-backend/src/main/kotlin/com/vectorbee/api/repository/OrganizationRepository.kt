@@ -6,15 +6,17 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 class OrganizationRepository(private val database: Database) {
-    fun list(): List<OrganizationView> =
+    fun list(organizationId: UUID): List<OrganizationView> =
         database.query { connection ->
             connection.prepareStatement(
                 """
                 select id, name, created_at
                 from public.organizations
+                where id = ?
                 order by created_at asc, name asc
                 """.trimIndent()
             ).use { statement ->
+                statement.setObject(1, organizationId)
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {

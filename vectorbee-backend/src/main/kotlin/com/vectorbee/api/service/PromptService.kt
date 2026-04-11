@@ -10,14 +10,12 @@ import com.vectorbee.api.repository.PromptRepository
 import java.util.UUID
 
 class PromptService(private val promptRepository: PromptRepository) {
-    fun createPrompt(request: CreatePromptRequest, authenticatedOrganizationId: UUID?): CreatePromptResponse {
+    fun createPrompt(request: CreatePromptRequest, workspaceId: UUID): CreatePromptResponse {
         validatePromptRequest(request)
-        val organizationId = request.organizationId ?: authenticatedOrganizationId
-            ?: throw HttpException(400, "organizationId is required")
 
         val parametersJson = request.parameters?.toString() ?: "{}"
         val (prompt, version) = promptRepository.createPromptWithInitialVersion(
-            organizationId = organizationId,
+            workspaceId = workspaceId,
             name = request.name.trim(),
             description = request.description?.trim()?.takeIf { it.isNotEmpty() },
             versionTag = request.versionTag.trim(),
@@ -33,30 +31,31 @@ class PromptService(private val promptRepository: PromptRepository) {
         )
     }
 
-    fun getLatestPrompt(organizationId: UUID, name: String): PromptVersionView =
-        promptRepository.findLatestByName(organizationId, name.trim())
+    fun getLatestPrompt(workspaceId: UUID, name: String): PromptVersionView =
+        promptRepository.findLatestByName(workspaceId, name.trim())
             ?: throw HttpException(404, "Prompt not found")
 
-    fun listPrompts(organizationId: UUID? = null): List<PromptListItem> = promptRepository.listPrompts(organizationId)
+    fun listPrompts(workspaceId: UUID): List<PromptListItem> = promptRepository.listPrompts(workspaceId)
 
-    fun getPromptById(promptId: UUID): PromptVersionView =
-        promptRepository.findById(promptId)
+    fun getPromptById(promptId: UUID, workspaceId: UUID): PromptVersionView =
+        promptRepository.findById(promptId, workspaceId)
             ?: throw HttpException(404, "Prompt not found")
 
-    fun listVersions(promptId: UUID): List<PromptVersionView> {
-        val versions = promptRepository.listVersions(promptId)
+    fun listVersions(promptId: UUID, workspaceId: UUID): List<PromptVersionView> {
+        val versions = promptRepository.listVersions(promptId, workspaceId)
         if (versions.isEmpty()) {
             throw HttpException(404, "Prompt not found")
         }
         return versions
     }
 
-    fun updatePrompt(promptId: UUID, request: UpdatePromptRequest): PromptVersionView {
+    fun updatePrompt(promptId: UUID, workspaceId: UUID, request: UpdatePromptRequest): PromptVersionView {
         validateUpdateRequest(request)
         val parametersJson = request.parameters?.toString() ?: "{}"
 
         return promptRepository.updatePrompt(
             promptId = promptId,
+            workspaceId = workspaceId,
             description = request.description?.trim()?.takeIf { it.isNotEmpty() },
             templateText = request.templateText,
             parametersJson = parametersJson,
@@ -64,8 +63,8 @@ class PromptService(private val promptRepository: PromptRepository) {
         ) ?: throw HttpException(404, "Prompt not found")
     }
 
-    fun publishPrompt(promptId: UUID): PromptVersionView =
-        promptRepository.publishPrompt(promptId)
+    fun publishPrompt(promptId: UUID, workspaceId: UUID): PromptVersionView =
+        promptRepository.publishPrompt(promptId, workspaceId)
             ?: throw HttpException(404, "Prompt not found")
 
     private fun validatePromptRequest(request: CreatePromptRequest) {

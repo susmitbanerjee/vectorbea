@@ -1,6 +1,6 @@
 export interface AuditLogView {
   timestamp: string;
-  organizationId: string;
+  workspaceId: string;
   promptName: string;
   versionTag: string;
   proxyLatencyMs: number;
@@ -21,7 +21,7 @@ export interface PromptListItem {
 export interface PromptDetail {
   promptId: string;
   promptVersionId: string;
-  organizationId: string;
+  workspaceId: string;
   name: string;
   description: string | null;
   versionTag: string;
@@ -42,15 +42,28 @@ export interface DailyRequestPoint {
   requests: number;
 }
 
+export type WorkspaceRole = "admin" | "editor" | "viewer";
+
+export interface OrganizationWorkspaceView {
+  id: string;
+  name: string;
+  role?: WorkspaceRole | null;
+  organizationId?: string | null;
+  organizationName?: string | null;
+}
+
 export interface OrganizationView {
   id: string;
   name: string;
   createdAt: string | null;
+  role?: WorkspaceRole | null;
+  workspaceRole?: WorkspaceRole | null;
+  workspaces?: OrganizationWorkspaceView[];
 }
 
 export interface ApiKeyView {
   id: string;
-  organizationId: string;
+  workspaceId: string;
   name: string;
   maskedKey: string;
   createdAt: string;
@@ -58,13 +71,31 @@ export interface ApiKeyView {
 
 export interface CreateApiKeyResponse {
   id: string;
-  organizationId: string;
+  workspaceId: string;
   name: string;
   apiKey: string;
   createdAt: string;
 }
 
-const DEV_TOKEN = "Bearer dev_org_123";
+export interface WorkspaceMember {
+  id: string;
+  email: string;
+  displayName: string;
+  role: "admin" | "editor" | "viewer";
+  joinedAt: string;
+}
+
+type ApiFetchOptions = RequestInit & {
+  workspaceId?: string | null;
+};
+
+function resolveAuthToken(): string {
+  const token =
+    typeof window === "undefined"
+      ? process.env.VECTORBEE_API_KEY
+      : null;
+  return token ? `Bearer ${token}` : "";
+}
 
 function resolveApiUrl() {
   if (typeof window === "undefined") {
@@ -74,13 +105,24 @@ function resolveApiUrl() {
   return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${resolveApiUrl()}${path}`, {
-    ...init,
+export function withWorkspaceId(path: string, workspaceId?: string | null) {
+  if (!workspaceId) return path;
+
+  const [pathname, hash = ""] = path.split("#", 2);
+  const separator = pathname.includes("?") ? "&" : "?";
+  return pathname.includes("workspaceId=")
+    ? path
+    : `${pathname}${separator}workspaceId=${encodeURIComponent(workspaceId)}${hash ? `#${hash}` : ""}`;
+}
+
+export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
+  const { workspaceId, ...requestInit } = init ?? {};
+  const response = await fetch(`${resolveApiUrl()}${withWorkspaceId(path, workspaceId)}`, {
+    ...requestInit,
     headers: {
-      Authorization: DEV_TOKEN,
+      Authorization: resolveAuthToken(),
       "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
+      ...(requestInit.headers ?? {}),
     },
     cache: "no-store",
   });

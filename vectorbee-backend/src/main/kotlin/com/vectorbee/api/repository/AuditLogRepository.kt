@@ -9,12 +9,12 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 class AuditLogRepository(private val database: Database) {
-    fun insertBatch(organizationId: UUID, logs: List<AuditLogInput>): Int =
+    fun insertBatch(workspaceId: UUID, logs: List<AuditLogInput>): Int =
         database.transaction { connection ->
             connection.prepareStatement(
                 """
                 insert into public.audit_logs (
-                    organization_id,
+                    workspace_id,
                     prompt_version_id,
                     proxy_latency_ms,
                     llm_latency_ms,
@@ -25,7 +25,7 @@ class AuditLogRepository(private val database: Database) {
                 """.trimIndent()
             ).use { statement ->
                 for (log in logs) {
-                    statement.setObject(1, organizationId)
+                    statement.setObject(1, workspaceId)
                     statement.setObject(2, log.promptVersionId)
                     statement.setDouble(3, log.proxyLatencyMs)
                     statement.setInt(4, log.llmLatencyMs)
@@ -38,7 +38,7 @@ class AuditLogRepository(private val database: Database) {
             }
         }
 
-    fun listRecent(limit: Int = 20, organizationId: UUID? = null): List<AuditLogListItem> =
+    fun listRecent(limit: Int = 20, workspaceId: UUID): List<AuditLogListItem> =
         database.query { connection ->
             connection.prepareStatement(
                 """
@@ -49,19 +49,18 @@ class AuditLogRepository(private val database: Database) {
                     al.proxy_latency_ms,
                     al.llm_latency_ms,
                     al.token_count,
-                    al.organization_id,
+                    al.workspace_id,
                     al.metadata
                 from public.audit_logs al
                 join public.prompt_versions pv on pv.id = al.prompt_version_id
                 join public.prompts p on p.id = pv.prompt_id
-                where (?::uuid is null or al.organization_id = ?)
+                where al.workspace_id = ?
                 order by al.created_at desc
                 limit ?
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
-                statement.setObject(2, organizationId)
-                statement.setInt(3, limit)
+                statement.setObject(1, workspaceId)
+                statement.setInt(2, limit)
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
@@ -73,7 +72,7 @@ class AuditLogRepository(private val database: Database) {
                                     proxyLatencyMs = rs.getDouble("proxy_latency_ms"),
                                     llmLatencyMs = rs.getInt("llm_latency_ms"),
                                     tokenCount = rs.getInt("token_count"),
-                                    organizationId = rs.getObject("organization_id", UUID::class.java),
+                                    workspaceId = rs.getObject("workspace_id", UUID::class.java),
                                     metadata = com.vectorbee.api.http.Json.decodeJsonNode(rs.getString("metadata"))
                                 )
                             )
@@ -83,7 +82,7 @@ class AuditLogRepository(private val database: Database) {
             }
         }
 
-    fun getDashboardSummary(organizationId: UUID? = null): DashboardSummary =
+    fun getDashboardSummary(workspaceId: UUID): DashboardSummary =
         database.query { connection ->
             connection.prepareStatement(
                 """
@@ -93,12 +92,11 @@ class AuditLogRepository(private val database: Database) {
                     count(distinct coalesce(metadata->>'agent_name', metadata->>'source', prompt_version_id::text)) filter
                         (where created_at >= now() - interval '24 hours') as active_agents
                 from public.audit_logs
-                where (?::uuid is null or organization_id = ?)
+                where workspace_id = ?
                   and (metadata->>'source' is null or metadata->>'source' != 'prompt-editor')
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
-                statement.setObject(2, organizationId)
+                statement.setObject(1, workspaceId)
                 statement.executeQuery().use { rs ->
                     rs.next()
                     DashboardSummary(
@@ -110,7 +108,7 @@ class AuditLogRepository(private val database: Database) {
             }
         }
 
-    fun getConnectionStatus(organizationId: UUID): com.vectorbee.api.model.ConnectionStatus =
+    fun getConnectionStatus(workspaceId: UUID): com.vectorbee.api.model.ConnectionStatus =
         database.query { connection ->
             connection.prepareStatement(
                 """
@@ -118,11 +116,11 @@ class AuditLogRepository(private val database: Database) {
                     max(created_at) as last_seen,
                     count(*) filter (where created_at >= now() - interval '5 minutes') as recent_count
                 from public.audit_logs
-                where organization_id = ?
+                where workspace_id = ?
                   and (metadata->>'source' is null or metadata->>'source' != 'prompt-editor')
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
+                statement.setObject(1, workspaceId)
                 statement.executeQuery().use { rs ->
                     rs.next()
                     val lastSeenTs = rs.getTimestamp("last_seen")
@@ -136,7 +134,7 @@ class AuditLogRepository(private val database: Database) {
             }
         }
 
-    fun getRequestsLast7Days(organizationId: UUID? = null): List<DailyRequestPoint> =
+    fun getRequestsLast7Days(workspaceId: UUID): List<DailyRequestPoint> =
         database.query { connection ->
             connection.prepareStatement(
                 """
@@ -148,14 +146,13 @@ class AuditLogRepository(private val database: Database) {
                     coalesce(count(al.id), 0) as requests
                 from days
                 left join public.audit_logs al on date(al.created_at) = days.day
-                    and (?::uuid is null or al.organization_id = ?)
+                    and al.workspace_id = ?
                     and (al.metadata->>'source' is null or al.metadata->>'source' != 'prompt-editor')
                 group by days.day
                 order by days.day
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
-                statement.setObject(2, organizationId)
+                statement.setObject(1, workspaceId)
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {

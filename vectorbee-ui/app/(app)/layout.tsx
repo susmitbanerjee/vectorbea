@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { WorkspaceProvider } from "@/lib/workspace-context";
 import { apiFetch, type DashboardSummary, type OrganizationView } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +19,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <AppSidebar organizations={organizations} summary={summary} />
-      <main className="min-w-0 flex-1">{children}</main>
-    </div>
+    <WorkspaceProvider organizations={organizations}>
+      <div className="flex min-h-screen">
+        <AppSidebar summary={summary} />
+        <main className="min-w-0 flex-1">{children}</main>
+      </div>
+    </WorkspaceProvider>
   );
 }

@@ -187,7 +187,7 @@ export default async function AuditLogsPage({
   searchParams: Promise<{ org?: string; q?: string }>;
 }) {
   const { org, q } = await searchParams;
-  const suffix = org ? `?organizationId=${org}` : "";
+  const suffix = org ? `?workspaceId=${org}` : "";
   const organizations = await apiFetch<OrganizationView[]>("/api/organizations").catch(() => [] as OrganizationView[]);
   const organizationMap = new Map(organizations.map((organization) => [organization.id, organization.name]));
   const logs = (await apiFetch<AuditLogView[]>(`/api/audit${suffix}`)).filter((log) =>
@@ -270,7 +270,7 @@ export default async function AuditLogsPage({
                           </span>
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm">{organizationMap.get(log.organizationId) ?? "Unknown workspace"}</span>
+                          <span className="text-sm">{organizationMap.get(log.workspaceId) ?? "Unknown workspace"}</span>
                         </TableCell>
                         <TableCell>
                           <span className="font-medium">{log.promptName}</span>

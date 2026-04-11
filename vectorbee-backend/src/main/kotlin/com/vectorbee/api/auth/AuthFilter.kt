@@ -44,10 +44,16 @@ class AuthFilter(
                 throw HttpException(401, "Bearer token is empty")
             }
 
-            val organizationId = authService.authenticate(token)
+            val authResult = authService.authenticate(token)
                 ?: throw HttpException(401, "Invalid API key")
 
-            exchange.setRequestContext(RequestContext(organizationId = organizationId))
+            exchange.setRequestContext(
+                RequestContext(
+                    workspaceId = authResult.workspaceId,
+                    workspaceRole = authResult.workspaceRole,
+                    organizationId = authResult.organizationId
+                )
+            )
             chain.doFilter(exchange)
         } catch (ex: HttpException) {
             exchange.writeJson(ex.statusCode, mapOf("error" to ex.message))

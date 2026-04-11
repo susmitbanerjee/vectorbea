@@ -6,12 +6,19 @@ export const dynamic = "force-dynamic";
 
 export default async function PromptDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ org?: string }>;
 }) {
   const { id } = await params;
-  const prompt = await apiFetch<PromptDetail>(`/api/prompts/${id}`);
-  const versions = await apiFetch<PromptDetail[]>(`/api/prompts/${id}/versions`);
+  const { org } = await searchParams;
+  const prompt = await apiFetch<PromptDetail>(`/api/prompts/${id}`, {
+    workspaceId: org ?? null,
+  });
+  const versions = await apiFetch<PromptDetail[]>(`/api/prompts/${id}/versions`, {
+    workspaceId: org ?? null,
+  });
 
   return (
     <div className="min-h-screen">

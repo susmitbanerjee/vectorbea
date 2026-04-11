@@ -1,12 +1,25 @@
 package com.vectorbee.api.model
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.vectorbee.api.auth.rbac.WorkspaceRole
 import java.time.OffsetDateTime
 import java.util.UUID
 
-data class CreateApiKeyRequest(
+/**
+ * Resolved identity returned after a successful Bearer token authentication.
+ * Lives in model so both AuthService (service) and ApiKeyRepository (repository)
+ * can import it without creating a circular dependency.
+ */
+data class AuthResult(
+    val workspaceId: UUID,
     val organizationId: UUID,
-    val name: String? = null
+    val workspaceRole: WorkspaceRole,
+)
+
+data class CreateApiKeyRequest(
+    val name: String? = null,
+    /** Optional role for the new key; defaults to "editor" if omitted. */
+    val role: String? = null
 )
 
 data class OrganizationView(
@@ -19,9 +32,20 @@ data class CreateOrganizationRequest(
     val name: String
 )
 
-data class CreateApiKeyResponse(
+data class WorkspaceView(
     val id: UUID,
     val organizationId: UUID,
+    val name: String,
+    val createdAt: OffsetDateTime
+)
+
+data class CreateWorkspaceRequest(
+    val name: String
+)
+
+data class CreateApiKeyResponse(
+    val id: UUID,
+    val workspaceId: UUID,
     val name: String,
     val apiKey: String,
     val createdAt: OffsetDateTime
@@ -29,14 +53,13 @@ data class CreateApiKeyResponse(
 
 data class ApiKeyView(
     val id: UUID,
-    val organizationId: UUID,
+    val workspaceId: UUID,
     val name: String,
     val maskedKey: String,
     val createdAt: OffsetDateTime
 )
 
 data class CreatePromptRequest(
-    val organizationId: UUID?,
     val name: String,
     val description: String?,
     val versionTag: String,
@@ -54,7 +77,7 @@ data class CreatePromptResponse(
 data class PromptVersionView(
     val promptId: UUID,
     val promptVersionId: UUID,
-    val organizationId: UUID,
+    val workspaceId: UUID,
     val name: String,
     val description: String?,
     val versionTag: String,
@@ -103,7 +126,7 @@ data class AuditLogListItem(
     val proxyLatencyMs: Double,
     val llmLatencyMs: Int,
     val tokenCount: Int,
-    val organizationId: UUID,
+    val workspaceId: UUID,
     val metadata: JsonNode
 )
 
@@ -126,7 +149,7 @@ data class ConnectionStatus(
 
 data class ApiKeyRecord(
     val id: UUID,
-    val organizationId: UUID,
+    val workspaceId: UUID,
     val name: String,
     val keyHash: String,
     val keyLastFour: String,
@@ -135,7 +158,7 @@ data class ApiKeyRecord(
 
 data class PromptRecord(
     val id: UUID,
-    val organizationId: UUID,
+    val workspaceId: UUID,
     val name: String,
     val description: String?,
     val createdAt: OffsetDateTime

@@ -10,9 +10,9 @@ import java.sql.ResultSet
 import java.time.OffsetDateTime
 import java.util.UUID
 
-class PromptRepository(private val database: Database) {
-    fun createPromptWithInitialVersion(
-        organizationId: UUID,
+open class PromptRepository(private val database: Database) {
+    open fun createPromptWithInitialVersion(
+        workspaceId: UUID,
         name: String,
         description: String?,
         versionTag: String,
@@ -22,12 +22,12 @@ class PromptRepository(private val database: Database) {
         database.transaction { connection ->
             val prompt = connection.prepareStatement(
                 """
-                insert into public.prompts (organization_id, name, description)
+                insert into public.prompts (workspace_id, name, description)
                 values (?, ?, ?)
-                returning id, organization_id, name, description, created_at
+                returning id, workspace_id, name, description, created_at
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
+                statement.setObject(1, workspaceId)
                 statement.setString(2, name)
                 statement.setString(3, description)
 
@@ -35,7 +35,7 @@ class PromptRepository(private val database: Database) {
                     rs.next()
                     PromptRecord(
                         id = rs.getObject("id", UUID::class.java),
-                        organizationId = rs.getObject("organization_id", UUID::class.java),
+                        workspaceId = rs.getObject("workspace_id", UUID::class.java),
                         name = rs.getString("name"),
                         description = rs.getString("description"),
                         createdAt = rs.getObject("created_at", OffsetDateTime::class.java)
@@ -71,7 +71,7 @@ class PromptRepository(private val database: Database) {
             prompt to promptVersion
         }
 
-    fun listPrompts(organizationId: UUID? = null): List<PromptListItem> =
+    open fun listPrompts(workspaceId: UUID): List<PromptListItem> =
         database.query { connection ->
             connection.prepareStatement(
                 """
@@ -90,12 +90,11 @@ class PromptRepository(private val database: Database) {
                     order by created_at desc, id desc
                     limit 1
                 ) pv on true
-                where (?::uuid is null or p.organization_id = ?)
+                where p.workspace_id = ?
                 order by pv.created_at desc, p.name asc
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
-                statement.setObject(2, organizationId)
+                statement.setObject(1, workspaceId)
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
@@ -115,34 +114,35 @@ class PromptRepository(private val database: Database) {
             }
         }
 
-    fun findById(promptId: UUID): PromptVersionView? =
+    open fun findById(promptId: UUID, workspaceId: UUID): PromptVersionView? =
         database.query { connection ->
             connection.prepareStatement(
                 """
                 $PROMPT_VERSION_SELECT
-                where p.id = ?
+                where p.id = ? and p.workspace_id = ?
                 order by pv.created_at desc, pv.id desc
                 limit 1
                 """.trimIndent()
             ).use { statement ->
                 statement.setObject(1, promptId)
+                statement.setObject(2, workspaceId)
                 statement.executeQuery().use { rs ->
                     if (rs.next()) mapPromptVersionView(rs) else null
                 }
             }
         }
 
-    fun findLatestByName(organizationId: UUID, name: String): PromptVersionView? =
+    open fun findLatestByName(workspaceId: UUID, name: String): PromptVersionView? =
         database.query { connection ->
             connection.prepareStatement(
                 """
                 $PROMPT_VERSION_SELECT
-                where p.organization_id = ? and p.name = ? and pv.is_published = true
+                where p.workspace_id = ? and p.name = ? and pv.is_published = true
                 order by pv.created_at desc, pv.id desc
                 limit 1
                 """.trimIndent()
             ).use { statement ->
-                statement.setObject(1, organizationId)
+                statement.setObject(1, workspaceId)
                 statement.setString(2, name)
                 statement.executeQuery().use { rs ->
                     if (rs.next()) mapPromptVersionView(rs) else null
@@ -150,16 +150,17 @@ class PromptRepository(private val database: Database) {
             }
         }
 
-    fun listVersions(promptId: UUID): List<PromptVersionView> =
+    open fun listVersions(promptId: UUID, workspaceId: UUID): List<PromptVersionView> =
         database.query { connection ->
             connection.prepareStatement(
                 """
                 $PROMPT_VERSION_SELECT
-                where p.id = ?
+                where p.id = ? and p.workspace_id = ?
                 order by pv.created_at desc, pv.id desc
                 """.trimIndent()
             ).use { statement ->
                 statement.setObject(1, promptId)
+                statement.setObject(2, workspaceId)
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
@@ -170,8 +171,9 @@ class PromptRepository(private val database: Database) {
             }
         }
 
-    fun updatePrompt(
+    open fun updatePrompt(
         promptId: UUID,
+        workspaceId: UUID,
         description: String?,
         templateText: String,
         parametersJson: String,
@@ -182,12 +184,13 @@ class PromptRepository(private val database: Database) {
                 """
                 update public.prompts
                 set description = ?
-                where id = ?
+                where id = ? and workspace_id = ?
                 returning id
                 """.trimIndent()
             ).use { statement ->
                 statement.setString(1, description)
                 statement.setObject(2, promptId)
+                statement.setObject(3, workspaceId)
                 statement.executeQuery().use { rs -> rs.next() }
             }
 
@@ -245,11 +248,21 @@ class PromptRepository(private val database: Database) {
                 }
             }
 
-            findById(promptId)
+            findById(promptId, workspaceId)
         }
 
-    fun publishPrompt(promptId: UUID): PromptVersionView? =
+    open fun publishPrompt(promptId: UUID, workspaceId: UUID): PromptVersionView? =
         database.transaction { connection ->
+            // Verify prompt belongs to workspace
+            val ownsPrompt = connection.prepareStatement(
+                "select 1 from public.prompts where id = ? and workspace_id = ?"
+            ).use { statement ->
+                statement.setObject(1, promptId)
+                statement.setObject(2, workspaceId)
+                statement.executeQuery().use { rs -> rs.next() }
+            }
+            if (!ownsPrompt) return@transaction null
+
             val promptVersionId = connection.prepareStatement(
                 """
                 select id
@@ -287,7 +300,7 @@ class PromptRepository(private val database: Database) {
                 statement.executeUpdate()
             }
 
-            findById(promptId)
+            findById(promptId, workspaceId)
         }
 
     private fun bumpVersionTag(versionTag: String): String {
@@ -305,7 +318,7 @@ class PromptRepository(private val database: Database) {
         private const val PROMPT_VERSION_SELECT = """
             select
                 p.id as prompt_id,
-                p.organization_id,
+                p.workspace_id,
                 p.name,
                 p.description,
                 pv.id as prompt_version_id,
@@ -320,7 +333,7 @@ class PromptRepository(private val database: Database) {
         private fun mapPromptVersionView(rs: ResultSet) = PromptVersionView(
             promptId = rs.getObject("prompt_id", UUID::class.java),
             promptVersionId = rs.getObject("prompt_version_id", UUID::class.java),
-            organizationId = rs.getObject("organization_id", UUID::class.java),
+            workspaceId = rs.getObject("workspace_id", UUID::class.java),
             name = rs.getString("name"),
             description = rs.getString("description"),
             versionTag = rs.getString("version_tag"),

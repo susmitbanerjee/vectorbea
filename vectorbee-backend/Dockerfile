@@ -5,6 +5,7 @@ FROM gradle:8.10.2-jdk21 AS builder
 WORKDIR /workspace
 
 COPY build.gradle.kts settings.gradle.kts ./
+COPY supabase ./supabase
 COPY src ./src
 
 RUN gradle --no-daemon fatJar

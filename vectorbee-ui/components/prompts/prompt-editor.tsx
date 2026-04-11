@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
 function highlightTemplate(template: string) {
   return template.split(/(\{\{[^}]+\}\})/g).map((part, index) => {
@@ -115,6 +116,8 @@ export function PromptEditor({
   versions: PromptDetail[];
 }) {
   const router = useRouter();
+  const { activeWorkspaceId } = useWorkspace();
+  const { hasAccess: canEdit } = useRBAC("editor");
   const [currentPrompt, setCurrentPrompt] = useState(prompt);
   const [versions, setVersions] = useState(initialVersions);
   const [selectedVersionId, setSelectedVersionId] = useState(
@@ -212,7 +215,7 @@ export function PromptEditor({
     startTransition(async () => {
       try {
         const response = await fetch(
-          `/api/prompts/${currentPrompt.promptId}`,
+          `/api/prompts/${currentPrompt.promptId}${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -249,21 +252,24 @@ export function PromptEditor({
           metadata.after_parameters = updatedPrompt.parameters;
         }
 
-        const auditResponse = await fetch("/api/audit/batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify([
-            {
-              promptVersionId: updatedPrompt.promptVersionId,
-              proxyLatencyMs: 0,
-              llmLatencyMs: 0,
-              tokenCount: 0,
-              metadata,
-            },
-          ]),
-        });
-        if (!auditResponse.ok) {
-          throw new Error(await auditResponse.text());
+        const workspaceAwareAuditResponse = await fetch(
+          `/api/audit/batch${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify([
+              {
+                promptVersionId: updatedPrompt.promptVersionId,
+                proxyLatencyMs: 0,
+                llmLatencyMs: 0,
+                tokenCount: 0,
+                metadata,
+              },
+            ]),
+          },
+        );
+        if (!workspaceAwareAuditResponse.ok) {
+          throw new Error(await workspaceAwareAuditResponse.text());
         }
 
         // Update local state first for instant feedback, then refresh the
@@ -289,7 +295,7 @@ export function PromptEditor({
     startPublishTransition(async () => {
       try {
         const response = await fetch(
-          `/api/prompts/${currentPrompt.promptId}/publish`,
+          `/api/prompts/${currentPrompt.promptId}/publish${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
           { method: "POST" },
         );
         if (!response.ok) {
@@ -300,30 +306,33 @@ export function PromptEditor({
 
         // Dedicated publish audit: only captures the version transition —
         // no template/parameter diff (publish never mutates content).
-        const auditResponse = await fetch("/api/audit/batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify([
-            {
-              promptVersionId: publishedPrompt.promptVersionId,
-              proxyLatencyMs: 0,
-              llmLatencyMs: 0,
-              tokenCount: 0,
-              metadata: {
-                action: "publish",
-                source: "prompt-editor",
-                prompt_name: publishedPrompt.name,
-                published_version: publishedPrompt.versionTag,
-                previous_published_version:
-                  previouslyPublished &&
-                  previouslyPublished.promptVersionId !==
-                    publishedPrompt.promptVersionId
-                    ? previouslyPublished.versionTag
-                    : null,
+        const auditResponse = await fetch(
+          `/api/audit/batch${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify([
+              {
+                promptVersionId: publishedPrompt.promptVersionId,
+                proxyLatencyMs: 0,
+                llmLatencyMs: 0,
+                tokenCount: 0,
+                metadata: {
+                  action: "publish",
+                  source: "prompt-editor",
+                  prompt_name: publishedPrompt.name,
+                  published_version: publishedPrompt.versionTag,
+                  previous_published_version:
+                    previouslyPublished &&
+                    previouslyPublished.promptVersionId !==
+                      publishedPrompt.promptVersionId
+                      ? previouslyPublished.versionTag
+                      : null,
+                },
               },
-            },
-          ]),
-        });
+            ]),
+          },
+        );
         if (!auditResponse.ok) {
           throw new Error(await auditResponse.text());
         }
@@ -378,7 +387,7 @@ export function PromptEditor({
             <Button
               size="sm"
               onClick={savePrompt}
-              disabled={isPending || !isViewingCurrentDraft}
+              disabled={isPending || !isViewingCurrentDraft || !canEdit}
             >
               {isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -396,7 +405,8 @@ export function PromptEditor({
               disabled={
                 isPublishPending ||
                 !isViewingCurrentDraft ||
-                currentPrompt.isPublished
+                currentPrompt.isPublished ||
+                !canEdit
               }
             >
               {isPublishPending ? (
@@ -471,7 +481,7 @@ export function PromptEditor({
                         <Textarea
                           value={templateText}
                           onChange={(e) => setTemplateText(e.target.value)}
-                          disabled={!isViewingCurrentDraft}
+                          disabled={!isViewingCurrentDraft || !canEdit}
                           className="min-h-[280px] flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-7 text-slate-200 shadow-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-70"
                         />
                       </div>
@@ -503,7 +513,7 @@ export function PromptEditor({
                 <Textarea
                   value={parametersText}
                   onChange={(e) => setParametersText(e.target.value)}
-                  disabled={!isViewingCurrentDraft}
+                  disabled={!isViewingCurrentDraft || !canEdit}
                   className="min-h-[220px] rounded-xl border border-border bg-muted/30 p-4 font-mono text-sm leading-7 disabled:cursor-not-allowed disabled:opacity-70"
                 />
               </CardContent>

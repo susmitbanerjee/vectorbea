@@ -1,11 +1,9 @@
 "use client";
 
-import type { Route } from "next";
-import { Check, ChevronsUpDown, Layers3, Plus } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Building2, Check, ChevronsUpDown, Layers3, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import type { OrganizationView } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,42 +14,45 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useWorkspace, type WorkspaceView } from "@/lib/workspace-context";
 
-export function WorkspaceSwitcher({ organizations }: { organizations: OrganizationView[] }) {
+export function WorkspaceSwitcher() {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { workspaces, activeWorkspace, setActiveWorkspaceId } = useWorkspace();
   const [newOrgName, setNewOrgName] = useState("");
   const [isPending, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
 
-  // Default to the first available org if nothing is selected
-  // (the (app) layout already redirects to /onboarding when there are zero orgs).
-  const selectedOrgId = searchParams.get("org") ?? organizations[0]?.id ?? "";
-  const active = organizations.find((item) => item.id === selectedOrgId) ?? organizations[0];
+  // Group workspaces by organization
+  const grouped = workspaces.reduce<Record<string, { orgName: string; items: WorkspaceView[] }>>(
+    (acc, ws) => {
+      if (!acc[ws.organizationId]) {
+        acc[ws.organizationId] = { orgName: ws.organizationName, items: [] };
+      }
+      acc[ws.organizationId].items.push(ws);
+      return acc;
+    },
+    {},
+  );
 
-  const updateOrg = (value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("org", value);
-    router.push(`${pathname}?${params}` as Route);
-  };
-
-  const createOrganization = () => {
+  const createWorkspace = () => {
     if (!newOrgName.trim() || creating) return;
     setCreating(true);
     startTransition(async () => {
       try {
-        const response = await fetch("/api/organizations", {
+        const body: Record<string, string> = { name: newOrgName.trim() };
+        if (activeWorkspace?.organizationId) {
+          body.organizationId = activeWorkspace.organizationId;
+        }
+        const response = await fetch("/api/workspaces", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newOrgName.trim() }),
+          body: JSON.stringify(body),
         });
         if (response.ok) {
           const created = (await response.json()) as { id: string };
           setNewOrgName("");
-          const params = new URLSearchParams(searchParams.toString());
-          params.set("org", created.id);
-          router.push(`${pathname}?${params}` as Route);
+          setActiveWorkspaceId(created.id);
           router.refresh();
         }
       } finally {
@@ -72,9 +73,11 @@ export function WorkspaceSwitcher({ organizations }: { organizations: Organizati
               <Layers3 className="h-4 w-4 text-amber-400" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">{active?.name ?? "No workspace"}</p>
+              <p className="truncate text-sm font-medium text-white">
+                {activeWorkspace?.name ?? "No workspace"}
+              </p>
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {organizations.length} workspace{organizations.length !== 1 ? "s" : ""}
+                {activeWorkspace?.organizationName ?? "Select workspace"}
               </p>
             </div>
           </div>
@@ -86,43 +89,58 @@ export function WorkspaceSwitcher({ organizations }: { organizations: Organizati
         <DropdownMenuPanelLabel>Switch workspace</DropdownMenuPanelLabel>
         <DropdownMenuPanelSeparator />
 
-        <div className="max-h-64 overflow-y-auto py-1">
-          {organizations.length === 0 ? (
+        <div className="max-h-72 overflow-y-auto py-1">
+          {Object.entries(grouped).length === 0 ? (
             <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-              No organizations yet
+              No workspaces yet
             </p>
           ) : (
-            organizations.map((org) => {
-              const isActive = org.id === selectedOrgId;
-              return (
-                <button
-                  key={org.id}
-                  type="button"
-                  onClick={() => updateOrg(org.id)}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
-                    isActive
-                      ? "bg-amber-400/10 text-white"
-                      : "text-slate-300 hover:bg-white/5 hover:text-white",
-                  )}
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div
+            Object.entries(grouped).map(([orgId, { orgName, items }]) => (
+              <div key={orgId}>
+                {/* Organization header */}
+                <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2.5">
+                  <Building2 className="h-3 w-3 text-muted-foreground/60" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                    {orgName}
+                  </span>
+                </div>
+
+                {/* Workspaces under this organization */}
+                {items.map((ws) => {
+                  const isActive = ws.id === activeWorkspace?.id;
+                  return (
+                    <button
+                      key={ws.id}
+                      type="button"
+                      onClick={() => setActiveWorkspaceId(ws.id)}
                       className={cn(
-                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold uppercase",
+                        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 pl-6 text-left text-sm transition-colors",
                         isActive
-                          ? "border-amber-400/40 bg-amber-400/15 text-amber-300"
-                          : "border-white/10 bg-white/[0.04] text-slate-400",
+                          ? "bg-amber-400/10 text-white"
+                          : "text-slate-300 hover:bg-white/5 hover:text-white",
                       )}
                     >
-                      {org.name.slice(0, 2)}
-                    </div>
-                    <span className="truncate">{org.name}</span>
-                  </div>
-                  {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-amber-400" />}
-                </button>
-              );
-            })
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div
+                          className={cn(
+                            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold uppercase",
+                            isActive
+                              ? "border-amber-400/40 bg-amber-400/15 text-amber-300"
+                              : "border-white/10 bg-white/[0.04] text-slate-400",
+                          )}
+                        >
+                          {ws.name.slice(0, 2)}
+                        </div>
+                        <span className="truncate">{ws.name}</span>
+                      </div>
+                      {isActive && (
+                        <Check className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
 
@@ -138,7 +156,7 @@ export function WorkspaceSwitcher({ organizations }: { organizations: Organizati
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                createOrganization();
+                createWorkspace();
               }
             }}
             placeholder="acme-production"
@@ -148,7 +166,7 @@ export function WorkspaceSwitcher({ organizations }: { organizations: Organizati
             className="h-8 w-full gap-1.5 bg-amber-400/15 text-amber-200 hover:bg-amber-400/25"
             size="sm"
             variant="outline"
-            onClick={createOrganization}
+            onClick={createWorkspace}
             disabled={creating || isPending || !newOrgName.trim()}
           >
             <Plus className="h-3.5 w-3.5" />

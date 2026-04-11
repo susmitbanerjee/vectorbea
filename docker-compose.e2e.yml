@@ -15,6 +15,8 @@ services:
       - ./vectorbee-backend/supabase/migrations/20260408_000002_api_key_last_four.sql:/docker-entrypoint-initdb.d/04-api-key-last-four.sql:ro
       - ./vectorbee-backend/supabase/migrations/20260409_000001_api_key_name.sql:/docker-entrypoint-initdb.d/05-api-key-name.sql:ro
       - ./vectorbee-backend/supabase/migrations/20260409_000002_enterprise_hierarchy_rbac.sql:/docker-entrypoint-initdb.d/06-enterprise-hierarchy-rbac.sql:ro
+      - ./vectorbee-backend/supabase/migrations/20260409_000003_api_key_role.sql:/docker-entrypoint-initdb.d/07-api-key-role.sql:ro
+      - ./vectorbee-backend/supabase/e2e-seed.sql:/docker-entrypoint-initdb.d/08-e2e-seed.sql:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -36,7 +38,8 @@ services:
       DB_USER: vectorbee
       DB_PASSWORD: vectorbee
       PORT: 8080
-      VECTORBEE_ALLOW_DEV_TOKEN: "true"
+      # Auth: no dev-token bypass — all requests must use a real API key
+      VECTORBEE_API_KEY: ${VECTORBEE_API_KEY:-vb_e2e_test_key_local}
     depends_on:
       db:
         condition: service_healthy
@@ -46,7 +49,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget -qO- http://127.0.0.1:8080/api/prompts >/dev/null 2>&1 || exit 1"
+          "wget -qO- --header='Authorization: Bearer vb_e2e_test_key_local' http://127.0.0.1:8080/api/prompts >/dev/null 2>&1 || exit 1"
         ]
       interval: 5s
       timeout: 5s
@@ -63,6 +66,7 @@ services:
       API_URL: http://backend:8080
       NEXT_PUBLIC_API_URL: http://localhost:8080
       PORT: 3000
+      VECTORBEE_API_KEY: ${VECTORBEE_API_KEY:-vb_e2e_test_key_local}
     depends_on:
       backend:
         condition: service_healthy
@@ -107,7 +111,7 @@ services:
       VECTORBEE_HUB_URL: http://backend:8080
       # The API key used to authenticate against the hub. Override this with
       # a real vb_ key from the dashboard once onboarding is complete.
-      VECTORBEE_KEY: ${VECTORBEE_API_KEY:-dev_org_123}
+      VECTORBEE_KEY: ${VECTORBEE_API_KEY:?VECTORBEE_API_KEY must be set}
       # Ktor REST socket (healthcheck endpoint, used by ops tooling only).
       VECTORBEE_REST_SOCKET: /run/vectorbee/vectorbee-rest.sock
       # gRPC data-plane socket shared with the agent-tester via named volume.

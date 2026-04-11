@@ -205,9 +205,8 @@ alter table public.audit_logs drop column if exists organization_id;
 -- ---------------------------------------------------------------------------
 
 -- Prompt names must still be unique within a workspace.
-alter table public.prompts
-    add constraint if not exists prompts_workspace_name_key
-    unique (workspace_id, name);
+create unique index if not exists prompts_workspace_name_key
+    on public.prompts (workspace_id, name);
 
 create index if not exists idx_workspaces_organization_id
     on public.workspaces (organization_id);
@@ -249,7 +248,7 @@ comment on column public.users.role is
     'workspace_members.role. Retained for backward compatibility only.';
 
 -- ---------------------------------------------------------------------------
--- 8. Row Level Security
+-- 8. Row Level Security  (Supabase only — skipped on plain PostgreSQL)
 --    Enable RLS on every table that holds user-scoped data, then attach
 --    fine-grained policies.  We expose auth.uid() — the Supabase JWT subject —
 --    as the identity predicate.
@@ -258,273 +257,195 @@ comment on column public.users.role is
 --      auth.uid()  → the UUID of the authenticated user (Supabase Auth)
 --
 --    All policies are PERMISSIVE and ORed together per operation.
+--
+--    On plain PostgreSQL (e.g. Docker e2e) the auth schema does not exist;
+--    the DO block below detects this and skips the entire RLS section.
+--    Access control is enforced at the API layer via API-key auth instead.
 -- ---------------------------------------------------------------------------
+do $skip_rls$
+begin
+  -- auth schema is Supabase-specific. Skip this entire section on plain PostgreSQL.
+  if not exists (select 1 from pg_namespace where nspname = 'auth') then
+    raise notice 'auth schema not found — skipping RLS + grants (non-Supabase environment)';
+    return;
+  end if;
 
--- 8a. Enable RLS ─────────────────────────────────────────────────────────────
-alter table public.workspaces         enable row level security;
-alter table public.org_members        enable row level security;
-alter table public.workspace_members  enable row level security;
-alter table public.api_keys           enable row level security;
-alter table public.prompts            enable row level security;
-alter table public.audit_logs         enable row level security;
-alter table public.prompt_versions    enable row level security;
+  -- 8a. Enable RLS
+  execute 'alter table public.workspaces         enable row level security';
+  execute 'alter table public.org_members        enable row level security';
+  execute 'alter table public.workspace_members  enable row level security';
+  execute 'alter table public.api_keys           enable row level security';
+  execute 'alter table public.prompts            enable row level security';
+  execute 'alter table public.audit_logs         enable row level security';
+  execute 'alter table public.prompt_versions    enable row level security';
 
--- 8b. Helper view: the set of workspace IDs visible to the current user.
---     Referenced in every policy below to avoid repeating the sub-select.
-create or replace view public.my_workspace_ids as
-    select workspace_id
-    from   public.workspace_members
-    where  user_id = auth.uid();
+  -- 8b. Helper view
+  execute $sql$
+    create or replace view public.my_workspace_ids as
+        select workspace_id from public.workspace_members where user_id = auth.uid()
+  $sql$;
 
--- 8c. workspaces — users see only workspaces they are members of ──────────────
-drop policy if exists workspaces_select_own on public.workspaces;
-create policy workspaces_select_own
-    on  public.workspaces
-    for select
-    using (
-        id in (select workspace_id from public.my_workspace_ids)
-    );
+  -- 8c. workspaces
+  execute 'drop policy if exists workspaces_select_own on public.workspaces';
+  execute $sql$
+    create policy workspaces_select_own on public.workspaces for select
+    using (id in (select workspace_id from public.my_workspace_ids))
+  $sql$;
 
--- Org owners and admins may create new workspaces inside their own org.
-drop policy if exists workspaces_insert_org_owner on public.workspaces;
-create policy workspaces_insert_org_owner
-    on  public.workspaces
-    for insert
-    with check (
-        exists (
-            select 1 from public.org_members
-            where  organization_id = workspaces.organization_id
-              and  user_id         = auth.uid()
-              and  role in ('owner', 'billing_admin')
-        )
-    );
+  execute 'drop policy if exists workspaces_insert_org_owner on public.workspaces';
+  execute $sql$
+    create policy workspaces_insert_org_owner on public.workspaces for insert
+    with check (exists (
+        select 1 from public.org_members
+        where organization_id = workspaces.organization_id
+          and user_id = auth.uid() and role in ('owner','billing_admin')))
+  $sql$;
 
--- 8d. org_members — members see their own row; owners see the whole org ───────
-drop policy if exists org_members_select on public.org_members;
-create policy org_members_select
-    on  public.org_members
-    for select
-    using (
-        -- Always see your own membership row.
-        user_id = auth.uid()
-        or
-        -- Org owners see every member row in their org.
-        exists (
-            select 1 from public.org_members om2
-            where  om2.organization_id = org_members.organization_id
-              and  om2.user_id         = auth.uid()
-              and  om2.role            = 'owner'
-        )
-    );
+  -- 8d. org_members
+  execute 'drop policy if exists org_members_select on public.org_members';
+  execute $sql$
+    create policy org_members_select on public.org_members for select
+    using (user_id = auth.uid() or exists (
+        select 1 from public.org_members om2
+        where om2.organization_id = org_members.organization_id
+          and om2.user_id = auth.uid() and om2.role = 'owner'))
+  $sql$;
 
--- 8e. workspace_members — admins see and manage their workspace's membership ──
-drop policy if exists workspace_members_select on public.workspace_members;
-create policy workspace_members_select
-    on  public.workspace_members
-    for select
-    using (
-        workspace_id in (select workspace_id from public.my_workspace_ids)
-    );
+  -- 8e. workspace_members
+  execute 'drop policy if exists workspace_members_select on public.workspace_members';
+  execute $sql$
+    create policy workspace_members_select on public.workspace_members for select
+    using (workspace_id in (select workspace_id from public.my_workspace_ids))
+  $sql$;
 
-drop policy if exists workspace_members_insert_admin on public.workspace_members;
-create policy workspace_members_insert_admin
-    on  public.workspace_members
-    for insert
-    with check (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = workspace_members.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role         = 'admin'
-        )
-    );
+  execute 'drop policy if exists workspace_members_insert_admin on public.workspace_members';
+  execute $sql$
+    create policy workspace_members_insert_admin on public.workspace_members for insert
+    with check (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = workspace_members.workspace_id
+          and wm.user_id = auth.uid() and wm.role = 'admin'))
+  $sql$;
 
-drop policy if exists workspace_members_delete_admin on public.workspace_members;
-create policy workspace_members_delete_admin
-    on  public.workspace_members
-    for delete
-    using (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = workspace_members.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role         = 'admin'
-        )
-        -- Admins cannot remove themselves; prevents workspace lock-out.
-        and workspace_members.user_id <> auth.uid()
-    );
+  execute 'drop policy if exists workspace_members_delete_admin on public.workspace_members';
+  execute $sql$
+    create policy workspace_members_delete_admin on public.workspace_members for delete
+    using (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = workspace_members.workspace_id
+          and wm.user_id = auth.uid() and wm.role = 'admin')
+      and workspace_members.user_id <> auth.uid())
+  $sql$;
 
--- 8f. prompts — visibility and mutation gated by workspace_members.role ───────
+  -- 8f. prompts
+  execute 'drop policy if exists prompts_select on public.prompts';
+  execute $sql$
+    create policy prompts_select on public.prompts for select
+    using (workspace_id in (select workspace_id from public.my_workspace_ids))
+  $sql$;
 
-drop policy if exists prompts_select on public.prompts;
-create policy prompts_select
-    on  public.prompts
-    for select
-    using (
-        workspace_id in (select workspace_id from public.my_workspace_ids)
-    );
+  execute 'drop policy if exists prompts_insert_editor on public.prompts';
+  execute $sql$
+    create policy prompts_insert_editor on public.prompts for insert
+    with check (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = prompts.workspace_id
+          and wm.user_id = auth.uid() and wm.role in ('admin','editor')))
+  $sql$;
 
-drop policy if exists prompts_insert_editor on public.prompts;
-create policy prompts_insert_editor
-    on  public.prompts
-    for insert
-    with check (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = prompts.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role in ('admin', 'editor')
-        )
-    );
+  execute 'drop policy if exists prompts_update_editor on public.prompts';
+  execute $sql$
+    create policy prompts_update_editor on public.prompts for update
+    using (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = prompts.workspace_id
+          and wm.user_id = auth.uid() and wm.role in ('admin','editor')))
+    with check (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = prompts.workspace_id
+          and wm.user_id = auth.uid() and wm.role in ('admin','editor')))
+  $sql$;
 
-drop policy if exists prompts_update_editor on public.prompts;
-create policy prompts_update_editor
-    on  public.prompts
-    for update
-    using (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = prompts.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role in ('admin', 'editor')
-        )
-    )
-    with check (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = prompts.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role in ('admin', 'editor')
-        )
-    );
+  execute 'drop policy if exists prompts_delete_admin on public.prompts';
+  execute $sql$
+    create policy prompts_delete_admin on public.prompts for delete
+    using (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = prompts.workspace_id
+          and wm.user_id = auth.uid() and wm.role = 'admin'))
+  $sql$;
 
-drop policy if exists prompts_delete_admin on public.prompts;
-create policy prompts_delete_admin
-    on  public.prompts
-    for delete
-    using (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = prompts.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role         = 'admin'
-        )
-    );
+  -- 8g. prompt_versions
+  execute 'drop policy if exists prompt_versions_select on public.prompt_versions';
+  execute $sql$
+    create policy prompt_versions_select on public.prompt_versions for select
+    using (exists (
+        select 1 from public.prompts p
+        join public.my_workspace_ids mw on mw.workspace_id = p.workspace_id
+        where p.id = prompt_versions.prompt_id))
+  $sql$;
 
--- 8g. prompt_versions — inherits workspace visibility via JOIN to prompts ─────
-drop policy if exists prompt_versions_select on public.prompt_versions;
-create policy prompt_versions_select
-    on  public.prompt_versions
-    for select
-    using (
-        exists (
-            select 1
-            from   public.prompts p
-            join   public.my_workspace_ids mw on mw.workspace_id = p.workspace_id
-            where  p.id = prompt_versions.prompt_id
-        )
-    );
+  execute 'drop policy if exists prompt_versions_insert_editor on public.prompt_versions';
+  execute $sql$
+    create policy prompt_versions_insert_editor on public.prompt_versions for insert
+    with check (exists (
+        select 1 from public.prompts p
+        join public.workspace_members wm on wm.workspace_id = p.workspace_id
+        where p.id = prompt_versions.prompt_id
+          and wm.user_id = auth.uid() and wm.role in ('admin','editor')))
+  $sql$;
 
-drop policy if exists prompt_versions_insert_editor on public.prompt_versions;
-create policy prompt_versions_insert_editor
-    on  public.prompt_versions
-    for insert
-    with check (
-        exists (
-            select 1
-            from   public.prompts p
-            join   public.workspace_members wm on wm.workspace_id = p.workspace_id
-            where  p.id          = prompt_versions.prompt_id
-              and  wm.user_id    = auth.uid()
-              and  wm.role in ('admin', 'editor')
-        )
-    );
+  execute 'drop policy if exists prompt_versions_update_editor on public.prompt_versions';
+  execute $sql$
+    create policy prompt_versions_update_editor on public.prompt_versions for update
+    using (exists (
+        select 1 from public.prompts p
+        join public.workspace_members wm on wm.workspace_id = p.workspace_id
+        where p.id = prompt_versions.prompt_id
+          and wm.user_id = auth.uid() and wm.role in ('admin','editor')))
+  $sql$;
 
-drop policy if exists prompt_versions_update_editor on public.prompt_versions;
-create policy prompt_versions_update_editor
-    on  public.prompt_versions
-    for update
-    using (
-        exists (
-            select 1
-            from   public.prompts p
-            join   public.workspace_members wm on wm.workspace_id = p.workspace_id
-            where  p.id          = prompt_versions.prompt_id
-              and  wm.user_id    = auth.uid()
-              and  wm.role in ('admin', 'editor')
-        )
-    );
+  -- 8h. api_keys
+  execute 'drop policy if exists api_keys_select on public.api_keys';
+  execute $sql$
+    create policy api_keys_select on public.api_keys for select
+    using (workspace_id in (select workspace_id from public.my_workspace_ids))
+  $sql$;
 
--- 8h. api_keys — admins and editors manage keys; viewers cannot see hashes ────
-drop policy if exists api_keys_select on public.api_keys;
-create policy api_keys_select
-    on  public.api_keys
-    for select
-    using (
-        workspace_id in (select workspace_id from public.my_workspace_ids)
-    );
+  execute 'drop policy if exists api_keys_insert_editor on public.api_keys';
+  execute $sql$
+    create policy api_keys_insert_editor on public.api_keys for insert
+    with check (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = api_keys.workspace_id
+          and wm.user_id = auth.uid() and wm.role in ('admin','editor')))
+  $sql$;
 
-drop policy if exists api_keys_insert_editor on public.api_keys;
-create policy api_keys_insert_editor
-    on  public.api_keys
-    for insert
-    with check (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = api_keys.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role in ('admin', 'editor')
-        )
-    );
+  execute 'drop policy if exists api_keys_delete_admin on public.api_keys';
+  execute $sql$
+    create policy api_keys_delete_admin on public.api_keys for delete
+    using (exists (
+        select 1 from public.workspace_members wm
+        where wm.workspace_id = api_keys.workspace_id
+          and wm.user_id = auth.uid() and wm.role = 'admin'))
+  $sql$;
 
-drop policy if exists api_keys_delete_admin on public.api_keys;
-create policy api_keys_delete_admin
-    on  public.api_keys
-    for delete
-    using (
-        exists (
-            select 1 from public.workspace_members wm
-            where  wm.workspace_id = api_keys.workspace_id
-              and  wm.user_id      = auth.uid()
-              and  wm.role         = 'admin'
-        )
-    );
+  -- 8i. audit_logs
+  execute 'drop policy if exists audit_logs_select on public.audit_logs';
+  execute $sql$
+    create policy audit_logs_select on public.audit_logs for select
+    using (workspace_id in (select workspace_id from public.my_workspace_ids))
+  $sql$;
 
--- 8i. audit_logs — read-only for all members; written only by the proxy service
---     account (bypass RLS via service-role key, not JWT-authenticated users).
-drop policy if exists audit_logs_select on public.audit_logs;
-create policy audit_logs_select
-    on  public.audit_logs
-    for select
-    using (
-        workspace_id in (select workspace_id from public.my_workspace_ids)
-    );
+  -- 9. Grants (Supabase roles only)
+  execute 'grant usage  on type public.org_role       to authenticated';
+  execute 'grant usage  on type public.workspace_role to authenticated';
+  execute 'grant select on public.my_workspace_ids    to authenticated';
+  execute 'grant select, insert, update, delete on public.workspaces, public.org_members, public.workspace_members to authenticated';
+  execute 'grant select, insert, update, delete on public.prompts, public.prompt_versions, public.api_keys to authenticated';
+  execute 'grant select on public.audit_logs to authenticated';
+  execute 'grant insert on public.audit_logs to service_role';
 
--- No INSERT/UPDATE/DELETE policy for audit_logs via the anon/user role.
--- The proxy writes through the Supabase service-role key which bypasses RLS.
-
--- ---------------------------------------------------------------------------
--- 9. Grant usage on new types + tables to authenticated role
--- ---------------------------------------------------------------------------
-grant usage  on type public.org_role       to authenticated;
-grant usage  on type public.workspace_role to authenticated;
-grant select on public.my_workspace_ids    to authenticated;
-
-grant select, insert, update, delete
-    on public.workspaces,
-       public.org_members,
-       public.workspace_members
-    to authenticated;
-
-grant select, insert, update, delete
-    on public.prompts,
-       public.prompt_versions,
-       public.api_keys
-    to authenticated;
-
-grant select on public.audit_logs to authenticated;
-
--- service_role bypasses RLS; needed by the Kotlin proxy for audit writes.
-grant insert on public.audit_logs to service_role;
+end $skip_rls$;
 
 commit;

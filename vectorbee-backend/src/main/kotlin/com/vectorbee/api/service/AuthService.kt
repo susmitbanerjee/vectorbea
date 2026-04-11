@@ -1,19 +1,58 @@
 package com.vectorbee.api.service
 
 import com.vectorbee.api.auth.ApiKeyHasher
+import com.vectorbee.api.auth.rbac.WorkspaceRole
+import com.vectorbee.api.config.Environment
+import com.vectorbee.api.model.AuthResult
 import com.vectorbee.api.repository.ApiKeyRepository
 import java.util.UUID
 
-class AuthService(private val apiKeyRepository: ApiKeyRepository) {
-    private val devTokenEnabled: Boolean =
-        System.getenv("VECTORBEE_ALLOW_DEV_TOKEN")?.equals("true", ignoreCase = true) == true
-
-    fun authenticate(rawToken: String): UUID? {
-        if (devTokenEnabled && rawToken == "dev_org_123") {
-            return apiKeyRepository.findAnyOrganizationId()
-        }
+open class AuthService(
+    private val apiKeyRepository: ApiKeyRepository,
+    private val environment: Environment = Environment.LOCAL,
+) {
+    /**
+     * Validates a raw Bearer token and returns the resolved [AuthResult], or
+     * null if the token is missing / unknown.
+     *
+     * LOCAL-environment bypass
+     * ─────────────────────────
+     * When [environment] is [Environment.LOCAL] (i.e. developer laptop / Docker
+     * Compose), the hardcoded token `dev_local_123` is accepted without a
+     * database lookup and resolves to full ADMIN access on the seeded workspace.
+     * This lets the Python SDK and UI work immediately after `docker compose up`
+     * without manually creating an API key.
+     *
+     * The bypass is unconditionally absent in DEV / STAGE / PROD — it is
+     * guarded by the [Environment.bypassForbidden] flag so it can never be
+     * accidentally activated in a shared or production environment.
+     */
+    open fun authenticate(rawToken: String): AuthResult? {
         if (rawToken.isBlank()) return null
+
+        if (!environment.bypassForbidden && rawToken == LOCAL_BYPASS_TOKEN) {
+            return LOCAL_BYPASS_AUTH
+        }
+
         val keyHash = ApiKeyHasher.sha256(rawToken)
-        return apiKeyRepository.findOrganizationIdByKeyHash(keyHash)
+        return apiKeyRepository.findAuthResultByKeyHash(keyHash)
+    }
+
+    companion object {
+        /** Raw token accepted only in the LOCAL environment. */
+        const val LOCAL_BYPASS_TOKEN = "dev_local_123"
+
+        /**
+         * Fixed UUIDs that match the rows inserted by `supabase/seed.sql`.
+         * They are stable so bookmarks / curl scripts don't break across restarts.
+         */
+        val LOCAL_ORG_ID: UUID = UUID.fromString("00000000-0000-0000-0001-000000000001")
+        val LOCAL_WORKSPACE_ID: UUID = UUID.fromString("00000000-0000-0000-0001-000000000002")
+
+        private val LOCAL_BYPASS_AUTH = AuthResult(
+            workspaceId = LOCAL_WORKSPACE_ID,
+            organizationId = LOCAL_ORG_ID,
+            workspaceRole = WorkspaceRole.ADMIN,
+        )
     }
 }

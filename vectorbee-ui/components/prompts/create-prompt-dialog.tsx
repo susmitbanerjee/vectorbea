@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -16,14 +16,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useWorkspace } from "@/lib/workspace-context";
 
 export function CreatePromptDialog() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isPending, startTransition] = useTransition();
+  const { activeWorkspaceId } = useWorkspace();
 
   const nameValid = name.trim().length >= 2;
 
@@ -35,11 +36,12 @@ export function CreatePromptDialog() {
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/prompts", {
+        const response = await fetch(
+          `/api/prompts${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+          {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            organizationId: searchParams.get("org"),
             name: name.trim(),
             description: description.trim() || null,
             versionTag: "v1.0.0",
@@ -51,7 +53,8 @@ export function CreatePromptDialog() {
               top_p: 0.95,
             },
           }),
-        });
+          },
+        );
         if (!response.ok) {
           throw new Error(await response.text());
         }
@@ -62,7 +65,7 @@ export function CreatePromptDialog() {
         setOpen(false);
         router.refresh();
         router.push(
-          `/prompts/${created.promptId}${searchParams.get("org") ? `?org=${searchParams.get("org")}` : ""}`,
+          `/prompts/${created.promptId}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
         );
       } catch (cause) {
         toast.error(

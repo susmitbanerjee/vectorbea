@@ -5,13 +5,15 @@ import { apiFetch, type PromptDetail } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId");
     const prompt = await apiFetch<PromptDetail>(`/api/prompts/${id}/publish`, {
       method: "POST",
+      workspaceId,
     });
     return NextResponse.json(prompt);
   } catch (error) {

@@ -3,29 +3,28 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light mode uses the same deep-slate palette as dark so all hardcoded
-     white/slate Tailwind utilities remain readable. Only brightness shifts. */
+  /* Light mode — white background, slate text */
   :root {
-    --background: 222 22% 13%;
-    --foreground: 210 22% 93%;
-    --card: 224 20% 16%;
-    --card-foreground: 210 22% 93%;
-    --popover: 224 20% 16%;
-    --popover-foreground: 210 22% 93%;
-    --primary: 217 91% 62%;
-    --primary-foreground: 222 47% 6%;
-    --secondary: 224 17% 22%;
-    --secondary-foreground: 210 22% 93%;
-    --muted: 224 17% 22%;
-    --muted-foreground: 214 15% 58%;
-    --accent: 217 30% 24%;
-    --accent-foreground: 210 22% 93%;
-    --border: 224 17% 22%;
-    --input: 224 17% 22%;
-    --ring: 217 91% 62%;
-    --chart-1: 217 91% 62%;
-    --chart-2: 188 95% 45%;
-    --chart-3: 262 83% 68%;
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 210 20% 98%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 20% 94%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 20% 92%;
+    --accent-foreground: 222 47% 11%;
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 217 91% 55%;
+    --chart-1: 217 91% 55%;
+    --chart-2: 188 95% 38%;
+    --chart-3: 262 83% 58%;
   }
 
   .dark {

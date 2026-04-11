@@ -5,12 +5,13 @@ import { apiFetch } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    await apiFetch(`/api/keys/${id}`, { method: "DELETE" });
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId");
+    await apiFetch(`/api/keys/${id}`, { method: "DELETE", workspaceId });
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return NextResponse.json(

@@ -498,7 +498,7 @@ export default function OnboardingPage() {
       const keyRes = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId: org.id }),
+        body: JSON.stringify({ name: "onboarding-key" }),
       });
       if (!keyRes.ok) throw new Error(await keyRes.text());
       const key = (await keyRes.json()) as { apiKey: string };

@@ -1,44 +1,101 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CreditCard, KeyRound, LayoutDashboard, Loader2, Logs, Settings2, Sparkles } from "lucide-react";
+import {
+  CreditCard,
+  KeyRound,
+  LayoutDashboard,
+  Loader2,
+  Logs,
+  Settings2,
+  Sparkles,
+  UserCircle,
+  Users,
+} from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
-
-import type { DashboardSummary, OrganizationView } from "@/lib/api";
+import type { DashboardSummary } from "@/lib/api";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
-const navigation: Array<{ href: Route; label: string; icon: typeof LayoutDashboard }> = [
+const ALL_NAV_ITEMS: Array<{
+  href: Route;
+  label: string;
+  icon: typeof LayoutDashboard;
+  minRole?: "admin" | "editor" | "viewer";
+}> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
-  { href: "/api-keys", label: "API Keys", icon: KeyRound },
+  { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/billing", label: "Billing", icon: CreditCard },
+  { href: "/settings/profile", label: "Profile", icon: UserCircle },
+  { href: "/settings/members", label: "Members", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ];
 
-export function AppSidebar({
-  organizations,
-  summary,
-}: {
-  organizations: OrganizationView[];
-  summary: DashboardSummary | null;
-}) {
+export function AppSidebar({ summary }: { summary: DashboardSummary | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentQuery = searchParams.toString();
   const [isPending, startTransition] = useTransition();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [workspaceSummary, setWorkspaceSummary] = useState<DashboardSummary | null>(summary);
+  const { isAdmin, isEditor } = useRBAC();
+  const { activeWorkspaceId } = useWorkspace();
 
-  // Clear the pending highlight as soon as the new route is committed.
+  const navigation = useMemo(() => {
+    return ALL_NAV_ITEMS.filter((item) => {
+      if (!item.minRole) return true;
+      if (item.minRole === "admin") return isAdmin;
+      if (item.minRole === "editor") return isEditor;
+      return true;
+    });
+  }, [isAdmin, isEditor]);
+
   useEffect(() => {
     setPendingHref(null);
   }, [pathname]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspaceSummary() {
+      if (!activeWorkspaceId) {
+        setWorkspaceSummary(summary);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/dashboard/summary?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) {
+          throw new Error("Failed to load workspace summary");
+        }
+        const nextSummary = (await response.json()) as DashboardSummary;
+        if (!cancelled) {
+          setWorkspaceSummary(nextSummary);
+        }
+      } catch {
+        if (!cancelled) {
+          setWorkspaceSummary(null);
+        }
+      }
+    }
+
+    void loadWorkspaceSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, summary]);
 
   const navigate = (href: string) => {
     const target = href.split("?")[0];
@@ -50,7 +107,7 @@ export function AppSidebar({
   };
 
   return (
-    <aside className="hidden w-[260px] shrink-0 border-r border-border/50 bg-card/30 backdrop-blur-sm px-3 py-4 lg:flex lg:flex-col">
+    <aside className="hidden w-[260px] shrink-0 border-r border-border/50 bg-card/30 px-3 py-4 backdrop-blur-sm lg:flex lg:flex-col">
       <div className="mb-6 flex items-center gap-3 px-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-400/15 via-amber-500/10 to-amber-600/5 shadow-[0_0_18px_-6px_rgba(251,191,36,0.45)]">
           <BeeLogo className="h-5 w-5 text-amber-400" />
@@ -61,7 +118,7 @@ export function AppSidebar({
         </div>
       </div>
 
-      <WorkspaceSwitcher organizations={organizations} />
+      <WorkspaceSwitcher />
 
       <nav className="mt-5 flex flex-col gap-0.5">
         {navigation.map((item) => {
@@ -87,7 +144,7 @@ export function AppSidebar({
               )}
             >
               {active && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-primary" />
+                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
               )}
               <Icon
                 className={cn(
@@ -107,21 +164,27 @@ export function AppSidebar({
 
       <div className="mt-auto rounded-xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm">
         <div className="mb-3 flex items-center gap-2">
-          <span className={cn("live-dot", !summary && "!bg-red-500")} />
-          <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">System Status</p>
+          <span className={cn("live-dot", !workspaceSummary && "!bg-red-500")} />
+          <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+            System Status
+          </p>
         </div>
-        {summary ? (
+        {workspaceSummary ? (
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xl font-semibold tabular-nums">{summary.averageLatencyMs} ms</p>
-              <p className="text-[11px] text-muted-foreground">Avg latency · {summary.activeAgents} agents</p>
+              <p className="text-xl font-semibold tabular-nums">
+                {workspaceSummary.averageLatencyMs} ms
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Avg latency · {workspaceSummary.activeAgents} agents
+              </p>
             </div>
             <Badge variant="success">Connected</Badge>
           </div>
         ) : (
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xl font-semibold tabular-nums">—</p>
+              <p className="text-xl font-semibold tabular-nums">-</p>
               <p className="text-[11px] text-muted-foreground">Backend unreachable</p>
             </div>
             <Badge variant="destructive">Offline</Badge>

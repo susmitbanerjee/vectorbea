@@ -5,12 +5,15 @@ import { apiFetch, type PromptDetail } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    const versions = await apiFetch<PromptDetail[]>(`/api/prompts/${id}/versions`);
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId");
+    const versions = await apiFetch<PromptDetail[]>(`/api/prompts/${id}/versions`, {
+      workspaceId,
+    });
     return NextResponse.json(versions);
   } catch (error) {
     return NextResponse.json(

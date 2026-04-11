@@ -12,12 +12,13 @@ interface ConnectionStatus {
 
 export async function GET(request: NextRequest) {
   try {
-    const orgId = request.nextUrl.searchParams.get("organizationId");
-    if (!orgId) {
-      return NextResponse.json({ error: "organizationId is required" }, { status: 400 });
+    const wsId = request.nextUrl.searchParams.get("workspaceId")
+      ?? request.nextUrl.searchParams.get("organizationId"); // back-compat
+    if (!wsId) {
+      return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     }
     const status = await apiFetch<ConnectionStatus>(
-      `/api/dashboard/connection-status?organizationId=${encodeURIComponent(orgId)}`,
+      `/api/dashboard/connection-status?workspaceId=${encodeURIComponent(wsId)}`,
     );
     return NextResponse.json(status);
   } catch (error) {

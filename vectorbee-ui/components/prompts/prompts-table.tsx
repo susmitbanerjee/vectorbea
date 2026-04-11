@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useWorkspace } from "@/lib/workspace-context";
 
 function relativeTime(value: string | null): string {
   if (!value) return "Unknown";
@@ -45,6 +46,7 @@ export function PromptsTable({
   initialQuery: string;
 }) {
   const router = useRouter();
+  const { activeWorkspaceId } = useWorkspace();
   const [query, setQuery] = useState(initialQuery);
   const [filter, setFilter] = useState<FilterTab>("all");
 
@@ -143,7 +145,11 @@ export function PromptsTable({
                   <TableRow
                     key={prompt.id}
                     className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(i + 1, 5)}`}
-                    onClick={() => router.push(`/prompts/${prompt.id}`)}
+                    onClick={() =>
+                      router.push(
+                        `/prompts/${prompt.id}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+                      )
+                    }
                   >
                     <TableCell className="font-medium">{prompt.name}</TableCell>
                     <TableCell>
