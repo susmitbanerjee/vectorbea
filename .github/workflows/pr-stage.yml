@@ -34,9 +34,11 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          build-root-directory: vectorbee-backend
 
       - name: Run tests
-        run: sh gradlew test --no-daemon
+        run: gradle test --no-daemon
 
       - name: Upload test results
         if: always()
@@ -46,7 +48,7 @@ jobs:
           path: vectorbee-backend/build/reports/tests/
 
       - name: Build distribution
-        run: sh gradlew installDist --no-daemon
+        run: gradle installDist --no-daemon
 
   # ──────────────────────────────────────────────
   # 2. UI — lint + type-check + build
