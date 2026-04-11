@@ -35,11 +35,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Make gradlew executable
-        run: chmod +x gradlew
-
       - name: Run tests
-        run: ./gradlew test --no-daemon
+        run: sh gradlew test --no-daemon
 
       - name: Upload test results
         if: always()
@@ -49,7 +46,7 @@ jobs:
           path: vectorbee-backend/build/reports/tests/
 
       - name: Build distribution
-        run: ./gradlew installDist --no-daemon
+        run: sh gradlew installDist --no-daemon
 
   # ──────────────────────────────────────────────
   # 2. UI — lint + type-check + build
