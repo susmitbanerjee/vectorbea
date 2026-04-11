@@ -1,7 +1,7 @@
 name: PR — Build & Stage
 
 on:
-  pull_request:
+  push:
     branches: [master]
 
 concurrency:
@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start stack
-        run: docker compose -f docker-compose.e2e.yml up -d --build --wait
+        run: docker compose -f docker-compose.e2e.yml up -d --build --wait --no-deps db backend frontend
         timeout-minutes: 10
 
       - name: Smoke — list prompts

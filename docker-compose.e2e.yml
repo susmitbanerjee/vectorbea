@@ -85,36 +85,25 @@ services:
       - vectorbee-e2e
 
   # ── Socket directory initialiser ───────────────────────────────────────────
-  # Runs once before the proxy starts. Sets the shared volume directory to
-  # 0777 so the proxy user (UID from the proxy image) can create the socket
-  # file, and the agent-tester user (root inside python:3.11-slim) can read it.
-  # Exits immediately after chmod — it has no ongoing resource cost.
   init-sockets:
     image: busybox:1.36
     container_name: vectorbee-e2e-init-sockets
+    profiles: [local]
     volumes:
       - shared_sockets:/run/vectorbee
     command: ["sh", "-c", "chmod 1777 /run/vectorbee && echo 'socket dir ready'"]
     restart: "no"
 
   # ── Kotlin gRPC Proxy (data plane sidecar) ────────────────────────────────
-  # Talks to the backend hub over HTTP (bridge network) and exposes the data
-  # plane to the agent-tester exclusively via UDS at /run/vectorbee/vectorbee.sock.
-  # No ports are published — there is nothing to expose over TCP.
   proxy:
     build:
       context: ./vectorbee-proxy
     container_name: vectorbee-e2e-proxy
+    profiles: [local]
     environment:
-      # Where the proxy calls back to the central hub for prompt fetches
-      # and audit batch uploads.
       VECTORBEE_HUB_URL: http://backend:8080
-      # The API key used to authenticate against the hub. Override this with
-      # a real vb_ key from the dashboard once onboarding is complete.
       VECTORBEE_KEY: ${VECTORBEE_API_KEY:?VECTORBEE_API_KEY must be set}
-      # Ktor REST socket (healthcheck endpoint, used by ops tooling only).
       VECTORBEE_REST_SOCKET: /run/vectorbee/vectorbee-rest.sock
-      # gRPC data-plane socket shared with the agent-tester via named volume.
       VECTORBEE_GRPC_SOCKET: /run/vectorbee/vectorbee.sock
     volumes:
       - shared_sockets:/run/vectorbee
@@ -123,8 +112,6 @@ services:
         condition: service_healthy
       init-sockets:
         condition: service_completed_successfully
-    # Healthcheck watches for the gRPC socket file. -S tests that the path
-    # exists AND is a socket (not just a regular file or directory).
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/vectorbee/vectorbee.sock"]
       interval: 3s
@@ -136,28 +123,18 @@ services:
       - vectorbee-e2e
 
   # ── Python Agent Tester ────────────────────────────────────────────────────
-  # Reads prompts and posts audit events directly through the gRPC UDS socket.
-  # No TCP hop: Python → /run/vectorbee/vectorbee.sock → Kotlin proxy in-process.
   agent-tester:
     image: python:3.11-slim
     container_name: vectorbee-e2e-agent-tester
+    profiles: [local]
     env_file:
-      # Keys (OPENAI_API_KEY, VECTORBEE_API_KEY) loaded from the external project.
       - ../vectorbee_client_project/.env
     environment:
-      # Tell the SDK where the socket lives inside this container.
-      # Both containers mount shared_sockets at /run/vectorbee, so the path
-      # is identical on both sides — no translation needed.
       VECTORBEE_GRPC_SOCKET: /run/vectorbee/vectorbee.sock
-      # Explicitly unset any leftover HTTP proxy URL from the .env file so
-      # the SDK does not fall back to TCP mode.
       VECTORBEE_PROXY_URL: ""
     volumes:
-      # Shared socket directory — must be the same named volume as the proxy.
       - shared_sockets:/run/vectorbee
-      # SDK root — writable so pip can write egg-info on editable install.
       - ../vectorbee_client_project:/app/sdk
-      # Agent test scripts — read-only.
       - ../vectorbee_client_project/vectorbee_tester:/app/tester:ro
     command: >
       sh -c "pip install --upgrade pip --quiet
