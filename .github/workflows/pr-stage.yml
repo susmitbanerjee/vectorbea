@@ -33,6 +33,9 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
       - name: Run tests
         run: ./gradlew test --no-daemon
 
@@ -43,7 +46,7 @@ jobs:
           name: backend-test-results
           path: vectorbee-backend/build/reports/tests/
 
-      - name: Build fat JAR
+      - name: Build distribution
         run: ./gradlew installDist --no-daemon
 
   # ──────────────────────────────────────────────

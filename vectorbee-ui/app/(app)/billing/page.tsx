@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+
 export const dynamic = "force-dynamic";
 
 const PLAN_FEATURES = [
@@ -77,16 +78,15 @@ export default function BillingPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Button variant="outline" className="gap-2" asChild>
-              <a
-                href="https://stripe.com/docs/billing"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Stripe Billing docs
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </Button>
+            <a
+              href="https://stripe.com/docs/billing"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              Stripe Billing docs
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
             <Button variant="ghost" className="text-muted-foreground">
               Contact us about enterprise pricing
             </Button>
