@@ -11,8 +11,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/vectorbee-backend
-  IMAGE_UI: ghcr.io/${{ github.repository }}/vectorbee-ui
+  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/vectorbea-backend
+  IMAGE_UI: ghcr.io/${{ github.repository }}/vectorbea-ui
 
 jobs:
   # ──────────────────────────────────────────────
@@ -49,7 +49,7 @@ jobs:
       packages: write
     defaults:
       run:
-        working-directory: vectorbee-backend
+        working-directory: vectorbea-backend
     steps:
       - uses: actions/checkout@v4
 
@@ -62,7 +62,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          build-root-directory: vectorbee-backend
+          build-root-directory: vectorbea-backend
 
       - name: Run tests
         run: gradle test --no-daemon
@@ -80,7 +80,7 @@ jobs:
       - name: Build & push backend image
         uses: docker/build-push-action@v5
         with:
-          context: vectorbee-backend
+          context: vectorbea-backend
           push: true
           tags: |
             ${{ env.IMAGE_BACKEND }}:${{ needs.meta.outputs.version }}
@@ -112,7 +112,7 @@ jobs:
       - name: Build & push UI image
         uses: docker/build-push-action@v5
         with:
-          context: vectorbee-ui
+          context: vectorbea-ui
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, ui]
     env:
-      VECTORBEE_API_KEY: vb_e2e_test_key_local
+      VECTORBEA_API_KEY: vb_e2e_test_key_local
     steps:
       - uses: actions/checkout@v4
 
@@ -142,7 +142,7 @@ jobs:
       - name: Smoke — API
         run: |
           curl -sf \
-            -H "Authorization: Bearer $VECTORBEE_API_KEY" \
+            -H "Authorization: Bearer $VECTORBEA_API_KEY" \
             http://localhost:8080/api/prompts
 
       - name: Smoke — UI

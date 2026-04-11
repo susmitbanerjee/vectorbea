@@ -1,4 +1,4 @@
-"""Minimal E2E sandbox verifier for the VectorBee Docker Compose stack.
+"""Minimal E2E sandbox verifier for the VectorBea Docker Compose stack.
 
 This script waits for the backend and frontend to become available, creates a
 dummy prompt through the backend API, inserts an audit log, and then verifies
@@ -38,7 +38,7 @@ def wait_for_service(url: str, timeout_seconds: int = 120) -> None:
 
 
 def main() -> None:
-    """Run the VectorBee E2E verification flow."""
+    """Run the VectorBea E2E verification flow."""
 
     print("Waiting for frontend to become healthy...")
     wait_for_service(f"{FRONTEND_URL}/settings")

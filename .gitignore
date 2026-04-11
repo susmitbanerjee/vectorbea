@@ -21,19 +21,22 @@ dist/
 .vercel/
 .turbo/
 *.tsbuildinfo
-vectorbee-ui/.next/
-vectorbee-ui/node_modules/
-vectorbee-ui/out/
+vectorbea-ui/.next/
+vectorbea-ui/node_modules/
+vectorbea-ui/out/
 
 # ── Gradle / JVM ─────────────────────────────────────────────────────────────
-vectorbee-backend/build/
-vectorbee-backend/.gradle/
-vectorbee-proxy/build/
-vectorbee-proxy/.gradle/
+vectorbea-backend/build/
+vectorbea-backend/.gradle/
+vectorbea-proxy/build/
+vectorbea-proxy/.gradle/
 *.class
-*.jar
 *.war
 *.ear
+# Exclude compiled JARs but keep Gradle wrapper JARs (required for CI)
+*.jar
+!vectorbea-backend/gradle/wrapper/gradle-wrapper.jar
+!vectorbea-proxy/gradle/wrapper/gradle-wrapper.jar
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
@@ -59,7 +62,7 @@ env/
 coverage/
 .nyc_output/
 test-results/
-vectorbee-backend/src/test/resources/*.tmp
+vectorbea-backend/src/test/resources/*.tmp
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 *.pem

@@ -3,43 +3,43 @@ services:
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   db:
     image: postgres:15-alpine
-    container_name: vectorbee-e2e-db
+    container_name: vectorbea-e2e-db
     environment:
-      POSTGRES_USER: vectorbee
-      POSTGRES_PASSWORD: vectorbee
-      POSTGRES_DB: vectorbee_test
+      POSTGRES_USER: vectorbea
+      POSTGRES_PASSWORD: vectorbea
+      POSTGRES_DB: vectorbea_test
     volumes:
-      - ./vectorbee-backend/supabase/migrations/20260405_000001_mvp_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./vectorbee-backend/supabase/migrations/20260405_000002_prompt_publish_status.sql:/docker-entrypoint-initdb.d/02-prompt-publish-status.sql:ro
-      - ./vectorbee-backend/supabase/migrations/20260408_000001_audit_split_latency.sql:/docker-entrypoint-initdb.d/03-audit-split-latency.sql:ro
-      - ./vectorbee-backend/supabase/migrations/20260408_000002_api_key_last_four.sql:/docker-entrypoint-initdb.d/04-api-key-last-four.sql:ro
-      - ./vectorbee-backend/supabase/migrations/20260409_000001_api_key_name.sql:/docker-entrypoint-initdb.d/05-api-key-name.sql:ro
-      - ./vectorbee-backend/supabase/migrations/20260409_000002_enterprise_hierarchy_rbac.sql:/docker-entrypoint-initdb.d/06-enterprise-hierarchy-rbac.sql:ro
-      - ./vectorbee-backend/supabase/migrations/20260409_000003_api_key_role.sql:/docker-entrypoint-initdb.d/07-api-key-role.sql:ro
-      - ./vectorbee-backend/supabase/e2e-seed.sql:/docker-entrypoint-initdb.d/08-e2e-seed.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260405_000001_mvp_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260405_000002_prompt_publish_status.sql:/docker-entrypoint-initdb.d/02-prompt-publish-status.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260408_000001_audit_split_latency.sql:/docker-entrypoint-initdb.d/03-audit-split-latency.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260408_000002_api_key_last_four.sql:/docker-entrypoint-initdb.d/04-api-key-last-four.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260409_000001_api_key_name.sql:/docker-entrypoint-initdb.d/05-api-key-name.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260409_000002_enterprise_hierarchy_rbac.sql:/docker-entrypoint-initdb.d/06-enterprise-hierarchy-rbac.sql:ro
+      - ./vectorbea-backend/supabase/migrations/20260409_000003_api_key_role.sql:/docker-entrypoint-initdb.d/07-api-key-role.sql:ro
+      - ./vectorbea-backend/supabase/e2e-seed.sql:/docker-entrypoint-initdb.d/08-e2e-seed.sql:ro
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vectorbee -d vectorbee_test"]
+      test: ["CMD-SHELL", "pg_isready -U vectorbea -d vectorbea_test"]
       interval: 5s
       timeout: 5s
       retries: 20
     networks:
-      - vectorbee-e2e
+      - vectorbea-e2e
 
   # ── Central Hub (Kotlin REST API + Postgres) ───────────────────────────────
   backend:
     build:
-      context: ./vectorbee-backend
-    container_name: vectorbee-e2e-backend
+      context: ./vectorbea-backend
+    container_name: vectorbea-e2e-backend
     environment:
-      DATABASE_URL: postgresql://vectorbee:vectorbee@db:5432/vectorbee_test
-      DB_URL: jdbc:postgresql://db:5432/vectorbee_test
-      DB_USER: vectorbee
-      DB_PASSWORD: vectorbee
+      DATABASE_URL: postgresql://vectorbea:vectorbea@db:5432/vectorbea_test
+      DB_URL: jdbc:postgresql://db:5432/vectorbea_test
+      DB_USER: vectorbea
+      DB_PASSWORD: vectorbea
       PORT: 8080
       # Auth: no dev-token bypass — all requests must use a real API key
-      VECTORBEE_API_KEY: ${VECTORBEE_API_KEY:-vb_e2e_test_key_local}
+      VECTORBEA_API_KEY: ${VECTORBEA_API_KEY:-vb_e2e_test_key_local}
     depends_on:
       db:
         condition: service_healthy
@@ -55,18 +55,18 @@ services:
       timeout: 5s
       retries: 20
     networks:
-      - vectorbee-e2e
+      - vectorbea-e2e
 
   # ── Next.js Frontend ────────────────────────────────────────────────────────
   frontend:
     build:
-      context: ./vectorbee-ui
-    container_name: vectorbee-e2e-frontend
+      context: ./vectorbea-ui
+    container_name: vectorbea-e2e-frontend
     environment:
       API_URL: http://backend:8080
       NEXT_PUBLIC_API_URL: http://localhost:8080
       PORT: 3000
-      VECTORBEE_API_KEY: ${VECTORBEE_API_KEY:-vb_e2e_test_key_local}
+      VECTORBEA_API_KEY: ${VECTORBEA_API_KEY:-vb_e2e_test_key_local}
     depends_on:
       backend:
         condition: service_healthy
@@ -82,74 +82,74 @@ services:
       timeout: 5s
       retries: 20
     networks:
-      - vectorbee-e2e
+      - vectorbea-e2e
 
   # ── Socket directory initialiser ───────────────────────────────────────────
   init-sockets:
     image: busybox:1.36
-    container_name: vectorbee-e2e-init-sockets
+    container_name: vectorbea-e2e-init-sockets
     profiles: [local]
     volumes:
-      - shared_sockets:/run/vectorbee
-    command: ["sh", "-c", "chmod 1777 /run/vectorbee && echo 'socket dir ready'"]
+      - shared_sockets:/run/vectorbea
+    command: ["sh", "-c", "chmod 1777 /run/vectorbea && echo 'socket dir ready'"]
     restart: "no"
 
   # ── Kotlin gRPC Proxy (data plane sidecar) ────────────────────────────────
   proxy:
     build:
-      context: ./vectorbee-proxy
-    container_name: vectorbee-e2e-proxy
+      context: ./vectorbea-proxy
+    container_name: vectorbea-e2e-proxy
     profiles: [local]
     environment:
-      VECTORBEE_HUB_URL: http://backend:8080
-      VECTORBEE_KEY: ${VECTORBEE_API_KEY:?VECTORBEE_API_KEY must be set}
-      VECTORBEE_REST_SOCKET: /run/vectorbee/vectorbee-rest.sock
-      VECTORBEE_GRPC_SOCKET: /run/vectorbee/vectorbee.sock
+      VECTORBEA_HUB_URL: http://backend:8080
+      VECTORBEA_KEY: ${VECTORBEA_API_KEY:?VECTORBEA_API_KEY must be set}
+      VECTORBEA_REST_SOCKET: /run/vectorbea/vectorbea-rest.sock
+      VECTORBEA_GRPC_SOCKET: /run/vectorbea/vectorbea.sock
     volumes:
-      - shared_sockets:/run/vectorbee
+      - shared_sockets:/run/vectorbea
     depends_on:
       backend:
         condition: service_healthy
       init-sockets:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "test -S /run/vectorbee/vectorbee.sock"]
+      test: ["CMD-SHELL", "test -S /run/vectorbea/vectorbea.sock"]
       interval: 3s
       timeout: 3s
       retries: 20
       start_period: 10s
     restart: unless-stopped
     networks:
-      - vectorbee-e2e
+      - vectorbea-e2e
 
   # ── Python Agent Tester ────────────────────────────────────────────────────
   agent-tester:
     image: python:3.11-slim
-    container_name: vectorbee-e2e-agent-tester
+    container_name: vectorbea-e2e-agent-tester
     profiles: [local]
     env_file:
-      - ../vectorbee_client_project/.env
+      - ../vectorbea_client_project/.env
     environment:
-      VECTORBEE_GRPC_SOCKET: /run/vectorbee/vectorbee.sock
-      VECTORBEE_PROXY_URL: ""
+      VECTORBEA_GRPC_SOCKET: /run/vectorbea/vectorbea.sock
+      VECTORBEA_PROXY_URL: ""
     volumes:
-      - shared_sockets:/run/vectorbee
-      - ../vectorbee_client_project:/app/sdk
-      - ../vectorbee_client_project/vectorbee_tester:/app/tester:ro
+      - shared_sockets:/run/vectorbea
+      - ../vectorbea_client_project:/app/sdk
+      - ../vectorbea_client_project/vectorbea_tester:/app/tester:ro
     command: >
       sh -c "pip install --upgrade pip --quiet
       && pip install -e /app/sdk --quiet --no-cache-dir
       && pip install openai grpcio protobuf --quiet --no-cache-dir
-      && echo 'agent-tester ready — socket: '${VECTORBEE_GRPC_SOCKET}
+      && echo 'agent-tester ready — socket: '${VECTORBEA_GRPC_SOCKET}
       && tail -f /dev/null"
     depends_on:
       proxy:
         condition: service_healthy
     networks:
-      - vectorbee-e2e
+      - vectorbea-e2e
 
 networks:
-  vectorbee-e2e:
+  vectorbea-e2e:
     driver: bridge
 
 volumes:

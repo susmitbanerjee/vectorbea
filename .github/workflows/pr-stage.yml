@@ -10,8 +10,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/vectorbee-backend
-  IMAGE_UI: ghcr.io/${{ github.repository }}/vectorbee-ui
+  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/vectorbea-backend
+  IMAGE_UI: ghcr.io/${{ github.repository }}/vectorbea-ui
 
 jobs:
   # ──────────────────────────────────────────────
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: vectorbee-backend
+        working-directory: vectorbea-backend
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +35,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          build-root-directory: vectorbee-backend
+          build-root-directory: vectorbea-backend
 
       - name: Run tests
         run: gradle test --no-daemon
@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-results
-          path: vectorbee-backend/build/reports/tests/
+          path: vectorbea-backend/build/reports/tests/
 
       - name: Build distribution
         run: gradle installDist --no-daemon
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: vectorbee-ui
+        working-directory: vectorbea-ui
     steps:
       - uses: actions/checkout@v4
 
@@ -66,7 +66,7 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: vectorbee-ui/package-lock.json
+          cache-dependency-path: vectorbea-ui/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend-test, ui-check]
     env:
-      VECTORBEE_API_KEY: vb_e2e_test_key_local
+      VECTORBEA_API_KEY: vb_e2e_test_key_local
     steps:
       - uses: actions/checkout@v4
 
@@ -101,7 +101,7 @@ jobs:
       - name: Smoke — list prompts
         run: |
           curl -sf \
-            -H "Authorization: Bearer $VECTORBEE_API_KEY" \
+            -H "Authorization: Bearer $VECTORBEA_API_KEY" \
             http://localhost:8080/api/prompts
 
       - name: Smoke — UI health
