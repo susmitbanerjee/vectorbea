@@ -176,7 +176,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
               <CardTitle>Your new API key</CardTitle>
             </div>
             <CardDescription>
-              Copy this key now. For security, it won't be shown again after you dismiss this banner.
+              Copy this key now. For security, it won&apos;t be shown again after you dismiss this banner.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

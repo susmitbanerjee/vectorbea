@@ -46,7 +46,7 @@ export default function BillingPage() {
           <div className="rounded-xl border border-border/60 bg-card/60 p-5">
             <div className="mb-4 flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-amber-400" />
-              <span className="text-sm font-semibold text-foreground">What's planned</span>
+              <span className="text-sm font-semibold text-foreground">What&apos;s planned</span>
             </div>
             <ul className="grid gap-2 sm:grid-cols-2">
               {PLAN_FEATURES.map((f) => (
