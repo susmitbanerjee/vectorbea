@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Loader2,
   Logs,
+  Server,
   Settings2,
   Sparkles,
   UserCircle,
@@ -29,6 +30,7 @@ const ALL_NAV_ITEMS: Array<{
   minRole?: "admin" | "editor" | "viewer";
 }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard/infrastructure", label: "Infrastructure", icon: Server },
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },

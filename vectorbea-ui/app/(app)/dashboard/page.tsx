@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   apiFetch,
   type AuditLogView,
-  type DailyRequestPoint,
   type DashboardSummary,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -26,7 +25,6 @@ export default async function DashboardPage({
   const suffix = org ? `?workspaceId=${org}` : "";
   const auditLogs = await apiFetch<AuditLogView[]>(`/api/audit${suffix}`);
   const dashboardSummary = await apiFetch<DashboardSummary>(`/api/dashboard/summary${suffix}`);
-  const requests = await apiFetch<DailyRequestPoint[]>(`/api/dashboard/requests${suffix}`);
   const filteredLogs = q
     ? auditLogs.filter((log) =>
         `${log.promptName} ${log.versionTag}`.toLowerCase().includes(q.toLowerCase()),
@@ -106,7 +104,7 @@ export default async function DashboardPage({
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
-          <RequestsChart data={requests} />
+          <RequestsChart />
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">

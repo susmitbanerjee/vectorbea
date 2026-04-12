@@ -90,6 +90,30 @@ export interface WorkspaceMember {
   joinedAt: string;
 }
 
+export interface DeploymentAgentView {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  lastHeartbeat: string | null;
+  createdAt: string | null;
+}
+
+export interface AgentMetricPoint {
+  id: string;
+  agentId: string;
+  latencyMs: number;
+  cpuUsagePercent: number;
+  memoryUsageMb: number;
+  activeReplicas: number;
+  createdAt: string;
+}
+
+export interface RegisterAgentResponse {
+  agent: DeploymentAgentView;
+  token: string;
+}
+
 type ApiFetchOptions = RequestInit & {
   workspaceId?: string | null;
 };

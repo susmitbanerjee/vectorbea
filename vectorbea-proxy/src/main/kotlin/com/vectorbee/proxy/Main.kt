@@ -10,6 +10,7 @@ import com.vectorbea.proxy.model.AuditAcceptedResponse
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
+import com.vectorbea.proxy.service.SharedRulesStore
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -37,7 +38,8 @@ fun main() {
     }
     val promptCache = PromptCache()
     val hubClient = HubClient(config)
-    val promptService = PromptService(promptCache, hubClient)
+    val sharedRulesStore = SharedRulesStore(config.sharedRulesPath, json)
+    val promptService = PromptService(promptCache, hubClient, sharedRulesStore)
     val auditDispatcher = AuditDispatcher(config, hubClient)
 
     auditDispatcher.start()
@@ -51,6 +53,11 @@ fun main() {
     }
     restServer.start(wait = false)
 
+    val httpServer = embeddedServer(CIO, port = config.httpPort, host = "0.0.0.0") {
+        vectorbeaModule(promptService, auditDispatcher, json)
+    }
+    httpServer.start(wait = false)
+
     // ── gRPC data-plane server (hot path) on its own UDS ──────────────────
     val grpcService = VectorBeaGrpcService(promptService, auditDispatcher, json)
     val grpcServer = GrpcServer(config.grpcSocketPath, grpcService)
@@ -58,6 +65,7 @@ fun main() {
 
     Runtime.getRuntime().addShutdownHook(Thread {
         grpcServer.stop()
+        httpServer.stop(1_000, 5_000)
         restServer.stop(1_000, 5_000)
         auditDispatcher.stop()
     })
@@ -68,7 +76,7 @@ fun main() {
 
     println(
         "vectorbea proxy ready — REST unix:${config.restSocketPath}, " +
-            "gRPC unix:${config.grpcSocketPath}"
+            "HTTP :${config.httpPort}, gRPC unix:${config.grpcSocketPath}"
     )
     runBlocking {
         awaitCancellation()
