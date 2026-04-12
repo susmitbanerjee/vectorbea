@@ -100,6 +100,12 @@ export default function LandingPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
+            href="/docs"
+            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+          >
+            Docs
+          </Link>
+          <Link
             href="/pricing"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
           >

@@ -1,7 +1,7 @@
 services:
   vectorbea-agent:
     build:
-      context: ./vectorbea-outbound-agent
+      context: ./vectorbea-agent
     environment:
       VECTORBEA_API_URL: https://dev.vectorbea.com
       VECTORBEA_AGENT_TOKEN: ${VECTORBEA_AGENT_TOKEN:?VECTORBEA_AGENT_TOKEN must be set}
