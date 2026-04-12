@@ -7,7 +7,7 @@ import {
   getAuthenticatedUserFromCookies,
   loadOrganizationsForUser,
 } from "@/lib/auth/server";
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,10 +34,16 @@ export async function POST(request: NextRequest) {
     }
 
     const existingOrganizations = await loadOrganizationsForUser(user.id);
-    if (existingOrganizations.length > 0) {
+    if (
+      existingOrganizations.length > 0 &&
+      (existingOrganizations[0]?.planTier ?? "free") === "free"
+    ) {
       return NextResponse.json(
-        { error: "Workspace already exists for this user." },
-        { status: 409 },
+        {
+          error:
+            "Free tier is limited to 1 Organization. Please upgrade to the Team plan.",
+        },
+        { status: 403 },
       );
     }
 
@@ -51,7 +57,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
 
     const { data: organization, error: organizationError } = await supabase
       .from("organizations")
@@ -59,6 +65,8 @@ export async function POST(request: NextRequest) {
         name: workspaceName,
         plan_tier: "free",
         max_seats: 1,
+        max_prompts: 5,
+        monthly_audit_limit: 100,
       })
       .select("id, name, created_at")
       .single();

@@ -92,7 +92,7 @@ function deriveWorkspaces(organizations: OrganizationView[]): WorkspaceView[] {
 }
 
 function normalizePlanTier(planTier?: PlanTier | null): PlanTier {
-  if (planTier === "pro" || planTier === "enterprise") {
+  if (planTier === "team" || planTier === "pro" || planTier === "enterprise") {
     return planTier;
   }
   return "free";

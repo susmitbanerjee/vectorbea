@@ -124,6 +124,7 @@ export function RequestsChart() {
       try {
         setLoadingAgents(true);
         const { data, error } = await supabase
+          .schema("vectorbea")
           .from("deployment_agents")
           .select("id, name, status, last_heartbeat")
           .eq("workspace_id", activeWorkspaceId)
@@ -175,6 +176,7 @@ export function RequestsChart() {
       try {
         setLoadingMetrics(true);
         const { data, error } = await supabase
+          .schema("vectorbea")
           .from("agent_metrics")
           .select("id, agent_id, latency_ms, cpu_usage_percent, created_at")
           .eq("agent_id", selectedAgentId)
@@ -226,7 +228,7 @@ export function RequestsChart() {
         "postgres_changes",
         {
           event: "INSERT",
-          schema: "public",
+          schema: "vectorbea",
           table: "agent_metrics",
           filter: `agent_id=eq.${selectedAgentId}`,
         },

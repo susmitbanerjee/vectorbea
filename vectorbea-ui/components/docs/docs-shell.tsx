@@ -52,7 +52,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(18,214,197,0.08),_transparent_28%),linear-gradient(180deg,_rgba(255,255,255,0.98),_rgba(248,250,252,1))] text-foreground">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(18,214,197,0.12),_transparent_28%)] text-foreground">
       <header className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-3 md:px-6 xl:px-8">
           <Link href="/" className="inline-flex items-center gap-3">
@@ -72,7 +72,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <div className="surface-grid border-b border-border/60 bg-gradient-to-br from-background via-background to-sky-50/80">
+      <div className="surface-grid border-b border-border/60 bg-gradient-to-br from-background via-background to-primary/5 dark:to-chart-2/10">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-10 md:px-6 xl:px-8">
           <div className="inline-flex w-fit items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-primary">
             <BookOpenText className="h-3.5 w-3.5" />
@@ -106,7 +106,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
             ].map(([title, body]) => (
               <div
                 key={title}
-                className="rounded-[1.5rem] border border-border/60 bg-white/75 p-4 shadow-[0_20px_60px_-40px_rgba(18,62,171,0.35)] backdrop-blur-sm"
+                className="rounded-[1.5rem] border border-border/60 bg-card/80 p-4 shadow-[0_20px_60px_-40px_rgba(18,62,171,0.35)] backdrop-blur-sm"
               >
                 <p className="text-sm font-semibold">{title}</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -119,7 +119,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
       </div>
 
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-8 md:px-6 lg:grid-cols-[300px_minmax(0,1fr)] xl:px-8">
-        <aside className="h-fit rounded-[1.75rem] border border-border/60 bg-white/80 p-4 shadow-[0_24px_80px_-50px_rgba(18,62,171,0.35)] backdrop-blur-sm lg:sticky lg:top-24">
+        <aside className="h-fit rounded-[1.75rem] border border-border/60 bg-card/85 p-4 shadow-[0_24px_80px_-50px_rgba(18,62,171,0.35)] backdrop-blur-sm lg:sticky lg:top-24">
           <div className="mb-4 px-2">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               Documentation
@@ -167,7 +167,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
           </nav>
         </aside>
 
-        <main className="min-w-0 rounded-[2rem] border border-border/60 bg-white/88 p-6 shadow-[0_32px_90px_-50px_rgba(18,62,171,0.35)] backdrop-blur-sm sm:p-8">
+        <main className="min-w-0 rounded-[2rem] border border-border/60 bg-card/90 p-6 shadow-[0_32px_90px_-50px_rgba(18,62,171,0.35)] backdrop-blur-sm sm:p-8">
           <article className="docs-prose mx-auto max-w-4xl">{children}</article>
         </main>
       </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     );
     const status = normalizeStatus(metrics.status);
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
     const { data: agent, error: agentError } = await supabase
       .from("deployment_agents")
       .select("id, workspace_id, name")

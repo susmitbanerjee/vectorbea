@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { VECTORBEA_SCHEMA } from "@/lib/supabase-schema";
 
 let browserClient: SupabaseClient | null = null;
 
@@ -21,4 +22,8 @@ export function getSupabaseBrowserClient() {
   }
 
   return browserClient;
+}
+
+export function getVectorBeaBrowserClient() {
+  return getSupabaseBrowserClient().schema(VECTORBEA_SCHEMA);
 }

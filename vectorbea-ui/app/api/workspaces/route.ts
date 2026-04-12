@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
       .from("workspaces")
       .insert([{ name, organization_id: organizationId }])

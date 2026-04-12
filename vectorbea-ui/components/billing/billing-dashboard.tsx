@@ -1,7 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { CreditCard, ExternalLink, ShieldCheck, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CreditCard,
+  ExternalLink,
+  FileText,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/layout/app-header";
@@ -12,30 +19,156 @@ import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/lib/workspace-context";
 
 const FALLBACK_PORTAL_URL = process.env.NEXT_PUBLIC_BILLING_PORTAL_URL ?? "";
+const TEAM_PLAN_PRICE = 19.99;
 
 const PLAN_COPY: Record<string, string> = {
-  free: "Free tier with starter limits for a single organization and a small team.",
-  pro: "Pro plan with more room for growing delivery teams and heavier prompt operations.",
-  enterprise: "Enterprise plan with per-seat billing, larger limits, and centralized governance.",
+  free: "Free includes 1 seat, 5 prompts, and 100 audit events every month.",
+  team: "Team unlocks more seats, more prompts, and higher monthly audit throughput.",
+  pro: "Pro keeps growing teams moving with additional usage headroom.",
+  enterprise: "Enterprise adds centralized governance and custom commercial support.",
 };
 
-export function BillingDashboard() {
-  const { activeOrganization, planTier, seatUsage } = useWorkspace();
-  const [seatCount, setSeatCount] = useState(
-    String(Math.max(seatUsage.max, seatUsage.used, 1)),
+type BillingUsage = {
+  planTier: string;
+  promptsUsed: number;
+  promptLimit: number;
+  auditsUsed: number;
+  auditLimit: number;
+  seatsUsed: number | null;
+  seatLimit: number;
+};
+
+function UsageBar({
+  label,
+  value,
+  limit,
+  icon,
+}: {
+  label: string;
+  value: number;
+  limit: number;
+  icon: React.ReactNode;
+}) {
+  const percentage = Math.min((value / Math.max(limit, 1)) * 100, 100);
+  const atLimit = value >= limit;
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-border/60 bg-card/50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            {icon}
+          </div>
+          <div>
+            <p className="text-sm font-medium">{label}</p>
+            <p className="text-xs text-muted-foreground">
+              {value} / {limit} used
+            </p>
+          </div>
+        </div>
+        <Badge variant={atLimit ? "destructive" : "outline"} className="tabular-nums">
+          {value}/{limit}
+        </Badge>
+      </div>
+      <div className="h-2.5 overflow-hidden rounded-full bg-muted/60">
+        <div
+          className={`h-full rounded-full transition-all ${
+            atLimit ? "bg-destructive" : "bg-primary"
+          }`}
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+    </div>
   );
+}
+
+export function BillingDashboard() {
+  const { activeOrganization, activeWorkspaceId, planTier, seatUsage } = useWorkspace();
+  const [seatCount, setSeatCount] = useState(String(Math.max(seatUsage.max, 1)));
   const [isRedirectingToCheckout, setIsRedirectingToCheckout] = useState(false);
+  const [usage, setUsage] = useState<BillingUsage | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
 
   const seatsUsed = seatUsage.used;
   const maxSeats = seatUsage.max;
-  const usagePercent = Math.min((seatsUsed / Math.max(maxSeats, 1)) * 100, 100);
   const portalUrl = activeOrganization?.billingPortalUrl?.trim() || FALLBACK_PORTAL_URL;
   const planLabel = planTier.charAt(0).toUpperCase() + planTier.slice(1);
   const parsedSeatCount = Number.parseInt(seatCount, 10);
+  const billingWorkspaceId = activeWorkspaceId ?? activeOrganization?.workspaces?.[0]?.id ?? null;
+
+  useEffect(() => {
+    if (!billingWorkspaceId) {
+      setUsage(null);
+      return;
+    }
+
+    const targetWorkspaceId = billingWorkspaceId;
+    let cancelled = false;
+
+    async function loadUsage() {
+      try {
+        setLoadingUsage(true);
+        const response = await fetch(
+          `/api/billing/usage?workspaceId=${encodeURIComponent(targetWorkspaceId)}`,
+          { cache: "no-store" },
+        );
+
+        const payload = (await response.json().catch(() => ({}))) as
+          | BillingUsage
+          | { error?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in payload && payload.error
+              ? payload.error
+              : "Failed to load billing usage.",
+          );
+        }
+
+        if (!cancelled) {
+          setUsage(payload as BillingUsage);
+          setSeatCount((current) => {
+            const currentParsed = Number.parseInt(current, 10);
+            if (Number.isFinite(currentParsed) && currentParsed > 0) {
+              return current;
+            }
+            return String(Math.max((payload as BillingUsage).seatLimit, 1));
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(
+            error instanceof Error ? error.message : "Failed to load billing usage.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingUsage(false);
+        }
+      }
+    }
+
+    void loadUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [billingWorkspaceId]);
+
+  const effectiveUsage = useMemo(
+    () => ({
+      promptsUsed: usage?.promptsUsed ?? 0,
+      promptLimit: usage?.promptLimit ?? 5,
+      auditsUsed: usage?.auditsUsed ?? 0,
+      auditLimit: usage?.auditLimit ?? 100,
+    }),
+    [usage],
+  );
 
   const handleUpgrade = async () => {
-    if (!activeOrganization?.id) {
-      toast.error("No active organization is selected for billing.");
+    const targetWorkspaceId = billingWorkspaceId;
+    if (!targetWorkspaceId) {
+      toast.error("No active workspace is selected for billing.");
       return;
     }
 
@@ -54,7 +187,7 @@ export function BillingDashboard() {
         },
         body: JSON.stringify({
           quantity: parsedSeatCount,
-          workspaceId: activeOrganization.id,
+          workspaceId: targetWorkspaceId,
         }),
       });
 
@@ -80,7 +213,7 @@ export function BillingDashboard() {
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
       <AppHeader
         title="Billing & plan"
-        subtitle={`Track seat usage and subscription details for ${activeOrganization?.name ?? "your organization"}.`}
+        subtitle={`Track usage and upgrade options for ${activeOrganization?.name ?? "your organization"}.`}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.85fr]">
@@ -91,54 +224,60 @@ export function BillingDashboard() {
                 <Users className="h-5 w-5 text-primary" />
               </div>
               <div className="space-y-1">
-                <CardTitle className="text-base">Seats used</CardTitle>
+                <CardTitle className="text-base">Current Plan: {planLabel}</CardTitle>
                 <CardDescription>
-                  {seatsUsed} of {maxSeats} paid seats are currently assigned across this organization.
+                  {PLAN_COPY[planTier] ?? PLAN_COPY.free}
                 </CardDescription>
               </div>
-              <Badge variant={seatUsage.atLimit ? "destructive" : "outline"} className="ml-auto">
-                {seatsUsed}/{maxSeats}
+              <Badge variant={planTier === "free" ? "outline" : "success"} className="ml-auto">
+                {planLabel}
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                <span>Seat usage</span>
-                <span>{Math.round(usagePercent)}%</span>
-              </div>
-              <div className="h-3 overflow-hidden rounded-full bg-muted/60">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    seatUsage.atLimit ? "bg-destructive" : "bg-primary"
-                  }`}
-                  style={{ width: `${usagePercent}%` }}
-                />
+            <div className="rounded-2xl border border-border/60 bg-card/50 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    Seats used
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {seatsUsed} / {maxSeats}
+                  </p>
+                </div>
+                <Badge variant={seatUsage.atLimit ? "destructive" : "outline"}>
+                  {seatUsage.remaining} remaining
+                </Badge>
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Seats used
-                </p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums">{seatsUsed}</p>
-              </div>
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Max seats
-                </p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums">{maxSeats}</p>
-              </div>
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Remaining
-                </p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums">
-                  {seatUsage.remaining}
-                </p>
-              </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <UsageBar
+                label="Prompts"
+                value={effectiveUsage.promptsUsed}
+                limit={effectiveUsage.promptLimit}
+                icon={<FileText className="h-4 w-4" />}
+              />
+              <UsageBar
+                label="Audit events"
+                value={effectiveUsage.auditsUsed}
+                limit={effectiveUsage.auditLimit}
+                icon={<ShieldCheck className="h-4 w-4" />}
+              />
             </div>
+
+            {loadingUsage ? (
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                Loading current usage...
+              </div>
+            ) : null}
+
+            {planTier === "free" ? (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
+                Free plan workspaces default to 1 seat, 5 prompts, and 100 audit
+                events each month. Upgrade when you need more capacity.
+              </div>
+            ) : null}
 
             {seatUsage.atLimit && (
               <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
@@ -169,7 +308,7 @@ export function BillingDashboard() {
                   </p>
                   <p className="mt-2 text-lg font-semibold">{planLabel}</p>
                 </div>
-                <Badge variant={planTier === "enterprise" ? "success" : "outline"}>
+                <Badge variant={planTier === "free" ? "outline" : "success"}>
                   {planLabel}
                 </Badge>
               </div>
@@ -190,9 +329,19 @@ export function BillingDashboard() {
             <div className="rounded-xl border border-border/60 bg-card/50 p-4">
               <div className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium">Upgrade to Enterprise</p>
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-medium">Upgrade to Team Plan</p>
+                  </div>
+                  <p className="mt-2 text-2xl font-semibold tracking-tight">
+                    ${TEAM_PLAN_PRICE.toFixed(2)}
+                    <span className="ml-1 text-sm font-medium text-muted-foreground">
+                      / month per seat
+                    </span>
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Choose how many paid seats this organization needs, then continue to Lemon Squeezy checkout.
+                    Choose how many paid seats this workspace needs, then continue
+                    to Lemon Squeezy checkout.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -214,10 +363,10 @@ export function BillingDashboard() {
                 <Button
                   type="button"
                   onClick={() => void handleUpgrade()}
-                  disabled={isRedirectingToCheckout || !activeOrganization?.id}
+                  disabled={isRedirectingToCheckout || !billingWorkspaceId}
                   className="w-full"
                 >
-                  {isRedirectingToCheckout ? "Redirecting to checkout..." : "Upgrade to Enterprise"}
+                  {isRedirectingToCheckout ? "Redirecting to checkout..." : "Upgrade to Team Plan"}
                 </Button>
               </div>
             </div>

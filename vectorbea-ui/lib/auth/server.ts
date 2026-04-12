@@ -9,7 +9,10 @@ import type {
   PlanTier,
   WorkspaceRole,
 } from "@/lib/api";
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import {
+  createSupabaseAdminClient,
+  createVectorBeaAdminClient,
+} from "@/lib/supabase-admin";
 
 type BillingOrgRecord = {
   id: string;
@@ -17,6 +20,8 @@ type BillingOrgRecord = {
   created_at: string | null;
   plan_tier?: PlanTier | null;
   max_seats?: number | null;
+  max_prompts?: number | null;
+  monthly_audit_limit?: number | null;
   stripe_customer_id?: string | null;
   stripe_subscription_id?: string | null;
 };
@@ -60,7 +65,7 @@ export async function getAuthenticatedUserFromCookies(
 }
 
 function normalizePlanTier(planTier?: PlanTier | null): PlanTier {
-  if (planTier === "pro" || planTier === "enterprise") {
+  if (planTier === "team" || planTier === "pro" || planTier === "enterprise") {
     return planTier;
   }
   return "free";
@@ -75,7 +80,7 @@ function normalizeWorkspaceRole(role?: WorkspaceRole | null): WorkspaceRole {
 
 function isBillingPending(org: OrganizationView) {
   return (
-    org.planTier === "enterprise" &&
+    org.planTier !== "free" &&
     !org.stripeCustomerId &&
     !org.stripeSubscriptionId
   );
@@ -84,11 +89,11 @@ function isBillingPending(org: OrganizationView) {
 export async function loadOrganizationsForUser(
   userId: string,
 ): Promise<OrganizationView[]> {
-  const supabase = createSupabaseAdminClient();
+  const supabase = createVectorBeaAdminClient();
   const { data: memberships, error } = await supabase
     .from("workspace_members")
     .select(
-      "role, workspaces!inner(id, name, organization_id, organizations!inner(id, name, created_at, plan_tier, max_seats, stripe_customer_id, stripe_subscription_id))",
+      "role, workspaces!inner(id, name, organization_id, organizations!inner(id, name, created_at, plan_tier, max_seats, max_prompts, monthly_audit_limit, stripe_customer_id, stripe_subscription_id))",
     )
     .eq("user_id", userId)
     .returns<WorkspaceMembershipRecord[]>();
@@ -128,6 +133,8 @@ export async function loadOrganizationsForUser(
         workspaces: [],
         planTier: normalizePlanTier(organizationRecord.plan_tier),
         maxSeats: organizationRecord.max_seats ?? 1,
+        maxPrompts: organizationRecord.max_prompts ?? 5,
+        monthlyAuditLimit: organizationRecord.monthly_audit_limit ?? 100,
         currentUsers: 0,
         stripeCustomerId: organizationRecord.stripe_customer_id ?? null,
         stripeSubscriptionId: organizationRecord.stripe_subscription_id ?? null,

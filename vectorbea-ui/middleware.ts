@@ -16,7 +16,11 @@ const AUTH_PROTECTED_PREFIXES = [
 ];
 
 function normalizeHostname(request: NextRequest) {
-  const rawHost = request.nextUrl.hostname || request.headers.get("host") || "";
+  const rawHost =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    request.nextUrl.hostname ||
+    "";
   return rawHost.toLowerCase().split(":")[0].trim();
 }
 
@@ -29,12 +33,6 @@ function isPublicProductionHost(hostname: string) {
 }
 
 function getClientIp(request: NextRequest): string | null {
-  const requestWithIp = request as NextRequest & { ip?: string | null };
-  const directIp = requestWithIp.ip?.trim();
-  if (directIp) {
-    return directIp;
-  }
-
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) {
     const firstForwardedIp = forwardedFor
@@ -43,13 +41,19 @@ function getClientIp(request: NextRequest): string | null {
       .find(Boolean);
 
     if (firstForwardedIp) {
-      return firstForwardedIp;
+      return firstForwardedIp.replace(/:\d+$/, "");
     }
   }
 
   const realIp = request.headers.get("x-real-ip")?.trim();
   if (realIp) {
-    return realIp;
+    return realIp.replace(/:\d+$/, "");
+  }
+
+  const requestWithIp = request as NextRequest & { ip?: string | null };
+  const directIp = requestWithIp.ip?.trim();
+  if (directIp) {
+    return directIp.replace(/:\d+$/, "");
   }
 
   return null;
@@ -64,9 +68,9 @@ function getWhitelistedIps() {
   );
 }
 
-function deny(ip: string | null) {
+function deny(ip: string | null, hostname: string) {
   return new NextResponse(
-    `Access Denied.\nRejected IP: ${ip ?? "Unavailable"}\n`,
+    `Access Denied.\nRejected IP: ${ip ?? "Unavailable"}\nHost: ${hostname || "Unavailable"}\n`,
     {
       status: 403,
       headers: {
@@ -119,7 +123,7 @@ export function middleware(request: NextRequest) {
   const whitelistedIps = getWhitelistedIps();
 
   if (!clientIp || !whitelistedIps.has(clientIp)) {
-    return deny(clientIp);
+    return deny(clientIp, hostname);
   }
 
   const authRedirect = enforceAuth(request);

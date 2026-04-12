@@ -43,7 +43,7 @@ export interface DailyRequestPoint {
 }
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";
-export type PlanTier = "free" | "pro" | "enterprise";
+export type PlanTier = "free" | "team" | "pro" | "enterprise";
 
 export interface OrganizationWorkspaceView {
   id: string;
@@ -62,6 +62,8 @@ export interface OrganizationView {
   workspaces?: OrganizationWorkspaceView[];
   planTier?: PlanTier | null;
   maxSeats?: number | null;
+  maxPrompts?: number | null;
+  monthlyAuditLimit?: number | null;
   currentUsers?: number | null;
   billingPortalUrl?: string | null;
   stripeCustomerId?: string | null;

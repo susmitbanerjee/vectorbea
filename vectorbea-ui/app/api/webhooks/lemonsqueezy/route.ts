@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getLemonSqueezyConfig } from "@/lib/lemonsqueezy";
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,15 +144,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
+    const { data: workspace } = await supabase
+      .from("workspaces")
+      .select("id, organization_id")
+      .eq("id", workspaceId)
+      .maybeSingle();
+
+    const organizationId = workspace?.organization_id ?? workspaceId;
+
     const { error } = await supabase
       .from("organizations")
       .update({
         max_seats: quantity,
-        plan_tier: "enterprise",
-        billing_customer_id: customerId,
+        plan_tier: "team",
+        stripe_customer_id: customerId,
       })
-      .eq("id", workspaceId);
+      .eq("id", organizationId);
 
     if (error) {
       throw new Error(`Failed to update organization billing state: ${error.message}`);
@@ -161,7 +169,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       received: true,
       event: eventName,
-      workspaceId,
+      workspaceId: organizationId,
       customerId,
       quantity,
     });

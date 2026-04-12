@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +38,7 @@ export async function GET(
     }
 
     const windowStart = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
 
     const { data: agent, error: agentError } = await supabase
       .from("deployment_agents")

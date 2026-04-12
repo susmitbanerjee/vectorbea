@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
+import { VECTORBEA_SCHEMA } from "@/lib/supabase-schema";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -21,4 +22,8 @@ export function createSupabaseAdminClient() {
       },
     },
   );
+}
+
+export function createVectorBeaAdminClient() {
+  return createSupabaseAdminClient().schema(VECTORBEA_SCHEMA);
 }

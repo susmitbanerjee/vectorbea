@@ -8,6 +8,25 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   const id = useId().replace(/:/g, "");
   const [svg, setSvg] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncTheme = () => {
+      setIsDark(root.classList.contains("dark"));
+    };
+
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -19,11 +38,14 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           startOnLoad: false,
           theme: "base",
           themeVariables: {
-            primaryColor: "#123EAB",
-            primaryTextColor: "#0f172a",
-            primaryBorderColor: "#12D6C5",
-            lineColor: "#0f172a",
-            tertiaryColor: "#dbeafe",
+            primaryColor: isDark ? "#1d4ed8" : "#123EAB",
+            primaryTextColor: isDark ? "#e5eefc" : "#0f172a",
+            primaryBorderColor: isDark ? "#2dd4bf" : "#12D6C5",
+            lineColor: isDark ? "#cbd5e1" : "#0f172a",
+            tertiaryColor: isDark ? "#0f172a" : "#dbeafe",
+            mainBkg: isDark ? "#111827" : "#eff6ff",
+            secondaryColor: isDark ? "#0b1220" : "#f8fafc",
+            background: "transparent",
             fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
           },
           flowchart: {
@@ -55,7 +77,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart, id]);
+  }, [chart, id, isDark]);
 
   if (error) {
     return (
@@ -74,7 +96,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   }
 
   return (
-    <div className="mermaid-shell mt-8 overflow-hidden rounded-[2rem] border border-border/60 bg-white p-6 shadow-[0_25px_80px_-40px_rgba(18,62,171,0.45)]">
+    <div className="mermaid-shell mt-8 overflow-hidden rounded-[2rem] border border-border/60 bg-card p-6 shadow-[0_25px_80px_-40px_rgba(18,62,171,0.45)]">
       <div
         className="mermaid-svg overflow-x-auto"
         dangerouslySetInnerHTML={{ __html: svg }}

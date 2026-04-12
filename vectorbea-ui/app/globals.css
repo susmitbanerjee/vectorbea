@@ -141,7 +141,7 @@
   }
 
   .docs-prose p {
-    @apply mt-4 text-base leading-8 text-slate-600;
+    @apply mt-4 text-base leading-8 text-muted-foreground;
   }
 
   .docs-prose strong {
@@ -149,7 +149,7 @@
   }
 
   .docs-prose a {
-    @apply font-medium text-primary underline decoration-primary/30 underline-offset-4 transition-colors hover:text-sky-700;
+    @apply font-medium text-primary underline decoration-primary/30 underline-offset-4 transition-colors hover:text-primary/80;
   }
 
   .docs-prose ul,
@@ -162,7 +162,7 @@
   }
 
   .docs-prose code {
-    @apply rounded-md border border-border/60 bg-slate-50 px-1.5 py-0.5 font-mono text-[0.9em] text-foreground;
+    @apply rounded-md border border-border/60 bg-muted/80 px-1.5 py-0.5 font-mono text-[0.9em] text-foreground;
   }
 
   .docs-prose pre {
@@ -174,7 +174,7 @@
   }
 
   .docs-prose blockquote {
-    @apply mt-6 rounded-[1.5rem] border border-primary/20 bg-gradient-to-br from-primary/5 to-sky-100/60 px-5 py-4 text-foreground;
+    @apply mt-6 rounded-[1.5rem] border border-primary/20 bg-gradient-to-br from-primary/5 to-muted/50 px-5 py-4 text-foreground;
   }
 
   .docs-prose hr {
@@ -196,6 +196,16 @@
 
   .mermaid-shell svg {
     @apply h-auto w-full;
+  }
+
+  .mermaid-shell {
+    @apply text-foreground;
+  }
+
+  .mermaid-shell .label,
+  .mermaid-shell .nodeLabel,
+  .mermaid-shell .edgeLabel {
+    color: hsl(var(--foreground));
   }
 
   .mermaid-shell .node rect,

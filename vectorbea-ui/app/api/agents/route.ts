@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "workspaceId is required." }, { status: 400 });
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
       .from("deployment_agents")
       .select("id, workspace_id, name, status, last_heartbeat, created_at")
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = `vbagent_${randomBytes(24).toString("hex")}`;
-    const supabase = createSupabaseAdminClient();
+    const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
       .from("deployment_agents")
       .insert({

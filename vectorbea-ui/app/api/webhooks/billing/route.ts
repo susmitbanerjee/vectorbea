@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
-import { createSupabaseAdminClient } from "@/lib/supabase-admin";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,13 +59,13 @@ async function upgradeOrganization(subscription: Stripe.Subscription) {
   }
 
   const quantity = extractSeatQuantity(subscription);
-  const supabase = createSupabaseAdminClient();
+  const supabase = createVectorBeaAdminClient();
 
   const { error } = await supabase
     .from("organizations")
     .update({
       max_seats: quantity,
-      plan_tier: "enterprise",
+      plan_tier: "team",
       stripe_subscription_id: subscription.id,
     })
     .eq("stripe_customer_id", customerId);
@@ -78,7 +78,7 @@ async function upgradeOrganization(subscription: Stripe.Subscription) {
 }
 
 async function downgradeOrganizationByCustomerId(customerId: string) {
-  const supabase = createSupabaseAdminClient();
+  const supabase = createVectorBeaAdminClient();
 
   const { error } = await supabase
     .from("organizations")
