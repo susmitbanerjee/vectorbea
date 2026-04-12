@@ -32,7 +32,7 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
-  { href: "/billing", label: "Billing", icon: CreditCard },
+  { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/settings/profile", label: "Profile", icon: UserCircle },
   { href: "/settings/members", label: "Members", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings2 },

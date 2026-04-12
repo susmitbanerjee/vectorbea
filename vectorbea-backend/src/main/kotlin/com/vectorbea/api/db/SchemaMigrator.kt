@@ -123,6 +123,10 @@ class SchemaMigrator(private val database: Database) {
                 filename = "20260409_000003_api_key_role.sql",
                 resourcePath = "migrations/20260409_000003_api_key_role.sql",
             ),
+            Migration(
+                filename = "20260412_000001_enterprise_billing_project_isolation.sql",
+                resourcePath = "migrations/20260412_000001_enterprise_billing_project_isolation.sql",
+            ),
         )
     }
 }

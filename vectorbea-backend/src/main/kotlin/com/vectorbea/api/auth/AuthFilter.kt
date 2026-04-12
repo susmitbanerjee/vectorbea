@@ -8,6 +8,7 @@ import com.vectorbea.api.http.RoutePattern
 import com.vectorbea.api.http.setRequestContext
 import com.vectorbea.api.http.writeJson
 import com.vectorbea.api.service.AuthService
+import java.util.UUID
 
 class AuthFilter(
     private val authService: AuthService,
@@ -47,10 +48,24 @@ class AuthFilter(
             val authResult = authService.authenticate(token)
                 ?: throw HttpException(401, "Invalid API key")
 
+            val userId = exchange.requestHeaders
+                .getFirst("X-User-Id")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let {
+                    try {
+                        UUID.fromString(it)
+                    } catch (_: IllegalArgumentException) {
+                        throw HttpException(400, "Invalid X-User-Id header")
+                    }
+                }
+                ?: authResult.userId
+
             exchange.setRequestContext(
                 RequestContext(
                     workspaceId = authResult.workspaceId,
                     workspaceRole = authResult.workspaceRole,
+                    userId = userId,
                     organizationId = authResult.organizationId
                 )
             )

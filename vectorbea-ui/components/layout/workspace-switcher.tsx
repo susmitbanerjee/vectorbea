@@ -3,6 +3,7 @@
 import { Building2, Check, ChevronsUpDown, Layers3, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,14 +17,25 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useWorkspace, type WorkspaceView } from "@/lib/workspace-context";
 
+const FREE_PLAN_TOOLTIP =
+  "Free plans are limited to 1 Organization. Upgrade to Enterprise for unlimited orgs.";
+
 export function WorkspaceSwitcher() {
   const router = useRouter();
-  const { workspaces, activeWorkspace, setActiveWorkspaceId } = useWorkspace();
-  const [newOrgName, setNewOrgName] = useState("");
+  const {
+    organizations,
+    activeOrganization,
+    activeWorkspace,
+    canCreateOrganization,
+    workspaces,
+    setActiveWorkspaceId,
+  } = useWorkspace();
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [newOrganizationName, setNewOrganizationName] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [creating, setCreating] = useState(false);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [creatingOrganization, setCreatingOrganization] = useState(false);
 
-  // Group workspaces by organization
   const grouped = workspaces.reduce<Record<string, { orgName: string; items: WorkspaceView[] }>>(
     (acc, ws) => {
       if (!acc[ws.organizationId]) {
@@ -36,27 +48,70 @@ export function WorkspaceSwitcher() {
   );
 
   const createWorkspace = () => {
-    if (!newOrgName.trim() || creating) return;
-    setCreating(true);
+    if (!newWorkspaceName.trim() || creatingWorkspace) return;
+    setCreatingWorkspace(true);
     startTransition(async () => {
       try {
-        const body: Record<string, string> = { name: newOrgName.trim() };
+        const body: Record<string, string> = { name: newWorkspaceName.trim() };
         if (activeWorkspace?.organizationId) {
           body.organizationId = activeWorkspace.organizationId;
         }
+
         const response = await fetch("/api/workspaces", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (response.ok) {
-          const created = (await response.json()) as { id: string };
-          setNewOrgName("");
-          setActiveWorkspaceId(created.id);
-          router.refresh();
+
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || "Failed to create workspace");
         }
+
+        const created = (await response.json()) as { id: string };
+        setNewWorkspaceName("");
+        setActiveWorkspaceId(created.id);
+        toast.success("Workspace created.");
+        router.refresh();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to create workspace.");
       } finally {
-        setCreating(false);
+        setCreatingWorkspace(false);
+      }
+    });
+  };
+
+  const createOrganization = () => {
+    if (!newOrganizationName.trim() || creatingOrganization || !canCreateOrganization) return;
+    setCreatingOrganization(true);
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/organizations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newOrganizationName.trim() }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          id?: string;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Failed to create organization");
+        }
+
+        setNewOrganizationName("");
+        if (payload.id) {
+          setActiveWorkspaceId(payload.id);
+        }
+        toast.success("Organization created.");
+        router.refresh();
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to create organization.",
+        );
+      } finally {
+        setCreatingOrganization(false);
       }
     });
   };
@@ -97,7 +152,6 @@ export function WorkspaceSwitcher() {
           ) : (
             Object.entries(grouped).map(([orgId, { orgName, items }]) => (
               <div key={orgId}>
-                {/* Organization header */}
                 <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2.5">
                   <Building2 className="h-3 w-3 text-muted-foreground/60" />
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -105,7 +159,6 @@ export function WorkspaceSwitcher() {
                   </span>
                 </div>
 
-                {/* Workspaces under this organization */}
                 {items.map((ws) => {
                   const isActive = ws.id === activeWorkspace?.id;
                   return (
@@ -151,11 +204,11 @@ export function WorkspaceSwitcher() {
             Create new workspace
           </p>
           <Input
-            value={newOrgName}
-            onChange={(event) => setNewOrgName(event.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
+            value={newWorkspaceName}
+            onChange={(event) => setNewWorkspaceName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
                 createWorkspace();
               }
             }}
@@ -167,11 +220,56 @@ export function WorkspaceSwitcher() {
             size="sm"
             variant="outline"
             onClick={createWorkspace}
-            disabled={creating || isPending || !newOrgName.trim()}
+            disabled={creatingWorkspace || isPending || !newWorkspaceName.trim()}
           >
             <Plus className="h-3.5 w-3.5" />
-            {creating ? "Creating…" : "Create workspace"}
+            {creatingWorkspace ? "Creating..." : "Create workspace"}
           </Button>
+        </div>
+
+        <DropdownMenuPanelSeparator />
+
+        <div className="space-y-2 p-2">
+          <div className="flex items-center justify-between gap-2 px-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Create new organization
+            </p>
+            <span className="text-[10px] text-muted-foreground">
+              {organizations.length} org{organizations.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <Input
+            value={newOrganizationName}
+            onChange={(event) => setNewOrganizationName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                createOrganization();
+              }
+            }}
+            placeholder="Acme AI"
+            className="h-9 border-white/10 bg-white/[0.04] text-sm text-white placeholder:text-slate-600"
+          />
+          <div title={!canCreateOrganization ? FREE_PLAN_TOOLTIP : undefined} className="space-y-2">
+            <Button
+              className="h-8 w-full gap-1.5"
+              size="sm"
+              variant="outline"
+              onClick={createOrganization}
+              disabled={
+                creatingOrganization ||
+                isPending ||
+                !newOrganizationName.trim() ||
+                !canCreateOrganization
+              }
+            >
+              <Building2 className="h-3.5 w-3.5" />
+              {creatingOrganization ? "Creating..." : "Create New Organization"}
+            </Button>
+            {!canCreateOrganization && activeOrganization?.planTier !== "enterprise" && (
+              <p className="text-[11px] text-muted-foreground">{FREE_PLAN_TOOLTIP}</p>
+            )}
+          </div>
         </div>
       </DropdownMenuPanel>
     </DropdownMenu>

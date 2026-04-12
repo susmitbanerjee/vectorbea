@@ -43,6 +43,7 @@ export interface DailyRequestPoint {
 }
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";
+export type PlanTier = "free" | "pro" | "enterprise";
 
 export interface OrganizationWorkspaceView {
   id: string;
@@ -59,6 +60,10 @@ export interface OrganizationView {
   role?: WorkspaceRole | null;
   workspaceRole?: WorkspaceRole | null;
   workspaces?: OrganizationWorkspaceView[];
+  planTier?: PlanTier | null;
+  maxSeats?: number | null;
+  currentUsers?: number | null;
+  billingPortalUrl?: string | null;
 }
 
 export interface ApiKeyView {

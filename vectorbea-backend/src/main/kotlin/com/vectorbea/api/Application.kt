@@ -6,6 +6,7 @@ import com.vectorbea.api.config.AppConfig
 import com.vectorbea.api.controller.ApiKeyController
 import com.vectorbea.api.controller.AuditController
 import com.vectorbea.api.controller.OrganizationController
+import com.vectorbea.api.controller.ProjectController
 import com.vectorbea.api.controller.PromptController
 import com.vectorbea.api.controller.WorkspaceController
 import com.vectorbea.api.db.Database
@@ -14,12 +15,14 @@ import com.vectorbea.api.http.Router
 import com.vectorbea.api.repository.ApiKeyRepository
 import com.vectorbea.api.repository.AuditLogRepository
 import com.vectorbea.api.repository.OrganizationRepository
+import com.vectorbea.api.repository.ProjectMemberRepository
 import com.vectorbea.api.repository.PromptRepository
 import com.vectorbea.api.repository.WorkspaceRepository
 import com.vectorbea.api.service.ApiKeyService
 import com.vectorbea.api.service.AuditService
 import com.vectorbea.api.service.AuthService
 import com.vectorbea.api.service.OrganizationService
+import com.vectorbea.api.service.ProjectService
 import com.vectorbea.api.service.PromptService
 import com.vectorbea.api.service.WorkspaceService
 import java.net.InetSocketAddress
@@ -35,6 +38,7 @@ fun main() {
     val auditLogRepository = AuditLogRepository(database)
     val organizationRepository = OrganizationRepository(database)
     val workspaceRepository = WorkspaceRepository(database)
+    val projectMemberRepository = ProjectMemberRepository(database)
 
     val authService = AuthService(apiKeyRepository, config.environment)
     val apiKeyService = ApiKeyService(apiKeyRepository)
@@ -42,12 +46,14 @@ fun main() {
     val auditService = AuditService(auditLogRepository)
     val organizationService = OrganizationService(organizationRepository)
     val workspaceService = WorkspaceService(workspaceRepository)
+    val projectService = ProjectService(projectMemberRepository, promptRepository)
 
     val apiKeyController = ApiKeyController(apiKeyService)
     val promptController = PromptController(promptService)
     val auditController = AuditController(auditService)
     val organizationController = OrganizationController(organizationService)
     val workspaceController = WorkspaceController(workspaceService)
+    val projectController = ProjectController(projectService)
 
     val router = Router().apply {
         post("/api/keys") { exchange -> apiKeyController.create(exchange) }
@@ -56,6 +62,8 @@ fun main() {
         get("/api/organizations") { exchange -> organizationController.list(exchange) }
         post("/api/organizations") { exchange -> organizationController.create(exchange) }
         post("/api/workspaces") { exchange -> workspaceController.create(exchange) }
+        post("/api/projects/:id/members") { exchange -> projectController.inviteMember(exchange) }
+        get("/api/projects/:id/prompts") { exchange -> projectController.listPrompts(exchange) }
         post("/api/prompts") { exchange -> promptController.create(exchange) }
         get("/api/prompts") { exchange -> promptController.list(exchange) }
         get("/api/prompts/:id") { exchange -> promptController.getByReference(exchange) }
@@ -83,6 +91,8 @@ fun main() {
                     AuthFilter.RouteDefinition("POST", "/api/organizations"),
                     // Workspace management — ADMIN only (enforced in controller)
                     AuthFilter.RouteDefinition("POST", "/api/workspaces"),
+                    AuthFilter.RouteDefinition("POST", "/api/projects/:id/members"),
+                    AuthFilter.RouteDefinition("GET", "/api/projects/:id/prompts"),
                     // Prompt operations — authenticated (role enforced in controller)
                     AuthFilter.RouteDefinition("POST", "/api/prompts"),
                     AuthFilter.RouteDefinition("GET", "/api/prompts"),
