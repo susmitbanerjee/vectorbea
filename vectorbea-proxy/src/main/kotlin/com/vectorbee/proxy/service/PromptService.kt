@@ -6,8 +6,10 @@ import com.vectorbea.proxy.model.PromptPayload
 
 class PromptService(
     private val cache: PromptCache,
-    private val hubClient: HubClient
+    private val hubClient: HubClient,
+    private val sharedRulesStore: SharedRulesStore
 ) {
     suspend fun getPrompt(name: String): PromptPayload =
-        cache.getOrLoad(name) { hubClient.fetchPrompt(name) }
+        sharedRulesStore.getPrompt(name)
+            ?: cache.getOrLoad(name) { hubClient.fetchPrompt(name) }
 }

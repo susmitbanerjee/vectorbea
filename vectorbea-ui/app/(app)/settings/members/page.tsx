@@ -84,7 +84,7 @@ function buildWorkspaceMembers(
 }
 
 export default function MembersPage() {
-  const { activeWorkspace, activeWorkspaceId } = useWorkspace();
+  const { activeOrganization, activeWorkspace, activeWorkspaceId, seatUsage } = useWorkspace();
   const seedMembers = useMemo(
     () => buildWorkspaceMembers(activeWorkspaceId, activeWorkspace?.name ?? null),
     [activeWorkspace?.name, activeWorkspaceId],
@@ -99,8 +99,21 @@ export default function MembersPage() {
     setMembers(seedMembers);
   }, [seedMembers]);
 
+  const hasSeatLimit = seatUsage.hasConfiguredLimit;
+  const seatsUsed = hasSeatLimit
+    ? Math.max(seatUsage.used, members.length)
+    : members.length;
+  const maxSeats = hasSeatLimit
+    ? Math.max(activeOrganization?.maxSeats ?? seatUsage.max, 1)
+    : Math.max(members.length, 1);
+  const seatLimitReached = hasSeatLimit && seatsUsed >= maxSeats;
+
   const handleInvite = async () => {
     const normalizedEmail = inviteEmail.trim().toLowerCase();
+    if (seatLimitReached) {
+      toast.error(`Seat limit reached (${seatsUsed}/${maxSeats}). Upgrade the plan to add more developers.`);
+      return;
+    }
     if (!normalizedEmail) {
       toast.error("Email is required.");
       return;
@@ -166,6 +179,22 @@ export default function MembersPage() {
                   }}
                   className="mt-4 space-y-4"
                 >
+                  {seatLimitReached && (
+                    <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm">
+                      <p className="font-medium text-amber-200">
+                        Seat limit reached ({seatsUsed}/{maxSeats}).
+                      </p>
+                      <p className="mt-1 text-amber-100/80">
+                        <a
+                          href="/settings/billing"
+                          className="font-medium underline underline-offset-4"
+                        >
+                          Upgrade Plan to add more developers
+                        </a>
+                      </p>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       Email address
@@ -225,7 +254,10 @@ export default function MembersPage() {
                     >
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={inviting || !inviteEmail.trim()}>
+                    <Button
+                      type="submit"
+                      disabled={inviting || !inviteEmail.trim() || seatLimitReached}
+                    >
                       <Plus className="h-4 w-4" />
                       {inviting ? "Sending..." : "Send invite"}
                     </Button>
@@ -268,6 +300,18 @@ export default function MembersPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium">Seat usage</p>
+                      <p className="text-xs text-muted-foreground">
+                        {seatsUsed} of {maxSeats} seats are allocated across{" "}
+                        {activeOrganization?.name ?? "this organization"}.
+                      </p>
+              </div>
+              <Badge variant={seatLimitReached ? "destructive" : "outline"}>
+                {seatsUsed}/{maxSeats}
+              </Badge>
+            </div>
             <div className="overflow-x-auto rounded-xl border border-border">
               <Table>
                 <TableHeader>

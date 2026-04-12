@@ -3,7 +3,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { KeyRound, LayoutDashboard, Logs, Search, Settings2, Sparkles } from "lucide-react";
+import { KeyRound, LayoutDashboard, Logs, Search, Server, Settings2, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -19,6 +19,7 @@ const mobileNavigation: Array<{
   minRole?: "admin" | "editor" | "viewer";
 }> = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard/infrastructure", label: "Infra", icon: Server },
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit", icon: Logs },
   { href: "/api-keys", label: "Keys", icon: KeyRound, minRole: "admin" },

@@ -14,6 +14,7 @@ import type { Route } from "next";
 import type {
   OrganizationView,
   OrganizationWorkspaceView,
+  PlanTier,
   WorkspaceRole,
 } from "@/lib/api";
 
@@ -37,10 +38,21 @@ export interface WorkspaceView {
 }
 
 interface WorkspaceContextValue {
+  organizations: OrganizationView[];
   workspaces: WorkspaceView[];
+  activeOrganization: OrganizationView | null;
   activeWorkspace: WorkspaceView | null;
   activeWorkspaceId: string | null;
   role: WorkspaceRole;
+  planTier: PlanTier;
+  seatUsage: {
+    used: number;
+    max: number;
+    remaining: number;
+    atLimit: boolean;
+    hasConfiguredLimit: boolean;
+  };
+  canCreateOrganization: boolean;
   setActiveWorkspaceId: (id: string) => void;
 }
 
@@ -77,6 +89,13 @@ function deriveWorkspaces(organizations: OrganizationView[]): WorkspaceView[] {
     }
     return [mapWorkspace(organization)];
   });
+}
+
+function normalizePlanTier(planTier?: PlanTier | null): PlanTier {
+  if (planTier === "pro" || planTier === "enterprise") {
+    return planTier;
+  }
+  return "free";
 }
 
 export function WorkspaceProvider({
@@ -155,7 +174,30 @@ export function WorkspaceProvider({
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
     workspaces[0] ??
     null;
+  const activeOrganization =
+    organizations.find((organization) => organization.id === activeWorkspace?.organizationId) ??
+    organizations[0] ??
+    null;
   const role = activeWorkspace?.role ?? DEFAULT_ROLE;
+  const planTier = normalizePlanTier(activeOrganization?.planTier);
+  const hasConfiguredLimit =
+    activeOrganization?.maxSeats != null || activeOrganization?.currentUsers != null;
+  const maxSeats = Math.max(
+    activeOrganization?.maxSeats ?? activeOrganization?.currentUsers ?? 1,
+    1,
+  );
+  const seatsUsed = Math.max(activeOrganization?.currentUsers ?? 0, 0);
+  const seatUsage = useMemo(
+    () => ({
+      used: seatsUsed,
+      max: maxSeats,
+      remaining: Math.max(maxSeats - seatsUsed, 0),
+      atLimit: hasConfiguredLimit ? seatsUsed >= maxSeats : false,
+      hasConfiguredLimit,
+    }),
+    [hasConfiguredLimit, maxSeats, seatsUsed],
+  );
+  const canCreateOrganization = !(planTier === "free" && organizations.length >= 1);
 
   const setActiveWorkspaceId = useCallback(
     (id: string) => {
@@ -169,13 +211,29 @@ export function WorkspaceProvider({
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
+      organizations,
       workspaces,
+      activeOrganization,
       activeWorkspace,
       activeWorkspaceId: activeWorkspace?.id ?? activeWorkspaceId ?? null,
       role,
+      planTier,
+      seatUsage,
+      canCreateOrganization,
       setActiveWorkspaceId,
     }),
-    [workspaces, activeWorkspace, activeWorkspaceId, role, setActiveWorkspaceId],
+    [
+      organizations,
+      workspaces,
+      activeOrganization,
+      activeWorkspace,
+      activeWorkspaceId,
+      role,
+      planTier,
+      seatUsage,
+      canCreateOrganization,
+      setActiveWorkspaceId,
+    ],
   );
 
   return (

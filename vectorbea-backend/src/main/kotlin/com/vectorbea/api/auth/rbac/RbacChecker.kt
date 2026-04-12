@@ -3,6 +3,7 @@ package com.vectorbea.api.auth.rbac
 import com.sun.net.httpserver.HttpExchange
 import com.vectorbea.api.http.HttpException
 import com.vectorbea.api.http.requestContext
+import java.util.UUID
 
 /**
  * Asserts that the authenticated principal holds at least [minimumRole] in
@@ -48,4 +49,8 @@ fun HttpExchange.requireWorkspaceRole(minimumRole: WorkspaceRole) {
  */
 fun HttpExchange.requireWorkspaceId() =
     requestContext().workspaceId
+        ?: throw HttpException(401, "Unauthorized")
+
+fun HttpExchange.requireUserId(): UUID =
+    requestContext().userId
         ?: throw HttpException(401, "Unauthorized")

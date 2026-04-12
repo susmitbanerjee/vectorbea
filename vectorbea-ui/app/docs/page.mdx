@@ -1,0 +1,46 @@
+export const metadata = {
+  title: "Introduction",
+};
+
+# Introduction
+
+VectorBea is prompt infrastructure for production AI systems that need two things at the same time: centralized governance and local execution. The platform is designed for teams that want to manage prompts, policies, audit trails, and rollout controls from a cloud control plane while keeping actual model invocation close to their agents, services, and data sources.
+
+## What VectorBea gives you
+
+- A **control plane** where teams define prompts, versions, publication state, access controls, and organization-wide governance.
+- A **local Kotlin proxy** that sits near your agent runtime, resolves the latest approved prompt rules, and enforces them before traffic reaches the model provider.
+- A **deployment model** that keeps execution in the customer environment while syncing only the minimum control data required to keep agents up to date.
+- A path to **enterprise governance** with role-based access control, project isolation, auditability, and per-seat administration.
+
+## Why teams adopt it
+
+Most AI teams hit the same failure mode: prompts start as local strings in notebooks and services, then gradually become production infrastructure without version control, ownership boundaries, or rollout discipline. VectorBea turns those prompts into governed assets.
+
+With VectorBea, teams can:
+
+- Move prompt definitions out of application code and into a managed registry.
+- Publish changes intentionally instead of letting developers hot-patch prompt text directly in runtime services.
+- Keep agents and proxy execution inside the customer environment, close to private data and internal networks.
+- Separate day-to-day development concerns from enterprise governance and access control.
+
+## Platform model
+
+The platform is easiest to understand as two cooperating layers:
+
+| Layer | Purpose |
+| --- | --- |
+| **Control Plane** | Stores organizations, projects, prompts, RBAC state, publication metadata, audit records, and billing/seat information. |
+| **Data Plane** | Runs the VectorBea proxy near the customer workload, serves prompt rules locally, and mediates prompt execution close to the agent. |
+
+That split is the foundation of the rest of the product:
+
+- The cloud decides **what should run**.
+- The local proxy decides **how the local agent receives and applies those rules**.
+- The customer environment remains the place **where execution happens**.
+
+## Read next
+
+- Start with [Quickstart](/docs/quickstart) to run the proxy with Docker.
+- Continue to [Architecture](/docs/architecture) for the control-plane vs. data-plane model.
+- Review [Enterprise](/docs/enterprise) for RBAC, project isolation, and seat billing.

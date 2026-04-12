@@ -3,6 +3,8 @@ package com.vectorbea.proxy.config
 data class AppConfig(
     val hubUrl: String,
     val apiKey: String,
+    val httpPort: Int = 8080,
+    val sharedRulesPath: String = "/app/shared-config/rules.json",
     // Ktor REST socket — used by the Next.js hub to push prompt invalidations
     // and by ops tooling for diagnostics.
     val restSocketPath: String = "/tmp/vectorbea-rest.sock",
@@ -21,6 +23,8 @@ data class AppConfig(
             return AppConfig(
                 hubUrl = hubUrl.trimEnd('/'),
                 apiKey = apiKey,
+                httpPort = env("VECTORBEA_HTTP_PORT")?.toIntOrNull() ?: 8080,
+                sharedRulesPath = env("VECTORBEA_SHARED_RULES_PATH") ?: "/app/shared-config/rules.json",
                 restSocketPath = env("VECTORBEA_REST_SOCKET") ?: "/tmp/vectorbea-rest.sock",
                 grpcSocketPath = env("VECTORBEA_GRPC_SOCKET") ?: "/tmp/vectorbea.sock"
             )

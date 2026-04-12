@@ -14,6 +14,7 @@ data class AuthResult(
     val workspaceId: UUID,
     val organizationId: UUID,
     val workspaceRole: WorkspaceRole,
+    val userId: UUID? = null,
 )
 
 data class CreateApiKeyRequest(
@@ -25,7 +26,11 @@ data class CreateApiKeyRequest(
 data class OrganizationView(
     val id: UUID,
     val name: String,
-    val createdAt: OffsetDateTime
+    val createdAt: OffsetDateTime,
+    val planTier: String,
+    val stripeCustomerId: String?,
+    val stripeSubscriptionId: String?,
+    val maxSeats: Int,
 )
 
 data class CreateOrganizationRequest(
@@ -41,6 +46,19 @@ data class WorkspaceView(
 
 data class CreateWorkspaceRequest(
     val name: String
+)
+
+data class CreateProjectMemberRequest(
+    val email: String,
+    val role: String? = null
+)
+
+data class ProjectMemberView(
+    val userId: UUID,
+    val projectId: UUID,
+    val email: String,
+    val role: String,
+    val grantedAt: OffsetDateTime
 )
 
 data class CreateApiKeyResponse(

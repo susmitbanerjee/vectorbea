@@ -48,11 +48,13 @@ open class AuthService(
          */
         val LOCAL_ORG_ID: UUID = UUID.fromString("00000000-0000-0000-0001-000000000001")
         val LOCAL_WORKSPACE_ID: UUID = UUID.fromString("00000000-0000-0000-0001-000000000002")
+        val LOCAL_USER_ID: UUID = UUID.fromString("00000000-0000-0000-0001-000000000003")
 
         private val LOCAL_BYPASS_AUTH = AuthResult(
             workspaceId = LOCAL_WORKSPACE_ID,
             organizationId = LOCAL_ORG_ID,
             workspaceRole = WorkspaceRole.ADMIN,
+            userId = LOCAL_USER_ID,
         )
     }
 }
