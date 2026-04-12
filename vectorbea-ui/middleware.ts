@@ -1,8 +1,19 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
+import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+
 const PROTECTED_HOST_PATTERNS = ["dev.vectorbea.com", "stage.vectorbea.com"];
 const PUBLIC_HOST_PATTERNS = ["vectorbea.com", "www.vectorbea.com"];
+const AUTH_PROTECTED_PREFIXES = [
+  "/onboarding",
+  "/dashboard",
+  "/prompts",
+  "/audit-logs",
+  "/api-keys",
+  "/settings",
+  "/billing",
+];
 
 function normalizeHostname(request: NextRequest) {
   const rawHost = request.nextUrl.hostname || request.headers.get("host") || "";
@@ -65,14 +76,42 @@ function deny(ip: string | null) {
   );
 }
 
+function isAuthProtectedPath(pathname: string) {
+  return AUTH_PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function enforceAuth(request: NextRequest) {
+  const sessionToken = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  if (!isAuthProtectedPath(request.nextUrl.pathname) || sessionToken) {
+    return null;
+  }
+
+  const loginUrl = new URL("/login", request.url);
+  loginUrl.searchParams.set(
+    "next",
+    request.nextUrl.pathname + request.nextUrl.search,
+  );
+  return NextResponse.redirect(loginUrl);
+}
+
 export function middleware(request: NextRequest) {
   const hostname = normalizeHostname(request);
 
   if (isPublicProductionHost(hostname)) {
+    const authRedirect = enforceAuth(request);
+    if (authRedirect) {
+      return authRedirect;
+    }
     return NextResponse.next();
   }
 
   if (!isProtectedHost(hostname)) {
+    const authRedirect = enforceAuth(request);
+    if (authRedirect) {
+      return authRedirect;
+    }
     return NextResponse.next();
   }
 
@@ -81,6 +120,11 @@ export function middleware(request: NextRequest) {
 
   if (!clientIp || !whitelistedIps.has(clientIp)) {
     return deny(clientIp);
+  }
+
+  const authRedirect = enforceAuth(request);
+  if (authRedirect) {
+    return authRedirect;
   }
 
   return NextResponse.next();

@@ -1,21 +1,32 @@
 import type { ReactNode } from "react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { apiFetch, type DashboardSummary } from "@/lib/api";
+import {
+  getAuthenticatedUserFromCookies,
+  getPostLoginRedirectForUser,
+} from "@/lib/auth/server";
 import { WorkspaceProvider } from "@/lib/workspace-context";
-import { apiFetch, type DashboardSummary, type OrganizationView } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const [organizations, summary] = await Promise.all([
-    apiFetch<OrganizationView[]>("/api/organizations").catch(() => [] as OrganizationView[]),
+  const cookieStore = await cookies();
+  const user = await getAuthenticatedUserFromCookies(cookieStore);
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const [{ organizations, redirectTo }, summary] = await Promise.all([
+    getPostLoginRedirectForUser(user.id),
     apiFetch<DashboardSummary>("/api/dashboard/summary").catch(() => null),
   ]);
 
-  // Gate the entire app behind onboarding — no organization, no dashboard.
-  if (organizations.length === 0) {
-    redirect("/onboarding");
+  if (redirectTo === "/onboarding" || redirectTo === "/settings/billing") {
+    redirect(redirectTo);
   }
 
   return (

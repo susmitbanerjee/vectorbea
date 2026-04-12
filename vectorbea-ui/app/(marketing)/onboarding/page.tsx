@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -466,6 +468,7 @@ function ListenerPulse({ connected }: { connected: boolean }) {
 const PLACEHOLDER_KEY = "vb_••••••••••••••••••••••••••••";
 
 export default function OnboardingPage() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
   const [workspace, setWorkspace] = useState("");
@@ -475,47 +478,81 @@ export default function OnboardingPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [checkingRoute, setCheckingRoute] = useState(true);
 
-  const go = (next: number) => {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncRouteState() {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!response.ok) {
+          router.replace("/login?next=/onboarding");
+          return;
+        }
+
+        const payload = (await response.json()) as { redirectTo?: string };
+        if (!cancelled && payload.redirectTo && payload.redirectTo !== "/onboarding") {
+          window.location.assign(payload.redirectTo);
+          return;
+        }
+      } finally {
+        if (!cancelled) {
+          setCheckingRoute(false);
+        }
+      }
+    }
+
+    void syncRouteState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  const go = useCallback((next: number) => {
     setDirection(next > step ? 1 : -1);
     setStep(next);
-  };
+  }, [step]);
 
   const handleCreateWorkspace = useCallback(async () => {
     if (!workspace.trim() || creating) return;
     setCreating(true);
     setCreateError(null);
     try {
-      const orgRes = await fetch("/api/organizations", {
+      const bootstrapResponse = await fetch("/api/onboarding/bootstrap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: workspace.trim() }),
+        body: JSON.stringify({ workspaceName: workspace.trim() }),
       });
-      if (!orgRes.ok) throw new Error(await orgRes.text());
-      const org = (await orgRes.json()) as { id: string };
+      const payload = (await bootstrapResponse.json().catch(() => ({}))) as {
+        organizationId?: string;
+        workspaceId?: string;
+        apiKey?: string;
+        error?: string;
+      };
 
-      const keyRes = await fetch("/api/keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "onboarding-key" }),
-      });
-      if (!keyRes.ok) throw new Error(await keyRes.text());
-      const key = (await keyRes.json()) as { apiKey: string };
+      if (!bootstrapResponse.ok) {
+        throw new Error(payload.error || "Failed to create workspace");
+      }
 
-      setOrgId(org.id);
-      setApiKey(key.apiKey);
+      setOrgId(payload.organizationId ?? null);
+      setWorkspaceId(payload.workspaceId ?? null);
+      setApiKey(payload.apiKey ?? null);
       go(1);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create workspace");
     } finally {
       setCreating(false);
     }
-  }, [workspace, creating]);
+  }, [workspace, creating, go]);
 
   // Poll the backend for a real connection — no fake pass.
   const handleTestConnection = useCallback(async () => {
-    if (!orgId || testing) return;
+    const targetWorkspaceId = workspaceId ?? orgId;
+    if (!targetWorkspaceId || testing) return;
     setTesting(true);
 
     const deadline = Date.now() + 90_000; // 90s window
@@ -524,7 +561,7 @@ export default function OnboardingPage() {
     while (Date.now() < deadline) {
       try {
         const res = await fetch(
-          `/api/dashboard/connection-status?organizationId=${encodeURIComponent(orgId)}`,
+          `/api/dashboard/connection-status?workspaceId=${encodeURIComponent(targetWorkspaceId)}`,
           { cache: "no-store" },
         );
         if (res.ok) {
@@ -567,7 +604,7 @@ export default function OnboardingPage() {
     setTimeout(() => {
       window.location.href = "/dashboard";
     }, 2200);
-  }, [orgId, testing]);
+  }, [orgId, testing, workspaceId]);
 
   // Per-step slide direction for enter/exit animations
   const enterX  = direction * 40;
@@ -583,6 +620,11 @@ export default function OnboardingPage() {
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-4 py-16">
+      {checkingRoute ? (
+        <div className="glass-strong absolute inset-x-4 top-8 z-20 mx-auto max-w-md rounded-[2rem] px-6 py-4 text-center text-sm text-muted-foreground">
+          Checking your account and workspace status...
+        </div>
+      ) : null}
       {/* Grid background */}
       <div
         className="pointer-events-none absolute inset-0 bg-grid-fade"
@@ -601,8 +643,15 @@ export default function OnboardingPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8 flex flex-col items-center gap-2 text-center"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-            <Zap className="h-5 w-5 text-primary" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-white/90 shadow-sm">
+            <Image
+              src="/favicon.svg"
+              alt="VectorBea"
+              width={36}
+              height={36}
+              className="h-9 w-9"
+              priority
+            />
           </div>
           <div>
             <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-primary">
@@ -873,7 +922,7 @@ export default function OnboardingPage() {
                         size="sm"
                         variant="outline"
                         onClick={handleTestConnection}
-                        disabled={testing || !orgId}
+                        disabled={testing || !(workspaceId ?? orgId)}
                         className="shrink-0 border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
                       >
                         {testing ? (

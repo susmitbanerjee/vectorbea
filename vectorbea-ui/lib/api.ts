@@ -64,6 +64,8 @@ export interface OrganizationView {
   maxSeats?: number | null;
   currentUsers?: number | null;
   billingPortalUrl?: string | null;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
 }
 
 export interface ApiKeyView {
