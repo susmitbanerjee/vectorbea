@@ -36,6 +36,10 @@ jobs:
         with:
           build-root-directory: vectorbea-proxy
 
+      - name: Make Gradle wrapper executable
+        working-directory: vectorbea-proxy
+        run: chmod +x gradlew
+
       - name: Run proxy tests
         working-directory: vectorbea-proxy
         run: ./gradlew --no-daemon test
