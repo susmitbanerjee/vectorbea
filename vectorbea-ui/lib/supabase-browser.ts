@@ -3,24 +3,32 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { VECTORBEA_SCHEMA } from "@/lib/supabase-schema";
 
-let browserClient: SupabaseClient | null = null;
+// Next.js inlines NEXT_PUBLIC_* vars at build time via static analysis.
+// They MUST be referenced as literal identifiers — process.env[dynamicKey]
+// always returns undefined for NEXT_PUBLIC_ vars in the browser bundle.
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-function requirePublicEnv(name: string) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required public environment variable: ${name}`);
-  }
-  return value;
+if (!SUPABASE_URL) {
+  throw new Error(
+    "Missing environment variable: NEXT_PUBLIC_SUPABASE_URL\n" +
+    "Add it to .env.local for local dev or to your Vercel project environment variables.",
+  );
 }
+
+if (!SUPABASE_ANON_KEY) {
+  throw new Error(
+    "Missing environment variable: NEXT_PUBLIC_SUPABASE_ANON_KEY\n" +
+    "Add it to .env.local for local dev or to your Vercel project environment variables.",
+  );
+}
+
+let browserClient: SupabaseClient | null = null;
 
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
-    browserClient = createClient(
-      requirePublicEnv("NEXT_PUBLIC_SUPABASE_URL"),
-      requirePublicEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    );
+    browserClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
-
   return browserClient;
 }
 
