@@ -9,7 +9,6 @@ concurrency:
   group: deploy-dev-${{ github.ref }}
   cancel-in-progress: true
 
-
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/${{ github.repository }}/vectorbee-proxy
