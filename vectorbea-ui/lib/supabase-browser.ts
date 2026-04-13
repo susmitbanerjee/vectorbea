@@ -1,6 +1,6 @@
 "use client";
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import { VECTORBEA_SCHEMA } from "@/lib/supabase-schema";
 
 // Next.js inlines NEXT_PUBLIC_* vars at build time via static analysis.
@@ -26,11 +26,14 @@ if (!SUPABASE_ANON_KEY) {
 const supabaseUrl = SUPABASE_URL as string;
 const supabaseAnonKey = SUPABASE_ANON_KEY as string;
 
-let browserClient: SupabaseClient | null = null;
+let browserClient: ReturnType<typeof createBrowserClient> | null = null;
 
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
-    browserClient = createClient(supabaseUrl, supabaseAnonKey);
+    // createBrowserClient stores the PKCE code_verifier in cookies (not
+    // localStorage) so the server-side route handler can read it back
+    // during the OAuth callback code exchange.
+    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
   }
   return browserClient;
 }

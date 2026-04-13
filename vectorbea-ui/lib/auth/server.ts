@@ -86,6 +86,16 @@ function isBillingPending(org: OrganizationView) {
   );
 }
 
+export async function loadProfileForUser(userId: string) {
+  const supabase = createVectorBeaAdminClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, email, full_name, avatar_url")
+    .eq("id", userId)
+    .single();
+  return data as { id: string; email: string; full_name: string | null; avatar_url: string | null } | null;
+}
+
 export async function loadOrganizationsForUser(
   userId: string,
 ): Promise<OrganizationView[]> {

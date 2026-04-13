@@ -6,6 +6,7 @@ import {
   getAuthenticatedUserForAccessToken,
   getAuthenticatedUserFromCookies,
   getPostLoginRedirectForUser,
+  loadProfileForUser,
 } from "@/lib/auth/server";
 
 export const runtime = "nodejs";
@@ -22,13 +23,18 @@ export async function GET() {
     );
   }
 
-  const { redirectTo } = await getPostLoginRedirectForUser(user.id);
+  const [{ redirectTo }, profile] = await Promise.all([
+    getPostLoginRedirectForUser(user.id),
+    loadProfileForUser(user.id),
+  ]);
   return NextResponse.json({
     authenticated: true,
     redirectTo,
     user: {
       id: user.id,
       email: user.email ?? null,
+      fullName: profile?.full_name ?? null,
+      avatarUrl: profile?.avatar_url ?? null,
     },
   });
 }
@@ -53,13 +59,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { redirectTo } = await getPostLoginRedirectForUser(user.id);
+    const [{ redirectTo }, profile] = await Promise.all([
+      getPostLoginRedirectForUser(user.id),
+      loadProfileForUser(user.id),
+    ]);
     const response = NextResponse.json({
       authenticated: true,
       redirectTo,
       user: {
         id: user.id,
         email: user.email ?? null,
+        fullName: profile?.full_name ?? null,
+        avatarUrl: profile?.avatar_url ?? null,
       },
     });
 
