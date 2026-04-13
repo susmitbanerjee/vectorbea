@@ -21,8 +21,11 @@ export function AuthScreen({
   next?: string;
 }) {
   const searchParams = useSearchParams();
+  const rawError = searchParams.get("error");
   const [error, setError] = useState<string | null>(
-    searchParams.get("error") ?? null,
+    rawError === "oauth"
+      ? "Authentication failed. Please try again."
+      : rawError ?? null,
   );
   const [providerLoading, setProviderLoading] = useState<"github" | "google" | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -39,7 +42,9 @@ export function AuthScreen({
 
         const payload = (await response.json()) as { redirectTo?: string };
         if (!cancelled && payload.redirectTo) {
-          window.location.assign(next || payload.redirectTo);
+          // Only use `next` if it's a meaningful app path, not the root.
+          const destination = (next && next !== "/") ? next : payload.redirectTo;
+          window.location.assign(destination);
         }
       } finally {
         if (!cancelled) {

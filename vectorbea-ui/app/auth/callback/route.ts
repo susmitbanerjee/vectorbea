@@ -1,5 +1,4 @@
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
@@ -20,9 +19,7 @@ async function persistProfile(user: {
   } | null;
 }) {
   const email = user.email?.trim();
-  if (!email) {
-    return;
-  }
+  if (!email) return;
 
   const fullName =
     user.user_metadata?.full_name?.trim() ||
@@ -33,16 +30,9 @@ async function persistProfile(user: {
     user.user_metadata?.picture?.trim() ||
     null;
 
-  const supabase = createVectorBeaAdminClient();
-  await supabase.from("profiles").upsert(
-    {
-      id: user.id,
-      email,
-      full_name: fullName,
-      avatar_url: avatarUrl,
-    },
-    { onConflict: "id" },
-  );
+  await createVectorBeaAdminClient()
+    .from("profiles")
+    .upsert({ id: user.id, email, full_name: fullName, avatar_url: avatarUrl }, { onConflict: "id" });
 }
 
 export async function GET(request: NextRequest) {
@@ -52,21 +42,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    const cookieStore = await cookies();
+    // Collect any cookies Supabase wants to set during the exchange so we
+    // can forward them onto the final redirect response.
+    const pendingCookies: Array<{ name: string; value: string; options: Record<string, unknown> }> = [];
 
-    // createServerClient reads the PKCE code_verifier from the cookies that
-    // createBrowserClient wrote during signInWithOAuth — completing the flow.
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
+          // Read PKCE verifier (and other auth cookies) from the incoming request.
           getAll() {
-            return cookieStore.getAll();
+            return request.cookies.getAll();
           },
+          // Buffer any cookies Supabase wants to write; we apply them to the
+          // redirect response below so they reach the browser.
           setAll(cookiesToSet) {
-            for (const { name, value, options } of cookiesToSet) {
-              cookieStore.set(name, value, options);
+            for (const cookie of cookiesToSet) {
+              pendingCookies.push(cookie);
             }
           },
         },
@@ -75,6 +68,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error || !data.session?.access_token || !data.user) {
+      console.error("[auth/callback] code exchange failed:", error?.message);
       throw error ?? new Error("Failed to exchange auth code for a session.");
     }
 
@@ -87,7 +81,12 @@ export async function GET(request: NextRequest) {
     const { redirectTo } = await getPostLoginRedirectForUser(data.user.id);
     const response = NextResponse.redirect(new URL(redirectTo, request.url));
 
-    // Set our own httpOnly session cookie for the app's auth checks.
+    // Forward Supabase session cookies onto the redirect response.
+    for (const { name, value, options } of pendingCookies) {
+      response.cookies.set(name, value, options as Parameters<typeof response.cookies.set>[2]);
+    }
+
+    // Also set our own httpOnly session cookie for app-level auth checks.
     response.cookies.set(AUTH_COOKIE_NAME, data.session.access_token, {
       httpOnly: true,
       sameSite: "lax",
@@ -97,7 +96,8 @@ export async function GET(request: NextRequest) {
     });
 
     return response;
-  } catch {
+  } catch (err) {
+    console.error("[auth/callback] unhandled error:", err);
     return NextResponse.redirect(new URL("/login?error=oauth", request.url));
   }
 }
