@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { ArrowRight } from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
+import { GitHubMark, GoogleMark } from "@/components/auth/oauth-provider-icons";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import { cn } from "@/lib/utils";
 
-type Mode = "login" | "signup";
+type Mode = "signin" | "signup";
 
 export function AuthScreen({
   mode,
@@ -18,12 +19,10 @@ export function AuthScreen({
   mode: Mode;
   next?: string;
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [providerLoading, setProviderLoading] = useState<"github" | "google" | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     let cancelled = false;
@@ -53,78 +52,53 @@ export function AuthScreen({
     };
   }, [next]);
 
-  const alternateHref = mode === "login" ? "/signup" : "/login";
-  const alternateLabel = mode === "login" ? "Create account" : "Sign in instead";
+  const alternateHref = mode === "signin" ? "/signup" : "/signin";
+  const alternateLabel =
+    mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in";
+  const callbackNext = next || searchParams.get("next") || undefined;
 
-  const submit = async () => {
-    if (!email.trim() || !password) {
-      setError("Email and password are required.");
-      return;
-    }
-
-    setLoading(true);
+  async function startOAuth(provider: "github" | "google") {
+    setProviderLoading(provider);
     setError(null);
-    setInfo(null);
 
     try {
       const supabase = getSupabaseBrowserClient();
-      const authResponse =
-        mode === "login"
-          ? await supabase.auth.signInWithPassword({
-              email: email.trim(),
-              password,
-            })
-          : await supabase.auth.signUp({
-              email: email.trim(),
-              password,
-            });
-
-      if (authResponse.error) {
-        throw authResponse.error;
+      const redirectUrl = new URL("/auth/callback", window.location.origin);
+      if (callbackNext) {
+        redirectUrl.searchParams.set("next", callbackNext);
       }
 
-      const accessToken = authResponse.data.session?.access_token;
-      if (!accessToken) {
-        setInfo(
-          "Your account was created. Check your email to confirm your account before continuing.",
-        );
-        return;
-      }
-
-      const sessionResponse = await fetch("/api/auth/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken }),
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: redirectUrl.toString(),
+          queryParams:
+            provider === "google"
+              ? { access_type: "offline", prompt: "consent" }
+              : undefined,
+        },
       });
 
-      const payload = (await sessionResponse.json()) as {
-        redirectTo?: string;
-        error?: string;
-      };
-
-      if (!sessionResponse.ok) {
-        throw new Error(payload.error || "Failed to establish application session.");
+      if (oauthError) {
+        throw oauthError;
       }
-
-      window.location.assign(next || payload.redirectTo || "/dashboard");
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
           ? submissionError.message
           : "Authentication failed.",
       );
-    } finally {
-      setLoading(false);
+      setProviderLoading(null);
     }
-  };
+  }
 
   return (
-    <div className="surface-grid min-h-screen bg-gradient-to-br from-background via-background to-muted/40 px-4 py-12">
-      <div className="mx-auto flex min-h-[calc(100vh-6rem)] max-w-5xl items-center">
+    <div className="docs-shell-grid min-h-screen bg-background px-4 py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl items-center">
         <div className="grid w-full gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-          <section className="hidden rounded-[2rem] border border-border/60 bg-card/70 p-10 shadow-sm backdrop-blur-sm lg:flex lg:flex-col lg:justify-between">
+          <section className="hidden rounded-[2rem] border border-border/70 bg-card/95 p-10 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.38)] lg:flex lg:flex-col lg:justify-between">
             <div className="space-y-6">
-              <div className="inline-flex items-center gap-3 rounded-full border border-primary/20 bg-primary/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+              <div className="inline-flex items-center gap-3 rounded-full border border-border bg-background px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-brand">
                 <BeeLogo className="h-5 w-5" />
                 VectorBea Cloud
               </div>
@@ -133,22 +107,22 @@ export function AuthScreen({
                   Govern prompts centrally. Keep execution local.
                 </h1>
                 <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-                  Sign in first, then we&apos;ll route you to the right next step:
-                  onboarding for a new workspace, billing for enterprise setup, or
-                  straight into the dashboard.
+                  VectorBea separates the control plane from the customer runtime.
+                  Authentication should feel just as direct: identity first, then
+                  the right workspace and billing path.
                 </p>
               </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
               {[
-                ["Auth first", "Access and billing state are established before workspace creation."],
-                ["Project scoped", "Organizations, workspaces, and RBAC stay aligned from the first session."],
-                ["Cloud + sidecar", "Control plane lives in Supabase and Vercel while agents execute locally."],
+                ["Auth first", "The app decides onboarding, dashboard, or billing only after identity is established."],
+                ["Workspace aware", "Profiles, roles, and organizations stay aligned from the first session."],
+                ["Cloud + sidecar", "Supabase and Vercel handle governance while customer agents execute locally."],
               ].map(([title, description]) => (
                 <div
                   key={title}
-                  className="rounded-2xl border border-border/60 bg-background/80 p-4"
+                  className="rounded-2xl border border-border/70 bg-background p-4"
                 >
                   <p className="text-sm font-semibold">{title}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -159,7 +133,7 @@ export function AuthScreen({
             </div>
           </section>
 
-          <section className="glass-strong rounded-[2rem] p-6 sm:p-8">
+          <section className="rounded-[2rem] border border-border/70 bg-card/95 p-6 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.42)] sm:p-8">
             <div className="mb-8 flex items-center justify-between">
               <Link href="/" className="inline-flex items-center gap-3">
                 <BeeLogo className="h-10 w-10" />
@@ -170,92 +144,67 @@ export function AuthScreen({
               </Link>
               <Link
                 href={alternateHref}
-                className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                className="text-sm font-medium text-brand underline-offset-4 hover:underline"
               >
                 {alternateLabel}
               </Link>
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">
-                {mode === "login" ? "Welcome back" : "Create account"}
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand">
+                {mode === "signin" ? "Sign in" : "Create an account"}
               </p>
               <h2 className="text-3xl font-semibold tracking-tight">
-                {mode === "login" ? "Sign in to continue" : "Start with a secure account"}
+                {mode === "signin" ? "Welcome back" : "Create an account"}
               </h2>
               <p className="text-sm leading-7 text-muted-foreground">
-                {mode === "login"
-                  ? "Use your Supabase credentials to pick up onboarding or jump back into your dashboard."
-                  : "Create your account first so we can apply the correct workspace and billing flow immediately after authentication."}
+                {mode === "signin"
+                  ? "Use your provider account and we’ll route you back to the right workspace automatically."
+                  : "Start with OAuth so we can capture your identity and route you into onboarding without any manual data entry."}
               </p>
             </div>
 
             <div className="mt-8 space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground" htmlFor="email">
-                  Email
-                </label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@company.com"
-                  className="h-11"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground" htmlFor="password">
-                  Password
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Enter a secure password"
-                  className="h-11"
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !loading) {
-                      void submit();
-                    }
-                  }}
-                />
-              </div>
-
-              {error && (
+              {error ? (
                 <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
                   {error}
                 </div>
-              )}
+              ) : null}
 
-              {info && (
-                <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary">
-                  {info}
-                </div>
-              )}
+              <div className="space-y-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-14 w-full justify-between rounded-2xl border-border bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
+                  disabled={checkingSession || providerLoading !== null}
+                  onClick={() => void startOAuth("github")}
+                >
+                  <span className="flex items-center gap-3">
+                    <GitHubMark className="h-5 w-5 text-foreground" />
+                    Continue with GitHub
+                  </span>
+                  {providerLoading === "github" ? "Connecting..." : <ArrowRight className="h-4 w-4 text-muted-foreground" />}
+                </Button>
 
-              <Button
-                type="button"
-                className={cn(
-                  "h-11 w-full text-sm font-semibold",
-                  checkingSession && "opacity-80",
-                )}
-                disabled={loading || checkingSession}
-                onClick={() => {
-                  void submit();
-                }}
-              >
-                {loading
-                  ? mode === "login"
-                    ? "Signing in..."
-                    : "Creating account..."
-                  : mode === "login"
-                    ? "Sign in"
-                    : "Create account"}
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-14 w-full justify-between rounded-2xl border-border bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
+                  disabled={checkingSession || providerLoading !== null}
+                  onClick={() => void startOAuth("google")}
+                >
+                  <span className="flex items-center gap-3">
+                    <GoogleMark className="h-5 w-5" />
+                    Continue with Google
+                  </span>
+                  {providerLoading === "google" ? "Connecting..." : <ArrowRight className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              </div>
+
+              <div className="rounded-2xl border border-border/70 bg-muted/30 px-4 py-4 text-sm leading-6 text-muted-foreground">
+                We capture your name and email from your identity provider, then
+                route you into onboarding or back into your workspace automatically.
+              </div>
             </div>
           </section>
         </div>

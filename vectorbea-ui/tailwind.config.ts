@@ -1,11 +1,13 @@
 import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
 
 const config: Config = {
   darkMode: ["class"],
   content: [
-    "./app/**/*.{ts,tsx}",
+    "./app/**/*.{ts,tsx,mdx}",
     "./components/**/*.{ts,tsx}",
     "./lib/**/*.{ts,tsx}",
+    "./mdx-components.tsx",
   ],
   theme: {
     extend: {
@@ -27,6 +29,11 @@ const config: Config = {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+          muted: "hsl(var(--brand-muted))",
+        },
         chart: {
           1: "hsl(var(--chart-1))",
           2: "hsl(var(--chart-2))",
@@ -39,16 +46,83 @@ const config: Config = {
         sm: "0.5rem",
       },
       boxShadow: {
-        panel: "0 0 0 1px rgba(255,255,255,0.04), 0 18px 48px rgba(0,0,0,0.22)",
-        glow: "0 0 20px rgba(59, 130, 246, 0.15)",
-        "glow-sm": "0 0 10px rgba(59, 130, 246, 0.1)",
+        panel: "0 18px 48px rgba(15, 23, 42, 0.08)",
+        glow: "0 0 20px rgba(16, 128, 255, 0.14)",
+        "glow-sm": "0 0 10px rgba(16, 128, 255, 0.1)",
       },
       backgroundImage: {
         "grid-fade":
-          "radial-gradient(circle at top, rgba(255,255,255,0.08), transparent 45%), linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)",
+          "radial-gradient(circle at top, rgba(16,128,255,0.08), transparent 45%), linear-gradient(rgba(127,127,127,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(127,127,127,0.035) 1px, transparent 1px)",
       },
       backgroundSize: {
         grid: "100% 100%, 24px 24px, 24px 24px",
+      },
+      typography: {
+        DEFAULT: {
+          css: {
+            maxWidth: "65ch",
+            color: "hsl(var(--muted-foreground))",
+            h1: {
+              color: "hsl(var(--foreground))",
+              fontWeight: "650",
+              letterSpacing: "-0.035em",
+            },
+            h2: {
+              color: "hsl(var(--foreground))",
+              fontWeight: "620",
+              letterSpacing: "-0.03em",
+            },
+            h3: {
+              color: "hsl(var(--foreground))",
+              fontWeight: "600",
+              letterSpacing: "-0.025em",
+            },
+            p: {
+              lineHeight: "1.85",
+            },
+            a: {
+              color: "hsl(var(--brand))",
+              textDecorationColor: "hsl(var(--brand) / 0.28)",
+              fontWeight: "500",
+            },
+            strong: {
+              color: "hsl(var(--foreground))",
+            },
+            code: {
+              color: "hsl(var(--foreground))",
+              backgroundColor: "hsl(var(--muted))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: "0.5rem",
+              padding: "0.18rem 0.4rem",
+              fontWeight: "500",
+            },
+            "code::before": { content: '""' },
+            "code::after": { content: '""' },
+            pre: {
+              color: "#e2e8f0",
+              backgroundColor: "#020617",
+              borderRadius: "1rem",
+              border: "1px solid rgba(148,163,184,0.18)",
+              boxShadow: "0 24px 60px -40px rgba(2,6,23,0.85)",
+            },
+            "pre code": {
+              backgroundColor: "transparent",
+              border: "none",
+              padding: "0",
+              color: "inherit",
+            },
+            blockquote: {
+              color: "hsl(var(--foreground))",
+              borderLeftColor: "hsl(var(--brand))",
+              backgroundColor: "hsl(var(--muted) / 0.6)",
+              borderRadius: "0.75rem",
+              padding: "1rem 1.25rem",
+            },
+            hr: {
+              borderColor: "hsl(var(--border))",
+            },
+          },
+        },
       },
       keyframes: {
         "fade-in": {
@@ -96,7 +170,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [typography],
 };
 
 export default config;

@@ -1,6 +1,9 @@
 import { AuthScreen } from "@/components/auth/auth-screen";
 
 export const dynamic = "force-dynamic";
+export const metadata = {
+  title: "Create an account",
+};
 
 export default async function SignupPage({
   searchParams,

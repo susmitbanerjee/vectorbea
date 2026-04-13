@@ -2,90 +2,52 @@ export const metadata = {
   title: "Architecture",
 };
 
+import { ArchitectureDiagram } from "@/components/docs/architecture-diagram";
+
 # Architecture
 
 VectorBea is intentionally split into a **cloud control plane** and a **local data plane**. That split is what lets the platform deliver centralized governance without forcing model invocation, agent execution, or application data to leave the customer environment.
 
-## Control Plane vs. Data Plane
+## Control plane vs. data plane
 
 The **control plane** is where VectorBea stores and manages shared operating state:
 
 - Organizations and projects
-- Prompt definitions and versions
-- Publication status
-- Role mappings and RBAC decisions
-- Audit metadata
-- Seat billing and plan controls
+- Prompt definitions and published versions
+- RBAC policy and membership state
+- Audit metadata and billing state
 
-The **data plane** is the customer-local execution layer. In practice, this is the VectorBea Kotlin proxy deployed close to the workload. It is responsible for:
+The **data plane** is the customer-local execution layer. In practice, this means the outbound agent and sidecar processes deployed close to the workload. They are responsible for:
 
-- Fetching the published prompt rules relevant to the local project
-- Caching and serving prompt definitions locally
-- Enforcing prompt policy before the request continues toward the model provider
-- Preserving a hard operational boundary between local execution and cloud synchronization
+- Syncing the published prompt and policy state for the active project
+- Serving local execution paths without putting model traffic through a shared SaaS runtime
+- Preserving a hard operational boundary between local execution and cloud governance
 
-## Request flow
+## System boundary
 
-At runtime, the agent does not need to fetch prompt text directly from the cloud for every request. Instead, it communicates with the local proxy over a low-latency local interface. The proxy already knows which prompt versions are published and allowed for that project because it continuously syncs from the VectorBea control plane.
+<ArchitectureDiagram />
 
-That means:
+## How the sync loop works
 
-- The agent gets local responsiveness.
-- The platform keeps centralized governance.
-- The organization avoids pushing sensitive execution logic into a remote shared runtime.
+At runtime, the customer environment initiates the connection. The outbound agent sends a heartbeat over HTTPS, pushes telemetry, and receives pending commands from the control plane. That keeps the network posture simple:
 
-## Isolation boundary
+- Outbound traffic only
+- Standard HTTPS on port 443
+- No inbound firewall exceptions required
 
-The architectural boundary matters just as much as the network path:
-
-- **Local execution** includes the AI agent, application data, runtime variables, and the proxy process handling prompt resolution.
-- **Cloud sync** includes prompt metadata, versioning state, RBAC policy, audit configuration, and organization/project administration.
-
-The local side executes. The cloud side governs.
-
-## Mermaid flow
-
-```mermaid
-flowchart LR
-    subgraph Customer_Environment["Customer Environment (Local Execution Boundary)"]
-        Agent["Python AI Agent"]
-        Proxy["VectorBea Kotlin Proxy"]
-        Agent -->|"Local gRPC prompt request"| Proxy
-    end
-
-    subgraph VectorBea_Cloud["VectorBea Cloud (Control Plane / Supabase)"]
-        API["VectorBea API"]
-        DB["Supabase: prompts, RBAC, audit metadata"]
-        API --> DB
-    end
-
-    Proxy -->|"Fetch published prompts, rules, project policy"| API
-    API -->|"Sync response: versions, policy, metadata"| Proxy
-
-    Customer_Environment -. "Strict Isolation Boundary: execution stays local, only control data syncs" .- VectorBea_Cloud
-```
+The result is a design that fits enterprise network controls while still letting the platform coordinate prompt, policy, and project state centrally.
 
 ## Why the sidecar model works
 
-The Kotlin proxy works well as a sidecar because it gives the team a stable, local enforcement point:
+The sidecar pattern gives the team a stable, local enforcement point:
 
-- Application teams integrate once against the proxy.
+- Application teams integrate once against a local endpoint.
 - Prompt operations teams can publish updates without redeploying every service.
-- Security teams can reason about a clear network and responsibility boundary.
-- Platform teams can run the same model across local Docker, VM, and Kubernetes environments.
+- Security teams get a clear separation between governance and execution.
+- Platform teams can run the same pattern across laptops, VMs, and Kubernetes clusters.
 
-## Failure domains and safety
-
-A healthy production deployment treats the proxy as a controlled cache and policy enforcement point:
-
-- If the control plane is temporarily unreachable, the proxy can continue serving the latest synchronized published rules.
-- If a prompt is unpublished or superseded, the control plane remains the source of truth for what the proxy should accept.
-- If access policy changes, project membership and RBAC updates flow through the same sync channel rather than relying on ad hoc application logic.
-
-## Practical design principle
-
-The architecture is built around a simple principle:
+## Design principle
 
 > Govern centrally. Execute locally.
 
-That is the reason VectorBea can support both developer velocity and enterprise control without making the customer surrender data-plane ownership.
+That principle is the reason VectorBea can support enterprise control without forcing the customer to hand over data-plane ownership.
