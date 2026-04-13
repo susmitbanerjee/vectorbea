@@ -232,7 +232,7 @@ export function RequestsChart() {
           table: "agent_metrics",
           filter: `agent_id=eq.${selectedAgentId}`,
         },
-        (payload) => {
+        (payload: { new: unknown }) => {
           const row = payload.new as {
             id: string;
             agent_id: string;
