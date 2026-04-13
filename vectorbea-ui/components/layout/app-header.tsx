@@ -63,6 +63,9 @@ export function AppHeader({
   useEffect(() => {
     const handle = window.setTimeout(() => pushSearch(query), 250);
     return () => window.clearTimeout(handle);
+    // pushSearch is defined inline each render; adding it would cause
+    // infinite re-runs. The stable dependency is query alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   const submitSearch = (event: React.FormEvent<HTMLFormElement>) => {

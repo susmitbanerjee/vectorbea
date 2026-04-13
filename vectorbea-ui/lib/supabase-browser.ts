@@ -23,11 +23,14 @@ if (!SUPABASE_ANON_KEY) {
   );
 }
 
+const supabaseUrl = SUPABASE_URL as string;
+const supabaseAnonKey = SUPABASE_ANON_KEY as string;
+
 let browserClient: SupabaseClient | null = null;
 
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
-    browserClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    browserClient = createClient(supabaseUrl, supabaseAnonKey);
   }
   return browserClient;
 }
