@@ -89,7 +89,7 @@ function isBillingPending(org: OrganizationView) {
 export async function loadOrganizationsForUser(
   userId: string,
 ): Promise<OrganizationView[]> {
-  const supabase = createVectorBeaAdminClient();
+  const supabase = createSupabaseAdminClient();
   const { data: memberships, error } = await supabase
     .from("workspace_members")
     .select(
