@@ -16,7 +16,7 @@ import {
   Users,
 } from "lucide-react";
 
-import { BeeLogo } from "@/components/brand/bee-logo";
+import { Logo } from "@/components/ui/Logo";
 import type { DashboardSummary } from "@/lib/api";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -111,8 +111,8 @@ export function AppSidebar({ summary }: { summary: DashboardSummary | null }) {
   return (
     <aside className="hidden w-[260px] shrink-0 border-r border-border/50 bg-card/30 px-3 py-4 backdrop-blur-sm lg:flex lg:flex-col">
       <div className="mb-6 flex items-center gap-3 px-2">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-400/15 via-amber-500/10 to-amber-600/5 shadow-[0_0_18px_-6px_rgba(251,191,36,0.45)]">
-          <BeeLogo className="h-5 w-5 text-amber-400" />
+        <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card">
+          <Logo />
         </div>
         <div>
           <p className="text-sm font-semibold tracking-tight">VectorBea</p>

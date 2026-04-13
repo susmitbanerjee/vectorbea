@@ -34,7 +34,7 @@ export function ArchitectureDiagram() {
     <div className="my-10 rounded-[2rem] border border-border/70 bg-gradient-to-b from-background to-muted/20 p-5 sm:p-6">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)] lg:items-center">
         <Zone
-          title="Vercel Control Plane"
+          title="VectorBea Control Plane"
           description="Centralized governance lives here: UI, API routes, and Supabase-backed state."
           items={["Next.js UI", "Route Handlers / API", "Supabase Database"]}
         />
