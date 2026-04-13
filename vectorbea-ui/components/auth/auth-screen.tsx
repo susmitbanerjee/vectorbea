@@ -20,10 +20,12 @@ export function AuthScreen({
   mode: Mode;
   next?: string;
 }) {
-  const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [error, setError] = useState<string | null>(
+    searchParams.get("error") ?? null,
+  );
   const [providerLoading, setProviderLoading] = useState<"github" | "google" | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
-  const searchParams = useSearchParams();
 
   useEffect(() => {
     let cancelled = false;
