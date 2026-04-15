@@ -99,7 +99,7 @@ export async function loadProfileForUser(userId: string) {
 export async function loadOrganizationsForUser(
   userId: string,
 ): Promise<OrganizationView[]> {
-  const supabase = createSupabaseAdminClient();
+  const supabase = createVectorBeaAdminClient();
   const { data: memberships, error } = await supabase
     .from("workspace_members")
     .select(
