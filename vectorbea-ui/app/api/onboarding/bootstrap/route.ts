@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingOrganizations = await loadOrganizationsForUser(user.id);
+    const existingOrganizations = await loadOrganizationsForUser(user.id).catch(() => []);
     if (
       existingOrganizations.length > 0 &&
       (existingOrganizations[0]?.planTier ?? "free") === "free"

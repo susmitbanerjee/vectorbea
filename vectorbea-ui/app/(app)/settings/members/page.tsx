@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Crown, Eye, Mail, Plus, Shield, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,6 +34,7 @@ interface Member {
   id: string;
   email: string;
   displayName: string;
+  avatarUrl?: string | null;
   role: MemberRole;
   joinedAt: string;
 }
@@ -47,57 +48,24 @@ const ROLE_CONFIG: Record<
   viewer: { label: "Viewer", icon: Eye, variant: "outline" },
 };
 
-function buildWorkspaceMembers(
-  workspaceId: string | null,
-  workspaceName: string | null,
-): Member[] {
-  const slug = (workspaceName ?? "workspace")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  const domain = `${slug || "workspace"}.vectorbea.dev`;
-  const seed = workspaceId?.slice(0, 4) ?? "root";
-
-  return [
-    {
-      id: `${seed}-admin`,
-      email: `admin@${domain}`,
-      displayName: `${workspaceName ?? "Workspace"} Admin`,
-      role: "admin",
-      joinedAt: "2026-03-15T10:00:00Z",
-    },
-    {
-      id: `${seed}-editor`,
-      email: `editor@${domain}`,
-      displayName: `${workspaceName ?? "Workspace"} Editor`,
-      role: "editor",
-      joinedAt: "2026-03-20T14:30:00Z",
-    },
-    {
-      id: `${seed}-viewer`,
-      email: `viewer@${domain}`,
-      displayName: `${workspaceName ?? "Workspace"} Viewer`,
-      role: "viewer",
-      joinedAt: "2026-04-01T09:15:00Z",
-    },
-  ];
-}
-
 export default function MembersPage() {
   const { activeOrganization, activeWorkspace, activeWorkspaceId, seatUsage } = useWorkspace();
-  const seedMembers = useMemo(
-    () => buildWorkspaceMembers(activeWorkspaceId, activeWorkspace?.name ?? null),
-    [activeWorkspace?.name, activeWorkspaceId],
-  );
-  const [members, setMembers] = useState<Member[]>(seedMembers);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("editor");
   const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
-    setMembers(seedMembers);
-  }, [seedMembers]);
+    if (!activeWorkspaceId) return;
+    setLoadingMembers(true);
+    fetch(`/api/workspaces/${activeWorkspaceId}/members`)
+      .then((r) => r.json())
+      .then((data: Member[]) => { if (Array.isArray(data)) setMembers(data); })
+      .catch(() => {})
+      .finally(() => setLoadingMembers(false));
+  }, [activeWorkspaceId]);
 
   const hasSeatLimit = seatUsage.hasConfiguredLimit;
   const seatsUsed = hasSeatLimit
@@ -323,21 +291,28 @@ export default function MembersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {members.map((member) => {
+                  {loadingMembers && members.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">Loading members...</TableCell>
+                    </TableRow>
+                  ) : members.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">No members found.</TableCell>
+                    </TableRow>
+                  ) : members.map((member) => {
                     const cfg = ROLE_CONFIG[member.role];
                     const Icon = cfg.icon;
                     return (
                       <TableRow key={member.id}>
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                              {member.displayName
-                                .split(" ")
-                                .map((word) => word[0])
-                                .join("")
-                                .slice(0, 2)
-                                .toUpperCase()}
-                            </div>
+                            {member.avatarUrl ? (
+                              <img src={member.avatarUrl} alt={member.displayName} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
+                            ) : (
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                                {member.displayName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
                             <span className="text-sm font-medium">{member.displayName}</span>
                           </div>
                         </TableCell>

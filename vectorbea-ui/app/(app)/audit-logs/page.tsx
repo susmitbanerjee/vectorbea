@@ -5,7 +5,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   apiFetch,
   type AuditLogView,
-  type OrganizationView,
 } from "@/lib/api";
 import { Activity, Clock, FileText, Zap } from "lucide-react";
 
@@ -188,8 +187,6 @@ export default async function AuditLogsPage({
 }) {
   const { org, q } = await searchParams;
   const suffix = org ? `?workspaceId=${org}` : "";
-  const organizations = await apiFetch<OrganizationView[]>("/api/organizations").catch(() => [] as OrganizationView[]);
-  const organizationMap = new Map(organizations.map((organization) => [organization.id, organization.name]));
   const logs = (await apiFetch<AuditLogView[]>(`/api/audit${suffix}`)).filter((log) =>
     !q
       ? true
@@ -252,7 +249,6 @@ export default async function AuditLogsPage({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Time</TableHead>
-                      <TableHead>Organization</TableHead>
                       <TableHead>Prompt</TableHead>
                       <TableHead>Version</TableHead>
                       <TableHead>VectorBea Latency</TableHead>
@@ -268,9 +264,6 @@ export default async function AuditLogsPage({
                           <span className="text-sm" title={new Date(log.timestamp).toLocaleString()}>
                             {relativeTime(log.timestamp)}
                           </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">{organizationMap.get(log.workspaceId) ?? "Unknown workspace"}</span>
                         </TableCell>
                         <TableCell>
                           <span className="font-medium">{log.promptName}</span>
@@ -319,7 +312,7 @@ export default async function AuditLogsPage({
                                                 Template
                                               </div>
                                               <div className="grid gap-1 md:grid-cols-2">
-                                                <div className="rounded bg-red-500/10 p-2 text-red-300">
+                                                <div className="rounded bg-red-500/10 p-2 text-red-600 dark:text-red-300">
                                                   <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">
                                                     Before
                                                   </div>
@@ -327,7 +320,7 @@ export default async function AuditLogsPage({
                                                     {truncate(change.before, 240)}
                                                   </pre>
                                                 </div>
-                                                <div className="rounded bg-emerald-500/10 p-2 text-emerald-300">
+                                                <div className="rounded bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-300">
                                                   <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">
                                                     After
                                                   </div>
@@ -342,11 +335,11 @@ export default async function AuditLogsPage({
                                               <span className="font-mono font-semibold text-foreground">
                                                 {change.path}:
                                               </span>
-                                              <span className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-red-300 line-through">
+                                              <span className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-red-600 dark:text-red-300 line-through">
                                                 {truncate(change.before, 40)}
                                               </span>
                                               <span className="text-muted-foreground">→</span>
-                                              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-emerald-300">
+                                              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-emerald-600 dark:text-emerald-300">
                                                 {truncate(change.after, 40)}
                                               </span>
                                             </div>

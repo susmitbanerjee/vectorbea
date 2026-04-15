@@ -2,17 +2,18 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Route } from "next";
+import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   CreditCard,
   KeyRound,
   LayoutDashboard,
   Loader2,
+  LogOut,
   Logs,
   Server,
   Settings2,
   Sparkles,
-  UserCircle,
   Users,
 } from "lucide-react";
 
@@ -35,12 +36,13 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
-  { href: "/settings/profile", label: "Profile", icon: UserCircle },
   { href: "/settings/members", label: "Members", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ];
 
-export function AppSidebar({ summary }: { summary: DashboardSummary | null }) {
+type SidebarUser = { email: string | null; full_name: string | null; avatar_url: string | null } | null;
+
+export function AppSidebar({ summary, user }: { summary: DashboardSummary | null; user?: SidebarUser }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -127,7 +129,13 @@ export function AppSidebar({ summary }: { summary: DashboardSummary | null }) {
           const Icon = item.icon;
           const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
           const active =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
+            pathname === item.href ||
+            (pathname.startsWith(`${item.href}/`) &&
+              !navigation.some(
+                (other) =>
+                  other.href !== item.href &&
+                  (pathname === other.href || pathname.startsWith(`${other.href}/`)),
+              ));
           const loading = isPending && pendingHref === fullHref;
 
           return (
@@ -164,7 +172,46 @@ export function AppSidebar({ summary }: { summary: DashboardSummary | null }) {
         })}
       </nav>
 
-      <div className="mt-auto rounded-xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm">
+      <div className="mt-auto flex flex-col gap-3">
+      {user && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">
+          {user.avatar_url ? (
+            <Image
+              src={user.avatar_url}
+              alt={user.full_name ?? user.email ?? "User"}
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-full border border-border/60 object-cover shrink-0"
+            />
+          ) : (
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[11px] font-semibold text-muted-foreground">
+              {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            {user.full_name && (
+              <p className="truncate text-[12px] font-medium leading-none">{user.full_name}</p>
+            )}
+            {user.email && (
+              <p className="truncate text-[10px] text-muted-foreground leading-none mt-0.5">{user.email}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void fetch("/api/auth/session", { method: "DELETE" }).then(() => {
+                window.location.assign("/login");
+              });
+            }}
+            title="Sign out"
+            className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm">
         <div className="mb-3 flex items-center gap-2">
           <span className={cn("live-dot", !workspaceSummary && "!bg-red-500")} />
           <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
@@ -192,6 +239,7 @@ export function AppSidebar({ summary }: { summary: DashboardSummary | null }) {
             <Badge variant="destructive">Offline</Badge>
           </div>
         )}
+      </div>
       </div>
     </aside>
   );
