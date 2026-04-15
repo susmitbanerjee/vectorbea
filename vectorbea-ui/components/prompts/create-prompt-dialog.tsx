@@ -58,14 +58,14 @@ export function CreatePromptDialog() {
         if (!response.ok) {
           throw new Error(await response.text());
         }
-        const created = (await response.json()) as { promptId: string };
+        const created = (await response.json()) as { id: string; promptId?: string };
         toast.success(`Prompt "${name.trim()}" created successfully.`);
         setName("");
         setDescription("");
         setOpen(false);
         router.refresh();
         router.push(
-          `/prompts/${created.promptId}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+          `/prompts/${created.id ?? created.promptId}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
         );
       } catch (cause) {
         toast.error(
