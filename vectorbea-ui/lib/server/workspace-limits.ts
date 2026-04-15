@@ -74,19 +74,10 @@ export async function getWorkspacePlanLimits(
 export async function getWorkspacePromptCount(workspaceId: string) {
   const supabase = createVectorBeaAdminClient();
 
-  // prompts are keyed by organization_id; resolve via workspace first
-  const { data: workspace } = await supabase
-    .from("workspaces")
-    .select("organization_id")
-    .eq("id", workspaceId)
-    .single();
-
-  if (!workspace?.organization_id) return 0;
-
   const { count, error } = await supabase
     .from("prompts")
     .select("id", { count: "exact", head: true })
-    .eq("organization_id", workspace.organization_id);
+    .eq("workspace_id", workspaceId);
 
   if (error) {
     throw new Error(`Failed to count prompts: ${error.message}`);
@@ -98,14 +89,6 @@ export async function getWorkspacePromptCount(workspaceId: string) {
 export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {
   const supabase = createVectorBeaAdminClient();
 
-  const { data: workspace } = await supabase
-    .from("workspaces")
-    .select("organization_id")
-    .eq("id", workspaceId)
-    .single();
-
-  if (!workspace?.organization_id) return 0;
-
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const nextMonthStart = new Date(
@@ -115,7 +98,7 @@ export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {
   const { count, error } = await supabase
     .from("audit_logs")
     .select("id", { count: "exact", head: true })
-    .eq("organization_id", workspace.organization_id)
+    .eq("workspace_id", workspaceId)
     .gte("created_at", monthStart.toISOString())
     .lt("created_at", nextMonthStart.toISOString());
 

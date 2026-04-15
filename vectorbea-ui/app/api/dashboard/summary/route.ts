@@ -14,23 +14,13 @@ export async function GET(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    const { data: workspace } = await supabase
-      .from("workspaces")
-      .select("organization_id")
-      .eq("id", workspaceId)
-      .single();
-
-    if (!workspace?.organization_id) {
-      return NextResponse.json({ totalApiCallsLast24h: 0, averageLatencyMs: 0, activeAgents: 0 } as DashboardSummary);
-    }
-
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const [{ data: auditData }, { data: agentData }] = await Promise.all([
       supabase
         .from("audit_logs")
         .select("proxy_latency_ms")
-        .eq("organization_id", workspace.organization_id)
+        .eq("workspace_id", workspaceId)
         .gte("created_at", since),
       supabase
         .from("deployment_agents")

@@ -18,21 +18,10 @@ export async function GET(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    // prompts are scoped to organization_id; resolve the org via the workspace
-    const { data: workspace } = await supabase
-      .from("workspaces")
-      .select("organization_id")
-      .eq("id", workspaceId)
-      .single();
-
-    if (!workspace?.organization_id) {
-      return NextResponse.json([] as PromptListItem[]);
-    }
-
     const { data, error } = await supabase
       .from("prompts")
       .select("id, name, description, created_at, updated_at, prompt_versions(version_tag, is_published, created_at)")
-      .eq("organization_id", workspace.organization_id)
+      .eq("workspace_id", workspaceId)
       .order("updated_at", { ascending: false });
 
     if (error) throw new Error(error.message);

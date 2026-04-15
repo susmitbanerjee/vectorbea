@@ -14,21 +14,10 @@ export async function GET(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    // audit_logs are keyed by organization_id; resolve via workspace first
-    const { data: workspace } = await supabase
-      .from("workspaces")
-      .select("organization_id")
-      .eq("id", workspaceId)
-      .single();
-
-    if (!workspace?.organization_id) {
-      return NextResponse.json([] as AuditLogView[]);
-    }
-
     const { data, error } = await supabase
       .from("audit_logs")
       .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
-      .eq("organization_id", workspace.organization_id)
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .limit(100);
 
