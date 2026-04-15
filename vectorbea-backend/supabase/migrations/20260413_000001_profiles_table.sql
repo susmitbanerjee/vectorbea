@@ -1,3 +1,4 @@
+drop table if exists vectorbea.profiles cascade;
 create schema if not exists vectorbea;
 
 drop view if exists vectorbea.profiles;
