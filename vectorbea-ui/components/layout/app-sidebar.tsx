@@ -6,6 +6,7 @@ import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   CreditCard,
+  FlaskConical,
   KeyRound,
   LayoutDashboard,
   Loader2,
@@ -34,6 +35,7 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/dashboard/infrastructure", label: "Infrastructure", icon: Server },
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
+  { href: "/evaluations", label: "Evaluations", icon: FlaskConical },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/settings/members", label: "Members", icon: Users },
