@@ -73,10 +73,20 @@ export async function getWorkspacePlanLimits(
 
 export async function getWorkspacePromptCount(workspaceId: string) {
   const supabase = createVectorBeaAdminClient();
+
+  // prompts are keyed by organization_id; resolve via workspace first
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("organization_id")
+    .eq("id", workspaceId)
+    .single();
+
+  if (!workspace?.organization_id) return 0;
+
   const { count, error } = await supabase
     .from("prompts")
     .select("id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId);
+    .eq("organization_id", workspace.organization_id);
 
   if (error) {
     throw new Error(`Failed to count prompts: ${error.message}`);
