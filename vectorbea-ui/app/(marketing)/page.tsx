@@ -103,7 +103,7 @@ export default function LandingPage() {
           >
             GitHub
           </a>
-          <Link href="/signup" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
+          <Link href="/login" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
             Create account
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
@@ -131,7 +131,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link href="/signup" className={cn(buttonVariants({ size: "lg" }), "gap-2 rounded-lg px-7")}>
+            <Link href="/login" className={cn(buttonVariants({ size: "lg" }), "gap-2 rounded-lg px-7")}>
               Start for free
               <ArrowRight className="h-4 w-4" />
             </Link>
