@@ -80,21 +80,10 @@ export async function POST(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    const { data: ws } = await supabase
-      .from("workspaces")
-      .select("organization_id")
-      .eq("id", workspaceId)
-      .single();
-
-    if (!ws?.organization_id) {
-      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
-    }
-
     const { data, error: insertError } = await supabase
       .from("prompts")
       .insert({
         workspace_id: workspaceId,
-        organization_id: ws.organization_id,
         name,
         description: payload.description?.trim() ?? null,
       })
