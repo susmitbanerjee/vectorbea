@@ -45,9 +45,7 @@ set
   max_prompts = coalesce(max_prompts, 5),
   monthly_audit_limit = coalesce(monthly_audit_limit, 100);
 
-create or replace view vectorbea.profiles as
-select *
-from vectorbea.users;
+-- vectorbea.profiles is created as a real table in 20260413_000001_profiles_table.sql
 
 create or replace view vectorbea.audits as
 select *
