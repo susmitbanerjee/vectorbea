@@ -24,13 +24,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const [{ organizations, redirectTo }, summary, profile] = await Promise.all([
     getPostLoginRedirectForUser(user.id),
     apiFetch<DashboardSummary>("/api/dashboard/summary").catch(() => null),
-    createVectorBeaAdminClient()
-      .from("profiles")
-      .select("email, full_name, avatar_url")
-      .eq("id", user.id)
-      .single()
-      .then(({ data }) => data)
-      .catch(() => null),
+    Promise.resolve(
+      createVectorBeaAdminClient()
+        .from("profiles")
+        .select("email, full_name, avatar_url")
+        .eq("id", user.id)
+        .single(),
+    ).then(({ data }) => data).catch(() => null),
   ]);
 
   if (redirectTo === "/onboarding" || redirectTo === "/settings/billing") {
