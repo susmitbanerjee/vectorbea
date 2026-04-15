@@ -27,27 +27,23 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from("audit_logs")
-      .select("id, organization_id, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at, prompt_versions(version_tag, prompts(name))")
+      .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
       .eq("organization_id", workspace.organization_id)
       .order("created_at", { ascending: false })
       .limit(100);
 
     if (error) throw new Error(error.message);
 
-    const logs: AuditLogView[] = (data ?? []).map((row) => {
-      const versionRaw = row.prompt_versions as unknown;
-      const version = versionRaw as { version_tag: string; prompts: { name: string } | { name: string }[] | null } | null;
-      return {
-        timestamp: row.created_at,
-        workspaceId,
-        promptName: (Array.isArray(version?.prompts) ? version?.prompts[0]?.name : version?.prompts?.name) ?? "",
-        versionTag: version?.version_tag ?? "",
-        proxyLatencyMs: row.proxy_latency_ms ?? 0,
-        llmLatencyMs: row.llm_latency_ms ?? 0,
-        tokenCount: row.token_count ?? 0,
-        metadata: (row.metadata as Record<string, unknown>) ?? {},
-      };
-    });
+    const logs: AuditLogView[] = (data ?? []).map((row) => ({
+      timestamp: row.created_at,
+      workspaceId,
+      promptName: row.prompt_name ?? "",
+      versionTag: row.version_tag ?? "",
+      proxyLatencyMs: row.proxy_latency_ms ?? 0,
+      llmLatencyMs: row.llm_latency_ms ?? 0,
+      tokenCount: row.token_count ?? 0,
+      metadata: (row.metadata as Record<string, unknown>) ?? {},
+    }));
 
     return NextResponse.json(logs);
   } catch (error) {

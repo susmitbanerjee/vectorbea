@@ -31,9 +31,9 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from("prompts")
-      .select("id, name, description, created_at, prompt_versions(version_tag, is_published, created_at)")
+      .select("id, name, description, created_at, updated_at, prompt_versions(version_tag, is_published, created_at)")
       .eq("organization_id", workspace.organization_id)
-      .order("created_at", { ascending: false });
+      .order("updated_at", { ascending: false });
 
     if (error) throw new Error(error.message);
 
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
         description: row.description ?? null,
         latestVersion: latest?.version_tag ?? "v0",
         isPublished: latest?.is_published ?? false,
-        updatedAt: row.created_at ?? null,
+        updatedAt: row.updated_at ?? row.created_at ?? null,
       };
     });
 
