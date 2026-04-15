@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { Crown, Eye, Mail, Plus, Shield, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -307,7 +308,7 @@ export default function MembersPage() {
                         <TableCell>
                           <div className="flex items-center gap-3">
                             {member.avatarUrl ? (
-                              <img src={member.avatarUrl} alt={member.displayName} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
+                              <Image src={member.avatarUrl!} alt={member.displayName} width={32} height={32} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
                             ) : (
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                                 {member.displayName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}

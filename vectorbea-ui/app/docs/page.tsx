@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { ArrowRight, Cloud, Cpu, GitBranch, Shield, Zap } from "lucide-react";
 
 export const metadata = {
@@ -164,9 +165,9 @@ export default function DocsIntroPage() {
         </h2>
         <div className="grid gap-3 sm:grid-cols-3">
           {[
-            { href: "/docs/quickstart", label: "Quickstart", desc: "Run the proxy with Docker" },
-            { href: "/docs/architecture", label: "Architecture", desc: "Control-plane vs. data-plane" },
-            { href: "/docs/enterprise", label: "Enterprise", desc: "RBAC, isolation, and billing" },
+            { href: "/docs/quickstart" as Route, label: "Quickstart", desc: "Run the proxy with Docker" },
+            { href: "/docs/architecture" as Route, label: "Architecture", desc: "Control-plane vs. data-plane" },
+            { href: "/docs/enterprise" as Route, label: "Enterprise", desc: "RBAC, isolation, and billing" },
           ].map(({ href, label, desc }) => (
             <Link
               key={href}
