@@ -17,22 +17,39 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = createVectorBeaAdminClient();
+
+    // prompts are scoped to organization_id; resolve the org via the workspace
+    const { data: workspace } = await supabase
+      .from("workspaces")
+      .select("organization_id")
+      .eq("id", workspaceId)
+      .single();
+
+    if (!workspace?.organization_id) {
+      return NextResponse.json([] as PromptListItem[]);
+    }
+
     const { data, error } = await supabase
       .from("prompts")
-      .select("id, workspace_id, name, description, status, created_at, updated_at")
-      .eq("workspace_id", workspaceId)
+      .select("id, name, description, created_at, updated_at, prompt_versions(version_tag, is_published, created_at)")
+      .eq("organization_id", workspace.organization_id)
       .order("updated_at", { ascending: false });
 
     if (error) throw new Error(error.message);
 
-    const prompts: PromptListItem[] = (data ?? []).map((row) => ({
-      id: row.id,
-      name: row.name,
-      description: row.description ?? null,
-      latestVersion: row.status ?? "draft",
-      isPublished: row.status === "published",
-      updatedAt: row.updated_at ?? null,
-    }));
+    const prompts: PromptListItem[] = (data ?? []).map((row) => {
+      const versions = Array.isArray(row.prompt_versions) ? row.prompt_versions : [];
+      const latest = versions.sort((a: { created_at: string }, b: { created_at: string }) =>
+        b.created_at.localeCompare(a.created_at))[0];
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? null,
+        latestVersion: latest?.version_tag ?? "v0",
+        isPublished: latest?.is_published ?? false,
+        updatedAt: row.updated_at ?? null,
+      };
+    });
 
     return NextResponse.json(prompts);
   } catch (error) {
