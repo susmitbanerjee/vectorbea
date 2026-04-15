@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { apiFetch, type PromptListItem } from "@/lib/api";
+import type { PromptListItem } from "@/lib/api";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import {
   getWorkspacePlanLimits,
@@ -72,13 +72,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payload = await request.json();
-    const response = await apiFetch("/api/prompts", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      workspaceId,
-    });
-    return NextResponse.json(response, { status: 201 });
+    const payload = (await request.json()) as { name?: string; description?: string };
+    const name = payload.name?.trim();
+    if (!name) {
+      return NextResponse.json({ error: "name is required" }, { status: 400 });
+    }
+
+    const supabase = createVectorBeaAdminClient();
+
+    const { data: ws } = await supabase
+      .from("workspaces")
+      .select("organization_id")
+      .eq("id", workspaceId)
+      .single();
+
+    if (!ws?.organization_id) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+    }
+
+    const { data, error: insertError } = await supabase
+      .from("prompts")
+      .insert({
+        workspace_id: workspaceId,
+        organization_id: ws.organization_id,
+        name,
+        description: payload.description?.trim() ?? null,
+      })
+      .select("id, name, description, created_at")
+      .single();
+
+    if (insertError) throw new Error(insertError.message);
+
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to create prompt" },
