@@ -33,7 +33,9 @@ export function getSupabaseBrowserClient() {
     // createBrowserClient stores the PKCE code_verifier in cookies (not
     // localStorage) so the server-side route handler can read it back
     // during the OAuth callback code exchange.
-    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
+    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+      auth: { flowType: "implicit" },
+    });
   }
   return browserClient;
 }

@@ -86,6 +86,23 @@ function isBillingPending(org: OrganizationView) {
   );
 }
 
+export async function upsertProfile(user: {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}) {
+  const email = user.email?.trim();
+  if (!email) return;
+  const meta = user.user_metadata ?? {};
+  const fullName =
+    ((meta.full_name ?? meta.name ?? meta.user_name) as string | undefined)?.trim() ?? null;
+  const avatarUrl =
+    ((meta.avatar_url ?? meta.picture) as string | undefined)?.trim() ?? null;
+  await createVectorBeaAdminClient()
+    .from("profiles")
+    .upsert({ id: user.id, email, full_name: fullName, avatar_url: avatarUrl }, { onConflict: "id" });
+}
+
 export async function loadProfileForUser(userId: string) {
   const supabase = createVectorBeaAdminClient();
   const { data } = await supabase

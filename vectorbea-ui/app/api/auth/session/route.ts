@@ -7,6 +7,7 @@ import {
   getAuthenticatedUserFromCookies,
   getPostLoginRedirectForUser,
   loadProfileForUser,
+  upsertProfile,
 } from "@/lib/auth/server";
 
 export const runtime = "nodejs";
@@ -58,6 +59,9 @@ export async function POST(request: NextRequest) {
         { status: 401 },
       );
     }
+
+    // Persist profile on first login (implicit flow has no server callback).
+    await upsertProfile(user);
 
     const [{ redirectTo }, profile] = await Promise.all([
       getPostLoginRedirectForUser(user.id),
