@@ -100,12 +100,13 @@ function EvaluationsPaywall() {
         </div>
 
         {/* CTA */}
-        <Button asChild size="lg" className="h-12 w-full gap-2 text-sm font-semibold">
-          <Link href="/settings/billing">
-            <CreditCard className="h-4 w-4" />
-            Upgrade to Team ($19.99/mo)
-          </Link>
-        </Button>
+        <Link
+          href="/settings/billing"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-primary px-6 text-sm font-semibold text-primary-foreground shadow transition-colors hover:bg-primary/90"
+        >
+          <CreditCard className="h-4 w-4" />
+          Upgrade to Team ($19.99/mo)
+        </Link>
 
         <p className="text-xs text-muted-foreground">
           No lock-in. Cancel or downgrade anytime from billing settings.
