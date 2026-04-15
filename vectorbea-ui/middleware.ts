@@ -68,6 +68,16 @@ function getWhitelistedIps() {
   );
 }
 
+// Requests from within the Next.js runtime (server components calling their
+// own API routes) arrive from AWS infra IPs, not the user's IP. Allow them
+// through if they carry the correct internal secret so the IP whitelist does
+// not block server-to-server calls.
+function isInternalRequest(request: NextRequest): boolean {
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) return false;
+  return request.headers.get("x-internal-secret") === secret;
+}
+
 function deny(ip: string | null, hostname: string) {
   return new NextResponse(
     `Access Denied.\nRejected IP: ${ip ?? "Unavailable"}\nHost: ${hostname || "Unavailable"}\n`,
@@ -116,6 +126,10 @@ export function middleware(request: NextRequest) {
     if (authRedirect) {
       return authRedirect;
     }
+    return NextResponse.next();
+  }
+
+  if (isInternalRequest(request)) {
     return NextResponse.next();
   }
 

@@ -150,11 +150,20 @@ export function withWorkspaceId(path: string, workspaceId?: string | null) {
 
 export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
   const { workspaceId, ...requestInit } = init ?? {};
+
+  // Server-side calls to our own API routes must carry the internal secret so
+  // the IP whitelist middleware lets them through (the request originates from
+  // AWS infra, not the user's whitelisted IP).
+  const internalSecret = typeof window === "undefined"
+    ? (process.env.INTERNAL_API_SECRET ?? "")
+    : "";
+
   const response = await fetch(`${resolveApiUrl()}${withWorkspaceId(path, workspaceId)}`, {
     ...requestInit,
     headers: {
       Authorization: resolveAuthToken(),
       "Content-Type": "application/json",
+      ...(internalSecret ? { "x-internal-secret": internalSecret } : {}),
       ...(requestInit.headers ?? {}),
     },
     cache: "no-store",
