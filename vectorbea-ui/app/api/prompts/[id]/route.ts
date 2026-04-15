@@ -15,7 +15,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("prompts")
-      .select("id, name, description, workspace_id, created_at, updated_at, prompt_versions(id, version_tag, is_published, content, parameters, created_at)")
+      .select("id, name, description, workspace_id, created_at, updated_at, prompt_versions(id, version_tag, is_published, template_text, parameters, created_at)")
       .eq("id", id)
       .single();
 
@@ -33,7 +33,7 @@ export async function GET(
       name: data.name,
       description: data.description ?? null,
       versionTag: latest?.version_tag ?? "v0",
-      templateText: latest?.content ?? "",
+      templateText: latest?.template_text ?? "",
       parameters: (latest?.parameters as Record<string, unknown>) ?? {},
       isPublished: latest?.is_published ?? false,
       createdAt: data.created_at ?? null,
@@ -93,7 +93,7 @@ export async function POST(
         .insert({
           prompt_id: id,
           version_tag: nextVersion,
-          content: payload.templateText,
+          template_text: payload.templateText,
           parameters: payload.parameters ?? {},
           is_published: false,
         });
@@ -104,7 +104,7 @@ export async function POST(
     // Return updated prompt via GET logic
     const { data, error } = await supabase
       .from("prompts")
-      .select("id, name, description, workspace_id, created_at, prompt_versions(id, version_tag, is_published, content, parameters, created_at)")
+      .select("id, name, description, workspace_id, created_at, prompt_versions(id, version_tag, is_published, template_text, parameters, created_at)")
       .eq("id", id)
       .single();
 
@@ -121,7 +121,7 @@ export async function POST(
       name: data.name,
       description: data.description ?? null,
       versionTag: latest?.version_tag ?? "v0",
-      templateText: latest?.content ?? "",
+      templateText: latest?.template_text ?? "",
       parameters: (latest?.parameters as Record<string, unknown>) ?? {},
       isPublished: latest?.is_published ?? false,
       createdAt: data.created_at ?? null,

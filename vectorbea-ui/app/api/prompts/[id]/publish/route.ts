@@ -41,7 +41,7 @@ export async function POST(
     // Return updated prompt
     const { data: prompt, error: promptError } = await supabase
       .from("prompts")
-      .select("id, name, description, workspace_id, created_at, prompt_versions(id, version_tag, is_published, content, parameters, created_at)")
+      .select("id, name, description, workspace_id, created_at, prompt_versions(id, version_tag, is_published, template_text, parameters, created_at)")
       .eq("id", id)
       .single();
 
@@ -57,7 +57,7 @@ export async function POST(
       name: prompt.name,
       description: prompt.description ?? null,
       versionTag: published?.version_tag ?? "v0",
-      templateText: published?.content ?? "",
+      templateText: published?.template_text ?? "",
       parameters: (published?.parameters as Record<string, unknown>) ?? {},
       isPublished: published?.is_published ?? false,
       createdAt: prompt.created_at ?? null,
