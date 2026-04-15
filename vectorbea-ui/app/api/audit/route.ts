@@ -1,13 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { apiFetch, type AuditLogView } from "@/lib/api";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import type { AuditLogView } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const query = request.nextUrl.searchParams.toString();
-    const logs = await apiFetch<AuditLogView[]>(`/api/audit${query ? `?${query}` : ""}`);
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
+    if (!workspaceId) {
+      return NextResponse.json([] as AuditLogView[]);
+    }
+
+    const supabase = createVectorBeaAdminClient();
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("id, workspace_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (error) throw new Error(error.message);
+
+    const logs: AuditLogView[] = (data ?? []).map((row) => ({
+      timestamp: row.created_at,
+      workspaceId: row.workspace_id,
+      promptName: row.prompt_name ?? "",
+      versionTag: row.version_tag ?? "",
+      proxyLatencyMs: row.proxy_latency_ms ?? 0,
+      llmLatencyMs: row.llm_latency_ms ?? 0,
+      tokenCount: row.token_count ?? 0,
+      metadata: (row.metadata as Record<string, unknown>) ?? {},
+    }));
+
     return NextResponse.json(logs);
   } catch (error) {
     return NextResponse.json(
