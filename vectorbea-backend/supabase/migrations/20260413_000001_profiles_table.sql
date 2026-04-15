@@ -1,6 +1,7 @@
 create schema if not exists vectorbea;
 
 drop view if exists vectorbea.profiles;
+drop table if exists vectorbea.profiles;
 
 create table if not exists vectorbea.profiles (
     id uuid primary key,
