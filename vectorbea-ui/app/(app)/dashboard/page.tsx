@@ -23,8 +23,15 @@ export default async function DashboardPage({
 }) {
   const { org, q } = await searchParams;
   const suffix = org ? `?workspaceId=${org}` : "";
-  const auditLogs = await apiFetch<AuditLogView[]>(`/api/audit${suffix}`);
-  const dashboardSummary = await apiFetch<DashboardSummary>(`/api/dashboard/summary${suffix}`);
+
+  // Backend (sidecar) may not be reachable — fail gracefully with empty state
+  // rather than crashing the entire page.
+  const [auditLogs, dashboardSummary] = await Promise.all([
+    apiFetch<AuditLogView[]>(`/api/audit${suffix}`).catch(() => [] as AuditLogView[]),
+    apiFetch<DashboardSummary>(`/api/dashboard/summary${suffix}`).catch(
+      () => ({ totalApiCallsLast24h: 0, averageLatencyMs: 0, activeAgents: 0 } as DashboardSummary),
+    ),
+  ]);
   const filteredLogs = q
     ? auditLogs.filter((log) =>
         `${log.promptName} ${log.versionTag}`.toLowerCase().includes(q.toLowerCase()),
