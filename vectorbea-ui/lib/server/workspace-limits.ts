@@ -96,17 +96,26 @@ export async function getWorkspacePromptCount(workspaceId: string) {
 }
 
 export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {
+  const supabase = createVectorBeaAdminClient();
+
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("organization_id")
+    .eq("id", workspaceId)
+    .single();
+
+  if (!workspace?.organization_id) return 0;
+
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const nextMonthStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
   );
 
-  const supabase = createVectorBeaAdminClient();
   const { count, error } = await supabase
     .from("audit_logs")
     .select("id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
+    .eq("organization_id", workspace.organization_id)
     .gte("created_at", monthStart.toISOString())
     .lt("created_at", nextMonthStart.toISOString());
 
