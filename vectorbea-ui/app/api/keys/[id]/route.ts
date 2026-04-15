@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { apiFetch } from "@/lib/api";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +10,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const workspaceId = request.nextUrl.searchParams.get("workspaceId");
-    await apiFetch(`/api/keys/${id}`, { method: "DELETE", workspaceId });
+    const supabase = createVectorBeaAdminClient();
+    const { error } = await supabase.from("api_keys").delete().eq("id", id);
+    if (error) throw new Error(error.message);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return NextResponse.json(

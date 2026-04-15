@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { apiFetch } from "@/lib/api";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import {
   getWorkspaceMonthlyAuditCount,
   getWorkspacePlanLimits,
 } from "@/lib/server/workspace-limits";
 
 export const dynamic = "force-dynamic";
+
+type AuditEntry = {
+  promptVersionId?: string;
+  proxyLatencyMs?: number;
+  llmLatencyMs?: number;
+  tokenCount?: number;
+  promptName?: string;
+  versionTag?: string;
+  metadata?: Record<string, unknown>;
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,20 +41,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payload = await request.json();
-    const response = await apiFetch("/api/audit/batch", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      workspaceId,
-    });
+    const payload = (await request.json()) as AuditEntry[];
+    const entries = Array.isArray(payload) ? payload : [payload];
 
-    return NextResponse.json(response, { status: 201 });
+    const supabase = createVectorBeaAdminClient();
+
+    const rows = entries.map((e) => ({
+      workspace_id: workspaceId,
+      prompt_version_id: e.promptVersionId ?? null,
+      proxy_latency_ms: e.proxyLatencyMs ?? 0,
+      llm_latency_ms: e.llmLatencyMs ?? 0,
+      token_count: e.tokenCount ?? 0,
+      prompt_name: e.promptName ?? "",
+      version_tag: e.versionTag ?? "",
+      metadata: e.metadata ?? {},
+    }));
+
+    const { error } = await supabase.from("audit_logs").insert(rows);
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({ inserted: rows.length }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to insert audit logs",
-      },
+      { error: error instanceof Error ? error.message : "Failed to insert audit logs" },
       { status: 500 },
     );
   }
