@@ -19,6 +19,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import type { Route } from "next";
+
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 export default function AuthCallbackPage() {
@@ -34,7 +36,7 @@ export default function AuthCallbackPage() {
       const next = searchParams.get("next") ?? "/dashboard";
 
       if (!code) {
-        router.replace("/login?error=no_code");
+        router.replace("/login?error=no_code" as Route);
         return;
       }
 
@@ -60,13 +62,13 @@ export default function AuthCallbackPage() {
 
         if (!cancelled) {
           // Resolve post-login destination — /dashboard or /onboarding
-          router.replace(next.startsWith("/") ? next : "/dashboard");
+          router.replace((next.startsWith("/") ? next : "/dashboard") as Route);
         }
       } catch (err) {
         console.error("[auth/callback]", err);
         if (!cancelled) {
           setStatus("error");
-          setTimeout(() => router.replace("/login?error=callback_failed"), 2000);
+          setTimeout(() => router.replace("/login?error=callback_failed" as Route), 2000);
         }
       }
     }
