@@ -201,7 +201,7 @@ docker pull vectorbea/vectorbea-proxy:latest`}</Code>
           The official VectorBea Python SDK wraps the proxy API and gives you
           a clean, typed interface — no manual HTTP calls required.
         </p>
-        <Code lang="bash">{`pip install vectorbea-sdk`}</Code>
+        <Code lang="bash">{`pip install vectorbea`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
           The SDK requires Python 3.8+ and has a single dependency:{" "}
           <InlineCode>requests</InlineCode>.

@@ -32,7 +32,7 @@ class HttpClient:
             {
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": "vectorbea-python/0.1.0",
+                "User-Agent": "vectorbea/0.1.0",
             }
         )
 
