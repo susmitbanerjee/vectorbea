@@ -12,6 +12,7 @@ jobs:
     environment: pypi
 
     permissions:
+      contents: read    # required to checkout the repository
       id-token: write   # required for trusted publishing (OIDC — no token needed)
 
     steps:
