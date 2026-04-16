@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+
 import { Activity, Bot, Zap, CheckCircle2, Layers, Tag, FileText } from "lucide-react";
 
 import { MetricCard } from "@/components/dashboard/metric-card";
@@ -7,11 +9,9 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  apiFetch,
-  type AuditLogView,
-  type DashboardSummary,
-} from "@/lib/api";
+import type { AuditLogView, DashboardSummary } from "@/lib/api";
+import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -21,17 +21,50 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ org?: string; q?: string }>;
 }) {
-  const { org, q } = await searchParams;
-  const suffix = org ? `?workspaceId=${org}` : "";
+  const { org: workspaceId, q } = await searchParams;
 
-  // Backend (sidecar) may not be reachable — fail gracefully with empty state
-  // rather than crashing the entire page.
-  const [auditLogs, dashboardSummary] = await Promise.all([
-    apiFetch<AuditLogView[]>(`/api/audit${suffix}`).catch(() => [] as AuditLogView[]),
-    apiFetch<DashboardSummary>(`/api/dashboard/summary${suffix}`).catch(
-      () => ({ totalApiCallsLast24h: 0, averageLatencyMs: 0, activeAgents: 0 } as DashboardSummary),
-    ),
-  ]);
+  let auditLogs: AuditLogView[] = [];
+  let dashboardSummary: DashboardSummary = { totalApiCallsLast24h: 0, averageLatencyMs: 0, activeAgents: 0 };
+
+  if (workspaceId) {
+    const cookieStore = await cookies();
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+
+    if (user) {
+      const supabase = createVectorBeaAdminClient();
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      const { data } = await supabase
+        .from("audit_logs")
+        .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      auditLogs = (data ?? []).map((row) => ({
+        timestamp: row.created_at,
+        workspaceId: workspaceId,
+        promptName: row.prompt_name ?? "",
+        versionTag: row.version_tag ?? "",
+        proxyLatencyMs: row.proxy_latency_ms ?? 0,
+        llmLatencyMs: row.llm_latency_ms ?? 0,
+        tokenCount: row.token_count ?? 0,
+        metadata: (row.metadata as Record<string, unknown>) ?? {},
+      }));
+
+      const recentLogs = auditLogs.filter((l) => l.timestamp >= since24h);
+      const avgLatency = recentLogs.length > 0
+        ? Math.round(recentLogs.reduce((s, l) => s + l.proxyLatencyMs, 0) / recentLogs.length)
+        : 0;
+
+      dashboardSummary = {
+        totalApiCallsLast24h: recentLogs.length,
+        averageLatencyMs: avgLatency,
+        activeAgents: 0,
+      };
+    }
+  }
+
   const filteredLogs = q
     ? auditLogs.filter((log) =>
         `${log.promptName} ${log.versionTag}`.toLowerCase().includes(q.toLowerCase()),
@@ -65,6 +98,8 @@ export default async function DashboardPage({
     },
   ];
 
+  const suffix = workspaceId ? `?workspaceId=${workspaceId}` : "";
+
   return (
     <div className="min-h-screen">
       <AppHeader
@@ -80,7 +115,7 @@ export default async function DashboardPage({
             >
               Export JSON
             </a>
-            <a href={`/prompts${org ? `?org=${org}` : ""}`} className={cn(buttonVariants())}>
+            <a href={workspaceId ? `/prompts?org=${workspaceId}` : "/prompts"} className={cn(buttonVariants())}>
               New Release
             </a>
           </>

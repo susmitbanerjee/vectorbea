@@ -1,11 +1,12 @@
+import { cookies } from "next/headers";
+
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  apiFetch,
-  type AuditLogView,
-} from "@/lib/api";
+import type { AuditLogView } from "@/lib/api";
+import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { Activity, Clock, FileText, Zap } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -54,41 +55,28 @@ function summarizeAudit(metadata: Record<string, unknown>): AuditSummary {
   const action = typeof metadata.action === "string" ? metadata.action : undefined;
   const source = typeof metadata.source === "string" ? metadata.source : undefined;
 
-  // Publish audit event
   if (action === "publish") {
     const next = String(metadata.published_version ?? "");
     const prev = metadata.previous_published_version
       ? String(metadata.previous_published_version)
       : null;
     return {
-      headline: prev
-        ? `Published ${next} (replaces ${prev})`
-        : `Published ${next}`,
+      headline: prev ? `Published ${next} (replaces ${prev})` : `Published ${next}`,
       tone: "publish",
       changes: [],
     };
   }
 
-  // Update audit event — compute a field-level diff from before/after blobs
   const changes: AuditChange[] = [];
   const beforeTpl = metadata.before_template;
   const afterTpl = metadata.after_template;
-  if (
-    typeof beforeTpl === "string" &&
-    typeof afterTpl === "string" &&
-    beforeTpl !== afterTpl
-  ) {
+  if (typeof beforeTpl === "string" && typeof afterTpl === "string" && beforeTpl !== afterTpl) {
     changes.push({ kind: "template", before: beforeTpl, after: afterTpl });
   }
 
   const beforeParams = metadata.before_parameters;
   const afterParams = metadata.after_parameters;
-  if (
-    beforeParams &&
-    afterParams &&
-    typeof beforeParams === "object" &&
-    typeof afterParams === "object"
-  ) {
+  if (beforeParams && afterParams && typeof beforeParams === "object" && typeof afterParams === "object") {
     changes.push(
       ...diffParameterObjects(
         beforeParams as Record<string, unknown>,
@@ -102,18 +90,12 @@ function summarizeAudit(metadata: Record<string, unknown>): AuditSummary {
     const templateChanges = changes.filter((c) => c.kind === "template").length;
     const fieldChanges = changes.filter((c) => c.kind === "field").length;
     if (templateChanges > 0) parts.push("template");
-    if (fieldChanges > 0) {
-      parts.push(`${fieldChanges} parameter${fieldChanges === 1 ? "" : "s"}`);
-    }
-    const headline =
-      parts.length > 0 ? `Updated ${parts.join(" & ")}` : "Updated prompt";
+    if (fieldChanges > 0) parts.push(`${fieldChanges} parameter${fieldChanges === 1 ? "" : "s"}`);
+    const headline = parts.length > 0 ? `Updated ${parts.join(" & ")}` : "Updated prompt";
     return { headline, tone: "update", changes };
   }
 
-  // Runtime audit from SDK / proxy
-  if (source) {
-    return { headline: `Runtime call`, tone: "runtime", changes: [] };
-  }
+  if (source) return { headline: "Runtime call", tone: "runtime", changes: [] };
   return { headline: "Runtime call", tone: "runtime", changes: [] };
 }
 
@@ -126,7 +108,6 @@ function relativeTime(timestamp: string) {
   const now = Date.now();
   const then = new Date(timestamp).getTime();
   const diffSeconds = Math.floor((now - then) / 1000);
-
   if (diffSeconds < 60) return `${diffSeconds}s ago`;
   const diffMinutes = Math.floor(diffSeconds / 60);
   if (diffMinutes < 60) return `${diffMinutes}m ago`;
@@ -159,11 +140,9 @@ function computeStats(logs: AuditLogView[]) {
   if (logs.length === 0) {
     return { total: 0, avgLlmLatency: 0, avgProxyLatency: 0, totalTokens: 0, mostActivePrompt: "N/A" };
   }
-
   const avgLlmLatency = Math.round(logs.reduce((sum, l) => sum + l.llmLatencyMs, 0) / logs.length);
   const avgProxyLatency = logs.reduce((sum, l) => sum + l.proxyLatencyMs, 0) / logs.length;
   const totalTokens = logs.reduce((sum, l) => sum + l.tokenCount, 0);
-
   const promptCounts = new Map<string, number>();
   for (const log of logs) {
     promptCounts.set(log.promptName, (promptCounts.get(log.promptName) ?? 0) + 1);
@@ -171,12 +150,8 @@ function computeStats(logs: AuditLogView[]) {
   let mostActivePrompt = "";
   let maxCount = 0;
   for (const [name, count] of promptCounts) {
-    if (count > maxCount) {
-      mostActivePrompt = name;
-      maxCount = count;
-    }
+    if (count > maxCount) { mostActivePrompt = name; maxCount = count; }
   }
-
   return { total: logs.length, avgLlmLatency, avgProxyLatency, totalTokens, mostActivePrompt };
 }
 
@@ -185,13 +160,43 @@ export default async function AuditLogsPage({
 }: {
   searchParams: Promise<{ org?: string; q?: string }>;
 }) {
-  const { org, q } = await searchParams;
-  const suffix = org ? `?workspaceId=${org}` : "";
-  const logs = (await apiFetch<AuditLogView[]>(`/api/audit${suffix}`)).filter((log) =>
-    !q
-      ? true
-      : `${log.promptName} ${log.versionTag} ${JSON.stringify(log.metadata)}`.toLowerCase().includes(q.toLowerCase()),
-  );
+  const { org: workspaceId, q } = await searchParams;
+
+  let allLogs: AuditLogView[] = [];
+
+  if (workspaceId) {
+    const cookieStore = await cookies();
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+
+    if (user) {
+      const supabase = createVectorBeaAdminClient();
+      const { data } = await supabase
+        .from("audit_logs")
+        .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      allLogs = (data ?? []).map((row) => ({
+        timestamp: row.created_at,
+        workspaceId: workspaceId,
+        promptName: row.prompt_name ?? "",
+        versionTag: row.version_tag ?? "",
+        proxyLatencyMs: row.proxy_latency_ms ?? 0,
+        llmLatencyMs: row.llm_latency_ms ?? 0,
+        tokenCount: row.token_count ?? 0,
+        metadata: (row.metadata as Record<string, unknown>) ?? {},
+      }));
+    }
+  }
+
+  const logs = q
+    ? allLogs.filter((log) =>
+        `${log.promptName} ${log.versionTag} ${JSON.stringify(log.metadata)}`
+          .toLowerCase()
+          .includes(q.toLowerCase()),
+      )
+    : allLogs;
 
   const stats = computeStats(logs);
 
@@ -265,12 +270,8 @@ export default async function AuditLogsPage({
                             {relativeTime(log.timestamp)}
                           </span>
                         </TableCell>
-                        <TableCell>
-                          <span className="font-medium">{log.promptName}</span>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{log.versionTag}</Badge>
-                        </TableCell>
+                        <TableCell><span className="font-medium">{log.promptName}</span></TableCell>
+                        <TableCell><Badge variant="outline">{log.versionTag}</Badge></TableCell>
                         <TableCell>
                           <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>
                             {formatProxyLatency(log.proxyLatencyMs)}
@@ -284,11 +285,9 @@ export default async function AuditLogsPage({
                           {(() => {
                             const summary = summarizeAudit(log.metadata);
                             const badgeVariant =
-                              summary.tone === "publish"
-                                ? "success"
-                                : summary.tone === "update"
-                                  ? "warning"
-                                  : "outline";
+                              summary.tone === "publish" ? "success"
+                              : summary.tone === "update" ? "warning"
+                              : "outline";
                             return (
                               <div className="space-y-1.5">
                                 <Badge variant={badgeVariant} className="text-[11px]">
@@ -297,44 +296,28 @@ export default async function AuditLogsPage({
                                 {summary.changes.length > 0 && (
                                   <details className="group/details">
                                     <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
-                                      View {summary.changes.length} change
-                                      {summary.changes.length === 1 ? "" : "s"}
+                                      View {summary.changes.length} change{summary.changes.length === 1 ? "" : "s"}
                                     </summary>
                                     <ul className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
                                       {summary.changes.map((change, idx) => (
-                                        <li
-                                          key={`${change.kind}-${idx}`}
-                                          className="text-[11px]"
-                                        >
+                                        <li key={`${change.kind}-${idx}`} className="text-[11px]">
                                           {change.kind === "template" ? (
                                             <div className="space-y-1">
-                                              <div className="font-semibold text-foreground">
-                                                Template
-                                              </div>
+                                              <div className="font-semibold text-foreground">Template</div>
                                               <div className="grid gap-1 md:grid-cols-2">
                                                 <div className="rounded bg-red-500/10 p-2 text-red-600 dark:text-red-300">
-                                                  <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">
-                                                    Before
-                                                  </div>
-                                                  <pre className="whitespace-pre-wrap font-mono">
-                                                    {truncate(change.before, 240)}
-                                                  </pre>
+                                                  <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">Before</div>
+                                                  <pre className="whitespace-pre-wrap font-mono">{truncate(change.before, 240)}</pre>
                                                 </div>
                                                 <div className="rounded bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-300">
-                                                  <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">
-                                                    After
-                                                  </div>
-                                                  <pre className="whitespace-pre-wrap font-mono">
-                                                    {truncate(change.after, 240)}
-                                                  </pre>
+                                                  <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">After</div>
+                                                  <pre className="whitespace-pre-wrap font-mono">{truncate(change.after, 240)}</pre>
                                                 </div>
                                               </div>
                                             </div>
                                           ) : (
                                             <div className="flex flex-wrap items-center gap-1.5">
-                                              <span className="font-mono font-semibold text-foreground">
-                                                {change.path}:
-                                              </span>
+                                              <span className="font-mono font-semibold text-foreground">{change.path}:</span>
                                               <span className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-red-600 dark:text-red-300 line-through">
                                                 {truncate(change.before, 40)}
                                               </span>
