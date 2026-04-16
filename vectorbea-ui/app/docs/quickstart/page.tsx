@@ -122,7 +122,7 @@ export default function QuickstartPage() {
         <Callout kind="info">
           The seed script inserts a ready-to-use <InlineCode>dev_local_123</InlineCode> API key,
           a sample <InlineCode>hello-world</InlineCode> prompt, and deterministic UUIDs that
-          match the sidecar's local auth bypass. You only need to run the seed once.
+          match the sidecar&apos;s local auth bypass. You only need to run the seed once.
         </Callout>
       </Step>
 
