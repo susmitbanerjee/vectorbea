@@ -1,7 +1,6 @@
 services:
   vectorbea-agent:
-    build:
-      context: ./vectorbea-agent
+    image: vectorbea/vectorbea-agent:latest
     environment:
       VECTORBEA_API_URL: https://dev.vectorbea.com
       VECTORBEA_AGENT_TOKEN: ${VECTORBEA_AGENT_TOKEN:?VECTORBEA_AGENT_TOKEN must be set}
@@ -17,8 +16,7 @@ services:
     restart: unless-stopped
 
   vectorbea-proxy:
-    build:
-      context: ./vectorbea-proxy
+    image: vectorbea/vectorbea-proxy:latest
     environment:
       VECTORBEA_HUB_URL: ${VECTORBEA_HUB_URL:-https://dev.vectorbea.com}
       VECTORBEA_KEY: ${VECTORBEA_PROXY_API_KEY:-local-dev-placeholder}

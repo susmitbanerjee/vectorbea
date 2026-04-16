@@ -1,7 +1,7 @@
 # VectorBea Proxy — Deployment Guide
 
 > **Audience:** Engineers integrating the VectorBea Proxy sidecar into their own infrastructure.  
-> **Proxy image:** `ghcr.io/my-org/vectorbea-proxy:latest`  
+> **Proxy image:** `vectorbea/vectorbea-proxy:latest`  
 > **Support:** support@vectorbea.io
 
 ---
@@ -100,7 +100,7 @@ services:
 
   # ── VectorBea Proxy sidecar ─────────────────────────────────────────────────
   vectorbea-proxy:
-    image: ghcr.io/my-org/vectorbea-proxy:latest
+    image: vectorbea/vectorbea-proxy:latest
     container_name: vectorbea-proxy
     restart: unless-stopped
     environment:
@@ -219,7 +219,7 @@ app:
 # ── VectorBea Proxy sidecar ───────────────────────────────────────────────────
 vectorbea:
   image:
-    repository: ghcr.io/my-org/vectorbea-proxy
+    repository: vectorbea/vectorbea-proxy
     tag: latest
     pullPolicy: IfNotPresent
   # Proxy listens on this port inside the Pod (localhost only).
@@ -518,13 +518,4 @@ Your `VECTORBEA_API_KEY` is invalid or expired. Regenerate it from the VectorBea
 The `promptName` in your request does not exist in the connected workspace. Check the VectorBea dashboard → **Prompts**.
 
 **`ImagePullBackOff` on the proxy container**  
-The GHCR image is private. Authenticate with:
-```bash
-echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-kubectl create secret docker-registry ghcr-pull-secret \
-  --docker-server=ghcr.io \
-  --docker-username=YOUR_GITHUB_USERNAME \
-  --docker-password=$GITHUB_TOKEN \
-  --namespace my-app
-```
-Then add `imagePullSecrets: [{name: ghcr-pull-secret}]` to your Pod spec or `values.yaml`.
+Confirm the image name is correct (`vectorbea/vectorbea-proxy:latest`) and that Docker Hub is reachable from your cluster. For air-gapped environments, mirror the image to your internal registry and update `values.vectorbea.image.repository` accordingly.

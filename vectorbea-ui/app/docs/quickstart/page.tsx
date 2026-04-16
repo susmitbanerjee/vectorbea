@@ -148,24 +148,24 @@ export default function QuickstartPage() {
         </Callout>
       </Step>
 
-      <Step n={3} title="Pull and run the published proxy image">
+      <Step n={3} title="Pull and run the official VectorBea proxy image">
         <p className="text-sm leading-7 text-muted-foreground">
-          The proxy is published to GitHub Container Registry. Use the image tag
-          that matches your environment:
+          The official proxy image is published on Docker Hub. Pull the tag that
+          matches your environment:
         </p>
-        <Code lang="bash">{`# Dev environment
-docker pull ghcr.io/susmitbanerjee/vectorbea/vectorbee-proxy:dev
+        <Code lang="bash">{`# Latest stable release
+docker pull vectorbea/vectorbea-proxy:latest
 
-# Production/stable environment
-docker pull ghcr.io/susmitbanerjee/vectorbea/vectorbee-proxy:latest`}</Code>
+# Pinned to a specific version (recommended for production)
+docker pull vectorbea/vectorbea-proxy:1.0.0`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
           Then start the container locally:
         </p>
         <Code lang="bash">{`docker run --rm -p 8080:8080 \\
-  -e VECTORBEA_HUB_URL="https://dev.vectorbea.com" \\
+  -e VECTORBEA_HUB_URL="https://app.vectorbea.com" \\
   -e VECTORBEA_KEY="vb_your_workspace_api_key" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
-  ghcr.io/susmitbanerjee/vectorbea/vectorbee-proxy:dev`}</Code>
+  vectorbea/vectorbea-proxy:latest`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
           You should see a startup message similar to:
         </p>
