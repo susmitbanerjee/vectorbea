@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import { apiFetch, type DashboardSummary } from "@/lib/api";
 import {
   getAuthenticatedUserFromCookies,
   getPostLoginRedirectForUser,
@@ -21,9 +20,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     redirect("/login");
   }
 
-  const [{ organizations, redirectTo }, summary, profile] = await Promise.all([
+  const [{ organizations, redirectTo }, profile] = await Promise.all([
     getPostLoginRedirectForUser(user.id),
-    apiFetch<DashboardSummary>("/api/dashboard/summary").catch(() => null),
     Promise.resolve(
       createVectorBeaAdminClient()
         .from("profiles")
@@ -40,7 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <WorkspaceProvider organizations={organizations}>
       <div className="flex min-h-screen">
-        <AppSidebar summary={summary} user={profile} />
+        <AppSidebar summary={null} user={profile} />
         <main className="min-w-0 flex-1">{children}</main>
       </div>
     </WorkspaceProvider>
