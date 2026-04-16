@@ -3,9 +3,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { VECTORBEA_SCHEMA } from "@/lib/supabase-schema";
 
-// Next.js inlines NEXT_PUBLIC_* vars at build time via static analysis.
-// They MUST be referenced as literal identifiers — process.env[dynamicKey]
-// always returns undefined for NEXT_PUBLIC_ vars in the browser bundle.
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -30,12 +27,15 @@ let browserClient: ReturnType<typeof createBrowserClient> | null = null;
 
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
-    // createBrowserClient stores the PKCE code_verifier in cookies (not
-    // localStorage) so the server-side route handler can read it back
-    // during the OAuth callback code exchange.
-    // Default flowType is "pkce". The server-side /auth/callback/route.ts
-    // handles the code exchange and writes the session cookie.
-    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
+    // Use implicit flow so the session is delivered via the URL hash fragment.
+    // PKCE requires the code_verifier to survive an OAuth redirect, but
+    // @supabase/ssr's createBrowserClient stores it in localStorage which is
+    // wiped between page navigations in some environments, breaking the
+    // exchange. Implicit flow has no code_verifier — the access_token arrives
+    // in the hash and is immediately available to the callback page.
+    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+      auth: { flowType: "implicit" },
+    });
   }
   return browserClient;
 }

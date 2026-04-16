@@ -1,55 +1,50 @@
 "use client";
 
 /**
- * OAuth PKCE callback — client-side exchange.
+ * OAuth implicit-flow callback.
  *
- * Why client-side?
- * createBrowserClient (@supabase/ssr) stores the PKCE code_verifier in
- * client-side storage (cookie / localStorage). When the OAuth provider
- * redirects back here, browsers may strip cookies that have SameSite=Strict,
- * so a server-side Route Handler cannot reliably read the verifier.
- * Running exchangeCodeForSession() in the browser guarantees the verifier
- * is always accessible, regardless of the SameSite policy.
+ * With flowType:"implicit", Supabase delivers the session via the URL hash
+ * fragment:  /auth/callback#access_token=...&refresh_token=...
  *
- * After a successful exchange we POST the raw access_token to
- * /api/auth/set-session, which sets the httpOnly AUTH_COOKIE_NAME cookie
- * that every server component / API route reads for auth.
+ * createBrowserClient detects the hash automatically and makes the session
+ * available via getSession(). We read it here, POST the access_token to
+ * /api/auth/set-session so the server can write the httpOnly cookie, then
+ * redirect to the appropriate page.
+ *
+ * Why implicit instead of PKCE?
+ * PKCE requires the code_verifier to survive the full OAuth redirect round-trip.
+ * @supabase/ssr's createBrowserClient stores it in localStorage which is reset
+ * between page navigations in some browsers/environments, making the exchange
+ * fail with "PKCE code verifier not found in storage". Implicit flow avoids
+ * this entirely — no verifier, no storage dependency.
  */
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-
+import { useRouter } from "next/navigation";
 import type { Route } from "next";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [status, setStatus] = useState<"pending" | "error">("pending");
 
   useEffect(() => {
     let cancelled = false;
 
-    async function exchange() {
-      const code = searchParams.get("code");
-      const next = searchParams.get("next") ?? "/dashboard";
-
-      if (!code) {
-        router.replace("/login?error=no_code" as Route);
-        return;
-      }
-
+    async function finish() {
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+        // Wait for createBrowserClient to parse the hash and hydrate the session.
+        // getSession() returns the session that was embedded in the hash fragment.
+        const { data, error } = await supabase.auth.getSession();
 
         if (error || !data.session) {
-          throw new Error(error?.message ?? "Session exchange failed");
+          throw new Error(error?.message ?? "No session found after OAuth redirect");
         }
 
-        // Persist the access token as a server-readable httpOnly cookie so
-        // that getAuthenticatedUserFromCookies() works in Server Components.
+        // Write an httpOnly server cookie so Server Components can authenticate.
         const res = await fetch("/api/auth/set-session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -61,7 +56,11 @@ export default function AuthCallbackPage() {
         }
 
         if (!cancelled) {
-          // Resolve post-login destination — /dashboard or /onboarding
+          // Determine post-login destination from the hash's `next` param or default.
+          const hashParams = new URLSearchParams(
+            window.location.hash.replace("#", "?"),
+          );
+          const next = hashParams.get("next") ?? "/dashboard";
           router.replace((next.startsWith("/") ? next : "/dashboard") as Route);
         }
       } catch (err) {
@@ -73,7 +72,7 @@ export default function AuthCallbackPage() {
       }
     }
 
-    void exchange();
+    void finish();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
