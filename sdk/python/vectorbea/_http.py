@@ -72,5 +72,8 @@ class HttpClient:
                 f"Detail: {message}"
             )
         if resp.status_code == 404:
-            raise NotFoundError(message)
+            raise NotFoundError(
+                message or f"Resource not found at {resp.url}. "
+                "Check the prompt name exists in your workspace and has a published version."
+            )
         raise VectorBeaError(f"HTTP {resp.status_code}: {message}")

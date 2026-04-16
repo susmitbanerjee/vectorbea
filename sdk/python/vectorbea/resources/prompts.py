@@ -68,5 +68,5 @@ class Prompts:
         >>> print(prompt.format(name="Alice", product="Acme AI"))
         Hello Alice, welcome to Acme AI!
         """
-        data = self._http.get(f"/api/proxy/prompts/{name}")
+        data = self._http.get(f"/api/prompts/{name}")
         return PromptTemplate._from_dict(data)
