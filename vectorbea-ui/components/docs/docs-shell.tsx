@@ -31,7 +31,7 @@ const DOCS_NAV: Array<{
   {
     href: "/docs/quickstart",
     title: "Quickstart",
-    description: "Pull the GHCR image and call the proxy from your own codebase.",
+    description: "Pull the Docker Hub image and call the proxy from your own codebase.",
     icon: Rocket,
   },
   {

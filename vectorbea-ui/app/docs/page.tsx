@@ -36,7 +36,7 @@ export default function DocsIntroPage() {
           </p>
           <ol className="list-decimal space-y-2 pl-5 text-sm leading-7 text-muted-foreground">
             <li>Create a workspace and API key in the VectorBea dashboard.</li>
-            <li>Pull the published proxy image from GitHub Container Registry.</li>
+            <li>Pull the published proxy image from Docker Hub.</li>
             <li>Run that proxy next to your own Python, Node.js, or JVM service.</li>
             <li>Call the local proxy from your application code.</li>
           </ol>
@@ -95,7 +95,7 @@ export default function DocsIntroPage() {
         <ul className="space-y-3 pl-5">
           {[
             "Create prompts and publish versions in the VectorBea dashboard.",
-            "Run the VectorBea proxy image from GitHub Container Registry in Docker or Kubernetes.",
+            "Run the VectorBea proxy image from Docker Hub in Docker or Kubernetes.",
             "Point your application at the local proxy instead of embedding prompt text directly in code.",
             "Send execution traces back through the proxy so the dashboard can show audit and latency data.",
           ].map((item) => (
@@ -189,7 +189,7 @@ export default function DocsIntroPage() {
             {
               href: "/docs/quickstart" as Route,
               label: "Quickstart",
-              desc: "Pull the GHCR image and test it from your own app",
+              desc: "Pull the Docker Hub image and test it from your own app",
             },
             {
               href: "/docs/architecture" as Route,

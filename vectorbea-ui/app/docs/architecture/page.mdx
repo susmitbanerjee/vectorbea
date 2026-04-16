@@ -29,7 +29,7 @@ The **data plane** runs in the customer environment. In the most common
 integration, that means:
 
 - your own Python, Node.js, or JVM application
-- a local VectorBea proxy container pulled from GHCR
+- a local VectorBea proxy container pulled from Docker Hub
 - optionally, an outbound agent for heartbeat and state sync
 
 ## System boundary
@@ -66,7 +66,7 @@ If you are integrating VectorBea into an existing service, the platform model
 looks like this:
 
 1. Create prompts and publish versions in the hosted dashboard.
-2. Pull the VectorBea proxy image from GitHub Container Registry.
+2. Pull the VectorBea proxy image from Docker Hub.
 3. Run the proxy alongside your own application.
 4. Replace hardcoded prompt strings with local proxy calls.
 
