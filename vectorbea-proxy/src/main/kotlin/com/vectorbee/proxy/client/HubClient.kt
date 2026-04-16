@@ -40,7 +40,7 @@ class HubClient(private val config: AppConfig) {
     }
 
     suspend fun fetchPrompt(name: String): PromptPayload =
-        client.get("${config.hubUrl}/api/prompts/${name.encodeURLPathPart()}").body()
+        client.get("${config.hubUrl}/api/proxy/prompts/${name.encodeURLPathPart()}").body()
 
     suspend fun flushAuditBatch(logs: List<AuditEvent>) {
         val response = client.post("${config.hubUrl}/api/audit/batch") {

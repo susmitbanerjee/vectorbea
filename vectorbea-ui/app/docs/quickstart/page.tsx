@@ -150,9 +150,10 @@ export default function QuickstartPage() {
 
       <Step n={3} title="Pull and run the official VectorBea proxy image">
         <p className="text-sm leading-7 text-muted-foreground">
-          The official proxy image is published on Docker Hub. For testing
-          against <InlineCode>dev.vectorbea.com</InlineCode>, use the{" "}
-          <InlineCode>dev</InlineCode> tag:
+          The official proxy image is published on Docker Hub. Use the{" "}
+          <InlineCode>dev</InlineCode> tag for development testing and point it
+          at a VectorBea <strong>hub API base URL</strong> that exposes the
+          proxy-facing prompt routes:
         </p>
         <Code lang="bash">{`# Dev / testing
 docker pull vectorbea/vectorbea-proxy:dev
@@ -163,10 +164,18 @@ docker pull vectorbea/vectorbea-proxy:latest`}</Code>
           Then start the container locally:
         </p>
         <Code lang="bash">{`docker run --rm -p 8080:8080 \\
-  -e VECTORBEA_HUB_URL="https://dev.vectorbea.com" \\
+  -e VECTORBEA_HUB_URL="https://your-vectorbea-hub-api.example.com" \\
   -e VECTORBEA_KEY="vb_your_workspace_api_key" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
   vectorbea/vectorbea-proxy:dev`}</Code>
+        <Callout kind="warn">
+          <strong>Do not point the proxy at the frontend domain unless that
+          domain also exposes the proxy-compatible backend API.</strong> The
+          proxy expects a hub URL that serves{" "}
+          <InlineCode>/api/prompts/:name</InlineCode> using Bearer API-key
+          authentication. If you point it at a frontend-only deployment, prompt
+          fetches will fail even though the local container starts cleanly.
+        </Callout>
         <p className="text-sm leading-7 text-muted-foreground">
           You should see a startup message similar to:
         </p>
@@ -175,64 +184,87 @@ docker pull vectorbea/vectorbea-proxy:latest`}</Code>
 
       <Step n={4} title="Verify prompt resolution with curl">
         <p className="text-sm leading-7 text-muted-foreground">
-          Before wiring the proxy into your application, test the local endpoint
-          directly:
+          Before wiring the SDK into your application, confirm the proxy can
+          reach the hub and resolve prompts:
         </p>
-        <Code lang="bash">{`curl http://localhost:8080/v1/prompts/greet-user`}</Code>
+        <Code lang="bash">{`curl http://localhost:8080/api/proxy/prompts/greet-user \\
+  -H "Authorization: Bearer vb_your_api_key"`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
-          The proxy will fetch the published prompt from the VectorBea control
-          plane and return the active payload as JSON.
+          You should receive a JSON object with <InlineCode>templateText</InlineCode>,{" "}
+          <InlineCode>versionTag</InlineCode>, and the other prompt fields. A{" "}
+          <InlineCode>404</InlineCode> means the prompt has no published version yet.
         </p>
       </Step>
 
-      <Step n={5} title="Call the local proxy from your Python codebase">
+      <Step n={5} title="Install the Python SDK">
         <p className="text-sm leading-7 text-muted-foreground">
-          Your application should talk to the local proxy, not to the hosted
-          dashboard directly. A minimal Python integration looks like this:
+          The official VectorBea Python SDK wraps the proxy API and gives you
+          a clean, typed interface — no manual HTTP calls required.
         </p>
-        <Code lang="python">{`import requests
+        <Code lang="bash">{`pip install vectorbea-sdk`}</Code>
+        <p className="text-sm leading-7 text-muted-foreground">
+          The SDK requires Python 3.8+ and has a single dependency:{" "}
+          <InlineCode>requests</InlineCode>.
+        </p>
+      </Step>
 
-PROXY_URL = "http://localhost:8080"
+      <Step n={6} title="Fetch and render a prompt with the SDK">
+        <p className="text-sm leading-7 text-muted-foreground">
+          Instantiate the client once and reuse it across your application.
+          Point <InlineCode>base_url</InlineCode> at your local proxy when
+          developing, or omit it to use the hosted cloud endpoint in production.
+        </p>
+        <Code lang="python">{`import vectorbea
 
-def get_prompt(name: str) -> dict:
-    response = requests.get(f"{PROXY_URL}/v1/prompts/{name}", timeout=5)
-    response.raise_for_status()
-    return response.json()
+# Local development — proxy running on Docker
+client = vectorbea.VectorBea(
+    api_key="vb_your_api_key",
+    base_url="http://localhost:8080",
+)
 
-prompt = get_prompt("greet-user")
-template = prompt["templateText"]
-message = template.replace("{{name}}", "Alice").replace("{{product}}", "Acme AI")
+# Fetch the latest published version of a prompt
+prompt = client.prompts.get("greet-user")
 
-print(message)`}</Code>
+print(prompt.name)         # greet-user
+print(prompt.version_tag)  # v1.0.0
+print(prompt.template_text)
+# → Hello {{name}}, welcome to {{product}}!
+
+# Render the template by injecting variables
+message = prompt.format(name="Alice", product="Acme AI")
+print(message)
+# → Hello Alice, welcome to Acme AI!`}</Code>
         <Callout kind="info">
-          This is the main integration model: keep your existing application,
-          but swap hardcoded prompt strings for a local call to the VectorBea
-          proxy.
+          <strong>Zero code changes on prompt updates.</strong> When you publish
+          a new version in the dashboard, the next call to{" "}
+          <InlineCode>client.prompts.get()</InlineCode> returns it automatically.
+          Your application code never needs to change.
         </Callout>
       </Step>
 
-      <Step n={6} title="Send audit events back through the proxy">
+      <Step n={7} title="Production — use the cloud endpoint">
         <p className="text-sm leading-7 text-muted-foreground">
-          After each model invocation, send execution metadata to the local
-          proxy so VectorBea can show prompt usage, latency, and audit history
-          in the dashboard.
+          In production, omit <InlineCode>base_url</InlineCode> to target the
+          hosted VectorBea cloud, or set the{" "}
+          <InlineCode>VECTORBEA_BASE_URL</InlineCode> and{" "}
+          <InlineCode>VECTORBEA_API_KEY</InlineCode> environment variables so
+          no credentials appear in source code:
         </p>
-        <Code lang="python">{`import requests
+        <Code lang="bash">{`export VECTORBEA_API_KEY="vb_live_..."
+export VECTORBEA_BASE_URL="https://app.vectorbea.com"  # optional, this is the default`}</Code>
+        <Code lang="python">{`import vectorbea
 
-PROXY_URL = "http://localhost:8080"
+# Reads VECTORBEA_API_KEY and VECTORBEA_BASE_URL from the environment
+client = vectorbea.VectorBea()
 
-payload = {
-    "promptName": "greet-user",
-    "versionTag": "v1.0.0",
-    "proxyLatencyMs": 2,
-    "llmLatencyMs": 184,
-    "tokenCount": 64,
-    "metadata": {"environment": "local-dev"},
-}
+prompt  = client.prompts.get("customer-support-reply")
+message = prompt.format(customer_name="Bob", issue="billing")
 
-response = requests.post(f"{PROXY_URL}/v1/audit", json=payload, timeout=5)
-response.raise_for_status()
-print(response.json())`}</Code>
+# Pass the rendered string directly to your LLM of choice
+response = openai_client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": message}],
+)`}</Code>
       </Step>
 
       <section className="space-y-4 border-t border-border/60 pt-8">
@@ -241,11 +273,15 @@ print(response.json())`}</Code>
           {[
             {
               problem: "The container starts but prompt fetches fail",
-              fix: "Check VECTORBEA_HUB_URL and VECTORBEA_KEY first. The proxy authenticates to the hosted control plane with that key.",
+              fix: "Check VECTORBEA_HUB_URL and VECTORBEA_KEY first. The proxy must point to a hub API base URL that supports GET /api/prompts/:name with Bearer API-key authentication.",
             },
             {
               problem: "Container exits with `DB_URL or JDBC_DATABASE_URL must be set`",
               fix: "That means the image you pulled is an older backend/API image, not the current proxy runtime expected by these docs. For testing against dev.vectorbea.com, use vectorbea/vectorbea-proxy:dev until the stable latest tag is refreshed.",
+            },
+            {
+              problem: "Local proxy returns 500 for /v1/prompts/<name>",
+              fix: "This usually means the upstream hub URL is wrong for the proxy contract. A common mistake is pointing VECTORBEA_HUB_URL at the frontend domain, which does not expose the proxy-facing prompt-by-name API.",
             },
             {
               problem: "localhost:8080 does not respond",
