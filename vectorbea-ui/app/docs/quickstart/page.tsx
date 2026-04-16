@@ -89,7 +89,7 @@ export default function QuickstartPage() {
         <p className="text-lg leading-8 text-muted-foreground">
           This guide assumes you already have your own application codebase. You
           will create a workspace in the VectorBea dashboard, pull the published
-          Docker image from GitHub Container Registry, run the proxy locally,
+          Docker image from Docker Hub, run the proxy locally,
           and call it from a simple Python script.
         </p>
       </section>
@@ -97,7 +97,7 @@ export default function QuickstartPage() {
       <Callout kind="info">
         <strong>You do not need this repository to get started.</strong> The
         normal customer workflow is: create prompts in the hosted dashboard,
-        pull the VectorBea proxy image from GHCR, run it in Docker, and point
+        pull the VectorBea proxy image from Docker Hub, run it in Docker, and point
         your own service at <InlineCode>http://localhost:8080</InlineCode>.
       </Callout>
 
@@ -150,22 +150,23 @@ export default function QuickstartPage() {
 
       <Step n={3} title="Pull and run the official VectorBea proxy image">
         <p className="text-sm leading-7 text-muted-foreground">
-          The official proxy image is published on Docker Hub. Pull the tag that
-          matches your environment:
+          The official proxy image is published on Docker Hub. For testing
+          against <InlineCode>dev.vectorbea.com</InlineCode>, use the{" "}
+          <InlineCode>dev</InlineCode> tag:
         </p>
-        <Code lang="bash">{`# Latest stable release
-docker pull vectorbea/vectorbea-proxy:latest
+        <Code lang="bash">{`# Dev / testing
+docker pull vectorbea/vectorbea-proxy:dev
 
-# Pinned to a specific version (recommended for production)
-docker pull vectorbea/vectorbea-proxy:1.0.0`}</Code>
+# Stable production tag
+docker pull vectorbea/vectorbea-proxy:latest`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
           Then start the container locally:
         </p>
         <Code lang="bash">{`docker run --rm -p 8080:8080 \\
-  -e VECTORBEA_HUB_URL="https://app.vectorbea.com" \\
+  -e VECTORBEA_HUB_URL="https://dev.vectorbea.com" \\
   -e VECTORBEA_KEY="vb_your_workspace_api_key" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
-  vectorbea/vectorbea-proxy:latest`}</Code>
+  vectorbea/vectorbea-proxy:dev`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
           You should see a startup message similar to:
         </p>
@@ -243,6 +244,10 @@ print(response.json())`}</Code>
               fix: "Check VECTORBEA_HUB_URL and VECTORBEA_KEY first. The proxy authenticates to the hosted control plane with that key.",
             },
             {
+              problem: "Container exits with `DB_URL or JDBC_DATABASE_URL must be set`",
+              fix: "That means the image you pulled is an older backend/API image, not the current proxy runtime expected by these docs. For testing against dev.vectorbea.com, use vectorbea/vectorbea-proxy:dev until the stable latest tag is refreshed.",
+            },
+            {
               problem: "localhost:8080 does not respond",
               fix: "Make sure the container is running with -p 8080:8080 and confirm startup logs do not contain a configuration error.",
             },
@@ -252,7 +257,7 @@ print(response.json())`}</Code>
             },
             {
               problem: "I only want to test from my own codebase",
-              fix: "That is the intended path. You do not need this repo; you only need your dashboard credentials, the GHCR image, and your local app.",
+              fix: "That is the intended path. You do not need this repo; you only need your dashboard credentials, the Docker Hub image, and your local app.",
             },
           ].map(({ problem, fix }) => (
             <div
