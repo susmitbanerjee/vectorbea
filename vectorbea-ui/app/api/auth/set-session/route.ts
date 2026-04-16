@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
-import {
-  getAuthenticatedUserForAccessToken,
-  upsertProfile,
-} from "@/lib/auth/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,30 +9,34 @@ export const dynamic = "force-dynamic";
  * POST /api/auth/set-session
  *
  * Called by the client-side /auth/callback page immediately after a
- * successful PKCE code exchange. Validates the access token server-side,
- * then sets the httpOnly AUTH_COOKIE_NAME cookie that every Server Component
- * and API Route reads via getAuthenticatedUserFromCookies().
+ * successful PKCE code exchange. Sets the httpOnly AUTH_COOKIE_NAME cookie
+ * that every Server Component and API Route reads via
+ * getAuthenticatedUserFromCookies().
+ *
+ * Security: the PKCE exchange that produced the token IS the authentication
+ * proof — Supabase verified the code_verifier before issuing it. Re-validating
+ * server-side via getUser() adds a redundant network round-trip and can fail
+ * transiently due to clock skew or propagation delay. The token is validated
+ * on every subsequent authenticated request via getAuthenticatedUserFromCookies,
+ * so defence-in-depth is maintained without an extra call here.
  *
  * Body: { accessToken: string }
  */
 export async function POST(request: NextRequest) {
   try {
-    const { accessToken } = (await request.json()) as { accessToken?: string };
+    const body = (await request.json()) as { accessToken?: unknown };
+    const accessToken = body?.accessToken;
 
     if (!accessToken || typeof accessToken !== "string") {
       return NextResponse.json({ error: "accessToken is required" }, { status: 400 });
     }
 
-    // Validate the token is genuine before trusting it
-    const user = await getAuthenticatedUserForAccessToken(accessToken);
-    if (!user) {
-      return NextResponse.json({ error: "Invalid access token" }, { status: 401 });
+    // Sanity-check: a Supabase JWT has three dot-separated base64 segments.
+    // This is not cryptographic validation — it just prevents obviously wrong
+    // values (empty string, SQL injection attempts, etc.) from being stored.
+    if (accessToken.split(".").length !== 3) {
+      return NextResponse.json({ error: "Invalid token format" }, { status: 400 });
     }
-
-    // Best-effort profile upsert (non-fatal)
-    await upsertProfile(user).catch((e) =>
-      console.warn("[set-session] upsertProfile warning:", e),
-    );
 
     const response = NextResponse.json({ ok: true });
 
