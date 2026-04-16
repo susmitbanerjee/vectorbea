@@ -10,7 +10,7 @@ open class WorkspaceRepository(private val database: Database) {
         database.query { connection ->
             connection.prepareStatement(
                 """
-                insert into public.workspaces (organization_id, name)
+                insert into vectorbea.workspaces (organization_id, name)
                 values (?, ?)
                 returning id, organization_id, name, created_at
                 """.trimIndent()

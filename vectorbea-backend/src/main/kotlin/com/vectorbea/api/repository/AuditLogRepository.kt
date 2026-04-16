@@ -13,7 +13,7 @@ class AuditLogRepository(private val database: Database) {
         database.transaction { connection ->
             connection.prepareStatement(
                 """
-                insert into public.audit_logs (
+                insert into vectorbea.audit_logs (
                     workspace_id,
                     prompt_version_id,
                     proxy_latency_ms,
@@ -51,9 +51,9 @@ class AuditLogRepository(private val database: Database) {
                     al.token_count,
                     al.workspace_id,
                     al.metadata
-                from public.audit_logs al
-                join public.prompt_versions pv on pv.id = al.prompt_version_id
-                join public.prompts p on p.id = pv.prompt_id
+                from vectorbea.audit_logs al
+                join vectorbea.prompt_versions pv on pv.id = al.prompt_version_id
+                join vectorbea.prompts p on p.id = pv.prompt_id
                 where al.workspace_id = ?
                 order by al.created_at desc
                 limit ?
@@ -91,7 +91,7 @@ class AuditLogRepository(private val database: Database) {
                     coalesce(round(avg(proxy_latency_ms))::int, 0) as average_latency_ms,
                     count(distinct coalesce(metadata->>'agent_name', metadata->>'source', prompt_version_id::text)) filter
                         (where created_at >= now() - interval '24 hours') as active_agents
-                from public.audit_logs
+                from vectorbea.audit_logs
                 where workspace_id = ?
                   and (metadata->>'source' is null or metadata->>'source' != 'prompt-editor')
                 """.trimIndent()
@@ -115,7 +115,7 @@ class AuditLogRepository(private val database: Database) {
                 select
                     max(created_at) as last_seen,
                     count(*) filter (where created_at >= now() - interval '5 minutes') as recent_count
-                from public.audit_logs
+                from vectorbea.audit_logs
                 where workspace_id = ?
                   and (metadata->>'source' is null or metadata->>'source' != 'prompt-editor')
                 """.trimIndent()
@@ -145,7 +145,7 @@ class AuditLogRepository(private val database: Database) {
                     to_char(days.day, 'Dy') as day_label,
                     coalesce(count(al.id), 0) as requests
                 from days
-                left join public.audit_logs al on date(al.created_at) = days.day
+                left join vectorbea.audit_logs al on date(al.created_at) = days.day
                     and al.workspace_id = ?
                     and (al.metadata->>'source' is null or al.metadata->>'source' != 'prompt-editor')
                 group by days.day

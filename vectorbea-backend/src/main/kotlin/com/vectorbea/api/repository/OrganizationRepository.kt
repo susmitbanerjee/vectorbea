@@ -12,7 +12,7 @@ class OrganizationRepository(private val database: Database) {
             connection.prepareStatement(
                 """
                 select id, name, created_at, plan_tier, stripe_customer_id, stripe_subscription_id, max_seats
-                from public.organizations
+                from vectorbea.organizations
                 where id = ?
                 order by created_at asc, name asc
                 """.trimIndent()
@@ -33,11 +33,11 @@ class OrganizationRepository(private val database: Database) {
             connection.prepareStatement(
                 """
                 select count(*)
-                from public.org_members om
-                join public.organizations o on o.id = om.organization_id
+                from vectorbea.org_members om
+                join vectorbea.organizations o on o.id = om.organization_id
                 where om.user_id = ?
                   and om.role = 'owner'
-                  and o.plan_tier = ?::public.plan_tier
+                  and o.plan_tier = ?::vectorbea.plan_tier
                 """.trimIndent()
             ).use { statement ->
                 statement.setObject(1, userId)
@@ -53,7 +53,7 @@ class OrganizationRepository(private val database: Database) {
         database.transaction { connection ->
             val organization = connection.prepareStatement(
                 """
-                insert into public.organizations (name)
+                insert into vectorbea.organizations (name)
                 values (?)
                 returning id, name, created_at, plan_tier, stripe_customer_id, stripe_subscription_id, max_seats
                 """.trimIndent()
@@ -67,8 +67,8 @@ class OrganizationRepository(private val database: Database) {
 
             connection.prepareStatement(
                 """
-                insert into public.org_members (user_id, organization_id, role)
-                values (?, ?, 'owner'::public.org_role)
+                insert into vectorbea.org_members (user_id, organization_id, role)
+                values (?, ?, 'owner'::vectorbea.org_role)
                 on conflict (user_id, organization_id) do update
                 set role = excluded.role
                 """.trimIndent()
@@ -80,7 +80,7 @@ class OrganizationRepository(private val database: Database) {
 
             val workspaceId = connection.prepareStatement(
                 """
-                insert into public.workspaces (organization_id, name)
+                insert into vectorbea.workspaces (organization_id, name)
                 values (?, 'default')
                 returning id
                 """.trimIndent()
@@ -94,8 +94,8 @@ class OrganizationRepository(private val database: Database) {
 
             connection.prepareStatement(
                 """
-                insert into public.workspace_members (user_id, workspace_id, role)
-                values (?, ?, 'admin'::public.workspace_role)
+                insert into vectorbea.workspace_members (user_id, workspace_id, role)
+                values (?, ?, 'admin'::vectorbea.workspace_role)
                 on conflict (user_id, workspace_id) do update
                 set role = excluded.role
                 """.trimIndent()

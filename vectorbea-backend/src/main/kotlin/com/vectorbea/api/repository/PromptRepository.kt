@@ -22,7 +22,7 @@ open class PromptRepository(private val database: Database) {
         database.transaction { connection ->
             val prompt = connection.prepareStatement(
                 """
-                insert into public.prompts (workspace_id, name, description)
+                insert into vectorbea.prompts (workspace_id, name, description)
                 values (?, ?, ?)
                 returning id, workspace_id, name, description, created_at
                 """.trimIndent()
@@ -45,7 +45,7 @@ open class PromptRepository(private val database: Database) {
 
             val promptVersion = connection.prepareStatement(
                 """
-                insert into public.prompt_versions (prompt_id, version_tag, template_text, parameters, is_published)
+                insert into vectorbea.prompt_versions (prompt_id, version_tag, template_text, parameters, is_published)
                 values (?, ?, ?, ?::jsonb, false)
                 returning id, prompt_id, version_tag, template_text, parameters, created_at
                 """.trimIndent()
@@ -82,10 +82,10 @@ open class PromptRepository(private val database: Database) {
                     pv.version_tag as latest_version,
                     pv.is_published,
                     pv.created_at as updated_at
-                from public.prompts p
+                from vectorbea.prompts p
                 join lateral (
                     select version_tag, is_published, created_at
-                    from public.prompt_versions
+                    from vectorbea.prompt_versions
                     where prompt_id = p.id
                     order by created_at desc, id desc
                     limit 1
@@ -182,7 +182,7 @@ open class PromptRepository(private val database: Database) {
         database.transaction { connection ->
             val promptExists = connection.prepareStatement(
                 """
-                update public.prompts
+                update vectorbea.prompts
                 set description = ?
                 where id = ? and workspace_id = ?
                 returning id
@@ -199,7 +199,7 @@ open class PromptRepository(private val database: Database) {
             val currentVersion = connection.prepareStatement(
                 """
                 select id, version_tag, is_published
-                from public.prompt_versions
+                from vectorbea.prompt_versions
                 where prompt_id = ?
                 order by created_at desc, id desc
                 limit 1
@@ -219,7 +219,7 @@ open class PromptRepository(private val database: Database) {
             if (currentVersion.third) {
                 connection.prepareStatement(
                     """
-                    insert into public.prompt_versions (prompt_id, version_tag, template_text, parameters, is_published)
+                    insert into vectorbea.prompt_versions (prompt_id, version_tag, template_text, parameters, is_published)
                     values (?, ?, ?, ?::jsonb, false)
                     """.trimIndent()
                 ).use { statement ->
@@ -235,7 +235,7 @@ open class PromptRepository(private val database: Database) {
             } else {
                 connection.prepareStatement(
                     """
-                    update public.prompt_versions
+                    update vectorbea.prompt_versions
                     set template_text = ?, parameters = ?::jsonb, version_tag = coalesce(?, version_tag), is_published = false
                     where id = ?
                     """.trimIndent()
@@ -255,7 +255,7 @@ open class PromptRepository(private val database: Database) {
         database.transaction { connection ->
             // Verify prompt belongs to workspace
             val ownsPrompt = connection.prepareStatement(
-                "select 1 from public.prompts where id = ? and workspace_id = ?"
+                "select 1 from vectorbea.prompts where id = ? and workspace_id = ?"
             ).use { statement ->
                 statement.setObject(1, promptId)
                 statement.setObject(2, workspaceId)
@@ -266,7 +266,7 @@ open class PromptRepository(private val database: Database) {
             val promptVersionId = connection.prepareStatement(
                 """
                 select id
-                from public.prompt_versions
+                from vectorbea.prompt_versions
                 where prompt_id = ?
                 order by created_at desc, id desc
                 limit 1
@@ -280,7 +280,7 @@ open class PromptRepository(private val database: Database) {
 
             connection.prepareStatement(
                 """
-                update public.prompt_versions
+                update vectorbea.prompt_versions
                 set is_published = false
                 where prompt_id = ?
                 """.trimIndent()
@@ -291,7 +291,7 @@ open class PromptRepository(private val database: Database) {
 
             connection.prepareStatement(
                 """
-                update public.prompt_versions
+                update vectorbea.prompt_versions
                 set is_published = true
                 where id = ?
                 """.trimIndent()
@@ -327,8 +327,8 @@ open class PromptRepository(private val database: Database) {
                 pv.parameters,
                 pv.is_published,
                 pv.created_at
-            from public.prompts p
-            join public.prompt_versions pv on pv.prompt_id = p.id"""
+            from vectorbea.prompts p
+            join vectorbea.prompt_versions pv on pv.prompt_id = p.id"""
 
         private fun mapPromptVersionView(rs: ResultSet) = PromptVersionView(
             promptId = rs.getObject("prompt_id", UUID::class.java),

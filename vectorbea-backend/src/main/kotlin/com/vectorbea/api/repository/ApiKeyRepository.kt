@@ -22,7 +22,7 @@ open class ApiKeyRepository(private val database: Database) {
         database.query { connection ->
             connection.prepareStatement(
                 """
-                insert into public.api_keys (workspace_id, key_name, key_role, key_hash, key_last_four)
+                insert into vectorbea.api_keys (workspace_id, key_name, key_role, key_hash, key_last_four)
                 values (?, ?, ?, ?, ?)
                 returning id, workspace_id, key_name, key_hash, key_last_four, created_at
                 """.trimIndent()
@@ -44,8 +44,8 @@ open class ApiKeyRepository(private val database: Database) {
             connection.prepareStatement(
                 """
                 select k.workspace_id, w.organization_id, k.key_role
-                from public.api_keys k
-                join public.workspaces w on w.id = k.workspace_id
+                from vectorbea.api_keys k
+                join vectorbea.workspaces w on w.id = k.workspace_id
                 where k.key_hash = ?
                 limit 1
                 """.trimIndent()
@@ -65,7 +65,7 @@ open class ApiKeyRepository(private val database: Database) {
     fun list(workspaceId: UUID): List<ApiKeyRecord> =
         database.query { connection ->
             connection.prepareStatement(
-                "select id, workspace_id, key_name, key_hash, key_last_four, created_at from public.api_keys where workspace_id = ? order by created_at desc"
+                "select id, workspace_id, key_name, key_hash, key_last_four, created_at from vectorbea.api_keys where workspace_id = ? order by created_at desc"
             ).use { statement ->
                 statement.setObject(1, workspaceId)
                 statement.executeQuery().use { rs ->
@@ -82,7 +82,7 @@ open class ApiKeyRepository(private val database: Database) {
     fun deleteById(id: UUID, workspaceId: UUID): Boolean =
         database.query { connection ->
             connection.prepareStatement(
-                "delete from public.api_keys where id = ? and workspace_id = ?"
+                "delete from vectorbea.api_keys where id = ? and workspace_id = ?"
             ).use { statement ->
                 statement.setObject(1, id)
                 statement.setObject(2, workspaceId)

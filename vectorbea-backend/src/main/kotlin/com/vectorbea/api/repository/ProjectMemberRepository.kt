@@ -16,7 +16,7 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select 1
-                from public.workspace_members
+                from vectorbea.workspace_members
                 where workspace_id = ? and user_id = ?
                 limit 1
                 """.trimIndent()
@@ -32,8 +32,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select 1
-                from public.workspace_members
-                where workspace_id = ? and user_id = ? and role = 'admin'::public.workspace_role
+                from vectorbea.workspace_members
+                where workspace_id = ? and user_id = ? and role = 'admin'::vectorbea.workspace_role
                 limit 1
                 """.trimIndent()
             ).use { statement ->
@@ -48,8 +48,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select w.organization_id, o.max_seats
-                from public.workspaces w
-                join public.organizations o on o.id = w.organization_id
+                from vectorbea.workspaces w
+                join vectorbea.organizations o on o.id = w.organization_id
                 where w.id = ?
                 limit 1
                 """.trimIndent()
@@ -70,8 +70,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select count(distinct wm.user_id)
-                from public.workspace_members wm
-                join public.workspaces w on w.id = wm.workspace_id
+                from vectorbea.workspace_members wm
+                join vectorbea.workspaces w on w.id = wm.workspace_id
                 where w.organization_id = ?
                 """.trimIndent()
             ).use { statement ->
@@ -88,7 +88,7 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select id
-                from public.users
+                from vectorbea.users
                 where organization_id = ? and lower(email) = lower(?)
                 limit 1
                 """.trimIndent()
@@ -106,8 +106,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select 1
-                from public.workspace_members wm
-                join public.workspaces w on w.id = wm.workspace_id
+                from vectorbea.workspace_members wm
+                join vectorbea.workspaces w on w.id = wm.workspace_id
                 where w.organization_id = ? and wm.user_id = ?
                 limit 1
                 """.trimIndent()
@@ -124,8 +124,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
 
             connection.prepareStatement(
                 """
-                insert into public.org_members (user_id, organization_id, role)
-                values (?, ?, 'member'::public.org_role)
+                insert into vectorbea.org_members (user_id, organization_id, role)
+                values (?, ?, 'member'::vectorbea.org_role)
                 on conflict (user_id, organization_id) do nothing
                 """.trimIndent()
             ).use { statement ->
@@ -136,8 +136,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
 
             connection.prepareStatement(
                 """
-                insert into public.workspace_members (user_id, workspace_id, role)
-                values (?, ?, ?::public.workspace_role)
+                insert into vectorbea.workspace_members (user_id, workspace_id, role)
+                values (?, ?, ?::vectorbea.workspace_role)
                 on conflict (user_id, workspace_id) do update
                 set role = excluded.role
                 """.trimIndent()
@@ -151,8 +151,8 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
             connection.prepareStatement(
                 """
                 select u.id as user_id, wm.workspace_id, u.email, wm.role::text as role, wm.granted_at
-                from public.workspace_members wm
-                join public.users u on u.id = wm.user_id
+                from vectorbea.workspace_members wm
+                join vectorbea.users u on u.id = wm.user_id
                 where wm.workspace_id = ? and wm.user_id = ?
                 limit 1
                 """.trimIndent()
@@ -176,7 +176,7 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
         connection.prepareStatement(
             """
             select id
-            from public.users
+            from vectorbea.users
             where organization_id = ? and lower(email) = lower(?)
             limit 1
             """.trimIndent()
@@ -192,7 +192,7 @@ class ProjectMemberRepository(private val database: com.vectorbea.api.db.Databas
 
         connection.prepareStatement(
             """
-            insert into public.users (organization_id, email, role)
+            insert into vectorbea.users (organization_id, email, role)
             values (?, ?, 'member')
             returning id
             """.trimIndent()
