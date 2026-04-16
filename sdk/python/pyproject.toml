@@ -9,6 +9,9 @@ description = "Official Python SDK for the VectorBea prompt management platform"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"
+authors = [
+    { name = "VectorBea", email = "support@vectorbea.com" },
+]
 keywords = ["vectorbea", "llm", "prompt", "ai", "sdk"]
 classifiers = [
     "Development Status :: 4 - Beta",
