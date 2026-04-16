@@ -17,6 +17,7 @@ jobs:
   build-and-push:
     name: Build and push dev proxy image
     runs-on: ubuntu-latest
+    environment: dev
 
     steps:
       - name: Check out repository
