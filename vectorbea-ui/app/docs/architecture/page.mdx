@@ -6,48 +6,79 @@ import { ArchitectureDiagram } from "@/components/docs/architecture-diagram";
 
 # Architecture
 
-VectorBea is intentionally split into a **cloud control plane** and a **local data plane**. That split is what lets the platform deliver centralized governance without forcing model invocation, agent execution, or application data to leave the customer environment.
+VectorBea is designed so that the hosted platform manages prompt governance,
+while your application keeps running in your own environment. The intended
+consumer of this architecture is not a developer working inside the VectorBea
+repository. It is a team with its own codebase that wants to:
 
-## Control plane vs. data plane
+- manage prompts centrally
+- run a local proxy in Docker or Kubernetes
+- keep model traffic and business logic inside its own network
 
-The **control plane** is where VectorBea stores and manages shared operating state:
+## Two-plane model
 
-- Organizations and projects
-- Prompt definitions and published versions
-- RBAC policy and membership state
-- Audit metadata and billing state
+The platform is intentionally split into a **control plane** and a **data plane**.
 
-The **data plane** is the customer-local execution layer. In practice, this means the outbound agent and sidecar processes deployed close to the workload. They are responsible for:
+The **control plane** is hosted by VectorBea. It includes:
 
-- Syncing the published prompt and policy state for the active project
-- Serving local execution paths without putting model traffic through a shared SaaS runtime
-- Preserving a hard operational boundary between local execution and cloud governance
+- the web dashboard
+- API routes for prompt and audit operations
+- Supabase-backed storage for prompts, access control, and billing state
+
+The **data plane** runs in the customer environment. In the most common
+integration, that means:
+
+- your own Python, Node.js, or JVM application
+- a local VectorBea proxy container pulled from GHCR
+- optionally, an outbound agent for heartbeat and state sync
 
 ## System boundary
 
 <ArchitectureDiagram />
 
-## How the sync loop works
+## What the local proxy actually does
 
-At runtime, the customer environment initiates the connection. The outbound agent sends a heartbeat over HTTPS, pushes telemetry, and receives pending commands from the control plane. That keeps the network posture simple:
+The local proxy is the main integration point for customer developers.
+Instead of baking prompt text directly into application code, your service
+calls a local endpoint such as:
 
-- Outbound traffic only
-- Standard HTTPS on port 443
-- No inbound firewall exceptions required
+- `GET /v1/prompts/{name}` to resolve the latest published prompt
+- `POST /v1/audit` to report prompt usage and latency
 
-The result is a design that fits enterprise network controls while still letting the platform coordinate prompt, policy, and project state centrally.
+That lets your team adopt VectorBea without rebuilding your application around
+the hosted control plane.
 
-## Why the sidecar model works
+## Network model
 
-The sidecar pattern gives the team a stable, local enforcement point:
+The customer environment initiates communication to the hosted platform.
+That is important operationally because it avoids inbound firewall exceptions.
 
-- Application teams integrate once against a local endpoint.
-- Prompt operations teams can publish updates without redeploying every service.
-- Security teams get a clear separation between governance and execution.
-- Platform teams can run the same pattern across laptops, VMs, and Kubernetes clusters.
+- The proxy authenticates to the control plane with a VectorBea API key.
+- Optional outbound agents send heartbeat data over HTTPS.
+- Your application only talks to the local proxy.
+
+For most teams, that means the first production test can happen without any
+changes to existing network policy beyond allowing outbound HTTPS.
+
+## Why this model fits external teams
+
+If you are integrating VectorBea into an existing service, the platform model
+looks like this:
+
+1. Create prompts and publish versions in the hosted dashboard.
+2. Pull the VectorBea proxy image from GitHub Container Registry.
+3. Run the proxy alongside your own application.
+4. Replace hardcoded prompt strings with local proxy calls.
+
+The result is a clean boundary:
+
+- VectorBea manages governance.
+- Your infrastructure manages execution.
+- Your codebase remains your codebase.
 
 ## Design principle
 
 > Govern centrally. Execute locally.
 
-That principle is the reason VectorBea can support enterprise control without forcing the customer to hand over data-plane ownership.
+That is the core reason VectorBea works for external application teams rather
+than only for developers working inside this repository.

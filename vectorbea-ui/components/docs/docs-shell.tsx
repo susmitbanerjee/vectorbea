@@ -31,13 +31,13 @@ const DOCS_NAV: Array<{
   {
     href: "/docs/quickstart",
     title: "Quickstart",
-    description: "Deploy the Dockerized proxy and point your local agents at it.",
+    description: "Pull the GHCR image and call the proxy from your own codebase.",
     icon: Rocket,
   },
   {
     href: "/docs/architecture",
     title: "Architecture",
-    description: "Understand the sidecar, the sync loop, and the isolation boundary.",
+    description: "Understand the hosted control plane, local proxy, and isolation boundary.",
     icon: Boxes,
   },
   {

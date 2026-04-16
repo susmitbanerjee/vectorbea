@@ -35,15 +35,15 @@ export function ArchitectureDiagram() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)] lg:items-center">
         <Zone
           title="VectorBea Control Plane"
-          description="Centralized governance lives here: UI, API routes, and Supabase-backed state."
-          items={["Next.js UI", "Route Handlers / API", "Supabase Database"]}
+          description="Hosted by VectorBea. Prompts, RBAC, billing, and audit state are managed here."
+          items={["Dashboard UI", "Control Plane API", "Supabase Database"]}
         />
 
         <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-brand/40 bg-brand/5 px-4 py-5 text-center">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-brand/50 to-transparent lg:hidden" />
           <div className="hidden h-full w-px bg-gradient-to-b from-transparent via-brand/50 to-transparent lg:block" />
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">
-            HTTPS Outbound Heartbeat
+            HTTPS Outbound Connection
           </p>
           <p className="text-sm text-muted-foreground">Port 443</p>
           <div className="flex h-10 w-10 items-center justify-center rounded-full border border-brand/40 bg-background text-brand">
@@ -53,11 +53,11 @@ export function ArchitectureDiagram() {
 
         <Zone
           title="Customer Environment"
-          description="Execution stays behind the customer boundary while VectorBea syncs only control-plane state."
+          description="Owned by the customer. The application and local proxy stay here while only control-plane state crosses the boundary."
           items={[
-            "Firewall / Network Boundary",
-            "VectorBea Agent",
-            "AI Microservices",
+            "Your Python / Node.js App",
+            "VectorBea Proxy",
+            "Optional Outbound Agent",
           ]}
         />
       </div>
