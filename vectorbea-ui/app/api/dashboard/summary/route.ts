@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import type { DashboardSummary } from "@/lib/api";
 
@@ -11,6 +12,11 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) {
       return NextResponse.json({ totalApiCallsLast24h: 0, averageLatencyMs: 0, activeAgents: 0 } as DashboardSummary);
     }
+
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
 
     const supabase = createVectorBeaAdminClient();
 

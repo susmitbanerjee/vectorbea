@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
+
+    const auth = await assertWorkspaceMember(request, id);
+    if (auth.error) return auth.error;
+
     const supabase = createVectorBeaAdminClient();
 
     const { data, error } = await supabase

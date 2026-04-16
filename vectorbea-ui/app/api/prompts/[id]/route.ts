@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 import type { PromptDetail } from "@/lib/api";
+import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +12,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const cookieStore = await cookies();
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
     const { id } = await params;
     const supabase = createVectorBeaAdminClient();
 
@@ -53,6 +61,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const cookieStore = await cookies();
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
     const { id } = await params;
     const payload = (await request.json()) as {
       name?: string;

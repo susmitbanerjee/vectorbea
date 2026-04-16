@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import {
   getWorkspaceMonthlyAuditCount,
   getWorkspacePlanLimits,
@@ -27,6 +28,11 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
 
     const planLimits = await getWorkspacePlanLimits(workspaceId);
     const auditCount = await getWorkspaceMonthlyAuditCount(workspaceId);

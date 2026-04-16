@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import type { ApiKeyView, CreateApiKeyResponse } from "@/lib/api";
 
@@ -13,6 +14,11 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) {
       return NextResponse.json([] as ApiKeyView[]);
     }
+
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
 
     const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
@@ -46,6 +52,11 @@ export async function POST(request: NextRequest) {
     if (!workspaceId) {
       return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     }
+
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
 
     const payload = (await request.json()) as { keyName?: string; keyRole?: string };
     const keyName = payload.keyName?.trim() || "default";

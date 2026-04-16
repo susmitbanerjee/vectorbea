@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import type { PromptListItem } from "@/lib/api";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import {
   getWorkspacePlanLimits,
   getWorkspacePromptCount,
@@ -15,6 +16,11 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) {
       return NextResponse.json([] as PromptListItem[]);
     }
+
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
 
     const supabase = createVectorBeaAdminClient();
 
@@ -59,6 +65,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
+
     const planLimits = await getWorkspacePlanLimits(workspaceId);
     const promptCount = await getWorkspacePromptCount(workspaceId);
     const promptLimit = Math.max(planLimits.maxPrompts ?? 5, 5);
@@ -68,7 +79,7 @@ export async function POST(request: NextRequest) {
         {
           error: `Free plan limit reached (${promptLimit} prompts). Please upgrade to the Team plan.`,
         },
-        { status: 403 },
+        { status: 429 },
       );
     }
 

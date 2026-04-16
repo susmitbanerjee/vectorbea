@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,11 @@ export async function GET(request: NextRequest) {
     if (!wsId) {
       return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     }
+
+    // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    const auth = await assertWorkspaceMember(request, wsId);
+    if (auth.error) return auth.error;
+    // ──────────────────────────────────────────────────────────────────────
 
     const supabase = createVectorBeaAdminClient();
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
