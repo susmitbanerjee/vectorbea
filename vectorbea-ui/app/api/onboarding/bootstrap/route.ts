@@ -7,7 +7,10 @@ import {
   getAuthenticatedUserFromCookies,
   loadOrganizationsForUser,
 } from "@/lib/auth/server";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import {
+  createSupabaseAdminClient,
+  createVectorBeaAdminClient,
+} from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,124 +24,96 @@ function generateApiKey() {
   };
 }
 
+type TenantEnvironmentResult = {
+  organization_id: string;
+  workspace_id: string;
+};
+
 export async function POST(request: NextRequest) {
   try {
+    // ── Auth ────────────────────────────────────────────────────────────────
     const cookieStore = await cookies();
     const user = await getAuthenticatedUserFromCookies(cookieStore);
-
     if (!user) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }
 
+    // ── Free plan gate ──────────────────────────────────────────────────────
     const existingOrganizations = await loadOrganizationsForUser(user.id).catch(() => []);
     if (
       existingOrganizations.length > 0 &&
       (existingOrganizations[0]?.planTier ?? "free") === "free"
     ) {
       return NextResponse.json(
-        {
-          error:
-            "Free tier is limited to 1 Organization. Please upgrade to the Team plan.",
-        },
+        { error: "Free tier is limited to 1 Organization. Please upgrade to the Team plan." },
         { status: 403 },
       );
     }
 
+    // ── Validate payload ────────────────────────────────────────────────────
     const payload = (await request.json()) as { workspaceName?: string };
     const workspaceName = payload.workspaceName?.trim();
-
     if (!workspaceName) {
-      return NextResponse.json(
-        { error: "workspaceName is required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "workspaceName is required" }, { status: 400 });
     }
 
-    const supabase = createVectorBeaAdminClient();
+    // ── Single transactional RPC ────────────────────────────────────────────
+    //
+    // Replaces 4 sequential inserts. If any step inside the Postgres function
+    // fails the entire transaction is rolled back — no orphaned org rows.
+    const supabase = createSupabaseAdminClient();
 
-    const { data: organization, error: organizationError } = await supabase
-      .from("organizations")
-      .insert({
-        name: workspaceName,
-        plan_tier: "free",
-        max_seats: 1,
-        max_prompts: 5,
-        monthly_audit_limit: 100,
-      })
-      .select("id, name, created_at")
-      .single();
+    const { data: rpcResult, error: rpcError } = await supabase.rpc(
+      "create_tenant_environment",
+      {
+        p_user_id:        user.id,
+        p_org_name:       workspaceName,   // org name = workspace name on first signup
+        p_workspace_name: workspaceName,
+        p_plan_tier:      "free",
+      },
+    );
 
-    if (organizationError || !organization) {
-      throw new Error(
-        organizationError?.message ?? "Failed to create organization",
-      );
+    if (rpcError || !rpcResult) {
+      throw new Error(rpcError?.message ?? "Transactional tenant creation failed");
     }
 
-    const { error: orgMembershipError } = await supabase.from("org_members").insert({
-      organization_id: organization.id,
-      user_id: user.id,
-      role: "owner",
-    });
+    const { organization_id, workspace_id } = rpcResult as TenantEnvironmentResult;
 
-    if (orgMembershipError) {
-      throw new Error(orgMembershipError.message);
-    }
-
-    const { data: workspace, error: workspaceError } = await supabase
-      .from("workspaces")
-      .insert({
-        organization_id: organization.id,
-        name: workspaceName,
-      })
-      .select("id, name, organization_id, created_at")
-      .single();
-
-    if (workspaceError || !workspace) {
-      throw new Error(workspaceError?.message ?? "Failed to create workspace");
-    }
-
-    const { error: workspaceMembershipError } = await supabase
-      .from("workspace_members")
-      .insert({
-        workspace_id: workspace.id,
-        user_id: user.id,
-        role: "admin",
-      });
-
-    if (workspaceMembershipError) {
-      throw new Error(workspaceMembershipError.message);
-    }
-
+    // ── Provision the onboarding API key ────────────────────────────────────
+    //
+    // This insert is intentionally outside the RPC because it is not a
+    // structural integrity concern — a missing API key does not corrupt the
+    // tenant topology. If it fails we still return success; the user can
+    // generate a key from the dashboard.
+    const vectorbea = createVectorBeaAdminClient();
     const generatedKey = generateApiKey();
-    const { error: apiKeyError } = await supabase.from("api_keys").insert({
-      workspace_id: workspace.id,
-      key_name: "onboarding-key",
-      key_hash: generatedKey.hash,
-      key_last_four: generatedKey.lastFour,
-      key_role: "admin",
-    });
 
-    if (apiKeyError) {
-      throw new Error(apiKeyError.message);
-    }
+    await vectorbea
+      .from("api_keys")
+      .insert({
+        workspace_id:  workspace_id,
+        key_name:      "onboarding-key",
+        key_hash:      generatedKey.hash,
+        key_last_four: generatedKey.lastFour,
+        key_role:      "admin",
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.warn("[onboarding/bootstrap] api_keys insert failed (non-fatal):", error.message);
+        }
+      });
 
     return NextResponse.json(
       {
-        organizationId: organization.id,
-        workspaceId: workspace.id,
-        apiKey: generatedKey.rawKey,
+        organizationId: organization_id,
+        workspaceId:    workspace_id,
+        apiKey:         generatedKey.rawKey,
       },
       { status: 201 },
     );
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to bootstrap onboarding",
-      },
+      { error: error instanceof Error ? error.message : "Failed to bootstrap onboarding" },
       { status: 500 },
     );
   }
