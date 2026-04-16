@@ -95,14 +95,12 @@ export default function LandingPage() {
           <Link href="/pricing" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
             Pricing
           </Link>
-          <a
-            href="https://github.com/vectorbea/vectorbea"
-            target="_blank"
-            rel="noreferrer"
+          <Link
+            href="/signin?next=/dashboard"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
           >
-            GitHub
-          </a>
+            Sign in
+          </Link>
           <Link href="/login" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
             Create account
             <ArrowRight className="h-3.5 w-3.5" />
