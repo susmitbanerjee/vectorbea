@@ -58,8 +58,8 @@ export async function POST(request: NextRequest) {
     if (auth.error) return auth.error;
     // ──────────────────────────────────────────────────────────────────────
 
-    const payload = (await request.json()) as { keyName?: string; keyRole?: string };
-    const keyName = payload.keyName?.trim() || "default";
+    const payload = (await request.json()) as { keyName?: string; agentId?: string; name?: string; keyRole?: string };
+    const keyName = payload.keyName?.trim() || payload.name?.trim() || "default";
     const keyRole = payload.keyRole?.trim() || "admin";
 
     const rawKey = `vb_${randomBytes(32).toString("base64url")}`;

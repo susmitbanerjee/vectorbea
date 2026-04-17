@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { Copy, Key, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { Copy, Eye, EyeOff, Key, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,9 +12,9 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ApiKeyView, CreateApiKeyResponse } from "@/lib/api";
+import type { ApiKeyView, CreateApiKeyResponse, DeploymentAgentView } from "@/lib/api";
 import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
 interface Props {
@@ -37,13 +37,28 @@ export function ApiKeysClient({ initialKeys }: Props) {
   const { hasAccess: canManageKeys } = useRBAC("admin");
   const [open, setOpen] = useState(false);
   const [keyName, setKeyName] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [agents, setAgents] = useState<DeploymentAgentView[]>([]);
   const [creating, setCreating] = useState(false);
   const [revealed, setRevealed] = useState<CreateApiKeyResponse | null>(null);
+  const [revealedRows, setRevealedRows] = useState<Record<string, boolean>>({});
+  const [revokeTarget, setRevokeTarget] = useState<ApiKeyView | null>(null);
+  const [regenerateTarget, setRegenerateTarget] = useState<ApiKeyView | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const workspaceQuery = activeWorkspace?.id
     ? `?workspaceId=${encodeURIComponent(activeWorkspace.id)}`
     : "";
+
+  // Fetch agents on mount
+  useEffect(() => {
+    if (!activeWorkspace?.id) return;
+    fetch(`/api/agents?workspaceId=${encodeURIComponent(activeWorkspace.id)}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: DeploymentAgentView[]) => setAgents(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [activeWorkspace?.id]);
 
   const copy = async (value: string) => {
     try {
@@ -65,7 +80,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
       const response = await fetch(`/api/keys${workspaceQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: keyName.trim() }),
+        body: JSON.stringify({ keyName: keyName.trim(), agentId: agentId || undefined }),
       });
       if (!response.ok) {
         const { error } = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -75,6 +90,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
       const created = (await response.json()) as CreateApiKeyResponse;
       setRevealed(created);
       setKeyName("");
+      setAgentId("");
       setOpen(false);
       toast.success("API key created. Copy it now - it won't be shown again.");
       startTransition(() => router.refresh());
@@ -85,7 +101,8 @@ export function ApiKeysClient({ initialKeys }: Props) {
     }
   };
 
-  const revoke = async (id: string) => {
+  const revokeKey = async (id: string) => {
+    setLoadingId(id);
     try {
       const response = await fetch(`/api/keys/${id}${workspaceQuery}`, {
         method: "DELETE",
@@ -97,20 +114,106 @@ export function ApiKeysClient({ initialKeys }: Props) {
       startTransition(() => router.refresh());
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to revoke key");
+    } finally {
+      setLoadingId(null);
+      setRevokeTarget(null);
     }
+  };
+
+  const regenerateKey = async (oldKey: ApiKeyView) => {
+    setLoadingId(oldKey.id);
+    try {
+      // Create a new key with the same name
+      const createResponse = await fetch(`/api/keys${workspaceQuery}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyName: oldKey.name }),
+      });
+      if (!createResponse.ok) {
+        const { error } = await createResponse.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(error || `Create failed (${createResponse.status})`);
+      }
+      const created = (await createResponse.json()) as CreateApiKeyResponse;
+
+      // Delete the old key
+      const deleteResponse = await fetch(`/api/keys/${oldKey.id}${workspaceQuery}`, {
+        method: "DELETE",
+      });
+      if (!deleteResponse.ok && deleteResponse.status !== 204) {
+        throw new Error(`Delete failed (${deleteResponse.status})`);
+      }
+
+      setRevealed(created);
+      toast.success("Key regenerated. Copy it now - it won't be shown again.");
+      startTransition(() => router.refresh());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to regenerate key");
+    } finally {
+      setLoadingId(null);
+      setRegenerateTarget(null);
+    }
+  };
+
+  const toggleRowReveal = (id: string) => {
+    setRevealedRows((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   return (
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
+      {/* Revoke confirmation dialog */}
+      <Dialog open={!!revokeTarget} onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revoke API key</DialogTitle>
+            <DialogDescription>
+              Revoke <strong>{revokeTarget?.name}</strong>? Any services using it will lose access immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRevokeTarget(null)} disabled={!!loadingId}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => revokeTarget && revokeKey(revokeTarget.id)}
+              disabled={!!loadingId}
+            >
+              {loadingId === revokeTarget?.id ? "Revoking..." : "Revoke"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Regenerate confirmation dialog */}
+      <Dialog open={!!regenerateTarget} onOpenChange={(open) => { if (!open) setRegenerateTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Regenerate API key</DialogTitle>
+            <DialogDescription>
+              Regenerate key for <strong>{regenerateTarget?.name}</strong>? The old key will stop working immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRegenerateTarget(null)} disabled={!!loadingId}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => regenerateTarget && regenerateKey(regenerateTarget)}
+              disabled={!!loadingId}
+            >
+              {loadingId === regenerateTarget?.id ? "Regenerating..." : "Regenerate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex justify-end">
         {canManageKeys && (
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4" />
-                Create API Key
-              </Button>
-            </DialogTrigger>
+            <Button onClick={() => setOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Create API Key
+            </Button>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create API key</DialogTitle>
@@ -125,6 +228,32 @@ export function ApiKeysClient({ initialKeys }: Props) {
                 }}
                 className="mt-4 space-y-4"
               >
+                {agents.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Agent (optional)
+                    </label>
+                    <select
+                      value={agentId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setAgentId(val);
+                        if (val) {
+                          const agent = agents.find((a) => a.id === val);
+                          if (agent) setKeyName(agent.name);
+                        }
+                      }}
+                      className="flex h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="">— Select an agent (optional) —</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Key name
@@ -221,7 +350,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
+                    <TableHead>Agent / Name</TableHead>
                     <TableHead>Key</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -232,20 +361,49 @@ export function ApiKeysClient({ initialKeys }: Props) {
                     <TableRow key={key.id}>
                       <TableCell className="text-sm font-medium">{key.name || "default"}</TableCell>
                       <TableCell>
-                        <code className="font-mono text-xs">{key.maskedKey}</code>
+                        <code className="font-mono text-xs">
+                          {revealedRows[key.id] ? key.maskedKey : `vb_••••••••`}
+                        </code>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {new Date(key.createdAt).toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => revoke(key.id)}
-                          disabled={isPending || !canManageKeys}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleRowReveal(key.id)}
+                            title={revealedRows[key.id] ? "Hide key" : "Reveal key"}
+                          >
+                            {revealedRows[key.id]
+                              ? <EyeOff className="h-4 w-4" />
+                              : <Eye className="h-4 w-4" />}
+                          </Button>
+                          {canManageKeys && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRegenerateTarget(key)}
+                                disabled={loadingId === key.id || isPending}
+                                title="Regenerate key"
+                              >
+                                <RefreshCw className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRevokeTarget(key)}
+                                disabled={loadingId === key.id || isPending}
+                                className="text-muted-foreground hover:text-destructive"
+                                title="Revoke key"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

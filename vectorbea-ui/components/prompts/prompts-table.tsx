@@ -2,11 +2,21 @@
 
 import type { PromptListItem } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { FileText, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { FileText, Search, Trash2 } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -49,6 +59,9 @@ export function PromptsTable({
   const { activeWorkspaceId } = useWorkspace();
   const [query, setQuery] = useState(initialQuery);
   const [filter, setFilter] = useState<FilterTab>("all");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmPrompt, setConfirmPrompt] = useState<PromptListItem | null>(null);
+  const [isPending, startTransition] = useTransition();
 
   const counts = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -79,102 +92,172 @@ export function PromptsTable({
     });
   }, [filter, prompts, query]);
 
-  return (
-    <Card className="animate-fade-in">
-      <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <CardTitle>Prompt Registry</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            {prompts.length} prompt{prompts.length === 1 ? "" : "s"} total
-          </p>
-        </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9"
-            placeholder="Search by name or description..."
-          />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Tabs
-          value={filter}
-          onValueChange={(v) => setFilter(v as FilterTab)}
-        >
-          <TabsList>
-            <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
-            <TabsTrigger value="published">
-              Published ({counts.published})
-            </TabsTrigger>
-            <TabsTrigger value="draft">Draft ({counts.draft})</TabsTrigger>
-          </TabsList>
-        </Tabs>
+  const handleDelete = async (promptId: string) => {
+    setDeletingId(promptId);
+    try {
+      const response = await fetch(`/api/prompts/${promptId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok && response.status !== 204) {
+        const body = await response.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(body.error || `Request failed (${response.status})`);
+      }
+      toast.success("Prompt deleted");
+      startTransition(() => router.refresh());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete prompt");
+    } finally {
+      setDeletingId(null);
+      setConfirmPrompt(null);
+    }
+  };
 
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center animate-fade-in">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <FileText className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="font-medium">No prompts found</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {query.trim()
-                  ? "Try adjusting your search or filter."
-                  : "Create your first prompt to get started."}
-              </p>
-            </div>
+  return (
+    <>
+      <Dialog
+        open={!!confirmPrompt}
+        onOpenChange={(open) => {
+          if (!open) setConfirmPrompt(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete prompt</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{confirmPrompt?.name}</strong>? This will
+              delete all versions and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmPrompt(null)}
+              disabled={!!deletingId}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => confirmPrompt && handleDelete(confirmPrompt.id)}
+              disabled={!!deletingId}
+            >
+              {deletingId ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Card className="animate-fade-in">
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <CardTitle>Prompt Registry</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {prompts.length} prompt{prompts.length === 1 ? "" : "s"} total
+            </p>
           </div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="hidden md:table-cell">
-                    Description
-                  </TableHead>
-                  <TableHead className="text-right">Updated</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((prompt, i) => (
-                  <TableRow
-                    key={prompt.id}
-                    className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(i + 1, 5)}`}
-                    onClick={() =>
-                      router.push(
-                        `/prompts/${prompt.id}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
-                      )
-                    }
-                  >
-                    <TableCell className="font-medium">{prompt.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{prompt.latestVersion}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={prompt.isPublished ? "success" : "secondary"}
-                      >
-                        {prompt.isPublished ? "Published" : "Draft"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden max-w-xs truncate text-muted-foreground md:table-cell">
-                      {prompt.description ?? "No description"}
-                    </TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">
-                      {relativeTime(prompt.updatedAt)}
-                    </TableCell>
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="pl-9"
+              placeholder="Search by name or description..."
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Tabs
+            value={filter}
+            onValueChange={(v) => setFilter(v as FilterTab)}
+          >
+            <TabsList>
+              <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
+              <TabsTrigger value="published">
+                Published ({counts.published})
+              </TabsTrigger>
+              <TabsTrigger value="draft">Draft ({counts.draft})</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center animate-fade-in">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <FileText className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="font-medium">No prompts found</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {query.trim()
+                    ? "Try adjusting your search or filter."
+                    : "Create your first prompt to get started."}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Version</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="hidden md:table-cell">
+                      Description
+                    </TableHead>
+                    <TableHead className="text-right">Updated</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((prompt, i) => (
+                    <TableRow
+                      key={prompt.id}
+                      className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(i + 1, 5)}`}
+                      onClick={() =>
+                        router.push(
+                          `/prompts/${prompt.id}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+                        )
+                      }
+                    >
+                      <TableCell className="font-medium">{prompt.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{prompt.latestVersion}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={prompt.isPublished ? "success" : "secondary"}
+                        >
+                          {prompt.isPublished ? "Published" : "Draft"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="hidden max-w-xs truncate text-muted-foreground md:table-cell">
+                        {prompt.description ?? "No description"}
+                      </TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">
+                        {relativeTime(prompt.updatedAt)}
+                      </TableCell>
+                      <TableCell
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-right"
+                      >
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setConfirmPrompt(prompt)}
+                          disabled={deletingId === prompt.id || isPending}
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }

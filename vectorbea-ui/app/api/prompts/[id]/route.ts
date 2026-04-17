@@ -149,3 +149,26 @@ export async function POST(
     );
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const cookieStore = await cookies();
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const { id } = await params;
+    const supabase = createVectorBeaAdminClient();
+    const { error } = await supabase.from("prompts").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete prompt" },
+      { status: 500 },
+    );
+  }
+}
