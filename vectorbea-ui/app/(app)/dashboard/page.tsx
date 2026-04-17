@@ -57,10 +57,20 @@ export default async function DashboardPage({
         ? Math.round(recentLogs.reduce((s, l) => s + l.proxyLatencyMs, 0) / recentLogs.length)
         : 0;
 
+      const { data: agentData } = await supabase
+        .from("deployment_agents")
+        .select("id, last_heartbeat")
+        .eq("workspace_id", workspaceId);
+
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const activeAgents = (agentData ?? []).filter(
+        (a) => a.last_heartbeat && a.last_heartbeat >= twoMinutesAgo,
+      ).length;
+
       dashboardSummary = {
         totalApiCallsLast24h: recentLogs.length,
         averageLatencyMs: avgLatency,
-        activeAgents: 0,
+        activeAgents,
       };
     }
   }

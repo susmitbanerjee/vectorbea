@@ -14,7 +14,6 @@ import { Activity, ChevronDown, Cpu } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AgentMetricPoint } from "@/lib/api";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useWorkspace } from "@/lib/workspace-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +21,7 @@ import { Badge } from "@/components/ui/badge";
 type AgentOption = {
   id: string;
   name: string;
-  status: string;
-  last_heartbeat: string | null;
+  lastHeartbeat: string | null;
 };
 
 function formatMetricTime(createdAt: string) {
@@ -33,29 +31,8 @@ function formatMetricTime(createdAt: string) {
   });
 }
 
-function mapMetricPoint(row: {
-  id: string;
-  agent_id: string;
-  latency_ms: number;
-  cpu_usage_percent: number;
-  created_at: string;
-}): AgentMetricPoint {
-  return {
-    id: row.id,
-    agentId: row.agent_id,
-    latencyMs: row.latency_ms,
-    cpuUsagePercent: row.cpu_usage_percent,
-    memoryUsageMb: 0,
-    activeReplicas: 0,
-    createdAt: row.created_at,
-  };
-}
-
 function isOnline(lastHeartbeat: string | null) {
-  if (!lastHeartbeat) {
-    return false;
-  }
-
+  if (!lastHeartbeat) return false;
   return Date.now() - new Date(lastHeartbeat).getTime() <= 2 * 60 * 1000;
 }
 
@@ -90,7 +67,6 @@ function CustomTooltip({
 
 export function RequestsChart() {
   const { activeWorkspaceId } = useWorkspace();
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [chartPoints, setChartPoints] = useState<AgentMetricPoint[]>([]);
@@ -110,6 +86,7 @@ export function RequestsChart() {
     [chartPoints],
   );
 
+  // ── Load agent list via API route (uses admin client — bypasses RLS) ────
   useEffect(() => {
     let cancelled = false;
 
@@ -123,37 +100,31 @@ export function RequestsChart() {
 
       try {
         setLoadingAgents(true);
-        const { data, error } = await supabase
-          .schema("vectorbea")
-          .from("deployment_agents")
-          .select("id, name, status, last_heartbeat")
-          .eq("workspace_id", activeWorkspaceId)
-          .order("last_heartbeat", { ascending: false, nullsFirst: false });
+        const response = await fetch(
+          `/api/agents?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+          { cache: "no-store" },
+        );
+        const data = (await response.json().catch(() => [])) as Array<{
+          id: string;
+          name: string;
+          lastHeartbeat: string | null;
+        }>;
 
-        if (error) {
-          throw error;
-        }
+        if (!response.ok) throw new Error("Failed to load agents");
 
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
 
-        const nextAgents = (data ?? []) as AgentOption[];
-        setAgents(nextAgents);
+        setAgents(data);
         setSelectedAgentId((current) => {
-          if (current && nextAgents.some((agent) => agent.id === current)) {
-            return current;
-          }
-          return nextAgents.find((agent) => isOnline(agent.last_heartbeat))?.id ?? nextAgents[0]?.id ?? "";
+          if (current && data.some((a) => a.id === current)) return current;
+          return data.find((a) => isOnline(a.lastHeartbeat))?.id ?? data[0]?.id ?? "";
         });
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : "Failed to load deployment agents.");
         }
       } finally {
-        if (!cancelled) {
-          setLoadingAgents(false);
-        }
+        if (!cancelled) setLoadingAgents(false);
       }
     }
 
@@ -162,97 +133,59 @@ export function RequestsChart() {
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, supabase]);
+  }, [activeWorkspaceId]);
 
+  // ── Load metrics via API route (uses admin client — bypasses RLS) ────────
   useEffect(() => {
     let cancelled = false;
 
     async function loadMetrics() {
-      if (!selectedAgentId) {
+      if (!selectedAgentId || !activeWorkspaceId) {
         setChartPoints([]);
         return;
       }
 
       try {
         setLoadingMetrics(true);
-        const { data, error } = await supabase
-          .schema("vectorbea")
-          .from("agent_metrics")
-          .select("id, agent_id, latency_ms, cpu_usage_percent, created_at")
-          .eq("agent_id", selectedAgentId)
-          .order("created_at", { ascending: false })
-          .limit(50);
+        const response = await fetch(
+          `/api/agents/${selectedAgentId}/metrics?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+          { cache: "no-store" },
+        );
+        const data = (await response.json().catch(() => [])) as AgentMetricPoint[] | { error?: string };
 
-        if (error) {
-          throw error;
+        if (!response.ok) {
+          throw new Error(
+            "error" in data && data.error ? data.error : "Failed to load agent metrics.",
+          );
         }
 
         if (!cancelled) {
-          const mapped = ((data ?? []) as Array<{
-            id: string;
-            agent_id: string;
-            latency_ms: number;
-            cpu_usage_percent: number;
-            created_at: string;
-          }>)
-            .map(mapMetricPoint)
-            .reverse();
-          setChartPoints(mapped);
+          // API route returns ascending order; take last 50 points
+          const points = (data as AgentMetricPoint[]).slice(-50);
+          setChartPoints(points);
         }
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : "Failed to load agent metrics.");
         }
       } finally {
-        if (!cancelled) {
-          setLoadingMetrics(false);
-        }
+        if (!cancelled) setLoadingMetrics(false);
       }
     }
 
     void loadMetrics();
 
+    // Poll every 35 s — slightly longer than the 30 s heartbeat interval so
+    // each poll catches a fresh data point without hammering the API.
+    const interval = window.setInterval(() => {
+      void loadMetrics();
+    }, 35_000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
-  }, [selectedAgentId, supabase]);
-
-  useEffect(() => {
-    if (!selectedAgentId) {
-      return;
-    }
-
-    const channel = supabase
-      .channel(`agent-metrics:${selectedAgentId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "vectorbea",
-          table: "agent_metrics",
-          filter: `agent_id=eq.${selectedAgentId}`,
-        },
-        (payload: { new: unknown }) => {
-          const row = payload.new as {
-            id: string;
-            agent_id: string;
-            latency_ms: number;
-            cpu_usage_percent: number;
-            created_at: string;
-          };
-
-          setChartPoints((current) => {
-            const next = [...current, mapMetricPoint(row)];
-            return next.slice(-50);
-          });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [selectedAgentId, supabase]);
+  }, [selectedAgentId, activeWorkspaceId]);
 
   return (
     <Card className="h-full">
@@ -277,7 +210,7 @@ export function RequestsChart() {
               ) : (
                 agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
-                    {agent.name} {isOnline(agent.last_heartbeat) ? "· Online" : "· Offline"}
+                    {agent.name} {isOnline(agent.lastHeartbeat) ? "· Online" : "· Offline"}
                   </option>
                 ))
               )}
@@ -289,8 +222,8 @@ export function RequestsChart() {
       <CardContent className="space-y-4 pt-2">
         {selectedAgent && (
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={isOnline(selectedAgent.last_heartbeat) ? "success" : "destructive"}>
-              {isOnline(selectedAgent.last_heartbeat) ? "Online" : "Offline"}
+            <Badge variant={isOnline(selectedAgent.lastHeartbeat) ? "success" : "destructive"}>
+              {isOnline(selectedAgent.lastHeartbeat) ? "Online" : "Offline"}
             </Badge>
             <Badge variant="secondary" className="gap-1.5">
               <Activity className="h-3 w-3" />
@@ -366,7 +299,9 @@ export function RequestsChart() {
             <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border/60 bg-muted/20 text-sm text-muted-foreground">
               {loadingMetrics
                 ? "Loading live telemetry..."
-                : "Select an agent with recent metrics to view live telemetry."}
+                : selectedAgentId
+                  ? "Waiting for the first heartbeat — data appears every 30 s."
+                  : "Select an agent to view live telemetry."}
             </div>
           )}
         </div>
