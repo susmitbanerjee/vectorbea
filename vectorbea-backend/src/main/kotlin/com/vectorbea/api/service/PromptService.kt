@@ -10,6 +10,8 @@ import com.vectorbea.api.repository.PromptRepository
 import java.util.UUID
 
 class PromptService(private val promptRepository: PromptRepository) {
+    private data class PromptReference(val name: String, val versionTag: String?)
+
     fun createPrompt(request: CreatePromptRequest, workspaceId: UUID): CreatePromptResponse {
         validatePromptRequest(request)
 
@@ -32,8 +34,17 @@ class PromptService(private val promptRepository: PromptRepository) {
     }
 
     fun getLatestPrompt(workspaceId: UUID, name: String): PromptVersionView =
-        promptRepository.findLatestByName(workspaceId, name.trim())
-            ?: throw HttpException(404, "Prompt not found")
+        parsePromptReference(name).let { reference ->
+            if (reference.versionTag != null) {
+                promptRepository.findByNameAndVersion(
+                    workspaceId,
+                    reference.name,
+                    reference.versionTag
+                )
+            } else {
+                promptRepository.findLatestByName(workspaceId, reference.name)
+            }
+        } ?: throw HttpException(404, "Prompt not found")
 
     fun listPrompts(workspaceId: UUID): List<PromptListItem> = promptRepository.listPrompts(workspaceId)
 
@@ -90,6 +101,24 @@ class PromptService(private val promptRepository: PromptRepository) {
         val parameters = request.parameters
         if (parameters != null && !parameters.isObject) {
             throw HttpException(400, "parameters must be a JSON object")
+        }
+    }
+
+    private fun parsePromptReference(rawName: String): PromptReference {
+        val trimmed = rawName.trim()
+        val separatorIndex = trimmed.lastIndexOf("@")
+
+        if (separatorIndex <= 0) {
+            return PromptReference(trimmed, null)
+        }
+
+        val name = trimmed.substring(0, separatorIndex).trim()
+        val versionTag = trimmed.substring(separatorIndex + 1).trim()
+
+        return if (name.isEmpty() || versionTag.isEmpty()) {
+            PromptReference(trimmed, null)
+        } else {
+            PromptReference(name, versionTag)
         }
     }
 }

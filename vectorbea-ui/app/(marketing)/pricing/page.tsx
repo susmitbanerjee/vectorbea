@@ -10,8 +10,10 @@ interface Tier {
   name: string;
   tagline: string;
   priceLabel: string;
+  originalPriceLabel?: string;
   priceSuffix: string;
   billingNote: string;
+  promoNote?: string;
   cta: { label: string; href: string };
   highlight?: boolean;
   icon: typeof Sparkles;
@@ -44,9 +46,11 @@ const tiers: Tier[] = [
     id: "team",
     name: "Team",
     tagline: "Per-seat billing for growing AI teams.",
-    priceLabel: "$29",
+    priceLabel: "$19.99",
+    originalPriceLabel: "$29",
     priceSuffix: "/ seat / month",
-    billingNote: "Billed monthly or annually (save 20%).",
+    billingNote: "Early adopter pricing for the first teams onboarded to VectorBea.",
+    promoNote: "List price is $29 / seat / month. Lock in $19.99 while the early adopter program is open.",
     cta: { label: "Start 14-day trial", href: "/checkout?plan=team" },
     highlight: true,
     icon: Sparkles,
@@ -156,6 +160,11 @@ export default function PricingPage() {
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{tier.tagline}</p>
 
               <div className="mt-6 flex items-baseline gap-1.5">
+                {tier.originalPriceLabel && (
+                  <span className="text-lg font-medium text-zinc-400 line-through dark:text-zinc-500">
+                    {tier.originalPriceLabel}
+                  </span>
+                )}
                 <span className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                   {tier.priceLabel}
                 </span>
@@ -166,6 +175,11 @@ export default function PricingPage() {
                 )}
               </div>
               <p className="mt-1.5 text-xs text-zinc-400 dark:text-zinc-500">{tier.billingNote}</p>
+              {tier.promoNote && (
+                <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+                  {tier.promoNote}
+                </div>
+              )}
 
               <a
                 href={tier.cta.href}

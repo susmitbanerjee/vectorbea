@@ -139,10 +139,20 @@ class AuditDispatcher(
         return try {
             val bean = ManagementFactory.getOperatingSystemMXBean()
             if (bean is com.sun.management.OperatingSystemMXBean) {
-                val load = bean.processCpuLoad
-                if (load >= 0) load * 100.0 else 0.0
+                val processLoad = bean.processCpuLoad
+                if (processLoad > 0.0) {
+                    processLoad * 100.0
+                } else {
+                    val systemLoad = bean.systemCpuLoad
+                    if (systemLoad > 0.0) systemLoad * 100.0 else 0.0
+                }
             } else {
-                0.0
+                val systemLoadAverage = bean.systemLoadAverage
+                if (systemLoadAverage > 0.0) {
+                    (systemLoadAverage / Runtime.getRuntime().availableProcessors()) * 100.0
+                } else {
+                    0.0
+                }
             }
         } catch (_: Exception) {
             0.0

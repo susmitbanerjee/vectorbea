@@ -19,6 +19,19 @@ type AuditEntry = {
   metadata?: Record<string, unknown>;
 };
 
+function getMetadataText(metadata: Record<string, unknown> | undefined, ...keys: string[]) {
+  if (!metadata) return "";
+
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
 export async function POST(request: NextRequest) {
   try {
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
@@ -52,16 +65,57 @@ export async function POST(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    const rows = entries.map((e) => ({
-      workspace_id: workspaceId,
-      prompt_version_id: e.promptVersionId ?? null,
-      proxy_latency_ms: e.proxyLatencyMs ?? 0,
-      llm_latency_ms: e.llmLatencyMs ?? 0,
-      token_count: e.tokenCount ?? 0,
-      prompt_name: e.promptName ?? "",
-      version_tag: e.versionTag ?? "",
-      metadata: e.metadata ?? {},
-    }));
+    const missingVersionIds = entries
+      .filter((entry) =>
+        entry.promptVersionId &&
+        (!entry.promptName || !entry.versionTag),
+      )
+      .map((entry) => entry.promptVersionId as string);
+
+    const versionMeta = new Map<string, { promptName: string; versionTag: string }>();
+
+    if (missingVersionIds.length > 0) {
+      const { data: versions, error: versionsError } = await supabase
+        .from("prompt_versions")
+        .select("id, version_tag, prompts!inner(name)")
+        .in("id", missingVersionIds);
+
+      if (versionsError) {
+        throw new Error(versionsError.message);
+      }
+
+      for (const version of versions ?? []) {
+        const promptRow = Array.isArray(version.prompts) ? version.prompts[0] : version.prompts;
+        versionMeta.set(version.id, {
+          promptName: (promptRow as { name?: string } | null)?.name ?? "",
+          versionTag: version.version_tag ?? "",
+        });
+      }
+    }
+
+    const rows = entries.map((entry) => {
+      const metadata = entry.metadata ?? {};
+      const meta = entry.promptVersionId ? versionMeta.get(entry.promptVersionId) : undefined;
+
+      return {
+        workspace_id: workspaceId,
+        prompt_version_id: entry.promptVersionId ?? null,
+        proxy_latency_ms: entry.proxyLatencyMs ?? 0,
+        llm_latency_ms: entry.llmLatencyMs ?? 0,
+        token_count: entry.tokenCount ?? 0,
+        prompt_name:
+          entry.promptName ||
+          getMetadataText(metadata, "promptName", "prompt_name") ||
+          meta?.promptName ||
+          "",
+        version_tag:
+          entry.versionTag ||
+          getMetadataText(metadata, "versionTag", "version_tag", "published_version") ||
+          meta?.versionTag ||
+          "",
+        metadata,
+      };
+    });
 
     const { error } = await supabase.from("audit_logs").insert(rows);
     if (error) throw new Error(error.message);

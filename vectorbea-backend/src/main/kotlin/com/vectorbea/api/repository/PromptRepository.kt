@@ -150,6 +150,29 @@ open class PromptRepository(private val database: Database) {
             }
         }
 
+    open fun findByNameAndVersion(
+        workspaceId: UUID,
+        name: String,
+        versionTag: String
+    ): PromptVersionView? =
+        database.query { connection ->
+            connection.prepareStatement(
+                """
+                $PROMPT_VERSION_SELECT
+                where p.workspace_id = ? and p.name = ? and pv.version_tag = ?
+                order by pv.created_at desc, pv.id desc
+                limit 1
+                """.trimIndent()
+            ).use { statement ->
+                statement.setObject(1, workspaceId)
+                statement.setString(2, name)
+                statement.setString(3, versionTag)
+                statement.executeQuery().use { rs ->
+                    if (rs.next()) mapPromptVersionView(rs) else null
+                }
+            }
+        }
+
     open fun listVersions(promptId: UUID, workspaceId: UUID): List<PromptVersionView> =
         database.query { connection ->
             connection.prepareStatement(

@@ -5,6 +5,36 @@ import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function parsePromptReference(rawName: string, requestedVersion: string | null) {
+  const explicitVersion = requestedVersion?.trim();
+  if (explicitVersion) {
+    return {
+      promptName: rawName.trim(),
+      versionTag: explicitVersion,
+    };
+  }
+
+  const separatorIndex = rawName.lastIndexOf("@");
+  if (separatorIndex <= 0) {
+    return {
+      promptName: rawName.trim(),
+      versionTag: null,
+    };
+  }
+
+  const promptName = rawName.slice(0, separatorIndex).trim();
+  const versionTag = rawName.slice(separatorIndex + 1).trim();
+
+  if (!promptName || !versionTag) {
+    return {
+      promptName: rawName.trim(),
+      versionTag: null,
+    };
+  }
+
+  return { promptName, versionTag };
+}
+
 /**
  * GET /api/proxy/prompts/:name
  *
@@ -71,7 +101,11 @@ export async function GET(
 
     // ── 3. Resolve prompt by name + workspace ─────────────────────────────
     const { name } = await params;
-    const promptName = decodeURIComponent(name);
+    const decodedName = decodeURIComponent(name);
+    const { promptName, versionTag: requestedVersionTag } = parsePromptReference(
+      decodedName,
+      request.nextUrl.searchParams.get("version"),
+    );
 
     const { data: prompt, error: promptError } = await supabase
       .from("prompts")
@@ -106,17 +140,31 @@ export async function GET(
       );
     }
 
-    // Find the published version (or fall back to the latest by date)
+    // Default resolution is the newest published version. If the caller
+    // explicitly requests a version tag, honor it exactly.
     const versions = Array.isArray(prompt.prompt_versions) ? prompt.prompt_versions : [];
-    const published = versions.find((v: { is_published: boolean }) => v.is_published)
-      ?? versions.sort(
-        (a: { created_at: string }, b: { created_at: string }) =>
-          b.created_at.localeCompare(a.created_at),
-      )[0];
+    const sortedVersions = [...versions].sort(
+      (
+        a: { created_at: string; id: string },
+        b: { created_at: string; id: string },
+      ) => {
+        const createdAtOrder = b.created_at.localeCompare(a.created_at);
+        return createdAtOrder !== 0 ? createdAtOrder : b.id.localeCompare(a.id);
+      },
+    );
+    const resolvedVersion = requestedVersionTag
+      ? sortedVersions.find(
+          (version: { version_tag: string }) => version.version_tag === requestedVersionTag,
+        )
+      : sortedVersions.find((version: { is_published: boolean }) => version.is_published);
 
-    if (!published) {
+    if (!resolvedVersion) {
       return NextResponse.json(
-        { error: `Prompt '${promptName}' has no published version` },
+        {
+          error: requestedVersionTag
+            ? `Prompt '${promptName}' does not have version '${requestedVersionTag}'`
+            : `Prompt '${promptName}' has no published version`,
+        },
         { status: 404 },
       );
     }
@@ -128,14 +176,14 @@ export async function GET(
     // ── 4. Return PromptPayload shaped to match the Kotlin data class ─────
     return NextResponse.json({
       promptId:        prompt.id,
-      promptVersionId: published.id,
+      promptVersionId: resolvedVersion.id,
       organizationId:  workspace?.organization_id ?? "",
       name:            prompt.name,
       description:     prompt.description ?? null,
-      versionTag:      published.version_tag,
-      templateText:    published.template_text,
-      parameters:      published.parameters ?? {},
-      createdAt:       published.created_at,
+      versionTag:      resolvedVersion.version_tag,
+      templateText:    resolvedVersion.template_text,
+      parameters:      resolvedVersion.parameters ?? {},
+      createdAt:       resolvedVersion.created_at,
     });
   } catch (error) {
     console.error("[proxy/prompts] unhandled error:", error);
