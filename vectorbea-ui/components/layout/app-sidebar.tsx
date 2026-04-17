@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Route } from "next";
 import Image from "next/image";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   CreditCard,
   FlaskConical,
@@ -46,7 +47,6 @@ type SidebarUser = { email: string | null; full_name: string | null; avatar_url:
 
 export function AppSidebar({ summary, user }: { summary: DashboardSummary | null; user?: SidebarUser }) {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const currentQuery = searchParams.toString();
   const [isPending, startTransition] = useTransition();
@@ -64,6 +64,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
     });
   }, [isAdmin, isEditor]);
 
+  // Clear pending indicator once navigation settles
   useEffect(() => {
     setPendingHref(null);
   }, [pathname]);
@@ -82,38 +83,23 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           `/api/dashboard/summary?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
           { cache: "no-store" },
         );
-        if (!response.ok) {
-          throw new Error("Failed to load workspace summary");
-        }
+        if (!response.ok) throw new Error("Failed to load workspace summary");
         const nextSummary = (await response.json()) as DashboardSummary;
-        if (!cancelled) {
-          setWorkspaceSummary(nextSummary);
-        }
+        if (!cancelled) setWorkspaceSummary(nextSummary);
       } catch {
-        if (!cancelled) {
-          setWorkspaceSummary(null);
-        }
+        if (!cancelled) setWorkspaceSummary(null);
       }
     }
 
     void loadWorkspaceSummary();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeWorkspaceId, summary]);
 
-  const navigate = (href: string) => {
-    const target = href.split("?")[0];
-    if (pathname === target || pendingHref === href) return;
-    setPendingHref(href);
-    startTransition(() => {
-      router.push(href as Route);
-    });
-  };
-
   return (
-    <aside className="hidden w-[260px] shrink-0 border-r border-border/50 bg-card/30 px-3 py-4 backdrop-blur-sm lg:flex lg:flex-col">
+    // h-full fills the locked h-screen parent; overflow-y-auto lets the sidebar
+    // scroll independently if the nav list ever overflows (e.g. small viewports)
+    // while keeping mt-auto pinning the sign-out card to the bottom.
+    <aside className="hidden w-[260px] shrink-0 border-r border-border/50 bg-card/30 px-3 py-4 backdrop-blur-sm lg:flex lg:flex-col h-full overflow-y-auto">
       <div className="mb-6 flex items-center gap-3 px-2">
         <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card">
           <Logo />
@@ -141,12 +127,19 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           const loading = isPending && pendingHref === fullHref;
 
           return (
-            <button
+            // Use <Link> so browser back/forward, middle-click, and right-click
+            // "open in new tab" all work correctly. onClick marks the transition
+            // pending for the loading spinner without bypassing Link's own
+            // history management.
+            <Link
               key={item.href}
-              type="button"
-              onClick={() => navigate(fullHref)}
-              disabled={loading}
+              href={fullHref as Route}
               aria-current={active ? "page" : undefined}
+              onClick={() => {
+                if (pathname === item.href || pendingHref === fullHref) return;
+                setPendingHref(fullHref);
+                startTransition(() => {});
+              }}
               className={cn(
                 "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-all duration-200",
                 active
@@ -169,79 +162,79 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 <Loader2 className="absolute left-3 h-4 w-4 animate-spin text-primary" />
               )}
               <span className="flex-1">{item.label}</span>
-            </button>
+            </Link>
           );
         })}
       </nav>
 
       <div className="mt-auto flex flex-col gap-3">
-      {user && (
-        <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">
-          {user.avatar_url ? (
-            <Image
-              src={user.avatar_url}
-              alt={user.full_name ?? user.email ?? "User"}
-              width={28}
-              height={28}
-              className="h-7 w-7 rounded-full border border-border/60 object-cover shrink-0"
-            />
-          ) : (
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[11px] font-semibold text-muted-foreground">
-              {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            {user.full_name && (
-              <p className="truncate text-[12px] font-medium leading-none">{user.full_name}</p>
+        {user && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">
+            {user.avatar_url ? (
+              <Image
+                src={user.avatar_url}
+                alt={user.full_name ?? user.email ?? "User"}
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded-full border border-border/60 object-cover shrink-0"
+              />
+            ) : (
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[11px] font-semibold text-muted-foreground">
+                {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
+              </div>
             )}
-            {user.email && (
-              <p className="truncate text-[10px] text-muted-foreground leading-none mt-0.5">{user.email}</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              void fetch("/api/auth/session", { method: "DELETE" }).then(() => {
-                window.location.assign("/login");
-              });
-            }}
-            title="Sign out"
-            className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      <div className="rounded-xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm">
-        <div className="mb-3 flex items-center gap-2">
-          <span className={cn("live-dot", !workspaceSummary && "!bg-red-500")} />
-          <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-            System Status
-          </p>
-        </div>
-        {workspaceSummary ? (
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xl font-semibold tabular-nums">
-                {workspaceSummary.averageLatencyMs} ms
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                Avg latency · {workspaceSummary.activeAgents} agents
-              </p>
+            <div className="min-w-0 flex-1">
+              {user.full_name && (
+                <p className="truncate text-[12px] font-medium leading-none">{user.full_name}</p>
+              )}
+              {user.email && (
+                <p className="truncate text-[10px] text-muted-foreground leading-none mt-0.5">{user.email}</p>
+              )}
             </div>
-            <Badge variant="success">Connected</Badge>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xl font-semibold tabular-nums">-</p>
-              <p className="text-[11px] text-muted-foreground">Backend unreachable</p>
-            </div>
-            <Badge variant="destructive">Offline</Badge>
+            <button
+              type="button"
+              onClick={() => {
+                void fetch("/api/auth/session", { method: "DELETE" }).then(() => {
+                  window.location.assign("/login");
+                });
+              }}
+              title="Sign out"
+              className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
-      </div>
+
+        <div className="rounded-xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <span className={cn("live-dot", !workspaceSummary && "!bg-red-500")} />
+            <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+              System Status
+            </p>
+          </div>
+          {workspaceSummary ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xl font-semibold tabular-nums">
+                  {workspaceSummary.averageLatencyMs} ms
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Avg latency · {workspaceSummary.activeAgents} agents
+                </p>
+              </div>
+              <Badge variant="success">Connected</Badge>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xl font-semibold tabular-nums">-</p>
+                <p className="text-[11px] text-muted-foreground">Backend unreachable</p>
+              </div>
+              <Badge variant="destructive">Offline</Badge>
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );

@@ -30,7 +30,7 @@ const tiers: Tier[] = [
     priceLabel: "$0",
     priceSuffix: "/ month",
     billingNote: "Free forever — no credit card.",
-    cta: { label: "Start free", href: "/checkout?plan=developer" },
+    cta: { label: "Start free", href: "/login" },
     icon: Code2,
     iconColor: "text-cyan-600 dark:text-cyan-400",
     iconBg: "bg-cyan-500/10 ring-1 ring-cyan-500/20",
@@ -49,9 +49,9 @@ const tiers: Tier[] = [
     priceLabel: "$19.99",
     originalPriceLabel: "$29",
     priceSuffix: "/ seat / month",
-    billingNote: "Early adopter pricing for the first teams onboarded to VectorBea.",
-    promoNote: "List price is $29 / seat / month. Lock in $19.99 while the early adopter program is open.",
-    cta: { label: "Start 14-day trial", href: "/checkout?plan=team" },
+    billingNote: "Early adopter price — lock it in before it moves to $29.",
+    promoNote: undefined,
+    cta: { label: "Get started", href: "/login" },
     highlight: true,
     icon: Sparkles,
     iconColor: "text-primary",
@@ -72,7 +72,7 @@ const tiers: Tier[] = [
     priceLabel: "Custom",
     priceSuffix: "",
     billingNote: "Annual or quarterly invoicing · NET-30/60.",
-    cta: { label: "Talk to sales", href: "mailto:sales@vectorbea.dev" },
+    cta: { label: "Talk to sales", href: "mailto:sales@vectorbea.com" },
     icon: Building2,
     iconColor: "text-violet-600 dark:text-violet-400",
     iconBg: "bg-violet-500/10 ring-1 ring-violet-500/20",
@@ -105,7 +105,7 @@ export default function PricingPage() {
             Home
           </Link>
           <Link
-            href="/onboarding"
+            href="/login"
             className={cn(buttonVariants({ size: "sm" }), "gap-1.5 rounded-md")}
           >
             Get started <ArrowRight className="h-3.5 w-3.5" />
@@ -225,8 +225,8 @@ export default function PricingPage() {
                 a: "Yes — enterprise contracts support monthly, quarterly, or annual billing cycles with NET-30 or NET-60 terms. We'll match your AP process.",
               },
               {
-                q: "Is there a free trial for Team?",
-                a: "Every Team workspace gets a 14-day trial of all paid features. No credit card required to start, and you can downgrade to Developer at any time.",
+                q: "Can I switch plans later?",
+                a: "Yes — you can upgrade from Developer to Team or downgrade at any time. Billing is pro-rated daily so you only pay for the time you are on a paid plan.",
               },
             ].map(({ q, a }) => (
               <div key={q}>

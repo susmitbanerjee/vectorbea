@@ -37,9 +37,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <WorkspaceProvider organizations={organizations}>
-      <div className="flex min-h-screen">
+      {/* h-screen + overflow-hidden locks the root to the viewport.
+          Sidebar and main each manage their own internal scroll so the
+          sign-out button (mt-auto in the sidebar) is always visible at
+          the bottom of the screen regardless of page content length. */}
+      <div className="flex h-screen overflow-hidden">
         <AppSidebar summary={null} user={profile} />
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1 h-full overflow-y-auto">{children}</main>
       </div>
     </WorkspaceProvider>
   );

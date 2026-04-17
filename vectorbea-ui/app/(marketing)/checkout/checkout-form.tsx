@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 const PLANS: Record<string, { name: string; basePrice: number; perSeat: boolean }> = {
   developer: { name: "Developer", basePrice: 0, perSeat: false },
-  team: { name: "Team", basePrice: 29, perSeat: true },
+  team: { name: "Team", basePrice: 19.99, perSeat: true },
   enterprise: { name: "Enterprise", basePrice: 0, perSeat: false },
 };
 
@@ -274,9 +274,9 @@ export default function CheckoutForm() {
           )}
 
           <ul className="mt-6 space-y-2 text-xs text-slate-400">
-            <li className="flex items-start gap-2"><Check className="mt-0.5 h-3.5 w-3.5 text-emerald-400" /> 14-day free trial included</li>
             <li className="flex items-start gap-2"><Check className="mt-0.5 h-3.5 w-3.5 text-emerald-400" /> Cancel anytime, no questions</li>
             <li className="flex items-start gap-2"><Check className="mt-0.5 h-3.5 w-3.5 text-emerald-400" /> Pro-rated seat changes</li>
+            <li className="flex items-start gap-2"><Check className="mt-0.5 h-3.5 w-3.5 text-emerald-400" /> Early adopter price locked in</li>
           </ul>
         </aside>
       </main>

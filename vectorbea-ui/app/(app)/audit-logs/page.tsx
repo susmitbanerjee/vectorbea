@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +10,13 @@ import type { AuditLogView } from "@/lib/api";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { Activity, Clock, FileText, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+
+const PAGE_SIZE = 25;
+
+// ── Audit diff helpers ────────────────────────────────────────────────────────
 
 type AuditChange =
   | { kind: "template"; before: string; after: string }
@@ -24,11 +31,7 @@ type AuditSummary = {
 function formatJsonValue(value: unknown): string {
   if (value === undefined || value === null) return "—";
   if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  try { return JSON.stringify(value); } catch { return String(value); }
 }
 
 function diffParameterObjects(
@@ -41,12 +44,7 @@ function diffParameterObjects(
     const b = before[key];
     const a = after[key];
     if (JSON.stringify(b) === JSON.stringify(a)) continue;
-    out.push({
-      kind: "field",
-      path: `parameters.${key}`,
-      before: formatJsonValue(b),
-      after: formatJsonValue(a),
-    });
+    out.push({ kind: "field", path: `parameters.${key}`, before: formatJsonValue(b), after: formatJsonValue(a) });
   }
   return out;
 }
@@ -57,9 +55,7 @@ function summarizeAudit(metadata: Record<string, unknown>): AuditSummary {
 
   if (action === "publish") {
     const next = String(metadata.published_version ?? "");
-    const prev = metadata.previous_published_version
-      ? String(metadata.previous_published_version)
-      : null;
+    const prev = metadata.previous_published_version ? String(metadata.previous_published_version) : null;
     return {
       headline: prev ? `Published ${next} (replaces ${prev})` : `Published ${next}`,
       tone: "publish",
@@ -73,16 +69,10 @@ function summarizeAudit(metadata: Record<string, unknown>): AuditSummary {
   if (typeof beforeTpl === "string" && typeof afterTpl === "string" && beforeTpl !== afterTpl) {
     changes.push({ kind: "template", before: beforeTpl, after: afterTpl });
   }
-
   const beforeParams = metadata.before_parameters;
   const afterParams = metadata.after_parameters;
   if (beforeParams && afterParams && typeof beforeParams === "object" && typeof afterParams === "object") {
-    changes.push(
-      ...diffParameterObjects(
-        beforeParams as Record<string, unknown>,
-        afterParams as Record<string, unknown>,
-      ),
-    );
+    changes.push(...diffParameterObjects(beforeParams as Record<string, unknown>, afterParams as Record<string, unknown>));
   }
 
   if (action === "update" || changes.length > 0) {
@@ -91,8 +81,7 @@ function summarizeAudit(metadata: Record<string, unknown>): AuditSummary {
     const fieldChanges = changes.filter((c) => c.kind === "field").length;
     if (templateChanges > 0) parts.push("template");
     if (fieldChanges > 0) parts.push(`${fieldChanges} parameter${fieldChanges === 1 ? "" : "s"}`);
-    const headline = parts.length > 0 ? `Updated ${parts.join(" & ")}` : "Updated prompt";
-    return { headline, tone: "update", changes };
+    return { headline: parts.length > 0 ? `Updated ${parts.join(" & ")}` : "Updated prompt", tone: "update", changes };
   }
 
   if (source) return { headline: "Runtime call", tone: "runtime", changes: [] };
@@ -136,33 +125,45 @@ function formatProxyLatency(ms: number): string {
   return `${Math.round(ms)}ms`;
 }
 
-function computeStats(logs: AuditLogView[]) {
-  if (logs.length === 0) {
-    return { total: 0, avgLlmLatency: 0, avgProxyLatency: 0, totalTokens: 0, mostActivePrompt: "N/A" };
-  }
-  const avgLlmLatency = Math.round(logs.reduce((sum, l) => sum + l.llmLatencyMs, 0) / logs.length);
-  const avgProxyLatency = logs.reduce((sum, l) => sum + l.proxyLatencyMs, 0) / logs.length;
-  const totalTokens = logs.reduce((sum, l) => sum + l.tokenCount, 0);
+// Stats are computed from up to 500 most-recent logs so they represent a
+// meaningful aggregate rather than just the current page.
+type StatsRow = { proxy_latency_ms: number | null; llm_latency_ms: number | null; token_count: number | null; prompt_name: string | null };
+function computeStats(rows: StatsRow[], total: number) {
+  if (rows.length === 0) return { total, avgLlmLatency: 0, avgProxyLatency: 0, mostActivePrompt: "N/A" };
+  const avgLlmLatency = Math.round(rows.reduce((s, r) => s + (r.llm_latency_ms ?? 0), 0) / rows.length);
+  const avgProxyLatency = rows.reduce((s, r) => s + (r.proxy_latency_ms ?? 0), 0) / rows.length;
   const promptCounts = new Map<string, number>();
-  for (const log of logs) {
-    promptCounts.set(log.promptName, (promptCounts.get(log.promptName) ?? 0) + 1);
+  for (const row of rows) {
+    const name = row.prompt_name ?? "";
+    promptCounts.set(name, (promptCounts.get(name) ?? 0) + 1);
   }
   let mostActivePrompt = "";
   let maxCount = 0;
   for (const [name, count] of promptCounts) {
     if (count > maxCount) { mostActivePrompt = name; maxCount = count; }
   }
-  return { total: logs.length, avgLlmLatency, avgProxyLatency, totalTokens, mostActivePrompt };
+  return { total, avgLlmLatency, avgProxyLatency, mostActivePrompt };
 }
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function AuditLogsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string; q?: string }>;
+  searchParams: Promise<{ org?: string; q?: string; page?: string }>;
 }) {
-  const { org: workspaceId, q } = await searchParams;
+  const { org: workspaceId, q, page: pageParam } = await searchParams;
 
-  let allLogs: AuditLogView[] = [];
+  // When a search query is active, return all matching results (no pagination)
+  // so users can search across the full dataset. Pagination only applies to
+  // the unfiltered view.
+  const isSearching = Boolean(q?.trim());
+  const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
+  const offset = (page - 1) * PAGE_SIZE;
+
+  let logs: AuditLogView[] = [];
+  let totalCount = 0;
+  let stats = { total: 0, avgLlmLatency: 0, avgProxyLatency: 0, mostActivePrompt: "N/A" };
 
   if (workspaceId) {
     const cookieStore = await cookies();
@@ -170,14 +171,40 @@ export default async function AuditLogsPage({
 
     if (user) {
       const supabase = createVectorBeaAdminClient();
-      const { data } = await supabase
-        .from("audit_logs")
-        .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false })
-        .limit(100);
 
-      allLogs = (data ?? []).map((row) => ({
+      // Run stats query + paginated data query in parallel for performance.
+      // Stats query fetches up to 500 rows for aggregate computation and also
+      // returns the exact total count via PostgREST's count header.
+      const [statsResult, pageResult] = await Promise.all([
+        supabase
+          .from("audit_logs")
+          .select("proxy_latency_ms, llm_latency_ms, token_count, prompt_name", { count: "exact" })
+          .eq("workspace_id", workspaceId)
+          .order("created_at", { ascending: false })
+          .limit(500),
+
+        isSearching
+          // Search: fetch enough rows to filter across; cap at 200 for safety.
+          ? supabase
+              .from("audit_logs")
+              .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+              .eq("workspace_id", workspaceId)
+              .order("created_at", { ascending: false })
+              .limit(200)
+          // Normal view: one page only.
+          : supabase
+              .from("audit_logs")
+              .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+              .eq("workspace_id", workspaceId)
+              .order("created_at", { ascending: false })
+              .range(offset, offset + PAGE_SIZE - 1),
+      ]);
+
+      totalCount = statsResult.count ?? 0;
+      stats = computeStats(statsResult.data ?? [], totalCount);
+
+      const rawRows = pageResult.data ?? [];
+      const mapped: AuditLogView[] = rawRows.map((row) => ({
         timestamp: row.created_at,
         workspaceId: workspaceId,
         promptName: row.prompt_name ?? "",
@@ -187,26 +214,38 @@ export default async function AuditLogsPage({
         tokenCount: row.token_count ?? 0,
         metadata: (row.metadata as Record<string, unknown>) ?? {},
       }));
+
+      // Apply client-side search filter on the fetched rows.
+      logs = q
+        ? mapped.filter((log) =>
+            `${log.promptName} ${log.versionTag} ${JSON.stringify(log.metadata)}`
+              .toLowerCase()
+              .includes(q.toLowerCase()),
+          )
+        : mapped;
     }
   }
 
-  const logs = q
-    ? allLogs.filter((log) =>
-        `${log.promptName} ${log.versionTag} ${JSON.stringify(log.metadata)}`
-          .toLowerCase()
-          .includes(q.toLowerCase()),
-      )
-    : allLogs;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  const stats = computeStats(logs);
+  // Build a URL preserving all current search params while changing page.
+  function pageUrl(p: number) {
+    const params = new URLSearchParams();
+    if (workspaceId) params.set("org", workspaceId);
+    if (q) params.set("q", q);
+    params.set("page", String(p));
+    return `/audit-logs?${params.toString()}`;
+  }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-full">
       <AppHeader
         title="Audit Logs"
         subtitle="Execution traces, ingestion health, and route-level observability."
       />
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
+
+        {/* ── Stats ── */}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 animate-fade-in">
           {[
             { label: "Total Entries", value: stats.total.toLocaleString(), icon: Activity },
@@ -228,15 +267,29 @@ export default async function AuditLogsPage({
           ))}
         </section>
 
+        {/* ── Table ── */}
         <Card className="animate-slide-up stagger-1-5">
           <CardHeader>
-            <CardTitle>Recent Audit Events</CardTitle>
-            <CardDescription>
-              {logs.length > 0
-                ? `Showing ${logs.length} event${logs.length !== 1 ? "s" : ""} from the backend audit feed.`
-                : "No audit events match the current filters."}
-            </CardDescription>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle>Recent Audit Events</CardTitle>
+                <CardDescription className="mt-1">
+                  {isSearching
+                    ? `${logs.length} result${logs.length !== 1 ? "s" : ""} matching "${q}"`
+                    : totalCount > 0
+                    ? `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} total event${totalCount !== 1 ? "s" : ""}`
+                    : "No audit events match the current filters."}
+                </CardDescription>
+              </div>
+              {/* Page counter badge */}
+              {!isSearching && totalPages > 1 && (
+                <p className="shrink-0 text-xs text-muted-foreground">
+                  {offset + 1}–{Math.min(offset + PAGE_SIZE, totalCount)} of {totalCount.toLocaleString()}
+                </p>
+              )}
+            </div>
           </CardHeader>
+
           <CardContent>
             {logs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -245,102 +298,178 @@ export default async function AuditLogsPage({
                 </div>
                 <p className="text-sm font-medium text-muted-foreground">No audit logs found</p>
                 <p className="mt-1 text-xs text-muted-foreground/70">
-                  Events will appear here once prompts are executed.
+                  {isSearching ? "Try a different search term." : "Events will appear here once prompts are executed."}
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Prompt</TableHead>
-                      <TableHead>Version</TableHead>
-                      <TableHead>VectorBea Latency</TableHead>
-                      <TableHead>LLM Latency</TableHead>
-                      <TableHead>Tokens</TableHead>
-                      <TableHead>Details</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {logs.map((log) => (
-                      <TableRow key={`${log.timestamp}-${log.promptName}-${log.versionTag}`} className="group">
-                        <TableCell className="whitespace-nowrap">
-                          <span className="text-sm" title={new Date(log.timestamp).toLocaleString()}>
-                            {relativeTime(log.timestamp)}
-                          </span>
-                        </TableCell>
-                        <TableCell><span className="font-medium">{log.promptName}</span></TableCell>
-                        <TableCell><Badge variant="outline">{log.versionTag}</Badge></TableCell>
-                        <TableCell>
-                          <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>
-                            {formatProxyLatency(log.proxyLatencyMs)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={llmLatencyBadgeVariant(log.llmLatencyMs)}>{log.llmLatencyMs} ms</Badge>
-                        </TableCell>
-                        <TableCell className="tabular-nums">{log.tokenCount.toLocaleString()}</TableCell>
-                        <TableCell className="max-w-md">
-                          {(() => {
-                            const summary = summarizeAudit(log.metadata);
-                            const badgeVariant =
-                              summary.tone === "publish" ? "success"
-                              : summary.tone === "update" ? "warning"
-                              : "outline";
-                            return (
-                              <div className="space-y-1.5">
-                                <Badge variant={badgeVariant} className="text-[11px]">
-                                  {summary.headline}
-                                </Badge>
-                                {summary.changes.length > 0 && (
-                                  <details className="group/details">
-                                    <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
-                                      View {summary.changes.length} change{summary.changes.length === 1 ? "" : "s"}
-                                    </summary>
-                                    <ul className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
-                                      {summary.changes.map((change, idx) => (
-                                        <li key={`${change.kind}-${idx}`} className="text-[11px]">
-                                          {change.kind === "template" ? (
-                                            <div className="space-y-1">
-                                              <div className="font-semibold text-foreground">Template</div>
-                                              <div className="grid gap-1 md:grid-cols-2">
-                                                <div className="rounded bg-red-500/10 p-2 text-red-600 dark:text-red-300">
-                                                  <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">Before</div>
-                                                  <pre className="whitespace-pre-wrap font-mono">{truncate(change.before, 240)}</pre>
-                                                </div>
-                                                <div className="rounded bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-300">
-                                                  <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">After</div>
-                                                  <pre className="whitespace-pre-wrap font-mono">{truncate(change.after, 240)}</pre>
+              <>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Prompt</TableHead>
+                        <TableHead>Version</TableHead>
+                        <TableHead>VectorBea Latency</TableHead>
+                        <TableHead>LLM Latency</TableHead>
+                        <TableHead>Tokens</TableHead>
+                        <TableHead>Details</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {logs.map((log) => (
+                        <TableRow key={`${log.timestamp}-${log.promptName}-${log.versionTag}`} className="group">
+                          <TableCell className="whitespace-nowrap">
+                            <span className="text-sm" title={new Date(log.timestamp).toLocaleString()}>
+                              {relativeTime(log.timestamp)}
+                            </span>
+                          </TableCell>
+                          <TableCell><span className="font-medium">{log.promptName}</span></TableCell>
+                          <TableCell><Badge variant="outline">{log.versionTag}</Badge></TableCell>
+                          <TableCell>
+                            <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>
+                              {formatProxyLatency(log.proxyLatencyMs)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={llmLatencyBadgeVariant(log.llmLatencyMs)}>{log.llmLatencyMs} ms</Badge>
+                          </TableCell>
+                          <TableCell className="tabular-nums">{log.tokenCount.toLocaleString()}</TableCell>
+                          <TableCell className="max-w-md">
+                            {(() => {
+                              const summary = summarizeAudit(log.metadata);
+                              const badgeVariant =
+                                summary.tone === "publish" ? "success"
+                                : summary.tone === "update" ? "warning"
+                                : "outline";
+                              return (
+                                <div className="space-y-1.5">
+                                  <Badge variant={badgeVariant} className="text-[11px]">
+                                    {summary.headline}
+                                  </Badge>
+                                  {summary.changes.length > 0 && (
+                                    <details className="group/details">
+                                      <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
+                                        View {summary.changes.length} change{summary.changes.length === 1 ? "" : "s"}
+                                      </summary>
+                                      <ul className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
+                                        {summary.changes.map((change, idx) => (
+                                          <li key={`${change.kind}-${idx}`} className="text-[11px]">
+                                            {change.kind === "template" ? (
+                                              <div className="space-y-1">
+                                                <div className="font-semibold text-foreground">Template</div>
+                                                <div className="grid gap-1 md:grid-cols-2">
+                                                  <div className="rounded bg-red-500/10 p-2 text-red-600 dark:text-red-300">
+                                                    <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">Before</div>
+                                                    <pre className="whitespace-pre-wrap font-mono">{truncate(change.before, 240)}</pre>
+                                                  </div>
+                                                  <div className="rounded bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-300">
+                                                    <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">After</div>
+                                                    <pre className="whitespace-pre-wrap font-mono">{truncate(change.after, 240)}</pre>
+                                                  </div>
                                                 </div>
                                               </div>
-                                            </div>
-                                          ) : (
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                              <span className="font-mono font-semibold text-foreground">{change.path}:</span>
-                                              <span className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-red-600 dark:text-red-300 line-through">
-                                                {truncate(change.before, 40)}
-                                              </span>
-                                              <span className="text-muted-foreground">→</span>
-                                              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-emerald-600 dark:text-emerald-300">
-                                                {truncate(change.after, 40)}
-                                              </span>
-                                            </div>
-                                          )}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </details>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                                            ) : (
+                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="font-mono font-semibold text-foreground">{change.path}:</span>
+                                                <span className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-red-600 dark:text-red-300 line-through">
+                                                  {truncate(change.before, 40)}
+                                                </span>
+                                                <span className="text-muted-foreground">→</span>
+                                                <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-emerald-600 dark:text-emerald-300">
+                                                  {truncate(change.after, 40)}
+                                                </span>
+                                              </div>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </details>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* ── Pagination controls ── */}
+                {!isSearching && totalPages > 1 && (
+                  <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
+                    <Link
+                      href={pageUrl(page - 1)}
+                      aria-disabled={page <= 1}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium transition-colors",
+                        page <= 1
+                          ? "pointer-events-none opacity-40"
+                          : "hover:bg-accent/40 hover:text-foreground text-muted-foreground",
+                      )}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      Previous
+                    </Link>
+
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                        // Show pages around current page with ellipsis logic
+                        let p: number | "…";
+                        if (totalPages <= 7) {
+                          p = i + 1;
+                        } else if (i === 0) {
+                          p = 1;
+                        } else if (i === 6) {
+                          p = totalPages;
+                        } else if (page <= 4) {
+                          p = i + 1;
+                        } else if (page >= totalPages - 3) {
+                          p = totalPages - 6 + i;
+                        } else {
+                          const offsets = [0, 1, 2, 3, 4, 5, 6];
+                          const mapped = [1, page - 2, page - 1, page, page + 1, page + 2, totalPages];
+                          p = mapped[offsets.indexOf(i)] ?? i + 1;
+                        }
+
+                        if (p === "…") {
+                          return <span key={`ellipsis-${i}`} className="px-1 text-xs text-muted-foreground">…</span>;
+                        }
+
+                        return (
+                          <Link
+                            key={p}
+                            href={pageUrl(p as number)}
+                            className={cn(
+                              "flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors",
+                              p === page
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                            )}
+                          >
+                            {p}
+                          </Link>
+                        );
+                      })}
+                    </div>
+
+                    <Link
+                      href={pageUrl(page + 1)}
+                      aria-disabled={page >= totalPages}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium transition-colors",
+                        page >= totalPages
+                          ? "pointer-events-none opacity-40"
+                          : "hover:bg-accent/40 hover:text-foreground text-muted-foreground",
+                      )}
+                    >
+                      Next
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
