@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { revalidateTag } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import type { OrganizationView } from "@/lib/api";
 import { organizationTag, WORKSPACES_TAG, workspaceTag } from "@/lib/dal/cache-tags";
@@ -35,10 +36,11 @@ export async function GET() {
 
 // ─── POST /api/organizations ──────────────────────────────────────────────────
 
-type CreateOrgPayload = {
-  name?: string;
-  workspaceName?: string;
-};
+// Zero-Trust: every incoming payload is treated as hostile until proven valid.
+const CreateOrgSchema = z.object({
+  name:          z.string().min(2, "Name must be at least 2 characters").max(80, "Name must be 80 characters or fewer").trim(),
+  workspaceName: z.string().min(2).max(80).trim().optional(),
+});
 
 type TenantEnvironmentResult = {
   organization_id: string;
@@ -54,17 +56,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }
 
-    // ── Validate payload ────────────────────────────────────────────────────
-    const payload = (await request.json()) as CreateOrgPayload;
-    const orgName = payload.name?.trim();
-    if (!orgName) {
+    // ── Zero-Trust payload validation (Zod) ────────────────────────────────
+    // Parse raw JSON first — reject non-JSON bodies before touching any DB.
+    const rawBody = await request.json().catch(() => null);
+    const parsed = CreateOrgSchema.safeParse(rawBody);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Organization name is required." },
+        { error: "Invalid request payload", details: parsed.error.flatten().fieldErrors },
         { status: 400 },
       );
     }
+
+    const orgName = parsed.data.name;
     // Workspace defaults to the org name when not explicitly provided.
-    const workspaceName = payload.workspaceName?.trim() || orgName;
+    const workspaceName = parsed.data.workspaceName ?? orgName;
 
     // ── Plan gate ───────────────────────────────────────────────────────────
     const existingOrganizations = await loadOrganizationsForUser(user.id).catch(() => []);
@@ -85,21 +90,19 @@ export async function POST(request: NextRequest) {
     // `vectorbea.create_tenant_environment` wraps all four inserts in one
     // implicit PL/pgSQL transaction — any error rolls back the entire unit.
     //
-    // The RPC is called via the *base* admin client (not the schema-scoped
-    // one) because Supabase's .rpc() targets the public PostgREST schema
-    // root — the function itself lives in vectorbea schema and handles its
-    // own schema-qualified inserts internally.
+    // IMPORTANT: `.schema('vectorbea')` must be chained before `.rpc()`.
+    // Without it PostgREST resolves the function name against the `public`
+    // schema and throws "Could not find the function public.create_tenant_environment".
     const supabase = createSupabaseAdminClient();
 
-    const { data: rpcResult, error: rpcError } = await supabase.rpc(
-      "create_tenant_environment",
-      {
+    const { data: rpcResult, error: rpcError } = await supabase
+      .schema("vectorbea")
+      .rpc("create_tenant_environment", {
         p_user_id:        user.id,
         p_org_name:       orgName,
         p_workspace_name: workspaceName,
         p_plan_tier:      planTier,
-      },
-    );
+      });
 
     if (rpcError || !rpcResult) {
       throw new Error(rpcError?.message ?? "Transactional org creation failed");

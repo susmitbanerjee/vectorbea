@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import {
   getAuthenticatedUserFromCookies,
@@ -23,6 +24,11 @@ function generateApiKey() {
     lastFour: rawKey.slice(-4),
   };
 }
+
+// Zero-Trust: validate the bootstrap payload before touching any DB.
+const BootstrapSchema = z.object({
+  workspaceName: z.string().min(2, "Workspace name must be at least 2 characters").max(80, "Workspace name must be 80 characters or fewer").trim(),
+});
 
 type TenantEnvironmentResult = {
   organization_id: string;
@@ -50,28 +56,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Validate payload ────────────────────────────────────────────────────
-    const payload = (await request.json()) as { workspaceName?: string };
-    const workspaceName = payload.workspaceName?.trim();
-    if (!workspaceName) {
-      return NextResponse.json({ error: "workspaceName is required" }, { status: 400 });
+    // ── Zero-Trust payload validation (Zod) ────────────────────────────────
+    const rawBody = await request.json().catch(() => null);
+    const parsed = BootstrapSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request payload", details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
     }
+
+    const workspaceName = parsed.data.workspaceName;
 
     // ── Single transactional RPC ────────────────────────────────────────────
     //
     // Replaces 4 sequential inserts. If any step inside the Postgres function
     // fails the entire transaction is rolled back — no orphaned org rows.
+    //
+    // IMPORTANT: `.schema('vectorbea')` routes the call to the correct
+    // PostgREST schema. Without it, Supabase defaults to `public` and throws
+    // "Could not find the function public.create_tenant_environment".
     const supabase = createSupabaseAdminClient();
 
-    const { data: rpcResult, error: rpcError } = await supabase.rpc(
-      "create_tenant_environment",
-      {
+    const { data: rpcResult, error: rpcError } = await supabase
+      .schema("vectorbea")
+      .rpc("create_tenant_environment", {
         p_user_id:        user.id,
         p_org_name:       workspaceName,   // org name = workspace name on first signup
         p_workspace_name: workspaceName,
         p_plan_tier:      "free",
-      },
-    );
+      });
 
     if (rpcError || !rpcResult) {
       throw new Error(rpcError?.message ?? "Transactional tenant creation failed");

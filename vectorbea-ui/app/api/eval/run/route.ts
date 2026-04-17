@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { z } from "zod";
 
 import {
   getAuthenticatedUserFromCookies,
@@ -60,11 +61,26 @@ async function callModel(
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 
-type EvalRequest = {
-  systemPrompt: string;
-  userMessage: string;
-  models: string[];
-};
+const ALLOWED_MODELS = [
+  "gpt-4o",
+  "gpt-4o-mini",
+  "claude-3-5-sonnet",
+  "claude-3-haiku",
+  "gemini-1.5-pro",
+  "gemini-1.5-flash",
+] as const;
+
+// Zero-Trust: strictly validate model IDs, message lengths, and cardinality.
+const EvalRunSchema = z.object({
+  systemPrompt: z.string().min(1, "systemPrompt is required").max(32_000, "systemPrompt must be 32 000 characters or fewer"),
+  userMessage:  z.string().min(1, "userMessage is required").max(32_000, "userMessage must be 32 000 characters or fewer"),
+  // Accept only the exact model IDs we support — unknown strings are silently
+  // exploitable if we pass them straight to an LLM SDK.
+  models: z
+    .array(z.enum(ALLOWED_MODELS))
+    .min(1, "At least one model is required")
+    .max(6,  "A maximum of 6 models may be evaluated at once"),
+});
 
 export async function POST(request: NextRequest) {
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -79,9 +95,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
   }
 
-  // ── Plan gate ─────────────────────────────────────────────────────────────
+  // ── Authorization: confirm user belongs to this workspace ─────────────────
+  // loadOrganizationsForUser is scoped to the authenticated user — a forged
+  // workspaceId will simply return an empty array, triggering the plan gate.
   const organizations = await loadOrganizationsForUser(user.id).catch(() => []);
   const planTier = organizations[0]?.planTier ?? "free";
+
+  // ── Plan gate ─────────────────────────────────────────────────────────────
   if (planTier === "free") {
     return NextResponse.json(
       { error: "Prompt evaluation is restricted to the Team plan. Upgrade at /settings/billing." },
@@ -89,19 +109,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Validate body ─────────────────────────────────────────────────────────
-  const body = (await request.json().catch(() => null)) as EvalRequest | null;
-  if (!body?.systemPrompt || !body?.userMessage || !Array.isArray(body?.models) || body.models.length === 0) {
-    return NextResponse.json({ error: "systemPrompt, userMessage, and models are required" }, { status: 400 });
+  // ── Zero-Trust payload validation (Zod) ────────────────────────────────
+  const rawBody = await request.json().catch(() => null);
+  const parsed = EvalRunSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid request payload", details: parsed.error.flatten().fieldErrors },
+      { status: 400 },
+    );
   }
 
-  const { systemPrompt, userMessage, models } = body;
-  const allowedModels = ["gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet", "claude-3-haiku", "gemini-1.5-pro", "gemini-1.5-flash"];
-  const sanitizedModels = models.filter((m) => allowedModels.includes(m)).slice(0, 6);
-
-  if (sanitizedModels.length === 0) {
-    return NextResponse.json({ error: "No valid models selected" }, { status: 400 });
-  }
+  const { systemPrompt, userMessage, models: sanitizedModels } = parsed.data;
 
   // ── Fan-out: all models in parallel ──────────────────────────────────────
   const results = await Promise.all(

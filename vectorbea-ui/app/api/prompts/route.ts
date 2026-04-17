@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
+import { z } from "zod";
 
 import type { PromptListItem } from "@/lib/api";
 import { PROMPTS_TAG, promptTag, workspaceTag } from "@/lib/dal/cache-tags";
@@ -57,6 +58,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Zero-Trust: every incoming prompt creation payload is validated before any DB write.
+const CreatePromptSchema = z.object({
+  name:        z.string().min(1, "name is required").max(120, "name must be 120 characters or fewer").trim(),
+  description: z.string().max(500, "description must be 500 characters or fewer").trim().optional(),
+});
+
 export async function POST(request: NextRequest) {
   try {
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
@@ -68,10 +75,25 @@ export async function POST(request: NextRequest) {
     }
 
     // ── P0: Tenant isolation gate ──────────────────────────────────────────
+    // Verify the authenticated user is actually a member of this workspace
+    // *before* touching plan limits or prompt counts.
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
     // ──────────────────────────────────────────────────────────────────────
 
+    // ── Zero-Trust payload validation (Zod) ────────────────────────────────
+    const rawBody = await request.json().catch(() => null);
+    const parsed = CreatePromptSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request payload", details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
+    }
+
+    const { name, description } = parsed.data;
+
+    // ── Plan limit check ────────────────────────────────────────────────────
     const planLimits = await getWorkspacePlanLimits(workspaceId);
     const promptCount = await getWorkspacePromptCount(workspaceId);
     const promptLimit = Math.max(planLimits.maxPrompts ?? 5, 5);
@@ -85,12 +107,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payload = (await request.json()) as { name?: string; description?: string };
-    const name = payload.name?.trim();
-    if (!name) {
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
-    }
-
     const supabase = createVectorBeaAdminClient();
 
     const { data, error: insertError } = await supabase
@@ -98,7 +114,7 @@ export async function POST(request: NextRequest) {
       .insert({
         workspace_id: workspaceId,
         name,
-        description: payload.description?.trim() ?? null,
+        description: description ?? null,
       })
       .select("id, name, description, created_at")
       .single();
