@@ -187,7 +187,7 @@ docker pull vectorbea/vectorbea-proxy:latest`}</Code>
           Before wiring the SDK into your application, confirm the proxy can
           reach the hub and resolve prompts:
         </p>
-        <Code lang="bash">{`curl http://localhost:8080/api/proxy/prompts/greet-user \\
+        <Code lang="bash">{`curl http://localhost:8080/v1/prompts/greet-user \\
   -H "Authorization: Bearer vb_your_api_key"`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
           You should receive a JSON object with <InlineCode>templateText</InlineCode>,{" "}
