@@ -19,6 +19,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 class HubClient(private val config: AppConfig) {
@@ -42,8 +43,13 @@ class HubClient(private val config: AppConfig) {
     suspend fun fetchPrompt(name: String): PromptPayload =
         client.get("${config.hubUrl}/api/proxy/prompts/${name.encodeURLPathPart()}").body()
 
+    /**
+     * Flush a batch of audit events to the M2M audit endpoint.
+     * Uses /api/proxy/audit/batch which authenticates via deployment_agents.api_token
+     * instead of requiring a browser session.
+     */
     suspend fun flushAuditBatch(logs: List<AuditEvent>) {
-        val response = client.post("${config.hubUrl}/api/audit/batch") {
+        val response = client.post("${config.hubUrl}/api/proxy/audit/batch") {
             setBody(logs)
         }
 
@@ -52,7 +58,53 @@ class HubClient(private val config: AppConfig) {
         }
     }
 
+    /**
+     * Send a heartbeat to the hub so the agent shows as online in the dashboard
+     * and live telemetry latency data is recorded.
+     *
+     * @param avgLatencyMs  Rolling average proxy latency over the heartbeat window (ms).
+     * @param cpuUsagePercent  CPU usage 0–100 (pass 0.0 if not tracked).
+     * @param memoryUsageMb   JVM heap used in MB.
+     * @param activeReplicas  Number of active proxy replicas (typically 1 for a single container).
+     */
+    suspend fun sendHeartbeat(
+        avgLatencyMs: Double = 0.0,
+        cpuUsagePercent: Double = 0.0,
+        memoryUsageMb: Double = 0.0,
+        activeReplicas: Int = 1,
+    ) {
+        val payload = HeartbeatPayload(
+            metrics = HeartbeatMetrics(
+                latencyMs = avgLatencyMs,
+                cpuUsagePercent = cpuUsagePercent,
+                memoryUsageMb = memoryUsageMb,
+                activeReplicas = activeReplicas,
+                status = "online",
+            )
+        )
+        val response = client.post("${config.hubUrl}/api/agents/heartbeat") {
+            setBody(payload)
+        }
+        if (!response.status.isSuccess()) {
+            error("Heartbeat rejected with ${response.status.value}: ${response.bodyAsText()}")
+        }
+    }
+
     fun close() {
         client.close()
     }
 }
+
+// ── Heartbeat request models ──────────────────────────────────────────────────
+
+@Serializable
+private data class HeartbeatPayload(val metrics: HeartbeatMetrics)
+
+@Serializable
+private data class HeartbeatMetrics(
+    val latencyMs: Double,
+    val cpuUsagePercent: Double,
+    val memoryUsageMb: Double,
+    val activeReplicas: Int,
+    val status: String,
+)
