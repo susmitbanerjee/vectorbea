@@ -9,12 +9,12 @@ export const dynamic = "force-dynamic";
  * Initiates Microsoft OAuth with PKCE + nonce through your own domain.
  * The consent screen shows "vectorbea.com" instead of "supabase.co".
  *
- * Why nonce?
- * Azure embeds the nonce in the id_token as a claim. Supabase's
- * signInWithIdToken validates that claim against the raw nonce we pass it.
- * Without this, signInWithIdToken rejects the Azure id_token with 401.
- * We hash the nonce before sending it to Azure (standard OIDC practice),
- * and store the raw value in a short-lived httpOnly cookie for the callback.
+ * Nonce encoding
+ * ──────────────
+ * Supabase's signInWithIdToken hashes the rawNonce you pass using SHA-256
+ * and encodes the result as lowercase hex before comparing against the
+ * id_token's nonce claim. The value sent to Azure as &nonce=... must therefore
+ * also be hex(sha256(rawNonce)) — not base64url — so both sides agree.
  */
 export async function GET(request: NextRequest) {
   const clientId = process.env.AZURE_CLIENT_ID;
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
   const next = searchParams.get("next") ?? "/dashboard";
 
-  // ── PKCE ─────────────────────────────────────────────────────────────────
+  // ── PKCE ──────────────────────────────────────────────────────────────────
   const verifierBytes  = crypto.getRandomValues(new Uint8Array(32));
   const codeVerifier   = Buffer.from(verifierBytes).toString("base64url");
   const challengeBytes = await crypto.subtle.digest(
@@ -36,23 +36,25 @@ export async function GET(request: NextRequest) {
   );
   const codeChallenge = Buffer.from(challengeBytes).toString("base64url");
 
-  // ── Nonce ─────────────────────────────────────────────────────────────────
-  // Raw nonce stored in cookie; hashed nonce sent to Azure.
-  // On callback: pass raw nonce to signInWithIdToken so Supabase can verify
-  // the nonce claim embedded in the id_token by Azure.
-  const nonceBytes     = crypto.getRandomValues(new Uint8Array(16));
-  const rawNonce       = Buffer.from(nonceBytes).toString("base64url");
-  const nonceHashBytes = await crypto.subtle.digest(
+  // ── Nonce ──────────────────────────────────────────────────────────────────
+  // rawNonce  → stored in cookie, passed to signInWithIdToken
+  // hashedNonce (hex) → sent to Azure, embedded by Azure in the id_token
+  // Supabase hashes rawNonce → hex and compares with the token claim → match.
+  const nonceBytes    = crypto.getRandomValues(new Uint8Array(16));
+  const rawNonce      = Buffer.from(nonceBytes).toString("base64url");
+  const nonceDigest   = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(rawNonce),
   );
-  const hashedNonce = Buffer.from(nonceHashBytes).toString("base64url");
+  const hashedNonce = Array.from(new Uint8Array(nonceDigest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");   // lowercase hex — matches Supabase internal encoding
 
   // ── State (CSRF) ──────────────────────────────────────────────────────────
   const stateBytes = crypto.getRandomValues(new Uint8Array(16));
   const state      = Buffer.from(stateBytes).toString("base64url");
 
-  // ── Build Microsoft authorization URL ────────────────────────────────────
+  // ── Build Microsoft authorization URL ─────────────────────────────────────
   const redirectUri = `${origin}/api/auth/microsoft/callback`;
   const authUrl = new URL(
     `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`,
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
   authUrl.searchParams.set("scope",                 "openid email profile offline_access");
   authUrl.searchParams.set("code_challenge",        codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
-  authUrl.searchParams.set("nonce",                 hashedNonce);
+  authUrl.searchParams.set("nonce",                 hashedNonce);  // hex hash
   authUrl.searchParams.set("state",                 state);
 
   const cookieOptions = {
@@ -72,7 +74,7 @@ export async function GET(request: NextRequest) {
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 10, // 10 minutes — enough for the OAuth round-trip
+    maxAge: 60 * 10,
   };
 
   const response = NextResponse.redirect(authUrl.toString());
