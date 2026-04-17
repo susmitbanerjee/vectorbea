@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidateTag } from "next/cache";
 
 import type { PromptDetail } from "@/lib/api";
+import { PROMPTS_TAG, promptTag, workspaceTag } from "@/lib/dal/cache-tags";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
@@ -46,6 +48,12 @@ export async function GET(
       isPublished: latest?.is_published ?? false,
       createdAt: data.created_at ?? null,
     };
+
+    if (data.workspace_id) {
+      revalidateTag(PROMPTS_TAG);
+      revalidateTag(workspaceTag(data.workspace_id));
+    }
+    revalidateTag(promptTag(id));
 
     return NextResponse.json(prompt);
   } catch (error) {
@@ -162,8 +170,23 @@ export async function DELETE(
     }
     const { id } = await params;
     const supabase = createVectorBeaAdminClient();
+    const { data: existingPrompt, error: fetchError } = await supabase
+      .from("prompts")
+      .select("workspace_id")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) throw new Error(fetchError.message);
+
     const { error } = await supabase.from("prompts").delete().eq("id", id);
     if (error) throw new Error(error.message);
+
+    if (existingPrompt?.workspace_id) {
+      revalidateTag(PROMPTS_TAG);
+      revalidateTag(workspaceTag(existingPrompt.workspace_id));
+    }
+    revalidateTag(promptTag(id));
+
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return NextResponse.json(

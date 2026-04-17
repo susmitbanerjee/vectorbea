@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import type { PromptListItem } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 async function getApiErrorMessage(response: Response, fallback: string) {
@@ -23,7 +24,17 @@ async function getApiErrorMessage(response: Response, fallback: string) {
   return payload?.error ?? fallback;
 }
 
-export function CreatePromptDialog() {
+type CreatePromptDialogProps = {
+  navigateOnSuccess?: boolean;
+  onOptimisticCreate?: (prompt: PromptListItem) => void;
+  onPromptCreated?: (prompt: PromptListItem, optimisticId?: string) => void;
+};
+
+export function CreatePromptDialog({
+  navigateOnSuccess = true,
+  onOptimisticCreate,
+  onPromptCreated,
+}: CreatePromptDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -40,6 +51,18 @@ export function CreatePromptDialog() {
     }
 
     startTransition(async () => {
+      const optimisticId = `optimistic-${crypto.randomUUID()}`;
+      const optimisticPrompt: PromptListItem = {
+        id: optimisticId,
+        name: name.trim(),
+        description: description.trim() || null,
+        latestVersion: "v1.0.0",
+        isPublished: false,
+        updatedAt: new Date().toISOString(),
+      };
+
+      onOptimisticCreate?.(optimisticPrompt);
+
       try {
         const response = await fetch(
           `/api/prompts${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
@@ -66,14 +89,26 @@ export function CreatePromptDialog() {
           );
         }
         const created = (await response.json()) as { id: string; promptId?: string };
+        const createdPrompt: PromptListItem = {
+          id: created.id ?? created.promptId ?? optimisticId,
+          name: name.trim(),
+          description: description.trim() || null,
+          latestVersion: "v1.0.0",
+          isPublished: false,
+          updatedAt: new Date().toISOString(),
+        };
+
+        onPromptCreated?.(createdPrompt, optimisticId);
         toast.success(`Prompt "${name.trim()}" created successfully.`);
         setName("");
         setDescription("");
         setOpen(false);
         router.refresh();
-        router.push(
-          `/prompts/${created.id ?? created.promptId}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
-        );
+        if (navigateOnSuccess) {
+          router.push(
+            `/prompts/${created.id ?? created.promptId}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+          );
+        }
       } catch (cause) {
         toast.error(
           cause instanceof Error ? cause.message : "Failed to create prompt.",

@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
+import { revalidateTag } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 
 import type { OrganizationView } from "@/lib/api";
+import { organizationTag, WORKSPACES_TAG, workspaceTag } from "@/lib/dal/cache-tags";
 import {
   getAuthenticatedUserFromCookies,
   loadOrganizationsForUser,
@@ -149,6 +151,10 @@ export async function POST(request: NextRequest) {
       stripeCustomerId:     null,
       stripeSubscriptionId: null,
     };
+
+    revalidateTag(WORKSPACES_TAG);
+    revalidateTag(organizationTag(organization_id));
+    revalidateTag(workspaceTag(workspace_id));
 
     return NextResponse.json(response, { status: 201 });
   } catch (error) {

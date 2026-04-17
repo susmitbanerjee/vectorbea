@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 
 import type { PromptListItem } from "@/lib/api";
+import { PROMPTS_TAG, promptTag, workspaceTag } from "@/lib/dal/cache-tags";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import {
@@ -102,6 +104,10 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (insertError) throw new Error(insertError.message);
+
+    revalidateTag(PROMPTS_TAG);
+    revalidateTag(workspaceTag(workspaceId));
+    revalidateTag(promptTag(data.id));
 
     return NextResponse.json(data, { status: 201 });
   } catch (error) {

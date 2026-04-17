@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidateTag } from "next/cache";
 
 import type { PromptDetail } from "@/lib/api";
+import { PROMPTS_TAG, promptTag, workspaceTag } from "@/lib/dal/cache-tags";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
@@ -70,6 +72,12 @@ export async function POST(
       isPublished: published?.is_published ?? false,
       createdAt: prompt.created_at ?? null,
     };
+
+    if (prompt.workspace_id) {
+      revalidateTag(PROMPTS_TAG);
+      revalidateTag(workspaceTag(prompt.workspace_id));
+    }
+    revalidateTag(promptTag(id));
 
     return NextResponse.json(result);
   } catch (error) {
