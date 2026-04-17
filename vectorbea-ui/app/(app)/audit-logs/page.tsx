@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { cookies } from "next/headers";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -400,7 +401,7 @@ export default async function AuditLogsPage({
                 {!isSearching && totalPages > 1 && (
                   <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
                     <Link
-                      href={pageUrl(page - 1)}
+                      href={pageUrl(page - 1) as Route}
                       aria-disabled={page <= 1}
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium transition-colors",
@@ -440,7 +441,7 @@ export default async function AuditLogsPage({
                         return (
                           <Link
                             key={p}
-                            href={pageUrl(p as number)}
+                            href={pageUrl(p as number) as Route}
                             className={cn(
                               "flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors",
                               p === page
@@ -455,7 +456,7 @@ export default async function AuditLogsPage({
                     </div>
 
                     <Link
-                      href={pageUrl(page + 1)}
+                      href={pageUrl(page + 1) as Route}
                       aria-disabled={page >= totalPages}
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium transition-colors",
