@@ -138,7 +138,7 @@ export default function QuickstartPage() {
         <Callout kind="info">
           <strong>Mac with Apple Silicon (M1 / M2 / M3 / M4)?</strong> You
           have an ARM64 chip. Every <InlineCode>docker</InlineCode> command
-          below has an ARM64 variant — use those instead of the default ones.
+          below has an AMD64 variant — use those instead of the default ones.
         </Callout>
       </section>
 
@@ -204,9 +204,9 @@ export default function QuickstartPage() {
         <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:dev`}</Code>
 
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Apple Silicon (M1 / M2 / M3 / M4) — ARM64
+          Apple Silicon (M1 / M2 / M3 / M4) — AMD64 / ARM64
         </p>
-        <Code lang="bash">{`docker pull --platform linux/arm64 vectorbea/vectorbea-proxy:dev`}</Code>
+        <Code lang="bash">{`docker pull --platform linux/amd64 vectorbea/vectorbea-proxy:dev`}</Code>
 
         <Callout kind="info">
           The pull downloads roughly 150 MB. You only need to do this once —
@@ -231,6 +231,13 @@ export default function QuickstartPage() {
           <strong>This token is shown exactly once.</strong> If you close the
           dialog without copying it you must delete the agent and register a
           new one. Store it somewhere safe — never commit it to source control.
+        </Callout>
+        <Callout kind="warn">
+          <strong>The agent is tied to the workspace you register it in.</strong>{" "}
+          The proxy can only fetch prompts that belong to that same workspace.
+          If your prompt is in workspace A but the agent is in workspace B, every
+          fetch returns a 404. Make sure you are on the correct workspace before
+          clicking Register New Agent.
         </Callout>
         <p className="text-sm leading-7 text-muted-foreground">
           The agent shows <strong>Pending</strong> in the dashboard until the
@@ -257,10 +264,10 @@ export default function QuickstartPage() {
   vectorbea/vectorbea-proxy:dev`}</Code>
 
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Apple Silicon (M1 / M2 / M3 / M4) — ARM64
+          Apple Silicon (M1 / M2 / M3 / M4) — AMD64 / ARM64
         </p>
         <Code lang="bash">{`docker run --rm -p 8080:8080 \\
-  --platform linux/arm64 \\
+  --platform linux/amd64 \\
   -e VECTORBEA_HUB_URL="https://dev.vectorbea.com" \\
   -e VECTORBEA_KEY="vbagent_your_token_here" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
@@ -435,15 +442,15 @@ message = prompt.format(name="Bob", product="Acme AI")`}</Code>
             },
             {
               problem: "NotFoundError: prompt not found",
-              fix: 'The prompt name is case-sensitive and must match exactly. Confirm you clicked Publish — a prompt that is only saved as a draft is invisible to the proxy.',
+              fix: 'There are two root causes. (1) Workspace mismatch: the agent token you gave VECTORBEA_KEY is linked to a specific workspace. The prompt must be created inside that same workspace. Check the Docker container logs — the 404 response now includes the workspace ID the proxy searched. Open Infrastructure in the dashboard, click the agent, and confirm its workspace matches the one containing your prompt. (2) Not published: a prompt that is only saved as a draft is invisible to the proxy. Open the prompt in the dashboard and click Publish.',
             },
             {
               problem: "ConnectionError: could not connect to proxy",
               fix: 'Check the first terminal and confirm "proxy ready" appeared. Then verify nothing else is using port 8080: run lsof -i :8080 on Mac/Linux or netstat -ano | findstr 8080 on Windows. Restart Docker Desktop if the port appears blocked.',
             },
             {
-              problem: "Apple Silicon — container crashes or behaves strangely",
-              fix: 'Make sure you added --platform linux/arm64 to both docker pull and docker run. Without the flag Docker tries x86-64 emulation which is slower and unstable on M-series chips.',
+              problem: "Mac (Intel or Apple Silicon) — container crashes or image not found",
+              fix: 'Use the --platform linux/amd64 flag in both docker pull and docker run. This targets the x86-64 image explicitly so Docker does not try to resolve the wrong architecture. Apple Silicon Macs run amd64 images via Rosetta emulation inside Docker Desktop.',
             },
             {
               problem: "Dashboard shows 0 API calls after running the script",

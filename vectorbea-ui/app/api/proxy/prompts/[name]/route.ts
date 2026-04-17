@@ -134,8 +134,19 @@ export async function GET(
     }
 
     if (!prompt) {
+      // Log the workspace so the developer can cross-check in the dashboard.
+      console.warn(
+        `[proxy/prompts] '${promptName}' not found. ` +
+        `Searched workspace_id=${workspaceId}. ` +
+        `Verify the prompt exists in that workspace and is published.`,
+      );
       return NextResponse.json(
-        { error: `Prompt '${promptName}' not found in this workspace` },
+        {
+          error:
+            `Prompt '${promptName}' not found. ` +
+            `The agent token is linked to workspace ${workspaceId} — ` +
+            `make sure the prompt was created and published in that same workspace.`,
+        },
         { status: 404 },
       );
     }
@@ -159,12 +170,12 @@ export async function GET(
       : sortedVersions.find((version: { is_published: boolean }) => version.is_published);
 
     if (!resolvedVersion) {
+      const reason = requestedVersionTag
+        ? `does not have version '${requestedVersionTag}'`
+        : `has no published version — open the dashboard, find the prompt, and click Publish`;
+      console.warn(`[proxy/prompts] '${promptName}' found but ${reason}.`);
       return NextResponse.json(
-        {
-          error: requestedVersionTag
-            ? `Prompt '${promptName}' does not have version '${requestedVersionTag}'`
-            : `Prompt '${promptName}' has no published version`,
-        },
+        { error: `Prompt '${promptName}' ${reason}` },
         { status: 404 },
       );
     }
