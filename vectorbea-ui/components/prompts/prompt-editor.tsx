@@ -25,22 +25,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
-function highlightTemplate(template: string) {
-  return template.split(/(\{\{[^}]+\}\})/g).map((part, index) => {
-    if (part.startsWith("{{") && part.endsWith("}}")) {
-      return (
-        <span
-          key={`${part}-${index}`}
-          className="rounded bg-cyan-500/15 px-1 font-semibold text-cyan-600 dark:text-cyan-400"
-        >
-          {part}
-        </span>
-      );
-    }
-    return <span key={`${part}-${index}`}>{part}</span>;
-  });
-}
-
 function renderPreview(
   template: string,
   parameters: Record<string, unknown> | null,
@@ -479,31 +463,18 @@ export function PromptEditor({
                     <span>prompt.template</span>
                     <span>{selectedVersion.versionTag}</span>
                   </div>
-                  <div className="grid min-h-[360px] md:grid-cols-2">
-                    <div className="border-b border-border bg-muted/20 p-4 md:border-b-0 md:border-r">
-                      <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                        Highlighted preview
-                      </p>
-                      <div className="flex">
-                        <LineNumbers text={templateText} />
-                        <pre className="flex-1 whitespace-pre-wrap font-mono text-sm leading-7 text-foreground">
-                          {highlightTemplate(templateText)}
-                        </pre>
-                      </div>
-                    </div>
-                    <div className="bg-background p-4">
-                      <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                        Editable source
-                      </p>
-                      <div className="flex">
-                        <LineNumbers text={templateText} />
-                        <Textarea
-                          value={templateText}
-                          onChange={(e) => setTemplateText(e.target.value)}
-                          disabled={!isViewingCurrentDraft || !canEdit}
-                          className="min-h-[280px] flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-7 text-foreground shadow-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-70"
-                        />
-                      </div>
+                  <div className="bg-background p-4">
+                    <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                      Editable source
+                    </p>
+                    <div className="flex min-h-[360px]">
+                      <LineNumbers text={templateText} />
+                      <Textarea
+                        value={templateText}
+                        onChange={(e) => setTemplateText(e.target.value)}
+                        disabled={!isViewingCurrentDraft || !canEdit}
+                        className="min-h-[360px] flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-7 text-foreground shadow-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-70"
+                      />
                     </div>
                   </div>
                 </div>
