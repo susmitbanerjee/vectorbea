@@ -31,7 +31,7 @@ function highlightTemplate(template: string) {
       return (
         <span
           key={`${part}-${index}`}
-          className="rounded bg-cyan-500/15 px-1 font-semibold text-cyan-400"
+          className="rounded bg-cyan-500/15 px-1 font-semibold text-cyan-600 dark:text-cyan-400"
         >
           {part}
         </span>
@@ -104,7 +104,7 @@ function LineNumbers({ text }: { text: string }) {
   return (
     <div
       aria-hidden
-      className="select-none pr-4 text-right font-mono text-xs leading-7 text-slate-600"
+      className="select-none pr-4 text-right font-mono text-xs leading-7 text-muted-foreground/70"
     >
       {Array.from({ length: lines }, (_, i) => (
         <div key={i}>{i + 1}</div>
@@ -439,7 +439,7 @@ export function PromptEditor({
         </div>
 
         {!isViewingCurrentDraft && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
             You are viewing a historical snapshot. Switch back to the current
             draft to edit or publish changes.
           </div>
@@ -474,25 +474,25 @@ export function PromptEditor({
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="overflow-hidden rounded-xl border border-border bg-[#0d1117] text-slate-100">
-                  <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-xs text-slate-400">
+                <div className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
                     <span>prompt.template</span>
                     <span>{selectedVersion.versionTag}</span>
                   </div>
                   <div className="grid min-h-[360px] md:grid-cols-2">
-                    <div className="border-b border-white/10 p-4 md:border-b-0 md:border-r">
-                      <p className="mb-3 text-xs uppercase tracking-[0.18em] text-slate-500">
+                    <div className="border-b border-border bg-muted/20 p-4 md:border-b-0 md:border-r">
+                      <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">
                         Highlighted preview
                       </p>
                       <div className="flex">
                         <LineNumbers text={templateText} />
-                        <pre className="flex-1 whitespace-pre-wrap font-mono text-sm leading-7 text-slate-200">
+                        <pre className="flex-1 whitespace-pre-wrap font-mono text-sm leading-7 text-foreground">
                           {highlightTemplate(templateText)}
                         </pre>
                       </div>
                     </div>
-                    <div className="p-4">
-                      <p className="mb-3 text-xs uppercase tracking-[0.18em] text-slate-500">
+                    <div className="bg-background p-4">
+                      <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">
                         Editable source
                       </p>
                       <div className="flex">
@@ -501,7 +501,7 @@ export function PromptEditor({
                           value={templateText}
                           onChange={(e) => setTemplateText(e.target.value)}
                           disabled={!isViewingCurrentDraft || !canEdit}
-                          className="min-h-[280px] flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-7 text-slate-200 shadow-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-70"
+                          className="min-h-[280px] flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-7 text-foreground shadow-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-70"
                         />
                       </div>
                     </div>
@@ -549,13 +549,13 @@ export function PromptEditor({
                 </p>
               </CardHeader>
               <CardContent>
-                <div className="overflow-hidden rounded-xl border border-border bg-[#0d1117]">
-                  <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-xs text-slate-400">
+                <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                  <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
                     <span>rendered output</span>
                     <span>{selectedVersion.versionTag}</span>
                   </div>
                   <div className="p-6">
-                    <pre className="whitespace-pre-wrap font-mono text-sm leading-7 text-slate-200">
+                    <pre className="whitespace-pre-wrap font-mono text-sm leading-7 text-foreground">
                       {renderPreview(templateText, parsedParameters)}
                     </pre>
                   </div>
