@@ -9,8 +9,11 @@
 --   column "plan_tier" is of type plan_tier but expression
 --   is of type text
 --
--- Fix: cast `p_plan_tier` to `vectorbea.plan_tier` at every
+-- Fix: cast `p_plan_tier` to `public.plan_tier` at every
 -- INSERT site inside the function body.
+-- The enum was created in and remains in the `public` schema
+-- (migration 20260412_000004 does `alter type public.plan_tier add value`
+-- which confirms it was never moved to `vectorbea`).
 -- =============================================================
 
 create or replace function vectorbea.create_tenant_environment(
@@ -58,7 +61,7 @@ begin
     )
     values (
         p_org_name,
-        p_plan_tier::vectorbea.plan_tier,   -- ← explicit cast fixes the error
+        p_plan_tier::public.plan_tier,      -- ← enum lives in public schema, not vectorbea
         v_max_seats,
         v_max_prompts,
         v_audit_limit
