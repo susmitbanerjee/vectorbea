@@ -137,6 +137,28 @@ graalvmNative {
             mainClass.set(application.mainClass)
             buildArgs.add("--no-fallback")
             buildArgs.add("--install-exit-handlers")
+
+            // ── Kotlin stdlib: safe to initialise at build time ───────────────
+            // GraalVM's bundled reachability-metadata marks some kotlin.* classes
+            // as run-time-init, but the Kotlin stdlib has no runtime-specific
+            // static state. The conflict causes the build to abort with:
+            //   "kotlin.DeprecationLevel was unintentionally initialized at build time"
+            // Declaring the whole kotlin package as build-time-safe overrides the
+            // metadata entry and resolves the conflict.
+            buildArgs.add("--initialize-at-build-time=kotlin")
+
+            // kotlinx.serialization also has static state that is safe to bake
+            // into the image (descriptor registries, primitive serializers, etc.).
+            buildArgs.add("--initialize-at-build-time=kotlinx.serialization")
+
+            // ── Netty / gRPC: must stay run-time-init ─────────────────────────
+            // Netty's internal resource-leak detector and platform detection read
+            // system properties that are only available at JVM startup.
+            // gRPC's service registry and channel state machines are also
+            // runtime-scoped.  Forcing these to run-time prevents subtle
+            // image-time NPEs if the metadata repo omits them.
+            buildArgs.add("--initialize-at-run-time=io.netty")
+            buildArgs.add("--initialize-at-run-time=io.grpc.netty")
         }
     }
     metadataRepository {

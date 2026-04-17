@@ -6,9 +6,15 @@ import { useSearchParams } from "next/navigation";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
-import { GitHubMark, GoogleMark } from "@/components/auth/oauth-provider-icons";
+import {
+  EnterpriseSsoMark,
+  GitHubMark,
+  GoogleMark,
+  MicrosoftMark,
+} from "@/components/auth/oauth-provider-icons";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type Mode = "signin" | "signup";
@@ -27,8 +33,11 @@ export function AuthScreen({
       ? "Authentication failed. Please try again."
       : rawError ?? null,
   );
-  const [providerLoading, setProviderLoading] = useState<"github" | "google" | null>(null);
+  const [providerLoading, setProviderLoading] = useState<
+    "github" | "google" | "azure" | "sso" | null
+  >(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [ssoEmail, setSsoEmail] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -65,16 +74,21 @@ export function AuthScreen({
     mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in";
   const callbackNext = next || searchParams.get("next") || undefined;
 
-  async function startOAuth(provider: "github" | "google") {
+  function buildRedirectUrl() {
+    const redirectUrl = new URL("/auth/callback", window.location.origin);
+    if (callbackNext) {
+      redirectUrl.searchParams.set("next", callbackNext);
+    }
+    return redirectUrl;
+  }
+
+  async function startOAuth(provider: "github" | "google" | "azure") {
     setProviderLoading(provider);
     setError(null);
 
     try {
       const supabase = getSupabaseBrowserClient();
-      const redirectUrl = new URL("/auth/callback", window.location.origin);
-      if (callbackNext) {
-        redirectUrl.searchParams.set("next", callbackNext);
-      }
+      const redirectUrl = buildRedirectUrl();
 
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider,
@@ -95,6 +109,41 @@ export function AuthScreen({
         submissionError instanceof Error
           ? submissionError.message
           : "Authentication failed.",
+      );
+      setProviderLoading(null);
+    }
+  }
+
+  async function startSso() {
+    const normalizedEmail = ssoEmail.trim().toLowerCase();
+    const domain = normalizedEmail.split("@")[1]?.trim();
+
+    if (!domain) {
+      setError("Enter your work email to continue with enterprise SSO.");
+      return;
+    }
+
+    setProviderLoading("sso");
+    setError(null);
+
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const redirectUrl = buildRedirectUrl();
+      const { error: ssoError } = await supabase.auth.signInWithSSO({
+        domain,
+        options: {
+          redirectTo: redirectUrl.toString(),
+        },
+      });
+
+      if (ssoError) {
+        throw ssoError;
+      }
+    } catch (submissionError) {
+      setError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Enterprise SSO failed.",
       );
       setProviderLoading(null);
     }
@@ -154,7 +203,7 @@ export function AuthScreen({
 
             <div className="grid gap-4 sm:grid-cols-3">
               {[
-                ["1 identity flow", "GitHub or Google first, then route users cleanly."],
+                ["1 identity flow", "Google, Microsoft, GitHub, or enterprise SSO first."],
                 ["2 surfaces", "Control plane in cloud, execution in customer infra."],
                 ["0 ambiguity", "Clear next steps for onboarding, billing, and dashboard access."],
               ].map(([title, body]) => (
@@ -195,7 +244,7 @@ export function AuthScreen({
                   <p className="max-w-md text-sm leading-7 text-muted-foreground">
                     {mode === "signin"
                       ? "Use your provider account and we will route you back into the correct workspace automatically."
-                      : "Start with OAuth and we will capture your identity, persist your profile, and send you straight into onboarding."}
+                      : "Start with your provider or enterprise SSO and we will capture your identity, persist your profile, and send you straight into onboarding."}
                   </p>
                 </div>
                 <Link
@@ -236,6 +285,24 @@ export function AuthScreen({
                   variant="outline"
                   className="h-16 w-full justify-between rounded-2xl border-border/80 bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
                   disabled={checkingSession || providerLoading !== null}
+                  onClick={() => void startOAuth("azure")}
+                >
+                  <span className="flex items-center gap-3">
+                    <MicrosoftMark className="h-5 w-5" />
+                    Continue with Microsoft
+                  </span>
+                  {providerLoading === "azure" ? (
+                    "Connecting..."
+                  ) : (
+                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-16 w-full justify-between rounded-2xl border-border/80 bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
+                  disabled={checkingSession || providerLoading !== null}
                   onClick={() => void startOAuth("google")}
                 >
                   <span className="flex items-center gap-3">
@@ -250,7 +317,43 @@ export function AuthScreen({
                 </Button>
               </div>
 
-              <div className="mt-6 rounded-2xl border border-border/70 bg-muted/30 px-4 py-4 text-sm leading-6 text-muted-foreground">
+              <div className="mt-6 rounded-2xl border border-border/70 bg-muted/30 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border border-border/70 bg-background text-muted-foreground">
+                    <EnterpriseSsoMark className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Enterprise SSO</p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        Use your verified work email and we will route you through your
+                        organization&apos;s SAML or OIDC identity provider when configured.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <Input
+                        type="email"
+                        value={ssoEmail}
+                        onChange={(event) => setSsoEmail(event.target.value)}
+                        placeholder="you@company.com"
+                        className="h-12 rounded-2xl bg-background"
+                        disabled={checkingSession || providerLoading !== null}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-12 rounded-2xl px-5"
+                        disabled={checkingSession || providerLoading !== null}
+                        onClick={() => void startSso()}
+                      >
+                        {providerLoading === "sso" ? "Connecting..." : "Continue with SSO"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-border/70 bg-muted/20 px-4 py-4 text-sm leading-6 text-muted-foreground">
                 We capture your full name and email from the provider so your
                 profile, billing flow, and workspace onboarding stay in sync from
                 the first session.
