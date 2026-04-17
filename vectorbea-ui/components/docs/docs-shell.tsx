@@ -31,7 +31,7 @@ const DOCS_NAV: Array<{
   {
     href: "/docs/quickstart",
     title: "Quickstart",
-    description: "Pull the Docker Hub image and call the proxy from your own codebase.",
+    description: "Fetch a published prompt from the hosted backend using the Python SDK.",
     icon: Rocket,
   },
   {

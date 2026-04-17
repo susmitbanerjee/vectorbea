@@ -84,27 +84,31 @@ export default function QuickstartPage() {
           Quickstart
         </p>
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-          From zero to your first prompt in 10 minutes
+          Test the backend from your own Python app
         </h1>
         <p className="text-lg leading-8 text-muted-foreground">
-          Run the VectorBea proxy locally, fetch a live prompt from your own
-          Python script, and watch the dashboard update in real time.
+          This is the simplest working path in the current setup. You will
+          create a prompt in the VectorBea dashboard, generate a deployment
+          agent token, install the Python SDK, and fetch that prompt directly
+          from the hosted backend.
         </p>
       </section>
 
       <Callout kind="info">
-        You only need <strong>Docker</strong> and <strong>Python 3.8+</strong>.
-        Everything else — the proxy binary, the hub connection, prompt storage —
-        is handled by VectorBea.
+        <strong>Start here first.</strong> This quickstart is written around the
+        path that currently works end to end with the existing backend and SDK.
+        It does <em>not</em> require you to run the local Docker proxy to do
+        your first successful prompt fetch.
       </Callout>
 
       <section className="space-y-3 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Prerequisites</h2>
         <ul className="space-y-2 text-sm text-muted-foreground">
           {[
-            "Docker Desktop installed and running",
-            "A VectorBea account — sign up at vectorbea.com",
-            "Python 3.8+ with pip",
+            "A VectorBea account and access to the dashboard",
+            "At least one published prompt in your workspace",
+            "A deployment agent token from the Infrastructure page",
+            "Python 3.8+",
           ].map((item) => (
             <li key={item} className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -114,196 +118,104 @@ export default function QuickstartPage() {
         </ul>
       </section>
 
-      <Step n={1} title="Create a workspace and publish a prompt">
+      <Step n={1} title="Create and publish a prompt">
         <p className="text-sm leading-7 text-muted-foreground">
-          Sign in to the VectorBea dashboard, create a workspace, then create
-          and publish a prompt. Use any name and template you like — for example:
+          In the VectorBea dashboard, create a prompt such as{" "}
+          <InlineCode>greet-user</InlineCode> and publish it.
         </p>
-        <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-muted-foreground">
-          <li>Prompt name: <InlineCode>greet-user</InlineCode></li>
-          <li>
-            Template:{" "}
-            <InlineCode>{"Hello {{name}}, welcome to {{product}}!"}</InlineCode>
-          </li>
-        </ul>
+        <Code>{`name: greet-user
+template: Hello {{name}}, welcome to {{product}}!`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
-          Click <strong>Publish</strong>. The proxy only serves published versions —
-          drafts are invisible to it.
+          The SDK fetches the latest published version by prompt name.
         </p>
       </Step>
 
       <Step n={2} title="Register a deployment agent">
         <p className="text-sm leading-7 text-muted-foreground">
-          In the dashboard, go to <strong>Infrastructure</strong> and click{" "}
-          <strong>Register New Agent</strong>. Give it any name (e.g.{" "}
-          <InlineCode>local-dev</InlineCode>), then click{" "}
-          <strong>Generate token</strong>.
+          Open <strong>Infrastructure</strong> in the dashboard and click{" "}
+          <strong>Register New Agent</strong>. Copy the generated{" "}
+          <InlineCode>vbagent_...</InlineCode> token immediately.
         </p>
         <Callout kind="warn">
-          Copy the <InlineCode>vbagent_…</InlineCode> token immediately — it is
-          only shown once. This is your <strong>agent token</strong> used by the
-          proxy to authenticate with the hub. Keep it secret.
+          Use the deployment agent token for this quickstart, not a workspace
+          API key. The currently exposed backend route behind the Python SDK
+          authenticates deployment agents.
         </Callout>
-        <p className="text-sm leading-7 text-muted-foreground">
-          The agent will show <strong>Pending</strong> until the proxy connects
-          for the first time. It flips to <strong>Online</strong> automatically
-          within a few seconds of the container starting — no manual steps needed.
-        </p>
       </Step>
 
-      <Step n={3} title="Pull and run the proxy">
-        <p className="text-sm leading-7 text-muted-foreground">
-          Pull the official proxy image and start it with your agent token and
-          the hub URL:
-        </p>
-        <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:dev
-
-docker run --rm -p 8080:8080 \\
-  -e VECTORBEA_HUB_URL="https://dev.vectorbea.com" \\
-  -e VECTORBEA_KEY="vbagent_your_agent_token" \\
-  -e VECTORBEA_HTTP_PORT="8080" \\
-  vectorbea/vectorbea-proxy:dev`}</Code>
-        <p className="text-sm leading-7 text-muted-foreground">
-          Wait for the startup message:
-        </p>
-        <Code>{`vectorbea proxy ready — REST unix:/tmp/vectorbea-rest.sock, HTTP :8080, gRPC unix:/tmp/vectorbea.sock`}</Code>
-        <p className="text-sm leading-7 text-muted-foreground">
-          Within ~5 seconds the proxy sends its first heartbeat and your agent
-          status in <strong>Infrastructure</strong> will flip from{" "}
-          <strong>Pending</strong> to <strong>Online</strong>.
-        </p>
-      </Step>
-
-      <Step n={4} title="Install the Python SDK">
+      <Step n={3} title="Install the Python SDK">
         <Code lang="bash">{`pip install vectorbea`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
-          Requires Python 3.8+ and <InlineCode>requests</InlineCode> (installed
-          automatically). No other dependencies.
+          The SDK uses <InlineCode>requests</InlineCode> under the hood and can
+          point directly at the hosted VectorBea backend.
         </p>
       </Step>
 
-      <Step n={5} title="Fetch and render a prompt">
+      <Step n={4} title="Fetch a prompt from the hosted backend">
         <p className="text-sm leading-7 text-muted-foreground">
-          Point the client at your local proxy. No API key is needed for local
-          development — the proxy handles hub authentication with the agent token
-          you already configured.
+          Point the SDK at the hosted development environment and use your
+          deployment agent token as the API key:
         </p>
         <Code lang="python">{`import vectorbea
 
-client = vectorbea.VectorBea(
-    api_key="any-value",          # not validated by the local proxy
-    base_url="http://localhost:8080",
-)
+if __name__ == "__main__":
+    client = vectorbea.VectorBea(
+        api_key="vbagent_your_agent_token",
+        base_url="https://dev.vectorbea.com",
+    )
 
-# Fetch the latest published version of a prompt.
-# Proxy latency is measured and reported to the dashboard automatically.
-prompt = client.prompts.get("greet-user")
+    prompt = client.prompts.get("greet-user")
 
-print(prompt.name)           # greet-user
-print(prompt.version_tag)    # v1.0.0
-print(prompt.template_text)  # Hello {{name}}, welcome to {{product}}!
+    print(prompt.name)
+    print(prompt.version_tag)
+    print(prompt.template_text)
 
-# Render the template
-message = prompt.format(name="Alice", product="Acme AI")
-print(message)               # Hello Alice, welcome to Acme AI!`}</Code>
-        <Callout kind="info">
-          Every <InlineCode>client.prompts.get()</InlineCode> call automatically
-          records an audit event — proxy latency, prompt name, and version all
-          appear in the dashboard immediately. No extra instrumentation needed.
-        </Callout>
-      </Step>
-
-      <Step n={6} title="Record LLM latency and token usage (optional)">
+    message = prompt.format(name="Alice", product="Acme AI")
+    print(message)`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
-          After calling your LLM, pass the response metadata back so the
-          dashboard shows full end-to-end latency and token cost per request:
+          If the prompt exists and has a published version, this returns the
+          prompt payload directly from the hosted backend.
         </p>
-        <Code lang="python">{`import time
-import vectorbea
-
-client = vectorbea.VectorBea(
-    api_key="any-value",
-    base_url="http://localhost:8080",
-)
-
-prompt = client.prompts.get("greet-user")
-message = prompt.format(name="Alice", product="Acme AI")
-
-# Call your LLM
-t0 = time.time()
-response = openai_client.chat.completions.create(
-    model="gpt-4o",
-    messages=[{"role": "user", "content": message}],
-)
-llm_ms = int((time.time() - t0) * 1000)
-
-# Report the full audit event
-client.prompts.log_audit(
-    prompt,
-    llm_latency_ms=llm_ms,
-    token_count=response.usage.total_tokens,
-    metadata={"model": "gpt-4o"},
-)`}</Code>
       </Step>
 
-      <Step n={7} title="Production — point at the cloud endpoint">
-        <p className="text-sm leading-7 text-muted-foreground">
-          In production, remove <InlineCode>base_url</InlineCode> (or set it to
-          the hosted endpoint) and supply a real workspace API key. Generate one
-          from <strong>Settings → API Keys</strong> in the dashboard.
-        </p>
-        <Code lang="bash">{`export VECTORBEA_API_KEY="vb_live_..."
-# VECTORBEA_BASE_URL defaults to https://app.vectorbea.com`}</Code>
-        <Code lang="python">{`import vectorbea
-
-# Reads credentials from environment — no hardcoded keys in source code
-client = vectorbea.VectorBea()
-
-prompt  = client.prompts.get("customer-support-reply")
-message = prompt.format(customer_name="Bob", issue="billing")`}</Code>
-        <Callout kind="info">
-          In production you can still run the proxy sidecar alongside your
-          service for lower latency and local caching. Simply deploy the proxy
-          container with the same environment variables and point{" "}
-          <InlineCode>base_url</InlineCode> at the sidecar instead.
-        </Callout>
+      <Step n={5} title="What success looks like">
+        <Code>{`greet-user
+v1.0.0
+Hello {{name}}, welcome to {{product}}!
+Hello Alice, welcome to Acme AI!`}</Code>
       </Step>
 
-      <section className="space-y-4 border-t border-border/60 pt-8">
-        <h2 className="text-xl font-semibold tracking-tight">Troubleshooting</h2>
-        <div className="space-y-3 text-sm">
-          {[
-            {
-              problem: "Agent stuck on Pending after container starts",
-              fix: 'Check the container logs for "proxy ready". If the startup message appeared, the heartbeat fires within 5 seconds and the status flips automatically. If you still see Pending, verify VECTORBEA_HUB_URL and VECTORBEA_KEY are set correctly.',
-            },
-            {
-              problem: "NotFoundError: prompt not found",
-              fix: "Make sure you published a version of the prompt in the dashboard. Drafts are not served by the proxy. The prompt name must match exactly (case-sensitive).",
-            },
-            {
-              problem: "ConnectionError: could not connect to proxy",
-              fix: "Confirm the container is running with -p 8080:8080 and the startup log appeared. On some systems Docker Desktop may block the port — try restarting Docker.",
-            },
-            {
-              problem: "Dashboard shows 0 API calls",
-              fix: "Make sure you are on SDK version 0.1.8 or later (pip install --upgrade vectorbea). Earlier versions did not auto-report audit events.",
-            },
-            {
-              problem: "Container exits with DB_URL or JDBC_DATABASE_URL must be set",
-              fix: "You pulled an old backend image. Run: docker pull vectorbea/vectorbea-proxy:dev to get the correct proxy runtime.",
-            },
-          ].map(({ problem, fix }) => (
-            <div
-              key={problem}
-              className="space-y-1 rounded-xl border border-border/60 bg-muted/20 p-4"
-            >
-              <p className="font-medium text-foreground">{problem}</p>
-              <p className="text-muted-foreground">{fix}</p>
-            </div>
-          ))}
+      <Step n={6} title="What common failures mean">
+        <div className="space-y-3 text-sm leading-7 text-muted-foreground">
+          <ul className="list-disc space-y-2 pl-5">
+            <li>
+              <strong>NotFoundError:</strong> the prompt name is wrong, or the
+              prompt has no published version yet.
+            </li>
+            <li>
+              <strong>AuthenticationError:</strong> the token is wrong, expired,
+              or not a valid deployment agent token.
+            </li>
+            <li>
+              <strong>Calling localhost with the SDK:</strong> the current SDK
+              route shape does not match the local proxy route shape, so the
+              hosted backend is the safer starting point right now.
+            </li>
+          </ul>
         </div>
-      </section>
+      </Step>
+
+      <Step n={7} title="About the local Docker proxy">
+        <p className="text-sm leading-7 text-muted-foreground">
+          The repo also contains a local Kotlin proxy image, but the current
+          SDK and local proxy are not yet aligned on the same route shape. That
+          means the fastest developer-start path today is:
+        </p>
+        <ol className="list-decimal space-y-2 pl-5 text-sm leading-7 text-muted-foreground">
+          <li>Use the hosted backend with the Python SDK for your first test.</li>
+          <li>Use the local proxy later only when you are explicitly testing the proxy runtime itself.</li>
+        </ol>
+      </Step>
 
       <section className="space-y-4 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Next steps</h2>
@@ -312,7 +224,7 @@ message = prompt.format(customer_name="Bob", issue="billing")`}</Code>
             {
               href: "/docs/architecture",
               label: "Architecture",
-              desc: "Understand the cloud control plane, local proxy, and customer boundary",
+              desc: "Understand the hosted control plane, proxy runtime, and customer boundary",
             },
             {
               href: "/docs/enterprise",
