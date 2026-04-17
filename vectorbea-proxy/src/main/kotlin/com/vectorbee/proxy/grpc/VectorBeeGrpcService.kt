@@ -68,7 +68,9 @@ class VectorBeaGrpcService(
             proxyLatencyMs = request.proxyLatencyMs,
             llmLatencyMs = request.llmLatencyMs,
             tokenCount = request.tokenCount,
-            metadata = metadata
+            metadata = metadata,
+            promptName = request.promptName,
+            versionTag = request.versionTag,
         )
 
         // Non-blocking enqueue into the unbounded channel — the AuditDispatcher

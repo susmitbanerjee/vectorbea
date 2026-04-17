@@ -53,6 +53,23 @@ class HttpClient:
         self._raise_for_status(resp)
         return resp.json()  # type: ignore[no-any-return]
 
+    def post(self, path: str, json: Any) -> Dict[str, Any]:
+        url = f"{self._base_url}{path}"
+        try:
+            resp = self._session.post(url, json=json, timeout=self._timeout)
+        except requests.ConnectionError as exc:
+            raise VectorBeaError(
+                f"Could not connect to VectorBea proxy at {self._base_url}. "
+                "Is the container running? Check that Docker is up and the port is mapped."
+            ) from exc
+        except requests.Timeout as exc:
+            raise VectorBeaError(
+                f"Request to {url} timed out after {self._timeout}s."
+            ) from exc
+
+        self._raise_for_status(resp)
+        return resp.json()  # type: ignore[no-any-return]
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     @staticmethod

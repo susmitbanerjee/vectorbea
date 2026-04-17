@@ -3,6 +3,7 @@ package com.vectorbea.proxy.service
 import com.vectorbea.proxy.client.HubClient
 import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.model.AuditEvent
+import java.lang.management.ManagementFactory
 import java.util.ArrayDeque
 
 import kotlinx.coroutines.CoroutineScope
@@ -110,7 +111,7 @@ class AuditDispatcher(
                 val memMb = jvmHeapUsedMb()
                 hubClient.sendHeartbeat(
                     avgLatencyMs = avgLatency,
-                    cpuUsagePercent = 0.0, // JVM CPU % requires platform-specific calls; omit for now
+                    cpuUsagePercent = jvmCpuPercent(),
                     memoryUsageMb = memMb,
                     activeReplicas = 1,
                 )
@@ -132,5 +133,19 @@ class AuditDispatcher(
         val rt = Runtime.getRuntime()
         val usedBytes = rt.totalMemory() - rt.freeMemory()
         return usedBytes.toDouble() / (1024 * 1024)
+    }
+
+    private fun jvmCpuPercent(): Double {
+        return try {
+            val bean = ManagementFactory.getOperatingSystemMXBean()
+            if (bean is com.sun.management.OperatingSystemMXBean) {
+                val load = bean.processCpuLoad
+                if (load >= 0) load * 100.0 else 0.0
+            } else {
+                0.0
+            }
+        } catch (_: Exception) {
+            0.0
+        }
     }
 }

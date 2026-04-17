@@ -23,7 +23,9 @@ data class AuditEvent(
     val proxyLatencyMs: Double,
     val llmLatencyMs: Int,
     val tokenCount: Int,
-    val metadata: JsonObject = JsonObject(emptyMap())
+    val metadata: JsonObject = JsonObject(emptyMap()),
+    val promptName: String = "",
+    val versionTag: String = "",
 )
 
 @Serializable

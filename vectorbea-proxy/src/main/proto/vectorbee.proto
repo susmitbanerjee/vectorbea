@@ -43,6 +43,9 @@ message LogAuditRequest {
   int32 llm_latency_ms = 3;
   int32 token_count = 4;
   string metadata_json = 5;
+  // Human-readable prompt name and version (optional, used for audit log display)
+  string prompt_name = 6;
+  string version_tag = 7;
 }
 
 message LogAuditResponse {
