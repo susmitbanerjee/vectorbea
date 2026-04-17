@@ -31,7 +31,7 @@ export function DropdownMenuPanel({
       <DropdownMenuContent
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-[12rem] overflow-hidden rounded-xl border border-white/10 bg-popover/95 p-1 text-popover-foreground shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)] backdrop-blur-xl",
+          "z-50 min-w-[12rem] overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl backdrop-blur-xl",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className,
         )}
@@ -49,7 +49,7 @@ export function DropdownMenuPanelItem({
   return (
     <DropdownMenuItem
       className={cn(
-        "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-foreground outline-none transition-colors hover:bg-white/5 focus:bg-white/[0.07] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         inset && "pl-8",
         className,
       )}
@@ -75,7 +75,7 @@ export function DropdownMenuPanelSeparator({
   className,
   ...props
 }: DropdownMenuPrimitive.DropdownMenuSeparatorProps) {
-  return <DropdownMenuSeparator className={cn("-mx-1 my-1 h-px bg-white/8", className)} {...props} />;
+  return <DropdownMenuSeparator className={cn("-mx-1 my-1 h-px bg-border", className)} {...props} />;
 }
 
 export function DropdownMenuPanelRadioItem({
@@ -86,7 +86,7 @@ export function DropdownMenuPanelRadioItem({
   return (
     <DropdownMenuRadioItem
       className={cn(
-        "relative flex cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-2.5 text-sm text-foreground outline-none transition-colors hover:bg-white/5 focus:bg-white/[0.07] focus:text-white data-[state=checked]:text-white",
+        "relative flex cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-2.5 text-sm text-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[state=checked]:bg-accent/60 data-[state=checked]:text-foreground",
         className,
       )}
       {...props}
