@@ -10,14 +10,20 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, Cpu } from "lucide-react";
+import { Activity, Cpu, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AgentMetricPoint } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type AgentOption = {
   id: string;
@@ -193,24 +199,37 @@ export function RequestsChart() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <Badge variant="outline">Realtime</Badge>
-          <div className="min-w-[220px]">
-            <Select
-              value={selectedAgentId}
-              onChange={(event) => setSelectedAgentId(event.target.value)}
-              className="h-9 bg-background"
-              disabled={loadingAgents || agents.length === 0}
-            >
-              {agents.length === 0 ? (
-                <option value="">{loadingAgents ? "Loading agents..." : "No agents found"}</option>
-              ) : (
-                agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name} {isOnline(agent.lastHeartbeat) ? "· Online" : "· Offline"}
-                  </option>
-                ))
-              )}
-            </Select>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={loadingAgents || agents.length === 0}>
+              <button
+                type="button"
+                className="flex min-w-[220px] items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="truncate">
+                  {agents.length === 0
+                    ? loadingAgents
+                      ? "Loading agents..."
+                      : "No agents found"
+                    : `${selectedAgent?.name ?? "Select agent"}${selectedAgent ? ` · ${isOnline(selectedAgent.lastHeartbeat) ? "Online" : "Offline"}` : ""}`}
+                </span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuPanel className="w-[260px]" align="end">
+              <DropdownMenuRadioGroup value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                {agents.map((agent) => (
+                  <DropdownMenuPanelRadioItem key={agent.id} value={agent.id}>
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate font-medium">{agent.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {isOnline(agent.lastHeartbeat) ? "Online" : "Offline"}
+                      </span>
+                    </div>
+                  </DropdownMenuPanelRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuPanel>
+          </DropdownMenu>
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-2">

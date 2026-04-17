@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { Copy, Eye, EyeOff, Key, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Eye, EyeOff, Key, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApiKeyView, CreateApiKeyResponse, DeploymentAgentView } from "@/lib/api";
@@ -18,8 +18,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -157,6 +163,8 @@ export function ApiKeysClient({ initialKeys }: Props) {
     setRevealedRows((previous) => ({ ...previous, [id]: !previous[id] }));
   };
 
+  const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null;
+
   return (
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
       <Dialog open={!!revokeTarget} onOpenChange={(openState) => { if (!openState) setRevokeTarget(null); }}>
@@ -233,25 +241,40 @@ export function ApiKeysClient({ initialKeys }: Props) {
                     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       Agent (optional)
                     </label>
-                    <Select
-                      value={agentId}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setAgentId(value);
-                        if (value) {
-                          const agent = agents.find((item) => item.id === value);
-                          if (agent) setKeyName(agent.name);
-                        }
-                      }}
-                      className="h-10 bg-background"
-                    >
-                      <option value="">- Select an agent (optional) -</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name}
-                        </option>
-                      ))}
-                    </Select>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 text-sm text-foreground transition-colors hover:bg-accent/40"
+                        >
+                          <span className="truncate">
+                            {selectedAgent?.name ?? "- Select an agent (optional) -"}
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuPanel className="w-[320px]" align="start">
+                        <DropdownMenuRadioGroup
+                          value={agentId}
+                          onValueChange={(value) => {
+                            setAgentId(value);
+                            if (value) {
+                              const agent = agents.find((item) => item.id === value);
+                              if (agent) setKeyName(agent.name);
+                            }
+                          }}
+                        >
+                          <DropdownMenuPanelRadioItem value="">
+                            - Select an agent (optional) -
+                          </DropdownMenuPanelRadioItem>
+                          {agents.map((agent) => (
+                            <DropdownMenuPanelRadioItem key={agent.id} value={agent.id}>
+                              {agent.name}
+                            </DropdownMenuPanelRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuPanel>
+                    </DropdownMenu>
                   </div>
                 )}
                 <div className="space-y-2">
