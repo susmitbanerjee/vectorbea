@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+import { AUTH_COOKIE_NAME, SESSION_ID_COOKIE_NAME } from "@/lib/auth/cookies";
+import { getAuthenticatedUserForAccessToken } from "@/lib/auth/server";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,16 +11,16 @@ export const dynamic = "force-dynamic";
  * POST /api/auth/set-session
  *
  * Called by the client-side /auth/callback page immediately after a
- * successful PKCE code exchange. Sets the httpOnly AUTH_COOKIE_NAME cookie
- * that every Server Component and API Route reads via
- * getAuthenticatedUserFromCookies().
+ * successful implicit-flow OAuth redirect. Sets two httpOnly cookies:
  *
- * Security: the PKCE exchange that produced the token IS the authentication
- * proof — Supabase verified the code_verifier before issuing it. Re-validating
- * server-side via getUser() adds a redundant network round-trip and can fail
- * transiently due to clock skew or propagation delay. The token is validated
- * on every subsequent authenticated request via getAuthenticatedUserFromCookies,
- * so defence-in-depth is maintained without an extra call here.
+ *   AUTH_COOKIE_NAME  — the Supabase access token read by every Server
+ *                       Component and API Route.
+ *   SESSION_ID_COOKIE — a fresh UUID that is ALSO written to
+ *                       vectorbea.profiles.current_session_id. Middleware
+ *                       compares the cookie against the DB value on every
+ *                       protected request. If they differ (login on another
+ *                       device rotated the DB value), the old session is
+ *                       immediately killed → seat-sharing prevention.
  *
  * Body: { accessToken: string }
  */
@@ -32,21 +34,40 @@ export async function POST(request: NextRequest) {
     }
 
     // Sanity-check: a Supabase JWT has three dot-separated base64 segments.
-    // This is not cryptographic validation — it just prevents obviously wrong
-    // values (empty string, SQL injection attempts, etc.) from being stored.
     if (accessToken.split(".").length !== 3) {
       return NextResponse.json({ error: "Invalid token format" }, { status: 400 });
     }
 
-    const response = NextResponse.json({ ok: true });
+    // Verify the token with Supabase to get the authenticated user.
+    // We need the user ID to update current_session_id in the profiles table.
+    const user = await getAuthenticatedUserForAccessToken(accessToken);
+    if (!user) {
+      return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
+    }
 
-    response.cookies.set(AUTH_COOKIE_NAME, accessToken, {
+    // ── Rotate session ID (seat-sharing prevention) ───────────────────────
+    // Generate a fresh UUID for this login event. Writing it to the DB
+    // immediately invalidates any other device's vb_session_id cookie —
+    // middleware will detect the mismatch on their next page load.
+    const sessionId = crypto.randomUUID();
+
+    await createVectorBeaAdminClient()
+      .from("profiles")
+      .update({ current_session_id: sessionId })
+      .eq("id", user.id);
+
+    // ── Write httpOnly cookies ────────────────────────────────────────────
+    const cookieOptions = {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "lax" as const,
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
+      maxAge: 60 * 60 * 24 * 7, // 7 days — matches access token lifetime
+    };
+
+    const response = NextResponse.json({ ok: true });
+    response.cookies.set(AUTH_COOKIE_NAME, accessToken, cookieOptions);
+    response.cookies.set(SESSION_ID_COOKIE_NAME, sessionId, cookieOptions);
 
     return response;
   } catch (error) {

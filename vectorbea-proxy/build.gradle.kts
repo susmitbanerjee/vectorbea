@@ -1,4 +1,14 @@
 import com.google.protobuf.gradle.id
+import proguard.gradle.ProGuardTask
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.guardsquare:proguard-gradle:7.5.0")
+    }
+}
 
 plugins {
     kotlin("jvm") version "2.1.20"
@@ -6,6 +16,9 @@ plugins {
     application
     id("org.graalvm.buildtools.native") version "0.10.6"
     id("com.google.protobuf") version "0.9.4"
+    // ProGuard — bytecode shrinking and obfuscation applied to the fat jar.
+    // Applied ONLY to the JVM/Docker path; the GraalVM native-image path is
+    // unaffected because it has its own dead-code elimination pipeline.
 }
 
 group = "com.vectorbea"
@@ -129,4 +142,56 @@ graalvmNative {
     metadataRepository {
         enabled.set(true)
     }
+}
+
+// ── ProGuard obfuscation ──────────────────────────────────────────────────────
+//
+// Produces build/libs/vectorbea-proxy-obfuscated.jar from the fat jar.
+// The Dockerfile uses THIS output for the runtime image, not the raw fat jar.
+//
+// Pipeline
+// ────────
+//   fatJar            →  build/libs/vectorbea-proxy-0.1.0-all.jar   (all deps bundled)
+//   proguardJar       →  build/libs/vectorbea-proxy-obfuscated.jar  (shrunk + obfuscated)
+//
+// The fat jar is kept in build/libs for local debugging; only the obfuscated
+// jar is shipped into Docker.
+
+val proguardJar by tasks.registering(ProGuardTask::class) {
+    description = "Shrinks and obfuscates the fat jar with ProGuard."
+    group = "build"
+
+    dependsOn(tasks.named("fatJar"))
+
+    // ── Input / output ────────────────────────────────────────────────────
+    // Reference the fat jar by its deterministic path so Gradle can track the
+    // input correctly without needing to resolve the task provider at
+    // configuration time.
+    injars(layout.buildDirectory.file("libs/${project.name}-${project.version}-all.jar"))
+    outjars(layout.buildDirectory.file("libs/${project.name}-obfuscated.jar"))
+
+    // ── JDK 21 library jars (module system) ──────────────────────────────
+    // ProGuard needs the JDK class hierarchy to analyse the bytecode.
+    // On JDK 9+ there is no rt.jar — classes live in jmod archives.
+    // We enumerate every .jmod so ProGuard can resolve all JDK references
+    // present in Ktor, Netty, coroutines, and our own code.
+    val javaHome = System.getProperty("java.home")
+    val jmodsPath = "$javaHome/jmods"
+    fileTree(jmodsPath) { include("*.jmod") }.forEach { jmod ->
+        libraryjars(
+            // jarfilter  — skip nested jars inside the jmod (not relevant here)
+            // filter     — skip module-info.class which ProGuard can't process
+            mapOf("jarfilter" to "!**.jar", "filter" to "!module-info.class"),
+            jmod,
+        )
+    }
+
+    // ── Rules file ────────────────────────────────────────────────────────
+    configuration("proguard-rules.pro")
+}
+
+// Wire into the standard Gradle lifecycle so `./gradlew build` produces
+// the obfuscated jar automatically.
+tasks.named("assemble") {
+    dependsOn(proguardJar)
 }

@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+
+# Native image build for customers who want a materially harder-to-reverse-
+# engineer proxy artifact than an obfuscated JVM jar.
+#
+# This keeps the existing JVM image path intact while adding a parallel
+# distribution lane that produces a GraalVM native binary.
+
+FROM ghcr.io/graalvm/native-image-community:21 AS builder
+
+WORKDIR /workspace
+
+# Build metadata first for better layer caching.
+COPY gradle gradle
+COPY gradlew gradlew
+COPY gradlew.bat gradlew.bat
+COPY build.gradle.kts settings.gradle.kts ./
+COPY src src
+
+RUN chmod +x gradlew
+
+# nativeCompile drives code generation, Kotlin compilation, and the GraalVM
+# native-image step through the Gradle plugin already configured in the project.
+RUN ./gradlew --no-daemon nativeCompile
+
+
+FROM debian:bookworm-slim AS runner
+
+WORKDIR /app
+
+RUN groupadd -r vectorbea && useradd -r -g vectorbea vectorbea
+
+COPY --from=builder /workspace/build/native/nativeCompile/vectorbea-proxy /app/vectorbea-proxy
+
+RUN mkdir -p /run/vectorbea && chown vectorbea:vectorbea /run/vectorbea
+
+USER vectorbea
+
+ENTRYPOINT ["/app/vectorbea-proxy"]
