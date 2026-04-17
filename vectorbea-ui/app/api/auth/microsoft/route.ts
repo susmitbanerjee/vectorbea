@@ -6,8 +6,15 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/auth/microsoft
  *
- * Initiates Microsoft OAuth with PKCE through your own domain.
+ * Initiates Microsoft OAuth with PKCE + nonce through your own domain.
  * The consent screen shows "vectorbea.com" instead of "supabase.co".
+ *
+ * Why nonce?
+ * Azure embeds the nonce in the id_token as a claim. Supabase's
+ * signInWithIdToken validates that claim against the raw nonce we pass it.
+ * Without this, signInWithIdToken rejects the Azure id_token with 401.
+ * We hash the nonce before sending it to Azure (standard OIDC practice),
+ * and store the raw value in a short-lived httpOnly cookie for the callback.
  */
 export async function GET(request: NextRequest) {
   const clientId = process.env.AZURE_CLIENT_ID;
@@ -21,45 +28,58 @@ export async function GET(request: NextRequest) {
   const next = searchParams.get("next") ?? "/dashboard";
 
   // ── PKCE ─────────────────────────────────────────────────────────────────
-  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
-  const codeVerifier  = Buffer.from(verifierBytes).toString("base64url");
-
+  const verifierBytes  = crypto.getRandomValues(new Uint8Array(32));
+  const codeVerifier   = Buffer.from(verifierBytes).toString("base64url");
   const challengeBytes = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(codeVerifier),
   );
   const codeChallenge = Buffer.from(challengeBytes).toString("base64url");
 
+  // ── Nonce ─────────────────────────────────────────────────────────────────
+  // Raw nonce stored in cookie; hashed nonce sent to Azure.
+  // On callback: pass raw nonce to signInWithIdToken so Supabase can verify
+  // the nonce claim embedded in the id_token by Azure.
+  const nonceBytes     = crypto.getRandomValues(new Uint8Array(16));
+  const rawNonce       = Buffer.from(nonceBytes).toString("base64url");
+  const nonceHashBytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(rawNonce),
+  );
+  const hashedNonce = Buffer.from(nonceHashBytes).toString("base64url");
+
   // ── State (CSRF) ──────────────────────────────────────────────────────────
   const stateBytes = crypto.getRandomValues(new Uint8Array(16));
-  const state = Buffer.from(stateBytes).toString("base64url");
+  const state      = Buffer.from(stateBytes).toString("base64url");
 
   // ── Build Microsoft authorization URL ────────────────────────────────────
   const redirectUri = `${origin}/api/auth/microsoft/callback`;
   const authUrl = new URL(
     `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`,
   );
-  authUrl.searchParams.set("client_id", clientId);
-  authUrl.searchParams.set("redirect_uri", redirectUri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("response_mode", "query");
-  authUrl.searchParams.set("scope", "openid email profile offline_access");
-  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("client_id",             clientId);
+  authUrl.searchParams.set("redirect_uri",          redirectUri);
+  authUrl.searchParams.set("response_type",         "code");
+  authUrl.searchParams.set("response_mode",         "query");
+  authUrl.searchParams.set("scope",                 "openid email profile offline_access");
+  authUrl.searchParams.set("code_challenge",        codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
-  authUrl.searchParams.set("state", state);
+  authUrl.searchParams.set("nonce",                 hashedNonce);
+  authUrl.searchParams.set("state",                 state);
 
   const cookieOptions = {
     httpOnly: true,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 10,
+    maxAge: 60 * 10, // 10 minutes — enough for the OAuth round-trip
   };
 
   const response = NextResponse.redirect(authUrl.toString());
   response.cookies.set("oauth_code_verifier", codeVerifier, cookieOptions);
-  response.cookies.set("oauth_state", state, cookieOptions);
-  response.cookies.set("oauth_next", next, cookieOptions);
+  response.cookies.set("oauth_nonce",         rawNonce,     cookieOptions);
+  response.cookies.set("oauth_state",         state,        cookieOptions);
+  response.cookies.set("oauth_next",          next,         cookieOptions);
 
   return response;
 }

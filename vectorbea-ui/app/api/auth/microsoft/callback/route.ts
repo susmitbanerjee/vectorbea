@@ -13,6 +13,10 @@ export const dynamic = "force-dynamic";
  *
  * Registered as the redirect URI in Azure Portal.
  * Microsoft shows "vectorbea.com" on the consent screen.
+ *
+ * The raw nonce stored in the oauth_nonce cookie during initiation is passed
+ * to signInWithIdToken so Supabase can verify the nonce claim that Azure
+ * embedded in the id_token — this is what fixes the 401.
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
@@ -21,6 +25,7 @@ export async function GET(request: NextRequest) {
   const oauthError    = searchParams.get("error");
 
   if (oauthError) {
+    console.error("[microsoft/callback] provider error:", searchParams.get("error_description"));
     return NextResponse.redirect(new URL("/login?error=oauth", request.url));
   }
 
@@ -32,10 +37,16 @@ export async function GET(request: NextRequest) {
   const cookieStore  = await cookies();
   const codeVerifier = cookieStore.get("oauth_code_verifier")?.value;
   const savedState   = cookieStore.get("oauth_state")?.value;
+  const rawNonce     = cookieStore.get("oauth_nonce")?.value;
   const next         = cookieStore.get("oauth_next")?.value ?? "/dashboard";
 
   if (!codeVerifier || !savedState || savedState !== returnedState) {
     console.error("[microsoft/callback] state mismatch or missing verifier");
+    return NextResponse.redirect(new URL("/login?error=callback_failed", request.url));
+  }
+
+  if (!rawNonce) {
+    console.error("[microsoft/callback] missing nonce cookie");
     return NextResponse.redirect(new URL("/login?error=callback_failed", request.url));
   }
 
@@ -71,18 +82,22 @@ export async function GET(request: NextRequest) {
     id_token?: string;
     access_token?: string;
     error?: string;
+    error_description?: string;
   };
 
-  if (!tokenData.id_token) {
-    console.error("[microsoft/callback] no id_token in Microsoft response");
+  if (tokenData.error || !tokenData.id_token) {
+    console.error("[microsoft/callback] no id_token:", tokenData.error_description);
     return NextResponse.redirect(new URL("/login?error=callback_failed", request.url));
   }
 
-  // ── Sign in to Supabase using the Microsoft id_token ─────────────────────
+  // ── Sign in to Supabase using the Microsoft id_token + raw nonce ──────────
+  // The raw nonce must match what Azure hashed and embedded in the id_token.
+  // Supabase hashes it internally and compares against the token's nonce claim.
   const supabase = createSupabaseAdminClient();
   const { data, error: supabaseError } = await supabase.auth.signInWithIdToken({
     provider: "azure",
-    token: tokenData.id_token,
+    token:    tokenData.id_token,
+    nonce:    rawNonce,
   });
 
   if (supabaseError || !data.session) {
@@ -101,7 +116,7 @@ export async function GET(request: NextRequest) {
     .update({ current_session_id: sessionId })
     .eq("id", user.id);
 
-  // ── Set session cookies + clear OAuth temp cookies ────────────────────────
+  // ── Set session cookies + clear all OAuth temp cookies ────────────────────
   const cookieOptions = {
     httpOnly: true,
     sameSite: "lax" as const,
@@ -118,11 +133,13 @@ export async function GET(request: NextRequest) {
   );
 
   const response = NextResponse.redirect(redirectUrl);
-  response.cookies.set(AUTH_COOKIE_NAME, access_token, cookieOptions);
+  response.cookies.set(AUTH_COOKIE_NAME,    access_token, cookieOptions);
   response.cookies.set(SESSION_ID_COOKIE_NAME, sessionId, cookieOptions);
+  // Clear all short-lived OAuth temp cookies
   response.cookies.set("oauth_code_verifier", "", expired);
-  response.cookies.set("oauth_state", "", expired);
-  response.cookies.set("oauth_next", "", expired);
+  response.cookies.set("oauth_nonce",          "", expired);
+  response.cookies.set("oauth_state",          "", expired);
+  response.cookies.set("oauth_next",           "", expired);
 
   return response;
 }
