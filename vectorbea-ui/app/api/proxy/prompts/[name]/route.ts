@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
@@ -16,9 +15,9 @@ export const runtime = "nodejs";
  * Auth flow
  * ─────────
  * 1. Extract the raw Bearer token from the Authorization header.
- * 2. SHA-256 hash it and look it up in vectorbea.deployment_agents.
- *    A deployment_agent row ties a hashed key to a specific workspace_id.
- * 3. Reject with 401 if the token is missing, unknown, or inactive.
+ * 2. Compare it directly against deployment_agents.api_token.
+ *    A deployment_agent row ties a token to a specific workspace_id.
+ * 3. Reject with 401 if the token is missing, unknown, or status != 'active'.
  *
  * Response
  * ────────
@@ -46,13 +45,12 @@ export async function GET(
     }
 
     // ── 2. Validate against deployment_agents ─────────────────────────────
-    const keyHash = createHash("sha256").update(rawToken).digest("hex");
     const supabase = createVectorBeaAdminClient();
 
     const { data: agent, error: agentError } = await supabase
       .from("deployment_agents")
-      .select("id, workspace_id, is_active")
-      .eq("key_hash", keyHash)
+      .select("id, workspace_id, status")
+      .eq("api_token", rawToken)
       .maybeSingle();
 
     if (agentError) {
@@ -60,9 +58,9 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    if (!agent || !agent.is_active) {
+    if (!agent || agent.status !== "active") {
       return NextResponse.json(
-        { error: "Invalid or inactive deployment agent key" },
+        { error: "Invalid or inactive deployment agent token" },
         { status: 401 },
       );
     }
