@@ -420,7 +420,7 @@ message = prompt.format(name="Bob", product="Acme AI")`}</Code>
           In production you can still run the proxy as a sidecar alongside
           your service for lower latency and local caching. Deploy the same
           Docker image with the same environment variables and set{" "}
-          <InlineCode>base_url="http://localhost:8080"</InlineCode>.
+          <InlineCode>{'base_url="http://localhost:8080"'}</InlineCode>.
         </Callout>
       </Step>
 
