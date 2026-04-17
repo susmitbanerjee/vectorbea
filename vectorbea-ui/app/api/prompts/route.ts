@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
 // Zero-Trust: every incoming prompt creation payload is validated before any DB write.
 const CreatePromptSchema = z.object({
   name:        z.string().min(1, "name is required").max(120, "name must be 120 characters or fewer").trim(),
-  description: z.string().max(500, "description must be 500 characters or fewer").trim().optional(),
+  description: z.string().max(500, "description must be 500 characters or fewer").trim().nullable().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       .insert({
         workspace_id: workspaceId,
         name,
-        description: description ?? null,
+        description: description?.trim() ? description.trim() : null,
       })
       .select("id, name, description, created_at")
       .single();

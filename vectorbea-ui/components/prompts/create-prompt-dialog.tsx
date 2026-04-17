@@ -73,7 +73,7 @@ export function CreatePromptDialog({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               name: name.trim(),
-              description: description.trim() || null,
+              description: description.trim() || undefined,
             }),
           },
         );
