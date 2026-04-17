@@ -146,6 +146,32 @@ function computeStats(rows: StatsRow[], total: number) {
   return { total, avgLlmLatency, avgProxyLatency, mostActivePrompt };
 }
 
+// Returns an ordered list of page numbers and "…" ellipsis markers for the
+// pagination control. Always shows first + last page; shows up to 3 pages
+// around the current page; inserts "…" where pages are skipped.
+function buildPageSlots(current: number, total: number): (number | "…")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const slots = new Set<number>([1, total]);
+  for (let p = Math.max(2, current - 2); p <= Math.min(total - 1, current + 2); p++) {
+    slots.add(p);
+  }
+
+  const sorted = Array.from(slots).sort((a, b) => a - b);
+  const result: (number | "…")[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const cur = sorted[i]!;
+    if (prev !== undefined && cur - prev > 1) result.push("…");
+    result.push(cur);
+  }
+
+  return result;
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function AuditLogsPage({
@@ -415,44 +441,24 @@ export default async function AuditLogsPage({
                     </Link>
 
                     <div className="flex items-center gap-1">
-                      {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                        // Show pages around current page with ellipsis logic
-                        let p: number | "…";
-                        if (totalPages <= 7) {
-                          p = i + 1;
-                        } else if (i === 0) {
-                          p = 1;
-                        } else if (i === 6) {
-                          p = totalPages;
-                        } else if (page <= 4) {
-                          p = i + 1;
-                        } else if (page >= totalPages - 3) {
-                          p = totalPages - 6 + i;
-                        } else {
-                          const offsets = [0, 1, 2, 3, 4, 5, 6];
-                          const mapped = [1, page - 2, page - 1, page, page + 1, page + 2, totalPages];
-                          p = mapped[offsets.indexOf(i)] ?? i + 1;
-                        }
-
-                        if (p === "…") {
-                          return <span key={`ellipsis-${i}`} className="px-1 text-xs text-muted-foreground">…</span>;
-                        }
-
-                        return (
+                      {buildPageSlots(page, totalPages).map((slot, i) =>
+                        slot === "…" ? (
+                          <span key={`ellipsis-${i}`} className="px-1 text-xs text-muted-foreground">…</span>
+                        ) : (
                           <Link
-                            key={p}
-                            href={pageUrl(p as number) as Route}
+                            key={slot}
+                            href={pageUrl(slot) as Route}
                             className={cn(
                               "flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors",
-                              p === page
+                              slot === page
                                 ? "bg-primary text-primary-foreground"
                                 : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
                             )}
                           >
-                            {p}
+                            {slot}
                           </Link>
-                        );
-                      })}
+                        ),
+                      )}
                     </div>
 
                     <Link
