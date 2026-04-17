@@ -14,7 +14,7 @@ export async function getRecentAuditLogsForWorkspace(
     )
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(50);
 
   if (error) {
     throw new Error(`Failed to load audit logs: ${error.message}`);
