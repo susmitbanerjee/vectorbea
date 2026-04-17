@@ -92,6 +92,25 @@ export function AuthScreen({
     setError(null);
 
     try {
+      // Google and Microsoft use our own domain routes — the consent screen
+      // shows "vectorbea.com" instead of "supabase.co".
+      // GitHub does not support id_token / OIDC so it still uses Supabase's
+      // built-in OAuth flow (will show supabase.co until a custom domain is set).
+      if (provider === "google") {
+        const url = new URL("/api/auth/google", window.location.origin);
+        if (callbackNext) url.searchParams.set("next", callbackNext);
+        window.location.assign(url.toString());
+        return;
+      }
+
+      if (provider === "azure") {
+        const url = new URL("/api/auth/microsoft", window.location.origin);
+        if (callbackNext) url.searchParams.set("next", callbackNext);
+        window.location.assign(url.toString());
+        return;
+      }
+
+      // GitHub — Supabase built-in flow
       const supabase = getSupabaseBrowserClient();
       const redirectUrl = buildRedirectUrl();
 
@@ -99,14 +118,6 @@ export function AuthScreen({
         provider,
         options: {
           redirectTo: redirectUrl.toString(),
-          scopes:
-            provider === "azure"
-              ? "openid profile email"
-              : undefined,
-          queryParams:
-            provider === "google"
-              ? { access_type: "offline", prompt: "consent" }
-              : undefined,
         },
       });
 
