@@ -94,6 +94,10 @@ export function AuthScreen({
         provider,
         options: {
           redirectTo: redirectUrl.toString(),
+          scopes:
+            provider === "azure"
+              ? "openid profile email"
+              : undefined,
           queryParams:
             provider === "google"
               ? { access_type: "offline", prompt: "consent" }

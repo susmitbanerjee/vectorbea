@@ -35,6 +35,22 @@ export default function AuthCallbackPage() {
     async function finish() {
       try {
         const supabase = getSupabaseBrowserClient();
+        const currentUrl = new URL(window.location.href);
+        const code = currentUrl.searchParams.get("code");
+        const hashParams = new URLSearchParams(
+          window.location.hash.replace(/^#/, ""),
+        );
+
+        // Some providers arrive through a code-based redirect even when the
+        // browser client is configured for implicit flow. Handle both shapes so
+        // Azure/Microsoft does not fail just because the provider returned a
+        // code instead of embedding tokens in the hash fragment.
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            throw exchangeError;
+          }
+        }
 
         // Wait for createBrowserClient to parse the hash and hydrate the session.
         // getSession() returns the session that was embedded in the hash fragment.
@@ -56,11 +72,12 @@ export default function AuthCallbackPage() {
         }
 
         if (!cancelled) {
-          // Determine post-login destination from the hash's `next` param or default.
-          const hashParams = new URLSearchParams(
-            window.location.hash.replace("#", "?"),
-          );
-          const next = hashParams.get("next") ?? "/dashboard";
+          // Determine post-login destination from either the query string or
+          // hash fragment, depending on which OAuth callback shape was used.
+          const next =
+            currentUrl.searchParams.get("next") ??
+            hashParams.get("next") ??
+            "/dashboard";
           router.replace((next.startsWith("/") ? next : "/dashboard") as Route);
         }
       } catch (err) {
