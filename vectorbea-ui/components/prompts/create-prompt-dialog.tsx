@@ -28,12 +28,14 @@ type CreatePromptDialogProps = {
   navigateOnSuccess?: boolean;
   onOptimisticCreate?: (prompt: PromptListItem) => void;
   onPromptCreated?: (prompt: PromptListItem, optimisticId?: string) => void;
+  onPromptCreateFailed?: (optimisticId: string) => void;
 };
 
 export function CreatePromptDialog({
   navigateOnSuccess = true,
   onOptimisticCreate,
   onPromptCreated,
+  onPromptCreateFailed,
 }: CreatePromptDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -72,14 +74,6 @@ export function CreatePromptDialog({
             body: JSON.stringify({
               name: name.trim(),
               description: description.trim() || null,
-              versionTag: "v1.0.0",
-              templateText: "You are VectorBea. Use {{user_input}} to answer clearly.",
-              parameters: {
-                model_name: "gpt-4.1-mini",
-                temperature: 0.2,
-                max_tokens: 512,
-                top_p: 0.95,
-              },
             }),
           },
         );
@@ -110,6 +104,7 @@ export function CreatePromptDialog({
           );
         }
       } catch (cause) {
+        onPromptCreateFailed?.(optimisticId);
         toast.error(
           cause instanceof Error ? cause.message : "Failed to create prompt.",
         );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useOptimistic, useState } from "react";
+import { useEffect, useOptimistic, useState } from "react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { RbacGuard } from "@/components/rbac-guard";
@@ -15,6 +15,11 @@ type PromptsShellProps = {
 
 export function PromptsShell({ initialPrompts, initialQuery }: PromptsShellProps) {
   const [prompts, setPrompts] = useState(initialPrompts);
+
+  useEffect(() => {
+    setPrompts(initialPrompts);
+  }, [initialPrompts]);
+
   const [optimisticPrompts, addOptimisticPrompt] = useOptimistic(
     prompts,
     (currentPrompts, optimisticPrompt: PromptListItem) => [
@@ -32,6 +37,18 @@ export function PromptsShell({ initialPrompts, initialQuery }: PromptsShellProps
     ]);
   };
 
+  const handlePromptCreateFailed = (optimisticId: string) => {
+    setPrompts((currentPrompts) =>
+      currentPrompts.filter((prompt) => prompt.id !== optimisticId),
+    );
+  };
+
+  const handlePromptDeleted = (deletedPromptId: string) => {
+    setPrompts((currentPrompts) =>
+      currentPrompts.filter((prompt) => prompt.id !== deletedPromptId),
+    );
+  };
+
   return (
     <div className="min-h-screen">
       <AppHeader
@@ -42,13 +59,18 @@ export function PromptsShell({ initialPrompts, initialQuery }: PromptsShellProps
             <CreatePromptDialog
               onOptimisticCreate={addOptimisticPrompt}
               onPromptCreated={handlePromptCreated}
+              onPromptCreateFailed={handlePromptCreateFailed}
               navigateOnSuccess={false}
             />
           </RbacGuard>
         }
       />
       <div className="px-4 py-6 md:px-6 xl:px-8">
-        <PromptsTable prompts={optimisticPrompts} initialQuery={initialQuery} />
+        <PromptsTable
+          prompts={optimisticPrompts}
+          initialQuery={initialQuery}
+          onPromptDeleted={handlePromptDeleted}
+        />
       </div>
     </div>
   );

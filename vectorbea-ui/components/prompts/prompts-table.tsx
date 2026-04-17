@@ -51,9 +51,11 @@ type FilterTab = "all" | "published" | "draft";
 export function PromptsTable({
   prompts,
   initialQuery,
+  onPromptDeleted,
 }: {
   prompts: PromptListItem[];
   initialQuery: string;
+  onPromptDeleted?: (promptId: string) => void;
 }) {
   const router = useRouter();
   const { activeWorkspaceId } = useWorkspace();
@@ -95,13 +97,17 @@ export function PromptsTable({
   const handleDelete = async (promptId: string) => {
     setDeletingId(promptId);
     try {
-      const response = await fetch(`/api/prompts/${promptId}`, {
+      const response = await fetch(
+        `/api/prompts/${promptId}${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
+        {
         method: "DELETE",
-      });
+        },
+      );
       if (!response.ok && response.status !== 204) {
         const body = await response.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(body.error || `Request failed (${response.status})`);
       }
+      onPromptDeleted?.(promptId);
       toast.success("Prompt deleted");
       startTransition(() => router.refresh());
     } catch (err) {
