@@ -27,14 +27,13 @@ let browserClient: ReturnType<typeof createBrowserClient> | null = null;
 
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
-    // Use implicit flow so the session is delivered via the URL hash fragment.
-    // PKCE requires the code_verifier to survive an OAuth redirect, but
-    // @supabase/ssr's createBrowserClient stores it in localStorage which is
-    // wiped between page navigations in some environments, breaking the
-    // exchange. Implicit flow has no code_verifier — the access_token arrives
-    // in the hash and is immediately available to the callback page.
+    // PKCE flow: @supabase/ssr's createBrowserClient stores the code_verifier
+    // in a cookie (not localStorage), so it survives the OAuth redirect and
+    // can be read by the server-side /api/auth/callback Route Handler.
+    // The handler calls exchangeCodeForSession(code) which internally reads
+    // that cookie — no client-side token handling needed at all.
     browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey, {
-      auth: { flowType: "implicit" },
+      auth: { flowType: "pkce" },
     });
   }
   return browserClient;

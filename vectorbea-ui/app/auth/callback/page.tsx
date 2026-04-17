@@ -1,111 +1,32 @@
 "use client";
 
 /**
- * OAuth implicit-flow callback.
+ * Legacy implicit-flow callback page — no longer active.
  *
- * With flowType:"implicit", Supabase delivers the session via the URL hash
- * fragment:  /auth/callback#access_token=...&refresh_token=...
+ * The OAuth redirect URI now points to the server-side Route Handler at
+ * /api/auth/callback which performs the PKCE exchange and sets cookies
+ * without any client-side JavaScript.
  *
- * createBrowserClient detects the hash automatically and makes the session
- * available via getSession(). We read it here, POST the access_token to
- * /api/auth/set-session so the server can write the httpOnly cookie, then
- * redirect to the appropriate page.
- *
- * Why implicit instead of PKCE?
- * PKCE requires the code_verifier to survive the full OAuth redirect round-trip.
- * @supabase/ssr's createBrowserClient stores it in localStorage which is reset
- * between page navigations in some browsers/environments, making the exchange
- * fail with "PKCE code verifier not found in storage". Implicit flow avoids
- * this entirely — no verifier, no storage dependency.
+ * This page is kept only as a safety net: if a user somehow lands here
+ * (e.g. a cached bookmark from before the PKCE migration), we redirect
+ * them to the login page instead of leaving them on a blank screen.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-
-export default function AuthCallbackPage() {
+export default function LegacyAuthCallbackPage() {
   const router = useRouter();
-  const [status, setStatus] = useState<"pending" | "error">("pending");
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function finish() {
-      try {
-        const supabase = getSupabaseBrowserClient();
-        const currentUrl = new URL(window.location.href);
-        const code = currentUrl.searchParams.get("code");
-        const hashParams = new URLSearchParams(
-          window.location.hash.replace(/^#/, ""),
-        );
-
-        // Some providers arrive through a code-based redirect even when the
-        // browser client is configured for implicit flow. Handle both shapes so
-        // Azure/Microsoft does not fail just because the provider returned a
-        // code instead of embedding tokens in the hash fragment.
-        if (code) {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) {
-            throw exchangeError;
-          }
-        }
-
-        // Wait for createBrowserClient to parse the hash and hydrate the session.
-        // getSession() returns the session that was embedded in the hash fragment.
-        const { data, error } = await supabase.auth.getSession();
-
-        if (error || !data.session) {
-          throw new Error(error?.message ?? "No session found after OAuth redirect");
-        }
-
-        // Write an httpOnly server cookie so Server Components can authenticate.
-        const res = await fetch("/api/auth/set-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken: data.session.access_token }),
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to persist session cookie");
-        }
-
-        if (!cancelled) {
-          // Determine post-login destination from either the query string or
-          // hash fragment, depending on which OAuth callback shape was used.
-          const next =
-            currentUrl.searchParams.get("next") ??
-            hashParams.get("next") ??
-            "/dashboard";
-          router.replace((next.startsWith("/") ? next : "/dashboard") as Route);
-        }
-      } catch (err) {
-        console.error("[auth/callback]", err);
-        if (!cancelled) {
-          setStatus("error");
-          setTimeout(() => router.replace("/login?error=callback_failed" as Route), 2000);
-        }
-      }
-    }
-
-    void finish();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (status === "error") {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-destructive text-sm">Sign-in failed. Redirecting…</p>
-      </div>
-    );
-  }
+    router.replace("/login" as Route);
+  }, [router]);
 
   return (
     <div className="flex min-h-screen items-center justify-center gap-3">
       <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      <p className="text-muted-foreground text-sm">Completing sign in…</p>
+      <p className="text-muted-foreground text-sm">Redirecting…</p>
     </div>
   );
 }

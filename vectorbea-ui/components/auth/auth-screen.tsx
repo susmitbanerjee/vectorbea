@@ -29,8 +29,10 @@ export function AuthScreen({
   const searchParams = useSearchParams();
   const rawError = searchParams.get("error");
   const [error, setError] = useState<string | null>(
-    rawError === "oauth"
+    rawError === "oauth" || rawError === "callback_failed"
       ? "Authentication failed. Please try again."
+      : rawError === "session_expired"
+      ? "You were signed in on another device. Please sign in again."
       : rawError ?? null,
   );
   const [providerLoading, setProviderLoading] = useState<
@@ -75,7 +77,10 @@ export function AuthScreen({
   const callbackNext = next || searchParams.get("next") || undefined;
 
   function buildRedirectUrl() {
-    const redirectUrl = new URL("/auth/callback", window.location.origin);
+    // Points to our own domain's server-side PKCE exchange handler.
+    // This is what gets registered as the redirect URI in Google, Microsoft,
+    // and GitHub — so the consent screen shows vectorbea.com, not supabase.co.
+    const redirectUrl = new URL("/api/auth/callback", window.location.origin);
     if (callbackNext) {
       redirectUrl.searchParams.set("next", callbackNext);
     }
