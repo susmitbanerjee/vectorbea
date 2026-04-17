@@ -5,6 +5,7 @@ Prompts resource — wraps the /v1/prompts/:name and /v1/audit endpoints.
 from __future__ import annotations
 
 import time
+import warnings
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from vectorbea.models import PromptTemplate
@@ -77,11 +78,15 @@ class Prompts:
 
         # Auto-report the proxy fetch latency so the dashboard reflects every
         # get() call without requiring a separate log_audit() call.
-        # Any error here is swallowed — audit must never break the caller.
+        # Errors are demoted to warnings — audit must never break the caller.
         try:
             self._report_audit(prompt, proxy_latency_ms=proxy_latency_ms)
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                f"[vectorbea] audit report failed (non-fatal): {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         return prompt
 
