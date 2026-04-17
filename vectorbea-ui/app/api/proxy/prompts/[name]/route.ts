@@ -58,7 +58,7 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    if (!agent || agent.status !== "active") {
+    if (!agent || !["active", "online"].includes(agent.status)) {
       return NextResponse.json(
         { error: "Invalid or inactive deployment agent token" },
         { status: 401 },
