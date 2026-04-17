@@ -47,9 +47,11 @@ export async function GET(
     // ── 2. Validate against deployment_agents ─────────────────────────────
     const supabase = createVectorBeaAdminClient();
 
+    // Status is NOT checked — a freshly-registered agent with status "offline"
+    // must be able to fetch prompts. The first heartbeat will flip it to "online".
     const { data: agent, error: agentError } = await supabase
       .from("deployment_agents")
-      .select("id, workspace_id, status")
+      .select("id, workspace_id")
       .eq("api_token", rawToken)
       .maybeSingle();
 
@@ -58,9 +60,9 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    if (!agent || !["active", "online"].includes(agent.status)) {
+    if (!agent) {
       return NextResponse.json(
-        { error: "Invalid or inactive deployment agent token" },
+        { error: "Invalid deployment agent token" },
         { status: 401 },
       );
     }

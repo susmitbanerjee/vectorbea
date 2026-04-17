@@ -42,9 +42,19 @@ function isAgentOnline(lastHeartbeat: string | null) {
   return Date.now() - new Date(lastHeartbeat).getTime() <= 2 * 60 * 1000;
 }
 
+function agentStatusVariant(lastHeartbeat: string | null): "success" | "secondary" | "destructive" {
+  if (!lastHeartbeat) return "secondary";   // never heartbeated — pending
+  return isAgentOnline(lastHeartbeat) ? "success" : "destructive";
+}
+
+function agentStatusLabel(lastHeartbeat: string | null): string {
+  if (!lastHeartbeat) return "Pending";
+  return isAgentOnline(lastHeartbeat) ? "Online" : "Offline";
+}
+
 function formatHeartbeat(lastHeartbeat: string | null) {
   if (!lastHeartbeat) {
-    return "Never reported";
+    return "Waiting for proxy to connect…";
   }
 
   return new Date(lastHeartbeat).toLocaleString();
@@ -449,7 +459,6 @@ export function InfrastructureDashboard() {
                     </TableRow>
                   ) : (
                     agents.map((agent) => {
-                      const online = isAgentOnline(agent.lastHeartbeat);
                       const selected = agent.id === selectedAgent?.id;
                       return (
                         <TableRow
@@ -464,8 +473,8 @@ export function InfrastructureDashboard() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={online ? "success" : "destructive"}>
-                              {online ? "Online" : "Offline"}
+                            <Badge variant={agentStatusVariant(agent.lastHeartbeat)}>
+                              {agentStatusLabel(agent.lastHeartbeat)}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -513,8 +522,8 @@ export function InfrastructureDashboard() {
                           Last heartbeat: {formatHeartbeat(selectedAgent.lastHeartbeat)}
                         </p>
                       </div>
-                      <Badge variant={isAgentOnline(selectedAgent.lastHeartbeat) ? "success" : "destructive"}>
-                        {isAgentOnline(selectedAgent.lastHeartbeat) ? "Online" : "Offline"}
+                      <Badge variant={agentStatusVariant(selectedAgent.lastHeartbeat)}>
+                        {agentStatusLabel(selectedAgent.lastHeartbeat)}
                       </Badge>
                     </div>
                   </div>
