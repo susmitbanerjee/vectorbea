@@ -81,6 +81,11 @@ function relativeTime(value: string | null): string {
   });
 }
 
+async function getApiErrorMessage(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  return payload?.error ?? fallback;
+}
+
 function summarizeVersionState(
   current: PromptDetail,
   latestPublished: PromptDetail | null,
@@ -230,7 +235,9 @@ export function PromptEditor({
           },
         );
         if (!response.ok) {
-          throw new Error(await response.text());
+          throw new Error(
+            await getApiErrorMessage(response, "Failed to save prompt."),
+          );
         }
 
         const updatedPrompt = (await response.json()) as PromptDetail;
@@ -269,7 +276,12 @@ export function PromptEditor({
           },
         );
         if (!workspaceAwareAuditResponse.ok) {
-          throw new Error(await workspaceAwareAuditResponse.text());
+          throw new Error(
+            await getApiErrorMessage(
+              workspaceAwareAuditResponse,
+              "Audit limit reached or audit logging is currently unavailable.",
+            ),
+          );
         }
 
         // Update local state first for instant feedback, then refresh the
@@ -299,7 +311,9 @@ export function PromptEditor({
           { method: "POST" },
         );
         if (!response.ok) {
-          throw new Error(await response.text());
+          throw new Error(
+            await getApiErrorMessage(response, "Failed to publish prompt."),
+          );
         }
 
         const publishedPrompt = (await response.json()) as PromptDetail;
@@ -334,7 +348,12 @@ export function PromptEditor({
           },
         );
         if (!auditResponse.ok) {
-          throw new Error(await auditResponse.text());
+          throw new Error(
+            await getApiErrorMessage(
+              auditResponse,
+              "Audit limit reached or audit logging is currently unavailable.",
+            ),
+          );
         }
 
         refreshVersions(publishedPrompt);

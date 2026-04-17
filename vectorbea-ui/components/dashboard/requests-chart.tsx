@@ -10,13 +10,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, ChevronDown, Cpu } from "lucide-react";
+import { Activity, Cpu } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AgentMetricPoint } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 
 type AgentOption = {
   id: string;
@@ -53,7 +54,10 @@ function CustomTooltip({
       <div className="mt-2 space-y-1.5">
         {payload.map((entry) => (
           <p key={`${entry.name}-${entry.color}`} className="text-sm font-medium">
-            <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span
+              className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
             {entry.name}:{" "}
             <span className="tabular-nums">
               {typeof entry.value === "number" ? entry.value.toFixed(1) : entry.value}
@@ -86,7 +90,6 @@ export function RequestsChart() {
     [chartPoints],
   );
 
-  // ── Load agent list via API route (uses admin client — bypasses RLS) ────
   useEffect(() => {
     let cancelled = false;
 
@@ -111,13 +114,12 @@ export function RequestsChart() {
         }>;
 
         if (!response.ok) throw new Error("Failed to load agents");
-
         if (cancelled) return;
 
         setAgents(data);
         setSelectedAgentId((current) => {
-          if (current && data.some((a) => a.id === current)) return current;
-          return data.find((a) => isOnline(a.lastHeartbeat))?.id ?? data[0]?.id ?? "";
+          if (current && data.some((agent) => agent.id === current)) return current;
+          return data.find((agent) => isOnline(agent.lastHeartbeat))?.id ?? data[0]?.id ?? "";
         });
       } catch (error) {
         if (!cancelled) {
@@ -135,7 +137,6 @@ export function RequestsChart() {
     };
   }, [activeWorkspaceId]);
 
-  // ── Load metrics via API route (uses admin client — bypasses RLS) ────────
   useEffect(() => {
     let cancelled = false;
 
@@ -154,15 +155,11 @@ export function RequestsChart() {
         const data = (await response.json().catch(() => [])) as AgentMetricPoint[] | { error?: string };
 
         if (!response.ok) {
-          throw new Error(
-            "error" in data && data.error ? data.error : "Failed to load agent metrics.",
-          );
+          throw new Error("error" in data && data.error ? data.error : "Failed to load agent metrics.");
         }
 
         if (!cancelled) {
-          // API route returns ascending order; take last 50 points
-          const points = (data as AgentMetricPoint[]).slice(-50);
-          setChartPoints(points);
+          setChartPoints((data as AgentMetricPoint[]).slice(-50));
         }
       } catch (error) {
         if (!cancelled) {
@@ -175,8 +172,6 @@ export function RequestsChart() {
 
     void loadMetrics();
 
-    // Poll every 35 s — slightly longer than the 30 s heartbeat interval so
-    // each poll catches a fresh data point without hammering the API.
     const interval = window.setInterval(() => {
       void loadMetrics();
     }, 35_000);
@@ -198,11 +193,11 @@ export function RequestsChart() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <Badge variant="outline">Realtime</Badge>
-          <div className="relative min-w-[220px]">
-            <select
+          <div className="min-w-[220px]">
+            <Select
               value={selectedAgentId}
               onChange={(event) => setSelectedAgentId(event.target.value)}
-              className="h-9 w-full appearance-none rounded-lg border border-border/60 bg-background/70 px-3 pr-9 text-sm outline-none transition-colors focus:border-primary/50"
+              className="h-9 bg-background"
               disabled={loadingAgents || agents.length === 0}
             >
               {agents.length === 0 ? (
@@ -214,8 +209,7 @@ export function RequestsChart() {
                   </option>
                 ))
               )}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            </Select>
           </div>
         </div>
       </CardHeader>
@@ -300,7 +294,7 @@ export function RequestsChart() {
               {loadingMetrics
                 ? "Loading live telemetry..."
                 : selectedAgentId
-                  ? "Waiting for the first heartbeat — data appears every 30 s."
+                  ? "Waiting for the first heartbeat - data appears every 30 s."
                   : "Select an agent to view live telemetry."}
             </div>
           )}

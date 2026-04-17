@@ -121,14 +121,14 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-left transition-all hover:border-white/20 hover:bg-white/[0.05]"
+          className="group flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-all hover:border-primary/30 hover:bg-accent/40"
         >
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-400/25 bg-amber-400/10">
-              <Layers3 className="h-4 w-4 text-amber-400" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
+              <Layers3 className="h-4 w-4 text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">
+              <p className="truncate text-sm font-medium text-foreground">
                 {activeWorkspace?.name ?? "No workspace"}
               </p>
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -136,7 +136,7 @@ export function WorkspaceSwitcher() {
               </p>
             </div>
           </div>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-white" />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
         </button>
       </DropdownMenuTrigger>
 
@@ -169,8 +169,8 @@ export function WorkspaceSwitcher() {
                       className={cn(
                         "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 pl-6 text-left text-sm transition-colors",
                         isActive
-                          ? "bg-amber-400/10 text-white"
-                          : "text-slate-300 hover:bg-white/5 hover:text-white",
+                          ? "bg-primary/10 text-primary"
+                          : "text-foreground hover:bg-accent/40",
                       )}
                     >
                       <div className="flex min-w-0 items-center gap-2">
@@ -178,8 +178,8 @@ export function WorkspaceSwitcher() {
                           className={cn(
                             "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold uppercase",
                             isActive
-                              ? "border-amber-400/40 bg-amber-400/15 text-amber-300"
-                              : "border-white/10 bg-white/[0.04] text-slate-400",
+                              ? "border-primary/30 bg-primary/10 text-primary"
+                              : "border-border bg-muted text-muted-foreground",
                           )}
                         >
                           {ws.name.slice(0, 2)}
@@ -187,7 +187,7 @@ export function WorkspaceSwitcher() {
                         <span className="truncate">{ws.name}</span>
                       </div>
                       {isActive && (
-                        <Check className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                        <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
                       )}
                     </button>
                   );
@@ -213,10 +213,10 @@ export function WorkspaceSwitcher() {
               }
             }}
             placeholder="acme-production"
-            className="h-9 border-white/10 bg-white/[0.04] text-sm text-white placeholder:text-slate-600"
+            className="h-9 text-sm"
           />
           <Button
-            className="h-8 w-full gap-1.5 bg-amber-400/15 text-amber-200 hover:bg-amber-400/25"
+            className="h-8 w-full gap-1.5"
             size="sm"
             variant="outline"
             onClick={createWorkspace}
@@ -248,7 +248,7 @@ export function WorkspaceSwitcher() {
               }
             }}
             placeholder="Acme AI"
-            className="h-9 border-white/10 bg-white/[0.04] text-sm text-white placeholder:text-slate-600"
+            className="h-9 text-sm"
           />
           <div title={!canCreateOrganization ? FREE_PLAN_TOOLTIP : undefined} className="space-y-2">
             <Button

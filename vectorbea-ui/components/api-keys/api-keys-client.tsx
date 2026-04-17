@@ -5,6 +5,8 @@ import { useEffect, useState, useTransition } from "react";
 import { Copy, Eye, EyeOff, Key, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import type { ApiKeyView, CreateApiKeyResponse, DeploymentAgentView } from "@/lib/api";
+import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,8 +28,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ApiKeyView, CreateApiKeyResponse, DeploymentAgentView } from "@/lib/api";
-import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
 interface Props {
   initialKeys: ApiKeyView[];
@@ -53,11 +53,10 @@ export function ApiKeysClient({ initialKeys }: Props) {
     ? `?workspaceId=${encodeURIComponent(activeWorkspace.id)}`
     : "";
 
-  // Fetch agents on mount
   useEffect(() => {
     if (!activeWorkspace?.id) return;
     fetch(`/api/agents?workspaceId=${encodeURIComponent(activeWorkspace.id)}`)
-      .then((r) => r.ok ? r.json() : [])
+      .then((response) => (response.ok ? response.json() : []))
       .then((data: DeploymentAgentView[]) => setAgents(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [activeWorkspace?.id]);
@@ -125,7 +124,6 @@ export function ApiKeysClient({ initialKeys }: Props) {
   const regenerateKey = async (oldKey: ApiKeyView) => {
     setLoadingId(oldKey.id);
     try {
-      // Create a new key with the same name
       const createResponse = await fetch(`/api/keys${workspaceQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -137,7 +135,6 @@ export function ApiKeysClient({ initialKeys }: Props) {
       }
       const created = (await createResponse.json()) as CreateApiKeyResponse;
 
-      // Delete the old key
       const deleteResponse = await fetch(`/api/keys/${oldKey.id}${workspaceQuery}`, {
         method: "DELETE",
       });
@@ -157,13 +154,12 @@ export function ApiKeysClient({ initialKeys }: Props) {
   };
 
   const toggleRowReveal = (id: string) => {
-    setRevealedRows((prev) => ({ ...prev, [id]: !prev[id] }));
+    setRevealedRows((previous) => ({ ...previous, [id]: !previous[id] }));
   };
 
   return (
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
-      {/* Revoke confirmation dialog */}
-      <Dialog open={!!revokeTarget} onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}>
+      <Dialog open={!!revokeTarget} onOpenChange={(openState) => { if (!openState) setRevokeTarget(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Revoke API key</DialogTitle>
@@ -186,8 +182,10 @@ export function ApiKeysClient({ initialKeys }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* Regenerate confirmation dialog */}
-      <Dialog open={!!regenerateTarget} onOpenChange={(open) => { if (!open) setRegenerateTarget(null); }}>
+      <Dialog
+        open={!!regenerateTarget}
+        onOpenChange={(openState) => { if (!openState) setRegenerateTarget(null); }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Regenerate API key</DialogTitle>
@@ -224,8 +222,8 @@ export function ApiKeysClient({ initialKeys }: Props) {
                 </DialogDescription>
               </DialogHeader>
               <form
-                onSubmit={(e) => {
-                  e.preventDefault();
+                onSubmit={(event) => {
+                  event.preventDefault();
                   createKey();
                 }}
                 className="mt-4 space-y-4"
@@ -235,38 +233,37 @@ export function ApiKeysClient({ initialKeys }: Props) {
                     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       Agent (optional)
                     </label>
-                    <select
+                    <Select
                       value={agentId}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAgentId(val);
-                        if (val) {
-                          const agent = agents.find((a) => a.id === val);
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setAgentId(value);
+                        if (value) {
+                          const agent = agents.find((item) => item.id === value);
                           if (agent) setKeyName(agent.name);
                         }
                       }}
-                      className="flex h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      className="h-10 bg-background"
                     >
-                      <option value="">— Select an agent (optional) —</option>
+                      <option value="">- Select an agent (optional) -</option>
                       {agents.map((agent) => (
                         <option key={agent.id} value={agent.id}>
                           {agent.name}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                 )}
                 <div className="space-y-2">
                   <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Key name
                   </label>
-                  <input
-                    type="text"
+                  <Input
                     value={keyName}
-                    onChange={(e) => setKeyName(e.target.value)}
+                    onChange={(event) => setKeyName(event.target.value)}
                     placeholder="production-agent"
                     autoFocus
-                    className="flex h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-slate-600 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="h-10"
                   />
                   <p className="text-[11px] text-muted-foreground">
                     Use this name in your client config - fetch by name, no need to recreate keys.
@@ -277,7 +274,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
                     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       Workspace
                     </label>
-                    <div className="flex h-10 items-center rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white/70">
+                    <div className="flex h-10 items-center rounded-lg border border-border bg-muted/30 px-3 text-sm text-foreground">
                       {activeWorkspace.name}
                     </div>
                     <p className="text-[11px] text-muted-foreground">
@@ -364,7 +361,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
                       <TableCell className="text-sm font-medium">{key.name || "default"}</TableCell>
                       <TableCell>
                         <code className="font-mono text-xs">
-                          {revealedRows[key.id] ? key.maskedKey : `vb_••••••••`}
+                          {revealedRows[key.id] ? key.maskedKey : "vb_••••••••"}
                         </code>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">

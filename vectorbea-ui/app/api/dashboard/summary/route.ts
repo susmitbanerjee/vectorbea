@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         .gte("created_at", since),
       supabase
         .from("deployment_agents")
-        .select("id")
+        .select("id, last_heartbeat")
         .eq("workspace_id", workspaceId),
     ]);
 
@@ -39,7 +39,10 @@ export async function GET(request: NextRequest) {
     const averageLatencyMs = rows.length > 0
       ? Math.round(rows.reduce((sum, r) => sum + (r.proxy_latency_ms ?? 0), 0) / rows.length)
       : 0;
-    const activeAgents = agentData?.length ?? 0;
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const activeAgents = (agentData ?? []).filter(
+      (agent) => agent.last_heartbeat && agent.last_heartbeat >= twoMinutesAgo,
+    ).length;
 
     return NextResponse.json({ totalApiCallsLast24h, averageLatencyMs, activeAgents } as DashboardSummary);
   } catch (error) {

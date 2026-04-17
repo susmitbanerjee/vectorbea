@@ -18,6 +18,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useWorkspace } from "@/lib/workspace-context";
 
+async function getApiErrorMessage(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  return payload?.error ?? fallback;
+}
+
 export function CreatePromptDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -39,24 +44,26 @@ export function CreatePromptDialog() {
         const response = await fetch(
           `/api/prompts${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
           {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: name.trim(),
-            description: description.trim() || null,
-            versionTag: "v1.0.0",
-            templateText: "You are VectorBea. Use {{user_input}} to answer clearly.",
-            parameters: {
-              model_name: "gpt-4.1-mini",
-              temperature: 0.2,
-              max_tokens: 512,
-              top_p: 0.95,
-            },
-          }),
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: name.trim(),
+              description: description.trim() || null,
+              versionTag: "v1.0.0",
+              templateText: "You are VectorBea. Use {{user_input}} to answer clearly.",
+              parameters: {
+                model_name: "gpt-4.1-mini",
+                temperature: 0.2,
+                max_tokens: 512,
+                top_p: 0.95,
+              },
+            }),
           },
         );
         if (!response.ok) {
-          throw new Error(await response.text());
+          throw new Error(
+            await getApiErrorMessage(response, "Unable to create prompt right now."),
+          );
         }
         const created = (await response.json()) as { id: string; promptId?: string };
         toast.success(`Prompt "${name.trim()}" created successfully.`);
