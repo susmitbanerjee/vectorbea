@@ -4,6 +4,7 @@ Prompts resource — wraps the /v1/prompts/:name and /v1/audit endpoints.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from vectorbea.models import PromptTemplate
@@ -33,10 +34,10 @@ class Prompts:
         """
         Fetch the latest published version of a prompt by name.
 
-        The proxy resolves the prompt from your workspace and returns the
-        active published version. If you update and republish a prompt in
-        the dashboard, the next call to ``.get()`` will automatically return
-        the new version — no code changes required.
+        The proxy latency is measured automatically and reported as an audit
+        event so every call appears in the VectorBea dashboard without any
+        extra instrumentation. Audit failures are silently swallowed so they
+        never break your application.
 
         Parameters
         ----------
@@ -68,8 +69,21 @@ class Prompts:
         >>> print(prompt.format(name="Alice", product="Acme AI"))
         Hello Alice, welcome to Acme AI!
         """
+        t0 = time.monotonic()
         data = self._http.get(f"/v1/prompts/{name}")
-        return PromptTemplate._from_dict(data)
+        proxy_latency_ms = (time.monotonic() - t0) * 1000.0
+
+        prompt = PromptTemplate._from_dict(data)
+
+        # Auto-report the proxy fetch latency so the dashboard reflects every
+        # get() call without requiring a separate log_audit() call.
+        # Any error here is swallowed — audit must never break the caller.
+        try:
+            self._report_audit(prompt, proxy_latency_ms=proxy_latency_ms)
+        except Exception:
+            pass
+
+        return prompt
 
     def log_audit(
         self,
@@ -81,44 +95,58 @@ class Prompts:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        Report an audit event to the proxy for a prompt execution.
+        Report a full audit event including LLM latency and token count.
 
-        Call this after your LLM responds so VectorBea can track API call
-        counts, latency, and token usage in the dashboard.
+        ``get()`` already reports the proxy fetch latency automatically.
+        Call this *after* your LLM responds to add the LLM latency and
+        token usage to the same audit record in the dashboard.
 
         Parameters
         ----------
         prompt : PromptTemplate
-            The prompt returned by ``client.prompts.get()``. Provides the
-            ``promptVersionId``, ``name``, and ``versionTag`` automatically.
+            The prompt returned by ``client.prompts.get()``.
         proxy_latency_ms : float
-            Time from when you called ``client.prompts.get()`` until you
-            received the rendered prompt, in milliseconds. Pass ``0`` if
-            you did not measure it.
+            Proxy fetch latency in ms. Pass the value measured around
+            ``get()`` if you want to override the auto-reported one.
         llm_latency_ms : int
             Round-trip latency of your LLM call in milliseconds.
         token_count : int
-            Total tokens consumed by the LLM response (prompt + completion).
+            Total tokens consumed (prompt + completion).
         metadata : dict, optional
-            Any additional key/value pairs to attach to the audit record
+            Extra key/value pairs attached to the audit record
             (e.g. ``{"user_id": "u_123", "model": "gpt-4o"}``).
 
         Examples
         --------
-        >>> import time
-        >>> t0 = time.time()
         >>> prompt = client.prompts.get("greet-user")
-        >>> proxy_ms = (time.time() - t0) * 1000
-        >>>
         >>> message = prompt.format(name="Alice", product="Acme AI")
         >>> # ... call your LLM ...
         >>> client.prompts.log_audit(
         ...     prompt,
-        ...     proxy_latency_ms=proxy_ms,
         ...     llm_latency_ms=432,
         ...     token_count=87,
+        ...     metadata={"model": "gpt-4o"},
         ... )
         """
+        self._report_audit(
+            prompt,
+            proxy_latency_ms=proxy_latency_ms,
+            llm_latency_ms=llm_latency_ms,
+            token_count=token_count,
+            metadata=metadata,
+        )
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _report_audit(
+        self,
+        prompt: PromptTemplate,
+        *,
+        proxy_latency_ms: float = 0.0,
+        llm_latency_ms: int = 0,
+        token_count: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         payload = {
             "promptVersionId": prompt.prompt_version_id,
             "promptName": prompt.name,
