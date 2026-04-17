@@ -40,8 +40,17 @@ class HubClient(private val config: AppConfig) {
         }
     }
 
-    suspend fun fetchPrompt(name: String): PromptPayload =
-        client.get("${config.hubUrl}/api/proxy/prompts/${name.encodeURLPathPart()}").body()
+    suspend fun fetchPrompt(name: String): PromptPayload {
+        val response = client.get("${config.hubUrl}/api/proxy/prompts/${name.encodeURLPathPart()}")
+        if (!response.status.isSuccess()) {
+            // Read the raw body so the caller sees the actual hub error message
+            // (e.g. "Prompt not found", "Invalid agent token") rather than a
+            // Kotlin deserialization crash about missing PromptPayload fields.
+            val errorBody = response.bodyAsText()
+            error("Hub returned ${response.status.value} for prompt '$name': $errorBody")
+        }
+        return response.body()
+    }
 
     /**
      * Flush a batch of audit events to the M2M audit endpoint.

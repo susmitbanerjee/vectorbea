@@ -107,6 +107,10 @@ export async function GET(
       request.nextUrl.searchParams.get("version"),
     );
 
+    // Look up prompt + versions only — no cross-table join.
+    // organization_id is fetched separately below using the workspaceId we
+    // already have from the agent, which avoids PostgREST relationship
+    // resolution issues with schema-scoped clients.
     const { data: prompt, error: promptError } = await supabase
       .from("prompts")
       .select(
@@ -114,7 +118,6 @@ export async function GET(
          name,
          description,
          workspace_id,
-         workspaces!inner ( organization_id ),
          prompt_versions (
            id,
            version_tag,
@@ -130,7 +133,7 @@ export async function GET(
 
     if (promptError) {
       console.error("[proxy/prompts] prompt lookup error:", promptError.message);
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return NextResponse.json({ error: promptError.message }, { status: 500 });
     }
 
     if (!prompt) {
@@ -180,11 +183,16 @@ export async function GET(
       );
     }
 
-    const workspace = Array.isArray(prompt.workspaces)
-      ? prompt.workspaces[0]
-      : prompt.workspaces;
+    // ── 4. Fetch organization_id from workspaces (separate query, no join) ──
+    // This avoids PostgREST FK resolution issues that arise with schema-scoped
+    // clients — we already have workspaceId from the agent lookup above.
+    const { data: workspace } = await supabase
+      .from("workspaces")
+      .select("organization_id")
+      .eq("id", workspaceId)
+      .maybeSingle();
 
-    // ── 4. Return PromptPayload shaped to match the Kotlin data class ─────
+    // ── 5. Return PromptPayload shaped to match the Kotlin data class ─────
     return NextResponse.json({
       promptId:        prompt.id,
       promptVersionId: resolvedVersion.id,
