@@ -8,8 +8,10 @@ import {
   Building2,
   ChevronRight,
   ExternalLink,
+  LockKeyhole,
   Menu,
   Rocket,
+  PlugZap,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -27,9 +29,11 @@ const DOCS_NAV: Array<{
   icon: typeof Rocket;
   section?: string;
 }> = [
-  { section: "Getting Started", href: "/docs/quickstart" as Route,   title: "Quickstart",    icon: Rocket },
-  { section: "Platform",        href: "/docs/architecture" as Route, title: "Architecture",  icon: Boxes },
-  { href: "/docs/enterprise" as Route,   title: "Enterprise",        icon: Building2 },
+  { section: "Getting Started", href: "/docs/quickstart" as Route, title: "Quickstart", icon: Rocket },
+  { section: "Platform", href: "/docs/architecture" as Route, title: "Architecture", icon: Boxes },
+  { href: "/docs/integrations" as Route, title: "Integrations", icon: PlugZap },
+  { section: "Enterprise", href: "/docs/enterprise" as Route, title: "Enterprise", icon: Building2 },
+  { href: "/docs/security" as Route, title: "Security", icon: LockKeyhole },
 ];
 
 const DOCS_NAV_GROUPS = DOCS_NAV.reduce<
@@ -81,12 +85,12 @@ function Sidebar({
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-30 flex h-screen w-[220px] flex-col border-r border-border bg-background transition-transform duration-200 ease-in-out",
+          "fixed left-0 top-0 z-30 flex h-screen w-[272px] flex-col border-r border-border bg-muted/[0.18] backdrop-blur transition-transform duration-200 ease-in-out",
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
         {/* Logo — matches landing page exactly */}
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-5">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card shadow-sm">
               <BeeLogo className="h-5 w-5" />
@@ -109,11 +113,11 @@ function Sidebar({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+        <nav className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
           {DOCS_NAV_GROUPS.map((group) => (
             <div key={group.section ?? group.items[0].href}>
               {group.section && (
-                <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   {group.section}
                 </p>
               )}
@@ -137,7 +141,7 @@ function Sidebar({
         </nav>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-border px-4 py-3">
+        <div className="shrink-0 border-t border-border px-5 py-4">
           <Link
             href="/"
             className="flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
@@ -168,8 +172,8 @@ function NavItem({
       className={cn(
         "flex items-center gap-2 rounded-[5px] px-2 py-[6px] text-[13px] transition-colors",
         active
-          ? "border-l-2 border-foreground bg-muted !rounded-l-none pl-[6px] font-medium text-foreground"
-          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+          ? "rounded-xl border border-border bg-background font-medium text-foreground shadow-sm"
+          : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
       )}
     >
       <Icon size={13} className="shrink-0" />
@@ -193,13 +197,40 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Moving to production",      href: "#step-9" },
     { label: "Troubleshooting",           href: "#troubleshooting" },
   ],
+  "/docs/architecture": [
+    { label: "The two-plane model", href: "#overview" },
+    { label: "System boundary", href: "#boundary" },
+    { label: "Responsibilities", href: "#responsibilities" },
+    { label: "Network model", href: "#network-model" },
+    { label: "Runtime request flow", href: "#runtime-flow" },
+    { label: "Why it matters", href: "#design-principle" },
+  ],
+  "/docs/integrations": [
+    { label: "SDK options", href: "#sdk-options" },
+    { label: "Deployment patterns", href: "#deployment-patterns" },
+    { label: "Operational signals", href: "#observability" },
+    { label: "Rollout workflow", href: "#workflow" },
+  ],
+  "/docs/enterprise": [
+    { label: "Operating model", href: "#operating-model" },
+    { label: "Workspace RBAC", href: "#rbac" },
+    { label: "Isolation", href: "#isolation" },
+    { label: "Security posture", href: "#security" },
+    { label: "Seat governance", href: "#billing" },
+    { label: "Recommended model", href: "#recommended-model" },
+  ],
+  "/docs/security": [
+    { label: "Network model", href: "#network" },
+    { label: "Data boundary", href: "#data" },
+    { label: "Token model", href: "#tokens" },
+  ],
 };
 
 function TableOfContents({ pathname }: { pathname: string }) {
   const items = TOC_BY_PATH[pathname];
   if (!items) return null;
   return (
-    <aside className="hidden w-[176px] shrink-0 xl:block">
+    <aside className="hidden w-[220px] shrink-0 xl:block">
       <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
         On this page
       </p>
@@ -225,7 +256,9 @@ const TITLE_BY_PATH: Record<string, string> = {
   "/docs":               "Quickstart",
   "/docs/quickstart":    "Quickstart",
   "/docs/architecture":  "Architecture",
+  "/docs/integrations":  "Integrations",
   "/docs/enterprise":    "Enterprise",
+  "/docs/security":      "Security",
 };
 
 function Breadcrumb({ pathname }: { pathname: string }) {
@@ -260,7 +293,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
       />
 
       {/* Offset content for fixed sidebar */}
-      <div className="lg:pl-[220px]">
+      <div className="lg:pl-[272px]">
         {/* Mobile top bar */}
         <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
           <button
@@ -289,9 +322,9 @@ export function DocsShell({ children }: { children: ReactNode }) {
         </div>
 
         {/* Main layout */}
-        <div className="mx-auto max-w-5xl px-6 pt-10 lg:px-10 xl:px-14">
-          <div className="flex gap-14">
-            <main className="min-w-0 flex-1">
+        <div className="mx-auto max-w-[1400px] px-6 pt-10 lg:px-10 xl:px-12">
+          <div className="flex items-start gap-10">
+            <main className="min-w-0 flex-1 max-w-[78ch]">
               <Breadcrumb pathname={pathname} />
               {children}
             </main>

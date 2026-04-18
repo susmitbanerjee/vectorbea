@@ -76,16 +76,18 @@ function Callout({
 // ─── Step ─────────────────────────────────────────────────────────────────────
 
 function Step({
+  id,
   n,
   title,
   children,
 }: {
+  id: string;
   n: number;
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4">
+    <section id={id} className="space-y-4 scroll-mt-24">
       <div className="flex items-center gap-3 border-t border-border/60 pt-8">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
           {n}
@@ -119,7 +121,7 @@ export default function QuickstartPage() {
       </section>
 
       {/* ── Prerequisites ────────────────────────────────────────────────── */}
-      <section className="space-y-3 border-t border-border/60 pt-8">
+      <section id="before-you-start" className="space-y-3 scroll-mt-24 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Before you start</h2>
         <p className="text-sm text-muted-foreground">
           You only need two things installed. Everything else is handled by
@@ -144,7 +146,7 @@ export default function QuickstartPage() {
       </section>
 
       {/* ── Step 1 ───────────────────────────────────────────────────────── */}
-      <Step n={1} title="Create a workspace">
+      <Step id="step-1" n={1} title="Create a workspace">
         <p className="text-sm leading-7 text-muted-foreground">
           Sign in to{" "}
           <a
@@ -165,7 +167,7 @@ export default function QuickstartPage() {
       </Step>
 
       {/* ── Step 2 ───────────────────────────────────────────────────────── */}
-      <Step n={2} title="Create and publish a prompt">
+      <Step id="step-2" n={2} title="Create and publish a prompt">
         <p className="text-sm leading-7 text-muted-foreground">
           Click <strong>Prompts</strong> in the left sidebar, then{" "}
           <strong>New prompt</strong>. Fill in the fields:
@@ -193,7 +195,7 @@ export default function QuickstartPage() {
       </Step>
 
       {/* ── Step 3 ───────────────────────────────────────────────────────── */}
-      <Step n={3} title="Pull the sidecar image">
+      <Step id="step-3" n={3} title="Pull the sidecar image">
         <p className="text-sm leading-7 text-muted-foreground">
           Open a terminal and pull the sidecar image. Choose the tab that
           matches your machine.
@@ -211,7 +213,7 @@ export default function QuickstartPage() {
       </Step>
 
       {/* ── Step 4 ───────────────────────────────────────────────────────── */}
-      <Step n={4} title="Register a sidecar and copy the token">
+      <Step id="step-4" n={4} title="Register a sidecar and copy the token">
         <p className="text-sm leading-7 text-muted-foreground">
           Every sidecar instance authenticates with a <em>sidecar token</em>.
           Go to <strong>Infrastructure</strong> in the dashboard and click{" "}
@@ -243,7 +245,7 @@ export default function QuickstartPage() {
       </Step>
 
       {/* ── Step 5 ───────────────────────────────────────────────────────── */}
-      <Step n={5} title="Run the sidecar container">
+      <Step id="step-5" n={5} title="Run the sidecar container">
         <p className="text-sm leading-7 text-muted-foreground">
           Replace <InlineCode>vbagent_your_token_here</InlineCode> with the
           token you just copied, then run the command for your machine.
@@ -283,7 +285,7 @@ export default function QuickstartPage() {
       </Step>
 
       {/* ── Step 6 ───────────────────────────────────────────────────────── */}
-      <Step n={6} title="Install the SDK">
+      <Step id="step-6" n={6} title="Install the SDK">
         <p className="text-sm leading-7 text-muted-foreground">
           Open a <strong>new</strong> terminal (leave the sidecar running in
           the first one) and install the SDK for your preferred language.
@@ -304,7 +306,7 @@ pip install --upgrade vectorbea`}</Code>
       </Step>
 
       {/* ── Step 7 ───────────────────────────────────────────────────────── */}
-      <Step n={7} title="Fetch your prompt">
+      <Step id="step-7" n={7} title="Fetch your prompt">
         <p className="text-sm leading-7 text-muted-foreground">
           Create a file, paste the script for your language, and run it.
         </p>
@@ -383,7 +385,7 @@ Rendered: Hello Alice, welcome to Acme AI!`}</Code>
       </Step>
 
       {/* ── Step 8 (optional) ────────────────────────────────────────────── */}
-      <Step n={8} title="Report LLM latency and token usage (optional)">
+      <Step id="step-8" n={8} title="Report LLM latency and token usage (optional)">
         <p className="text-sm leading-7 text-muted-foreground">
           After calling your LLM, pass the response metadata back so the
           dashboard shows end-to-end latency and token cost per request:
@@ -417,7 +419,7 @@ client.prompts.log_audit(
       </Step>
 
       {/* ── Step 9 ───────────────────────────────────────────────────────── */}
-      <Step n={9} title="Moving to production">
+      <Step id="step-9" n={9} title="Moving to production">
         <p className="text-sm leading-7 text-muted-foreground">
           For production, omit <InlineCode>base_url</InlineCode> and supply a
           real workspace API key. Generate one from{" "}
@@ -443,7 +445,7 @@ message = prompt.format(name="Bob", product="Acme AI")`}</Code>
       </Step>
 
       {/* ── Troubleshooting ──────────────────────────────────────────────── */}
-      <section className="space-y-4 border-t border-border/60 pt-8">
+      <section id="troubleshooting" className="space-y-4 scroll-mt-24 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Troubleshooting</h2>
         <div className="space-y-3 text-sm">
           {[
@@ -492,6 +494,11 @@ message = prompt.format(name="Bob", product="Acme AI")`}</Code>
               href: "/docs/architecture",
               label: "Architecture",
               desc: "How the control plane and sidecar cooperate, and what stays in your network",
+            },
+            {
+              href: "/docs/integrations",
+              label: "Integrations",
+              desc: "How to wire VectorBea into Python services, Node backends, and container platforms",
             },
             {
               href: "/docs/enterprise",

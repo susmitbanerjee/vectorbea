@@ -1,3 +1,5 @@
+import { ArrowRight } from "lucide-react";
+
 function Zone({
   title,
   description,
@@ -31,33 +33,33 @@ function Zone({
 
 export function ArchitectureDiagram() {
   return (
-    <div className="my-10 rounded-[2rem] border border-border/70 bg-gradient-to-b from-background to-muted/20 p-5 sm:p-6">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)] lg:items-center">
+    <div className="my-6 rounded-[2rem] border border-border/70 bg-gradient-to-b from-background to-muted/20 p-5 sm:p-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_200px_minmax(0,1fr)] lg:items-center">
         <Zone
           title="VectorBea Control Plane"
-          description="Hosted by VectorBea. Prompts, RBAC, billing, and audit state are managed here."
-          items={["Dashboard UI", "Control Plane API", "Supabase Database"]}
+          description="Hosted by VectorBea. Prompt publication, workspace state, access control, and billing are managed here."
+          items={["Dashboard UI", "Control Plane API", "Workspace Metadata"]}
         />
 
         <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-brand/40 bg-brand/5 px-4 py-5 text-center">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-brand/50 to-transparent lg:hidden" />
           <div className="hidden h-full w-px bg-gradient-to-b from-transparent via-brand/50 to-transparent lg:block" />
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">
-            HTTPS Outbound Connection
+            HTTPS outbound heartbeat
           </p>
           <p className="text-sm text-muted-foreground">Port 443</p>
           <div className="flex h-10 w-10 items-center justify-center rounded-full border border-brand/40 bg-background text-brand">
-            →
+            <ArrowRight className="h-4 w-4" />
           </div>
         </div>
 
         <Zone
           title="Customer Environment"
-          description="Owned by the customer. The application and sidecar stay here while only control-plane state crosses the boundary."
+          description="Owned by the customer. The application, sidecar, and model execution stay here while only control-plane state crosses the boundary."
           items={[
-            "Your Python / Node.js App",
+            "Firewall and Egress Policy",
             "VectorBea Sidecar",
-            "Optional Outbound Agent",
+            "AI Microservices",
           ]}
         />
       </div>
