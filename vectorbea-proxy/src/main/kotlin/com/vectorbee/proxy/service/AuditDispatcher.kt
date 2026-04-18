@@ -3,7 +3,6 @@ package com.vectorbea.proxy.service
 import com.vectorbea.proxy.client.HubClient
 import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.model.AuditEvent
-import java.lang.management.ManagementFactory
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.DoubleAdder
@@ -151,26 +150,6 @@ class AuditDispatcher(
     }
 
     private fun jvmCpuPercent(): Double {
-        return try {
-            val bean = ManagementFactory.getOperatingSystemMXBean()
-            if (bean is com.sun.management.OperatingSystemMXBean) {
-                val processLoad = bean.processCpuLoad
-                if (processLoad > 0.0) {
-                    processLoad * 100.0
-                } else {
-                    val systemLoad = bean.systemCpuLoad
-                    if (systemLoad > 0.0) systemLoad * 100.0 else 0.0
-                }
-            } else {
-                val systemLoadAverage = bean.systemLoadAverage
-                if (systemLoadAverage > 0.0) {
-                    (systemLoadAverage / Runtime.getRuntime().availableProcessors()) * 100.0
-                } else {
-                    0.0
-                }
-            }
-        } catch (_: Exception) {
-            0.0
-        }
+        return SystemMetrics.cpuPercent()
     }
 }

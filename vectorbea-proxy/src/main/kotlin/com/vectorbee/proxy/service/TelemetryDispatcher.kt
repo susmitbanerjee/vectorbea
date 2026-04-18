@@ -14,7 +14,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.content.TextContent
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
-import java.lang.management.ManagementFactory
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -230,20 +229,7 @@ class TelemetryDispatcher(
         return (rt.totalMemory() - rt.freeMemory()).toDouble() / (1024 * 1024)
     }
 
-    private fun jvmCpuPercent(): Double = try {
-        val bean = ManagementFactory.getOperatingSystemMXBean()
-        if (bean is com.sun.management.OperatingSystemMXBean) {
-            val load = bean.processCpuLoad
-            if (load > 0.0) load * 100.0
-            else {
-                val sys = bean.systemCpuLoad
-                if (sys > 0.0) sys * 100.0 else 0.0
-            }
-        } else {
-            val avg = bean.systemLoadAverage
-            if (avg > 0.0) (avg / Runtime.getRuntime().availableProcessors()) * 100.0 else 0.0
-        }
-    } catch (_: Exception) { 0.0 }
+    private fun jvmCpuPercent(): Double = SystemMetrics.cpuPercent()
 
     // ── Private data structures ───────────────────────────────────────────────
 
