@@ -107,10 +107,10 @@ class HubClient(private val config: AppConfig) {
 // ── Heartbeat request models ──────────────────────────────────────────────────
 
 @Serializable
-private data class HeartbeatPayload(val metrics: HeartbeatMetrics)
+internal data class HeartbeatPayload(val metrics: HeartbeatMetrics)
 
 @Serializable
-private data class HeartbeatMetrics(
+internal data class HeartbeatMetrics(
     val latencyMs: Double,
     val cpuUsagePercent: Double,
     val memoryUsageMb: Double,
