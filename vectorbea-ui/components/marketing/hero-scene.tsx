@@ -28,17 +28,6 @@ function fadeUpProps(delay = 0) {
   };
 }
 
-function orbitProps(delay = 0) {
-  return {
-    animate: { y: [0, -10, 0] },
-    transition: {
-      duration: 6,
-      delay,
-      repeat: Number.POSITIVE_INFINITY,
-    },
-  };
-}
-
 function SignalCard({
   title,
   value,
@@ -63,13 +52,15 @@ function SignalCard({
 
 export function MarketingHero() {
   return (
-    <section className="relative overflow-hidden rounded-[2rem] border border-border/70 bg-gradient-to-br from-background via-background to-muted/30 px-6 py-10 sm:px-8 lg:px-10 lg:py-12">
-      <div className="pointer-events-none absolute inset-0 surface-grid opacity-60" />
-      <div className="pointer-events-none absolute left-[-120px] top-[-120px] h-[300px] w-[300px] rounded-full bg-brand/10 blur-3xl" />
-      <div className="pointer-events-none absolute bottom-[-140px] right-[-80px] h-[300px] w-[300px] rounded-full bg-brand-muted/10 blur-3xl" />
+    <section className="relative left-1/2 w-screen max-w-none -translate-x-1/2 px-4 md:px-6 xl:px-8">
+      <div className="relative overflow-hidden rounded-[2rem] border border-border/70 bg-gradient-to-br from-background via-background to-muted/30 px-6 py-10 sm:px-8 lg:px-10 lg:py-14">
+        <div className="pointer-events-none absolute inset-0 surface-grid opacity-50" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(56,189,248,0.12),transparent_28%),radial-gradient(circle_at_82%_18%,rgba(14,165,233,0.08),transparent_24%),radial-gradient(circle_at_80%_78%,rgba(34,197,94,0.07),transparent_22%)]" />
+        <div className="pointer-events-none absolute inset-y-0 left-[52%] hidden w-px bg-gradient-to-b from-transparent via-border/80 to-transparent lg:block" />
 
-      <div className="relative grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)] lg:items-center">
-        <div className="space-y-7">
+        <div className="relative mx-auto max-w-[1480px]">
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)] lg:items-center">
+            <div className="space-y-7">
           <motion.div
             {...fadeUpProps(0)}
             className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-sm"
@@ -141,13 +132,15 @@ export function MarketingHero() {
           </motion.div>
         </div>
 
-        <motion.div
-          {...fadeUpProps(0.2)}
-          className="relative mx-auto w-full max-w-[560px]"
-        >
-          <div className="relative overflow-hidden rounded-[2rem] border border-border/70 bg-zinc-950 p-5 text-white shadow-[0_30px_90px_-45px_rgba(0,0,0,0.75)]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.12),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(34,197,94,0.08),transparent_26%)]" />
-            <div className="relative space-y-5">
+            <motion.div
+              {...fadeUpProps(0.2)}
+              className="relative w-full"
+            >
+              <div className="relative overflow-hidden rounded-[2rem] border border-border/70 bg-zinc-950 p-5 text-white shadow-[0_30px_90px_-45px_rgba(0,0,0,0.75)]">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.12),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(34,197,94,0.08),transparent_26%)]" />
+                <div className="pointer-events-none absolute left-0 top-[122px] hidden h-px w-full bg-gradient-to-r from-transparent via-sky-400/55 to-transparent opacity-80 lg:block hero-scan-line" />
+                <div className="pointer-events-none absolute left-0 top-[304px] hidden h-px w-full bg-gradient-to-r from-transparent via-cyan-300/40 to-transparent opacity-70 lg:block hero-scan-line-delayed" />
+                <div className="relative space-y-5">
               <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/15 text-sky-300">
@@ -168,14 +161,8 @@ export function MarketingHero() {
               </div>
 
               <div className="relative rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
-                <div className="absolute inset-x-10 top-[72px] hidden h-px bg-gradient-to-r from-sky-400/20 via-sky-400/70 to-transparent md:block" />
-                <div className="absolute inset-x-10 top-[152px] hidden h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-emerald-400/35 md:block" />
-
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] md:items-center">
-                  <motion.div
-                    {...orbitProps(0)}
-                    className="rounded-2xl border border-white/10 bg-zinc-900/90 p-4"
-                  >
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_104px_minmax(0,1fr)] md:items-center">
+                  <div className="rounded-2xl border border-white/10 bg-zinc-900/90 p-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/10 text-sky-300">
                         <Network className="h-5 w-5" />
@@ -197,23 +184,16 @@ export function MarketingHero() {
                         POST /v1/audit
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
 
                   <div className="relative flex items-center justify-center">
-                    <motion.div
-                      animate={{ scale: [1, 1.12, 1], opacity: [0.75, 1, 0.75] }}
-                      transition={{ duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
-                      className="absolute h-16 w-16 rounded-full bg-sky-400/15 blur-xl"
-                    />
+                    <div className="absolute h-16 w-16 rounded-full bg-sky-400/15 blur-xl hero-pulse-soft" />
                     <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-sky-400/25 bg-sky-400/10 text-sky-300">
                       <BrainCircuit className="h-6 w-6" />
                     </div>
                   </div>
 
-                  <motion.div
-                    {...orbitProps(0.6)}
-                    className="rounded-2xl border border-white/10 bg-zinc-900/90 p-4"
-                  >
+                  <div className="rounded-2xl border border-white/10 bg-zinc-900/90 p-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300">
                         <Cpu className="h-5 w-5" />
@@ -239,7 +219,7 @@ export function MarketingHero() {
                         </div>
                       ))}
                     </div>
-                  </motion.div>
+                  </div>
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -293,22 +273,14 @@ export function MarketingHero() {
                         ["support-agent", "v12 published"],
                         ["checkout-assistant", "v7 rollout 100%"],
                         ["risk-review", "v4 canary complete"],
-                      ].map(([name, state], index) => (
-                        <motion.div
+                      ].map(([name, state]) => (
+                        <div
                           key={name}
-                          initial={{ opacity: 0.5 }}
-                          animate={{ opacity: [0.55, 1, 0.55] }}
-                          transition={{
-                            duration: 3.2,
-                            delay: index * 0.35,
-                            repeat: Number.POSITIVE_INFINITY,
-                            ease: "easeInOut",
-                          }}
                           className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm"
                         >
                           <span className="text-zinc-100">{name}</span>
                           <span className="text-zinc-400">{state}</span>
-                        </motion.div>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -341,7 +313,9 @@ export function MarketingHero() {
               </div>
             </div>
           </div>
-        </motion.div>
+            </motion.div>
+          </div>
+        </div>
       </div>
     </section>
   );
