@@ -226,10 +226,13 @@ async function handleStripe(
   // invoice.payment_failed → past_due
   if (event.type === "invoice.payment_failed") {
     const invoice = event.data.object as Stripe.Invoice;
+    // Stripe v18: subscription moved from invoice.subscription to
+    // invoice.parent.subscription_details.subscription
+    const subRef = invoice.parent?.type === "subscription_details"
+      ? invoice.parent.subscription_details?.subscription
+      : undefined;
     const subId =
-      typeof invoice.subscription === "string"
-        ? invoice.subscription
-        : (invoice.subscription?.id ?? null);
+      typeof subRef === "string" ? subRef : (subRef?.id ?? null);
     const custId =
       typeof invoice.customer === "string"
         ? invoice.customer
