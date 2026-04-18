@@ -6,10 +6,6 @@ import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface RouteContext {
-  params: { id: string };
-}
-
 /**
  * DELETE /api/agents/:id?workspaceId=<uuid>
  *
@@ -22,8 +18,12 @@ interface RouteContext {
  * If stricter rules are needed in the future, swap the membership check for
  * an admin-only guard.
  */
-export async function DELETE(request: NextRequest, { params }: RouteContext) {
-  const agentId     = params.id?.trim();
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id }  = await params;
+  const agentId = id?.trim();
   const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
 
   if (!agentId) {
