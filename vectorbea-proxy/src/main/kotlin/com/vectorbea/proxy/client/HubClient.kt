@@ -4,9 +4,7 @@ import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.model.PromptPayload
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.accept
 import io.ktor.client.request.get
@@ -20,7 +18,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.content.TextContent
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
-import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.builtins.ListSerializer
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -64,9 +62,6 @@ class HubClient(private val config: AppConfig) {
                 pingInterval(30, TimeUnit.SECONDS)
             }
         }
-        install(ContentNegotiation) {
-            json(json)
-        }
         defaultRequest {
             url(config.hubUrl)
             header(HttpHeaders.Authorization, "Bearer ${config.apiKey}")
@@ -84,7 +79,7 @@ class HubClient(private val config: AppConfig) {
             val errorBody = response.bodyAsText()
             error("Hub returned ${response.status.value} for prompt '$name': $errorBody")
         }
-        return response.body()
+        return json.decodeFromString(PromptPayload.serializer(), response.bodyAsText())
     }
 
     /**
@@ -94,7 +89,12 @@ class HubClient(private val config: AppConfig) {
      */
     suspend fun flushAuditBatch(logs: List<AuditEvent>) {
         val response = client.post("${config.hubUrl}/api/proxy/audit/batch") {
-            setBody(logs)
+            setBody(
+                TextContent(
+                    json.encodeToString(ListSerializer(AuditEvent.serializer()), logs),
+                    ContentType.Application.Json,
+                )
+            )
         }
 
         if (!response.status.isSuccess()) {

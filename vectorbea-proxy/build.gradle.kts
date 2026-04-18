@@ -50,7 +50,8 @@ dependencies {
     // HTTP/1.1 only, so the hub round-trip would re-handshake TLS on every
     // cold connection. OkHttp negotiates ALPN h2 once and multiplexes.
     implementation("io.ktor:ktor-client-okhttp-jvm:$ktorVersion")
-    implementation("io.ktor:ktor-client-content-negotiation-jvm:$ktorVersion")
+    // kotlinx-serialization-json — provides the Json class used throughout the proxy
+    // for explicit serialization (no ContentNegotiation reflection anywhere).
     implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:$ktorVersion")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
