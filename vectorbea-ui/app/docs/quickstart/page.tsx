@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { CopyButton } from "@/components/docs/copy-button";
+import { DocsTabs } from "@/components/docs/docs-tabs";
 
 export const metadata = {
   title: "Quickstart — VectorBea Docs",
@@ -194,19 +195,14 @@ export default function QuickstartPage() {
       {/* ── Step 3 ───────────────────────────────────────────────────────── */}
       <Step n={3} title="Pull the sidecar image">
         <p className="text-sm leading-7 text-muted-foreground">
-          Open a terminal and pull the sidecar image. Choose the command that
+          Open a terminal and pull the sidecar image. Choose the tab that
           matches your machine.
         </p>
 
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Intel / AMD (x86-64) — Windows · Linux · older Mac
-        </p>
-        <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:latest`}</Code>
-
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Apple Silicon (M1 / M2 / M3 / M4) — AMD64 via Rosetta
-        </p>
-        <Code lang="bash">{`docker pull --platform linux/amd64 vectorbea/vectorbea-proxy:latest`}</Code>
+        <DocsTabs tabs={["Intel / AMD (x86-64)", "Apple Silicon / ARM64"]}>
+          <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:latest`}</Code>
+          <Code lang="bash">{`docker pull --platform linux/amd64 vectorbea/vectorbea-proxy:latest`}</Code>
+        </DocsTabs>
 
         <Callout kind="info">
           The pull is roughly 150 MB. You only need to do this once — Docker
@@ -253,24 +249,19 @@ export default function QuickstartPage() {
           token you just copied, then run the command for your machine.
         </p>
 
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Intel / AMD (x86-64) — Windows · Linux · older Mac
-        </p>
-        <Code lang="bash">{`docker run --rm -p 8080:8080 \\
+        <DocsTabs tabs={["Intel / AMD (x86-64)", "Apple Silicon / ARM64"]}>
+          <Code lang="bash">{`docker run --rm -p 8080:8080 \\
   -e VECTORBEA_HUB_URL="https://vectorbea.com" \\
   -e VECTORBEA_KEY="vbagent_your_token_here" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
   vectorbea/vectorbea-proxy:latest`}</Code>
-
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Apple Silicon (M1 / M2 / M3 / M4) — AMD64 via Rosetta
-        </p>
-        <Code lang="bash">{`docker run --rm -p 8080:8080 \\
+          <Code lang="bash">{`docker run --rm -p 8080:8080 \\
   --platform linux/amd64 \\
   -e VECTORBEA_HUB_URL="https://vectorbea.com" \\
   -e VECTORBEA_KEY="vbagent_your_token_here" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
   vectorbea/vectorbea-proxy:latest`}</Code>
+        </DocsTabs>
 
         <p className="text-sm leading-7 text-muted-foreground">
           Watch the terminal. Within a few seconds you will see:
@@ -298,24 +289,18 @@ export default function QuickstartPage() {
           the first one) and install the SDK for your preferred language.
         </p>
 
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Python (3.8+)
-        </p>
-        <Code lang="bash">{`pip install vectorbea`}</Code>
-        <p className="text-sm leading-7 text-muted-foreground">
-          Verify the installed version:
-        </p>
-        <Code lang="bash">{`pip show vectorbea`}</Code>
-        <p className="text-sm leading-7 text-muted-foreground">
-          You need <strong>0.1.8 or later</strong> for automatic audit
-          reporting. If you see an older version, upgrade:
-        </p>
-        <Code lang="bash">{`pip install --upgrade vectorbea`}</Code>
-
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Node.js (18+)
-        </p>
-        <Code lang="bash">{`npm install vectorbea`}</Code>
+        <DocsTabs tabs={["Python (3.8+)", "Node.js (18+)"]}>
+          <div className="space-y-3 p-0">
+            <Code lang="bash">{`pip install vectorbea`}</Code>
+            <p className="px-4 pt-1 text-sm leading-7 text-muted-foreground">
+              You need <strong>0.1.8 or later</strong> for automatic audit
+              reporting. Verify and upgrade if needed:
+            </p>
+            <Code lang="bash">{`pip show vectorbea
+pip install --upgrade vectorbea`}</Code>
+          </div>
+          <Code lang="bash">{`npm install vectorbea`}</Code>
+        </DocsTabs>
       </Step>
 
       {/* ── Step 7 ───────────────────────────────────────────────────────── */}
@@ -324,10 +309,9 @@ export default function QuickstartPage() {
           Create a file, paste the script for your language, and run it.
         </p>
 
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Python — test_prompt.py
-        </p>
-        <Code lang="python">{`import vectorbea
+        <DocsTabs tabs={["Python — test_prompt.py", "Node.js — testPrompt.mjs"]}>
+          <div className="space-y-0">
+            <Code lang="python">{`import vectorbea
 
 client = vectorbea.VectorBea(
     api_key="any-value",            # not validated by the local sidecar
@@ -345,13 +329,10 @@ print("Template:", prompt.template_text)   # Hello {{name}}, welcome to {{produc
 # Render the template with your own variables
 message = prompt.format(name="Alice", product="Acme AI")
 print("Rendered:", message)                # Hello Alice, welcome to Acme AI!`}</Code>
-
-        <Code lang="bash">{`python test_prompt.py`}</Code>
-
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Node.js — testPrompt.mjs
-        </p>
-        <Code lang="javascript">{`import VectorBea from "vectorbea";
+            <Code lang="bash">{`python test_prompt.py`}</Code>
+          </div>
+          <div className="space-y-0">
+            <Code lang="javascript">{`import VectorBea from "vectorbea";
 
 const client = new VectorBea({
   apiKey: "any-value",              // not validated by the local sidecar
@@ -366,8 +347,9 @@ console.log("Template:", prompt.templateText);   // Hello {{name}}, welcome to {
 
 const message = prompt.format({ name: "Alice", product: "Acme AI" });
 console.log("Rendered:", message);               // Hello Alice, welcome to Acme AI!`}</Code>
-
-        <Code lang="bash">{`node testPrompt.mjs`}</Code>
+            <Code lang="bash">{`node testPrompt.mjs`}</Code>
+          </div>
+        </DocsTabs>
 
         <p className="text-sm font-medium">Expected output</p>
         <Code>{`Name:     greet-user
