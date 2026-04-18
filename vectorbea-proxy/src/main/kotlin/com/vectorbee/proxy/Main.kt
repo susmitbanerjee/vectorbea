@@ -9,12 +9,13 @@ import com.vectorbea.proxy.http.PublicHttpServer
 import com.vectorbea.proxy.http.SocketPermissions
 import com.vectorbea.proxy.model.AuditAcceptedResponse
 import com.vectorbea.proxy.model.AuditEvent
+import com.vectorbea.proxy.model.PromptPayload
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
 import com.vectorbea.proxy.service.SharedRulesStore
 import com.vectorbea.proxy.service.TelemetryDispatcher
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
@@ -23,10 +24,9 @@ import io.ktor.server.cio.unixConnector
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.calllogging.CallLogging
-import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.request.receive
-import io.ktor.server.response.respond
+import io.ktor.server.request.receiveText
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
@@ -138,14 +138,14 @@ private fun Application.vectorbeaModule(
     json: Json,
 ) {
     install(CallLogging)
-    install(ContentNegotiation) {
-        json(json)
-    }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
-            call.respond(
+            // Explicit JSON string — no ContentNegotiation / reflection needed.
+            val message = cause.message?.replace("\"", "\\\"") ?: "internal server error"
+            call.respondText(
+                """{"error":"$message"}""",
+                ContentType.Application.Json,
                 HttpStatusCode.InternalServerError,
-                mapOf("error" to (cause.message ?: "internal server error")),
             )
         }
     }
@@ -153,18 +153,33 @@ private fun Application.vectorbeaModule(
     routing {
         get("/v1/prompts/{name}") {
             val name = call.parameters["name"]
-                ?: return@get call.respond(
+                ?: return@get call.respondText(
+                    """{"error":"missing prompt name"}""",
+                    ContentType.Application.Json,
                     HttpStatusCode.BadRequest,
-                    mapOf("error" to "missing prompt name"),
                 )
             val prompt = promptService.getPrompt(name)
-            call.respond(HttpStatusCode.OK, prompt)
+            // Use the compiler-generated serializer explicitly — this avoids
+            // Ktor's ContentNegotiation / reflection-based KClass lookup, which
+            // breaks under ProGuard obfuscation even when the $serializer class
+            // survives. Calling PromptPayload.serializer() directly is resolved
+            // at compile time and is always safe after obfuscation.
+            call.respondText(
+                json.encodeToString(PromptPayload.serializer(), prompt),
+                ContentType.Application.Json,
+                HttpStatusCode.OK,
+            )
         }
 
         post("/v1/audit") {
-            val event = call.receive<AuditEvent>()
+            val bodyText = call.receiveText()
+            val event = json.decodeFromString(AuditEvent.serializer(), bodyText)
             auditDispatcher.tryEnqueue(event)
-            call.respond(HttpStatusCode.Accepted, AuditAcceptedResponse(accepted = true))
+            call.respondText(
+                json.encodeToString(AuditAcceptedResponse.serializer(), AuditAcceptedResponse(accepted = true)),
+                ContentType.Application.Json,
+                HttpStatusCode.Accepted,
+            )
         }
     }
 }
