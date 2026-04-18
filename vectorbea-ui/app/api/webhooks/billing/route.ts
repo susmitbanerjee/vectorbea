@@ -134,6 +134,20 @@ function stripeCustomerId(sub: Stripe.Subscription): string | null {
   return typeof sub.customer === "string" ? sub.customer : (sub.customer?.id ?? null);
 }
 
+/**
+ * Stripe v18 moved `current_period_end` from the Subscription root to each
+ * SubscriptionItem.  We take the maximum across all items so the grace period
+ * reflects the latest-ending item (relevant for multi-price subscriptions).
+ * Returns null when no items carry a period end (e.g. free-trial-only subs).
+ */
+function stripeCurrentPeriodEnd(sub: Stripe.Subscription): Date | null {
+  const timestamps = sub.items.data
+    .map((item) => item.current_period_end)
+    .filter((ts): ts is number => typeof ts === "number" && ts > 0);
+  if (timestamps.length === 0) return null;
+  return new Date(Math.max(...timestamps) * 1000);
+}
+
 // ── Provider detection ────────────────────────────────────────────────────────
 
 function detectProvider(req: NextRequest): BillingProvider | null {
@@ -188,9 +202,7 @@ async function handleStripe(
       status:           stripeStatus(sub),
       workspaceId:      (sub.metadata?.workspaceId ?? sub.metadata?.workspace_id) || null,
       seatQuantity:     stripeSeatQuantity(sub),
-      currentPeriodEnd: sub.current_period_end
-        ? new Date(sub.current_period_end * 1000)
-        : null,
+      currentPeriodEnd: stripeCurrentPeriodEnd(sub),
       stripeCustomerId: stripeCustomerId(sub),
     };
   }
@@ -206,9 +218,7 @@ async function handleStripe(
       status:           "canceled",
       workspaceId:      (sub.metadata?.workspaceId ?? sub.metadata?.workspace_id) || null,
       seatQuantity:     1,
-      currentPeriodEnd: sub.current_period_end
-        ? new Date(sub.current_period_end * 1000)
-        : null,
+      currentPeriodEnd: stripeCurrentPeriodEnd(sub),
       stripeCustomerId: stripeCustomerId(sub),
     };
   }
