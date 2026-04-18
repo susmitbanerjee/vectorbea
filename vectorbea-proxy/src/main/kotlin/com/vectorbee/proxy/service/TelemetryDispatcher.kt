@@ -3,7 +3,6 @@ package com.vectorbea.proxy.service
 import com.vectorbea.proxy.config.AppConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -13,7 +12,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.content.TextContent
 import io.ktor.http.isSuccess
-import io.ktor.serialization.kotlinx.json.json
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -57,9 +55,6 @@ class TelemetryDispatcher(
                     writeTimeout(5, TimeUnit.SECONDS)
                     pingInterval(30, TimeUnit.SECONDS)
                 }
-            }
-            install(ContentNegotiation) {
-                json(Json { ignoreUnknownKeys = true; explicitNulls = false })
             }
             defaultRequest {
                 header(HttpHeaders.Authorization, "Bearer ${config.apiKey}")
