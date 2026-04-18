@@ -1,74 +1,100 @@
 package com.vectorbea.proxy.cache
 
-import com.github.benmanes.caffeine.cache.AsyncCache
-import com.github.benmanes.caffeine.cache.Caffeine
 import java.time.Duration
-import java.util.concurrent.CompletableFuture
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.future.asCompletableFuture
-import kotlinx.coroutines.future.await
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CompletableDeferred
 
 /**
- * Validation cache for agent / SDK tokens.
- *
- * Today the proxy trusts UDS peers (same-pod co-location), so there is no
- * inbound auth check. This cache exists so that when per-call token
- * validation is introduced (e.g. over TCP from an external SDK), the hot
- * path does not re-hit the hub on every request.
- *
- * Positive TTL is kept tight (60 s) so a revoked token is locked out
- * quickly; negative results are cached for a shorter window (10 s) so a
- * just-rotated token isn't blackholed for a full minute.
- *
- * Lookup cost on a hit: ~nanoseconds — one ConcurrentHashMap get, one
- * CompletableFuture.getNow.
+ * Native-safe validation cache for agent / SDK tokens.
  */
 class AuthCache(
     positiveTtl: Duration = Duration.ofSeconds(60),
     private val negativeTtlMs: Long = 10_000,
-    maxSize: Long = 50_000,
+    private val maxSize: Long = 50_000,
     private val validator: suspend (token: String) -> Boolean,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private data class Result(
+        val valid: Boolean,
+        val insertedAtMs: Long,
+        val expiresAtMs: Long,
+    )
 
-    // value = (isValid, insertedAtMs). We bake the insertion time into the
-    // value so we can enforce a short negative-TTL without maintaining a
-    // second cache keyed the same way.
-    private data class Result(val valid: Boolean, val insertedAtMs: Long)
+    private val entries = ConcurrentHashMap<String, Result>()
+    private val inFlight = ConcurrentHashMap<String, CompletableDeferred<Result>>()
 
-    private val cache: AsyncCache<String, Result> =
-        Caffeine.newBuilder()
-            .maximumSize(maxSize)
-            .expireAfterWrite(positiveTtl)
-            .recordStats()
-            .buildAsync()
+    private val hits = AtomicLong(0)
+    private val misses = AtomicLong(0)
+    private val loadSuccesses = AtomicLong(0)
+    private val loadFailures = AtomicLong(0)
+    private val positiveTtlMs = positiveTtl.toMillis()
 
     suspend fun isValid(token: String): Boolean {
-        val future: CompletableFuture<Result> =
-            cache.get(token) { key, _ ->
-                scope.async { Result(validator(key), System.currentTimeMillis()) }
-                    .asCompletableFuture()
+        val now = System.currentTimeMillis()
+        entries[token]?.takeIf { it.expiresAtMs > now }?.let { cached ->
+            if (!cached.valid && now - cached.insertedAtMs > negativeTtlMs) {
+                invalidate(token)
+            } else {
+                hits.incrementAndGet()
+                return cached.valid
             }
-
-        val result = future.await()
-
-        // Honour the shorter negative-TTL: if the last check said "invalid"
-        // and it's been more than negativeTtlMs, invalidate so the next
-        // lookup re-checks with the hub.
-        if (!result.valid &&
-            System.currentTimeMillis() - result.insertedAtMs > negativeTtlMs
-        ) {
-            cache.synchronous().invalidate(token)
-            return isValid(token)
         }
 
-        return result.valid
+        misses.incrementAndGet()
+
+        val deferred = CompletableDeferred<Result>()
+        val existing = inFlight.putIfAbsent(token, deferred)
+        if (existing != null) {
+            return existing.await().valid
+        }
+
+        try {
+            val valid = validator(token)
+            val result = Result(
+                valid = valid,
+                insertedAtMs = now,
+                expiresAtMs = now + if (valid) positiveTtlMs else negativeTtlMs,
+            )
+            entries[token] = result
+            evictIfOversized()
+            loadSuccesses.incrementAndGet()
+            deferred.complete(result)
+            return result.valid
+        } catch (error: Throwable) {
+            loadFailures.incrementAndGet()
+            deferred.completeExceptionally(error)
+            throw error
+        } finally {
+            inFlight.remove(token, deferred)
+        }
     }
 
-    fun invalidate(token: String) = cache.synchronous().invalidate(token)
-    fun invalidateAll() = cache.synchronous().invalidateAll()
-    fun stats() = cache.synchronous().stats()
+    fun invalidate(token: String) {
+        entries.remove(token)
+        inFlight.remove(token)
+    }
+
+    fun invalidateAll() {
+        entries.clear()
+        inFlight.clear()
+    }
+
+    fun stats() = CacheStats(
+        hits = hits.get(),
+        misses = misses.get(),
+        loadSuccesses = loadSuccesses.get(),
+        loadFailures = loadFailures.get(),
+    )
+
+    private fun evictIfOversized() {
+        if (entries.size <= maxSize) return
+
+        val overflow = entries.size - maxSize.toInt()
+        if (overflow <= 0) return
+
+        entries.entries
+            .sortedBy { it.value.expiresAtMs }
+            .take(overflow)
+            .forEach { (key, _) -> entries.remove(key) }
+    }
 }

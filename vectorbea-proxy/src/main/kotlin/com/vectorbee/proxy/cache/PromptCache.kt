@@ -1,75 +1,104 @@
 package com.vectorbea.proxy.cache
 
-import com.github.benmanes.caffeine.cache.AsyncCache
-import com.github.benmanes.caffeine.cache.Caffeine
 import com.vectorbea.proxy.model.PromptPayload
 import java.time.Duration
-import java.util.concurrent.CompletableFuture
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.future.asCompletableFuture
-import kotlinx.coroutines.future.await
-import kotlinx.coroutines.async
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CompletableDeferred
+
+data class CacheStats(
+    val hits: Long,
+    val misses: Long,
+    val loadSuccesses: Long,
+    val loadFailures: Long,
+)
 
 /**
- * Caffeine-backed prompt cache.
+ * Native-safe prompt cache.
  *
- * Why Caffeine over the previous ConcurrentHashMap + per-key Mutex:
- *   - Near-optimal Window TinyLFU eviction policy, vs. naïve TTL-only.
- *   - Lock-free reads (single volatile load + CAS on tick counter).
- *   - Single-flight by construction: concurrent callers for the same missing
- *     key share one CompletableFuture, so the hub is never hammered with a
- *     thundering herd after TTL expiry. Previous implementation leaked one
- *     Mutex per key and rebuilt it on every load.
- *
- * Hot path cost on a cache hit: ~20–80 ns (one CAS, one map lookup, one
- * CompletableFuture.getNow). Well under the 1 ms budget.
+ * This keeps the same external API as the old Caffeine-backed cache, but
+ * avoids runtime-generated implementation classes that GraalVM native-image
+ * cannot see by default.
  */
 class PromptCache(
-    maxSize: Long = 10_000,
-    ttl: Duration = Duration.ofMinutes(5),
+    private val maxSize: Long = 10_000,
+    private val ttl: Duration = Duration.ofMinutes(5),
 ) {
-    // Reuse one scope for the cache's async loaders. We use Dispatchers.IO
-    // because the loader does blocking HTTP work under the hood.
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private data class CacheEntry<T>(
+        val value: T,
+        val expiresAtMs: Long,
+    )
 
-    private val cache: AsyncCache<String, PromptPayload> =
-        Caffeine.newBuilder()
-            .maximumSize(maxSize)
-            .expireAfterWrite(ttl)
-            .recordStats()
-            .buildAsync()
+    private val entries = ConcurrentHashMap<String, CacheEntry<PromptPayload>>()
+    private val inFlight = ConcurrentHashMap<String, CompletableDeferred<PromptPayload>>()
 
-    /**
-     * Returns the cached prompt if fresh; otherwise runs [loader] exactly
-     * once across all concurrent callers for the same [name] and caches
-     * the result.
-     *
-     * The loader is wrapped in a Deferred so Caffeine can share the
-     * in-flight computation via a single CompletableFuture — this is the
-     * canonical "single-flight" pattern.
-     */
+    private val hits = AtomicLong(0)
+    private val misses = AtomicLong(0)
+    private val loadSuccesses = AtomicLong(0)
+    private val loadFailures = AtomicLong(0)
+
     suspend fun getOrLoad(name: String, loader: suspend () -> PromptPayload): PromptPayload {
-        val future: CompletableFuture<PromptPayload> =
-            cache.get(name) { key, _ ->
-                scope.async { loader() }.asCompletableFuture()
-            }
-        return future.await()
+        val now = System.currentTimeMillis()
+        entries[name]?.takeIf { it.expiresAtMs > now }?.let {
+            hits.incrementAndGet()
+            return it.value
+        }
+
+        misses.incrementAndGet()
+
+        val deferred = CompletableDeferred<PromptPayload>()
+        val existing = inFlight.putIfAbsent(name, deferred)
+        if (existing != null) {
+            return existing.await()
+        }
+
+        try {
+            val loaded = loader()
+            entries[name] = CacheEntry(
+                value = loaded,
+                expiresAtMs = now + ttl.toMillis(),
+            )
+            evictIfOversized()
+            loadSuccesses.incrementAndGet()
+            deferred.complete(loaded)
+            return loaded
+        } catch (error: Throwable) {
+            loadFailures.incrementAndGet()
+            deferred.completeExceptionally(error)
+            throw error
+        } finally {
+            inFlight.remove(name, deferred)
+        }
     }
 
-    /** Remove a single entry (e.g. on hub-pushed invalidation). */
     fun invalidate(name: String) {
-        cache.synchronous().invalidate(name)
+        entries.remove(name)
+        inFlight.remove(name)
     }
 
-    /** Drop everything — called from the hub when a workspace-wide publish fires. */
     fun invalidateAll() {
-        cache.synchronous().invalidateAll()
+        entries.clear()
+        inFlight.clear()
     }
 
-    /** Exposed for /metrics — hit rate, eviction count, load penalty, etc. */
-    fun stats() = cache.synchronous().stats()
+    fun stats() = CacheStats(
+        hits = hits.get(),
+        misses = misses.get(),
+        loadSuccesses = loadSuccesses.get(),
+        loadFailures = loadFailures.get(),
+    )
 
-    fun estimatedSize(): Long = cache.synchronous().estimatedSize()
+    fun estimatedSize(): Long = entries.size.toLong()
+
+    private fun evictIfOversized() {
+        if (entries.size <= maxSize) return
+
+        val overflow = entries.size - maxSize.toInt()
+        if (overflow <= 0) return
+
+        entries.entries
+            .sortedBy { it.value.expiresAtMs }
+            .take(overflow)
+            .forEach { (key, _) -> entries.remove(key) }
+    }
 }
