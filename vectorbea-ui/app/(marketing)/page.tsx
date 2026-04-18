@@ -22,37 +22,37 @@ const features = [
     icon: GitBranch,
     title: "Versioned prompts",
     description:
-      "Draft, review, and publish prompt versions with the same rigour as source control. Roll back any version with one click.",
+      "Draft, review, and publish prompt versions with the same rigour as source control — roll back any version with one click",
   },
   {
     icon: Zap,
     title: "Semantic caching",
     description:
-      "The sidecar deduplicates similar requests before they reach the model — cutting cost and latency without changing your code.",
+      "The sidecar deduplicates similar requests before they reach the model — cutting cost and latency without changing your code",
   },
   {
     icon: ScrollText,
     title: "Audit trails",
     description:
-      "Every inference is attributed, timestamped, and scored. Inspect what ran, when, and with which prompt version.",
+      "Every inference is attributed, timestamped, and scored — inspect what ran, when, and with which prompt version",
   },
   {
     icon: KeyRound,
     title: "Role-based access",
     description:
-      "Issue API keys and assign roles per workspace. Teams ship independently without stepping on each other's prompts.",
+      "Issue API keys and assign roles per workspace — teams ship independently without stepping on each other's prompts",
   },
   {
     icon: Layers3,
     title: "Workspace isolation",
     description:
-      "Separate prompts and telemetry by product, environment, or customer — no duplicated infrastructure needed.",
+      "Separate prompts and telemetry by product, environment, or customer — no duplicated infrastructure needed",
   },
   {
     icon: BarChart3,
     title: "Live observability",
     description:
-      "Monitor sidecar health, latency distribution, and prompt usage from one dashboard. No extra tooling required.",
+      "Monitor sidecar health, latency distribution, and prompt usage from one dashboard — no extra tooling required",
   },
 ];
 
@@ -60,17 +60,17 @@ const steps = [
   {
     label: "01",
     title: "Create an account",
-    body: "Sign in with GitHub, Google, or Microsoft. No forms, no setup — your workspace is one step away.",
+    body: "Sign in with GitHub, Google, or Microsoft — no forms, no setup, your workspace is one step away",
   },
   {
     label: "02",
     title: "Name your workspace",
-    body: "Every account starts on the free plan. Name a workspace and you're in the dashboard within seconds.",
+    body: "Every account starts on the free plan — name a workspace and you're in the dashboard within seconds",
   },
   {
     label: "03",
     title: "Run the sidecar",
-    body: "Pull the docker image and start the sidecar next to your services. Prompts and settings sync from the control plane — your data never leaves your infra.",
+    body: "Pull the docker image and start the sidecar next to your services — prompts and settings sync from the control plane while your data stays in your infra",
     code: `docker pull vectorbea/vectorbea-proxy:latest
 docker run -p 8080:8080 \\
   -e VECTORBEA_KEY="vbagent_..." \\
@@ -96,7 +96,7 @@ export default function LandingPage() {
 
         <div className="flex items-center gap-2 md:gap-3">
           <ThemeToggle />
-          <Link href="/docs" target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
+          <Link href="/docs" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
             Docs
           </Link>
           <Link href="/pricing" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
@@ -128,17 +128,17 @@ export default function LandingPage() {
 
           {/* Heading */}
           <h1 className="text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
-            The Enterprise AI Infrastructure Platform.{" "}
+            The Enterprise AI Infrastructure Platform{" "}
             <span className="text-zinc-500 dark:text-zinc-400">
-              Manage, evaluate, and deliver prompts at the edge with zero latency.
+              Manage, evaluate, and deliver prompts at the edge with zero latency
             </span>
           </h1>
 
           {/* Sub-paragraph */}
           <p className="mx-auto max-w-2xl text-base leading-7 text-zinc-500 dark:text-zinc-400">
-            Manage, evaluate, and deliver prompts at the edge with zero latency.
+            Manage, evaluate, and deliver prompts at the edge with zero latency
             Run the VectorBea Sidecar in your VPC to separate AI behavior from
-            your codebase without compromising data privacy.
+            your codebase without compromising data privacy
           </p>
 
           {/* CTAs */}
@@ -149,8 +149,6 @@ export default function LandingPage() {
             </Link>
             <Link
               href="/docs"
-              target="_blank"
-              rel="noopener noreferrer"
               className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-lg px-7")}
             >
               Read the docs
@@ -162,15 +160,15 @@ export default function LandingPage() {
             {[
               [
                 "1 control plane",
-                "Manage prompts, access, and billing — all from the cloud UI.",
+                "Manage prompts, access, and billing — all from the cloud UI",
               ],
               [
                 "Outbound only",
-                "Your sidecar connects over HTTPS. No inbound ports, no open firewall rules.",
+                "Your sidecar connects over HTTPS — no inbound ports, no open firewall rules",
               ],
               [
                 "Data stays yours",
-                "VectorBea Cloud stores no inference data, no prompt content, no secrets.",
+                "VectorBea Cloud stores no inference data, no prompt content, no secrets",
               ],
             ].map(([title, body]) => (
               <div
@@ -238,7 +236,7 @@ export default function LandingPage() {
                 <p className="max-w-lg text-sm leading-6 text-muted-foreground">
                   The VectorBea control plane manages governance. Your sidecar
                   handles execution. Model calls, secrets, and customer data
-                  never leave your network — by design, not by configuration.
+                  never leave your network — by design, not by configuration
                 </p>
               </div>
             </div>

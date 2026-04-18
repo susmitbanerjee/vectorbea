@@ -4,7 +4,6 @@ import Link from "next/link";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import {
-  BookOpenText,
   Boxes,
   Building2,
   ChevronRight,
@@ -25,11 +24,10 @@ import { cn } from "@/lib/utils";
 const DOCS_NAV: Array<{
   href: Route;
   title: string;
-  icon: typeof BookOpenText;
+  icon: typeof Rocket;
   section?: string;
 }> = [
-  { section: "Getting Started", href: "/docs" as Route,              title: "Introduction",  icon: BookOpenText },
-  { href: "/docs/quickstart" as Route,   title: "Quickstart",        icon: Rocket },
+  { section: "Getting Started", href: "/docs/quickstart" as Route,   title: "Quickstart",    icon: Rocket },
   { section: "Platform",        href: "/docs/architecture" as Route, title: "Architecture",  icon: Boxes },
   { href: "/docs/enterprise" as Route,   title: "Enterprise",        icon: Building2 },
 ];
@@ -40,7 +38,7 @@ const DOCS_NAV_GROUPS = DOCS_NAV.reduce<
     items: Array<{
       href: Route;
       title: string;
-      icon: typeof BookOpenText;
+      icon: typeof Rocket;
     }>;
   }>
 >((groups, item) => {
@@ -161,7 +159,7 @@ function NavItem({
 }: {
   href: Route;
   active: boolean;
-  Icon: typeof BookOpenText;
+  Icon: typeof Rocket;
   title: string;
 }) {
   return (
@@ -195,11 +193,6 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Moving to production",      href: "#step-9" },
     { label: "Troubleshooting",           href: "#troubleshooting" },
   ],
-  "/docs": [
-    { label: "What VectorBea gives you",  href: "#what" },
-    { label: "How teams integrate",       href: "#how" },
-    { label: "Platform model",            href: "#platform" },
-  ],
 };
 
 function TableOfContents({ pathname }: { pathname: string }) {
@@ -229,7 +222,7 @@ function TableOfContents({ pathname }: { pathname: string }) {
 // ─── Breadcrumb ───────────────────────────────────────────────────────────────
 
 const TITLE_BY_PATH: Record<string, string> = {
-  "/docs":               "Introduction",
+  "/docs":               "Quickstart",
   "/docs/quickstart":    "Quickstart",
   "/docs/architecture":  "Architecture",
   "/docs/enterprise":    "Enterprise",
