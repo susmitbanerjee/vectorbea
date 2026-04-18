@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
@@ -55,20 +55,23 @@ export function DashboardOverview({
     setDashboardSummary(initialSummary);
   }, [initialSummary]);
 
+  // Guards against overlapping in-flight requests. If the previous poll
+  // hasn't returned yet when the next interval fires, we skip that tick
+  // rather than queuing a second parallel fetch for the same data.
+  const fetchingRef = useRef(false);
+
   const refreshDashboard = useCallback(
     async ({ showToast = false }: { showToast?: boolean } = {}) => {
       if (!workspaceId) return;
+      if (fetchingRef.current && !showToast) return; // skip silent polls while one is in-flight
 
       try {
+        fetchingRef.current = true;
         setRefreshing(true);
 
         const [summaryResponse, auditResponse] = await Promise.all([
-          fetch(`/api/dashboard/summary?workspaceId=${encodeURIComponent(workspaceId)}`, {
-            cache: "no-store",
-          }),
-          fetch(`/api/audit?workspaceId=${encodeURIComponent(workspaceId)}`, {
-            cache: "no-store",
-          }),
+          fetch(`/api/dashboard/summary?workspaceId=${encodeURIComponent(workspaceId)}`),
+          fetch(`/api/audit?workspaceId=${encodeURIComponent(workspaceId)}`),
         ]);
 
         if (!summaryResponse.ok) {
@@ -99,6 +102,7 @@ export function DashboardOverview({
           toast.error(error instanceof Error ? error.message : "Failed to refresh dashboard.");
         }
       } finally {
+        fetchingRef.current = false;
         setRefreshing(false);
       }
     },
@@ -109,18 +113,21 @@ export function DashboardOverview({
     if (!workspaceId) return;
 
     const interval = window.setInterval(() => {
+      // Skip background tabs — fire immediately when the tab becomes visible again
+      if (document.visibilityState === "hidden") return;
       void refreshDashboard();
     }, 15_000);
 
-    const onFocus = () => {
-      void refreshDashboard();
+    // Catch the tab coming back into focus after being hidden
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshDashboard();
     };
 
-    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refreshDashboard, workspaceId]);
 

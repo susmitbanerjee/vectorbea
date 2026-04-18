@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { ArrowRight, ChevronLeft, ChevronRight, FileText } from "lucide-react";
 
 import type { AuditLogView } from "@/lib/api";
@@ -82,6 +81,21 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
   const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
   const visible = logs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  // Track which row keys were present in the previous render so we only
+  // animate genuinely new rows, not every row on every 15 s poll refresh.
+  const seenKeysRef = useRef<Set<string>>(new Set());
+  const newKeys = new Set<string>();
+  for (const log of visible) {
+    const key = `${log.timestamp}-${log.promptName}-${log.versionTag}`;
+    if (!seenKeysRef.current.has(key)) newKeys.add(key);
+  }
+  // Merge into seen set after diff
+  for (const log of visible) {
+    seenKeysRef.current.add(`${log.timestamp}-${log.promptName}-${log.versionTag}`);
+  }
+  // Cap the seen set to avoid unbounded memory growth across many refreshes
+  if (seenKeysRef.current.size > 500) seenKeysRef.current.clear();
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -113,36 +127,39 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visible.map((log, i) => (
-                  <motion.tr
-                    key={`${log.timestamp}-${log.promptName}-${log.versionTag}`}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.04, ease: "easeOut" }}
-                    className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
-                  >
-                    <TableCell className="text-muted-foreground">
-                      <span title={log.timestamp}>{formatRelativeTime(log.timestamp)}</span>
-                    </TableCell>
-                    <TableCell className="font-medium">{log.promptName}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{log.versionTag}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>
-                        {formatProxyLatency(log.proxyLatencyMs)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={llmLatencyBadgeVariant(log.llmLatencyMs)}>
-                        {log.llmLatencyMs} ms
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {log.tokenCount.toLocaleString()}
-                    </TableCell>
-                  </motion.tr>
-                ))}
+                {visible.map((log) => {
+                  const rowKey = `${log.timestamp}-${log.promptName}-${log.versionTag}`;
+                  const isNew  = newKeys.has(rowKey);
+                  return (
+                    <TableRow
+                      key={rowKey}
+                      // CSS animation: only new rows slide in; existing rows
+                      // stay put so the table doesn't flash on every poll.
+                      className={isNew ? "animate-row-in" : undefined}
+                    >
+                      <TableCell className="text-muted-foreground">
+                        <span title={log.timestamp}>{formatRelativeTime(log.timestamp)}</span>
+                      </TableCell>
+                      <TableCell className="font-medium">{log.promptName}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{log.versionTag}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>
+                          {formatProxyLatency(log.proxyLatencyMs)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={llmLatencyBadgeVariant(log.llmLatencyMs)}>
+                          {log.llmLatencyMs} ms
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {log.tokenCount.toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
 

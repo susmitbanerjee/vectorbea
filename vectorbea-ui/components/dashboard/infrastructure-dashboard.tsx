@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Clock3,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Server,
   ShieldPlus,
+  Trash2,
 } from "lucide-react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -22,6 +23,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -67,11 +69,16 @@ export function InfrastructureDashboard() {
   const [metrics, setMetrics] = useState<AgentMetricPoint[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  // In-flight guards — prevent overlapping concurrent fetches on each polling loop
+  const fetchingAgentsRef  = useRef(false);
+  const fetchingMetricsRef = useRef(false);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [agentName, setAgentName] = useState("");
   const [registering, setRegistering] = useState(false);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [syncingAgentId, setSyncingAgentId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeploymentAgentView | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
 
@@ -111,14 +118,14 @@ export function InfrastructureDashboard() {
         setLoadingAgents(false);
         return;
       }
+      if (fetchingAgentsRef.current) return; // skip if previous fetch still in-flight
 
       try {
-        if (!cancelled) {
-          setLoadingAgents(true);
-        }
+        fetchingAgentsRef.current = true;
+        if (!cancelled) setLoadingAgents(true);
+
         const response = await fetch(
           `/api/agents?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
-          { cache: "no-store" },
         );
         const payload = (await response.json().catch(() => [])) as
           | DeploymentAgentView[]
@@ -131,28 +138,32 @@ export function InfrastructureDashboard() {
           );
         }
 
-        if (!cancelled) {
-          setAgents(payload as DeploymentAgentView[]);
-        }
+        if (!cancelled) setAgents(payload as DeploymentAgentView[]);
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : "Failed to load agents.");
         }
       } finally {
-        if (!cancelled) {
-          setLoadingAgents(false);
-        }
+        fetchingAgentsRef.current = false;
+        if (!cancelled) setLoadingAgents(false);
       }
     }
 
     void loadAgents();
     const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void loadAgents();
     }, 15_000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadAgents();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [activeWorkspaceId]);
 
@@ -165,13 +176,14 @@ export function InfrastructureDashboard() {
         return;
       }
 
+      if (fetchingMetricsRef.current) return; // skip if previous fetch still in-flight
+
       try {
-        if (!cancelled) {
-          setLoadingMetrics(true);
-        }
+        fetchingMetricsRef.current = true;
+        if (!cancelled) setLoadingMetrics(true);
+
         const response = await fetch(
           `/api/agents/${selectedAgent.id}/metrics?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
-          { cache: "no-store" },
         );
         const payload = (await response.json().catch(() => [])) as
           | AgentMetricPoint[]
@@ -184,28 +196,32 @@ export function InfrastructureDashboard() {
           );
         }
 
-        if (!cancelled) {
-          setMetrics(payload as AgentMetricPoint[]);
-        }
+        if (!cancelled) setMetrics(payload as AgentMetricPoint[]);
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : "Failed to load agent metrics.");
         }
       } finally {
-        if (!cancelled) {
-          setLoadingMetrics(false);
-        }
+        fetchingMetricsRef.current = false;
+        if (!cancelled) setLoadingMetrics(false);
       }
     }
 
     void loadMetrics();
     const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void loadMetrics();
     }, 15_000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadMetrics();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [activeWorkspaceId, selectedAgent]);
 
@@ -284,6 +300,33 @@ export function InfrastructureDashboard() {
       toast.error(error instanceof Error ? error.message : "Failed to enqueue sync command.");
     } finally {
       setSyncingAgentId(null);
+    }
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!deleteTarget || !activeWorkspaceId) return;
+
+    setDeleting(true);
+    try {
+      const response = await fetch(
+        `/api/agents/${encodeURIComponent(deleteTarget.id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        { method: "DELETE" },
+      );
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to delete agent.");
+      }
+
+      // Remove from local state; if deleted agent was selected, clear selection.
+      setAgents((current) => current.filter((a) => a.id !== deleteTarget.id));
+      if (selectedAgentId === deleteTarget.id) setSelectedAgentId(null);
+      toast.success(`Agent "${deleteTarget.name}" deleted.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete agent.");
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -389,6 +432,45 @@ export function InfrastructureDashboard() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Delete confirmation dialog ── */}
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete agent?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove{" "}
+              <span className="font-semibold text-foreground">
+                {deleteTarget?.name}
+              </span>{" "}
+              and all its historical heartbeat metrics. The agent&apos;s token will
+              be immediately invalidated. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleDeleteAgent()}
+              disabled={deleting}
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleting ? "Deleting…" : "Delete agent"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
         <section className="grid gap-4 md:grid-cols-3">
           <Card className="animate-slide-up">
@@ -481,19 +563,34 @@ export function InfrastructureDashboard() {
                             {formatHeartbeat(agent.lastHeartbeat)}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleSyncConfig(agent.id);
-                              }}
-                              disabled={syncingAgentId === agent.id}
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" />
-                              {syncingAgentId === agent.id ? "Queueing..." : "Sync Config"}
-                            </Button>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleSyncConfig(agent.id);
+                                }}
+                                disabled={syncingAgentId === agent.id}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                {syncingAgentId === agent.id ? "Queueing..." : "Sync Config"}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setDeleteTarget(agent);
+                                }}
+                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                aria-label={`Delete agent ${agent.name}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );

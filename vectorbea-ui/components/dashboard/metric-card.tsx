@@ -17,18 +17,30 @@ interface MetricCardProps {
 
 function AnimatedNumber({ value, suffix }: { value: number; suffix?: string }) {
   const motionValue = useMotionValue(0);
-  const rounded = useTransform(motionValue, (v) => {
+  const rounded     = useTransform(motionValue, (v) => {
     const n = Math.round(v);
     return n >= 1000 ? n.toLocaleString() : n.toString();
   });
-  const ref = useRef<HTMLSpanElement>(null);
+  const ref         = useRef<HTMLSpanElement>(null);
+
+  // Track whether this is the first mount so we only run the count-up
+  // animation once. Subsequent value changes (every 15 s poll) snap
+  // directly to the new number to avoid constant distracting animations.
+  const mountedRef = useRef(false);
 
   useEffect(() => {
-    const controls = animate(motionValue, value, {
-      duration: 1.4,
-      ease: [0.16, 1, 0.3, 1],
-    });
-    return controls.stop;
+    if (!mountedRef.current) {
+      // First render — do the count-up from 0
+      mountedRef.current = true;
+      const controls = animate(motionValue, value, {
+        duration: 1.4,
+        ease: [0.16, 1, 0.3, 1],
+      });
+      return controls.stop;
+    } else {
+      // Subsequent updates — snap immediately, no animation
+      motionValue.set(value);
+    }
   }, [motionValue, value]);
 
   useEffect(() => {
@@ -47,6 +59,8 @@ function AnimatedNumber({ value, suffix }: { value: number; suffix?: string }) {
 
 export function MetricCard({ label, value, suffix, icon, staggerIndex = 0 }: MetricCardProps) {
   return (
+    // Entrance animation runs once on mount; the `key` prop is intentionally
+    // NOT tied to `value` so re-renders don't restart the slide-up animation.
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}

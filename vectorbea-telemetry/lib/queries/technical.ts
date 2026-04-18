@@ -178,3 +178,85 @@ export async function getActiveHostCount(env: Environment): Promise<number> {
   if (error) return 0;
   return new Set((data ?? []).map((r) => r.proxy_host_id)).size;
 }
+
+// ── Agent heartbeat queries ───────────────────────────────────────────────────
+
+export type AgentStatusFilter = "all" | "online" | "offline";
+
+export interface AgentHeartbeatRow {
+  id:             string;
+  name:           string;
+  status:         "online" | "offline" | "degraded" | "error";
+  lastHeartbeat:  string | null;   // ISO timestamp from deployment_agents
+  workspaceId:    string | null;
+  /** ISO timestamps of every agent_metrics row in the last 30 min (sorted asc) */
+  recentTicks:    string[];
+  avgLatencyMs:   number | null;
+}
+
+/**
+ * Returns all deployment agents (optionally filtered by status) enriched with
+ * their last-30-minute heartbeat ticks from agent_metrics.
+ *
+ * Two separate queries are issued and merged in JS — PostgREST doesn't
+ * support LEFT JOIN aggregation in a single call.
+ */
+export async function getAgentsWithHeartbeats(
+  statusFilter: AgentStatusFilter = "all",
+): Promise<AgentHeartbeatRow[]> {
+  const db = rawDb();
+
+  // ── 1. Fetch agents ──────────────────────────────────────────────────────
+  let agentsQuery = db
+    .from("deployment_agents")
+    .select("id, name, status, last_heartbeat, workspace_id")
+    .order("last_heartbeat", { ascending: false, nullsFirst: false })
+    .limit(50);
+
+  if (statusFilter !== "all") {
+    agentsQuery = agentsQuery.eq("status", statusFilter);
+  }
+
+  const { data: agents, error: agentsErr } = await agentsQuery;
+  if (agentsErr || !agents?.length) return [];
+
+  const agentIds = agents.map((a) => a.id as string);
+
+  // ── 2. Fetch agent_metrics rows in the last 30 min for those agents ──────
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data: ticks, error: ticksErr } = await db
+    .from("agent_metrics")
+    .select("agent_id, created_at, latency_ms")
+    .in("agent_id", agentIds)
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: true });
+
+  if (ticksErr) {
+    console.error("[technical] getAgentsWithHeartbeats ticks error:", ticksErr);
+  }
+
+  // ── 3. Merge ─────────────────────────────────────────────────────────────
+  const ticksByAgent = new Map<string, { timestamps: string[]; latencySum: number }>();
+  for (const tick of ticks ?? []) {
+    const id = tick.agent_id as string;
+    const entry = ticksByAgent.get(id) ?? { timestamps: [], latencySum: 0 };
+    entry.timestamps.push(tick.created_at as string);
+    entry.latencySum += Number(tick.latency_ms ?? 0);
+    ticksByAgent.set(id, entry);
+  }
+
+  return agents.map((a) => {
+    const id     = a.id as string;
+    const entry  = ticksByAgent.get(id);
+    const count  = entry?.timestamps.length ?? 0;
+    return {
+      id,
+      name:          (a.name as string | null) ?? id.slice(0, 8),
+      status:        (a.status as AgentHeartbeatRow["status"]) ?? "offline",
+      lastHeartbeat: (a.last_heartbeat as string | null) ?? null,
+      workspaceId:   (a.workspace_id as string | null) ?? null,
+      recentTicks:   entry?.timestamps ?? [],
+      avgLatencyMs:  count > 0 ? Math.round(entry!.latencySum / count) : null,
+    };
+  });
+}

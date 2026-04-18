@@ -123,19 +123,46 @@
 -dontwarn kotlinx.serialization.**
 -dontnote kotlinx.serialization.AnnotationsKt
 
-# Preserve every class annotated with @Serializable together with all its
-# fields (JSON keys), its Companion object, and the serializer() factory method.
+# ── Rule set follows the official kotlinx.serialization ProGuard guide ────────
+#
+# Three rules are required together:
+#
+#   1. Keep the @Serializable class itself, its fields (= JSON keys), its
+#      Companion object, and the serializer() factory — annotation-based wildcard
+#      so any future model class is covered automatically.
+#
+#   2. Keep the generated $serializer inner class WITH descriptor classes.
+#      `-keep,includedescriptorclasses` ensures the KSerializer<PromptPayload>
+#      type-parameter descriptor survives, which the runtime needs to resolve
+#      the concrete serializer. Without it ProGuard keeps the class but strips
+#      the descriptor, and the runtime still throws "Serializer not found".
+#      We scope to the app package so ProGuard can resolve the annotation
+#      definitively rather than relying on a global ** wildcard.
+#
+#   3. Keep the Companion member and serializer() on any class in our package
+#      that exposes one — catches companion objects that are not themselves
+#      annotated.
+
+# Rule 1 — annotation-driven: class name + fields + Companion + serializer()
 -keep @kotlinx.serialization.Serializable class ** {
     <fields>;
     *** Companion;
     *** serializer(...);
 }
 
-# Keep the generated $serializer classes (inner classes of every @Serializable).
--keep class **$$serializer { *; }
+# Rule 2 — generated $serializer inner classes, scoped to our app package
+-keep,includedescriptorclasses class com.vectorbea.proxy.**$$serializer { *; }
 
-# Keep any class that declares a KSerializer-returning serializer() method —
-# this catches companion objects that are not themselves @Serializable.
+# Rule 3 — Companion members and serializer() factories in our package
+-keepclassmembers class com.vectorbea.proxy.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.vectorbea.proxy.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Also keep any KSerializer-returning method globally (covers ktor-serialization
+# helpers that wrap our serializers).
 -keepclasseswithmembers class ** {
     public static kotlinx.serialization.KSerializer serializer();
 }

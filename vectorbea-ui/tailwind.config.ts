@@ -159,6 +159,7 @@ const config: Config = {
         },
       },
       animation: {
+        "row-in": "fade-in 0.25s ease-out both",
         "fade-in": "fade-in 0.4s ease-out both",
         "fade-in-scale": "fade-in-scale 0.3s ease-out both",
         "slide-in-right": "slide-in-right 0.3s ease-out both",

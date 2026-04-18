@@ -1,11 +1,13 @@
 import { Suspense } from "react";
-import { Card, Metric, Text, Badge } from "@tremor/react";
+import { Card, Metric, Text } from "@tremor/react";
 import { Server, Activity, Clock, Network } from "lucide-react";
 
-import { EnvToggle }        from "@/components/technical/EnvToggle";
-import { HostMetricsChart } from "@/components/technical/HostMetricsChart";
-import { LatencyChart }     from "@/components/technical/LatencyChart";
-import { WallOfShame }      from "@/components/technical/WallOfShame";
+import { EnvToggle }             from "@/components/technical/EnvToggle";
+import { AgentFilter }           from "@/components/technical/AgentFilter";
+import { HostMetricsChart }      from "@/components/technical/HostMetricsChart";
+import { LatencyChart }          from "@/components/technical/LatencyChart";
+import { WallOfShame }           from "@/components/technical/WallOfShame";
+import { AgentHeartbeatPanel }   from "@/components/technical/AgentHeartbeatPanel";
 
 import {
   getHourlyHostMetrics,
@@ -13,7 +15,9 @@ import {
   getTop10SlowestPrompts,
   getAvgNetworkHops,
   getActiveHostCount,
+  getAgentsWithHeartbeats,
   type Environment,
+  type AgentStatusFilter,
 } from "@/lib/queries/technical";
 
 // Re-fetch every 30 seconds so the page stays live without a client-side
@@ -21,7 +25,7 @@ import {
 export const revalidate = 30;
 
 interface PageProps {
-  searchParams: { env?: string };
+  searchParams: { env?: string; agentStatus?: string };
 }
 
 function StatCard({
@@ -51,8 +55,12 @@ export default async function TechnicalPage({ searchParams }: PageProps) {
   const env: Environment =
     searchParams.env === "dev" ? "dev" : "prod";
 
+  const rawStatus = searchParams.agentStatus ?? "all";
+  const agentStatus: AgentStatusFilter =
+    rawStatus === "online" || rawStatus === "offline" ? rawStatus : "all";
+
   // All queries run in parallel on the server — no waterfalls.
-  const [cpuData, memData, latencyData, slowPrompts, hops, activeHosts] =
+  const [cpuData, memData, latencyData, slowPrompts, hops, activeHosts, agents] =
     await Promise.all([
       getHourlyHostMetrics(env, "cpu_usage"),
       getHourlyHostMetrics(env, "memory_usage"),
@@ -60,6 +68,7 @@ export default async function TechnicalPage({ searchParams }: PageProps) {
       getTop10SlowestPrompts(env),
       getAvgNetworkHops(env),
       getActiveHostCount(env),
+      getAgentsWithHeartbeats(agentStatus),
     ]);
 
   const latRow = latencyData[0];
@@ -74,11 +83,13 @@ export default async function TechnicalPage({ searchParams }: PageProps) {
             Live sidecar telemetry · auto-refreshes every 30 s
           </p>
         </div>
-        {/* EnvToggle needs useSearchParams → must be a Client Component.
-            Wrap in Suspense so the Server Component can stream around it. */}
-        <Suspense fallback={null}>
-          <EnvToggle />
-        </Suspense>
+        {/* Both toggles need useSearchParams → must be Client Components.
+            Wrap in Suspense so the Server Component can stream around them. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Suspense fallback={null}>
+            <EnvToggle />
+          </Suspense>
+        </div>
       </div>
 
       {/* ── KPI strip ── */}
@@ -107,6 +118,22 @@ export default async function TechnicalPage({ searchParams }: PageProps) {
           sub={hops.sampleCount > 0 ? `${hops.sampleCount} samples` : "no data"}
           icon={Network}
         />
+      </div>
+
+      {/* ── Agent heartbeats ── */}
+      <div className="space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-medium text-gray-300">Agent Status</h2>
+            <p className="text-xs text-gray-600">
+              Real-time heartbeat responses · last 30 minutes
+            </p>
+          </div>
+          <Suspense fallback={null}>
+            <AgentFilter />
+          </Suspense>
+        </div>
+        <AgentHeartbeatPanel agents={agents} />
       </div>
 
       {/* ── Host resource charts ── */}
