@@ -18,6 +18,34 @@ import {
   X,
 } from 'lucide-react'
 
+// ─── Inline bee logo (matches /public/favicon.svg) ───────────────────────────
+
+function BeeLogo({ size = 20, className = '' }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <g stroke="#7C5200" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <ellipse cx="7.5" cy="8" rx="3.2" ry="2.2" opacity="0.65" fill="#F8D36A" />
+        <ellipse cx="16.5" cy="8" rx="3.2" ry="2.2" opacity="0.65" fill="#F8D36A" />
+        <ellipse cx="12" cy="14" rx="4.2" ry="5.2" fill="#F5B942" fillOpacity="0.32" />
+        <path d="M8.4 12.6h7.2" />
+        <path d="M8.1 15.2h7.8" />
+        <path d="M8.6 17.8h6.8" />
+        <path d="M10.4 9.2 L9.2 6.4" />
+        <path d="M13.6 9.2 L14.8 6.4" />
+        <circle cx="9.2" cy="6.2" r="0.6" fill="#7C5200" />
+        <circle cx="14.8" cy="6.2" r="0.6" fill="#7C5200" />
+      </g>
+    </svg>
+  )
+}
+
 // ─── Sidebar nav data ─────────────────────────────────────────────────────────
 
 const NAV = [
@@ -186,14 +214,14 @@ function Sidebar({ open, onClose }) {
       >
         {/* Logo */}
         <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-200 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-[22px] h-[22px] rounded-[5px] bg-zinc-900 flex items-center justify-center shrink-0">
-              <Zap size={12} className="text-white" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg border border-zinc-200 bg-white shadow-sm flex items-center justify-center shrink-0">
+              <BeeLogo size={20} />
             </div>
-            <span className="text-[13px] font-semibold tracking-tight text-zinc-900 leading-none">
-              VectorBea
-              <span className="font-normal text-zinc-400"> /docs</span>
-            </span>
+            <div className="leading-none">
+              <p className="text-[13px] font-semibold tracking-tight text-zinc-900">VectorBea</p>
+              <p className="text-[11px] text-zinc-400 mt-0.5">Documentation</p>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -341,7 +369,6 @@ function PageContent() {
       <header className="mb-8 pb-7 border-b border-zinc-200">
         <div className="flex items-center gap-2 mb-3.5">
           <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold tracking-[0.08em] uppercase text-zinc-500 border border-zinc-200 rounded-md px-2 py-[3px]">
-            <Zap size={9} strokeWidth={2.5} />
             Getting Started
           </span>
           <span className="text-[11px] text-zinc-400">5 min read</span>
@@ -541,9 +568,15 @@ export default function App() {
           >
             <Menu size={17} />
           </button>
-          <span className="text-[13px] font-semibold tracking-tight text-zinc-900">
-            VectorBea <span className="font-normal text-zinc-400">/docs</span>
-          </span>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg border border-zinc-200 bg-white shadow-sm flex items-center justify-center shrink-0">
+              <BeeLogo size={18} />
+            </div>
+            <div className="leading-none">
+              <p className="text-[13px] font-semibold tracking-tight text-zinc-900">VectorBea</p>
+              <p className="text-[10px] text-zinc-400 mt-0.5">Documentation</p>
+            </div>
+          </div>
         </header>
 
         {/* Content area */}

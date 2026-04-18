@@ -9,7 +9,7 @@ interface BeeLogoProps {
 export function BeeLogo({ className }: BeeLogoProps) {
   return (
     <Image
-      src="/icon.svg"
+      src="/favicon.svg"
       alt="VectorBea"
       width={24}
       height={24}

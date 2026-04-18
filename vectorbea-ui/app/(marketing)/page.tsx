@@ -96,7 +96,7 @@ export default function LandingPage() {
 
         <div className="flex items-center gap-2 md:gap-3">
           <ThemeToggle />
-          <Link href="/docs" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
+          <Link href="/docs" target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
             Docs
           </Link>
           <Link href="/pricing" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
@@ -149,6 +149,8 @@ export default function LandingPage() {
             </Link>
             <Link
               href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
               className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-lg px-7")}
             >
               Read the docs
@@ -351,6 +353,8 @@ export default function LandingPage() {
             </Link>
             <Link
               href="/docs/quickstart"
+              target="_blank"
+              rel="noopener noreferrer"
               className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-lg px-7")}
             >
               Read the quickstart

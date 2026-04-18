@@ -55,8 +55,10 @@ export function DocsShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-border/80 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between px-4 py-3 md:px-6 xl:px-10">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <BeeLogo className="h-8 w-8" />
+          <Link href="/" className="inline-flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card shadow-sm shrink-0">
+              <BeeLogo className="h-5 w-5" />
+            </div>
             <div>
               <p className="text-sm font-semibold tracking-tight">VectorBea</p>
               <p className="text-xs text-muted-foreground">Documentation</p>
