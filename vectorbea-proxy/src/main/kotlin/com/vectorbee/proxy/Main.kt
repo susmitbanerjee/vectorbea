@@ -21,6 +21,7 @@ import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.cio.unixConnector
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -53,7 +54,7 @@ fun main() {
         warmup(hubClient, promptCache)
     }
 
-    val httpServer = embeddedServer(CIO, port = config.httpPort, host = "0.0.0.0") {
+    val httpServer = embeddedServer(Netty, port = config.httpPort, host = "0.0.0.0") {
         vectorbeaModule(promptService, auditDispatcher, json)
     }
     httpServer.start(wait = false)
