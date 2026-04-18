@@ -14,6 +14,7 @@ data class AppConfig(
     // Falls back to hubUrl when VECTORBEA_TELEMETRY_URL is not set so existing
     // single-host deployments need no changes.
     val telemetryUrl: String,
+    val telemetryEnabled: Boolean,
 
     // ── Sidecar identity ──────────────────────────────────────────────────────
     // Stable identifier sent with every telemetry batch.  Kubernetes sets
@@ -55,6 +56,19 @@ data class AppConfig(
             val telemetryUrl = env("VECTORBEA_TELEMETRY_URL")
                 ?: env("VECTORBEA_HUB_URL")
                 ?: "http://localhost:3001"
+            val telemetryEnabled = env("VECTORBEA_ENABLE_TELEMETRY")
+                ?.lowercase()
+                ?.let { value ->
+                    when (value) {
+                        "1", "true", "yes", "on" -> true
+                        "0", "false", "no", "off" -> false
+                        else -> null
+                    }
+                }
+                // Local Docker testing usually passes only HUB_URL + API key.
+                // In that mode we default telemetry off to avoid noisy HTML 404s
+                // from hosts that expose the control plane but not the ingest API.
+                ?: (env("VECTORBEA_TELEMETRY_URL") != null)
 
             // Stable host identity: prefer explicit override → Kubernetes pod name
             // (HOSTNAME) → machine hostname → random fallback.
@@ -71,6 +85,7 @@ data class AppConfig(
                 hubUrl          = hubUrl.trimEnd('/'),
                 apiKey          = apiKey,
                 telemetryUrl    = telemetryUrl.trimEnd('/'),
+                telemetryEnabled = telemetryEnabled,
                 proxyHostId     = proxyHostId,
                 environment     = environment,
                 httpPort        = env("VECTORBEA_HTTP_PORT")?.toIntOrNull() ?: 8080,

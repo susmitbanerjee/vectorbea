@@ -5,6 +5,7 @@ import com.vectorbea.proxy.client.HubClient
 import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.grpc.GrpcServer
 import com.vectorbea.proxy.grpc.VectorBeaGrpcService
+import com.vectorbea.proxy.http.PublicHttpServer
 import com.vectorbea.proxy.http.SocketPermissions
 import com.vectorbea.proxy.model.AuditAcceptedResponse
 import com.vectorbea.proxy.model.AuditEvent
@@ -21,7 +22,6 @@ import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.cio.unixConnector
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -54,10 +54,13 @@ fun main() {
         warmup(hubClient, promptCache)
     }
 
-    val httpServer = embeddedServer(Netty, port = config.httpPort, host = "0.0.0.0") {
-        vectorbeaModule(promptService, auditDispatcher, json)
-    }
-    httpServer.start(wait = false)
+    val httpServer = PublicHttpServer(
+        port = config.httpPort,
+        promptService = promptService,
+        auditDispatcher = auditDispatcher,
+        json = json,
+    )
+    httpServer.start()
 
     val restServer = startRestSocketServer(config, promptService, auditDispatcher, json)
 
@@ -73,7 +76,7 @@ fun main() {
 
     Runtime.getRuntime().addShutdownHook(Thread {
         grpcServer?.stop()
-        httpServer.stop(1_000, 5_000)
+        httpServer.stop()
         restServer?.stop(1_000, 5_000)
         auditDispatcher.stop()
         telemetryDispatcher.stop()
