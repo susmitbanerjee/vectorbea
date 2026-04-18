@@ -14,15 +14,16 @@ export default function DocsIntroPage() {
           Introduction
         </p>
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-          Version and govern prompts centrally.{" "}
-          <span className="text-muted-foreground">Your data never leaves your infra.</span>
+          The Enterprise AI Infrastructure Platform.{" "}
+          <span className="text-muted-foreground">
+            Manage, evaluate, and deliver prompts at the edge with zero latency.
+          </span>
         </h1>
         <p className="text-lg leading-8 text-muted-foreground">
-          VectorBea is a docker-native prompt and AI settings repository. The
-          cloud UI is a control plane only — it manages prompts, access, and
-          visibility. Every inference, secret, and audit event stays inside your
-          own containers via a lightweight sidecar you run alongside your
-          services.
+          Run the VectorBea Sidecar in your VPC to separate AI behavior from
+          your codebase without compromising data privacy. The cloud UI is the
+          control plane for governance, while execution stays inside your own
+          environment.
         </p>
       </section>
 

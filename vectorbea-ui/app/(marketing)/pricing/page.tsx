@@ -240,7 +240,7 @@ export default function PricingPage() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="border-t border-zinc-200 px-6 py-8 text-center text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-600">
-        <p>© {new Date().getFullYear()} VectorBea · Prompt infrastructure for production AI</p>
+        <p>© {new Date().getFullYear()} VectorBea · The Enterprise AI Infrastructure Platform</p>
       </footer>
     </div>
   );

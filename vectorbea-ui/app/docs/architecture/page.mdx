@@ -6,12 +6,13 @@ import { ArchitectureDiagram } from "@/components/docs/architecture-diagram";
 
 # Architecture
 
-VectorBea is designed so that the hosted platform manages prompt governance
-while your application keeps running in your own environment. The intended
-consumer is not a developer working inside this repository. It is a team with
-its own codebase that wants to:
+VectorBea is the Enterprise AI Infrastructure Platform. It is designed so that
+the hosted platform manages prompt governance while your application keeps
+running in your own environment. The intended consumer is not a developer
+working inside this repository. It is a team with its own codebase that wants
+to:
 
-- version and govern prompts centrally
+- manage, evaluate, and deliver prompts at the edge with zero latency
 - run a sidecar container in Docker or Kubernetes
 - keep model traffic, secrets, and business logic inside its own network
 
@@ -83,8 +84,9 @@ The result is a clean boundary:
 
 ## Design principle
 
-> Version and govern prompts centrally. Your data never leaves your infra.
+> The Enterprise AI Infrastructure Platform. Manage, evaluate, and deliver prompts at the edge with zero latency.
 
-That is the core reason VectorBea works for teams with strict data residency
-requirements or network policies that prohibit sending model traffic to
-third-party systems.
+Run the VectorBea Sidecar in your VPC to separate AI behavior from your
+codebase without compromising data privacy. That is the core reason VectorBea
+works for teams with strict data residency requirements or network policies
+that prohibit sending model traffic to third-party systems.

@@ -10,7 +10,8 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "VectorBea",
-  description: "Prompt infrastructure for production AI",
+  description:
+    "The Enterprise AI Infrastructure Platform. Manage, evaluate, and deliver prompts at the edge with zero latency. Run the VectorBea Sidecar in your VPC to separate AI behavior from your codebase without compromising data privacy.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     shortcut: "/icon.svg",

@@ -90,7 +90,7 @@ export default function LandingPage() {
           </div>
           <div>
             <p className="text-sm font-semibold tracking-tight">VectorBea</p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">Prompt &amp; AI settings registry</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">Enterprise AI Infrastructure Platform</p>
           </div>
         </Link>
 
@@ -128,18 +128,17 @@ export default function LandingPage() {
 
           {/* Heading */}
           <h1 className="text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
-            Version and govern prompts centrally.{" "}
+            The Enterprise AI Infrastructure Platform.{" "}
             <span className="text-zinc-500 dark:text-zinc-400">
-              Your data never leaves your infra.
+              Manage, evaluate, and deliver prompts at the edge with zero latency.
             </span>
           </h1>
 
           {/* Sub-paragraph */}
-          <p className="mx-auto max-w-xl text-base leading-7 text-zinc-500 dark:text-zinc-400">
-            VectorBea is a prompt and AI settings repository your team manages
-            from the cloud — but every inference, secret, and audit event stays
-            inside your own containers. Pull the docker image, run the sidecar,
-            and connect in minutes.
+          <p className="mx-auto max-w-2xl text-base leading-7 text-zinc-500 dark:text-zinc-400">
+            Manage, evaluate, and deliver prompts at the edge with zero latency.
+            Run the VectorBea Sidecar in your VPC to separate AI behavior from
+            your codebase without compromising data privacy.
           </p>
 
           {/* CTAs */}
@@ -339,7 +338,7 @@ export default function LandingPage() {
         {/* ── CTA banner ───────────────────────────────────────────────── */}
         <section className="mx-auto max-w-2xl space-y-6 text-center">
           <h2 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-            Ready to govern your prompts?
+            Ready to run enterprise AI infrastructure at the edge?
           </h2>
           <p className="text-base leading-7 text-zinc-500 dark:text-zinc-400">
             Free plan, no credit card required. Pull the sidecar in minutes and
@@ -362,7 +361,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-border px-6 py-8 text-center text-xs text-zinc-500 dark:text-zinc-400">
-        <p>© {new Date().getFullYear()} VectorBea &middot; Prompt &amp; AI settings registry &middot; Your data never leaves your infra</p>
+        <p>© {new Date().getFullYear()} VectorBea &middot; The Enterprise AI Infrastructure Platform &middot; Your data never leaves your infra</p>
       </footer>
     </div>
   );
