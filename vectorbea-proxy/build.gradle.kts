@@ -146,6 +146,7 @@ graalvmNative {
             mainClass.set(application.mainClass)
             buildArgs.add("--no-fallback")
             buildArgs.add("--install-exit-handlers")
+            buildArgs.add("--enable-preview")
 
             // ── Kotlin stdlib: safe to initialise at build time ───────────────
             // GraalVM's bundled reachability-metadata marks some kotlin.* classes
