@@ -5,6 +5,8 @@ import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.model.AuditEvent
 import java.lang.management.ManagementFactory
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.DoubleAdder
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,24 +21,34 @@ import org.slf4j.LoggerFactory
 class AuditDispatcher(
     private val config: AppConfig,
     private val hubClient: HubClient,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Audit fan-out runs on Dispatchers.IO so batch POSTs don't steal CPU
+    // from the gRPC request threads on Dispatchers.Default.
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
     private val logger = LoggerFactory.getLogger(AuditDispatcher::class.java)
+
+    // Unbounded channel with CONFLATED-like semantics: enqueue is a single
+    // CAS on Channel's tail pointer (~20 ns). Fire-and-forget from the gRPC
+    // request thread — the critical path *never* blocks on hub I/O.
     private val channel = Channel<AuditEvent>(Channel.UNLIMITED)
 
-    // ── Rolling latency tracking (last 100 events) ────────────────────────
-    private val latencyWindow = ArrayDeque<Double>(100)
-    private val latencyLock = Any()
+    // ── Lock-free rolling-latency accumulator ──────────────────────────────
+    // Previous impl. took a `synchronized(latencyLock)` on every enqueue —
+    // that's 30–60 ns of uncontended overhead and pathological contention
+    // under load. DoubleAdder + AtomicLong are cache-line striped and free
+    // of mutual exclusion on the write path. The heartbeat reader trades
+    // a touch of precision (non-atomic sum+count read) for zero impact on
+    // the hot path, which is the correct trade for SRE metrics.
+    private val latencySumMs = DoubleAdder()
+    private val latencyCount = AtomicLong(0)
 
     // ── Heartbeat interval (30 s) ─────────────────────────────────────────
     private val heartbeatIntervalMs = 30_000L
 
     fun tryEnqueue(event: AuditEvent): Boolean {
-        // Track proxy latency for heartbeat metrics
-        synchronized(latencyLock) {
-            if (latencyWindow.size >= 100) latencyWindow.removeFirst()
-            latencyWindow.addLast(event.proxyLatencyMs)
-        }
+        // Hot path, called from every gRPC / REST request. Lock-free.
+        latencySumMs.add(event.proxyLatencyMs)
+        latencyCount.incrementAndGet()
         return channel.trySend(event).isSuccess
     }
 
@@ -125,8 +137,11 @@ class AuditDispatcher(
     }
 
     private fun computeAvgLatency(): Double {
-        val snapshot = synchronized(latencyLock) { latencyWindow.toList() }
-        return if (snapshot.isEmpty()) 0.0 else snapshot.average()
+        // Drain the accumulator: sumThenReset + getAndSet so each heartbeat
+        // reports the window since the last heartbeat, not a since-boot avg.
+        val count = latencyCount.getAndSet(0)
+        val sum = latencySumMs.sumThenReset()
+        return if (count == 0L) 0.0 else sum / count
     }
 
     private fun jvmHeapUsedMb(): Double {

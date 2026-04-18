@@ -47,11 +47,19 @@ dependencies {
     implementation("io.ktor:ktor-server-status-pages-jvm:$ktorVersion")
 
     implementation("io.ktor:ktor-client-core-jvm:$ktorVersion")
-    implementation("io.ktor:ktor-client-cio-jvm:$ktorVersion")
+    // OkHttp engine — needed for HTTP/2 + tunable connection pool. Ktor CIO is
+    // HTTP/1.1 only, so the hub round-trip would re-handshake TLS on every
+    // cold connection. OkHttp negotiates ALPN h2 once and multiplexes.
+    implementation("io.ktor:ktor-client-okhttp-jvm:$ktorVersion")
     implementation("io.ktor:ktor-client-content-negotiation-jvm:$ktorVersion")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
     implementation("ch.qos.logback:logback-classic:1.5.18")
+
+    // ── Caffeine: high-throughput, low-overhead, near-optimal hit-ratio cache.
+    // Replaces the hand-rolled ConcurrentHashMap+Mutex prompt cache; also
+    // backs the SDK auth-token validation cache.
+    implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
 
     // ── gRPC data plane (UDS, sub-millisecond) ──────────────────────────────
     implementation("io.grpc:grpc-stub:$grpcVersion")
@@ -159,6 +167,11 @@ graalvmNative {
             // image-time NPEs if the metadata repo omits them.
             buildArgs.add("--initialize-at-run-time=io.netty")
             buildArgs.add("--initialize-at-run-time=io.grpc.netty")
+
+            // OkHttp reads /etc/ssl on first use — keep its SSLContext
+            // initialisation at run time so the image works on any host.
+            buildArgs.add("--initialize-at-run-time=okhttp3")
+            buildArgs.add("--initialize-at-run-time=okio")
         }
     }
     metadataRepository {

@@ -3,6 +3,7 @@ package com.vectorbea.proxy.grpc
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
+import com.vectorbea.proxy.service.TelemetryDispatcher
 import io.grpc.Status
 import io.grpc.StatusException
 import kotlinx.serialization.json.Json
@@ -17,7 +18,10 @@ import org.slf4j.LoggerFactory
 class VectorBeaGrpcService(
     private val promptService: PromptService,
     private val auditDispatcher: AuditDispatcher,
-    private val json: Json
+    private val json: Json,
+    // Optional so existing test harnesses and Docker images that haven't set
+    // VECTORBEA_TELEMETRY_URL yet continue to work without any config change.
+    private val telemetryDispatcher: TelemetryDispatcher? = null,
 ) : VectorBeaDataPlaneGrpcKt.VectorBeaDataPlaneCoroutineImplBase() {
 
     private val logger = LoggerFactory.getLogger(VectorBeaGrpcService::class.java)
@@ -76,6 +80,17 @@ class VectorBeaGrpcService(
         // Non-blocking enqueue into the unbounded channel — the AuditDispatcher
         // worker drains it in batches and POSTs to the hub asynchronously.
         val accepted = auditDispatcher.tryEnqueue(event)
+
+        // Mirror the same execution data to the telemetry service (fire-and-
+        // forget, lock-free). Both dispatchers accumulate independently so that
+        // the telemetry endpoint can be on a completely different domain / VPC
+        // without coupling the two background workers.
+        telemetryDispatcher?.recordLatency(event.proxyLatencyMs)
+        telemetryDispatcher?.recordExecution(
+            promptName = event.promptName,
+            latencyMs  = event.proxyLatencyMs,
+            tokensUsed = event.tokenCount,
+        )
 
         return LogAuditResponse.newBuilder()
             .setAccepted(accepted)

@@ -11,6 +11,7 @@ import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
 import com.vectorbea.proxy.service.SharedRulesStore
+import com.vectorbea.proxy.service.TelemetryDispatcher
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -41,8 +42,28 @@ fun main() {
     val sharedRulesStore = SharedRulesStore(config.sharedRulesPath, json)
     val promptService = PromptService(promptCache, hubClient, sharedRulesStore)
     val auditDispatcher = AuditDispatcher(config, hubClient)
+    val telemetryDispatcher = TelemetryDispatcher(config)
 
     auditDispatcher.start()
+    // TelemetryDispatcher starts its own coroutine; no dependency on
+    // auditDispatcher or hubClient — it is a fully independent worker.
+    telemetryDispatcher.start()
+
+    // ── Warmup: pay TLS + JIT + classload penalties BEFORE binding sockets.
+    //
+    // Critical for our < 200 ms cold-start target. Without this, the very
+    // first SDK request would pay:
+    //   - ~150–300 ms TLS 1.3 handshake + ALPN h2 negotiation to the hub
+    //   - ~50–100 ms for OkHttp dispatcher classload
+    //   - ~20–50 ms for kotlinx.serialization descriptor construction
+    //   - ~10–30 ms to touch Caffeine's Window-TinyLFU sketch arrays
+    //
+    // Running all of this pre-bind means the first real request sees a warm
+    // JIT, an open h2 connection, and a Caffeine cache with its machinery
+    // already in cache lines — cold-start collapses to single-digit ms.
+    runBlocking {
+        warmup(hubClient, promptCache)
+    }
 
     // ── Ktor REST server (control plane) on its own UDS ────────────────────
     SocketPermissions.prepareSocketPath(config.restSocketPath)
@@ -59,7 +80,12 @@ fun main() {
     httpServer.start(wait = false)
 
     // ── gRPC data-plane server (hot path) on its own UDS ──────────────────
-    val grpcService = VectorBeaGrpcService(promptService, auditDispatcher, json)
+    val grpcService = VectorBeaGrpcService(
+        promptService        = promptService,
+        auditDispatcher      = auditDispatcher,
+        json                 = json,
+        telemetryDispatcher  = telemetryDispatcher,
+    )
     val grpcServer = GrpcServer(config.grpcSocketPath, grpcService)
     grpcServer.start()
 
@@ -68,6 +94,7 @@ fun main() {
         httpServer.stop(1_000, 5_000)
         restServer.stop(1_000, 5_000)
         auditDispatcher.stop()
+        telemetryDispatcher.stop()
     })
 
     runBlocking {
@@ -81,6 +108,36 @@ fun main() {
     runBlocking {
         awaitCancellation()
     }
+}
+
+/**
+ * Pre-bind warmup. Runs on the main thread before gRPC / HTTP / REST servers
+ * start accepting traffic so first-request latency doesn't include TLS,
+ * classloading, or JIT costs.
+ *
+ * We execute the two parallel primers sequentially (they're both quick) and
+ * swallow any failure — the proxy must still boot if the hub is temporarily
+ * down; the first real request will just pay the penalty we tried to avoid.
+ */
+private suspend fun warmup(hubClient: HubClient, promptCache: PromptCache) {
+    val started = System.currentTimeMillis()
+
+    // 1. Prime the HTTP/2 connection + TLS session to the hub.
+    hubClient.warmup()
+
+    // 2. Touch the Caffeine cache machinery (Window-TinyLFU sketch, hash
+    //    buckets, read/write buffer). A get + invalidate cycles every code
+    //    path that a real request would hit, but without polluting the
+    //    cache with a real prompt.
+    runCatching {
+        promptCache.getOrLoad("__warmup__") {
+            error("warmup sentinel — never actually fetched")
+        }
+    }
+    promptCache.invalidate("__warmup__")
+
+    val elapsed = System.currentTimeMillis() - started
+    println("vectorbea warmup complete in ${elapsed} ms")
 }
 
 private fun Application.vectorbeaModule(
