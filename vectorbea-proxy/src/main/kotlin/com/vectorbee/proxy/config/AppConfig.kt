@@ -28,9 +28,9 @@ data class AppConfig(
     val httpPort: Int = 8080,
     val sharedRulesPath: String = "/app/shared-config/rules.json",
     // Ktor REST socket — used by the Next.js hub for prompt invalidations + ops tooling
-    val restSocketPath: String = "/tmp/vectorbea-rest.sock",
+    val restSocketPath: String? = null,
     // gRPC data-plane socket — hot path used by SDK clients in the same pod
-    val grpcSocketPath: String = "/tmp/vectorbea.sock",
+    val grpcSocketPath: String? = null,
 
     // ── Audit flush tuning ────────────────────────────────────────────────────
     val flushIntervalMillis: Long = 5_000,
@@ -75,8 +75,8 @@ data class AppConfig(
                 environment     = environment,
                 httpPort        = env("VECTORBEA_HTTP_PORT")?.toIntOrNull() ?: 8080,
                 sharedRulesPath = env("VECTORBEA_SHARED_RULES_PATH") ?: "/app/shared-config/rules.json",
-                restSocketPath  = env("VECTORBEA_REST_SOCKET") ?: "/tmp/vectorbea-rest.sock",
-                grpcSocketPath  = env("VECTORBEA_GRPC_SOCKET") ?: "/tmp/vectorbea.sock",
+                restSocketPath  = env("VECTORBEA_REST_SOCKET"),
+                grpcSocketPath  = env("VECTORBEA_GRPC_SOCKET"),
                 telemetryIntervalMs = env("VECTORBEA_TELEMETRY_INTERVAL_MS")?.toLongOrNull() ?: 30_000,
             )
         }

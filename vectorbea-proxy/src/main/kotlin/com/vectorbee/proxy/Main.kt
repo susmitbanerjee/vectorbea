@@ -17,7 +17,9 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
+import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.cio.unixConnector
+import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
@@ -45,93 +47,79 @@ fun main() {
     val telemetryDispatcher = TelemetryDispatcher(config)
 
     auditDispatcher.start()
-    // TelemetryDispatcher starts its own coroutine; no dependency on
-    // auditDispatcher or hubClient — it is a fully independent worker.
     telemetryDispatcher.start()
 
-    // ── Warmup: pay TLS + JIT + classload penalties BEFORE binding sockets.
-    //
-    // Critical for our < 200 ms cold-start target. Without this, the very
-    // first SDK request would pay:
-    //   - ~150–300 ms TLS 1.3 handshake + ALPN h2 negotiation to the hub
-    //   - ~50–100 ms for OkHttp dispatcher classload
-    //   - ~20–50 ms for kotlinx.serialization descriptor construction
-    //   - ~10–30 ms to touch Caffeine's Window-TinyLFU sketch arrays
-    //
-    // Running all of this pre-bind means the first real request sees a warm
-    // JIT, an open h2 connection, and a Caffeine cache with its machinery
-    // already in cache lines — cold-start collapses to single-digit ms.
     runBlocking {
         warmup(hubClient, promptCache)
     }
-
-    // ── Ktor REST server (control plane) on its own UDS ────────────────────
-    SocketPermissions.prepareSocketPath(config.restSocketPath)
-    val restServer = embeddedServer(CIO, configure = {
-        unixConnector(config.restSocketPath)
-    }) {
-        vectorbeaModule(promptService, auditDispatcher, json)
-    }
-    restServer.start(wait = false)
 
     val httpServer = embeddedServer(CIO, port = config.httpPort, host = "0.0.0.0") {
         vectorbeaModule(promptService, auditDispatcher, json)
     }
     httpServer.start(wait = false)
 
-    // ── gRPC data-plane server (hot path) on its own UDS ──────────────────
+    val restServer = startRestSocketServer(config, promptService, auditDispatcher, json)
+
     val grpcService = VectorBeaGrpcService(
-        promptService        = promptService,
-        auditDispatcher      = auditDispatcher,
-        json                 = json,
-        telemetryDispatcher  = telemetryDispatcher,
+        promptService = promptService,
+        auditDispatcher = auditDispatcher,
+        json = json,
+        telemetryDispatcher = telemetryDispatcher,
     )
-    val grpcServer = GrpcServer(config.grpcSocketPath, grpcService)
-    grpcServer.start()
+    val grpcServer = config.grpcSocketPath?.let { socketPath ->
+        GrpcServer(socketPath, grpcService).also { it.start() }
+    }
 
     Runtime.getRuntime().addShutdownHook(Thread {
-        grpcServer.stop()
+        grpcServer?.stop()
         httpServer.stop(1_000, 5_000)
-        restServer.stop(1_000, 5_000)
+        restServer?.stop(1_000, 5_000)
         auditDispatcher.stop()
         telemetryDispatcher.stop()
     })
 
-    runBlocking {
-        SocketPermissions.waitForSocketAndSetPermissions(config.restSocketPath)
+    config.restSocketPath?.let { socketPath ->
+        runBlocking {
+            SocketPermissions.waitForSocketAndSetPermissions(socketPath)
+        }
     }
 
-    println(
-        "vectorbea proxy ready — REST unix:${config.restSocketPath}, " +
-            "HTTP :${config.httpPort}, gRPC unix:${config.grpcSocketPath}"
-    )
+    val readyTargets = buildList {
+        add("HTTP :${config.httpPort}")
+        config.restSocketPath?.let { add("REST unix:$it") }
+        config.grpcSocketPath?.let { add("gRPC unix:$it") }
+    }
+    println("vectorbea proxy ready - ${readyTargets.joinToString(", ")}")
+
     runBlocking {
         awaitCancellation()
     }
 }
 
-/**
- * Pre-bind warmup. Runs on the main thread before gRPC / HTTP / REST servers
- * start accepting traffic so first-request latency doesn't include TLS,
- * classloading, or JIT costs.
- *
- * We execute the two parallel primers sequentially (they're both quick) and
- * swallow any failure — the proxy must still boot if the hub is temporarily
- * down; the first real request will just pay the penalty we tried to avoid.
- */
+private fun startRestSocketServer(
+    config: AppConfig,
+    promptService: PromptService,
+    auditDispatcher: AuditDispatcher,
+    json: Json,
+): EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? {
+    val socketPath = config.restSocketPath ?: return null
+
+    SocketPermissions.prepareSocketPath(socketPath)
+    return embeddedServer(CIO, configure = {
+        unixConnector(socketPath)
+    }) {
+        vectorbeaModule(promptService, auditDispatcher, json)
+    }.also { it.start(wait = false) }
+}
+
 private suspend fun warmup(hubClient: HubClient, promptCache: PromptCache) {
     val started = System.currentTimeMillis()
 
-    // 1. Prime the HTTP/2 connection + TLS session to the hub.
     hubClient.warmup()
 
-    // 2. Touch the Caffeine cache machinery (Window-TinyLFU sketch, hash
-    //    buckets, read/write buffer). A get + invalidate cycles every code
-    //    path that a real request would hit, but without polluting the
-    //    cache with a real prompt.
     runCatching {
         promptCache.getOrLoad("__warmup__") {
-            error("warmup sentinel — never actually fetched")
+            error("warmup sentinel - never actually fetched")
         }
     }
     promptCache.invalidate("__warmup__")
@@ -143,7 +131,7 @@ private suspend fun warmup(hubClient: HubClient, promptCache: PromptCache) {
 private fun Application.vectorbeaModule(
     promptService: PromptService,
     auditDispatcher: AuditDispatcher,
-    json: Json
+    json: Json,
 ) {
     install(CallLogging)
     install(ContentNegotiation) {
@@ -153,7 +141,7 @@ private fun Application.vectorbeaModule(
         exception<Throwable> { call, cause ->
             call.respond(
                 HttpStatusCode.InternalServerError,
-                mapOf("error" to (cause.message ?: "internal server error"))
+                mapOf("error" to (cause.message ?: "internal server error")),
             )
         }
     }
@@ -161,7 +149,10 @@ private fun Application.vectorbeaModule(
     routing {
         get("/v1/prompts/{name}") {
             val name = call.parameters["name"]
-                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "missing prompt name"))
+                ?: return@get call.respond(
+                    HttpStatusCode.BadRequest,
+                    mapOf("error" to "missing prompt name"),
+                )
             val prompt = promptService.getPrompt(name)
             call.respond(HttpStatusCode.OK, prompt)
         }

@@ -17,6 +17,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.content.TextContent
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
@@ -121,7 +122,12 @@ class HubClient(private val config: AppConfig) {
             )
         )
         val response = client.post("${config.hubUrl}/api/agents/heartbeat") {
-            setBody(payload)
+            setBody(
+                TextContent(
+                    json.encodeToString(HeartbeatPayload.serializer(), payload),
+                    ContentType.Application.Json,
+                ),
+            )
         }
         if (!response.status.isSuccess()) {
             error("Heartbeat rejected with ${response.status.value}: ${response.bodyAsText()}")
@@ -161,10 +167,10 @@ class HubClient(private val config: AppConfig) {
 // ── Heartbeat request models ──────────────────────────────────────────────────
 
 @Serializable
-private data class HeartbeatPayload(val metrics: HeartbeatMetrics)
+internal data class HeartbeatPayload(val metrics: HeartbeatMetrics)
 
 @Serializable
-private data class HeartbeatMetrics(
+internal data class HeartbeatMetrics(
     val latencyMs: Double,
     val cpuUsagePercent: Double,
     val memoryUsageMb: Double,

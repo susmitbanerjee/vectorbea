@@ -11,6 +11,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.content.TextContent
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import java.lang.management.ManagementFactory
@@ -195,7 +196,12 @@ class TelemetryDispatcher(
         )
 
         val response = httpClient.post("${config.telemetryUrl}/api/ingest") {
-            setBody(payload)
+            setBody(
+                TextContent(
+                    Json.encodeToString(IngestPayload.serializer(), payload),
+                    ContentType.Application.Json,
+                ),
+            )
         }
 
         if (!response.status.isSuccess()) {
@@ -252,7 +258,7 @@ class TelemetryDispatcher(
 // Must match the Zod schema in vectorbea-telemetry/app/api/ingest/route.ts.
 
 @Serializable
-private data class IngestPayload(
+internal data class IngestPayload(
     val environment:      String,
     val proxyHostId:      String,
     val metrics:          List<MetricPoint>,
@@ -260,13 +266,13 @@ private data class IngestPayload(
 )
 
 @Serializable
-private data class MetricPoint(
+internal data class MetricPoint(
     val name:  String,
     val value: Double,
 )
 
 @Serializable
-private data class ExecutionPoint(
+internal data class ExecutionPoint(
     val promptName: String,
     val latencyMs:  Double,
     val tokensUsed: Int,
