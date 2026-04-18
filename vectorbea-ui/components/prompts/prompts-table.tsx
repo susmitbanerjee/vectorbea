@@ -130,8 +130,8 @@ export function PromptsTable({
           <DialogHeader>
             <DialogTitle>Delete prompt</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete <strong>{confirmPrompt?.name}</strong>? This will
-              delete all versions and cannot be undone.
+              Are you sure you want to delete <strong>{confirmPrompt?.name}</strong>? All versions
+              will be deleted and cannot be recovered.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -156,7 +156,7 @@ export function PromptsTable({
       <Card className="animate-fade-in">
         <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
-            <CardTitle>Prompt Registry</CardTitle>
+            <CardTitle>Prompts</CardTitle>
             <p className="text-sm text-muted-foreground">
               {prompts.length} prompt{prompts.length === 1 ? "" : "s"} total
             </p>
@@ -195,7 +195,7 @@ export function PromptsTable({
                 <p className="mt-1 text-sm text-muted-foreground">
                   {query.trim()
                     ? "Try adjusting your search or filter."
-                    : "Create your first prompt to get started."}
+                    : "Create your first prompt to start versioning."}
                 </p>
               </div>
             </div>
@@ -237,7 +237,7 @@ export function PromptsTable({
                         </Badge>
                       </TableCell>
                       <TableCell className="hidden max-w-xs truncate text-muted-foreground md:table-cell">
-                        {prompt.description ?? "No description"}
+                        {prompt.description ?? "—"}
                       </TableCell>
                       <TableCell className="text-right text-sm text-muted-foreground">
                         {relativeTime(prompt.updatedAt)}

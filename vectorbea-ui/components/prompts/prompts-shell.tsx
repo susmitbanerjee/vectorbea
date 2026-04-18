@@ -53,7 +53,7 @@ export function PromptsShell({ initialPrompts, initialQuery }: PromptsShellProps
     <div className="min-h-screen">
       <AppHeader
         title="Prompts"
-        subtitle="Registry of versioned prompts, policies, and model configurations."
+        subtitle="Create, version, and publish prompts. The sidecar serves whatever version is live."
         actions={
           <RbacGuard requiredRole="editor">
             <CreatePromptDialog

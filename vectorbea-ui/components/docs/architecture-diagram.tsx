@@ -53,10 +53,10 @@ export function ArchitectureDiagram() {
 
         <Zone
           title="Customer Environment"
-          description="Owned by the customer. The application and local proxy stay here while only control-plane state crosses the boundary."
+          description="Owned by the customer. The application and sidecar stay here while only control-plane state crosses the boundary."
           items={[
             "Your Python / Node.js App",
-            "VectorBea Proxy",
+            "VectorBea Sidecar",
             "Optional Outbound Agent",
           ]}
         />

@@ -220,13 +220,13 @@ export function ApiKeysClient({ initialKeys }: Props) {
           <Dialog open={open} onOpenChange={setOpen}>
             <Button onClick={() => setOpen(true)}>
               <Plus className="h-4 w-4" />
-              Create API Key
+              New API key
             </Button>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create API key</DialogTitle>
                 <DialogDescription>
-                  Keys are shown once. Copy and store them in your secret manager before closing the dialog.
+                  Keys are shown once. Store it in your secrets manager before closing.
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -284,12 +284,12 @@ export function ApiKeysClient({ initialKeys }: Props) {
                   <Input
                     value={keyName}
                     onChange={(event) => setKeyName(event.target.value)}
-                    placeholder="production-agent"
+                    placeholder="e.g. production-sidecar"
                     autoFocus
                     className="h-10"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Use this name in your client config - fetch by name, no need to recreate keys.
+                    Use this to identify the key in audit logs and your sidecar config.
                   </p>
                 </div>
                 {activeWorkspace && (
@@ -324,10 +324,10 @@ export function ApiKeysClient({ initialKeys }: Props) {
           <CardHeader>
             <div className="flex items-center gap-2">
               <ShieldAlert className="h-5 w-5 text-primary" />
-              <CardTitle>Your new API key</CardTitle>
+              <CardTitle>Save your new API key</CardTitle>
             </div>
             <CardDescription>
-              Copy this key now. For security, it won&apos;t be shown again after you dismiss this banner.
+              This key will not be shown again. Copy it into your sidecar config or secrets manager before dismissing.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -364,7 +364,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
               </div>
               <p className="text-sm font-medium text-muted-foreground">No API keys yet</p>
               <p className="mt-1 text-xs text-muted-foreground/70">
-                Create a key to authenticate the VectorBea proxy and SDKs.
+                Create a key to authenticate the sidecar and SDKs.
               </p>
             </div>
           ) : (
@@ -372,7 +372,7 @@ export function ApiKeysClient({ initialKeys }: Props) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Agent / Name</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead>Key</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>

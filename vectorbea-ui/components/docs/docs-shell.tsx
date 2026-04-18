@@ -25,25 +25,25 @@ const DOCS_NAV: Array<{
     href: "/docs",
     title: "Introduction",
     description:
-      "What VectorBea is and how the platform is split between cloud control and local execution.",
+      "What VectorBea is — a docker-native prompt and AI settings registry where your data never leaves your infra.",
     icon: BookOpenText,
   },
   {
     href: "/docs/quickstart",
     title: "Quickstart",
-    description: "Fetch a published prompt from the hosted backend using the Python SDK.",
+    description: "Pull the sidecar, publish a prompt, and fetch it with the Python or Node.js SDK in 15 minutes.",
     icon: Rocket,
   },
   {
     href: "/docs/architecture",
     title: "Architecture",
-    description: "Understand the hosted control plane, local proxy, and isolation boundary.",
+    description: "How the cloud control plane and your local sidecar cooperate — and what stays inside your network.",
     icon: Boxes,
   },
   {
     href: "/docs/enterprise",
     title: "Enterprise",
-    description: "RBAC, project isolation, row-level security, and per-seat billing.",
+    description: "RBAC, workspace isolation, database-enforced row-level security, and per-seat billing.",
     icon: Building2,
   },
 ];

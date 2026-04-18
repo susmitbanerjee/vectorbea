@@ -157,12 +157,12 @@ export function DashboardOverview({
   }> = [
     {
       label: "Publish status",
-      value: filteredLogs.length > 0 ? "Healthy" : "No writes yet",
+      value: filteredLogs.length > 0 ? "Healthy" : "No activity yet",
       icon: <CheckCircle2 className="h-4 w-4 text-muted-foreground" />,
       variant: filteredLogs.length > 0 ? "success" : "secondary",
     },
     {
-      label: "Recent log rows",
+      label: "Recent audit events",
       value: filteredLogs.length.toString(),
       icon: <Layers className="h-4 w-4 text-muted-foreground" />,
       variant: "outline",
@@ -187,7 +187,7 @@ export function DashboardOverview({
     <div className="min-h-screen">
       <AppHeader
         title="Dashboard"
-        subtitle="Observe prompt traffic, latency, and agent activity across your workspace."
+        subtitle="Sidecar requests, latency, and prompt usage for this workspace."
         actions={
           <>
             <Button
@@ -207,7 +207,7 @@ export function DashboardOverview({
               Export JSON
             </a>
             <a href={workspaceId ? `/prompts?org=${workspaceId}` : "/prompts"} className={cn(buttonVariants())}>
-              New Release
+              Publish prompt
             </a>
           </>
         }
@@ -216,20 +216,20 @@ export function DashboardOverview({
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <MetricCard
-            label="API Calls (24h)"
+            label="Requests (24h)"
             value={dashboardSummary.totalApiCallsLast24h}
             icon={<Activity className="h-5 w-5" />}
             staggerIndex={0}
           />
           <MetricCard
-            label="Avg Proxy Latency"
+            label="Avg latency"
             value={dashboardSummary.averageLatencyMs}
             suffix=" ms"
             icon={<Zap className="h-5 w-5" />}
             staggerIndex={1}
           />
           <MetricCard
-            label="Active Agents"
+            label="Active sidecars"
             value={dashboardSummary.activeAgents}
             icon={<Bot className="h-5 w-5" />}
             staggerIndex={2}
@@ -242,8 +242,8 @@ export function DashboardOverview({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="space-y-1.5">
-                  <CardTitle>Release Signals</CardTitle>
-                  <CardDescription>Derived from recent audit activity.</CardDescription>
+                  <CardTitle>Workspace signals</CardTitle>
+                  <CardDescription>Derived from recent audit events.</CardDescription>
                 </div>
                 <Badge variant="outline">Live</Badge>
               </div>

@@ -39,7 +39,7 @@ const tiers: Tier[] = [
       "10,000 proxied calls / month",
       "30-day audit log retention",
       "Community Discord support",
-      "Self-host the proxy sidecar",
+      "Self-host the sidecar",
     ],
   },
   {

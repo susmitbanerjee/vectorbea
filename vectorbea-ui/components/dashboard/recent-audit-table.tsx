@@ -121,7 +121,7 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
                   <TableHead>Time</TableHead>
                   <TableHead>Prompt</TableHead>
                   <TableHead>Version</TableHead>
-                  <TableHead>VectorBea Latency</TableHead>
+                  <TableHead>Sidecar latency</TableHead>
                   <TableHead>LLM Latency</TableHead>
                   <TableHead className="text-right">Tokens</TableHead>
                 </TableRow>

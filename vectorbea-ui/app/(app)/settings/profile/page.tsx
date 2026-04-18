@@ -11,7 +11,7 @@ export default function ProfilePage() {
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
       <AppHeader
         title="Profile"
-        subtitle="Your account details and workspace role."
+        subtitle="Your identity and role within this workspace."
       />
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -22,7 +22,7 @@ export default function ProfilePage() {
               <CardTitle>Account</CardTitle>
             </div>
             <CardDescription>
-              Identity information pulled from your authentication provider.
+              Your name and email come from your OAuth provider — we don&apos;t store them separately.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -39,7 +39,7 @@ export default function ProfilePage() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Profile editing will be available after SSO / OAuth integration ships.
+              To update your name or email, change them with your OAuth provider.
             </p>
           </CardContent>
         </Card>
@@ -63,7 +63,7 @@ export default function ProfilePage() {
               {
                 label: "Plan",
                 value: "Free",
-                description: "Upgrade to unlock higher request limits and team seats.",
+                description: "Upgrade from Settings → Billing to unlock more seats and higher limits.",
                 variant: "outline" as const,
               },
             ].map((row) => (

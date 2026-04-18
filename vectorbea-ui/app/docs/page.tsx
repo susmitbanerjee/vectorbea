@@ -1,9 +1,9 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { ArrowRight, Cloud, Cpu, GitBranch, Shield, Zap } from "lucide-react";
+import { ArrowRight, Cloud, Container, GitBranch, Lock, Zap } from "lucide-react";
 
 export const metadata = {
-  title: "Introduction - VectorBea Docs",
+  title: "Introduction — VectorBea Docs",
 };
 
 export default function DocsIntroPage() {
@@ -14,31 +14,38 @@ export default function DocsIntroPage() {
           Introduction
         </p>
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-          Govern prompts centrally. Run your application locally.
+          Version and govern prompts centrally.{" "}
+          <span className="text-muted-foreground">Your data never leaves your infra.</span>
         </h1>
         <p className="text-lg leading-8 text-muted-foreground">
-          VectorBea gives you a hosted control plane for prompts, publishing,
-          RBAC, and audit visibility, plus a local proxy you can run inside
-          your own environment. Your code keeps talking to a local endpoint
-          while prompt operations move into a managed system.
+          VectorBea is a docker-native prompt and AI settings repository. The
+          cloud UI is a control plane only — it manages prompts, access, and
+          visibility. Every inference, secret, and audit event stays inside your
+          own containers via a lightweight sidecar you run alongside your
+          services.
         </p>
       </section>
 
       <section className="rounded-2xl border border-border/60 bg-card/60 p-6">
         <div className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-            Who These Docs Are For
+            Who these docs are for
           </p>
           <p className="text-sm leading-7 text-muted-foreground">
             These docs are written for an engineer integrating VectorBea into an
             existing application. You do not need this repository checked out.
-            The normal path is:
+            The standard path is:
           </p>
           <ol className="list-decimal space-y-2 pl-5 text-sm leading-7 text-muted-foreground">
             <li>Create a workspace and API key in the VectorBea dashboard.</li>
-            <li>Create and publish a prompt in the dashboard.</li>
-            <li>Register a deployment agent and copy its token.</li>
-            <li>Call the hosted backend from your own Python, Node.js, or JVM service.</li>
+            <li>Create and publish a prompt.</li>
+            <li>Register a sidecar and copy its token.</li>
+            <li>
+              Pull the docker image and run the sidecar next to your service.
+            </li>
+            <li>
+              Call the sidecar from your Python, Node.js, or any HTTP client.
+            </li>
           </ol>
         </div>
       </section>
@@ -52,22 +59,22 @@ export default function DocsIntroPage() {
             {
               icon: Cloud,
               title: "Cloud control plane",
-              body: "Manage prompts, publication state, access controls, and usage visibility from a single hosted surface.",
+              body: "Manage prompts, publication state, access controls, and usage visibility from a single hosted surface. No prompt data is stored here.",
             },
             {
-              icon: Cpu,
-              title: "Local Kotlin proxy",
-              body: "Run a lightweight Docker container in your environment and expose a stable local API to your application.",
+              icon: Container,
+              title: "Docker-native sidecar",
+              body: "Pull one image, run it next to your service, and expose a stable local API. Prompts and settings sync from the control plane automatically.",
             },
             {
-              icon: Shield,
-              title: "Enterprise governance",
-              body: "Keep prompt ownership, project isolation, and billing controls out of ad hoc application code.",
+              icon: Lock,
+              title: "Zero data residency",
+              body: "VectorBea Cloud stores no inference data, no prompt content, and no secrets. Everything that matters to your business stays in your environment.",
             },
             {
               icon: GitBranch,
               title: "Versioned prompt registry",
-              body: "Publish approved prompt versions intentionally instead of hot-patching strings across services.",
+              body: "Draft, review, and publish prompt versions with the same rigour as source control. Roll back any version with one click.",
             },
           ].map(({ icon: Icon, title, body }) => (
             <div
@@ -86,18 +93,20 @@ export default function DocsIntroPage() {
 
       <section className="space-y-4">
         <h2 className="border-t border-border/60 pt-8 text-2xl font-semibold tracking-tight">
-          How teams usually integrate it
+          How teams integrate it
         </h2>
         <p className="leading-7 text-muted-foreground">
-          VectorBea is designed to fit around an existing codebase. The usual
-          rollout is not &quot;fork our repo and build our app.&quot; It is:
+          VectorBea fits around an existing codebase. You do not rebuild your
+          application around it — you add a sidecar and replace hardcoded prompt
+          strings with local API calls. The typical rollout looks like this:
         </p>
         <ul className="space-y-3 pl-5">
           {[
-            "Create prompts and publish versions in the VectorBea dashboard.",
-            "Call the hosted backend first so you can validate prompt resolution from your own codebase quickly.",
-            "Use the local proxy later when you are explicitly testing the proxy runtime itself.",
-            "Send execution traces back through the proxy so the dashboard can show audit and latency data.",
+            "Create prompts in the dashboard and publish the versions you want active.",
+            "Run the sidecar locally first so you can validate prompt resolution quickly.",
+            "Point your application at the sidecar — it exposes a stable REST endpoint at localhost:8080.",
+            "Send execution traces back through the sidecar so the dashboard shows latency and audit data.",
+            "In production, deploy the same docker image as a sidecar container alongside your service.",
           ].map((item) => (
             <li
               key={item}
@@ -115,7 +124,8 @@ export default function DocsIntroPage() {
           Platform model
         </h2>
         <p className="leading-7 text-muted-foreground">
-          The platform is easiest to understand as two cooperating layers:
+          The platform is two cooperating layers with a clean boundary between
+          them:
         </p>
 
         <div className="overflow-hidden rounded-2xl border border-border/60">
@@ -123,7 +133,8 @@ export default function DocsIntroPage() {
             <thead className="bg-muted/50">
               <tr>
                 <th className="px-5 py-3 text-left font-semibold">Layer</th>
-                <th className="px-5 py-3 text-left font-semibold">Purpose</th>
+                <th className="px-5 py-3 text-left font-semibold">What it manages</th>
+                <th className="px-5 py-3 text-left font-semibold">Where it runs</th>
               </tr>
             </thead>
             <tbody>
@@ -131,24 +142,28 @@ export default function DocsIntroPage() {
                 <td className="whitespace-nowrap px-5 py-4 align-top font-medium">
                   <span className="inline-flex items-center gap-1.5">
                     <Cloud className="h-3.5 w-3.5 text-primary" />
-                    Control Plane
+                    Control plane
                   </span>
                 </td>
                 <td className="px-5 py-4 leading-6 text-muted-foreground">
-                  Stores organizations, workspaces, prompts, RBAC state,
-                  publication metadata, audit records, and billing information.
+                  Workspaces, prompts, RBAC, publication metadata, audit records, billing
+                </td>
+                <td className="px-5 py-4 leading-6 text-muted-foreground">
+                  VectorBea Cloud
                 </td>
               </tr>
               <tr className="border-t border-border/60">
                 <td className="whitespace-nowrap px-5 py-4 align-top font-medium">
                   <span className="inline-flex items-center gap-1.5">
                     <Zap className="h-3.5 w-3.5 text-primary" />
-                    Data Plane
+                    Data plane
                   </span>
                 </td>
                 <td className="px-5 py-4 leading-6 text-muted-foreground">
-                  Runs the VectorBea proxy near the customer workload and gives
-                  your own service a stable local API to call.
+                  Inference calls, prompt resolution, audit events, secrets
+                </td>
+                <td className="px-5 py-4 leading-6 text-muted-foreground">
+                  Your infrastructure
                 </td>
               </tr>
             </tbody>
@@ -157,13 +172,13 @@ export default function DocsIntroPage() {
 
         <div className="space-y-3 rounded-2xl border border-primary/20 bg-primary/5 p-5">
           <p className="text-sm font-semibold">
-            The practical split looks like this:
+            The practical split in one sentence each:
           </p>
           <ul className="space-y-2">
             {[
-              ["The cloud decides", "what prompt versions and policies are active."],
-              ["The local proxy decides", "what your application receives at runtime."],
-              ["Your application stays in control", "of the actual model call and business logic."],
+              ["The cloud decides", "which prompt versions and access policies are active."],
+              ["The sidecar decides", "what your application receives at runtime."],
+              ["Your application keeps control", "of the actual model call and all business logic."],
             ].map(([strong, rest]) => (
               <li
                 key={strong}
@@ -189,17 +204,17 @@ export default function DocsIntroPage() {
             {
               href: "/docs/quickstart" as Route,
               label: "Quickstart",
-              desc: "Use the hosted backend and Python SDK for the fastest first test",
+              desc: "Pull the sidecar and fetch your first prompt in 15 minutes",
             },
             {
               href: "/docs/architecture" as Route,
               label: "Architecture",
-              desc: "Control-plane vs. data-plane and network boundaries",
+              desc: "Control plane vs. data plane, network boundaries, and the sidecar model",
             },
             {
               href: "/docs/enterprise" as Route,
               label: "Enterprise",
-              desc: "RBAC, isolation, and billing",
+              desc: "RBAC, workspace isolation, and per-seat billing",
             },
           ].map(({ href, label, desc }) => (
             <Link

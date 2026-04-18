@@ -117,15 +117,15 @@ export function CreatePromptDialog({
       <DialogTrigger asChild>
         <Button>
           <Plus className="h-4 w-4" />
-          Create Prompt
+          New prompt
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create prompt</DialogTitle>
+          <DialogTitle>New prompt</DialogTitle>
           <DialogDescription>
-            A new prompt will be initialized with a starter template and default
-            model parameters.
+            Give it a name and optional description. You can add versions and
+            publish after creation.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -169,7 +169,7 @@ export function CreatePromptDialog({
             </Button>
             <Button type="submit" disabled={isPending || !nameValid}>
               {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isPending ? "Creating..." : "Create Prompt"}
+              {isPending ? "Creating..." : "Create prompt"}
             </Button>
           </div>
         </form>

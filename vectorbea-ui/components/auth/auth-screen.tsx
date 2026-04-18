@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
 import {
@@ -30,9 +30,9 @@ export function AuthScreen({
   const rawError = searchParams.get("error");
   const [error, setError] = useState<string | null>(
     rawError === "oauth" || rawError === "callback_failed"
-      ? "Authentication failed. Please try again."
+      ? "Sign-in failed. Please try again or use a different provider."
       : rawError === "session_expired"
-      ? "You were signed in on another device. Please sign in again."
+      ? "Your session expired. Please sign in again."
       : rawError ?? null,
   );
   const [providerLoading, setProviderLoading] = useState<
@@ -53,7 +53,6 @@ export function AuthScreen({
 
         const payload = (await response.json()) as { redirectTo?: string };
         if (!cancelled && payload.redirectTo) {
-          // Only use `next` if it's a meaningful app path, not the root.
           const destination = (next && next !== "/") ? next : payload.redirectTo;
           window.location.assign(destination);
         }
@@ -77,9 +76,6 @@ export function AuthScreen({
   const callbackNext = next || searchParams.get("next") || undefined;
 
   function buildRedirectUrl() {
-    // Points to our own domain's server-side PKCE exchange handler.
-    // This is what gets registered as the redirect URI in Google, Microsoft,
-    // and GitHub — so the consent screen shows vectorbea.com, not supabase.co.
     const redirectUrl = new URL("/api/auth/callback", window.location.origin);
     if (callbackNext) {
       redirectUrl.searchParams.set("next", callbackNext);
@@ -92,10 +88,6 @@ export function AuthScreen({
     setError(null);
 
     try {
-      // Google and Microsoft use our own domain routes — the consent screen
-      // shows "vectorbea.com" instead of "supabase.co".
-      // GitHub does not support id_token / OIDC so it still uses Supabase's
-      // built-in OAuth flow (will show supabase.co until a custom domain is set).
       if (provider === "google") {
         const url = new URL("/api/auth/google", window.location.origin);
         if (callbackNext) url.searchParams.set("next", callbackNext);
@@ -110,7 +102,6 @@ export function AuthScreen({
         return;
       }
 
-      // GitHub — Supabase built-in flow
       const supabase = getSupabaseBrowserClient();
       const redirectUrl = buildRedirectUrl();
 
@@ -128,7 +119,7 @@ export function AuthScreen({
       setError(
         submissionError instanceof Error
           ? submissionError.message
-          : "Authentication failed.",
+          : "Sign-in failed. Please try again or use a different provider.",
       );
       setProviderLoading(null);
     }
@@ -139,7 +130,7 @@ export function AuthScreen({
     const domain = normalizedEmail.split("@")[1]?.trim();
 
     if (!domain) {
-      setError("Enter your work email to continue with enterprise SSO.");
+      setError("Enter a valid work email to continue with SSO.");
       return;
     }
 
@@ -163,7 +154,7 @@ export function AuthScreen({
       setError(
         submissionError instanceof Error
           ? submissionError.message
-          : "Enterprise SSO failed.",
+          : "SSO failed. Check with your IT admin that the provider is configured, then try again.",
       );
       setProviderLoading(null);
     }
@@ -172,9 +163,13 @@ export function AuthScreen({
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="grid min-h-screen lg:grid-cols-2">
+
+        {/* ── Left panel — brand & trust ──────────────────────────────── */}
         <section className="relative hidden border-r border-border/80 bg-muted/30 lg:flex">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,128,255,0.14),transparent_42%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.1),transparent_42%)]" />
           <div className="relative flex w-full flex-col justify-between px-12 py-10 xl:px-16 xl:py-12">
+
+            {/* Logo row */}
             <div className="flex items-center justify-between">
               <Link href="/" className="inline-flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border/80 bg-card shadow-sm">
@@ -182,50 +177,56 @@ export function AuthScreen({
                 </div>
                 <div>
                   <p className="text-sm font-semibold tracking-tight">VectorBea</p>
-                  <p className="text-xs text-muted-foreground">Enterprise prompt operations</p>
+                  <p className="text-xs text-muted-foreground">Prompt &amp; AI settings registry</p>
                 </div>
               </Link>
               <ThemeToggle />
             </div>
 
+            {/* Main copy */}
             <div className="max-w-xl space-y-8">
               <div className="space-y-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">
-                  Govern prompts. Keep execution local.
+                  Privacy-first prompt governance
                 </p>
                 <h1 className="text-5xl font-semibold tracking-tight text-foreground xl:text-6xl">
-                  The control plane your AI stack has been missing.
+                  Your prompts live in the cloud.{" "}
+                  <span className="text-muted-foreground">
+                    Your data lives in your infra.
+                  </span>
                 </h1>
                 <p className="text-lg leading-8 text-muted-foreground">
-                  VectorBea gives teams a clean place to manage prompts, routing,
-                  billing, and telemetry while agents and model calls continue to
-                  run inside the customer environment.
+                  VectorBea is a docker-native prompt and AI settings registry.
+                  The control plane is cloud-hosted — every inference, secret,
+                  and audit event stays inside your own containers.
                 </p>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              {/* Trust checklist */}
+              <div className="grid gap-3 sm:grid-cols-2">
                 {[
-                  "Authentication happens before workspace creation.",
-                  "Free plan onboarding is immediate and self-serve.",
-                  "Projects stay isolated through role-aware boundaries.",
-                  "Control plane syncs over outbound HTTPS only.",
+                  "Sign in once — your workspace is ready immediately after.",
+                  "Free plan, no credit card required.",
+                  "Workspace isolation enforced across the UI and API.",
+                  "Sidecar communicates over outbound HTTPS only — no inbound ports.",
                 ].map((item) => (
                   <div
                     key={item}
                     className="flex items-start gap-3 rounded-2xl border border-border/70 bg-card/90 p-4"
                   >
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-brand" />
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
                     <p className="text-sm leading-6 text-muted-foreground">{item}</p>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* Stats row */}
             <div className="grid gap-4 sm:grid-cols-3">
               {[
-                ["1 identity flow", "Google, Microsoft, GitHub, or enterprise SSO first."],
-                ["2 surfaces", "Control plane in cloud, execution in customer infra."],
-                ["0 ambiguity", "Clear next steps for onboarding, billing, and dashboard access."],
+                ["1 identity flow", "Sign in with Google, GitHub, Microsoft, or enterprise SSO."],
+                ["2 surfaces", "Cloud control plane. Local data plane. Fully separate."],
+                ["0 data residency", "VectorBea Cloud holds no inference data, logs, or secrets."],
               ].map(([title, body]) => (
                 <div
                   key={title}
@@ -239,32 +240,37 @@ export function AuthScreen({
           </div>
         </section>
 
+        {/* ── Right panel — auth form ──────────────────────────────────── */}
         <section className="flex min-h-screen items-center justify-center px-4 py-8 sm:px-8 lg:px-12 xl:px-16">
           <div className="w-full max-w-xl">
+
+            {/* Mobile logo (hidden on desktop) */}
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Link href="/" className="inline-flex items-center gap-3">
                 <BeeLogo className="h-9 w-9" />
                 <div>
                   <p className="text-sm font-semibold">VectorBea</p>
-                  <p className="text-xs text-muted-foreground">Authentication</p>
+                  <p className="text-xs text-muted-foreground">Prompt &amp; AI settings registry</p>
                 </div>
               </Link>
               <ThemeToggle />
             </div>
 
             <div className="rounded-[2rem] border border-border/80 bg-card/98 p-8 shadow-[0_28px_90px_-56px_rgba(15,23,42,0.42)] sm:p-10">
+
+              {/* Form header */}
               <div className="flex items-center justify-between gap-4">
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">
                     {mode === "signin" ? "Sign in" : "Create account"}
                   </p>
                   <h2 className="text-3xl font-semibold tracking-tight text-foreground">
-                    {mode === "signin" ? "Welcome back" : "Create an account"}
+                    {mode === "signin" ? "Welcome back" : "Get started"}
                   </h2>
                   <p className="max-w-md text-sm leading-7 text-muted-foreground">
                     {mode === "signin"
-                      ? "Use your provider account and we will route you back into the correct workspace automatically."
-                      : "Start with your provider or enterprise SSO and we will capture your identity, persist your profile, and send you straight into onboarding."}
+                      ? "Pick your provider and you'll land straight in your workspace."
+                      : "Sign in with your provider and we'll take you straight to workspace setup. No forms."}
                   </p>
                 </div>
                 <Link
@@ -275,6 +281,7 @@ export function AuthScreen({
                 </Link>
               </div>
 
+              {/* Providers */}
               <div className="mt-8 space-y-4">
                 {error ? (
                   <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -337,6 +344,7 @@ export function AuthScreen({
                 </Button>
               </div>
 
+              {/* Enterprise SSO */}
               <div className="mt-6 rounded-2xl border border-border/70 bg-muted/30 p-4">
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border border-border/70 bg-background text-muted-foreground">
@@ -346,8 +354,8 @@ export function AuthScreen({
                     <div>
                       <p className="text-sm font-medium text-foreground">Enterprise SSO</p>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        Use your verified work email and we will route you through your
-                        organization&apos;s SAML or OIDC identity provider when configured.
+                        Enter your work email and we&apos;ll route you through your
+                        organization&apos;s identity provider.
                       </p>
                     </div>
                     <div className="flex flex-col gap-3 sm:flex-row">
@@ -373,12 +381,14 @@ export function AuthScreen({
                 </div>
               </div>
 
+              {/* Privacy notice */}
               <div className="mt-6 rounded-2xl border border-border/70 bg-muted/20 px-4 py-4 text-sm leading-6 text-muted-foreground">
-                We capture your full name and email from the provider so your
-                profile, billing flow, and workspace onboarding stay in sync from
-                the first session.
+                We only use your name and email to set up your profile and
+                workspace. We don&apos;t store inference data, prompt content,
+                or secrets.
               </div>
 
+              {/* Mobile alternate link */}
               <div className="mt-6 sm:hidden">
                 <Link
                   href={alternateHref}
@@ -390,6 +400,7 @@ export function AuthScreen({
             </div>
           </div>
         </section>
+
       </div>
     </div>
   );

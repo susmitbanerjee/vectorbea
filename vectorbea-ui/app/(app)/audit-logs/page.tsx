@@ -268,15 +268,15 @@ export default async function AuditLogsPage({
     <div className="min-h-full">
       <AppHeader
         title="Audit Logs"
-        subtitle="Execution traces, ingestion health, and route-level observability."
+        subtitle="Every prompt call your sidecar handled — timestamped, attributed, and scored."
       />
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
 
         {/* ── Stats ── */}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 animate-fade-in">
           {[
-            { label: "Total Entries", value: stats.total.toLocaleString(), icon: Activity },
-            { label: "Avg VectorBea Latency", value: formatProxyLatency(stats.avgProxyLatency), icon: Zap },
+            { label: "Total events", value: stats.total.toLocaleString(), icon: Activity },
+            { label: "Avg sidecar latency", value: formatProxyLatency(stats.avgProxyLatency), icon: Zap },
             { label: "Avg LLM Latency", value: `${stats.avgLlmLatency} ms`, icon: Clock },
             { label: "Most Active Prompt", value: stats.mostActivePrompt, icon: FileText },
           ].map((stat) => (
@@ -323,9 +323,9 @@ export default async function AuditLogsPage({
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 mb-4">
                   <Activity className="h-7 w-7 text-muted-foreground/60" />
                 </div>
-                <p className="text-sm font-medium text-muted-foreground">No audit logs found</p>
+                <p className="text-sm font-medium text-muted-foreground">No audit events yet</p>
                 <p className="mt-1 text-xs text-muted-foreground/70">
-                  {isSearching ? "Try a different search term." : "Events will appear here once prompts are executed."}
+                  {isSearching ? "Try a different search term." : "Sidecar calls will appear here once your sidecar is connected and handling requests."}
                 </p>
               </div>
             ) : (
@@ -337,7 +337,7 @@ export default async function AuditLogsPage({
                         <TableHead>Time</TableHead>
                         <TableHead>Prompt</TableHead>
                         <TableHead>Version</TableHead>
-                        <TableHead>VectorBea Latency</TableHead>
+                        <TableHead>Sidecar latency</TableHead>
                         <TableHead>LLM Latency</TableHead>
                         <TableHead>Tokens</TableHead>
                         <TableHead>Details</TableHead>

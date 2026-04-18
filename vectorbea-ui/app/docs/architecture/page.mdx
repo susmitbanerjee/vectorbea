@@ -1,84 +1,90 @@
 export const metadata = {
-  title: "Architecture",
+  title: "Architecture — VectorBea Docs",
 };
 
 import { ArchitectureDiagram } from "@/components/docs/architecture-diagram";
 
 # Architecture
 
-VectorBea is designed so that the hosted platform manages prompt governance,
+VectorBea is designed so that the hosted platform manages prompt governance
 while your application keeps running in your own environment. The intended
-consumer of this architecture is not a developer working inside the VectorBea
-repository. It is a team with its own codebase that wants to:
+consumer is not a developer working inside this repository. It is a team with
+its own codebase that wants to:
 
-- manage prompts centrally
-- run a local proxy in Docker or Kubernetes
-- keep model traffic and business logic inside its own network
+- version and govern prompts centrally
+- run a sidecar container in Docker or Kubernetes
+- keep model traffic, secrets, and business logic inside its own network
 
 ## Two-plane model
 
-The platform is intentionally split into a **control plane** and a **data plane**.
+The platform is split into a **control plane** and a **data plane**. These
+two layers cooperate but remain fully separate.
 
 The **control plane** is hosted by VectorBea. It includes:
 
-- the web dashboard
+- the web dashboard (your UI)
 - API routes for prompt and audit operations
-- Supabase-backed storage for prompts, access control, and billing state
+- cloud storage for workspaces, access control, publication metadata, and billing
 
-The **data plane** runs in the customer environment. In the most common
-integration, that means:
+**The control plane stores no inference data, no prompt content at runtime,
+and no secrets.** Its job is governance, not execution.
 
-- your own Python, Node.js, or JVM application
-- a local VectorBea proxy container pulled from Docker Hub
-- optionally, an outbound agent for heartbeat and state sync
+The **data plane** runs in your environment. In the most common integration
+that means:
+
+- your own Python, Node.js, or any HTTP-capable application
+- a VectorBea sidecar container pulled from Docker Hub
+- outbound heartbeats to keep the control plane informed of sidecar health
 
 ## System boundary
 
 <ArchitectureDiagram />
 
-## What the local proxy actually does
+## What the sidecar actually does
 
-The local proxy is the main integration point for customer developers.
-Instead of baking prompt text directly into application code, your service
-calls a local endpoint such as:
+The sidecar is the main integration point for your application. Instead of
+baking prompt text directly into code, your service calls a local endpoint:
 
-- `GET /v1/prompts/{name}` to resolve the latest published prompt
-- `POST /v1/audit` to report prompt usage and latency
+- `GET /v1/prompts/{name}` — resolve the latest published prompt by name
+- `POST /v1/audit` — report prompt usage, latency, and token counts
 
-That lets your team adopt VectorBea without rebuilding your application around
-the hosted control plane.
+This keeps your application decoupled from the hosted control plane. If you
+need to swap prompt versions, you publish a new version in the dashboard —
+your application code does not change.
 
 ## Network model
 
-The customer environment initiates communication to the hosted platform.
-That is important operationally because it avoids inbound firewall exceptions.
+Your environment initiates all communication. There are no inbound connections
+from VectorBea Cloud into your network.
 
-- The proxy authenticates to the control plane with a VectorBea API key.
-- Optional outbound agents send heartbeat data over HTTPS.
-- Your application only talks to the local proxy.
+- The sidecar authenticates to the control plane with its sidecar token on startup.
+- It sends periodic heartbeats over outbound HTTPS (port 443).
+- Your application only ever talks to the sidecar at localhost.
 
-For most teams, that means the first production test can happen without any
-changes to existing network policy beyond allowing outbound HTTPS.
+For most teams this means the first production deployment requires no changes
+to existing network policy beyond allowing outbound HTTPS — which is already
+permitted in virtually every environment.
 
-## Why this model fits external teams
+## Why this model works for external teams
 
-If you are integrating VectorBea into an existing service, the platform model
-looks like this:
+If you are integrating VectorBea into an existing service, the path is:
 
-1. Create prompts and publish versions in the hosted dashboard.
-2. Pull the VectorBea proxy image from Docker Hub.
-3. Run the proxy alongside your own application.
-4. Replace hardcoded prompt strings with local proxy calls.
+1. Create prompts and publish versions in the dashboard.
+2. Pull the VectorBea sidecar image from Docker Hub.
+3. Run the sidecar alongside your application — as a sidecar container in
+   the same pod, or as a separate docker-compose service.
+4. Replace hardcoded prompt strings with sidecar calls.
 
 The result is a clean boundary:
 
-- VectorBea manages governance.
-- Your infrastructure manages execution.
-- Your codebase remains your codebase.
+- VectorBea manages governance and version history.
+- Your infrastructure manages execution and data.
+- Your codebase stays your codebase.
 
 ## Design principle
 
-> Govern centrally. Execute locally.
+> Version and govern prompts centrally. Your data never leaves your infra.
 
-That is the core reason VectorBea works for external application teams rather
-than only for developers working inside this repository.
+That is the core reason VectorBea works for teams with strict data residency
+requirements or network policies that prohibit sending model traffic to
+third-party systems.

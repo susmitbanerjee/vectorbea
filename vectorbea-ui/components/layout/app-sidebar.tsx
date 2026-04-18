@@ -106,7 +106,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         </div>
         <div>
           <p className="text-sm font-semibold tracking-tight">VectorBea</p>
-          <p className="text-[11px] text-muted-foreground">Prompt Registry</p>
+          <p className="text-[11px] text-muted-foreground">Prompt &amp; AI settings registry</p>
         </div>
       </div>
 
@@ -210,7 +210,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           <div className="mb-3 flex items-center gap-2">
             <span className={cn("live-dot", !workspaceSummary && "!bg-red-500")} />
             <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-              System Status
+              Sidecar Status
             </p>
           </div>
           {workspaceSummary ? (
@@ -220,7 +220,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   {workspaceSummary.averageLatencyMs} ms
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  Avg latency · {workspaceSummary.activeAgents} agents
+                  {workspaceSummary.averageLatencyMs} ms avg · {workspaceSummary.activeAgents} sidecars live
                 </p>
               </div>
               <Badge variant="success">Connected</Badge>
@@ -229,9 +229,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xl font-semibold tabular-nums">-</p>
-                <p className="text-[11px] text-muted-foreground">Backend unreachable</p>
+                <p className="text-[11px] text-muted-foreground">No sidecar connected</p>
               </div>
-              <Badge variant="destructive">Offline</Badge>
+              <Badge variant="destructive">Disconnected</Badge>
             </div>
           )}
         </div>

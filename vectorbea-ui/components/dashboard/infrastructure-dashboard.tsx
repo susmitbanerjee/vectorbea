@@ -56,7 +56,7 @@ function agentStatusLabel(lastHeartbeat: string | null): string {
 
 function formatHeartbeat(lastHeartbeat: string | null) {
   if (!lastHeartbeat) {
-    return "Waiting for proxy to connect…";
+    return "Waiting for first heartbeat…";
   }
 
   return new Date(lastHeartbeat).toLocaleString();
@@ -265,7 +265,7 @@ export function InfrastructureDashboard() {
       setSelectedAgentId(payload.agent.id);
       setRevealedToken(payload.token);
       setAgentName("");
-      toast.success("Agent registered. Copy the token before closing.");
+      toast.success("Sidecar registered. Copy the token before closing.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to register deployment agent.");
     } finally {
@@ -295,7 +295,7 @@ export function InfrastructureDashboard() {
         throw new Error(payload.error || "Failed to enqueue sync command.");
       }
 
-      toast.success("Sync command queued. The agent will pick it up on its next heartbeat.");
+      toast.success("Sync queued. The sidecar will pick it up on its next heartbeat.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to enqueue sync command.");
     } finally {
@@ -321,7 +321,7 @@ export function InfrastructureDashboard() {
       // Remove from local state; if deleted agent was selected, clear selection.
       setAgents((current) => current.filter((a) => a.id !== deleteTarget.id));
       if (selectedAgentId === deleteTarget.id) setSelectedAgentId(null);
-      toast.success(`Agent "${deleteTarget.name}" deleted.`);
+      toast.success("Sidecar removed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to delete agent.");
     } finally {
@@ -334,7 +334,7 @@ export function InfrastructureDashboard() {
     <div className="min-h-screen">
       <AppHeader
         title="Infrastructure"
-        subtitle={`Monitor self-hosted agents connected to ${activeWorkspace?.name ?? "this workspace"}.`}
+        subtitle="Sidecars connected to this workspace — heartbeat status, resource usage, and sync controls."
         actions={
           <Button
             type="button"
@@ -344,7 +344,7 @@ export function InfrastructureDashboard() {
             }}
           >
             <ShieldPlus className="h-4 w-4" />
-            Register New Agent
+            Add sidecar
           </Button>
         }
       />
@@ -362,19 +362,19 @@ export function InfrastructureDashboard() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {revealedToken ? "Agent token generated" : "Register a new outbound agent"}
+              {revealedToken ? "Sidecar token generated" : "Add a sidecar"}
             </DialogTitle>
             <DialogDescription>
               {revealedToken
                 ? "This token is only shown once. Copy it now and pass it to your container."
-                : "Create a new agent identity for the current workspace."}
+                : "Create an identity for a new sidecar container."}
             </DialogDescription>
           </DialogHeader>
 
           {revealedToken ? (
             <div className="mt-4 space-y-4">
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <p className="text-sm font-medium">Pass this as `VECTORBEA_AGENT_TOKEN` to your Docker container.</p>
+                <p className="text-sm font-medium">Pass this as `VECTORBEA_KEY` to your sidecar container.</p>
                 <code className="mt-3 block overflow-x-auto rounded-lg bg-slate-950 px-4 py-3 font-mono text-sm text-slate-100">
                   {revealedToken}
                 </code>
@@ -409,7 +409,7 @@ export function InfrastructureDashboard() {
                   htmlFor="agent-name"
                   className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
                 >
-                  Agent name
+                  Sidecar name
                 </label>
                 <Input
                   id="agent-name"
@@ -439,13 +439,13 @@ export function InfrastructureDashboard() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete agent?</DialogTitle>
+            <DialogTitle>Remove sidecar?</DialogTitle>
             <DialogDescription>
               This will permanently remove{" "}
               <span className="font-semibold text-foreground">
                 {deleteTarget?.name}
               </span>{" "}
-              and all its historical heartbeat metrics. The agent&apos;s token will
+              and all its heartbeat history. The sidecar&apos;s token will
               be immediately invalidated. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -465,7 +465,7 @@ export function InfrastructureDashboard() {
               disabled={deleting}
             >
               <Trash2 className="h-4 w-4" />
-              {deleting ? "Deleting…" : "Delete agent"}
+              {deleting ? "Removing…" : "Remove sidecar"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -480,7 +480,7 @@ export function InfrastructureDashboard() {
               </div>
               <div>
                 <p className="text-2xl font-semibold tabular-nums">{agents.length}</p>
-                <p className="text-xs text-muted-foreground">Registered agents</p>
+                <p className="text-xs text-muted-foreground">Registered sidecars</p>
               </div>
             </CardContent>
           </Card>
@@ -502,7 +502,7 @@ export function InfrastructureDashboard() {
               </div>
               <div>
                 <p className="text-2xl font-semibold tabular-nums">{Math.max(agents.length - onlineAgents, 0)}</p>
-                <p className="text-xs text-muted-foreground">Offline or stale agents</p>
+                <p className="text-xs text-muted-foreground">Offline or stale</p>
               </div>
             </CardContent>
           </Card>
@@ -511,16 +511,16 @@ export function InfrastructureDashboard() {
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
           <Card className="animate-slide-up">
             <CardHeader>
-              <CardTitle>Deployment agents</CardTitle>
+              <CardTitle>Sidecars</CardTitle>
               <CardDescription>
-                Agents heartbeat from customer-owned Docker or Kubernetes environments.
+                Sidecars run in your own Docker or Kubernetes environment and heartbeat to the control plane.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Agent</TableHead>
+                    <TableHead>Sidecar</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Last heartbeat</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -530,13 +530,13 @@ export function InfrastructureDashboard() {
                   {loadingAgents ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        Loading agents...
+                        Loading...
                       </TableCell>
                     </TableRow>
                   ) : agents.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        No agents registered yet.
+                        No sidecars registered yet.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -575,7 +575,7 @@ export function InfrastructureDashboard() {
                                 disabled={syncingAgentId === agent.id}
                               >
                                 <RefreshCw className="h-3.5 w-3.5" />
-                                {syncingAgentId === agent.id ? "Queueing..." : "Sync Config"}
+                                {syncingAgentId === agent.id ? "Queueing..." : "Sync config"}
                               </Button>
                               <Button
                                 type="button"
@@ -603,9 +603,9 @@ export function InfrastructureDashboard() {
 
           <Card className="animate-slide-up stagger-1">
             <CardHeader>
-              <CardTitle>Agent details</CardTitle>
+              <CardTitle>Sidecar details</CardTitle>
               <CardDescription>
-                Select an agent to inspect recent heartbeat metrics and replica health.
+                Select a sidecar to inspect its latest heartbeat and resource usage.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -648,7 +648,7 @@ export function InfrastructureDashboard() {
                 </>
               ) : (
                 <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-sm text-muted-foreground">
-                  Register an agent to start receiving infrastructure metrics.
+                  Add a sidecar to start receiving heartbeat and resource metrics.
                 </div>
               )}
             </CardContent>

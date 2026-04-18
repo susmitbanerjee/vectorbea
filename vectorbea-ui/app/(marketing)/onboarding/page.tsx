@@ -175,21 +175,21 @@ export default function OnboardingPage() {
                   VectorBea
                 </p>
                 <CardTitle className="text-2xl font-semibold tracking-tight">
-                  {user?.fullName ? `Welcome, ${user.fullName.split(" ")[0]}` : "Name your workspace"}
+                  Create your first workspace
                 </CardTitle>
               </div>
             </div>
 
             <p className="max-w-md text-sm leading-6 text-muted-foreground">
-              Every account starts on the Free plan. Create your first workspace now
-              and head straight into the dashboard.
+              Every account starts on the free plan — no credit card needed. Name
+              your workspace and you&apos;re in the dashboard in seconds.
             </p>
           </CardHeader>
 
           <CardContent className="space-y-6 px-8 py-8">
             {checkingRoute ? (
               <div className="rounded-2xl border border-border/70 bg-muted/30 px-4 py-5 text-sm text-muted-foreground">
-                Checking your account and workspace status...
+                Checking your account...
               </div>
             ) : (
               <>
@@ -203,7 +203,7 @@ export default function OnboardingPage() {
                   <Input
                     id="workspace-name"
                     autoFocus
-                    placeholder="e.g. Acme AI Platform"
+                    placeholder="e.g. acme-ai-platform"
                     value={workspaceName}
                     onChange={(event) => setWorkspaceName(event.target.value)}
                     onKeyDown={(event) => {
@@ -215,8 +215,7 @@ export default function OnboardingPage() {
                     className="h-12"
                   />
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Free workspaces include 1 seat, 5 prompts, and 100 audit events
-                    each month.
+                    Free plan: 1 seat · 5 prompts · 100 audit events/month
                   </p>
                 </div>
 
@@ -225,19 +224,19 @@ export default function OnboardingPage() {
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                       Prompts
                     </p>
-                    <p className="mt-2 text-lg font-semibold">5 included</p>
+                    <p className="mt-2 text-lg font-semibold">5 prompts</p>
                   </div>
                   <div className="rounded-xl bg-background/70 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                       Audits
                     </p>
-                    <p className="mt-2 text-lg font-semibold">100 / month</p>
+                    <p className="mt-2 text-lg font-semibold">100 events / mo</p>
                   </div>
                   <div className="rounded-xl bg-background/70 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                       Upgrade path
                     </p>
-                    <p className="mt-2 text-lg font-semibold">Team anytime</p>
+                    <p className="mt-2 text-lg font-semibold">Upgrade to Team anytime</p>
                   </div>
                 </div>
 
@@ -251,9 +250,8 @@ export default function OnboardingPage() {
                   <div className="flex items-start gap-3">
                     <Sparkles className="mt-0.5 h-4 w-4 text-primary" />
                     <p className="leading-6">
-                      If you need more than one workspace on Free, we&apos;ll guide
-                      you to the Team billing flow from settings when you&apos;re ready
-                      to upgrade.
+                      Need multiple workspaces? Upgrade to Team from Settings whenever
+                      you&apos;re ready.
                     </p>
                   </div>
                 </div>
@@ -270,7 +268,7 @@ export default function OnboardingPage() {
 
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                   <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                  You can rename your workspace later from settings.
+                  You can rename this workspace anytime in Settings.
                 </div>
               </>
             )}

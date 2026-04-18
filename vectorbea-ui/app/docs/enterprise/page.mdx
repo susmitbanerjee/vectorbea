@@ -1,48 +1,60 @@
 export const metadata = {
-  title: "Enterprise",
+  title: "Enterprise — VectorBea Docs",
 };
 
 # Enterprise
 
-VectorBea is built for organizations that need more than prompt versioning. Enterprise deployments need strict access boundaries, explainable governance, and billing controls that line up with how teams actually operate. That is why the platform is organized around the hierarchy:
+VectorBea is built for organizations that need more than prompt versioning.
+Enterprise deployments need strict access boundaries, explainable governance,
+and billing controls that align with how teams actually operate. That is why
+the platform is organized around the hierarchy:
 
 ```text
-Organization -> Project (Workspace) -> Prompts / Logs
+Organization → Workspace → Prompts / Audit logs
 ```
 
 ## RBAC model
 
-RBAC in VectorBea is scoped to the project where work happens. A user can be an administrator in one project, an editor in another, and have no visibility at all outside the projects where they are explicitly assigned.
+Access control in VectorBea is scoped to the workspace where work happens.
+A user can be an administrator in one workspace, an editor in another, and
+have no visibility at all outside the workspaces where they are explicitly
+assigned.
 
-Typical roles include:
+Typical roles:
 
-- **Admin** for project governance, membership management, and operational settings
-- **Editor** for creating and iterating on prompts inside that project
-- **Viewer** for read-only visibility into prompts, logs, and dashboards
+- **Admin** — workspace governance, membership management, and operational settings
+- **Editor** — creating and iterating on prompts inside that workspace
+- **Viewer** — read-only visibility into prompts, audit logs, and the dashboard
 
-This keeps the permission model close to the work instead of giving every developer broad workspace-wide access by default.
+This keeps the permission model close to the work instead of giving every
+developer broad organization-wide access by default.
 
-## Project isolation
+## Workspace isolation
 
-Every prompt belongs to an isolated project. That is the most important boundary in the enterprise model.
+Every prompt belongs to an isolated workspace. That is the most important
+boundary in the enterprise model.
 
-If a developer is assigned to **Project A**, they can work with the prompts and audit data scoped to **Project A**. They do not gain visibility into **Project B** simply because both projects are under the same organization. Access is not a convention or a UI-only affordance. It is enforced in the persistence layer.
+If a developer is assigned to **Workspace A**, they can work with the prompts
+and audit data scoped to **Workspace A**. They do not gain visibility into
+**Workspace B** simply because both workspaces are under the same organization.
+Access is not a UI-only convention — it is enforced at the persistence layer.
 
-## Database-enforced isolation with RLS
+## Database-enforced isolation with row-level security
 
-VectorBea uses database-level **Row Level Security (RLS)** to make project isolation real.
+VectorBea uses database-level **row-level security (RLS)** to make workspace
+isolation real.
 
 That means:
 
-- Prompt rows are filtered based on the authenticated user&apos;s active membership in the matching project.
+- Prompt rows are filtered based on the authenticated user's active membership in the matching workspace.
 - Audit log rows are filtered the same way.
-- Insert, update, read, and delete operations are all checked against project membership, not just the frontend.
+- Insert, update, read, and delete operations are all checked against workspace membership — not just the frontend.
 
-For enterprise CTOs and security teams, this matters because it changes the trust model:
+For security teams and CTOs, this matters because it changes the trust model:
 
-- A developer in **Project A** physically cannot query or mutate the prompts of **Project B** if they are not mapped in the `project_members` table.
+- A developer in **Workspace A** physically cannot query or mutate the prompts of **Workspace B** unless they are in that workspace's member table.
 - The application server is not the only line of defense.
-- Data isolation survives UI bugs, accidental overfetching, or incomplete client-side checks because the database itself rejects unauthorized access.
+- Isolation survives UI bugs, accidental overfetching, and incomplete client-side checks because the database itself rejects unauthorized access.
 
 ## What this means in practice
 
@@ -52,43 +64,49 @@ Suppose the same organization has three teams:
 - Customer Support Automation
 - Internal Developer Tools
 
-Each team can have its own project with its own prompts, runtime logs, access rules, and local proxy deployment. A support engineer can be an editor in Support Automation without inheriting access to Payments prompts. A platform admin can manage seats at the organization level without automatically editing every project prompt.
+Each team can have its own workspace with its own prompts, audit logs, access
+rules, and local sidecar deployment. A support engineer can be an editor in
+Customer Support Automation without inheriting access to the Payments workspace.
+A platform admin can manage seats at the organization level without
+automatically editing every team's prompts.
 
 ## Per-seat billing
 
-Enterprise billing is aligned to active developers instead of abstract infrastructure units.
+Enterprise billing is aligned to active developers, not abstract
+infrastructure units.
 
 At the organization layer, VectorBea tracks:
 
-- The customer and subscription identifier from the billing provider
-- The plan tier
-- The maximum number of paid seats
-- The current active user count across projects
+- The plan tier and maximum seat count
+- The current active member count across workspaces
 
-That lets the platform enforce seat limits before new project members are invited. In other words, billing is not only a finance workflow. It becomes an operational guardrail tied directly to access management.
+This lets the platform enforce seat limits before new workspace members are
+invited. Billing is not only a finance workflow — it becomes an operational
+guardrail tied directly to access management.
 
-## Why CTOs care
+## Why enterprise teams choose VectorBea
 
-Enterprise leaders usually need answers to three questions:
+Enterprise leaders typically need answers to three questions:
 
-1. Can one team accidentally see another team&apos;s prompts?
+1. Can one team accidentally see another team's prompts?
 2. Can access be governed centrally without slowing teams down?
 3. Can billing and seat allocation reflect real developer usage?
 
 VectorBea answers those with:
 
 - Organization-level administration
-- Project-level prompt isolation
-- Database-enforced RLS
+- Workspace-level prompt isolation
+- Database-enforced row-level security
 - Membership-aware seat enforcement
-- A local execution model that keeps runtime traffic in the customer environment
+- A local sidecar model that keeps runtime traffic inside your network — not VectorBea's
 
 ## Recommended operating model
 
 - Create one organization per business entity or tenant boundary.
-- Create one project per team, environment, or risk boundary.
-- Assign developers only to the projects they actively work in.
-- Run the local proxy close to each project&apos;s workloads.
+- Create one workspace per team, environment, or risk boundary.
+- Assign developers only to the workspaces they actively work in.
+- Run the sidecar close to each workspace's services.
 - Use published prompts and RBAC approvals as the path to production.
 
-That combination gives teams autonomy inside their own project while preserving the control and auditability enterprise buyers expect.
+That combination gives teams autonomy inside their own workspace while
+preserving the control and auditability enterprise buyers expect.
