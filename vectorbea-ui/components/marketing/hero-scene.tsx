@@ -7,8 +7,11 @@ import {
   ArrowRight,
   Bot,
   CheckCircle2,
+  Globe2,
+  KeyRound,
   Lock,
   Radar,
+  ScrollText,
   ShieldCheck,
   Sparkles,
   Workflow,
@@ -16,7 +19,7 @@ import {
 } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
+import { coreTrustSignals } from "@/components/ui/trust-bar";
 import { cn } from "@/lib/utils";
 
 const posters = [
@@ -110,13 +113,33 @@ function fadeUp(delay = 0) {
   };
 }
 
+const signalIcons = {
+  soc2: ShieldCheck,
+  sso: KeyRound,
+  audit: ScrollText,
+  encryption: Lock,
+  residency: Globe2,
+  hipaa: ShieldCheck,
+  gdpr: Globe2,
+  iso27001: ShieldCheck,
+} as const;
+
 export function MarketingHero() {
   const [activePoster, setActivePoster] = useState(0);
+  const [activeSignal, setActiveSignal] = useState(0);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
       setActivePoster((current) => (current + 1) % posters.length);
     }, 3200);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setActiveSignal((current) => (current + 1) % coreTrustSignals.length);
+    }, 2100);
 
     return () => window.clearInterval(interval);
   }, []);
@@ -133,30 +156,21 @@ export function MarketingHero() {
         <div className="relative mx-auto max-w-[1520px]">
           <div className="grid gap-10 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] xl:items-center">
             <div className="space-y-7">
-              <motion.div {...fadeUp(0)}>
-                <TrustBar
-                  signals={coreTrustSignals}
-                  variant="hero"
-                  density="dense"
-                  className="max-w-3xl"
-                />
-              </motion.div>
-
               <div className="space-y-5">
                 <motion.p
-                  {...fadeUp(0.08)}
+                  {...fadeUp(0)}
                   className="text-sm font-medium uppercase tracking-[0.22em] text-primary"
                 >
                   The Enterprise AI Infrastructure Platform
                 </motion.p>
                 <motion.h1
-                  {...fadeUp(0.16)}
+                  {...fadeUp(0.08)}
                   className="max-w-3xl text-4xl font-semibold tracking-tight text-foreground md:text-5xl xl:text-6xl"
                 >
                   Control AI behavior like infrastructure, not app copy
                 </motion.h1>
                 <motion.p
-                  {...fadeUp(0.24)}
+                  {...fadeUp(0.16)}
                   className="max-w-2xl text-base leading-7 text-muted-foreground md:text-lg md:leading-8"
                 >
                   Manage, evaluate, and deliver prompts at the edge with zero latency. Run the
@@ -166,7 +180,7 @@ export function MarketingHero() {
               </div>
 
               <motion.div
-                {...fadeUp(0.32)}
+                {...fadeUp(0.24)}
                 className="flex flex-wrap items-center gap-3"
               >
                 <Link
@@ -190,7 +204,7 @@ export function MarketingHero() {
               </motion.div>
 
               <motion.div
-                {...fadeUp(0.4)}
+                {...fadeUp(0.32)}
                 className="grid gap-3 sm:grid-cols-3"
               >
                 {[
@@ -210,7 +224,7 @@ export function MarketingHero() {
             </div>
 
             <motion.div
-              {...fadeUp(0.18)}
+              {...fadeUp(0.14)}
               className="relative min-h-[620px] overflow-hidden rounded-[2rem] border border-border/70 bg-zinc-950 p-5 text-white shadow-[0_30px_90px_-45px_rgba(0,0,0,0.75)]"
             >
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(99,102,241,0.16),transparent_30%)]" />
@@ -383,6 +397,69 @@ export function MarketingHero() {
               </div>
             </motion.div>
           </div>
+
+          <motion.div
+            {...fadeUp(0.4)}
+            className="mt-8 rounded-[1.75rem] border border-border/70 bg-card/40 p-4 backdrop-blur"
+          >
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+                  Enterprise capabilities
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                  Trust, identity, audit, and control surfaced like product features
+                </h2>
+              </div>
+              <p className="max-w-xl text-sm leading-7 text-muted-foreground">
+                These are not footnotes for procurement. They are part of the platform story, and
+                they should read that way.
+              </p>
+            </div>
+
+            <div className="mt-6 grid gap-3 lg:grid-cols-5">
+              {coreTrustSignals.map((signal, index) => {
+                const Icon = signalIcons[signal.id];
+                const active = index === activeSignal;
+
+                return (
+                  <motion.div
+                    key={signal.id}
+                    animate={{
+                      y: active ? -6 : 0,
+                      scale: active ? 1.01 : 1,
+                      borderColor: active
+                        ? "rgba(59,130,246,0.28)"
+                        : "rgba(148,163,184,0.14)",
+                    }}
+                    transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                    className={cn(
+                      "rounded-[1.35rem] border bg-background/70 p-4 shadow-sm",
+                      active && "bg-primary/5",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div
+                        className={cn(
+                          "h-2.5 w-2.5 rounded-full transition-colors",
+                          active ? "bg-primary" : "bg-border",
+                        )}
+                      />
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-lg font-semibold text-foreground">{signal.label}</p>
+                      <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                        {signal.subtitle}
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
         </div>
       </div>
     </section>
