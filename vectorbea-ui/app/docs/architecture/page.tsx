@@ -60,12 +60,12 @@ export default function ArchitecturePage() {
             [
               "VectorBea control plane",
               "Govern prompts, memberships, publication state, billing, and deployment visibility",
-              "Dashboard UI, prompt versions, RBAC, workspace state",
+              "Next.js dashboard, Supabase-backed state, prompt versions, RBAC",
             ],
             [
               "VectorBea Sidecar",
               "Serve prompts locally, emit audits, and keep a narrow outbound connection to the control plane",
-              "GET /v1/prompts/{name}, POST /v1/audit, heartbeats",
+              "GET /v1/prompts/{name}, POST /v1/audit, 30s heartbeats",
             ],
             [
               "Customer application",
@@ -74,6 +74,38 @@ export default function ArchitecturePage() {
             ],
           ]}
         />
+      </DocsSection>
+
+      <DocsSection
+        id="components"
+        title="Components in the current build"
+        description="The runtime is intentionally small: one hosted control plane, one sidecar container per environment, and a thin SDK in the caller."
+      >
+        <DocsTable
+          headers={["Component", "Runtime", "What it does"]}
+          rows={[
+            [
+              "Control plane (vectorbea-ui)",
+              "Next.js 15 + Supabase",
+              "Dashboard, prompt publication, workspace RBAC, heartbeat and audit ingest endpoints",
+            ],
+            [
+              "Sidecar (vectorbea-proxy)",
+              "GraalVM native-image Kotlin, single container",
+              "Prompt fetch with in-memory cache, audit batch dispatch, heartbeat with live CPU/memory/latency, HTTP on :8080 plus optional Unix sockets for REST and gRPC",
+            ],
+            [
+              "Client SDK",
+              "Python (pip install vectorbea)",
+              "Calls the local sidecar over HTTP or UDS; no direct control plane dependency at runtime",
+            ],
+          ]}
+        />
+        <DocsCallout title="One container, not two">
+          The sidecar is a single native binary. Prompt syncing, heartbeats, and
+          audit flushing all run inside the proxy process — there is no separate
+          agent container, shared volume, or Docker socket mount to operate.
+        </DocsCallout>
       </DocsSection>
 
       <DocsSection
@@ -107,10 +139,10 @@ export default function ArchitecturePage() {
         description="A typical production request keeps the latency-sensitive work close to the calling service."
       >
         <ol className="space-y-3 text-sm leading-7 text-muted-foreground">
-          <li>1. The application requests a published prompt by name from the local sidecar</li>
-          <li>2. The sidecar serves a cached version locally or refreshes from the control plane when needed</li>
-          <li>3. The application renders the prompt with request-specific variables and calls its model provider</li>
-          <li>4. The sidecar reports audit metadata and health state back to VectorBea over outbound HTTPS</li>
+          <li>1. The application requests a published prompt by name from the local sidecar over HTTP on :8080 or a Unix socket</li>
+          <li>2. The sidecar serves from its in-memory cache, or fetches once from the control plane and caches the result</li>
+          <li>3. The application renders the prompt with request-specific variables and calls its model provider directly — model traffic never crosses the VectorBea boundary</li>
+          <li>4. The sidecar batches audit events and posts them to the control plane, and emits a heartbeat with CPU, memory, and average latency every 30 seconds</li>
         </ol>
       </DocsSection>
 

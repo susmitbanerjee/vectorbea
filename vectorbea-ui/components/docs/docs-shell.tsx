@@ -201,6 +201,7 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "The two-plane model", href: "#overview" },
     { label: "System boundary", href: "#boundary" },
     { label: "Responsibilities", href: "#responsibilities" },
+    { label: "Components", href: "#components" },
     { label: "Network model", href: "#network-model" },
     { label: "Runtime request flow", href: "#runtime-flow" },
     { label: "Why it matters", href: "#design-principle" },

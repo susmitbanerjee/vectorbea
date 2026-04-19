@@ -58,8 +58,8 @@ export function ArchitectureDiagram() {
           description="Owned by the customer. The application, sidecar, and model execution stay here while only control-plane state crosses the boundary."
           items={[
             "Firewall and Egress Policy",
-            "VectorBea Sidecar",
-            "AI Microservices",
+            "VectorBea Sidecar (single native container)",
+            "AI Microservices + Model Providers",
           ]}
         />
       </div>
