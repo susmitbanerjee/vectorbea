@@ -8,6 +8,7 @@ import type { AuditLogView } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RolloutStatus } from "@/components/ui/rollout-status";
 import {
   Table,
   TableBody,
@@ -142,7 +143,17 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
                       </TableCell>
                       <TableCell className="font-medium">{log.promptName}</TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{log.versionTag}</Badge>
+                        <RolloutStatus
+                          version={log.versionTag}
+                          stage="full"
+                          progress={100}
+                          target={100}
+                          policy="Audit recorded"
+                          startedAt={log.timestamp}
+                          variant="inline"
+                          size="sm"
+                          className="w-full max-w-[180px]"
+                        />
                       </TableCell>
                       <TableCell>
                         <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>

@@ -22,6 +22,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { RecentAuditTable } from "@/components/dashboard/recent-audit-table";
 import { RequestsChart } from "@/components/dashboard/requests-chart";
+import { RolloutStatus } from "@/components/ui/rollout-status";
+import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import { cn } from "@/lib/utils";
 
 type DashboardOverviewProps = {
@@ -182,6 +184,7 @@ export function DashboardOverview({
   ];
 
   const suffix = workspaceId ? `?workspaceId=${workspaceId}` : "";
+  const latestAudit = filteredLogs[0] ?? null;
 
   return (
     <div className="min-h-screen">
@@ -248,7 +251,23 @@ export function DashboardOverview({
                 <Badge variant="outline">Live</Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
+              <TrustBar
+                signals={coreTrustSignals.slice(0, 4)}
+                variant="compact"
+              />
+              {latestAudit ? (
+                <RolloutStatus
+                  version={latestAudit.versionTag}
+                  label={latestAudit.promptName}
+                  stage="full"
+                  progress={100}
+                  target={100}
+                  policy="Manual gate"
+                  startedAt={latestAudit.timestamp}
+                  variant="card"
+                />
+              ) : null}
               {signals.map((signal) => (
                 <div
                   key={signal.label}

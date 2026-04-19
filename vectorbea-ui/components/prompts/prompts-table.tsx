@@ -1,11 +1,12 @@
 "use client";
 
-import type { PromptListItem } from "@/lib/api";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Search, Trash2 } from "lucide-react";
-import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import type { PromptListItem } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RolloutStatus, derivePromptRollout } from "@/components/ui/rollout-status";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -27,7 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useWorkspace } from "@/lib/workspace-context";
+
+type FilterTab = "all" | "published" | "draft";
 
 function relativeTime(value: string | null): string {
   if (!value) return "Unknown";
@@ -45,8 +48,6 @@ function relativeTime(value: string | null): string {
   if (months < 12) return `${months}mo ago`;
   return `${Math.floor(months / 12)}y ago`;
 }
-
-type FilterTab = "all" | "published" | "draft";
 
 export function PromptsTable({
   prompts,
@@ -67,15 +68,16 @@ export function PromptsTable({
 
   const counts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const matchesQuery = (p: PromptListItem) =>
+    const matchesQuery = (prompt: PromptListItem) =>
       !q ||
-      [p.name, p.description ?? "", p.latestVersion].some((f) =>
-        f.toLowerCase().includes(q),
+      [prompt.name, prompt.description ?? "", prompt.latestVersion].some((field) =>
+        field.toLowerCase().includes(q),
       );
+
     return {
       all: prompts.filter(matchesQuery).length,
-      published: prompts.filter((p) => matchesQuery(p) && p.isPublished).length,
-      draft: prompts.filter((p) => matchesQuery(p) && !p.isPublished).length,
+      published: prompts.filter((prompt) => matchesQuery(prompt) && prompt.isPublished).length,
+      draft: prompts.filter((prompt) => matchesQuery(prompt) && !prompt.isPublished).length,
     };
   }, [prompts, query]);
 
@@ -84,8 +86,8 @@ export function PromptsTable({
     return prompts.filter((prompt) => {
       const matchesQuery =
         !value ||
-        [prompt.name, prompt.description ?? "", prompt.latestVersion].some(
-          (field) => field.toLowerCase().includes(value),
+        [prompt.name, prompt.description ?? "", prompt.latestVersion].some((field) =>
+          field.toLowerCase().includes(value),
         );
       const matchesFilter =
         filter === "all" ||
@@ -96,22 +98,25 @@ export function PromptsTable({
 
   const handleDelete = async (promptId: string) => {
     setDeletingId(promptId);
+
     try {
       const response = await fetch(
         `/api/prompts/${promptId}${activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
-        {
-        method: "DELETE",
-        },
+        { method: "DELETE" },
       );
+
       if (!response.ok && response.status !== 204) {
-        const body = await response.json().catch(() => ({ error: "Unknown error" }));
+        const body = (await response.json().catch(() => ({ error: "Unknown error" }))) as {
+          error?: string;
+        };
         throw new Error(body.error || `Request failed (${response.status})`);
       }
+
       onPromptDeleted?.(promptId);
       toast.success("Prompt deleted");
       startTransition(() => router.refresh());
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete prompt");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete prompt");
     } finally {
       setDeletingId(null);
       setConfirmPrompt(null);
@@ -121,7 +126,7 @@ export function PromptsTable({
   return (
     <>
       <Dialog
-        open={!!confirmPrompt}
+        open={Boolean(confirmPrompt)}
         onOpenChange={(open) => {
           if (!open) setConfirmPrompt(null);
         }}
@@ -138,14 +143,14 @@ export function PromptsTable({
             <Button
               variant="ghost"
               onClick={() => setConfirmPrompt(null)}
-              disabled={!!deletingId}
+              disabled={Boolean(deletingId)}
             >
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={() => confirmPrompt && handleDelete(confirmPrompt.id)}
-              disabled={!!deletingId}
+              disabled={Boolean(deletingId)}
             >
               {deletingId ? "Deleting..." : "Delete"}
             </Button>
@@ -165,22 +170,17 @@ export function PromptsTable({
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(event) => setQuery(event.target.value)}
               className="pl-9"
               placeholder="Search by name or description..."
             />
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Tabs
-            value={filter}
-            onValueChange={(v) => setFilter(v as FilterTab)}
-          >
+          <Tabs value={filter} onValueChange={(value) => setFilter(value as FilterTab)}>
             <TabsList>
               <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
-              <TabsTrigger value="published">
-                Published ({counts.published})
-              </TabsTrigger>
+              <TabsTrigger value="published">Published ({counts.published})</TabsTrigger>
               <TabsTrigger value="draft">Draft ({counts.draft})</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -207,18 +207,17 @@ export function PromptsTable({
                     <TableHead>Name</TableHead>
                     <TableHead>Version</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="hidden md:table-cell">
-                      Description
-                    </TableHead>
+                    <TableHead>Rollout</TableHead>
+                    <TableHead className="hidden md:table-cell">Description</TableHead>
                     <TableHead className="text-right">Updated</TableHead>
                     <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((prompt, i) => (
+                  {filtered.map((prompt, index) => (
                     <TableRow
                       key={prompt.id}
-                      className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(i + 1, 5)}`}
+                      className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(index + 1, 5)}`}
                       onClick={() =>
                         router.push(
                           `/prompts/${prompt.id}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
@@ -230,20 +229,26 @@ export function PromptsTable({
                         <Badge variant="outline">{prompt.latestVersion}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={prompt.isPublished ? "success" : "secondary"}
-                        >
+                        <Badge variant={prompt.isPublished ? "success" : "secondary"}>
                           {prompt.isPublished ? "Published" : "Draft"}
                         </Badge>
                       </TableCell>
+                      <TableCell>
+                        <RolloutStatus
+                          {...derivePromptRollout(prompt)}
+                          variant="inline"
+                          size="sm"
+                          className="w-full max-w-[180px]"
+                        />
+                      </TableCell>
                       <TableCell className="hidden max-w-xs truncate text-muted-foreground md:table-cell">
-                        {prompt.description ?? "—"}
+                        {prompt.description ?? "-"}
                       </TableCell>
                       <TableCell className="text-right text-sm text-muted-foreground">
                         {relativeTime(prompt.updatedAt)}
                       </TableCell>
                       <TableCell
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
                         className="text-right"
                       >
                         <Button

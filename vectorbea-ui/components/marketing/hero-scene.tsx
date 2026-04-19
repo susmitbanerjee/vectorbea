@@ -4,17 +4,17 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
-  BarChart3,
   BrainCircuit,
   CheckCircle2,
   Cloud,
   Cpu,
   Lock,
   Network,
-  ShieldCheck,
 } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
+import { RolloutStatus } from "@/components/ui/rollout-status";
+import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import { cn } from "@/lib/utils";
 
 function fadeUpProps(delay = 0) {
@@ -61,16 +61,13 @@ export function MarketingHero() {
         <div className="relative mx-auto max-w-[1480px]">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)] lg:items-center">
             <div className="space-y-7">
-          <motion.div
-            {...fadeUpProps(0)}
-            className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-sm"
-          >
-            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-            Privacy-first
-            <span className="text-border">&middot;</span>
-            Docker-native
-            <span className="text-border">&middot;</span>
-            Enterprise-ready
+          <motion.div {...fadeUpProps(0)}>
+            <TrustBar
+              signals={coreTrustSignals}
+              variant="hero"
+              density="dense"
+              className="max-w-3xl"
+            />
           </motion.div>
 
           <div className="space-y-4">
@@ -161,6 +158,18 @@ export function MarketingHero() {
               </div>
 
               <div className="relative rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
+                <RolloutStatus
+                  version="v12"
+                  label="checkout-assistant"
+                  stage="ramp"
+                  progress={30}
+                  target={50}
+                  policy="Auto 10% / hr"
+                  startedAt={new Date(Date.now() - 2 * 60 * 60 * 1000)}
+                  variant="hero"
+                  className="mb-5 border-white/10 bg-black/20"
+                />
+
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_104px_minmax(0,1fr)] md:items-center">
                   <div className="rounded-2xl border border-white/10 bg-zinc-900/90 p-4">
                     <div className="flex items-center gap-3">
@@ -270,17 +279,43 @@ export function MarketingHero() {
                     </div>
                     <div className="mt-4 space-y-3">
                       {[
-                        ["support-agent", "v12 published"],
-                        ["checkout-assistant", "v7 rollout 100%"],
-                        ["risk-review", "v4 canary complete"],
-                      ].map(([name, state]) => (
-                        <div
-                          key={name}
-                          className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm"
-                        >
-                          <span className="text-zinc-100">{name}</span>
-                          <span className="text-zinc-400">{state}</span>
-                        </div>
+                        {
+                          label: "support-agent",
+                          version: "v12",
+                          stage: "full" as const,
+                          progress: 100,
+                          target: 100,
+                          policy: "Manual gate",
+                        },
+                        {
+                          label: "checkout-assistant",
+                          version: "v7",
+                          stage: "ramp" as const,
+                          progress: 72,
+                          target: 100,
+                          policy: "Auto 10% / hr",
+                        },
+                        {
+                          label: "risk-review",
+                          version: "v4",
+                          stage: "canary" as const,
+                          progress: 10,
+                          target: 25,
+                          policy: "Observe before ramp",
+                        },
+                      ].map((item) => (
+                        <RolloutStatus
+                          key={item.label}
+                          label={item.label}
+                          version={item.version}
+                          stage={item.stage}
+                          progress={item.progress}
+                          target={item.target}
+                          policy={item.policy}
+                          variant="inline"
+                          size="sm"
+                          className="w-full border-white/10 bg-black/20"
+                        />
                       ))}
                     </div>
                   </div>

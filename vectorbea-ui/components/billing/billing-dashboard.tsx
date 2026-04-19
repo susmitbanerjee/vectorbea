@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import { useWorkspace } from "@/lib/workspace-context";
 
 const FALLBACK_PORTAL_URL = process.env.NEXT_PUBLIC_BILLING_PORTAL_URL ?? "";
@@ -325,6 +326,11 @@ export function BillingDashboard() {
                 </div>
               </div>
             </div>
+
+            <TrustBar
+              signals={coreTrustSignals}
+              variant="compact"
+            />
 
             <div className="rounded-xl border border-border/60 bg-card/50 p-4">
               <div className="space-y-3">

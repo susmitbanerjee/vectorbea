@@ -28,6 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RolloutStatus } from "@/components/ui/rollout-status";
 import {
   Table,
   TableBody,
@@ -36,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import type { AgentMetricPoint, DeploymentAgentView, RegisterAgentResponse } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -472,6 +474,12 @@ export function InfrastructureDashboard() {
       </Dialog>
 
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
+        <TrustBar
+          signals={coreTrustSignals.slice(0, 4)}
+          variant="compact"
+          className="animate-slide-up"
+        />
+
         <section className="grid gap-4 md:grid-cols-3">
           <Card className="animate-slide-up">
             <CardContent className="flex items-center gap-3 p-4">
@@ -645,6 +653,17 @@ export function InfrastructureDashboard() {
                       </p>
                     </div>
                   </div>
+
+                  <RolloutStatus
+                    version={selectedAgent.status?.startsWith("v") ? selectedAgent.status : "vCurrent"}
+                    label={`${selectedAgent.name} policy`}
+                    stage={isAgentOnline(selectedAgent.lastHeartbeat) ? "full" : "rolled-back"}
+                    progress={isAgentOnline(selectedAgent.lastHeartbeat) ? 100 : 0}
+                    target={100}
+                    policy={isAgentOnline(selectedAgent.lastHeartbeat) ? "Sidecar healthy" : "Heartbeat stale"}
+                    startedAt={selectedAgent.lastHeartbeat}
+                    variant="card"
+                  />
                 </>
               ) : (
                 <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-sm text-muted-foreground">

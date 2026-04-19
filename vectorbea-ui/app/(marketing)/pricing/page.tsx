@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { ArrowRight, Check, Sparkles, Building2, Code2 } from "lucide-react";
+import { ArrowRight, Building2, Check, Code2, Sparkles } from "lucide-react";
 
+import { RolloutStatus } from "@/components/ui/rollout-status";
+import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import { Logo } from "@/components/ui/Logo";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,12 +15,9 @@ interface Tier {
   originalPriceLabel?: string;
   priceSuffix: string;
   billingNote: string;
-  promoNote?: string;
   cta: { label: string; href: string };
   highlight?: boolean;
   icon: typeof Sparkles;
-  iconColor: string;
-  iconBg: string;
   features: string[];
 }
 
@@ -26,222 +25,249 @@ const tiers: Tier[] = [
   {
     id: "developer",
     name: "Developer",
-    tagline: "For solo builders shipping side projects.",
+    tagline: "For solo builders validating the sidecar path",
     priceLabel: "$0",
     priceSuffix: "/ month",
-    billingNote: "Free forever — no credit card.",
+    billingNote: "Free forever, no card required",
     cta: { label: "Start free", href: "/login" },
     icon: Code2,
-    iconColor: "text-cyan-600 dark:text-cyan-400",
-    iconBg: "bg-cyan-500/10 ring-1 ring-cyan-500/20",
     features: [
       "1 workspace, 1 seat",
       "10,000 proxied calls / month",
-      "30-day audit log retention",
-      "Community Discord support",
-      "Self-host the sidecar",
+      "30-day audit retention",
+      "Self-hosted sidecar runtime",
+      "Community support",
     ],
   },
   {
     id: "team",
     name: "Team",
-    tagline: "Per-seat billing for growing AI teams.",
+    tagline: "For platform teams rolling out governed prompt delivery",
     priceLabel: "$19.99",
     originalPriceLabel: "$29",
     priceSuffix: "/ seat / month",
-    billingNote: "Early adopter price — lock it in before it moves to $29.",
-    promoNote: undefined,
+    billingNote: "Early adopter pricing, then standardizes at $29 / seat",
     cta: { label: "Get started", href: "/login" },
     highlight: true,
     icon: Sparkles,
-    iconColor: "text-primary",
-    iconBg: "bg-primary/10 ring-1 ring-primary/30",
     features: [
       "Unlimited workspaces",
       "1,000,000 proxied calls / month included",
-      "$0.50 per additional 1k calls",
-      "1-year audit log retention",
-      "RBAC & SSO (Google, Microsoft)",
-      "Priority email support · 1 business day",
+      "Prompt versioning and rollout control",
+      "RBAC and SSO",
+      "1-year audit retention",
+      "Priority support",
     ],
   },
   {
     id: "enterprise",
     name: "Enterprise",
-    tagline: "Custom billing cycles, on-prem, dedicated support.",
+    tagline: "For security, procurement, and dedicated rollout controls",
     priceLabel: "Custom",
     priceSuffix: "",
-    billingNote: "Annual or quarterly invoicing · NET-30/60.",
+    billingNote: "Quarterly or annual contracts with private deployment support",
     cta: { label: "Talk to sales", href: "mailto:sales@vectorbea.com" },
     icon: Building2,
-    iconColor: "text-violet-600 dark:text-violet-400",
-    iconBg: "bg-violet-500/10 ring-1 ring-violet-500/20",
     features: [
-      "Unlimited seats & calls",
-      "Air-gapped / VPC deployment",
-      "SAML SSO, SCIM provisioning",
-      "Indefinite audit log retention",
-      "Custom DPA, SOC 2 report, MSA",
-      "Dedicated Slack channel · 99.9% SLA",
-      "Named solutions architect",
+      "VPC and air-gapped deployment options",
+      "Security review and procurement workflows",
+      "Custom retention and regional posture",
+      "SAML / SCIM roadmap alignment",
+      "Dedicated solutions partner",
+      "Commercial SLA and onboarding support",
     ],
+  },
+];
+
+const faq = [
+  {
+    question: "What counts as a proxied call?",
+    answer:
+      "Any request served through the VectorBea Sidecar to an LLM provider counts as a proxied call. Prompt edits, dashboard reads, and admin actions do not.",
+  },
+  {
+    question: "How does seat billing work?",
+    answer:
+      "Every active user in a workspace counts as a seat. Teams can scale seats up as they expand the people touching rollout, governance, and auditing.",
+  },
+  {
+    question: "Can we run VectorBea inside our own network?",
+    answer:
+      "Yes. The core product posture is sidecar-first deployment, with the runtime running in your environment and the control plane handling policy, versions, and visibility.",
+  },
+  {
+    question: "Do you support enterprise identity?",
+    answer:
+      "Team already supports Google and Microsoft sign-in. Enterprise plans are where SAML, procurement review, and deeper identity workflows are handled.",
+  },
+  {
+    question: "How are upgrades managed?",
+    answer:
+      "Developer can upgrade into Team at any time. Enterprise is handled through a sales conversation so legal, security, and billing expectations are aligned before rollout.",
+  },
+  {
+    question: "What happens when usage grows?",
+    answer:
+      "Team includes a large monthly call allowance and scales with overage pricing. Enterprise plans are designed around higher-volume production traffic and tailored commercial terms.",
   },
 ];
 
 export default function PricingPage() {
   return (
-    <div className="min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
-
-      {/* ── Navigation ──────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800 md:px-10">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-            <Logo />
+    <div className="min-h-screen bg-zinc-950 text-zinc-50">
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-zinc-950/88 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/5">
+              <Logo />
+            </div>
+            <div>
+              <p className="text-sm font-semibold tracking-tight text-white">VectorBea</p>
+              <p className="text-xs text-zinc-400">Enterprise AI Infrastructure Platform</p>
+            </div>
+          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-zinc-300 hover:text-white")}>
+              Home
+            </Link>
+            <Link
+              href="/login"
+              className={cn(buttonVariants({ size: "sm" }), "gap-1.5 rounded-lg")}
+            >
+              Get started
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
-          <span className="text-sm font-semibold tracking-tight">VectorBea</span>
-        </Link>
-        <div className="flex items-center gap-3">
-          <Link href="/" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
-            Home
-          </Link>
-          <Link
-            href="/login"
-            className={cn(buttonVariants({ size: "sm" }), "gap-1.5 rounded-md")}
-          >
-            Get started <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
         </div>
       </header>
 
-      {/* ── Hero ──────────────────────────────────────────────────────────── */}
-      <section className="mx-auto max-w-3xl px-6 pt-16 text-center md:pt-24">
-        <div className="mb-5 inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-          Simple, predictable pricing
-        </div>
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 md:text-5xl">
-          Pay for what you ship,{" "}
-          <span className="text-zinc-500 dark:text-zinc-400">
-            not what you experiment with.
-          </span>
-        </h1>
-        <p className="mx-auto mt-5 max-w-xl text-base text-zinc-500 dark:text-zinc-400">
-          Free for individual developers. Per-seat billing for teams. Custom contracts for
-          enterprises with bespoke billing cycles.
-        </p>
-      </section>
+      <main className="mx-auto max-w-7xl px-6 pb-24 pt-16">
+        <section className="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-end">
+          <div className="space-y-6">
+            <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-400">
+              Pricing built for teams shipping AI into production
+            </div>
+            <div className="space-y-4">
+              <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-white md:text-5xl">
+                Choose the control plane that matches your rollout surface
+              </h1>
+              <p className="max-w-2xl text-base leading-8 text-zinc-400 md:text-lg">
+                VectorBea starts free for builders, scales into governed sidecar delivery for teams,
+                and expands into enterprise infrastructure for organizations that need trust, rollout
+                control, and procurement-ready posture.
+              </p>
+            </div>
+          </div>
 
-      {/* ── Pricing cards ─────────────────────────────────────────────────── */}
-      <section className="mx-auto mt-16 grid max-w-6xl gap-5 px-6 pb-24 md:grid-cols-3">
-        {tiers.map((tier) => {
-          const Icon = tier.icon;
-          return (
-            <div
-              key={tier.id}
-              className={cn(
-                "relative flex flex-col rounded-lg border bg-white p-7 dark:bg-zinc-900",
-                tier.highlight
-                  ? "border-primary shadow-[0_0_0_1px] shadow-primary/20"
-                  : "border-zinc-200 dark:border-zinc-800",
-              )}
-            >
-              {tier.highlight && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-md border border-primary/30 bg-primary px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-primary-foreground">
-                  Most popular
-                </div>
-              )}
+          <RolloutStatus
+            version="v12"
+            label="checkout-assistant"
+            stage="ramp"
+            progress={60}
+            target={100}
+            policy="Auto 10% / hr"
+            startedAt={new Date(Date.now() - 90 * 60 * 1000)}
+            variant="hero"
+            className="border-white/10 bg-white/[0.04]"
+          />
+        </section>
 
-              <div className={cn("mb-5 flex h-10 w-10 items-center justify-center rounded-md", tier.iconBg)}>
-                <Icon className={cn("h-5 w-5", tier.iconColor)} />
-              </div>
-
-              <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-                {tier.name}
-              </h3>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{tier.tagline}</p>
-
-              <div className="mt-6 flex items-baseline gap-1.5">
-                {tier.originalPriceLabel && (
-                  <span className="text-lg font-medium text-zinc-400 line-through dark:text-zinc-500">
-                    {tier.originalPriceLabel}
-                  </span>
-                )}
-                <span className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-                  {tier.priceLabel}
-                </span>
-                {tier.priceSuffix && (
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                    {tier.priceSuffix}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1.5 text-xs text-zinc-400 dark:text-zinc-500">{tier.billingNote}</p>
-              {tier.promoNote && (
-                <div className="mt-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
-                  {tier.promoNote}
-                </div>
-              )}
-
-              <a
-                href={tier.cta.href}
+        <section className="mt-14 grid gap-5 lg:grid-cols-3">
+          {tiers.map((tier) => {
+            const Icon = tier.icon;
+            return (
+              <div
+                key={tier.id}
                 className={cn(
-                  buttonVariants({ size: "sm", variant: tier.highlight ? "default" : "outline" }),
-                  "mt-6 w-full gap-1.5 rounded-md text-center",
+                  "relative flex flex-col rounded-[1.5rem] border bg-white/[0.03] p-7 shadow-[0_20px_70px_-45px_rgba(0,0,0,0.85)]",
+                  tier.highlight
+                    ? "border-primary/50 ring-1 ring-primary/25"
+                    : "border-white/10",
                 )}
               >
-                {tier.cta.label} <ArrowRight className="h-3.5 w-3.5" />
-              </a>
+                {tier.highlight ? (
+                  <div className="absolute -top-3 left-6 rounded-full border border-primary/30 bg-primary/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+                    Most popular
+                  </div>
+                ) : null}
 
-              <ul className="mt-7 space-y-3 border-t border-zinc-100 pt-6 dark:border-zinc-800">
-                {tier.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2.5 text-sm text-zinc-600 dark:text-zinc-400">
-                    <Check className={cn("mt-0.5 h-4 w-4 shrink-0", tier.iconColor)} />
-                    <span>{f}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </section>
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Icon className="h-5 w-5" />
+                </div>
 
-      {/* ── FAQ ──────────────────────────────────────────────────────────── */}
-      <section className="mx-auto max-w-4xl px-6 pb-24">
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-            Frequently asked
-          </h2>
-          <div className="mt-6 grid gap-6 text-sm md:grid-cols-2">
-            {[
-              {
-                q: "How does per-seat billing work?",
-                a: "Each user that logs into your workspace counts as one seat. We pro-rate additions and removals daily, so adding a teammate mid-cycle only charges for the days they were active.",
-              },
-              {
-                q: 'What counts as a "proxied call"?',
-                a: "Any inference request that flows through the VectorBea sidecar to an LLM provider. Prompt edits, audit views, and dashboard activity are never billed as calls.",
-              },
-              {
-                q: "Can enterprises invoice quarterly?",
-                a: "Yes — enterprise contracts support monthly, quarterly, or annual billing cycles with NET-30 or NET-60 terms. We'll match your AP process.",
-              },
-              {
-                q: "Can I switch plans later?",
-                a: "Yes — you can upgrade from Developer to Team or downgrade at any time. Billing is pro-rated daily so you only pay for the time you are on a paid plan.",
-              },
-            ].map(({ q, a }) => (
-              <div key={q}>
-                <p className="font-medium text-zinc-900 dark:text-zinc-50">{q}</p>
-                <p className="mt-1.5 text-zinc-500 dark:text-zinc-400">{a}</p>
+                <div className="mt-6 space-y-2">
+                  <h2 className="text-xl font-semibold text-white">{tier.name}</h2>
+                  <p className="text-sm leading-6 text-zinc-400">{tier.tagline}</p>
+                </div>
+
+                <div className="mt-8 flex items-end gap-2">
+                  {tier.originalPriceLabel ? (
+                    <span className="pb-1 text-xl font-medium text-zinc-500 line-through">
+                      {tier.originalPriceLabel}
+                    </span>
+                  ) : null}
+                  <span className="text-4xl font-semibold tracking-tight text-white">
+                    {tier.priceLabel}
+                  </span>
+                  {tier.priceSuffix ? (
+                    <span className="pb-1 text-sm text-zinc-400">{tier.priceSuffix}</span>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-sm text-zinc-400">{tier.billingNote}</p>
+
+                <a
+                  href={tier.cta.href}
+                  className={cn(
+                    buttonVariants({
+                      size: "lg",
+                      variant: tier.highlight ? "default" : "outline",
+                    }),
+                    "mt-8 w-full justify-center rounded-lg",
+                  )}
+                >
+                  {tier.cta.label}
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+
+                <ul className="mt-8 space-y-3 border-t border-white/10 pt-6">
+                  {tier.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-3 text-sm leading-6 text-zinc-300">
+                      <Check className="mt-1 h-4 w-4 shrink-0 text-primary" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </section>
+
+        <section className="mt-8">
+          <TrustBar
+            signals={coreTrustSignals}
+            variant="compact"
+            className="border-white/10 bg-white/[0.04]"
+          />
+        </section>
+
+        <section className="mt-16 rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-8">
+          <div className="max-w-2xl">
+            <h2 className="text-2xl font-semibold text-white">Frequently asked</h2>
+            <p className="mt-3 text-sm leading-7 text-zinc-400">
+              The questions enterprise buyers, platform teams, and security reviewers ask before
+              rollout starts
+            </p>
+          </div>
+          <div className="mt-8 grid gap-6 md:grid-cols-2">
+            {faq.map((item) => (
+              <div key={item.question} className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                <p className="text-sm font-semibold text-white">{item.question}</p>
+                <p className="mt-2 text-sm leading-7 text-zinc-400">{item.answer}</p>
               </div>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* ── Footer ───────────────────────────────────────────────────────── */}
-      <footer className="border-t border-zinc-200 px-6 py-8 text-center text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-600">
-        <p>© {new Date().getFullYear()} VectorBea · The Enterprise AI Infrastructure Platform</p>
-      </footer>
+        </section>
+      </main>
     </div>
   );
 }
