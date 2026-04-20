@@ -30,6 +30,12 @@ internal class HttpClient(
     private val apiKey: String?,
     timeoutSeconds: Long,
 ) {
+    // Safe representation of baseUrl for use in error messages — strips any
+    // embedded userinfo (user:password@host) that a caller might accidentally pass.
+    private val safeBaseUrl: String = runCatching {
+        val uri = java.net.URI(baseUrl)
+        java.net.URI(uri.scheme, null, uri.host, uri.port, null, null, null).toString()
+    }.getOrDefault(baseUrl.substringBefore("@").substringBefore("://") + "://<host>")
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -89,13 +95,13 @@ internal class HttpClient(
             okhttp.newCall(request).execute()
         } catch (e: SocketTimeoutException) {
             throw TimeoutException(
-                "Request to ${request.url} timed out. " +
+                "Request to $safeBaseUrl timed out. " +
                     "Increase the timeout via VectorBeaClient.Builder.timeoutSeconds().",
                 e,
             )
         } catch (e: IOException) {
             throw ConnectionException(
-                "Could not connect to VectorBea proxy at $baseUrl. " +
+                "Could not connect to VectorBea proxy at $safeBaseUrl. " +
                     "Is the container running? Verify Docker is up and port 8080 is mapped. " +
                     "Underlying error: ${e.message}",
                 e,

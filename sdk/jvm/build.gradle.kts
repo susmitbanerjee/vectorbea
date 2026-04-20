@@ -39,14 +39,12 @@ mavenPublishing {
 
     publishToMavenCentral(automaticRelease = true)
 
-    val hasInMemorySigningKey =
-        providers.gradleProperty("signingInMemoryKey").isPresent &&
-            providers.gradleProperty("signingInMemoryKeyPassword").isPresent
-    val hasLegacySigningKey =
-        providers.gradleProperty("signing.secretKeyRingFile").isPresent &&
-            providers.gradleProperty("signing.password").isPresent
-
-    if (hasInMemorySigningKey || hasLegacySigningKey) {
+    // Only sign when both in-memory PGP keys are explicitly provided.
+    // This means signing fires in CI (via ORG_GRADLE_PROJECT_signingInMemoryKey)
+    // but is silently skipped for local builds and publishToMavenLocal dry-runs.
+    val signingKey = providers.gradleProperty("signingInMemoryKey").orNull
+    val signingPassword = providers.gradleProperty("signingInMemoryKeyPassword").orNull
+    if (signingKey != null && signingPassword != null) {
         signAllPublications()
     }
 
