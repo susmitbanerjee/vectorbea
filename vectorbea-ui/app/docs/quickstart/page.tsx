@@ -1,8 +1,17 @@
 import type { Route } from "next";
 import Link from "next/link";
+import type { ComponentType } from "react";
 import { ArrowRight, CheckCircle2, Clock } from "lucide-react";
 
 import { Callout, Code, InlineCode, Step } from "@/components/docs/prose";
+import {
+  GoIcon,
+  JavaIcon,
+  KotlinIcon,
+  NodeIcon,
+  PythonIcon,
+  RustIcon,
+} from "@/components/docs/sdk-logo-icons";
 
 export const metadata = {
   title: "Quickstart — VectorBea Docs",
@@ -12,13 +21,13 @@ export const metadata = {
 
 function LangCard({
   href,
-  color,
+  Icon,
   name,
   install,
   soon,
 }: {
   href: string;
-  color: string;
+  Icon: ComponentType<{ size?: number; className?: string }>;
   name: string;
   install?: string;
   soon?: boolean;
@@ -28,13 +37,9 @@ function LangCard({
       href={href as Route}
       className="group relative flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
     >
-      {/* colour strip */}
-      <div
-        className="h-1 w-8 rounded-full"
-        style={{ backgroundColor: color }}
-      />
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-foreground group-hover:text-primary">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 text-sm font-semibold text-foreground group-hover:text-primary">
+          <Icon size={16} className="shrink-0" />
           {name}
         </span>
         {soon ? (
@@ -228,37 +233,37 @@ export default function QuickstartPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           <LangCard
             href="/docs/sdk/python"
-            color="#3776AB"
+            Icon={PythonIcon}
             name="Python"
             install="pip install vectorbea"
           />
           <LangCard
             href="/docs/sdk/nodejs"
-            color="#339933"
+            Icon={NodeIcon}
             name="Node.js"
             install="npm install @vectorbea-ai/node"
           />
           <LangCard
             href="/docs/sdk/java"
-            color="#ED8B00"
+            Icon={JavaIcon}
             name="Java"
             install="com.vectorbea:vectorbea-jvm-sdk:0.2.1"
           />
           <LangCard
             href="/docs/sdk/kotlin"
-            color="#7F52FF"
+            Icon={KotlinIcon}
             name="Kotlin"
             install="com.vectorbea:vectorbea-jvm-sdk:0.2.1"
           />
           <LangCard
             href="/docs/sdk/go"
-            color="#00ADD8"
+            Icon={GoIcon}
             name="Go"
             soon
           />
           <LangCard
             href="/docs/sdk/rust"
-            color="#CE422B"
+            Icon={RustIcon}
             name="Rust"
             soon
           />
