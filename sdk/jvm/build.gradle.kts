@@ -38,24 +38,7 @@ mavenPublishing {
     )
 
     publishToMavenCentral(automaticRelease = true)
-
-    // Sign only when explicitly requested via -PsignPublication.
-    //
-    // Calling signAllPublications() registers .asc files as required publication
-    // artifacts at configuration time. If signing is configured but the sign task
-    // is later skipped (e.g. with -x), Gradle still expects those .asc files and
-    // fails. The only safe solution is to never call signAllPublications() unless
-    // we actually intend to produce signed artifacts.
-    //
-    // In the CI workflow:
-    //   publishToMavenLocal            → no -PsignPublication  (packaging gate only)
-    //   publishAndReleaseToMavenCentral → -PsignPublication     (real publish, must sign)
-    val shouldSign = providers.gradleProperty("signPublication").isPresent
-    val signingKey = providers.gradleProperty("signingInMemoryKey").orNull
-    val signingPassword = providers.gradleProperty("signingInMemoryKeyPassword").orNull
-    if (shouldSign && signingKey != null && signingPassword != null) {
-        signAllPublications()
-    }
+    signAllPublications()
 
     pom {
         name.set("VectorBea JVM SDK")
