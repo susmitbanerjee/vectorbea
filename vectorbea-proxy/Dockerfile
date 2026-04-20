@@ -1,17 +1,36 @@
 # syntax=docker/dockerfile:1.7
 
-# ── Stage 1: build + obfuscate ───────────────────────────────────────────────
+# ── Multi-architecture JVM image ─────────────────────────────────────────────
 #
-# Pipeline inside this stage:
+# Produces a linux/amd64 + linux/arm64 image from a single `docker buildx build`
+# invocation. Both base images have native amd64 and arm64 layers on Docker Hub,
+# so no QEMU emulation is needed at runtime.
+#
+# Cross-compilation strategy
+# ──────────────────────────
+# The build stage is pinned to $BUILDPLATFORM (the machine running the build).
+# Gradle produces platform-neutral JVM bytecode, so the same obfuscated JAR runs
+# on every target architecture. Only the lightweight runtime stage executes under
+# the target platform — the heavy dependency download and compilation steps always
+# run at native speed regardless of which platform is being targeted.
+#
+# Build pipeline inside the builder stage:
 #   1. generateProto     — compiles vectorbee.proto → Java + Kotlin gRPC stubs
 #   2. compileKotlin     — compiles all Kotlin sources (including generated stubs)
 #   3. fatJar            — bundles all runtime deps into one executable JAR
 #   4. proguardJar       — shrinks dead code and obfuscates class/method names
 #
-# Only the obfuscated JAR is copied into the runtime stage. The fat jar and all
-# intermediate build artefacts are discarded when the builder layer is dropped.
+# Only the obfuscated JAR is copied into the runtime stage.
 
-FROM gradle:8.10.2-jdk21 AS builder
+# ── Stage 1: build + obfuscate ───────────────────────────────────────────────
+#
+# --platform=$BUILDPLATFORM: always runs on the host machine's native arch.
+# Gradle and the JDK are heavy tools; emulating them under QEMU for a cross-
+# platform build wastes 10-20 minutes and often OOMs on 7 GB GitHub runners.
+# Because the output is a JVM JAR (platform-neutral bytecode) we can safely build
+# on amd64 and copy the result into an arm64 runtime image.
+
+FROM --platform=$BUILDPLATFORM gradle:8.10.2-jdk21 AS builder
 
 WORKDIR /workspace
 
@@ -31,9 +50,13 @@ RUN gradle --no-daemon proguardJar
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 #
-# IMPORTANT: use Debian/glibc (jammy), NOT Alpine/musl.
-# netty-transport-native-epoll bundles a glibc-linked .so. On Alpine the .so
-# fails to load silently (Epoll.isAvailable() == false) and the GrpcServer
+# eclipse-temurin:21-jre-jammy ships native layers for both linux/amd64 and
+# linux/arm64. Docker Hub selects the correct layer automatically based on
+# TARGETPLATFORM — no explicit --platform flag or TARGETARCH handling required.
+#
+# Debian/glibc (jammy) is intentional — NOT Alpine/musl.
+# netty-transport-native-epoll bundles a glibc-linked .so. On Alpine/musl the
+# .so fails to load silently (Epoll.isAvailable() == false) and the GrpcServer
 # startup assertion aborts the process.
 
 FROM eclipse-temurin:21-jre-jammy AS runner

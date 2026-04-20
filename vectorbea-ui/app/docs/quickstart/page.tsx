@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 
 import { CopyButton } from "@/components/docs/copy-button";
-import { DocsTabs } from "@/components/docs/docs-tabs";
 
 export const metadata = {
   title: "Quickstart — VectorBea Docs",
@@ -139,9 +138,11 @@ export default function QuickstartPage() {
           ))}
         </ul>
         <Callout kind="info">
-          <strong>Mac with Apple Silicon (M1 / M2 / M3 / M4)?</strong> You
-          have an ARM64 chip. Every <InlineCode>docker</InlineCode> command
-          below has an AMD64 variant — use those instead of the default ones.
+          The VectorBea sidecar image is a multi-arch manifest — the same{" "}
+          <InlineCode>docker pull</InlineCode> and{" "}
+          <InlineCode>docker run</InlineCode> commands work on Intel / AMD,
+          Apple Silicon (M1–M4), and AWS Graviton. Docker selects the correct
+          layer automatically.
         </Callout>
       </section>
 
@@ -197,14 +198,12 @@ export default function QuickstartPage() {
       {/* ── Step 3 ───────────────────────────────────────────────────────── */}
       <Step id="step-3" n={3} title="Pull the sidecar image">
         <p className="text-sm leading-7 text-muted-foreground">
-          Open a terminal and pull the sidecar image. Choose the tab that
-          matches your machine.
+          Open a terminal and run the command below. The image is a multi-arch
+          manifest — Docker automatically pulls the correct layer for your
+          machine whether you are on Intel, AMD, Apple Silicon, or AWS Graviton.
         </p>
 
-        <DocsTabs tabs={["Intel / AMD (x86-64)", "Apple Silicon / ARM64"]}>
-          <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:latest`}</Code>
-          <Code lang="bash">{`docker pull --platform linux/amd64 vectorbea/vectorbea-proxy:latest`}</Code>
-        </DocsTabs>
+        <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:latest`}</Code>
 
         <Callout kind="info">
           The pull is roughly 150 MB. You only need to do this once — Docker
@@ -248,22 +247,15 @@ export default function QuickstartPage() {
       <Step id="step-5" n={5} title="Run the sidecar container">
         <p className="text-sm leading-7 text-muted-foreground">
           Replace <InlineCode>vbagent_your_token_here</InlineCode> with the
-          token you just copied, then run the command for your machine.
+          token you just copied. The same command runs on every platform — no{" "}
+          <InlineCode>--platform</InlineCode> flag needed.
         </p>
 
-        <DocsTabs tabs={["Intel / AMD (x86-64)", "Apple Silicon / ARM64"]}>
-          <Code lang="bash">{`docker run --rm -p 8080:8080 \\
+        <Code lang="bash">{`docker run --rm -p 8080:8080 \\
   -e VECTORBEA_HUB_URL="https://vectorbea.com" \\
   -e VECTORBEA_KEY="vbagent_your_token_here" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
   vectorbea/vectorbea-proxy:latest`}</Code>
-          <Code lang="bash">{`docker run --rm -p 8080:8080 \\
-  --platform linux/amd64 \\
-  -e VECTORBEA_HUB_URL="https://vectorbea.com" \\
-  -e VECTORBEA_KEY="vbagent_your_token_here" \\
-  -e VECTORBEA_HTTP_PORT="8080" \\
-  vectorbea/vectorbea-proxy:latest`}</Code>
-        </DocsTabs>
 
         <p className="text-sm leading-7 text-muted-foreground">
           Watch the terminal. Within a few seconds you will see:
@@ -460,10 +452,6 @@ message = prompt.format(name="Bob", product="Acme AI")`}</Code>
             {
               problem: "ConnectionError: could not connect to sidecar",
               fix: 'Check the first terminal and confirm "sidecar ready" appeared. Verify nothing else is using port 8080: run lsof -i :8080 on Mac/Linux or netstat -ano | findstr 8080 on Windows. Restart Docker Desktop if the port appears blocked.',
-            },
-            {
-              problem: "Mac (Intel or Apple Silicon) — container crashes or image not found",
-              fix: 'Use the --platform linux/amd64 flag in both docker pull and docker run. This targets the x86-64 image explicitly so Docker does not try to resolve the wrong architecture.',
             },
             {
               problem: "Dashboard shows 0 requests after running the script",
