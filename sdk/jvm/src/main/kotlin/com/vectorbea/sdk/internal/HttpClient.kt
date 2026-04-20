@@ -21,6 +21,26 @@ import java.util.concurrent.TimeUnit
 private const val SDK_VERSION = "0.2.1"
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
+// ── Message sanitisation ──────────────────────────────────────────────────────
+//
+// Server error bodies may contain internal identifiers (workspace UUIDs, user
+// UUIDs, internal service names) that should never be forwarded to the caller
+// and end up in application logs, Sentry, Datadog, etc.
+//
+// Every server-sourced string must pass through sanitize() before it is placed
+// into an exception message.
+
+private val UUID_REGEX = Regex(
+    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    RegexOption.IGNORE_CASE,
+)
+private const val MAX_MSG_LENGTH = 200
+
+private fun sanitize(raw: String): String =
+    raw.replace(UUID_REGEX, "[id]")     // strip workspace / resource UUIDs
+        .take(MAX_MSG_LENGTH)           // cap length — avoids huge blobs in logs
+        .trim()
+
 /**
  * Internal HTTP transport layer.
  * Not part of the public API — use [com.vectorbea.sdk.VectorBeaClient] instead.
@@ -30,12 +50,14 @@ internal class HttpClient(
     private val apiKey: String?,
     timeoutSeconds: Long,
 ) {
-    // Safe representation of baseUrl for use in error messages — strips any
-    // embedded userinfo (user:password@host) that a caller might accidentally pass.
+    // Safe representation of baseUrl for use in error messages.
+    // Strips any embedded userinfo (user:password@host) that a caller might
+    // accidentally include in the baseUrl string.
     private val safeBaseUrl: String = runCatching {
         val uri = java.net.URI(baseUrl)
         java.net.URI(uri.scheme, null, uri.host, uri.port, null, null, null).toString()
-    }.getOrDefault(baseUrl.substringBefore("@").substringBefore("://") + "://<host>")
+    }.getOrDefault(baseUrl.substringAfterLast("@").let { "${baseUrl.substringBefore("://")}://$it" })
+
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -65,7 +87,7 @@ internal class HttpClient(
             .applyHeaders()
             .get()
             .build()
-        execute(request)
+        execute(request, path)
     }
 
     /**
@@ -78,7 +100,7 @@ internal class HttpClient(
             .applyHeaders()
             .post(body.toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        execute(request)
+        execute(request, path)
     }
 
     // ── Internal helpers ───────────────────────────────────────────────────────
@@ -90,7 +112,7 @@ internal class HttpClient(
         if (!apiKey.isNullOrBlank()) header("Authorization", "Bearer $apiKey")
     }
 
-    inline fun <reified T> execute(request: Request): T {
+    inline fun <reified T> execute(request: Request, path: String): T {
         val response = try {
             okhttp.newCall(request).execute()
         } catch (e: SocketTimeoutException) {
@@ -102,8 +124,7 @@ internal class HttpClient(
         } catch (e: IOException) {
             throw ConnectionException(
                 "Could not connect to VectorBea proxy at $safeBaseUrl. " +
-                    "Is the container running? Verify Docker is up and port 8080 is mapped. " +
-                    "Underlying error: ${e.message}",
+                    "Is the container running? Verify Docker is up and port 8080 is mapped.",
                 e,
             )
         }
@@ -116,22 +137,27 @@ internal class HttpClient(
                 return json.decodeFromString<T>(bodyText)
             }
 
-            // Extract the error message from JSON body if possible
-            val message: String = runCatching {
+            // Extract the error message from JSON body if possible, then sanitise
+            // before it reaches any exception message or caller log.
+            val raw: String = runCatching {
                 json.decodeFromString<JsonObject>(bodyText)["error"]
                     ?.jsonPrimitive?.content
                     ?: bodyText
             }.getOrDefault(bodyText)
 
+            val message = sanitize(raw)
+
             when (status) {
                 401 -> throw AuthenticationException(
+                    // Do not echo server detail for auth failures — the response
+                    // body may contain workspace context that should not be visible
+                    // to the caller.
                     "Invalid or inactive API key. " +
-                        "Regenerate it from the VectorBea dashboard → API Keys. " +
-                        "Detail: $message"
+                        "Regenerate it from the VectorBea dashboard → API Keys."
                 )
                 404 -> throw NotFoundException(
                     message.ifBlank {
-                        "Resource not found at ${request.url.encodedPath}. " +
+                        "Resource not found at $path. " +
                             "Check the prompt name exists in your workspace " +
                             "and has at least one published version."
                     }

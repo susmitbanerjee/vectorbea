@@ -11,7 +11,39 @@ import {
   TimeoutError,
 } from "./errors.js";
 
-const SDK_VERSION = "0.2.0";
+const SDK_VERSION = "0.2.1";
+
+// ── Message sanitisation ──────────────────────────────────────────────────────
+//
+// Server error bodies may contain internal identifiers (workspace UUIDs, user
+// UUIDs, internal service names) that should never be forwarded to the caller.
+// Sanitise every server-sourced string before it enters an exception message.
+
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const MAX_MSG_LENGTH = 200;
+
+function sanitize(raw: string): string {
+  return raw
+    .replace(UUID_RE, "[id]")           // strip workspace / resource UUIDs
+    .slice(0, MAX_MSG_LENGTH)           // cap length — avoids huge blobs in logs
+    .trim();
+}
+
+// ── URL helpers ───────────────────────────────────────────────────────────────
+//
+// Use only the origin (scheme + host + port) in error messages so that
+// embedded credentials in a URL (http://user:pass@host) are never leaked.
+
+function safeOrigin(url: string): string {
+  try {
+    const { protocol, host } = new URL(url);
+    return `${protocol}//${host}`;
+  } catch {
+    return url.split("@").pop()?.split("/")[0] ?? url;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface HttpClientOptions {
   baseUrl: string;
@@ -22,16 +54,18 @@ export interface HttpClientOptions {
 /** @internal */
 export class HttpClient {
   private readonly baseUrl: string;
+  private readonly safeOrigin: string;
   private readonly headers: Record<string, string>;
   private readonly timeoutMs: number;
 
   constructor({ baseUrl, apiKey, timeoutMs }: HttpClientOptions) {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.timeoutMs = timeoutMs;
-    this.headers = {
-      "Accept": "application/json",
+    this.baseUrl    = baseUrl.replace(/\/$/, "");
+    this.safeOrigin = safeOrigin(this.baseUrl);
+    this.timeoutMs  = timeoutMs;
+    this.headers    = {
+      "Accept":       "application/json",
       "Content-Type": "application/json",
-      "User-Agent": `vectorbea-node/${SDK_VERSION}`,
+      "User-Agent":   `vectorbea-node/${SDK_VERSION}`,
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     };
   }
@@ -51,20 +85,19 @@ export class HttpClient {
     } catch (err: unknown) {
       if (this._isAbortError(err)) {
         throw new TimeoutError(
-          `Request to ${url} timed out after ${this.timeoutMs}ms. ` +
+          `Request to ${this.safeOrigin} timed out after ${this.timeoutMs}ms. ` +
             `Increase the timeout by passing timeoutMs to VectorBeaClient.`
         );
       }
       throw new ConnectionError(
-        `Could not connect to VectorBea proxy at ${this.baseUrl}. ` +
-          `Is the container running? Verify Docker is up and port 8080 is mapped. ` +
-          `Underlying error: ${String(err instanceof Error ? err.message : err)}`
+        `Could not connect to VectorBea proxy at ${this.safeOrigin}. ` +
+          `Is the container running? Verify Docker is up and port 8080 is mapped.`
       );
     } finally {
       clearTimeout(timer);
     }
 
-    await this._throwForStatus(response, url);
+    await this._throwForStatus(response, path);
     return response.json() as Promise<T>;
   }
 
@@ -84,47 +117,49 @@ export class HttpClient {
     } catch (err: unknown) {
       if (this._isAbortError(err)) {
         throw new TimeoutError(
-          `Request to ${url} timed out after ${this.timeoutMs}ms.`
+          `Request to ${this.safeOrigin} timed out after ${this.timeoutMs}ms.`
         );
       }
       throw new ConnectionError(
-        `Could not connect to VectorBea proxy at ${this.baseUrl}. ` +
-          `Underlying error: ${String(err instanceof Error ? err.message : err)}`
+        `Could not connect to VectorBea proxy at ${this.safeOrigin}.`
       );
     } finally {
       clearTimeout(timer);
     }
 
-    await this._throwForStatus(response, url);
+    await this._throwForStatus(response, path);
     return response.json() as Promise<T>;
   }
 
   // ── Internals ───────────────────────────────────────────────────────────────
 
-  private async _throwForStatus(response: Response, url: string): Promise<void> {
+  private async _throwForStatus(response: Response, path: string): Promise<void> {
     if (response.ok) return;
 
-    let message: string;
+    // Extract the server's error message and sanitise it before surfacing.
+    let raw: string;
     try {
       const body = (await response.json()) as { error?: string };
-      message = body.error ?? (await response.text());
+      raw = typeof body.error === "string" ? body.error : JSON.stringify(body);
     } catch {
-      message = response.statusText || `HTTP ${response.status}`;
+      raw = response.statusText || `HTTP ${response.status}`;
     }
 
-    const status = response.status;
+    const message = sanitize(raw);
+    const status  = response.status;
 
     if (status === 401) {
+      // Do not echo server detail for auth failures — it may contain
+      // workspace context that should not be visible to the caller.
       throw new AuthenticationError(
         `Invalid or inactive API key. ` +
-          `Regenerate it from the VectorBea dashboard → API Keys. ` +
-          `Detail: ${message}`
+          `Regenerate it from the VectorBea dashboard → API Keys.`
       );
     }
     if (status === 404) {
       throw new NotFoundError(
         message ||
-          `Resource not found at ${url}. ` +
+          `Resource not found at ${path}. ` +
             `Check the prompt name exists in your workspace and has a published version.`
       );
     }

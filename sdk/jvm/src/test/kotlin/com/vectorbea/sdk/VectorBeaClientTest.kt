@@ -118,6 +118,45 @@ class VectorBeaClientTest {
         }
     }
 
+    @Test
+    fun `getPrompt strips workspace UUID from 404 message`() = runTest {
+        // Server returns a message containing an internal workspace UUID.
+        // The SDK must not forward the raw UUID to the caller.
+        server.enqueue(
+            MockResponse().setResponseCode(404).setBody(
+                """{"error":"Prompt 'greet-user' not found. The agent token is linked to workspace 8a18b033-48ed-497f-a3b7-d93087897a81 — make sure the prompt was created and published in that same workspace."}"""
+            )
+        )
+
+        val ex = assertFailsWith<NotFoundException> {
+            client.getPrompt("greet-user")
+        }
+        assert("8a18b033-48ed-497f-a3b7-d93087897a81" !in (ex.message ?: "")) {
+            "Raw UUID must not appear in the exception message"
+        }
+        assert("[id]" in (ex.message ?: "")) {
+            "UUID should be replaced with [id] placeholder"
+        }
+    }
+
+    @Test
+    fun `getPrompt does not leak server detail in 401 message`() = runTest {
+        // Server returns workspace context in the auth error — the SDK should
+        // discard the server body entirely for 401 and use a fixed message.
+        server.enqueue(
+            MockResponse().setResponseCode(401).setBody(
+                """{"error":"Token belongs to workspace 8a18b033-48ed-497f-a3b7-d93087897a81"}"""
+            )
+        )
+
+        val ex = assertFailsWith<AuthenticationException> {
+            client.getPrompt("greet-user")
+        }
+        assert("8a18b033" !in (ex.message ?: "")) {
+            "Server detail must not appear in AuthenticationException message"
+        }
+    }
+
     // ── 401 mapping ───────────────────────────────────────────────────────────
 
     @Test
