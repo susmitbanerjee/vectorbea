@@ -45,7 +45,10 @@ jobs:
         run: bash scripts/scan-secrets.sh
 
       - name: Publish dry-run to Maven Local
-        run: ./gradlew --no-daemon publishToMavenLocal
+        # Signing is intentionally skipped here — publishToMavenLocal is a
+        # packaging gate only (confirms jars + POM generate correctly).
+        # Signing runs exclusively during the real Central publish step below.
+        run: ./gradlew --no-daemon publishToMavenLocal -x signMavenPublication
 
       - name: Publish to Maven Central
         run: ./gradlew --no-daemon publishAndReleaseToMavenCentral
