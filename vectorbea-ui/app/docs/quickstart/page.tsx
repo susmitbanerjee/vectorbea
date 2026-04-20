@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Clock,
   Info,
   Terminal,
 } from "lucide-react";
@@ -72,6 +73,27 @@ function Callout({
   );
 }
 
+// ─── Incoming badge ──────────────────────────────────────────────────────────
+
+function IncomingBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+      <Clock className="h-3 w-3" />
+      Incoming
+    </span>
+  );
+}
+
+// ─── Lang label ──────────────────────────────────────────────────────────────
+
+function LangLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
 // ─── Step ─────────────────────────────────────────────────────────────────────
 
 function Step({
@@ -114,8 +136,8 @@ export default function QuickstartPage() {
         </h1>
         <p className="text-lg leading-8 text-muted-foreground">
           Pull the VectorBea sidecar, publish your first prompt, and watch your
-          Python or Node.js script fetch it in real time — all before your
-          coffee goes cold.
+          app fetch it in real time — works with Python, Node.js, Java, and
+          Kotlin out of the box.
         </p>
       </section>
 
@@ -129,7 +151,7 @@ export default function QuickstartPage() {
         <ul className="space-y-2 text-sm text-muted-foreground">
           {[
             "Docker Desktop — download from docker.com/get-started",
-            "Python 3.8+ or Node.js 18+ — depending on which SDK you prefer",
+            "Python 3.8+, Node.js 18+, or Java 17+ — depending on your preferred SDK",
           ].map((item) => (
             <li key={item} className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -141,8 +163,8 @@ export default function QuickstartPage() {
           The VectorBea sidecar image is a multi-arch manifest — the same{" "}
           <InlineCode>docker pull</InlineCode> and{" "}
           <InlineCode>docker run</InlineCode> commands work on Intel / AMD,
-          Apple Silicon (M1–M4), and AWS Graviton. Docker selects the correct
-          layer automatically.
+          Apple Silicon (M1–M4 Max/Pro/Ultra), and AWS Graviton. Docker selects
+          the correct native layer automatically.
         </Callout>
       </section>
 
@@ -199,8 +221,9 @@ export default function QuickstartPage() {
       <Step id="step-3" n={3} title="Pull the sidecar image">
         <p className="text-sm leading-7 text-muted-foreground">
           Open a terminal and run the command below. The image is a multi-arch
-          manifest — Docker automatically pulls the correct layer for your
-          machine whether you are on Intel, AMD, Apple Silicon, or AWS Graviton.
+          manifest — Docker automatically pulls the correct native layer for your
+          machine whether you are on Intel, AMD, Apple Silicon (M1–M4), or AWS
+          Graviton.
         </p>
 
         <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:latest`}</Code>
@@ -283,9 +306,11 @@ export default function QuickstartPage() {
           the first one) and install the SDK for your preferred language.
         </p>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
+
+          {/* Python */}
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Python</p>
+            <LangLabel>Python</LangLabel>
             <Code lang="bash">{`pip install vectorbea`}</Code>
             <p className="text-sm leading-7 text-muted-foreground">
               You need <strong>0.2.0 or later</strong> for automatic audit
@@ -294,10 +319,65 @@ export default function QuickstartPage() {
             <Code lang="bash">{`pip show vectorbea
 pip install --upgrade vectorbea`}</Code>
           </div>
+
+          {/* Node.js */}
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Node.js</p>
+            <LangLabel>Node.js</LangLabel>
             <Code lang="bash">{`npm install @vectorbea-ai/node`}</Code>
           </div>
+
+          {/* Java */}
+          <div className="space-y-2">
+            <LangLabel>Java</LangLabel>
+            <p className="text-sm leading-7 text-muted-foreground">
+              Add the dependency to your build file. Requires Java 17+.
+            </p>
+            <p className="text-xs font-medium text-muted-foreground">Maven — pom.xml</p>
+            <Code lang="xml">{`<dependency>
+  <groupId>com.vectorbea</groupId>
+  <artifactId>vectorbea-jvm-sdk</artifactId>
+  <version>0.2.1</version>
+</dependency>`}</Code>
+            <p className="text-xs font-medium text-muted-foreground">Gradle (Kotlin DSL) — build.gradle.kts</p>
+            <Code lang="kotlin">{`implementation("com.vectorbea:vectorbea-jvm-sdk:0.2.1")`}</Code>
+            <p className="text-xs font-medium text-muted-foreground">Gradle (Groovy) — build.gradle</p>
+            <Code lang="groovy">{`implementation 'com.vectorbea:vectorbea-jvm-sdk:0.2.1'`}</Code>
+          </div>
+
+          {/* Kotlin */}
+          <div className="space-y-2">
+            <LangLabel>Kotlin</LangLabel>
+            <p className="text-sm leading-7 text-muted-foreground">
+              The JVM SDK is written in Kotlin — the same artifact works for both
+              Java and Kotlin projects. Add the identical dependency shown above.
+            </p>
+            <Code lang="kotlin">{`implementation("com.vectorbea:vectorbea-jvm-sdk:0.2.1")`}</Code>
+          </div>
+
+          {/* Go */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <LangLabel>Go</LangLabel>
+              <IncomingBadge />
+            </div>
+            <p className="text-sm leading-7 text-muted-foreground">
+              Native Go SDK coming soon. In the meantime you can call the sidecar
+              directly over HTTP — see the REST API reference.
+            </p>
+          </div>
+
+          {/* Rust */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <LangLabel>Rust</LangLabel>
+              <IncomingBadge />
+            </div>
+            <p className="text-sm leading-7 text-muted-foreground">
+              Native Rust SDK coming soon. In the meantime you can call the sidecar
+              directly over HTTP — see the REST API reference.
+            </p>
+          </div>
+
         </div>
       </Step>
 
@@ -307,9 +387,11 @@ pip install --upgrade vectorbea`}</Code>
           Create a file, paste the script for your language, and run it.
         </p>
 
-        <div className="space-y-6">
+        <div className="space-y-8">
+
+          {/* Python */}
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Python — test_prompt.py</p>
+            <LangLabel>Python — test_prompt.py</LangLabel>
             <Code lang="python">{`from vectorbea import VectorBeaClient
 
 client = VectorBeaClient(
@@ -330,8 +412,10 @@ message = prompt.compile({"name": "Alice", "product": "Acme AI"})
 print("Rendered:", message)                # Hello Alice, welcome to Acme AI!`}</Code>
             <Code lang="bash">{`python test_prompt.py`}</Code>
           </div>
+
+          {/* Node.js */}
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Node.js — testPrompt.mjs</p>
+            <LangLabel>Node.js — testPrompt.mjs</LangLabel>
             <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
 
 const client = new VectorBeaClient({
@@ -349,6 +433,82 @@ const message = prompt.compile({ name: "Alice", product: "Acme AI" });
 console.log("Rendered:", message);               // Hello Alice, welcome to Acme AI!`}</Code>
             <Code lang="bash">{`node testPrompt.mjs`}</Code>
           </div>
+
+          {/* Java */}
+          <div className="space-y-2">
+            <LangLabel>Java — TestPrompt.java</LangLabel>
+            <Code lang="java">{`import com.vectorbea.sdk.VectorBeaClient;
+import com.vectorbea.sdk.model.Prompt;
+
+public class TestPrompt {
+    public static void main(String[] args) throws Exception {
+        VectorBeaClient client = new VectorBeaClient.Builder()
+            .apiKey("any-value")          // not validated by the local sidecar
+            .baseUrl("http://localhost:8080")
+            .build();
+
+        // Fetch the latest published version by name
+        Prompt prompt = client.prompts().get("greet-user");
+
+        System.out.println("Name:     " + prompt.getName());
+        System.out.println("Version:  " + prompt.getVersionTag());
+        System.out.println("Template: " + prompt.getTemplateText());
+
+        // Render the template with your own variables
+        String message = prompt.compile(Map.of(
+            "name", "Alice",
+            "product", "Acme AI"
+        ));
+        System.out.println("Rendered: " + message);
+    }
+}`}</Code>
+          </div>
+
+          {/* Kotlin */}
+          <div className="space-y-2">
+            <LangLabel>Kotlin — TestPrompt.kt</LangLabel>
+            <Code lang="kotlin">{`import com.vectorbea.sdk.VectorBeaClient
+
+suspend fun main() {
+    val client = VectorBeaClient(
+        apiKey  = "any-value",           // not validated by the local sidecar
+        baseUrl = "http://localhost:8080",
+    )
+
+    // Fetch the latest published version by name
+    val prompt = client.prompts.get("greet-user")
+
+    println("Name:     ${prompt.name}")
+    println("Version:  ${prompt.versionTag}")
+    println("Template: ${prompt.templateText}")
+
+    // Render the template with your own variables
+    val message = prompt.compile(mapOf(
+        "name"    to "Alice",
+        "product" to "Acme AI",
+    ))
+    println("Rendered: $message")
+}`}</Code>
+          </div>
+
+          {/* Go / Rust incoming */}
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border/40 bg-muted/20 p-4 space-y-1">
+              <div className="flex items-center gap-2">
+                <LangLabel>Go</LangLabel>
+                <IncomingBadge />
+              </div>
+              <p className="text-sm text-muted-foreground">Native Go SDK is on the roadmap. Until then, fetch prompts directly from the sidecar REST endpoint at <InlineCode>http://localhost:8080/v1/prompts/&#123;name&#125;</InlineCode>.</p>
+            </div>
+            <div className="rounded-xl border border-border/40 bg-muted/20 p-4 space-y-1">
+              <div className="flex items-center gap-2">
+                <LangLabel>Rust</LangLabel>
+                <IncomingBadge />
+              </div>
+              <p className="text-sm text-muted-foreground">Native Rust SDK is on the roadmap. Until then, fetch prompts directly from the sidecar REST endpoint at <InlineCode>http://localhost:8080/v1/prompts/&#123;name&#125;</InlineCode>.</p>
+            </div>
+          </div>
+
         </div>
 
         <p className="text-sm font-medium">Expected output</p>
@@ -388,16 +548,22 @@ Rendered: Hello Alice, welcome to Acme AI!`}</Code>
           After calling your LLM, pass the response metadata back so the
           dashboard shows end-to-end latency and token cost per request:
         </p>
-        <Code lang="python">{`import time
-import vectorbea
 
-client = vectorbea.VectorBea(
+        <div className="space-y-6">
+
+          {/* Python */}
+          <div className="space-y-2">
+            <LangLabel>Python</LangLabel>
+            <Code lang="python">{`import time
+from vectorbea import VectorBeaClient
+
+client = VectorBeaClient(
     api_key="any-value",
     base_url="http://localhost:8080",
 )
 
 prompt  = client.prompts.get("greet-user")
-message = prompt.format(name="Alice", product="Acme AI")
+message = prompt.compile({"name": "Alice", "product": "Acme AI"})
 
 # Call your LLM (OpenAI shown — swap for any provider)
 t0 = time.time()
@@ -414,24 +580,152 @@ client.prompts.log_audit(
     token_count=response.usage.total_tokens,
     metadata={"model": "gpt-4o"},
 )`}</Code>
+          </div>
+
+          {/* Node.js */}
+          <div className="space-y-2">
+            <LangLabel>Node.js</LangLabel>
+            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
+
+const client = new VectorBeaClient({
+  apiKey:  "any-value",
+  baseUrl: "http://localhost:8080",
+});
+
+const prompt  = await client.prompts.get("greet-user");
+const message = prompt.compile({ name: "Alice", product: "Acme AI" });
+
+// Call your LLM (OpenAI shown — swap for any provider)
+const t0 = Date.now();
+const response = await openai.chat.completions.create({
+  model: "gpt-4o",
+  messages: [{ role: "user", content: message }],
+});
+const llmMs = Date.now() - t0;
+
+// Log the full audit event — appears in Audit logs
+await client.prompts.logAudit(prompt, {
+  llmLatencyMs: llmMs,
+  tokenCount: response.usage.total_tokens,
+  metadata: { model: "gpt-4o" },
+});`}</Code>
+          </div>
+
+          {/* Java */}
+          <div className="space-y-2">
+            <LangLabel>Java</LangLabel>
+            <Code lang="java">{`import com.vectorbea.sdk.VectorBeaClient;
+import com.vectorbea.sdk.model.Prompt;
+
+VectorBeaClient client = new VectorBeaClient.Builder()
+    .apiKey("any-value")
+    .baseUrl("http://localhost:8080")
+    .build();
+
+Prompt prompt  = client.prompts().get("greet-user");
+String message = prompt.compile(Map.of("name", "Alice", "product", "Acme AI"));
+
+long t0 = System.currentTimeMillis();
+// ... call your LLM here ...
+long llmMs = System.currentTimeMillis() - t0;
+
+client.prompts().logAudit(prompt, llmMs, tokenCount,
+    Map.of("model", "gpt-4o"));`}</Code>
+          </div>
+
+          {/* Kotlin */}
+          <div className="space-y-2">
+            <LangLabel>Kotlin</LangLabel>
+            <Code lang="kotlin">{`val client = VectorBeaClient(
+    apiKey  = "any-value",
+    baseUrl = "http://localhost:8080",
+)
+
+val prompt  = client.prompts.get("greet-user")
+val message = prompt.compile(mapOf("name" to "Alice", "product" to "Acme AI"))
+
+val t0 = System.currentTimeMillis()
+// ... call your LLM here ...
+val llmMs = System.currentTimeMillis() - t0
+
+client.prompts.logAudit(
+    prompt,
+    llmLatencyMs = llmMs,
+    tokenCount   = tokenCount,
+    metadata     = mapOf("model" to "gpt-4o"),
+)`}</Code>
+          </div>
+
+        </div>
       </Step>
 
       {/* ── Step 9 ───────────────────────────────────────────────────────── */}
       <Step id="step-9" n={9} title="Moving to production">
         <p className="text-sm leading-7 text-muted-foreground">
-          For production, omit <InlineCode>base_url</InlineCode> and supply a
-          real workspace API key. Generate one from{" "}
-          <strong>API keys</strong> in the sidebar.
+          For production, omit <InlineCode>base_url</InlineCode> (or{" "}
+          <InlineCode>baseUrl</InlineCode>) and supply a real workspace API key.
+          Generate one from <strong>API keys</strong> in the sidebar.
         </p>
         <Code lang="bash">{`export VECTORBEA_API_KEY="vb_live_..."`}</Code>
-        <Code lang="python">{`import vectorbea
+
+        <div className="space-y-6">
+
+          {/* Python */}
+          <div className="space-y-2">
+            <LangLabel>Python</LangLabel>
+            <Code lang="python">{`from vectorbea import VectorBeaClient
 
 # Reads VECTORBEA_API_KEY from the environment automatically.
 # base_url defaults to https://vectorbea.com
-client = vectorbea.VectorBea()
+client = VectorBeaClient()
 
 prompt  = client.prompts.get("greet-user")
-message = prompt.format(name="Bob", product="Acme AI")`}</Code>
+message = prompt.compile({"name": "Bob", "product": "Acme AI"})`}</Code>
+          </div>
+
+          {/* Node.js */}
+          <div className="space-y-2">
+            <LangLabel>Node.js</LangLabel>
+            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
+
+// Reads VECTORBEA_API_KEY from process.env automatically.
+// baseUrl defaults to https://vectorbea.com
+const client = new VectorBeaClient();
+
+const prompt  = await client.prompts.get("greet-user");
+const message = prompt.compile({ name: "Bob", product: "Acme AI" });`}</Code>
+          </div>
+
+          {/* Java */}
+          <div className="space-y-2">
+            <LangLabel>Java</LangLabel>
+            <Code lang="java">{`import com.vectorbea.sdk.VectorBeaClient;
+
+// Reads VECTORBEA_API_KEY from the environment automatically.
+// baseUrl defaults to https://vectorbea.com
+VectorBeaClient client = new VectorBeaClient.Builder()
+    .fromEnvironment()
+    .build();
+
+Prompt prompt  = client.prompts().get("greet-user");
+String message = prompt.compile(Map.of("name", "Bob", "product", "Acme AI"));`}</Code>
+          </div>
+
+          {/* Kotlin */}
+          <div className="space-y-2">
+            <LangLabel>Kotlin</LangLabel>
+            <Code lang="kotlin">{`import com.vectorbea.sdk.VectorBeaClient
+
+// Reads VECTORBEA_API_KEY from the environment automatically.
+// baseUrl defaults to https://vectorbea.com
+val client = VectorBeaClient.fromEnvironment()
+
+val prompt  = client.prompts.get("greet-user")
+val message = prompt.compile(mapOf("name" to "Bob", "product" to "Acme AI"))`}</Code>
+          </div>
+
+        </div>
+
         <Callout kind="info">
           In production, run the sidecar as a container alongside your service
           for lower latency and local caching. Deploy the same docker image

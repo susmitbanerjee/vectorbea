@@ -18,7 +18,6 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { cn } from "@/lib/utils";
 
 // ─── Nav data ─────────────────────────────────────────────────────────────────
@@ -312,15 +311,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
               <p className="mt-0.5 text-[10px] text-muted-foreground">Documentation</p>
             </div>
           </Link>
-          <div className="ml-auto">
-            <ThemeToggle />
-          </div>
         </header>
-
-        {/* Desktop right-side theme toggle */}
-        <div className="fixed right-4 top-[11px] z-20 hidden lg:block">
-          <ThemeToggle />
-        </div>
 
         {/* Main layout */}
         <div className="mx-auto max-w-[1400px] px-6 pt-10 lg:px-10 xl:px-12">
