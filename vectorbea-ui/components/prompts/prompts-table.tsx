@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { FileText, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { BeeLoader } from "@/components/ui/bee-loader";
 
 type FilterTab = "all" | "published" | "draft";
 
@@ -65,6 +67,22 @@ export function PromptsTable({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmPrompt, setConfirmPrompt] = useState<PromptListItem | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [pendingPromptId, setPendingPromptId] = useState<string | null>(null);
+
+  const promptHref = (promptId: string) =>
+    `/prompts/${promptId}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`;
+
+  const prefetchPrompt = (promptId: string) => {
+    router.prefetch(promptHref(promptId) as Route);
+  };
+
+  const openPrompt = (promptId: string) => {
+    if (isPending) return;
+    setPendingPromptId(promptId);
+    startTransition(() => {
+      router.push(promptHref(promptId) as Route);
+    });
+  };
 
   const counts = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -217,14 +235,21 @@ export function PromptsTable({
                   {filtered.map((prompt, index) => (
                     <TableRow
                       key={prompt.id}
-                      className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(index + 1, 5)}`}
-                      onClick={() =>
-                        router.push(
-                          `/prompts/${prompt.id}${activeWorkspaceId ? `?org=${encodeURIComponent(activeWorkspaceId)}` : ""}`,
-                        )
-                      }
+                      className={`cursor-pointer transition-colors hover:bg-accent/50 animate-slide-up stagger-${Math.min(index + 1, 5)} ${
+                        isPending ? "pointer-events-none opacity-70" : ""
+                      } ${pendingPromptId === prompt.id ? "bg-accent/40" : ""}`}
+                      onMouseEnter={() => prefetchPrompt(prompt.id)}
+                      onFocus={() => prefetchPrompt(prompt.id)}
+                      onClick={() => openPrompt(prompt.id)}
                     >
-                      <TableCell className="font-medium">{prompt.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <span className="inline-flex items-center gap-2">
+                          {prompt.name}
+                          {pendingPromptId === prompt.id && isPending ? (
+                            <BeeLoader compact />
+                          ) : null}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{prompt.latestVersion}</Badge>
                       </TableCell>
