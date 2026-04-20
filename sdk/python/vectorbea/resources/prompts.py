@@ -8,7 +8,7 @@ import time
 import warnings
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from vectorbea.models import PromptTemplate
+from vectorbea.models import Prompt
 
 if TYPE_CHECKING:
     from vectorbea._http import HttpClient
@@ -31,7 +31,7 @@ class Prompts:
     def __init__(self, http: "HttpClient") -> None:
         self._http = http
 
-    def get(self, name: str) -> PromptTemplate:
+    def get(self, name: str) -> Prompt:
         """
         Fetch the latest published version of a prompt by name.
 
@@ -48,7 +48,7 @@ class Prompts:
 
         Returns
         -------
-        PromptTemplate
+        Prompt
             Resolved prompt with a ``.format(**kwargs)`` method for
             variable substitution.
 
@@ -74,7 +74,7 @@ class Prompts:
         data = self._http.get(f"/v1/prompts/{name}")
         proxy_latency_ms = (time.monotonic() - t0) * 1000.0
 
-        prompt = PromptTemplate._from_dict(data)
+        prompt = Prompt._from_dict(data)
 
         # Auto-report the proxy fetch latency so the dashboard reflects every
         # get() call without requiring a separate log_audit() call.
@@ -92,7 +92,7 @@ class Prompts:
 
     def log_audit(
         self,
-        prompt: PromptTemplate,
+        prompt: Prompt,
         *,
         proxy_latency_ms: float = 0.0,
         llm_latency_ms: int = 0,
@@ -145,7 +145,7 @@ class Prompts:
 
     def _report_audit(
         self,
-        prompt: PromptTemplate,
+        prompt: Prompt,
         *,
         proxy_latency_ms: float = 0.0,
         llm_latency_ms: int = 0,

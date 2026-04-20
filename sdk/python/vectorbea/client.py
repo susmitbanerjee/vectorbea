@@ -13,7 +13,7 @@ from vectorbea.resources.prompts import Prompts
 _DEFAULT_BASE_URL = "https://app.vectorbea.com"
 
 
-class VectorBea:
+class VectorBeaClient:
     """
     The VectorBea SDK client.
 
@@ -24,8 +24,9 @@ class VectorBea:
     Parameters
     ----------
     api_key : str, optional
-        Your workspace API key (starts with ``vb_``). If omitted the SDK
-        looks for the ``VECTORBEA_API_KEY`` environment variable.
+        Your workspace API key (starts with ``vb_`` or ``vbagent_``). If
+        omitted the SDK looks for the ``VECTORBEA_API_KEY`` environment
+        variable.
     base_url : str, optional
         Base URL of the VectorBea proxy or hub. Defaults to the hosted
         cloud endpoint. Override to ``http://localhost:8080`` when running
@@ -39,18 +40,20 @@ class VectorBea:
 
     .. code-block:: python
 
-        import vectorbea
+        from vectorbea import VectorBeaClient
 
-        client = vectorbea.VectorBea(api_key="vb_live_...")
+        client = VectorBeaClient(api_key="vb_live_...")
         prompt = client.prompts.get("customer-support-reply")
-        message = prompt.format(customer_name="Alice", issue="billing")
+        message = prompt.compile({"customer_name": "Alice", "issue": "billing"})
 
     **Local proxy (development)**
 
     .. code-block:: python
 
-        client = vectorbea.VectorBea(
-            api_key="vb_dev_...",
+        from vectorbea import VectorBeaClient
+
+        client = VectorBeaClient(
+            api_key="vbagent_...",
             base_url="http://localhost:8080",
         )
     """

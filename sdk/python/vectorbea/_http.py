@@ -1,6 +1,6 @@
 """
 Internal HTTP transport layer.
-Not part of the public API — use VectorBea() instead.
+Not part of the public API — use VectorBeaClient() instead.
 """
 
 from __future__ import annotations
@@ -8,10 +8,18 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import requests
+import requests.exceptions
 
-from vectorbea.errors import AuthenticationError, NotFoundError, VectorBeaError
+from vectorbea.errors import (
+    APIError,
+    AuthenticationError,
+    ConnectionError as VectorBeaConnectionError,
+    NotFoundError,
+    TimeoutError as VectorBeaTimeoutError,
+)
 
 _DEFAULT_TIMEOUT = 10  # seconds
+_SDK_VERSION = "0.2.0"
 
 
 class HttpClient:
@@ -32,7 +40,7 @@ class HttpClient:
             {
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": "vectorbea/0.1.0",
+                "User-Agent": f"vectorbea-python/{_SDK_VERSION}",
             }
         )
 
@@ -40,16 +48,16 @@ class HttpClient:
         url = f"{self._base_url}{path}"
         try:
             resp = self._session.get(url, timeout=self._timeout)
-        except requests.ConnectionError as exc:
-            raise VectorBeaError(
+        except requests.exceptions.ConnectionError as exc:
+            raise VectorBeaConnectionError(
                 f"Could not connect to VectorBea proxy at {self._base_url}. "
-                "Is the container running? Check that Docker is up and the port is mapped."
+                "Is the container running? Verify that Docker is up and port 8080 is mapped."
             ) from exc
-        except requests.Timeout as exc:
-            raise VectorBeaError(
-                f"Request to {url} timed out after {self._timeout}s."
+        except requests.exceptions.Timeout as exc:
+            raise VectorBeaTimeoutError(
+                f"Request to {url} timed out after {self._timeout}s. "
+                f"Increase the timeout by passing timeout= to VectorBeaClient()."
             ) from exc
-
         self._raise_for_status(resp)
         return resp.json()  # type: ignore[no-any-return]
 
@@ -57,16 +65,16 @@ class HttpClient:
         url = f"{self._base_url}{path}"
         try:
             resp = self._session.post(url, json=json, timeout=self._timeout)
-        except requests.ConnectionError as exc:
-            raise VectorBeaError(
+        except requests.exceptions.ConnectionError as exc:
+            raise VectorBeaConnectionError(
                 f"Could not connect to VectorBea proxy at {self._base_url}. "
-                "Is the container running? Check that Docker is up and the port is mapped."
+                "Is the container running? Verify that Docker is up and port 8080 is mapped."
             ) from exc
-        except requests.Timeout as exc:
-            raise VectorBeaError(
-                f"Request to {url} timed out after {self._timeout}s."
+        except requests.exceptions.Timeout as exc:
+            raise VectorBeaTimeoutError(
+                f"Request to {url} timed out after {self._timeout}s. "
+                f"Increase the timeout by passing timeout= to VectorBeaClient()."
             ) from exc
-
         self._raise_for_status(resp)
         return resp.json()  # type: ignore[no-any-return]
 
@@ -78,7 +86,7 @@ class HttpClient:
             return
         try:
             body = resp.json()
-            message = body.get("error") or resp.text
+            message: str = body.get("error") or resp.text
         except ValueError:
             message = resp.text
 
@@ -90,7 +98,14 @@ class HttpClient:
             )
         if resp.status_code == 404:
             raise NotFoundError(
-                message or f"Resource not found at {resp.url}. "
-                "Check the prompt name exists in your workspace and has a published version."
+                message
+                or (
+                    f"Resource not found at {resp.url}. "
+                    "Check that the prompt name exists in your workspace "
+                    "and has at least one published version."
+                )
             )
-        raise VectorBeaError(f"HTTP {resp.status_code}: {message}")
+        raise APIError(
+            f"HTTP {resp.status_code}: {message}",
+            status_code=resp.status_code,
+        )

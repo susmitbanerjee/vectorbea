@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 
 @dataclass
-class PromptTemplate:
+class Prompt:
     """
     A resolved, published prompt version fetched from the VectorBea proxy.
 
@@ -38,7 +38,7 @@ class PromptTemplate:
     Examples
     --------
     >>> prompt = client.prompts.get("greet-user")
-    >>> message = prompt.format(name="Alice", product="Acme AI")
+    >>> message = prompt.compile({"name": "Alice", "product": "Acme AI"})
     >>> print(message)
     Hello Alice, welcome to Acme AI!
     """
@@ -56,18 +56,19 @@ class PromptTemplate:
     # Matches both {{ name }} and {{name}} style placeholders
     _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
-    def format(self, **kwargs: Any) -> str:
+    def compile(self, variables: Dict[str, Any]) -> str:
         """
         Render the template by substituting ``{{variable}}`` placeholders.
 
         All ``{{key}}`` occurrences in :attr:`template_text` are replaced
-        with the corresponding keyword argument. Whitespace inside the
-        braces is ignored, so ``{{ name }}`` and ``{{name}}`` are equivalent.
+        with the corresponding value from *variables*. Whitespace inside
+        the braces is ignored, so ``{{ name }}`` and ``{{name}}`` are
+        equivalent.
 
         Parameters
         ----------
-        **kwargs :
-            Variable values keyed by their placeholder names.
+        variables : dict
+            Mapping of placeholder names to their substitution values.
 
         Returns
         -------
@@ -77,32 +78,37 @@ class PromptTemplate:
         Raises
         ------
         KeyError
-            If a placeholder in the template has no matching kwarg.
+            If a placeholder in the template has no matching key in
+            *variables*.
 
         Examples
         --------
-        >>> prompt.format(name="Bob", product="VectorBea")
+        >>> prompt.compile({"name": "Bob", "product": "VectorBea"})
         'Hello Bob, welcome to VectorBea!'
         """
         missing = [
             m.group(1)
             for m in self._PLACEHOLDER_RE.finditer(self.template_text)
-            if m.group(1) not in kwargs
+            if m.group(1) not in variables
         ]
         if missing:
             raise KeyError(
                 f"Missing template variables: {missing}. "
-                f"Provide them as keyword arguments to .format()."
+                f"Provide them as keys in the variables dict passed to .compile()."
             )
 
-        def replacer(match: re.Match) -> str:  # type: ignore[type-arg]
-            return str(kwargs[match.group(1)])
+        def _replacer(match: re.Match) -> str:  # type: ignore[type-arg]
+            return str(variables[match.group(1)])
 
-        return self._PLACEHOLDER_RE.sub(replacer, self.template_text)
+        return self._PLACEHOLDER_RE.sub(_replacer, self.template_text)
+
+    def format(self, **kwargs: Any) -> str:
+        """Deprecated alias for :meth:`compile`. Use ``compile(variables)`` instead."""
+        return self.compile(dict(kwargs))
 
     @classmethod
-    def _from_dict(cls, data: Dict[str, Any]) -> "PromptTemplate":
-        """Internal: build a PromptTemplate from the raw API JSON payload."""
+    def _from_dict(cls, data: Dict[str, Any]) -> "Prompt":
+        """Internal: build a Prompt from the raw API JSON payload."""
         return cls(
             prompt_id=data["promptId"],
             prompt_version_id=data["promptVersionId"],
@@ -114,3 +120,7 @@ class PromptTemplate:
             description=data.get("description"),
             created_at=data.get("createdAt", ""),
         )
+
+
+# Backward-compatibility alias — remove in v1.0
+PromptTemplate = Prompt
