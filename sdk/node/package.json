@@ -7,7 +7,7 @@
   "homepage": "https://vectorbea.com/docs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/susmitbanerjee/vectorbea"
+    "url": "git+https://github.com/susmitbanerjee/vectorbea.git"
   },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
