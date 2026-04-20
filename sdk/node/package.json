@@ -1,6 +1,6 @@
 {
   "name": "@vectorbea-ai/node",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Official Node.js / TypeScript SDK for the VectorBea prompt management platform",
   "license": "MIT",
   "author": "VectorBea <support@vectorbea.com>",
