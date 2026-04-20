@@ -478,9 +478,9 @@ suspend fun main() {
     // Fetch the latest published version by name
     val prompt = client.prompts.get("greet-user")
 
-    println("Name:     ${prompt.name}")
-    println("Version:  ${prompt.versionTag}")
-    println("Template: ${prompt.templateText}")
+    println("Name:     ${"$"}{prompt.name}")
+    println("Version:  ${"$"}{prompt.versionTag}")
+    println("Template: ${"$"}{prompt.templateText}")
 
     // Render the template with your own variables
     val message = prompt.compile(mapOf(
