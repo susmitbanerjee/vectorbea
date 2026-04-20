@@ -1,9 +1,9 @@
 /**
- * @vectorbea/node — Official Node.js / TypeScript SDK
+ * @vectorbea-ai/node — Official Node.js / TypeScript SDK
  *
  * @example
  * ```ts
- * import { VectorBeaClient } from "@vectorbea/node";
+ * import { VectorBeaClient } from "@vectorbea-ai/node";
  *
  * const client = new VectorBeaClient({
  *   apiKey:  process.env.VECTORBEA_API_KEY,

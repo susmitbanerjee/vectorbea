@@ -30,7 +30,7 @@ export interface LogAuditOptions {
  * Obtain an instance via `client.prompts`:
  *
  * ```ts
- * import { VectorBeaClient } from "@vectorbea/node";
+ * import { VectorBeaClient } from "@vectorbea-ai/node";
  *
  * const client = new VectorBeaClient({ apiKey: "vbagent_..." });
  * const prompt  = await client.prompts.get("greet-user");

@@ -45,7 +45,7 @@ export interface VectorBeaClientOptions {
  * @example
  * **Local proxy (development)**
  * ```ts
- * import { VectorBeaClient } from "@vectorbea/node";
+ * import { VectorBeaClient } from "@vectorbea-ai/node";
  *
  * const client = new VectorBeaClient({
  *   apiKey:  "vbagent_...",

@@ -296,7 +296,7 @@ pip install --upgrade vectorbea`}</Code>
           </div>
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Node.js</p>
-            <Code lang="bash">{`npm install @vectorbea/node`}</Code>
+            <Code lang="bash">{`npm install @vectorbea-ai/node`}</Code>
           </div>
         </div>
       </Step>
@@ -332,7 +332,7 @@ print("Rendered:", message)                # Hello Alice, welcome to Acme AI!`}<
           </div>
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Node.js — testPrompt.mjs</p>
-            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea/node";
+            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
 
 const client = new VectorBeaClient({
   apiKey:  "any-value",             // not validated by the local sidecar
