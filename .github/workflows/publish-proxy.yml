@@ -15,6 +15,12 @@ name: Publish Multi-Arch Proxy
 on:
   release:
     types: [published]
+  workflow_dispatch:    # allow manual trigger from the Actions tab
+    inputs:
+      version:
+        description: "Version tag to apply (e.g. 0.1.0) — leave blank to use 'dev'"
+        required: false
+        default: "dev"
 
 concurrency:
   group: publish-proxy-${{ github.ref }}
@@ -89,13 +95,17 @@ jobs:
 
       # Derive clean version string from the GitHub Release tag.
       # Release tag format: v1.2.3  →  version: 1.2.3
-      - name: Extract version from release tag
+      - name: Extract version
         id: version
         run: |
-          RAW="${{ github.event.release.tag_name }}"
-          VERSION="${RAW#v}"   # strip leading 'v' if present
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            RAW="${{ github.event.release.tag_name }}"
+            VERSION="${RAW#v}"
+          fi
           echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Release version: ${VERSION}"
+          echo "Building version: ${VERSION}"
 
       # Build for both platforms simultaneously and push a multi-arch manifest
       # to Docker Hub. Docker Hub and every OCI-compliant registry will serve
