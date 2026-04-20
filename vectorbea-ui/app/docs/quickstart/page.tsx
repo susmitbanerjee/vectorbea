@@ -1,122 +1,57 @@
 import type { Route } from "next";
 import Link from "next/link";
-import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  Info,
-  Terminal,
-} from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock } from "lucide-react";
 
-import { CopyButton } from "@/components/docs/copy-button";
+import { Callout, Code, InlineCode, Step } from "@/components/docs/prose";
 
 export const metadata = {
   title: "Quickstart — VectorBea Docs",
 };
 
-// ─── Code block ───────────────────────────────────────────────────────────────
+// ─── Language card ────────────────────────────────────────────────────────────
 
-function Code({ lang, children }: { lang?: string; children: string }) {
-  const trimmed = children.trim();
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-border/40 bg-[#0d1117] shadow-sm">
-      {/* top bar */}
-      <div className="flex items-center justify-between border-b border-border/30 bg-white/[0.03] px-4 py-1.5">
-        <div className="flex items-center gap-1.5">
-          <Terminal className="h-3.5 w-3.5 text-muted-foreground/50" />
-          {lang && (
-            <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground/50">
-              {lang}
-            </span>
-          )}
-        </div>
-        {/* CopyButton is the only client island on this page */}
-        <CopyButton text={trimmed} />
-      </div>
-      <pre className="overflow-x-auto px-5 py-4 text-sm leading-relaxed text-slate-200">
-        <code>{trimmed}</code>
-      </pre>
-    </div>
-  );
-}
-
-// ─── Inline code ──────────────────────────────────────────────────────────────
-
-function InlineCode({ children }: { children: React.ReactNode }) {
-  return (
-    <code className="rounded bg-muted px-1.5 py-0.5 text-[0.85em] font-mono text-foreground">
-      {children}
-    </code>
-  );
-}
-
-// ─── Callout ─────────────────────────────────────────────────────────────────
-
-function Callout({
-  kind = "info",
-  children,
+function LangCard({
+  href,
+  color,
+  name,
+  install,
+  soon,
 }: {
-  kind?: "info" | "warn";
-  children: React.ReactNode;
-}) {
-  const styles =
-    kind === "warn"
-      ? "border-amber-500/30 bg-amber-500/8 text-amber-700 dark:text-amber-300"
-      : "border-primary/30 bg-primary/5 text-foreground";
-  const Icon = kind === "warn" ? AlertTriangle : Info;
-  return (
-    <div className={`flex gap-3 rounded-xl border p-4 text-sm leading-relaxed ${styles}`}>
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
-      <div>{children}</div>
-    </div>
-  );
-}
-
-// ─── Incoming badge ──────────────────────────────────────────────────────────
-
-function IncomingBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-      <Clock className="h-3 w-3" />
-      Incoming
-    </span>
-  );
-}
-
-// ─── Lang label ──────────────────────────────────────────────────────────────
-
-function LangLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-      {children}
-    </p>
-  );
-}
-
-// ─── Step ─────────────────────────────────────────────────────────────────────
-
-function Step({
-  id,
-  n,
-  title,
-  children,
-}: {
-  id: string;
-  n: number;
-  title: string;
-  children: React.ReactNode;
+  href: string;
+  color: string;
+  name: string;
+  install?: string;
+  soon?: boolean;
 }) {
   return (
-    <section id={id} className="space-y-4 scroll-mt-24">
-      <div className="flex items-center gap-3 border-t border-border/60 pt-8">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-          {n}
+    <Link
+      href={href as Route}
+      className="group relative flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
+    >
+      {/* colour strip */}
+      <div
+        className="h-1 w-8 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-foreground group-hover:text-primary">
+          {name}
         </span>
-        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+        {soon ? (
+          <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Clock className="h-2.5 w-2.5" />
+            Soon
+          </span>
+        ) : (
+          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary" />
+        )}
       </div>
-      {children}
-    </section>
+      {install && (
+        <code className="rounded bg-muted/60 px-2 py-1 text-[11px] font-mono text-muted-foreground">
+          {install}
+        </code>
+      )}
+    </Link>
   );
 }
 
@@ -126,7 +61,7 @@ export default function QuickstartPage() {
   return (
     <article className="mx-auto max-w-[68ch] space-y-6 py-4 lg:py-8">
 
-      {/* ── Hero ──────────────────────────────────────────────────────────── */}
+      {/* Hero */}
       <section className="space-y-4">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
           Quickstart
@@ -135,23 +70,21 @@ export default function QuickstartPage() {
           From zero to live prompt in 15 minutes
         </h1>
         <p className="text-lg leading-8 text-muted-foreground">
-          Pull the VectorBea sidecar, publish your first prompt, and watch your
-          app fetch it in real time — works with Python, Node.js, Java, and
-          Kotlin out of the box.
+          Pull the VectorBea sidecar, publish your first prompt, then pick your
+          language SDK and start fetching in real time.
         </p>
       </section>
 
-      {/* ── Prerequisites ────────────────────────────────────────────────── */}
+      {/* Prerequisites */}
       <section id="before-you-start" className="space-y-3 scroll-mt-24 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Before you start</h2>
         <p className="text-sm text-muted-foreground">
-          You only need two things installed. Everything else is handled by
-          VectorBea.
+          You only need two things installed. Everything else is handled by VectorBea.
         </p>
         <ul className="space-y-2 text-sm text-muted-foreground">
           {[
             "Docker Desktop — download from docker.com/get-started",
-            "Python 3.8+, Node.js 18+, or Java 17+ — depending on your preferred SDK",
+            "The runtime for your chosen SDK — Python 3.8+, Node.js 18+, or Java 17+",
           ].map((item) => (
             <li key={item} className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -168,7 +101,7 @@ export default function QuickstartPage() {
         </Callout>
       </section>
 
-      {/* ── Step 1 ───────────────────────────────────────────────────────── */}
+      {/* Step 1 */}
       <Step id="step-1" n={1} title="Create a workspace">
         <p className="text-sm leading-7 text-muted-foreground">
           Sign in to{" "}
@@ -189,7 +122,7 @@ export default function QuickstartPage() {
         </p>
       </Step>
 
-      {/* ── Step 2 ───────────────────────────────────────────────────────── */}
+      {/* Step 2 */}
       <Step id="step-2" n={2} title="Create and publish a prompt">
         <p className="text-sm leading-7 text-muted-foreground">
           Click <strong>Prompts</strong> in the left sidebar, then{" "}
@@ -217,27 +150,23 @@ export default function QuickstartPage() {
         </Callout>
       </Step>
 
-      {/* ── Step 3 ───────────────────────────────────────────────────────── */}
+      {/* Step 3 */}
       <Step id="step-3" n={3} title="Pull the sidecar image">
         <p className="text-sm leading-7 text-muted-foreground">
-          Open a terminal and run the command below. The image is a multi-arch
-          manifest — Docker automatically pulls the correct native layer for your
-          machine whether you are on Intel, AMD, Apple Silicon (M1–M4), or AWS
-          Graviton.
+          Open a terminal and run the command below. Docker automatically pulls
+          the correct native layer for your machine — no{" "}
+          <InlineCode>--platform</InlineCode> flag needed.
         </p>
-
         <Code lang="bash">{`docker pull vectorbea/vectorbea-proxy:latest`}</Code>
-
         <Callout kind="info">
           The pull is roughly 150 MB. You only need to do this once — Docker
           reuses the cached image on every subsequent run.
         </Callout>
       </Step>
 
-      {/* ── Step 4 ───────────────────────────────────────────────────────── */}
+      {/* Step 4 */}
       <Step id="step-4" n={4} title="Register a sidecar and copy the token">
         <p className="text-sm leading-7 text-muted-foreground">
-          Every sidecar instance authenticates with a <em>sidecar token</em>.
           Go to <strong>Infrastructure</strong> in the dashboard and click{" "}
           <strong>Register sidecar</strong>. Give it a name like{" "}
           <InlineCode>local-dev</InlineCode>, then click{" "}
@@ -250,512 +179,108 @@ export default function QuickstartPage() {
         <Callout kind="warn">
           <strong>This token is shown exactly once.</strong> If you close the
           dialog without copying it you must delete the sidecar and register a
-          new one. Store it somewhere safe — never commit it to source control.
+          new one. Never commit it to source control.
         </Callout>
         <Callout kind="warn">
-          <strong>The sidecar token is scoped to the workspace you register it in.</strong>{" "}
-          It can only fetch prompts that belong to that same workspace. If your
-          prompt is in workspace A but the sidecar is registered in workspace B,
-          every fetch returns a 404. Confirm you are on the correct workspace
-          before clicking Register sidecar.
+          <strong>Tokens are workspace-scoped.</strong> The sidecar can only
+          fetch prompts that belong to the workspace it was registered in. If
+          your prompt is in workspace A but the sidecar is in workspace B, every
+          fetch returns a 404.
         </Callout>
-        <p className="text-sm leading-7 text-muted-foreground">
-          The sidecar shows <strong>Pending</strong> in the dashboard until the
-          container starts. It flips to <strong>Online</strong> automatically
-          within ~5 seconds of the container sending its first heartbeat.
-        </p>
       </Step>
 
-      {/* ── Step 5 ───────────────────────────────────────────────────────── */}
+      {/* Step 5 */}
       <Step id="step-5" n={5} title="Run the sidecar container">
         <p className="text-sm leading-7 text-muted-foreground">
           Replace <InlineCode>vbagent_your_token_here</InlineCode> with the
-          token you just copied. The same command runs on every platform — no{" "}
-          <InlineCode>--platform</InlineCode> flag needed.
+          token you copied.
         </p>
-
         <Code lang="bash">{`docker run --rm -p 8080:8080 \\
   -e VECTORBEA_HUB_URL="https://vectorbea.com" \\
   -e VECTORBEA_KEY="vbagent_your_token_here" \\
   -e VECTORBEA_HTTP_PORT="8080" \\
   vectorbea/vectorbea-proxy:latest`}</Code>
-
         <p className="text-sm leading-7 text-muted-foreground">
-          Watch the terminal. Within a few seconds you will see:
+          Within a few seconds you will see:
         </p>
         <Code>{`vectorbea sidecar ready — REST unix:/tmp/vectorbea-rest.sock, HTTP :8080, gRPC unix:/tmp/vectorbea.sock`}</Code>
         <p className="text-sm leading-7 text-muted-foreground">
-          That line means the sidecar is up, authenticated with the control
-          plane, and listening on <InlineCode>localhost:8080</InlineCode>. The
-          sidecar status in the dashboard changes from{" "}
-          <strong>Pending → Online</strong> within ~5 seconds.
+          The sidecar status in the dashboard changes from{" "}
+          <strong>Pending → Online</strong> within ~5 seconds. Keep this
+          terminal open while you run the SDK steps.
         </p>
         <Callout kind="info">
-          Keep this terminal open. The sidecar runs in the foreground — closing
-          it stops the container. To run it in the background, add{" "}
-          <InlineCode>-d</InlineCode> after <InlineCode>docker run</InlineCode>{" "}
-          and use <InlineCode>docker logs &lt;container-id&gt;</InlineCode> to
-          view output.
+          To run in the background add <InlineCode>-d</InlineCode> after{" "}
+          <InlineCode>docker run</InlineCode> and use{" "}
+          <InlineCode>docker logs &lt;container-id&gt;</InlineCode> to view
+          output.
         </Callout>
       </Step>
 
-      {/* ── Step 6 ───────────────────────────────────────────────────────── */}
-      <Step id="step-6" n={6} title="Install the SDK">
+      {/* Step 6 — SDK choice */}
+      <Step id="step-6" n={6} title="Choose your SDK">
         <p className="text-sm leading-7 text-muted-foreground">
-          Open a <strong>new</strong> terminal (leave the sidecar running in
-          the first one) and install the SDK for your preferred language.
+          Open a <strong>new</strong> terminal and follow the guide for your
+          preferred language. Each guide covers installation, fetching a prompt,
+          reporting LLM telemetry, and moving to production.
         </p>
 
-        <div className="space-y-6">
-
-          {/* Python */}
-          <div className="space-y-2">
-            <LangLabel>Python</LangLabel>
-            <Code lang="bash">{`pip install vectorbea`}</Code>
-            <p className="text-sm leading-7 text-muted-foreground">
-              You need <strong>0.2.0 or later</strong> for automatic audit
-              reporting. Verify and upgrade if needed:
-            </p>
-            <Code lang="bash">{`pip show vectorbea
-pip install --upgrade vectorbea`}</Code>
-          </div>
-
-          {/* Node.js */}
-          <div className="space-y-2">
-            <LangLabel>Node.js</LangLabel>
-            <Code lang="bash">{`npm install @vectorbea-ai/node`}</Code>
-          </div>
-
-          {/* Java */}
-          <div className="space-y-2">
-            <LangLabel>Java</LangLabel>
-            <p className="text-sm leading-7 text-muted-foreground">
-              Add the dependency to your build file. Requires Java 17+.
-            </p>
-            <p className="text-xs font-medium text-muted-foreground">Maven — pom.xml</p>
-            <Code lang="xml">{`<dependency>
-  <groupId>com.vectorbea</groupId>
-  <artifactId>vectorbea-jvm-sdk</artifactId>
-  <version>0.2.1</version>
-</dependency>`}</Code>
-            <p className="text-xs font-medium text-muted-foreground">Gradle (Kotlin DSL) — build.gradle.kts</p>
-            <Code lang="kotlin">{`implementation("com.vectorbea:vectorbea-jvm-sdk:0.2.1")`}</Code>
-            <p className="text-xs font-medium text-muted-foreground">Gradle (Groovy) — build.gradle</p>
-            <Code lang="groovy">{`implementation 'com.vectorbea:vectorbea-jvm-sdk:0.2.1'`}</Code>
-          </div>
-
-          {/* Kotlin */}
-          <div className="space-y-2">
-            <LangLabel>Kotlin</LangLabel>
-            <p className="text-sm leading-7 text-muted-foreground">
-              The JVM SDK is written in Kotlin — the same artifact works for both
-              Java and Kotlin projects. Add the identical dependency shown above.
-            </p>
-            <Code lang="kotlin">{`implementation("com.vectorbea:vectorbea-jvm-sdk:0.2.1")`}</Code>
-          </div>
-
-          {/* Go */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <LangLabel>Go</LangLabel>
-              <IncomingBadge />
-            </div>
-            <p className="text-sm leading-7 text-muted-foreground">
-              Native Go SDK coming soon. In the meantime you can call the sidecar
-              directly over HTTP — see the REST API reference.
-            </p>
-          </div>
-
-          {/* Rust */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <LangLabel>Rust</LangLabel>
-              <IncomingBadge />
-            </div>
-            <p className="text-sm leading-7 text-muted-foreground">
-              Native Rust SDK coming soon. In the meantime you can call the sidecar
-              directly over HTTP — see the REST API reference.
-            </p>
-          </div>
-
+        <div className="grid gap-3 sm:grid-cols-2">
+          <LangCard
+            href="/docs/sdk/python"
+            color="#3776AB"
+            name="Python"
+            install="pip install vectorbea"
+          />
+          <LangCard
+            href="/docs/sdk/nodejs"
+            color="#339933"
+            name="Node.js"
+            install="npm install @vectorbea-ai/node"
+          />
+          <LangCard
+            href="/docs/sdk/java"
+            color="#ED8B00"
+            name="Java"
+            install="com.vectorbea:vectorbea-jvm-sdk:0.2.1"
+          />
+          <LangCard
+            href="/docs/sdk/kotlin"
+            color="#7F52FF"
+            name="Kotlin"
+            install="com.vectorbea:vectorbea-jvm-sdk:0.2.1"
+          />
+          <LangCard
+            href="/docs/sdk/go"
+            color="#00ADD8"
+            name="Go"
+            soon
+          />
+          <LangCard
+            href="/docs/sdk/rust"
+            color="#CE422B"
+            name="Rust"
+            soon
+          />
         </div>
       </Step>
 
-      {/* ── Step 7 ───────────────────────────────────────────────────────── */}
-      <Step id="step-7" n={7} title="Fetch your prompt">
-        <p className="text-sm leading-7 text-muted-foreground">
-          Create a file, paste the script for your language, and run it.
-        </p>
-
-        <div className="space-y-8">
-
-          {/* Python */}
-          <div className="space-y-2">
-            <LangLabel>Python — test_prompt.py</LangLabel>
-            <Code lang="python">{`from vectorbea import VectorBeaClient
-
-client = VectorBeaClient(
-    api_key="any-value",            # not validated by the local sidecar
-    base_url="http://localhost:8080",
-)
-
-# Fetch the latest published version by name.
-# SDK 0.2.0+ automatically records an audit event on every get().
-prompt = client.prompts.get("greet-user")
-
-print("Name:    ", prompt.name)            # greet-user
-print("Version: ", prompt.version_tag)     # v1.0.0
-print("Template:", prompt.template_text)   # Hello {{name}}, welcome to {{product}}!
-
-# Render the template with your own variables
-message = prompt.compile({"name": "Alice", "product": "Acme AI"})
-print("Rendered:", message)                # Hello Alice, welcome to Acme AI!`}</Code>
-            <Code lang="bash">{`python test_prompt.py`}</Code>
-          </div>
-
-          {/* Node.js */}
-          <div className="space-y-2">
-            <LangLabel>Node.js — testPrompt.mjs</LangLabel>
-            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
-
-const client = new VectorBeaClient({
-  apiKey:  "any-value",             // not validated by the local sidecar
-  baseUrl: "http://localhost:8080",
-});
-
-const prompt = await client.prompts.get("greet-user");
-
-console.log("Name:    ", prompt.name);           // greet-user
-console.log("Version: ", prompt.versionTag);     // v1.0.0
-console.log("Template:", prompt.templateText);   // Hello {{name}}, welcome to {{product}}!
-
-const message = prompt.compile({ name: "Alice", product: "Acme AI" });
-console.log("Rendered:", message);               // Hello Alice, welcome to Acme AI!`}</Code>
-            <Code lang="bash">{`node testPrompt.mjs`}</Code>
-          </div>
-
-          {/* Java */}
-          <div className="space-y-2">
-            <LangLabel>Java — TestPrompt.java</LangLabel>
-            <Code lang="java">{`import com.vectorbea.sdk.VectorBeaClient;
-import com.vectorbea.sdk.model.Prompt;
-
-public class TestPrompt {
-    public static void main(String[] args) throws Exception {
-        VectorBeaClient client = new VectorBeaClient.Builder()
-            .apiKey("any-value")          // not validated by the local sidecar
-            .baseUrl("http://localhost:8080")
-            .build();
-
-        // Fetch the latest published version by name
-        Prompt prompt = client.prompts().get("greet-user");
-
-        System.out.println("Name:     " + prompt.getName());
-        System.out.println("Version:  " + prompt.getVersionTag());
-        System.out.println("Template: " + prompt.getTemplateText());
-
-        // Render the template with your own variables
-        String message = prompt.compile(Map.of(
-            "name", "Alice",
-            "product", "Acme AI"
-        ));
-        System.out.println("Rendered: " + message);
-    }
-}`}</Code>
-          </div>
-
-          {/* Kotlin */}
-          <div className="space-y-2">
-            <LangLabel>Kotlin — TestPrompt.kt</LangLabel>
-            <Code lang="kotlin">{`import com.vectorbea.sdk.VectorBeaClient
-
-suspend fun main() {
-    val client = VectorBeaClient(
-        apiKey  = "any-value",           // not validated by the local sidecar
-        baseUrl = "http://localhost:8080",
-    )
-
-    // Fetch the latest published version by name
-    val prompt = client.prompts.get("greet-user")
-
-    println("Name:     ${"$"}{prompt.name}")
-    println("Version:  ${"$"}{prompt.versionTag}")
-    println("Template: ${"$"}{prompt.templateText}")
-
-    // Render the template with your own variables
-    val message = prompt.compile(mapOf(
-        "name"    to "Alice",
-        "product" to "Acme AI",
-    ))
-    println("Rendered: $message")
-}`}</Code>
-          </div>
-
-          {/* Go / Rust incoming */}
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border/40 bg-muted/20 p-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <LangLabel>Go</LangLabel>
-                <IncomingBadge />
-              </div>
-              <p className="text-sm text-muted-foreground">Native Go SDK is on the roadmap. Until then, fetch prompts directly from the sidecar REST endpoint at <InlineCode>http://localhost:8080/v1/prompts/&#123;name&#125;</InlineCode>.</p>
-            </div>
-            <div className="rounded-xl border border-border/40 bg-muted/20 p-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <LangLabel>Rust</LangLabel>
-                <IncomingBadge />
-              </div>
-              <p className="text-sm text-muted-foreground">Native Rust SDK is on the roadmap. Until then, fetch prompts directly from the sidecar REST endpoint at <InlineCode>http://localhost:8080/v1/prompts/&#123;name&#125;</InlineCode>.</p>
-            </div>
-          </div>
-
-        </div>
-
-        <p className="text-sm font-medium">Expected output</p>
-        <Code>{`Name:     greet-user
-Version:  v1.0.0
-Template: Hello {{name}}, welcome to {{product}}!
-Rendered: Hello Alice, welcome to Acme AI!`}</Code>
-
-        <p className="text-sm leading-7 text-muted-foreground">
-          Now open the VectorBea dashboard and confirm:
-        </p>
-        <ul className="list-disc space-y-1.5 pl-5 text-sm leading-7 text-muted-foreground">
-          <li>
-            <strong>Infrastructure →</strong> sidecar status is{" "}
-            <strong>Online</strong> with a recent last-seen timestamp
-          </li>
-          <li>
-            <strong>Dashboard →</strong> Requests (24h) incremented, Avg
-            latency populated, Active sidecars shows 1
-          </li>
-          <li>
-            <strong>Audit logs →</strong> your fetch appears with prompt name,
-            version, and latency
-          </li>
-        </ul>
-        <Callout kind="info">
-          Every <InlineCode>client.prompts.get()</InlineCode> call
-          automatically records an audit event — no extra instrumentation
-          needed. The sidecar sends a heartbeat every 30 seconds and the live
-          telemetry chart updates on the same cadence.
-        </Callout>
-      </Step>
-
-      {/* ── Step 8 (optional) ────────────────────────────────────────────── */}
-      <Step id="step-8" n={8} title="Report LLM latency and token usage (optional)">
-        <p className="text-sm leading-7 text-muted-foreground">
-          After calling your LLM, pass the response metadata back so the
-          dashboard shows end-to-end latency and token cost per request:
-        </p>
-
-        <div className="space-y-6">
-
-          {/* Python */}
-          <div className="space-y-2">
-            <LangLabel>Python</LangLabel>
-            <Code lang="python">{`import time
-from vectorbea import VectorBeaClient
-
-client = VectorBeaClient(
-    api_key="any-value",
-    base_url="http://localhost:8080",
-)
-
-prompt  = client.prompts.get("greet-user")
-message = prompt.compile({"name": "Alice", "product": "Acme AI"})
-
-# Call your LLM (OpenAI shown — swap for any provider)
-t0 = time.time()
-response = openai_client.chat.completions.create(
-    model="gpt-4o",
-    messages=[{"role": "user", "content": message}],
-)
-llm_ms = int((time.time() - t0) * 1000)
-
-# Log the full audit event — appears in Audit logs
-client.prompts.log_audit(
-    prompt,
-    llm_latency_ms=llm_ms,
-    token_count=response.usage.total_tokens,
-    metadata={"model": "gpt-4o"},
-)`}</Code>
-          </div>
-
-          {/* Node.js */}
-          <div className="space-y-2">
-            <LangLabel>Node.js</LangLabel>
-            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
-
-const client = new VectorBeaClient({
-  apiKey:  "any-value",
-  baseUrl: "http://localhost:8080",
-});
-
-const prompt  = await client.prompts.get("greet-user");
-const message = prompt.compile({ name: "Alice", product: "Acme AI" });
-
-// Call your LLM (OpenAI shown — swap for any provider)
-const t0 = Date.now();
-const response = await openai.chat.completions.create({
-  model: "gpt-4o",
-  messages: [{ role: "user", content: message }],
-});
-const llmMs = Date.now() - t0;
-
-// Log the full audit event — appears in Audit logs
-await client.prompts.logAudit(prompt, {
-  llmLatencyMs: llmMs,
-  tokenCount: response.usage.total_tokens,
-  metadata: { model: "gpt-4o" },
-});`}</Code>
-          </div>
-
-          {/* Java */}
-          <div className="space-y-2">
-            <LangLabel>Java</LangLabel>
-            <Code lang="java">{`import com.vectorbea.sdk.VectorBeaClient;
-import com.vectorbea.sdk.model.Prompt;
-
-VectorBeaClient client = new VectorBeaClient.Builder()
-    .apiKey("any-value")
-    .baseUrl("http://localhost:8080")
-    .build();
-
-Prompt prompt  = client.prompts().get("greet-user");
-String message = prompt.compile(Map.of("name", "Alice", "product", "Acme AI"));
-
-long t0 = System.currentTimeMillis();
-// ... call your LLM here ...
-long llmMs = System.currentTimeMillis() - t0;
-
-client.prompts().logAudit(prompt, llmMs, tokenCount,
-    Map.of("model", "gpt-4o"));`}</Code>
-          </div>
-
-          {/* Kotlin */}
-          <div className="space-y-2">
-            <LangLabel>Kotlin</LangLabel>
-            <Code lang="kotlin">{`val client = VectorBeaClient(
-    apiKey  = "any-value",
-    baseUrl = "http://localhost:8080",
-)
-
-val prompt  = client.prompts.get("greet-user")
-val message = prompt.compile(mapOf("name" to "Alice", "product" to "Acme AI"))
-
-val t0 = System.currentTimeMillis()
-// ... call your LLM here ...
-val llmMs = System.currentTimeMillis() - t0
-
-client.prompts.logAudit(
-    prompt,
-    llmLatencyMs = llmMs,
-    tokenCount   = tokenCount,
-    metadata     = mapOf("model" to "gpt-4o"),
-)`}</Code>
-          </div>
-
-        </div>
-      </Step>
-
-      {/* ── Step 9 ───────────────────────────────────────────────────────── */}
-      <Step id="step-9" n={9} title="Moving to production">
-        <p className="text-sm leading-7 text-muted-foreground">
-          For production, omit <InlineCode>base_url</InlineCode> (or{" "}
-          <InlineCode>baseUrl</InlineCode>) and supply a real workspace API key.
-          Generate one from <strong>API keys</strong> in the sidebar.
-        </p>
-        <Code lang="bash">{`export VECTORBEA_API_KEY="vb_live_..."`}</Code>
-
-        <div className="space-y-6">
-
-          {/* Python */}
-          <div className="space-y-2">
-            <LangLabel>Python</LangLabel>
-            <Code lang="python">{`from vectorbea import VectorBeaClient
-
-# Reads VECTORBEA_API_KEY from the environment automatically.
-# base_url defaults to https://vectorbea.com
-client = VectorBeaClient()
-
-prompt  = client.prompts.get("greet-user")
-message = prompt.compile({"name": "Bob", "product": "Acme AI"})`}</Code>
-          </div>
-
-          {/* Node.js */}
-          <div className="space-y-2">
-            <LangLabel>Node.js</LangLabel>
-            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea-ai/node";
-
-// Reads VECTORBEA_API_KEY from process.env automatically.
-// baseUrl defaults to https://vectorbea.com
-const client = new VectorBeaClient();
-
-const prompt  = await client.prompts.get("greet-user");
-const message = prompt.compile({ name: "Bob", product: "Acme AI" });`}</Code>
-          </div>
-
-          {/* Java */}
-          <div className="space-y-2">
-            <LangLabel>Java</LangLabel>
-            <Code lang="java">{`import com.vectorbea.sdk.VectorBeaClient;
-
-// Reads VECTORBEA_API_KEY from the environment automatically.
-// baseUrl defaults to https://vectorbea.com
-VectorBeaClient client = new VectorBeaClient.Builder()
-    .fromEnvironment()
-    .build();
-
-Prompt prompt  = client.prompts().get("greet-user");
-String message = prompt.compile(Map.of("name", "Bob", "product", "Acme AI"));`}</Code>
-          </div>
-
-          {/* Kotlin */}
-          <div className="space-y-2">
-            <LangLabel>Kotlin</LangLabel>
-            <Code lang="kotlin">{`import com.vectorbea.sdk.VectorBeaClient
-
-// Reads VECTORBEA_API_KEY from the environment automatically.
-// baseUrl defaults to https://vectorbea.com
-val client = VectorBeaClient.fromEnvironment()
-
-val prompt  = client.prompts.get("greet-user")
-val message = prompt.compile(mapOf("name" to "Bob", "product" to "Acme AI"))`}</Code>
-          </div>
-
-        </div>
-
-        <Callout kind="info">
-          In production, run the sidecar as a container alongside your service
-          for lower latency and local caching. Deploy the same docker image
-          with the same environment variables and point your SDK at{" "}
-          <InlineCode>{'base_url="http://localhost:8080"'}</InlineCode>.
-          Your data stays inside your network — the control plane only receives
-          heartbeats and audit metadata.
-        </Callout>
-      </Step>
-
-      {/* ── Troubleshooting ──────────────────────────────────────────────── */}
+      {/* Troubleshooting */}
       <section id="troubleshooting" className="space-y-4 scroll-mt-24 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Troubleshooting</h2>
         <div className="space-y-3 text-sm">
           {[
             {
               problem: "Sidecar stuck on Pending after the container starts",
-              fix: 'Wait 10 seconds after "sidecar ready" appears in the terminal — the heartbeat fires within 5 seconds of that message. If it is still Pending, double-check that VECTORBEA_HUB_URL and VECTORBEA_KEY are set correctly. A single typo prevents authentication.',
+              fix: 'Wait 10 seconds after "sidecar ready" appears. If it is still Pending, double-check that VECTORBEA_HUB_URL and VECTORBEA_KEY are set correctly — a single typo prevents authentication.',
             },
             {
               problem: "NotFoundError: prompt not found",
-              fix: 'Two root causes. (1) Workspace mismatch — the sidecar token is scoped to a specific workspace. Open Infrastructure, click the sidecar, and confirm its workspace matches the one containing your prompt. (2) Not published — a saved draft is invisible to the sidecar. Open the prompt and click Publish.',
+              fix: 'Two root causes. (1) Workspace mismatch — the sidecar token is scoped to a specific workspace. Open Infrastructure and confirm it matches the workspace containing your prompt. (2) Not published — a saved draft is invisible to the sidecar. Open the prompt and click Publish.',
             },
             {
               problem: "ConnectionError: could not connect to sidecar",
-              fix: 'Check the first terminal and confirm "sidecar ready" appeared. Verify nothing else is using port 8080: run lsof -i :8080 on Mac/Linux or netstat -ano | findstr 8080 on Windows. Restart Docker Desktop if the port appears blocked.',
-            },
-            {
-              problem: "Dashboard shows 0 requests after running the script",
-              fix: 'You need SDK 0.1.8 or later. Run pip show vectorbea to check. If the version is older, run pip install --upgrade vectorbea. Versions before 0.1.8 did not auto-report audit events on prompts.get().',
+              fix: 'Check the first terminal and confirm "sidecar ready" appeared. Verify nothing else is using port 8080: run lsof -i :8080 on Mac/Linux or netstat -ano | findstr 8080 on Windows.',
             },
             {
               problem: 'Container exits immediately with "DB_URL must be set"',
@@ -773,7 +298,7 @@ val message = prompt.compile(mapOf("name" to "Bob", "product" to "Acme AI"))`}</
         </div>
       </section>
 
-      {/* ── Next steps ───────────────────────────────────────────────────── */}
+      {/* Next steps */}
       <section className="space-y-4 border-t border-border/60 pt-8">
         <h2 className="text-xl font-semibold tracking-tight">Next steps</h2>
         <div className="grid gap-3 sm:grid-cols-2">

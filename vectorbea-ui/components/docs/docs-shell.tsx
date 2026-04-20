@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
+import type { ComponentType, ReactNode } from "react";
 import {
   Boxes,
   Building2,
@@ -15,49 +16,87 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
 import { cn } from "@/lib/utils";
 
+// ─── Language logo icons ──────────────────────────────────────────────────────
+//
+// Small coloured SVG circles — readable at 13 px, consistent with sidebar grid.
+// Each factory closes over a brand colour.
+
+function mkLangIcon(color: string) {
+  return function LangIcon({
+    size = 13,
+    className,
+  }: {
+    size?: number;
+    className?: string;
+  }) {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 13 13"
+        className={className}
+        aria-hidden="true"
+      >
+        <circle cx="6.5" cy="6.5" r="5.5" fill={color} />
+      </svg>
+    );
+  };
+}
+
+const PythonIcon = mkLangIcon("#3776AB");
+const NodeIcon   = mkLangIcon("#339933");
+const JavaIcon   = mkLangIcon("#ED8B00");
+const KotlinIcon = mkLangIcon("#7F52FF");
+const GoIcon     = mkLangIcon("#00ADD8");
+const RustIcon   = mkLangIcon("#CE422B");
+
 // ─── Nav data ─────────────────────────────────────────────────────────────────
 
-const DOCS_NAV: Array<{
+type NavItem = {
   href: Route;
   title: string;
-  icon: typeof Rocket;
+  icon: ComponentType<{ size?: number; className?: string }>;
   section?: string;
-}> = [
-  { section: "Getting Started", href: "/docs/quickstart" as Route, title: "Quickstart", icon: Rocket },
-  { section: "Platform", href: "/docs/architecture" as Route, title: "Architecture", icon: Boxes },
-  { href: "/docs/integrations" as Route, title: "Integrations", icon: PlugZap },
-  { section: "Enterprise", href: "/docs/enterprise" as Route, title: "Enterprise", icon: Building2 },
-  { href: "/docs/security" as Route, title: "Security", icon: LockKeyhole },
+  badge?: string;         // e.g. "Soon"
+};
+
+const DOCS_NAV: NavItem[] = [
+  // Getting Started
+  { section: "Getting Started", href: "/docs/quickstart"   as Route, title: "Quickstart",  icon: Rocket   },
+
+  // SDKs
+  { section: "SDKs",            href: "/docs/sdk/python"   as Route, title: "Python",      icon: PythonIcon },
+  {                              href: "/docs/sdk/nodejs"   as Route, title: "Node.js",     icon: NodeIcon   },
+  {                              href: "/docs/sdk/java"     as Route, title: "Java",        icon: JavaIcon   },
+  {                              href: "/docs/sdk/kotlin"   as Route, title: "Kotlin",      icon: KotlinIcon },
+  {                              href: "/docs/sdk/go"       as Route, title: "Go",          icon: GoIcon,   badge: "Soon" },
+  {                              href: "/docs/sdk/rust"     as Route, title: "Rust",        icon: RustIcon, badge: "Soon" },
+
+  // Platform
+  { section: "Platform",        href: "/docs/architecture" as Route, title: "Architecture", icon: Boxes   },
+  {                              href: "/docs/integrations" as Route, title: "Integrations", icon: PlugZap },
+
+  // Enterprise
+  { section: "Enterprise",      href: "/docs/enterprise"   as Route, title: "Enterprise",  icon: Building2  },
+  {                              href: "/docs/security"     as Route, title: "Security",    icon: LockKeyhole },
 ];
 
-const DOCS_NAV_GROUPS = DOCS_NAV.reduce<
-  Array<{
-    section?: string;
-    items: Array<{
-      href: Route;
-      title: string;
-      icon: typeof Rocket;
-    }>;
-  }>
->((groups, item) => {
+// Group nav items by section
+type NavGroup = {
+  section?: string;
+  items: NavItem[];
+};
+
+const DOCS_NAV_GROUPS = DOCS_NAV.reduce<NavGroup[]>((groups, item) => {
   if (item.section || groups.length === 0) {
-    groups.push({
-      section: item.section,
-      items: [{ href: item.href, title: item.title, icon: item.icon }],
-    });
+    groups.push({ section: item.section, items: [item] });
     return groups;
   }
-
-  groups[groups.length - 1].items.push({
-    href: item.href,
-    title: item.title,
-    icon: item.icon,
-  });
+  groups[groups.length - 1].items.push(item);
   return groups;
 }, []);
 
@@ -74,7 +113,6 @@ function Sidebar({
 }) {
   return (
     <>
-      {/* Mobile backdrop */}
       {open && (
         <div
           className="fixed inset-0 z-20 bg-black/25 lg:hidden"
@@ -88,7 +126,7 @@ function Sidebar({
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
-        {/* Logo — matches landing page exactly */}
+        {/* Logo */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-5">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card shadow-sm">
@@ -112,7 +150,7 @@ function Sidebar({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
+        <nav className="flex-1 space-y-5 overflow-y-auto px-4 py-5">
           {DOCS_NAV_GROUPS.map((group) => (
             <div key={group.section ?? group.items[0].href}>
               {group.section && (
@@ -123,15 +161,16 @@ function Sidebar({
               {group.items.map((item) => {
                 const active =
                   pathname === item.href ||
-                  (item.href !== "/docs" && pathname.startsWith(`${item.href}/`));
-
+                  (item.href !== "/docs" &&
+                    pathname.startsWith(`${item.href}/`));
                 return (
-                  <NavItem
+                  <SidebarNavItem
                     key={item.href}
                     href={item.href}
                     active={active}
                     Icon={item.icon}
                     title={item.title}
+                    badge={item.badge}
                   />
                 );
               })}
@@ -154,16 +193,18 @@ function Sidebar({
   );
 }
 
-function NavItem({
+function SidebarNavItem({
   href,
   active,
   Icon,
   title,
+  badge,
 }: {
   href: Route;
   active: boolean;
-  Icon: typeof Rocket;
+  Icon: ComponentType<{ size?: number; className?: string }>;
   title: string;
+  badge?: string;
 }) {
   return (
     <Link
@@ -176,53 +217,86 @@ function NavItem({
       )}
     >
       <Icon size={13} className="shrink-0" />
-      {title}
+      <span className="flex-1">{title}</span>
+      {badge && (
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }
 
-// ─── On-page TOC placeholder (extensible per-page) ───────────────────────────
+// ─── On-page TOC ─────────────────────────────────────────────────────────────
 
 const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
   "/docs/quickstart": [
-    { label: "Before you start",         href: "#before-you-start" },
-    { label: "Create a workspace",        href: "#step-1" },
-    { label: "Create a prompt",           href: "#step-2" },
-    { label: "Pull the sidecar",          href: "#step-3" },
-    { label: "Register a sidecar",        href: "#step-4" },
-    { label: "Run the container",         href: "#step-5" },
-    { label: "Install the SDK",           href: "#step-6" },
-    { label: "Fetch your prompt",         href: "#step-7" },
-    { label: "Moving to production",      href: "#step-9" },
-    { label: "Troubleshooting",           href: "#troubleshooting" },
+    { label: "Before you start",    href: "#before-you-start" },
+    { label: "Create a workspace",  href: "#step-1" },
+    { label: "Create a prompt",     href: "#step-2" },
+    { label: "Pull the sidecar",    href: "#step-3" },
+    { label: "Register a sidecar",  href: "#step-4" },
+    { label: "Run the container",   href: "#step-5" },
+    { label: "Choose your SDK",     href: "#step-6" },
+    { label: "Troubleshooting",     href: "#troubleshooting" },
+  ],
+  "/docs/sdk/python": [
+    { label: "Install",              href: "#install" },
+    { label: "Fetch your prompt",    href: "#fetch" },
+    { label: "Report LLM telemetry", href: "#telemetry" },
+    { label: "Production",           href: "#production" },
+  ],
+  "/docs/sdk/nodejs": [
+    { label: "Install",              href: "#install" },
+    { label: "Fetch your prompt",    href: "#fetch" },
+    { label: "Report LLM telemetry", href: "#telemetry" },
+    { label: "Production",           href: "#production" },
+  ],
+  "/docs/sdk/java": [
+    { label: "Install",              href: "#install" },
+    { label: "Fetch your prompt",    href: "#fetch" },
+    { label: "Report LLM telemetry", href: "#telemetry" },
+    { label: "Production",           href: "#production" },
+  ],
+  "/docs/sdk/kotlin": [
+    { label: "Install",              href: "#install" },
+    { label: "Fetch your prompt",    href: "#fetch" },
+    { label: "Report LLM telemetry", href: "#telemetry" },
+    { label: "Production",           href: "#production" },
+  ],
+  "/docs/sdk/go": [
+    { label: "Overview", href: "#overview" },
+  ],
+  "/docs/sdk/rust": [
+    { label: "Overview", href: "#overview" },
   ],
   "/docs/architecture": [
-    { label: "The two-plane model", href: "#overview" },
-    { label: "System boundary", href: "#boundary" },
-    { label: "Responsibilities", href: "#responsibilities" },
-    { label: "Components", href: "#components" },
-    { label: "Network model", href: "#network-model" },
-    { label: "Runtime request flow", href: "#runtime-flow" },
-    { label: "Why it matters", href: "#design-principle" },
+    { label: "The two-plane model",    href: "#overview" },
+    { label: "System boundary",        href: "#boundary" },
+    { label: "Responsibilities",       href: "#responsibilities" },
+    { label: "Components",             href: "#components" },
+    { label: "Network model",          href: "#network-model" },
+    { label: "Runtime request flow",   href: "#runtime-flow" },
+    { label: "Why it matters",         href: "#design-principle" },
   ],
   "/docs/integrations": [
-    { label: "SDK options", href: "#sdk-options" },
-    { label: "Deployment patterns", href: "#deployment-patterns" },
-    { label: "Operational signals", href: "#observability" },
-    { label: "Rollout workflow", href: "#workflow" },
+    { label: "SDK options",            href: "#sdk-options" },
+    { label: "Deployment patterns",    href: "#deployment-patterns" },
+    { label: "Operational signals",    href: "#observability" },
+    { label: "Rollout workflow",       href: "#workflow" },
   ],
   "/docs/enterprise": [
-    { label: "Operating model", href: "#operating-model" },
-    { label: "Workspace RBAC", href: "#rbac" },
-    { label: "Isolation", href: "#isolation" },
-    { label: "Security posture", href: "#security" },
-    { label: "Seat governance", href: "#billing" },
-    { label: "Recommended model", href: "#recommended-model" },
+    { label: "Operating model",        href: "#operating-model" },
+    { label: "Workspace RBAC",         href: "#rbac" },
+    { label: "Isolation",              href: "#isolation" },
+    { label: "Security posture",       href: "#security" },
+    { label: "Seat governance",        href: "#billing" },
+    { label: "Recommended model",      href: "#recommended-model" },
   ],
   "/docs/security": [
-    { label: "Network model", href: "#network" },
-    { label: "Data boundary", href: "#data" },
-    { label: "Token model", href: "#tokens" },
+    { label: "Network model",          href: "#network" },
+    { label: "Data boundary",          href: "#data" },
+    { label: "Token model",            href: "#tokens" },
   ],
 };
 
@@ -255,6 +329,12 @@ function TableOfContents({ pathname }: { pathname: string }) {
 const TITLE_BY_PATH: Record<string, string> = {
   "/docs":               "Quickstart",
   "/docs/quickstart":    "Quickstart",
+  "/docs/sdk/python":    "Python SDK",
+  "/docs/sdk/nodejs":    "Node.js SDK",
+  "/docs/sdk/java":      "Java SDK",
+  "/docs/sdk/kotlin":    "Kotlin SDK",
+  "/docs/sdk/go":        "Go SDK",
+  "/docs/sdk/rust":      "Rust SDK",
   "/docs/architecture":  "Architecture",
   "/docs/integrations":  "Integrations",
   "/docs/enterprise":    "Enterprise",
@@ -263,11 +343,22 @@ const TITLE_BY_PATH: Record<string, string> = {
 
 function Breadcrumb({ pathname }: { pathname: string }) {
   const title = TITLE_BY_PATH[pathname] ?? "Docs";
+  const isSdk = pathname.startsWith("/docs/sdk/");
   return (
     <nav className="mb-7 flex items-center gap-1 text-[12px] text-muted-foreground">
-      <Link href="/" className="transition-colors hover:text-foreground">Home</Link>
+      <Link href="/" className="transition-colors hover:text-foreground">
+        Home
+      </Link>
       <ChevronRight size={11} className="text-border" />
-      <Link href="/docs" className="transition-colors hover:text-foreground">Docs</Link>
+      <Link href="/docs" className="transition-colors hover:text-foreground">
+        Docs
+      </Link>
+      {isSdk && (
+        <>
+          <ChevronRight size={11} className="text-border" />
+          <span className="text-muted-foreground">SDKs</span>
+        </>
+      )}
       {pathname !== "/docs" && (
         <>
           <ChevronRight size={11} className="text-border" />
@@ -292,7 +383,6 @@ export function DocsShell({ children }: { children: ReactNode }) {
         pathname={pathname}
       />
 
-      {/* Offset content for fixed sidebar */}
       <div className="lg:pl-[272px]">
         {/* Mobile top bar */}
         <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
@@ -307,8 +397,12 @@ export function DocsShell({ children }: { children: ReactNode }) {
               <BeeLogo className="h-[18px] w-[18px]" />
             </div>
             <div className="leading-none">
-              <p className="text-[13px] font-semibold tracking-tight text-foreground">VectorBea</p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">Documentation</p>
+              <p className="text-[13px] font-semibold tracking-tight text-foreground">
+                VectorBea
+              </p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Documentation
+              </p>
             </div>
           </Link>
         </header>
