@@ -1,0 +1,16 @@
+# Gradle build outputs
+build/
+.gradle/
+
+# Local wrapper cache (the JAR itself is committed)
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db

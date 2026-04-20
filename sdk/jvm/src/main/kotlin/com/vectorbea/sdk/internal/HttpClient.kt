@@ -18,7 +18,7 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
-private const val SDK_VERSION = "0.2.0"
+private const val SDK_VERSION = "0.2.1"
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
 /**

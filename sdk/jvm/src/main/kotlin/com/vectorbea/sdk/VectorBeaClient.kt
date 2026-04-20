@@ -7,9 +7,11 @@ import kotlinx.serialization.json.Json
 import java.io.Closeable
 import kotlin.time.measureTimedValue
 
-private const val DEFAULT_BASE_URL = "https://app.vectorbea.com"
+// Default to the local sidecar — the most common first-run experience.
+// Override to "https://app.vectorbea.com" or your own host for cloud usage.
+private const val DEFAULT_BASE_URL = "http://localhost:8080"
 private const val DEFAULT_TIMEOUT_SECONDS = 10L
-private const val SDK_VERSION = "0.2.0"
+private const val SDK_VERSION = "0.2.1"
 
 /**
  * The VectorBea JVM SDK client.
@@ -19,7 +21,7 @@ private const val SDK_VERSION = "0.2.0"
  *
  * ```kotlin
  * val client = VectorBeaClient.Builder()
- *     .apiKey("vbagent_...")
+ *     .apiKey("vbagent_your_token_here")
  *     .baseUrl("http://localhost:8080")
  *     .build()
  *
