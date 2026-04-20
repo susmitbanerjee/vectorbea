@@ -45,10 +45,12 @@ jobs:
         run: bash scripts/scan-secrets.sh
 
       - name: Publish dry-run to Maven Local
-        # Signing is intentionally skipped here — publishToMavenLocal is a
-        # packaging gate only (confirms jars + POM generate correctly).
-        # Signing runs exclusively during the real Central publish step below.
-        run: ./gradlew --no-daemon publishToMavenLocal -x signMavenPublication
+        # No -PsignPublication here — this is a packaging gate only.
+        # signAllPublications() is never called at configuration time, so no
+        # .asc artifacts are registered and the local publish succeeds cleanly.
+        run: ./gradlew --no-daemon publishToMavenLocal
 
       - name: Publish to Maven Central
-        run: ./gradlew --no-daemon publishAndReleaseToMavenCentral
+        # -PsignPublication activates signAllPublications() in build.gradle.kts.
+        # The in-memory GPG key is read from ORG_GRADLE_PROJECT_signingInMemoryKey.
+        run: ./gradlew --no-daemon publishAndReleaseToMavenCentral -PsignPublication
