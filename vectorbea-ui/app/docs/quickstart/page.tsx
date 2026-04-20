@@ -283,18 +283,22 @@ export default function QuickstartPage() {
           the first one) and install the SDK for your preferred language.
         </p>
 
-        <DocsTabs tabs={["Python (3.8+)", "Node.js (18+)"]}>
-          <div className="space-y-3 p-0">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Python</p>
             <Code lang="bash">{`pip install vectorbea`}</Code>
-            <p className="px-4 pt-1 text-sm leading-7 text-muted-foreground">
-              You need <strong>0.1.8 or later</strong> for automatic audit
+            <p className="text-sm leading-7 text-muted-foreground">
+              You need <strong>0.2.0 or later</strong> for automatic audit
               reporting. Verify and upgrade if needed:
             </p>
             <Code lang="bash">{`pip show vectorbea
 pip install --upgrade vectorbea`}</Code>
           </div>
-          <Code lang="bash">{`npm install vectorbea`}</Code>
-        </DocsTabs>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Node.js</p>
+            <Code lang="bash">{`npm install @vectorbea/node`}</Code>
+          </div>
+        </div>
       </Step>
 
       {/* ── Step 7 ───────────────────────────────────────────────────────── */}
@@ -303,17 +307,18 @@ pip install --upgrade vectorbea`}</Code>
           Create a file, paste the script for your language, and run it.
         </p>
 
-        <DocsTabs tabs={["Python — test_prompt.py", "Node.js — testPrompt.mjs"]}>
-          <div className="space-y-0">
-            <Code lang="python">{`import vectorbea
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Python — test_prompt.py</p>
+            <Code lang="python">{`from vectorbea import VectorBeaClient
 
-client = vectorbea.VectorBea(
+client = VectorBeaClient(
     api_key="any-value",            # not validated by the local sidecar
     base_url="http://localhost:8080",
 )
 
 # Fetch the latest published version by name.
-# SDK 0.1.8+ automatically records an audit event on every get().
+# SDK 0.2.0+ automatically records an audit event on every get().
 prompt = client.prompts.get("greet-user")
 
 print("Name:    ", prompt.name)            # greet-user
@@ -321,15 +326,16 @@ print("Version: ", prompt.version_tag)     # v1.0.0
 print("Template:", prompt.template_text)   # Hello {{name}}, welcome to {{product}}!
 
 # Render the template with your own variables
-message = prompt.format(name="Alice", product="Acme AI")
+message = prompt.compile({"name": "Alice", "product": "Acme AI"})
 print("Rendered:", message)                # Hello Alice, welcome to Acme AI!`}</Code>
             <Code lang="bash">{`python test_prompt.py`}</Code>
           </div>
-          <div className="space-y-0">
-            <Code lang="javascript">{`import VectorBea from "vectorbea";
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Node.js — testPrompt.mjs</p>
+            <Code lang="javascript">{`import { VectorBeaClient } from "@vectorbea/node";
 
-const client = new VectorBea({
-  apiKey: "any-value",              // not validated by the local sidecar
+const client = new VectorBeaClient({
+  apiKey:  "any-value",             // not validated by the local sidecar
   baseUrl: "http://localhost:8080",
 });
 
@@ -339,11 +345,11 @@ console.log("Name:    ", prompt.name);           // greet-user
 console.log("Version: ", prompt.versionTag);     // v1.0.0
 console.log("Template:", prompt.templateText);   // Hello {{name}}, welcome to {{product}}!
 
-const message = prompt.format({ name: "Alice", product: "Acme AI" });
+const message = prompt.compile({ name: "Alice", product: "Acme AI" });
 console.log("Rendered:", message);               // Hello Alice, welcome to Acme AI!`}</Code>
             <Code lang="bash">{`node testPrompt.mjs`}</Code>
           </div>
-        </DocsTabs>
+        </div>
 
         <p className="text-sm font-medium">Expected output</p>
         <Code>{`Name:     greet-user
