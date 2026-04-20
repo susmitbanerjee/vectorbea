@@ -59,9 +59,12 @@
                 Signature,
                 InnerClasses,
                 EnclosingMethod,
-                Exceptions,
-                SourceFile,
-                LineNumberTable
+                Exceptions
+# SourceFile and LineNumberTable are intentionally excluded.
+# Keeping them embeds original .kt filenames and line numbers inside the JAR,
+# which makes decompiled output significantly more readable.
+# Stack traces in production logs will show obfuscated names — this is
+# acceptable because the proxy logs errors with context messages, not raw traces.
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -79,11 +82,14 @@
 # KOTLIN RUNTIME
 # ═════════════════════════════════════════════════════════════════════════════
 
-# @Metadata is embedded by the Kotlin compiler in every class. It is read at
-# runtime by Kotlin reflection, coroutines (continuation dispatch), and the
-# kotlinx.serialization compiler plugin output. Removing or renaming it causes
-# ClassCastExceptions and SerializationException at runtime.
+# Keep Kotlin.Metadata only for third-party framework classes that need it
+# (coroutines, serialization, Ktor). Strip it from our proprietary package —
+# without @Metadata, Kotlin-aware decompilers fall back to generic Java output
+# and lose parameter names, nullability, and suspend function signatures.
 -keep class kotlin.Metadata { *; }
+-stripAnnotations class com.vectorbea.proxy.** {
+    @kotlin.Metadata *;
+}
 
 # Keep the entire Kotlin stdlib. ProGuard will still remove unreferenced
 # classes within it (shrinking), but it must not rename anything.
