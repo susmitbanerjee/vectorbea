@@ -143,7 +143,7 @@ prompt  = client.prompts.get("greet-user")
 message = prompt.compile({"name": "Bob", "product": "Acme AI"})`}</Code>
         <Callout kind="info">
           In production, run the sidecar as a container alongside your service
-          and point the SDK at <InlineCode>base_url="http://localhost:8080"</InlineCode>.
+          and point the SDK at <InlineCode>{`base_url="http://localhost:8080"`}</InlineCode>.
           Your prompts never leave your network — the control plane only
           receives heartbeats and audit metadata.
         </Callout>

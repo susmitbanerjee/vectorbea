@@ -164,7 +164,7 @@ Prompt prompt  = client.prompts().get("greet-user");
 String message = prompt.compile(Map.of("name", "Bob", "product", "Acme AI"));`}</Code>
         <Callout kind="info">
           In production, run the sidecar alongside your service and point the
-          SDK at <InlineCode>.baseUrl("http://localhost:8080")</InlineCode>.
+          SDK at <InlineCode>{`.baseUrl("http://localhost:8080")`}</InlineCode>.
           Your prompts never leave your network.
         </Callout>
       </Step>
