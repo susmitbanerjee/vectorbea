@@ -35,7 +35,7 @@ declare -a PATTERNS=(
   "VectorBea agent token|vbagent_[A-Za-z0-9]{20,}"
   "VectorBea live key|vb_live_[A-Za-z0-9]+"
   "VectorBea dev key|vb_dev_[A-Za-z0-9]+"
-  "Supabase service role|service_role"
+  "Supabase service role key|\"service_role\"|service_role_key"
   "Supabase anon key|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
   "Hardcoded Authorization header|Authorization: Bearer [A-Za-z0-9+/=_.-]{20,}"
   "JWT token|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"

@@ -131,7 +131,7 @@ internal class HttpClient(
                 )
                 404 -> throw NotFoundException(
                     message.ifBlank {
-                        "Resource not found at ${request.url}. " +
+                        "Resource not found at ${request.url.encodedPath}. " +
                             "Check the prompt name exists in your workspace " +
                             "and has at least one published version."
                     }
