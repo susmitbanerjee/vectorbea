@@ -32,7 +32,7 @@ export interface LogAuditOptions {
  * ```ts
  * import { VectorBeaClient } from "@vectorbea-ai/node";
  *
- * const client = new VectorBeaClient({ apiKey: "vbagent_..." });
+ * const client = new VectorBeaClient({ apiKey: "vbagent_your_token_here" });
  * const prompt  = await client.prompts.get("greet-user");
  * ```
  */

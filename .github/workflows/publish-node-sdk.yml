@@ -3,11 +3,11 @@ name: Publish Node.js SDK to npm
 on:
   push:
     tags:
-      - "sdk/node/v*"   # trigger on tags like sdk/node/v0.2.0
+      - "sdk/node/v*"   # trigger on tags like sdk/node/v0.2.1
 
 jobs:
   publish:
-    name: Build and publish @vectorbea-ai/node
+    name: Build, gate, and publish @vectorbea-ai/node
     runs-on: ubuntu-latest
     environment: npm
 
@@ -31,6 +31,14 @@ jobs:
       - name: Build (compile TypeScript → dist/)
         working-directory: sdk/node
         run: npm run build
+
+      - name: Secret scan (blocks publish on any credential match)
+        working-directory: sdk/node
+        run: bash scripts/scan-secrets.sh dist
+
+      - name: Dry-run pack (verifies publish surface)
+        working-directory: sdk/node
+        run: npm pack --dry-run
 
       - name: Publish to npm
         working-directory: sdk/node

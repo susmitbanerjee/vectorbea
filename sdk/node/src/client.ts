@@ -48,7 +48,7 @@ export interface VectorBeaClientOptions {
  * import { VectorBeaClient } from "@vectorbea-ai/node";
  *
  * const client = new VectorBeaClient({
- *   apiKey:  "vbagent_...",
+ *   apiKey:  "vbagent_your_token_here",
  *   baseUrl: "http://localhost:8080",
  * });
  *
