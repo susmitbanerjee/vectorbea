@@ -37,6 +37,26 @@ class PromptCache(
     private val loadSuccesses = AtomicLong(0)
     private val loadFailures = AtomicLong(0)
 
+    fun get(name: String): PromptPayload? {
+        val now = System.currentTimeMillis()
+        val entry = entries[name] ?: return null
+        if (entry.expiresAtMs <= now) {
+            entries.remove(name, entry)
+            return null
+        }
+        hits.incrementAndGet()
+        return entry.value
+    }
+
+    fun put(name: String, prompt: PromptPayload) {
+        val now = System.currentTimeMillis()
+        entries[name] = CacheEntry(
+            value = prompt,
+            expiresAtMs = now + ttl.toMillis(),
+        )
+        evictIfOversized()
+    }
+
     suspend fun getOrLoad(name: String, loader: suspend () -> PromptPayload): PromptPayload {
         val now = System.currentTimeMillis()
         entries[name]?.takeIf { it.expiresAtMs > now }?.let {

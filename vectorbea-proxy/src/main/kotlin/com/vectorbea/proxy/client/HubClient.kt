@@ -82,6 +82,20 @@ class HubClient(private val config: AppConfig) {
         return json.decodeFromString(PromptPayload.serializer(), response.bodyAsText())
     }
 
+    suspend fun fetchAllPublishedPrompts(): List<PromptPayload> {
+        val response = client.get("${config.hubUrl}/api/proxy/sync")
+        if (!response.status.isSuccess()) {
+            val errorBody = response.bodyAsText()
+            error("Hub returned ${response.status.value} for sync: $errorBody")
+        }
+        return json.decodeFromString(ListSerializer(PromptPayload.serializer()), response.bodyAsText())
+    }
+
+    suspend fun validateAgentToken(): Boolean {
+        val response = client.get("${config.hubUrl}/api/proxy/sync")
+        return response.status.value != 401
+    }
+
     /**
      * Flush a batch of audit events to the M2M audit endpoint.
      * Uses /api/proxy/audit/batch which authenticates via deployment_agents.api_token

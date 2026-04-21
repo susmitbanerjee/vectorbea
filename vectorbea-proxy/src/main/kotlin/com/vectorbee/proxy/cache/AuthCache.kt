@@ -9,7 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
  * Native-safe validation cache for agent / SDK tokens.
  */
 class AuthCache(
-    positiveTtl: Duration = Duration.ofSeconds(60),
+    positiveTtl: Duration = Duration.ofMinutes(5),
     private val negativeTtlMs: Long = 10_000,
     private val maxSize: Long = 50_000,
     private val validator: suspend (token: String) -> Boolean,

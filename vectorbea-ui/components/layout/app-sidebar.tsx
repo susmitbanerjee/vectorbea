@@ -7,6 +7,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   CreditCard,
+  ArrowUpRight,
+  BookOpen,
   FlaskConical,
   KeyRound,
   LayoutDashboard,
@@ -106,7 +108,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         </div>
         <div>
           <p className="text-sm font-semibold tracking-tight">VectorBea</p>
-          <p className="text-[11px] text-muted-foreground">Prompt &amp; AI settings registry</p>
+          <p className="text-[11px] text-muted-foreground">Enterprise AI Infrastructure Platform</p>
         </div>
       </div>
 
@@ -168,6 +170,17 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       </nav>
 
       <div className="mt-auto flex flex-col gap-3">
+        <a
+          href="https://vectorbea.com/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-accent/40 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+        >
+          <BookOpen className="h-4 w-4 shrink-0" />
+          <span className="flex-1">Documentation</span>
+          <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+        </a>
+
         {user && (
           <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">
             {user.avatar_url ? (

@@ -1,6 +1,7 @@
 package com.vectorbea.proxy
 
 import com.vectorbea.proxy.cache.PromptCache
+import com.vectorbea.proxy.cache.AuthCache
 import com.vectorbea.proxy.client.HubClient
 import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.grpc.GrpcServer
@@ -13,6 +14,7 @@ import com.vectorbea.proxy.model.PromptPayload
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
 import com.vectorbea.proxy.service.SharedRulesStore
+import com.vectorbea.proxy.service.SyncDispatcher
 import com.vectorbea.proxy.service.TelemetryDispatcher
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -43,12 +45,15 @@ fun main() {
     val promptCache = PromptCache()
     val hubClient = HubClient(config)
     val sharedRulesStore = SharedRulesStore(config.sharedRulesPath, json)
-    val promptService = PromptService(promptCache, hubClient, sharedRulesStore)
+    val authCache = AuthCache(validator = { hubClient.validateAgentToken() })
+    val promptService = PromptService(promptCache, authCache, config.apiKey, hubClient, sharedRulesStore)
     val auditDispatcher = AuditDispatcher(config, hubClient)
     val telemetryDispatcher = TelemetryDispatcher(config)
+    val syncDispatcher = SyncDispatcher(config, hubClient, promptService)
 
     auditDispatcher.start()
     telemetryDispatcher.start()
+    syncDispatcher.start()
 
     runBlocking {
         warmup(hubClient, promptCache)
@@ -80,6 +85,7 @@ fun main() {
         restServer?.stop(1_000, 5_000)
         auditDispatcher.stop()
         telemetryDispatcher.stop()
+        syncDispatcher.stop()
     })
 
     config.restSocketPath?.let { socketPath ->
