@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AuditLogView } from "@/lib/api";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
+import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { Activity, Clock, FileText, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -30,9 +31,10 @@ type AuditSummary = {
 };
 
 function resolveUseType(metadata: Record<string, unknown>): "runtime" | "audit" {
-  const explicit = metadata.useType;
+  const normalized = normalizeTraceMetadataV1(metadata);
+  const explicit = normalized.tags?.use_type;
   if (explicit === "runtime" || explicit === "audit") return explicit;
-  const action = metadata.action;
+  const action = (normalized.custom as Record<string, unknown> | undefined)?.action;
   return typeof action === "string" && action.trim() ? "audit" : "runtime";
 }
 

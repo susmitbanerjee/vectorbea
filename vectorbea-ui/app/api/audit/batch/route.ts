@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import {
@@ -20,19 +21,6 @@ type AuditEntry = {
 };
 
 const ALLOWED_UI_AUDIT_ACTIONS = new Set(["update", "publish", "create", "delete"]);
-
-function getMetadataText(metadata: Record<string, unknown> | undefined, ...keys: string[]) {
-  if (!metadata) return "";
-
-  for (const key of keys) {
-    const value = metadata[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return "";
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -107,11 +95,19 @@ export async function POST(request: NextRequest) {
     }
 
     const rows = entries.map((entry) => {
-      const metadata = {
-        ...(entry.metadata ?? {}),
-        useType: "audit",
-      };
       const meta = entry.promptVersionId ? versionMeta.get(entry.promptVersionId) : undefined;
+      const metadata = buildTraceMetadataV1({
+        metadata: entry.metadata ?? {},
+        useType: "audit",
+        workspaceId,
+        promptVersionId: entry.promptVersionId ?? null,
+        promptName: entry.promptName || meta?.promptName || "",
+        versionTag: entry.versionTag || meta?.versionTag || "",
+        proxyLatencyMs: entry.proxyLatencyMs ?? 0,
+        llmLatencyMs: entry.llmLatencyMs ?? 0,
+        tokenCount: entry.tokenCount ?? 0,
+      });
+      const metadataPrompt = metadata.prompt ?? {};
 
       return {
         workspace_id: workspaceId,
@@ -121,12 +117,12 @@ export async function POST(request: NextRequest) {
         token_count: entry.tokenCount ?? 0,
         prompt_name:
           entry.promptName ||
-          getMetadataText(metadata, "promptName", "prompt_name") ||
+          (typeof metadataPrompt.name === "string" ? metadataPrompt.name : "") ||
           meta?.promptName ||
           "",
         version_tag:
           entry.versionTag ||
-          getMetadataText(metadata, "versionTag", "version_tag", "published_version") ||
+          (typeof metadataPrompt.version_tag === "string" ? metadataPrompt.version_tag : "") ||
           meta?.versionTag ||
           "",
         metadata,

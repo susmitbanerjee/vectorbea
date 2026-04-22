@@ -138,6 +138,16 @@ class VectorBeaClient private constructor(
             ?: throw IllegalArgumentException(
                 "Prompt audit reference missing. Use the Prompt returned by getPrompt() when calling logAudit().",
             )
+        val normalizedMetadata = buildTraceMetadataV1(
+            metadata = metadata,
+            promptVersionId = promptVersionId,
+            promptName = prompt.name,
+            versionTag = prompt.versionTag,
+            proxyLatencyMs = proxyLatencyMs,
+            llmLatencyMs = llmLatencyMs,
+            tokenCount = tokenCount,
+            useType = "runtime",
+        )
 
         val payload = buildString {
             append("""{"promptVersionId":""")
@@ -150,7 +160,7 @@ class VectorBeaClient private constructor(
             append(""","llmLatencyMs":$llmLatencyMs""")
             append(""","tokenCount":$tokenCount""")
             append(""","metadata":""")
-            append(json.encodeToString(metadata))
+            append(json.encodeToString(normalizedMetadata))
             append("}")
         }
         http.post<kotlinx.serialization.json.JsonObject>("/v1/audit", payload)

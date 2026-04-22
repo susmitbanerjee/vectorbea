@@ -11,6 +11,7 @@ import com.vectorbea.proxy.http.SocketPermissions
 import com.vectorbea.proxy.model.AuditAcceptedResponse
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.model.PromptPayload
+import com.vectorbea.proxy.model.TraceMetadataBuilder
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
 import com.vectorbea.proxy.service.SharedRulesStore
@@ -190,7 +191,19 @@ private fun Application.vectorbeaModule(
         post("/v1/audit") {
             val bodyText = call.receiveText()
             val event = json.decodeFromString(AuditEvent.serializer(), bodyText)
-            auditDispatcher.tryEnqueue(event)
+            val normalized = event.copy(
+                metadata = TraceMetadataBuilder.normalize(
+                    metadata = event.metadata,
+                    promptVersionId = event.promptVersionId,
+                    promptName = event.promptName,
+                    versionTag = event.versionTag,
+                    proxyLatencyMs = event.proxyLatencyMs,
+                    llmLatencyMs = event.llmLatencyMs,
+                    tokenCount = event.tokenCount,
+                    useType = "runtime",
+                ),
+            )
+            auditDispatcher.tryEnqueue(normalized)
             call.respondText(
                 json.encodeToString(AuditAcceptedResponse.serializer(), AuditAcceptedResponse(accepted = true)),
                 ContentType.Application.Json,

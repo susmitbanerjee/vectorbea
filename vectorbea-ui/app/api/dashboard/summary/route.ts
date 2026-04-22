@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import type { DashboardSummary } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 function resolveUseType(metadata: Record<string, unknown>): "runtime" | "audit" {
-  const explicit = metadata.useType;
+  const normalized = normalizeTraceMetadataV1(metadata);
+  const explicit = normalized.tags?.use_type;
   if (explicit === "runtime" || explicit === "audit") return explicit;
-  const action = metadata.action;
+  const action = (normalized.custom as Record<string, unknown> | undefined)?.action;
   return typeof action === "string" && action.trim() ? "audit" : "runtime";
 }
 

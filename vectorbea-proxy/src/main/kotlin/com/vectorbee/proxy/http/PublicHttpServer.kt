@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer
 import com.vectorbea.proxy.model.AuditAcceptedResponse
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.model.PromptPayload
+import com.vectorbea.proxy.model.TraceMetadataBuilder
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
 import java.net.InetSocketAddress
@@ -73,7 +74,19 @@ class PublicHttpServer(
         runCatching {
             val body = exchange.requestBody.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
             val event = json.decodeFromString(AuditEvent.serializer(), body)
-            auditDispatcher.tryEnqueue(event)
+            val normalized = event.copy(
+                metadata = TraceMetadataBuilder.normalize(
+                    metadata = event.metadata,
+                    promptVersionId = event.promptVersionId,
+                    promptName = event.promptName,
+                    versionTag = event.versionTag,
+                    proxyLatencyMs = event.proxyLatencyMs,
+                    llmLatencyMs = event.llmLatencyMs,
+                    tokenCount = event.tokenCount,
+                    useType = "runtime",
+                ),
+            )
+            auditDispatcher.tryEnqueue(normalized)
         }.onSuccess {
             respondJson(exchange, 202, AuditAcceptedResponse.serializer(), AuditAcceptedResponse(accepted = true))
         }.onFailure { error ->

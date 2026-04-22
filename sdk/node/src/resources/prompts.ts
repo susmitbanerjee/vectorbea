@@ -4,6 +4,7 @@
 
 import type { HttpClient } from "../_http.js";
 import { Prompt, type PromptPayload } from "../models.js";
+import { buildTraceMetadataV1 } from "../trace-metadata.js";
 
 interface AuditPayload {
   promptVersionId: string;
@@ -118,7 +119,16 @@ export class Prompts {
       proxyLatencyMs: options.proxyLatencyMs ?? 0,
       llmLatencyMs: options.llmLatencyMs ?? 0,
       tokenCount: options.tokenCount ?? 0,
-      metadata: options.metadata ?? {},
+      metadata: buildTraceMetadataV1({
+        metadata: options.metadata ?? {},
+        promptVersionId: prompt._promptVersionId,
+        promptName: prompt.name,
+        versionTag: prompt.versionTag,
+        proxyLatencyMs: options.proxyLatencyMs ?? 0,
+        llmLatencyMs: options.llmLatencyMs ?? 0,
+        tokenCount: options.tokenCount ?? 0,
+        useType: "runtime",
+      }),
     };
     await this.http.post("/v1/audit", payload);
   }

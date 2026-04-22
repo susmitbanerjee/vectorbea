@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
@@ -39,11 +39,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { TraceDetailView } from "@/lib/api";
+import type { TraceDetailView, TraceReplayResponse } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 import { cn } from "@/lib/utils";
 
-type SpanStatus = "success" | "warning" | "error";
+type SpanStatus = "success" | "warning" | "error" | "partial";
 type SpanType =
   | "incoming_request"
   | "sidecar_proxy"
@@ -163,6 +163,7 @@ const STATUS_STYLE: Record<SpanStatus, string> = {
   success: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   warning: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   error: "bg-red-500/15 text-red-300 border-red-500/30",
+  partial: "bg-violet-500/15 text-violet-300 border-violet-500/30",
 };
 
 const LEVEL_STYLE: Record<LogLevel, string> = {
@@ -472,12 +473,15 @@ function createEmptyTrace(id: string): TraceDetailView {
 }
 
 export default function TraceDetailsPage() {
+  const router = useRouter();
   const { activeWorkspaceId } = useWorkspace();
   const params = useParams<{ id: string }>();
   const traceId = params?.id ?? "";
   const [traceData, setTraceData] = useState<TraceDetailView | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [replayPending, setReplayPending] = useState(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const trace = traceData ?? createEmptyTrace(traceId || "trace");
 
   useEffect(() => {
@@ -643,6 +647,35 @@ export default function TraceDetailsPage() {
     }
   };
 
+  const replayTrace = async () => {
+    if (!activeWorkspaceId || !trace.id || replayPending) return;
+
+    setReplayPending(true);
+    setReplayError(null);
+    try {
+      const response = await fetch(
+        `/api/traces/${encodeURIComponent(trace.id)}/replay?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({ error: "Failed to replay trace" }))) as { error?: string };
+        throw new Error(body.error || `Failed to replay trace (${response.status})`);
+      }
+
+      const payload = (await response.json()) as Partial<TraceReplayResponse>;
+      if (!payload.traceId) {
+        throw new Error("Replay completed, but no replay trace id was returned.");
+      }
+
+      router.push(`/traces/${encodeURIComponent(payload.traceId)}?org=${encodeURIComponent(activeWorkspaceId)}`);
+    } catch (error) {
+      setReplayError(error instanceof Error ? error.message : "Failed to replay trace");
+    } finally {
+      setReplayPending(false);
+    }
+  };
+
   if (!activeWorkspaceId) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
@@ -691,20 +724,48 @@ export default function TraceDetailsPage() {
         subtitle={`Traces / ${trace.id}`}
         actions={
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200"><Workflow className="mr-1 h-4 w-4" />Replay</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-slate-700 bg-slate-900 text-slate-200"
+              onClick={replayTrace}
+              disabled={replayPending}
+            >
+              <Workflow className="mr-1 h-4 w-4" />
+              {replayPending ? "Replaying..." : "Replay"}
+            </Button>
             <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200"><GitBranch className="mr-1 h-4 w-4" />Compare</Button>
-            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200"><Download className="mr-1 h-4 w-4" />Export JSON</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-slate-700 bg-slate-900 text-slate-200"
+              onClick={() => copy(JSON.stringify(trace, null, 2))}
+            >
+              <Download className="mr-1 h-4 w-4" />
+              Export JSON
+            </Button>
             <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200"><Flag className="mr-1 h-4 w-4" />Mark issue</Button>
           </div>
         }
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
+        {replayError ? (
+          <Card className="rounded-2xl border border-red-500/30 bg-red-500/10">
+            <CardContent className="p-4 text-sm text-red-100">{replayError}</CardContent>
+          </Card>
+        ) : null}
         <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
           <CardContent className="space-y-4 p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge className={cn("border", STATUS_STYLE[trace.status])}>
-                {trace.status === "success" ? "Success" : trace.status === "warning" ? "Warning" : "Error"}
+                {trace.status === "success"
+                  ? "Success"
+                  : trace.status === "warning"
+                    ? "Warning"
+                    : trace.status === "partial"
+                      ? "Partial"
+                      : "Error"}
               </Badge>
               <Badge variant="outline" className="border-slate-700 text-slate-300">{trace.env}</Badge>
               <span className="text-xs text-slate-400">{new Date(trace.startedAt).toLocaleString()}</span>

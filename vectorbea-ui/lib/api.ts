@@ -120,7 +120,19 @@ export interface RegisterAgentResponse {
   token: string;
 }
 
-export type TraceStatus = "success" | "warning" | "error";
+export type AuditLog = {
+  id: string;
+  prompt_name: string;
+  version_tag: string;
+  proxy_latency_ms: number;
+  llm_latency_ms: number;
+  token_count: number;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  workspace_id: string;
+};
+
+export type TraceStatus = "success" | "warning" | "error" | "partial";
 export type TraceUseType = "runtime" | "audit";
 export type TraceCacheStatus = "hit" | "miss" | "unknown";
 export type TraceGuardrailStatus = "passed" | "flagged" | "unknown";
@@ -260,6 +272,12 @@ export interface TraceDetailView {
     parsedJson?: Record<string, unknown>;
     safetyNotes: string[];
   };
+}
+
+export interface TraceReplayResponse {
+  traceId: string;
+  replayedFrom: string;
+  createdAt: string;
 }
 
 type ApiFetchOptions = RequestInit & {

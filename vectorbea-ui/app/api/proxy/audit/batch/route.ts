@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -103,10 +104,17 @@ export async function POST(request: NextRequest) {
     // ── 5. Build and insert rows ──────────────────────────────────────────
     const rows = entries.map((e) => {
       const meta = e.promptVersionId ? versionMeta.get(e.promptVersionId) : undefined;
-      const metadata = {
-        ...(e.metadata ?? {}),
+      const metadata = buildTraceMetadataV1({
+        metadata: e.metadata ?? {},
         useType: "runtime",
-      };
+        workspaceId,
+        promptVersionId: e.promptVersionId ?? null,
+        promptName: e.promptName || meta?.promptName || "",
+        versionTag: e.versionTag || meta?.versionTag || "",
+        proxyLatencyMs: e.proxyLatencyMs ?? 0,
+        llmLatencyMs: e.llmLatencyMs ?? 0,
+        tokenCount: e.tokenCount ?? 0,
+      });
       return {
         workspace_id: workspaceId,
         prompt_version_id: e.promptVersionId ?? null,

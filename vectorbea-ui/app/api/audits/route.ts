@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import {
   getWorkspaceMonthlyAuditCount,
@@ -52,16 +53,29 @@ export async function POST(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    const rows = entries.map((e) => ({
-      workspace_id: workspaceId,
-      prompt_version_id: e.promptVersionId ?? null,
-      proxy_latency_ms: e.proxyLatencyMs ?? 0,
-      llm_latency_ms: e.llmLatencyMs ?? 0,
-      token_count: e.tokenCount ?? 0,
-      prompt_name: e.promptName ?? "",
-      version_tag: e.versionTag ?? "",
-      metadata: e.metadata ?? {},
-    }));
+    const rows = entries.map((e) => {
+      const metadata = buildTraceMetadataV1({
+        metadata: e.metadata ?? {},
+        useType: "runtime",
+        workspaceId,
+        promptVersionId: e.promptVersionId ?? null,
+        promptName: e.promptName ?? "",
+        versionTag: e.versionTag ?? "",
+        proxyLatencyMs: e.proxyLatencyMs ?? 0,
+        llmLatencyMs: e.llmLatencyMs ?? 0,
+        tokenCount: e.tokenCount ?? 0,
+      });
+      return {
+        workspace_id: workspaceId,
+        prompt_version_id: e.promptVersionId ?? null,
+        proxy_latency_ms: e.proxyLatencyMs ?? 0,
+        llm_latency_ms: e.llmLatencyMs ?? 0,
+        token_count: e.tokenCount ?? 0,
+        prompt_name: e.promptName || metadata.prompt?.name || "",
+        version_tag: e.versionTag || metadata.prompt?.version_tag || "",
+        metadata,
+      };
+    });
 
     const { error } = await supabase.from("audit_logs").insert(rows);
     if (error) throw new Error(error.message);

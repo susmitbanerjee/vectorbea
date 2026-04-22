@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, AlertTriangle, CheckCircle2, Clock3, GitBranch, RefreshCw, SearchX, ShieldCheck, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, RefreshCw, SearchX, XCircle } from "lucide-react";
 
 import type { TraceListResponse, TraceSummaryView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -44,7 +44,7 @@ function formatRelative(timestamp: string) {
 
 function statusBadge(status: TraceSummaryView["status"]) {
   if (status === "success") return "success";
-  if (status === "warning") return "warning";
+  if (status === "warning" || status === "partial") return "warning";
   return "destructive";
 }
 
@@ -59,6 +59,8 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
   const [status, setStatus] = useState(searchParams.get("status") ?? "all");
   const [environment, setEnvironment] = useState(searchParams.get("environment") ?? "all");
   const [useType, setUseType] = useState(searchParams.get("useType") ?? "runtime");
+  const [promptName, setPromptName] = useState(searchParams.get("promptName") ?? "all");
+  const [since, setSince] = useState(searchParams.get("since") ?? "all");
   const [sortBy, setSortBy] = useState(searchParams.get("sortBy") ?? "newest");
   const [page, setPage] = useState(Number(searchParams.get("page") ?? "1") || 1);
   const [result, setResult] = useState<TraceListResponse | null>(null);
@@ -80,6 +82,8 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
     params.set("status", status);
     params.set("environment", environment);
     params.set("useType", useType);
+    params.set("promptName", promptName);
+    params.set("since", since);
     params.set("sortBy", sortBy);
     params.set("page", String(page));
     const current = searchParams.toString();
@@ -87,7 +91,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
     if (next !== current) {
       router.replace(`${pathname}?${next}` as Route);
     }
-  }, [environment, page, pathname, query, router, searchParams, sortBy, status, useType]);
+  }, [environment, page, pathname, promptName, query, router, searchParams, since, sortBy, status, useType]);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +112,8 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
           status,
           environment,
           useType,
+          promptName,
+          since,
           sortBy,
           page: String(page),
           pageSize: "25",
@@ -133,7 +139,12 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, environment, page, query, sortBy, status, useType]);
+  }, [activeWorkspaceId, environment, page, promptName, query, since, sortBy, status, useType]);
+
+  const promptOptions = useMemo(() => {
+    const names = new Set((result?.items ?? []).map((item) => item.promptName).filter(Boolean));
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [result]);
 
   const summary = useMemo(() => {
     const items = result?.items ?? [];
@@ -220,7 +231,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
         <Card>
           <CardHeader className="space-y-3">
             <CardTitle>Trace browser</CardTitle>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -242,6 +253,18 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <option value="runtime">Runtime traces</option>
                 <option value="audit">Audit traces</option>
                 <option value="all">All types</option>
+              </Select>
+              <Select value={promptName} onChange={(event) => { setPage(1); setPromptName(event.target.value); }}>
+                <option value="all">All prompts</option>
+                {promptOptions.map((name) => (
+                  <option key={name} value={name.toLowerCase()}>{name}</option>
+                ))}
+              </Select>
+              <Select value={since} onChange={(event) => { setPage(1); setSince(event.target.value); }}>
+                <option value="all">All time</option>
+                <option value="24h">Last 24h</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
               </Select>
               <Select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
                 <option value="newest">Newest first</option>
@@ -289,6 +312,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                         <TableHead>Trace</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Prompt</TableHead>
+                        <TableHead>Version</TableHead>
                         <TableHead>Model</TableHead>
                         <TableHead>Sidecar</TableHead>
                         <TableHead>Latency</TableHead>
@@ -319,14 +343,16 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                           </TableCell>
                           <TableCell>
                             <div className="font-medium">{row.promptName}</div>
-                            <div className="text-xs text-muted-foreground">{row.promptVersion}</div>
                           </TableCell>
+                          <TableCell className="font-mono text-xs">{row.promptVersion}</TableCell>
                           <TableCell>
                             <div>{row.model ?? "—"}</div>
                             <div className="text-xs text-muted-foreground">{row.provider ?? "—"}</div>
                           </TableCell>
                           <TableCell>{row.sidecarName ?? "—"}</TableCell>
-                          <TableCell className="tabular-nums">{formatDuration(row.durationMs)}</TableCell>
+                          <TableCell className="tabular-nums" title={`proxy ${formatDuration(Math.max(row.durationMs - row.llmLatencyMs, 0))} + llm ${formatDuration(row.llmLatencyMs)}`}>
+                            {formatDuration(row.durationMs)}
+                          </TableCell>
                           <TableCell className="tabular-nums">{row.tokenCount}</TableCell>
                           <TableCell className="tabular-nums">{formatCost(row.totalCostUsd)}</TableCell>
                           <TableCell>

@@ -1,6 +1,7 @@
 package com.vectorbea.proxy.grpc
 
 import com.vectorbea.proxy.model.AuditEvent
+import com.vectorbea.proxy.model.TraceMetadataBuilder
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
 import com.vectorbea.proxy.service.TelemetryDispatcher
@@ -67,12 +68,23 @@ class VectorBeaGrpcService(
             JsonObject(emptyMap())
         }
 
+        val normalizedMetadata = TraceMetadataBuilder.normalize(
+            metadata = metadata,
+            promptVersionId = request.promptVersionId,
+            promptName = request.promptName,
+            versionTag = request.versionTag,
+            proxyLatencyMs = request.proxyLatencyMs,
+            llmLatencyMs = request.llmLatencyMs,
+            tokenCount = request.tokenCount,
+            useType = "runtime",
+        )
+
         val event = AuditEvent(
             promptVersionId = request.promptVersionId,
             proxyLatencyMs = request.proxyLatencyMs,
             llmLatencyMs = request.llmLatencyMs,
             tokenCount = request.tokenCount,
-            metadata = metadata,
+            metadata = normalizedMetadata,
             promptName = request.promptName,
             versionTag = request.versionTag,
         )

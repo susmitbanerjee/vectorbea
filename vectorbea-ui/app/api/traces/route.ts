@@ -31,6 +31,8 @@ export async function GET(request: NextRequest) {
     const status = (request.nextUrl.searchParams.get("status") ?? "all").trim().toLowerCase();
     const environment = (request.nextUrl.searchParams.get("environment") ?? "all").trim().toLowerCase();
     const useType = (request.nextUrl.searchParams.get("useType") ?? "runtime").trim().toLowerCase();
+    const promptName = (request.nextUrl.searchParams.get("promptName") ?? "all").trim().toLowerCase();
+    const since = (request.nextUrl.searchParams.get("since") ?? "all").trim().toLowerCase();
     const sortBy = (request.nextUrl.searchParams.get("sortBy") ?? "newest").trim().toLowerCase();
 
     const supabase = createVectorBeaAdminClient();
@@ -40,6 +42,16 @@ export async function GET(request: NextRequest) {
         "id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at",
       )
       .eq("workspace_id", workspaceId)
+      .gte(
+        "created_at",
+        since === "24h"
+          ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          : since === "7d"
+            ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+            : since === "30d"
+              ? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+              : "1970-01-01T00:00:00.000Z",
+      )
       .order("created_at", { ascending: false })
       .limit(1000);
 
@@ -53,6 +65,7 @@ export async function GET(request: NextRequest) {
       if (useType !== "all" && item.useType !== useType) return false;
       if (status !== "all" && item.status !== status) return false;
       if (environment !== "all" && item.environment.toLowerCase() !== environment) return false;
+      if (promptName !== "all" && item.promptName.toLowerCase() !== promptName) return false;
       if (!query) return true;
 
       return (
