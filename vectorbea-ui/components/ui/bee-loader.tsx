@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { BeeLogo } from "@/components/brand/bee-logo";
 
 export function BeeLoader({ compact = false }: { compact?: boolean }) {
   return (
@@ -10,23 +11,27 @@ export function BeeLoader({ compact = false }: { compact?: boolean }) {
       aria-live="polite"
       aria-label="Loading environment"
     >
-      <motion.svg
-        aria-hidden="true"
-        viewBox="0 0 64 64"
-        className={compact ? "h-4 w-4 text-zinc-500" : "h-14 w-14 text-zinc-500"}
-        fill="none"
-        initial={{ y: 0, rotate: 0 }}
-        animate={{ y: [0, -4, 0], rotate: [-2, 2, -2] }}
-        transition={{ duration: 2.1, repeat: Infinity, ease: "easeInOut" }}
+      <motion.div
+        className={compact ? "relative h-5 w-5" : "relative h-16 w-16"}
+        initial={{ x: -2, y: 0, rotate: -2 }}
+        animate={{
+          x: [-2, 4, -3, 2, -2],
+          y: [0, -7, -2, -8, 0],
+          rotate: [-2, 5, -3, 4, -2],
+        }}
+        transition={{
+          duration: 2.2,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
       >
-        <ellipse cx="23" cy="25" rx="10" ry="8" className="fill-zinc-300/60 dark:fill-zinc-700/70" />
-        <ellipse cx="41" cy="25" rx="10" ry="8" className="fill-zinc-300/60 dark:fill-zinc-700/70" />
-        <ellipse cx="32" cy="36" rx="14" ry="16" className="fill-zinc-500/90 dark:fill-zinc-400/90" />
-        <path d="M22 30h20M22 36h20M22 42h20" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
-        <circle cx="27" cy="34" r="1.4" className="fill-zinc-950 dark:fill-zinc-100" />
-        <circle cx="37" cy="34" r="1.4" className="fill-zinc-950 dark:fill-zinc-100" />
-        <path d="M30 47c1.6 1.2 2.4 1.2 4 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </motion.svg>
+        <motion.div
+          className={compact ? "absolute -top-0.5 left-0.5 h-1.5 w-1.5 rounded-full bg-primary/70" : "absolute -top-1 left-2 h-2 w-2 rounded-full bg-primary/70"}
+          animate={{ opacity: [0.2, 0.8, 0.2], scale: [0.9, 1.15, 0.9] }}
+          transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <BeeLogo className={compact ? "h-5 w-5 drop-shadow-sm" : "h-16 w-16 drop-shadow-md"} />
+      </motion.div>
 
       {!compact && (
         <motion.p

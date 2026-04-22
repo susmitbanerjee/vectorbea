@@ -68,6 +68,8 @@ async function supabaseGet<T>(path: string) {
     headers: {
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
+      "Accept-Profile": "vectorbea",
+      "Content-Profile": "vectorbea",
       Accept: "application/json",
       "Content-Type": "application/json",
     },

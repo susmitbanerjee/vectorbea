@@ -112,7 +112,7 @@ export class Prompts {
     options: { proxyLatencyMs?: number } & LogAuditOptions
   ): Promise<void> {
     const payload: AuditPayload = {
-      promptVersionId: prompt.promptVersionId,
+      promptVersionId: prompt._promptVersionId,
       promptName: prompt.name,
       versionTag: prompt.versionTag,
       proxyLatencyMs: options.proxyLatencyMs ?? 0,

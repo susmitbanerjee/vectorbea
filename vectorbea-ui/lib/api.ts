@@ -6,6 +6,7 @@ export interface AuditLogView {
   proxyLatencyMs: number;
   llmLatencyMs: number;
   tokenCount: number;
+  useType: "runtime" | "audit";
   metadata: Record<string, unknown>;
 }
 
@@ -33,6 +34,7 @@ export interface PromptDetail {
 
 export interface DashboardSummary {
   totalApiCallsLast24h: number;
+  auditsThisMonth: number;
   averageLatencyMs: number;
   activeAgents: number;
 }

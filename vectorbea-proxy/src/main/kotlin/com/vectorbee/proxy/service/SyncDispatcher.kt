@@ -48,6 +48,10 @@ class SyncDispatcher(
     private suspend fun syncOnce(reason: String) {
         runCatching {
             val prompts = hubClient.fetchAllPublishedPrompts()
+            if (prompts.isEmpty()) {
+                logger.info("[sync] {} sync returned no prompts (route unavailable or no published prompts yet)", reason)
+                return
+            }
             prompts.forEach { promptService.putPromptInCache(it) }
             logger.info("[sync] {} sync complete - cached {} prompts", reason, prompts.size)
         }.onFailure { ex ->

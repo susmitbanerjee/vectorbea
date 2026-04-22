@@ -15,10 +15,11 @@ type PromptsShellProps = {
 
 export function PromptsShell({ initialPrompts, initialQuery }: PromptsShellProps) {
   const [prompts, setPrompts] = useState(initialPrompts);
+  const [deletedPromptIds, setDeletedPromptIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setPrompts(initialPrompts);
-  }, [initialPrompts]);
+    setPrompts(initialPrompts.filter((prompt) => !deletedPromptIds.has(prompt.id)));
+  }, [deletedPromptIds, initialPrompts]);
 
   const [optimisticPrompts, addOptimisticPrompt] = useOptimistic(
     prompts,
@@ -44,6 +45,11 @@ export function PromptsShell({ initialPrompts, initialQuery }: PromptsShellProps
   };
 
   const handlePromptDeleted = (deletedPromptId: string) => {
+    setDeletedPromptIds((current) => {
+      const next = new Set(current);
+      next.add(deletedPromptId);
+      return next;
+    });
     setPrompts((currentPrompts) =>
       currentPrompts.filter((prompt) => prompt.id !== deletedPromptId),
     );

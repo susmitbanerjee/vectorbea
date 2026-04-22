@@ -71,7 +71,17 @@ function EmptyState() {
   );
 }
 
-export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
+export function RecentAuditTable({
+  logs,
+  title = "Recent Audit Logs",
+  description = "Prompt executions streaming in from active proxies.",
+  typeLabel = "All",
+}: {
+  logs: AuditLogView[];
+  title?: string;
+  description?: string;
+  typeLabel?: "All" | "Runtime" | "Audit";
+}) {
   const [page, setPage] = useState(0);
 
   // Reset to first page whenever the underlying data changes (e.g. refresh)
@@ -101,15 +111,18 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle>Recent Audit Logs</CardTitle>
-          <CardDescription>Prompt executions streaming in from active proxies.</CardDescription>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
-        <Link
-          href="/audit-logs"
-          className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          View all <ArrowRight className="h-3 w-3" />
-        </Link>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">{typeLabel}</Badge>
+          <Link
+            href="/audit-logs"
+            className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            View all <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
       </CardHeader>
       <CardContent>
         {logs.length === 0 ? (
@@ -122,6 +135,7 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
                   <TableHead>Time</TableHead>
                   <TableHead>Prompt</TableHead>
                   <TableHead>Version</TableHead>
+                  <TableHead>Use type</TableHead>
                   <TableHead>Sidecar latency</TableHead>
                   <TableHead>LLM Latency</TableHead>
                   <TableHead className="text-right">Tokens</TableHead>
@@ -154,6 +168,11 @@ export function RecentAuditTable({ logs }: { logs: AuditLogView[] }) {
                           size="sm"
                           className="w-full max-w-[180px]"
                         />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={log.useType === "audit" ? "warning" : "secondary"}>
+                          {log.useType === "audit" ? "Audit" : "Runtime"}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>

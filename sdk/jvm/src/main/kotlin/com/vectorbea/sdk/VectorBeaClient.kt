@@ -4,6 +4,8 @@ import com.vectorbea.sdk.internal.HttpClient
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.Closeable
+import java.util.Collections
+import java.util.WeakHashMap
 import kotlin.time.measureTimedValue
 
 // Default to the local sidecar — the most common first-run experience.
@@ -39,6 +41,7 @@ class VectorBeaClient private constructor(
         ignoreUnknownKeys = true
         explicitNulls = false
     }
+    private val auditPromptVersionIds = Collections.synchronizedMap(WeakHashMap<Prompt, String>())
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -61,9 +64,11 @@ class VectorBeaClient private constructor(
      * @throws TimeoutException if the request exceeds the configured timeout.
      */
     suspend fun getPrompt(name: String): Prompt {
-        val (prompt, elapsed) = measureTimedValue {
-            http.get<Prompt>("/v1/prompts/${name.encodeUrl()}")
+        val (rawPrompt, elapsed) = measureTimedValue {
+            http.get<RawPrompt>("/v1/prompts/${name.encodeUrl()}")
         }
+        val prompt = rawPrompt.toPrompt()
+        auditPromptVersionIds[prompt] = rawPrompt.promptVersionId
 
         // Auto-report the proxy latency — audit failures are non-fatal
         runCatching {
@@ -129,9 +134,14 @@ class VectorBeaClient private constructor(
         tokenCount: Int = 0,
         metadata: Map<String, String> = emptyMap(),
     ) {
+        val promptVersionId = auditPromptVersionIds[prompt]
+            ?: throw IllegalArgumentException(
+                "Prompt audit reference missing. Use the Prompt returned by getPrompt() when calling logAudit().",
+            )
+
         val payload = buildString {
             append("""{"promptVersionId":""")
-            append(json.encodeToString(prompt.promptVersionId))
+            append(json.encodeToString(promptVersionId))
             append(""","promptName":""")
             append(json.encodeToString(prompt.name))
             append(""","versionTag":""")

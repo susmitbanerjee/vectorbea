@@ -18,6 +18,7 @@ export async function DashboardOverviewServer({
   let auditLogs: AuditLogView[] = [];
   let dashboardSummary: DashboardSummary = {
     totalApiCallsLast24h: 0,
+    auditsThisMonth: 0,
     averageLatencyMs: 0,
     activeAgents: 0,
   };

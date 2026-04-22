@@ -8,6 +8,7 @@ import {
   Boxes,
   Building2,
   ChevronRight,
+  Container,
   ExternalLink,
   LockKeyhole,
   Menu,
@@ -103,6 +104,7 @@ const DOCS_NAV: NavItem[] = [
   // Platform
   { section: "Platform",        href: "/docs/architecture" as Route, title: "Architecture", icon: Boxes   },
   {                              href: "/docs/integrations" as Route, title: "Integrations", icon: PlugZap },
+  {                              href: "/docs/kubernetes"   as Route, title: "Kubernetes",   icon: Container },
 
   // Enterprise
   { section: "Enterprise",      href: "/docs/enterprise"   as Route, title: "Enterprise",  icon: Building2  },
@@ -309,6 +311,13 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Operational signals",    href: "#observability" },
     { label: "Rollout workflow",       href: "#workflow" },
   ],
+  "/docs/kubernetes": [
+    { label: "Architecture",           href: "#architecture" },
+    { label: "Deploy sidecar",         href: "#deploy-sidecar" },
+    { label: "Health and probes",      href: "#health-probes" },
+    { label: "Scaling and updates",    href: "#scaling-updates" },
+    { label: "Network policy",         href: "#network-policy" },
+  ],
   "/docs/enterprise": [
     { label: "Operating model",        href: "#operating-model" },
     { label: "Workspace RBAC",         href: "#rbac" },
@@ -361,6 +370,7 @@ const TITLE_BY_PATH: Record<string, string> = {
   "/docs/sdk/rust":      "Rust SDK",
   "/docs/architecture":  "Architecture",
   "/docs/integrations":  "Integrations",
+  "/docs/kubernetes":    "Kubernetes",
   "/docs/enterprise":    "Enterprise",
   "/docs/security":      "Security",
 };

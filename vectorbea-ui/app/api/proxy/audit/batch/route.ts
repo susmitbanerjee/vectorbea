@@ -103,6 +103,10 @@ export async function POST(request: NextRequest) {
     // ── 5. Build and insert rows ──────────────────────────────────────────
     const rows = entries.map((e) => {
       const meta = e.promptVersionId ? versionMeta.get(e.promptVersionId) : undefined;
+      const metadata = {
+        ...(e.metadata ?? {}),
+        useType: "runtime",
+      };
       return {
         workspace_id: workspaceId,
         prompt_version_id: e.promptVersionId ?? null,
@@ -111,7 +115,7 @@ export async function POST(request: NextRequest) {
         token_count: e.tokenCount ?? 0,
         prompt_name: e.promptName || meta?.promptName || "",
         version_tag: e.versionTag || meta?.versionTag || "",
-        metadata: e.metadata ?? {},
+        metadata,
       };
     });
 

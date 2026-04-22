@@ -153,7 +153,7 @@ class Prompts:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         payload = {
-            "promptVersionId": prompt.prompt_version_id,
+            "promptVersionId": prompt._prompt_version_id,
             "promptName": prompt.name,
             "versionTag": prompt.version_tag,
             "proxyLatencyMs": float(proxy_latency_ms),

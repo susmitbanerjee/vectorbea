@@ -19,6 +19,8 @@ type AuditEntry = {
   metadata?: Record<string, unknown>;
 };
 
+const ALLOWED_UI_AUDIT_ACTIONS = new Set(["update", "publish", "create", "delete"]);
+
 function getMetadataText(metadata: Record<string, unknown> | undefined, ...keys: string[]) {
   if (!metadata) return "";
 
@@ -62,6 +64,17 @@ export async function POST(request: NextRequest) {
 
     const payload = (await request.json()) as AuditEntry[];
     const entries = Array.isArray(payload) ? payload : [payload];
+    const hasInvalidEntry = entries.some((entry) => {
+      const action = typeof entry.metadata?.action === "string" ? entry.metadata.action.trim() : "";
+      return !ALLOWED_UI_AUDIT_ACTIONS.has(action);
+    });
+
+    if (hasInvalidEntry) {
+      return NextResponse.json(
+        { error: "Only prompt change events from the UI can be written to audit logs." },
+        { status: 400 },
+      );
+    }
 
     const supabase = createVectorBeaAdminClient();
 
@@ -94,7 +107,10 @@ export async function POST(request: NextRequest) {
     }
 
     const rows = entries.map((entry) => {
-      const metadata = entry.metadata ?? {};
+      const metadata = {
+        ...(entry.metadata ?? {}),
+        useType: "audit",
+      };
       const meta = entry.promptVersionId ? versionMeta.get(entry.promptVersionId) : undefined;
 
       return {

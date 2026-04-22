@@ -319,6 +319,11 @@ export default function QuickstartPage() {
               desc: "How to wire VectorBea into Python services, Node backends, and container platforms",
             },
             {
+              href: "/docs/kubernetes",
+              label: "Kubernetes",
+              desc: "Deploy sidecars as cluster-local services with health probes and safe rollouts",
+            },
+            {
               href: "/docs/enterprise",
               label: "Enterprise",
               desc: "RBAC, workspace isolation, row-level security, and per-seat billing",

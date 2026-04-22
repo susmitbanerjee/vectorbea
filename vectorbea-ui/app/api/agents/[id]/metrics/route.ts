@@ -42,13 +42,18 @@ export async function GET(
 
     const { data: agent, error: agentError } = await supabase
       .from("deployment_agents")
-      .select("id")
+      .select("id, last_heartbeat")
       .eq("id", id)
       .eq("workspace_id", workspaceId)
       .single();
 
     if (agentError || !agent) {
       return NextResponse.json({ error: "Agent not found." }, { status: 404 });
+    }
+
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    if (!agent.last_heartbeat || agent.last_heartbeat < twoMinutesAgo) {
+      return NextResponse.json([]);
     }
 
     const { data, error } = await supabase

@@ -15,6 +15,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
@@ -84,6 +85,9 @@ class HubClient(private val config: AppConfig) {
 
     suspend fun fetchAllPublishedPrompts(): List<PromptPayload> {
         val response = client.get("${config.hubUrl}/api/proxy/sync")
+        if (response.status == HttpStatusCode.NotFound) {
+            return emptyList()
+        }
         if (!response.status.isSuccess()) {
             val errorBody = response.bodyAsText()
             error("Hub returned ${response.status.value} for sync: $errorBody")
@@ -92,7 +96,7 @@ class HubClient(private val config: AppConfig) {
     }
 
     suspend fun validateAgentToken(): Boolean {
-        val response = client.get("${config.hubUrl}/api/proxy/sync")
+        val response = client.get("${config.hubUrl}/api/proxy/prompts/__vectorbea_auth_probe__")
         return response.status.value != 401
     }
 

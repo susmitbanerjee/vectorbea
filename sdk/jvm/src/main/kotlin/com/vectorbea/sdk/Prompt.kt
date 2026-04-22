@@ -14,18 +14,6 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class Prompt(
-    /** Stable UUID of the parent prompt record. */
-    @SerialName("promptId")
-    val promptId: String,
-
-    /** UUID of the specific published version that was resolved. */
-    @SerialName("promptVersionId")
-    val promptVersionId: String,
-
-    /** UUID of the organization that owns this prompt. */
-    @SerialName("organizationId")
-    val organizationId: String,
-
     /** Prompt name as registered in the dashboard (e.g. `"greet-user"`). */
     @SerialName("name")
     val name: String,
@@ -50,6 +38,33 @@ data class Prompt(
     @SerialName("createdAt")
     val createdAt: String = "",
 )
+
+@Serializable
+internal data class RawPrompt(
+    @SerialName("promptVersionId")
+    val promptVersionId: String,
+    @SerialName("name")
+    val name: String,
+    @SerialName("versionTag")
+    val versionTag: String,
+    @SerialName("templateText")
+    val templateText: String,
+    @SerialName("parameters")
+    val parameters: Map<String, String> = emptyMap(),
+    @SerialName("description")
+    val description: String? = null,
+    @SerialName("createdAt")
+    val createdAt: String = "",
+) {
+    fun toPrompt(): Prompt = Prompt(
+        name = name,
+        versionTag = versionTag,
+        templateText = templateText,
+        parameters = parameters,
+        description = description,
+        createdAt = createdAt,
+    )
+}
 
 // ── Extension functions ───────────────────────────────────────────────────────
 

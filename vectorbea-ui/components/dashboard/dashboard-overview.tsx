@@ -4,6 +4,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useT
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
+  ClipboardList,
   Bot,
   CheckCircle2,
   FileText,
@@ -150,6 +151,14 @@ export function DashboardOverview({
         : auditLogs,
     [auditLogs, query],
   );
+  const runtimeLogs = useMemo(
+    () => filteredLogs.filter((log) => log.useType === "runtime"),
+    [filteredLogs],
+  );
+  const auditChangeLogs = useMemo(
+    () => filteredLogs.filter((log) => log.useType === "audit"),
+    [filteredLogs],
+  );
 
   const signals: Array<{
     label: string;
@@ -219,23 +228,29 @@ export function DashboardOverview({
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <MetricCard
-            label="Requests (24h)"
+            label="API calls (24h)"
             value={dashboardSummary.totalApiCallsLast24h}
             icon={<Activity className="h-5 w-5" />}
             staggerIndex={0}
+          />
+          <MetricCard
+            label="Audits this month"
+            value={dashboardSummary.auditsThisMonth}
+            icon={<ClipboardList className="h-5 w-5" />}
+            staggerIndex={1}
           />
           <MetricCard
             label="Avg latency"
             value={dashboardSummary.averageLatencyMs}
             suffix=" ms"
             icon={<Zap className="h-5 w-5" />}
-            staggerIndex={1}
+            staggerIndex={2}
           />
           <MetricCard
             label="Active sidecars"
             value={dashboardSummary.activeAgents}
             icon={<Bot className="h-5 w-5" />}
-            staggerIndex={2}
+            staggerIndex={3}
           />
         </section>
 
@@ -284,8 +299,19 @@ export function DashboardOverview({
           </Card>
         </section>
 
-        <section>
-          <RecentAuditTable logs={filteredLogs} />
+        <section className="grid gap-6 xl:grid-cols-2">
+          <RecentAuditTable
+            logs={runtimeLogs}
+            title="Recent API Calls"
+            description="Runtime prompt calls coming from active sidecars."
+            typeLabel="Runtime"
+          />
+          <RecentAuditTable
+            logs={auditChangeLogs}
+            title="Recent Audits"
+            description="Prompt changes made from the dashboard UI."
+            typeLabel="Audit"
+          />
         </section>
       </div>
     </div>

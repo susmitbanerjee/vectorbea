@@ -83,16 +83,13 @@ class TelemetryDispatcher(
 
     fun start() {
         if (!enabled) {
-            logger.info(
-                "TelemetryDispatcher disabled for this runtime. Set VECTORBEA_ENABLE_TELEMETRY=true and VECTORBEA_TELEMETRY_URL to enable telemetry pushes.",
-            )
+            logger.info("TelemetryDispatcher disabled for this runtime.")
             return
         }
 
         scope.launch { runWorker() }
         logger.info(
-            "TelemetryDispatcher started - pushing to {} every {} ms, env={}, hostId={}",
-            config.telemetryUrl,
+            "TelemetryDispatcher started (interval={} ms, env={}, hostId={})",
             config.telemetryIntervalMs,
             config.environment,
             config.proxyHostId,
@@ -111,8 +108,7 @@ class TelemetryDispatcher(
             runCatching { push() }
                 .onFailure { ex ->
                     logger.warn(
-                        "[telemetry] Push to {} failed - will retry next cycle: {}",
-                        config.telemetryUrl,
+                        "[telemetry] Push failed - retrying next cycle: {}",
                         ex.message,
                     )
                 }
@@ -161,11 +157,9 @@ class TelemetryDispatcher(
         }
 
         if (!response.status.isSuccess()) {
-            val body = runCatching { response.bodyAsText() }.getOrElse { "<unreadable>" }
             logger.warn(
-                "[telemetry] Ingest returned {} - body: {}",
+                "[telemetry] Ingest returned status {}",
                 response.status.value,
-                body,
             )
             return
         }

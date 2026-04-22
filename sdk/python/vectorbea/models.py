@@ -16,12 +16,6 @@ class Prompt:
 
     Attributes
     ----------
-    prompt_id : str
-        Stable UUID of the parent prompt record.
-    prompt_version_id : str
-        UUID of the specific published version that was resolved.
-    organization_id : str
-        UUID of the organization that owns this prompt.
     name : str
         Prompt name as registered in the dashboard (e.g. ``"greet-user"``).
     version_tag : str
@@ -43,15 +37,13 @@ class Prompt:
     Hello Alice, welcome to Acme AI!
     """
 
-    prompt_id: str
-    prompt_version_id: str
-    organization_id: str
     name: str
     version_tag: str
     template_text: str
     parameters: Dict[str, Any] = field(default_factory=dict)
     description: Optional[str] = None
     created_at: str = ""
+    _prompt_version_id: str = field(default="", repr=False)
 
     # Matches both {{ name }} and {{name}} style placeholders
     _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
@@ -110,15 +102,13 @@ class Prompt:
     def _from_dict(cls, data: Dict[str, Any]) -> "Prompt":
         """Internal: build a Prompt from the raw API JSON payload."""
         return cls(
-            prompt_id=data["promptId"],
-            prompt_version_id=data["promptVersionId"],
-            organization_id=data["organizationId"],
             name=data["name"],
             version_tag=data["versionTag"],
             template_text=data["templateText"],
             parameters=data.get("parameters") or {},
             description=data.get("description"),
             created_at=data.get("createdAt", ""),
+            _prompt_version_id=data["promptVersionId"],
         )
 
 

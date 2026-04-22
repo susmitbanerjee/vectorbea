@@ -37,6 +37,16 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 
 fun main() {
+    if (System.getProperty("org.slf4j.simpleLogger.defaultLogLevel").isNullOrBlank()) {
+        System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info")
+    }
+    if (System.getProperty("org.slf4j.simpleLogger.log.io.netty").isNullOrBlank()) {
+        System.setProperty("org.slf4j.simpleLogger.log.io.netty", "warn")
+    }
+    if (System.getProperty("org.slf4j.simpleLogger.log.io.ktor").isNullOrBlank()) {
+        System.setProperty("org.slf4j.simpleLogger.log.io.ktor", "info")
+    }
+
     val config = AppConfig.fromEnv()
     val json = Json {
         ignoreUnknownKeys = true

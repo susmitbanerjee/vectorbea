@@ -29,12 +29,6 @@ const PLACEHOLDER_RE = /\{\{\s*(\w+)\s*\}\}/g;
  * ```
  */
 export class Prompt {
-  /** Stable UUID of the parent prompt record. */
-  readonly promptId: string;
-  /** UUID of the specific published version that was resolved. */
-  readonly promptVersionId: string;
-  /** UUID of the organization that owns this prompt. */
-  readonly organizationId: string;
   /** Prompt name as registered in the dashboard (e.g. `"greet-user"`). */
   readonly name: string;
   /** Human-readable version label (e.g. `"v1.2.0"`). */
@@ -47,12 +41,12 @@ export class Prompt {
   readonly description: string | undefined;
   /** ISO-8601 timestamp of when this version was created. */
   readonly createdAt: string;
+  /** @internal */
+  readonly _promptVersionId: string;
 
   /** @internal Use `Prompt.fromPayload()` instead of constructing directly. */
   constructor(payload: PromptPayload) {
-    this.promptId = payload.promptId;
-    this.promptVersionId = payload.promptVersionId;
-    this.organizationId = payload.organizationId;
+    this._promptVersionId = payload.promptVersionId;
     this.name = payload.name;
     this.versionTag = payload.versionTag;
     this.templateText = payload.templateText;

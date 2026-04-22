@@ -6,11 +6,23 @@ import type { DashboardSummary } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
+function resolveUseType(metadata: Record<string, unknown>): "runtime" | "audit" {
+  const explicit = metadata.useType;
+  if (explicit === "runtime" || explicit === "audit") return explicit;
+  const action = metadata.action;
+  return typeof action === "string" && action.trim() ? "audit" : "runtime";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) {
-      return NextResponse.json({ totalApiCallsLast24h: 0, averageLatencyMs: 0, activeAgents: 0 } as DashboardSummary);
+      return NextResponse.json({
+        totalApiCallsLast24h: 0,
+        auditsThisMonth: 0,
+        averageLatencyMs: 0,
+        activeAgents: 0,
+      } as DashboardSummary);
     }
 
     // ── P0: Tenant isolation gate ──────────────────────────────────────────
@@ -21,30 +33,53 @@ export async function GET(request: NextRequest) {
     const supabase = createVectorBeaAdminClient();
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthStartIso = monthStart.toISOString();
 
-    const [{ data: auditData }, { data: agentData }] = await Promise.all([
+    const [{ data: auditData24h }, { data: auditDataMonth }, { data: agentData }] = await Promise.all([
       supabase
         .from("audit_logs")
-        .select("proxy_latency_ms")
+        .select("proxy_latency_ms, metadata")
         .eq("workspace_id", workspaceId)
         .gte("created_at", since),
+      supabase
+        .from("audit_logs")
+        .select("metadata")
+        .eq("workspace_id", workspaceId)
+        .gte("created_at", monthStartIso),
       supabase
         .from("deployment_agents")
         .select("id, last_heartbeat")
         .eq("workspace_id", workspaceId),
     ]);
 
-    const rows = auditData ?? [];
-    const totalApiCallsLast24h = rows.length;
-    const averageLatencyMs = rows.length > 0
-      ? Math.round(rows.reduce((sum, r) => sum + (r.proxy_latency_ms ?? 0), 0) / rows.length)
+    const runtimeRows24h = (auditData24h ?? []).filter(
+      (row) => resolveUseType((row.metadata as Record<string, unknown>) ?? {}) === "runtime",
+    );
+    const auditRowsMonth = (auditDataMonth ?? []).filter(
+      (row) => resolveUseType((row.metadata as Record<string, unknown>) ?? {}) === "audit",
+    );
+
+    const totalApiCallsLast24h = runtimeRows24h.length;
+    const averageLatencyMs = runtimeRows24h.length > 0
+      ? Math.round(
+          runtimeRows24h.reduce((sum, r) => sum + (r.proxy_latency_ms ?? 0), 0) /
+            runtimeRows24h.length,
+        )
       : 0;
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const activeAgents = (agentData ?? []).filter(
       (agent) => agent.last_heartbeat && agent.last_heartbeat >= twoMinutesAgo,
     ).length;
 
-    return NextResponse.json({ totalApiCallsLast24h, averageLatencyMs, activeAgents } as DashboardSummary);
+    return NextResponse.json({
+      totalApiCallsLast24h,
+      auditsThisMonth: auditRowsMonth.length,
+      averageLatencyMs,
+      activeAgents,
+    } as DashboardSummary);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to load dashboard summary" },

@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
@@ -63,6 +64,70 @@ function relativeTime(value: string | null): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+type ModelParametersForm = {
+  model: string;
+  temperature: string;
+  maxTokens: string;
+  topP: string;
+  seed: string;
+  ragSources: string;
+  stopSequences: string;
+};
+
+function toFormParameters(parameters: Record<string, unknown>): ModelParametersForm {
+  const rag = parameters.rag_sources;
+  const stop = parameters.stop_sequences;
+  return {
+    model: String(parameters.model ?? ""),
+    temperature: String(parameters.temperature ?? ""),
+    maxTokens: String(parameters.max_tokens ?? ""),
+    topP: String(parameters.top_p ?? ""),
+    seed: String(parameters.seed ?? ""),
+    ragSources: Array.isArray(rag) ? rag.map(String).join(", ") : "",
+    stopSequences: Array.isArray(stop) ? stop.map(String).join(", ") : "",
+  };
+}
+
+function toPersistedParameters(form: ModelParametersForm): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  const toNumber = (value: string) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  if (form.model.trim()) next.model = form.model.trim();
+  if (form.temperature.trim()) {
+    const parsed = toNumber(form.temperature.trim());
+    if (parsed !== null) next.temperature = parsed;
+  }
+  if (form.maxTokens.trim()) {
+    const parsed = toNumber(form.maxTokens.trim());
+    if (parsed !== null) next.max_tokens = Math.round(parsed);
+  }
+  if (form.topP.trim()) {
+    const parsed = toNumber(form.topP.trim());
+    if (parsed !== null) next.top_p = parsed;
+  }
+  if (form.seed.trim()) {
+    const parsed = toNumber(form.seed.trim());
+    if (parsed !== null) next.seed = Math.round(parsed);
+  }
+
+  const ragSources = form.ragSources
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (ragSources.length > 0) next.rag_sources = ragSources;
+
+  const stopSequences = form.stopSequences
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (stopSequences.length > 0) next.stop_sequences = stopSequences;
+
+  return next;
 }
 
 async function getApiErrorMessage(response: Response, fallback: string) {
@@ -113,8 +178,8 @@ export function PromptEditor({
     prompt.promptVersionId,
   );
   const [templateText, setTemplateText] = useState(prompt.templateText);
-  const [parametersText, setParametersText] = useState(
-    JSON.stringify(prompt.parameters, null, 2),
+  const [modelParameters, setModelParameters] = useState<ModelParametersForm>(
+    toFormParameters(prompt.parameters),
   );
   const [isPending, startTransition] = useTransition();
   const [isPublishPending, startPublishTransition] = useTransition();
@@ -148,16 +213,13 @@ export function PromptEditor({
 
   useEffect(() => {
     setTemplateText(selectedVersion.templateText);
-    setParametersText(JSON.stringify(selectedVersion.parameters, null, 2));
+    setModelParameters(toFormParameters(selectedVersion.parameters));
   }, [selectedVersion]);
 
-  const parsedParameters = useMemo(() => {
-    try {
-      return JSON.parse(parametersText) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }, [parametersText]);
+  const parsedParameters = useMemo(
+    () => toPersistedParameters(modelParameters),
+    [modelParameters],
+  );
 
   const refreshVersions = useCallback(
     (updatedPrompt: PromptDetail) => {
@@ -186,11 +248,6 @@ export function PromptEditor({
   );
 
   const savePrompt = () => {
-    if (!parsedParameters) {
-      toast.error("Parameters JSON must be valid before saving.");
-      return;
-    }
-
     const templateChanged = templateText !== currentPrompt.templateText;
     const parametersChanged =
       JSON.stringify(parsedParameters) !==
@@ -273,7 +330,7 @@ export function PromptEditor({
         // with the freshly-created draft row from the backend.
         refreshVersions(updatedPrompt);
         setTemplateText(updatedPrompt.templateText);
-        setParametersText(JSON.stringify(updatedPrompt.parameters, null, 2));
+        setModelParameters(toFormParameters(updatedPrompt.parameters));
         toast.success(
           `Saved as ${updatedPrompt.versionTag}${updatedPrompt.isPublished ? "" : " (draft)"}`,
         );
@@ -486,26 +543,111 @@ export function PromptEditor({
                 <div>
                   <CardTitle>Model Parameters</CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    JSON payload that ships with this prompt version.
+                    Runtime parameters shipped with this prompt version.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {parsedParameters === null && (
-                    <Badge variant="destructive">Invalid JSON</Badge>
-                  )}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Sparkles className="h-4 w-4" />
-                    Structured config
-                  </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Sparkles className="h-4 w-4" />
+                  Structured config
                 </div>
               </CardHeader>
-              <CardContent>
-                <Textarea
-                  value={parametersText}
-                  onChange={(e) => setParametersText(e.target.value)}
-                  disabled={!isViewingCurrentDraft || !canEdit}
-                  className="min-h-[220px] rounded-xl border border-border bg-muted/30 p-4 font-mono text-sm leading-7 disabled:cursor-not-allowed disabled:opacity-70"
-                />
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Model
+                    </label>
+                    <Input
+                      value={modelParameters.model}
+                      onChange={(event) =>
+                        setModelParameters((current) => ({ ...current, model: event.target.value }))
+                      }
+                      placeholder="gpt-4o-mini"
+                      disabled={!isViewingCurrentDraft || !canEdit}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Temperature
+                    </label>
+                    <Input
+                      value={modelParameters.temperature}
+                      onChange={(event) =>
+                        setModelParameters((current) => ({ ...current, temperature: event.target.value }))
+                      }
+                      placeholder="0.2"
+                      disabled={!isViewingCurrentDraft || !canEdit}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Top P
+                    </label>
+                    <Input
+                      value={modelParameters.topP}
+                      onChange={(event) =>
+                        setModelParameters((current) => ({ ...current, topP: event.target.value }))
+                      }
+                      placeholder="0.95"
+                      disabled={!isViewingCurrentDraft || !canEdit}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Max Tokens
+                    </label>
+                    <Input
+                      value={modelParameters.maxTokens}
+                      onChange={(event) =>
+                        setModelParameters((current) => ({ ...current, maxTokens: event.target.value }))
+                      }
+                      placeholder="512"
+                      disabled={!isViewingCurrentDraft || !canEdit}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Seed
+                    </label>
+                    <Input
+                      value={modelParameters.seed}
+                      onChange={(event) =>
+                        setModelParameters((current) => ({ ...current, seed: event.target.value }))
+                      }
+                      placeholder="42"
+                      disabled={!isViewingCurrentDraft || !canEdit}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Stop Sequences
+                    </label>
+                    <Input
+                      value={modelParameters.stopSequences}
+                      onChange={(event) =>
+                        setModelParameters((current) => ({ ...current, stopSequences: event.target.value }))
+                      }
+                      placeholder="END, ###"
+                      disabled={!isViewingCurrentDraft || !canEdit}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    RAG Names
+                  </label>
+                  <Input
+                    value={modelParameters.ragSources}
+                    onChange={(event) =>
+                      setModelParameters((current) => ({ ...current, ragSources: event.target.value }))
+                    }
+                    placeholder="knowledge-base-prod, policies-v2"
+                    disabled={!isViewingCurrentDraft || !canEdit}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use comma-separated names. These are saved as <code>rag_sources</code>.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
