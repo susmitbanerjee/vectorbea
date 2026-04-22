@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -39,6 +39,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { TraceDetailView } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace-context";
 import { cn } from "@/lib/utils";
 
 type SpanStatus = "success" | "warning" | "error";
@@ -412,15 +414,127 @@ function KV({ label, value, mono = false }: { label: string; value: string; mono
   );
 }
 
+function createEmptyTrace(id: string): TraceDetailView {
+  return {
+    id,
+    status: "success",
+    startedAt: new Date(0).toISOString(),
+    env: "prod",
+    durationMs: 0,
+    totalCostUsd: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    promptName: "—",
+    promptVersion: "—",
+    sidecarName: "—",
+    primaryModel: "—",
+    provider: "—",
+    cacheStatus: "miss",
+    fallbackUsed: false,
+    guardrail: "passed",
+    evalScore: 0,
+    spans: [],
+    logs: [],
+    prompt: {
+      name: "—",
+      version: "—",
+      source: "published",
+      publishedBy: "—",
+      rolloutPercent: 0,
+      releaseTag: "—",
+      evalBaseline: 0,
+      params: { temperature: 0, top_p: 1, max_tokens: 0 },
+      system: "",
+      developer: "",
+      userTemplate: "",
+      renderedPrompt: "",
+      variables: {},
+    },
+    inputs: {
+      userInput: "",
+      variables: {},
+      contextDocs: [],
+      headers: {},
+      tenant: "—",
+      workspace: "—",
+      environment: "prod",
+      cacheKey: "—",
+      sessionId: "—",
+      conversationId: "—",
+    },
+    outputs: {
+      rawPrimary: "",
+      postProcessed: "",
+      finalDelivered: "",
+      safetyNotes: [],
+    },
+  };
+}
+
 export default function TraceDetailsPage() {
+  const { activeWorkspaceId } = useWorkspace();
   const params = useParams<{ id: string }>();
-  const traceId = params?.id ?? TRACE.id;
-  const trace = { ...TRACE, id: traceId };
+  const traceId = params?.id ?? "";
+  const [traceData, setTraceData] = useState<TraceDetailView | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const trace = traceData ?? createEmptyTrace(traceId || "trace");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTrace() {
+      if (!activeWorkspaceId || !traceId) {
+        setTraceData(null);
+        setLoadError(null);
+        return;
+      }
+
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const response = await fetch(
+          `/api/traces/${encodeURIComponent(traceId)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+          { cache: "no-store" },
+        );
+
+        if (response.status === 404) {
+          if (!cancelled) {
+            setTraceData(null);
+            setLoadError("Trace not found in this workspace.");
+          }
+          return;
+        }
+
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({ error: "Failed to load trace" }))) as { error?: string };
+          throw new Error(body.error || `Failed to load trace (${response.status})`);
+        }
+
+        const payload = (await response.json()) as TraceDetailView;
+        if (!cancelled) {
+          setTraceData(payload);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Failed to load trace");
+          setTraceData(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadTrace();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, traceId]);
 
   const { rows, byParent } = useMemo(() => flattenSpans(trace.spans), [trace.spans]);
   const rootSpan = rows.find((r) => r.parentId === null) ?? rows[0];
   const [activeTab, setActiveTab] = useState("waterfall");
-  const [selectedSpanId, setSelectedSpanId] = useState(rootSpan?.id ?? "");
+  const [selectedSpanId, setSelectedSpanId] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "errors" | "slow" | "ai" | "infra">("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -442,6 +556,11 @@ export default function TraceDetailsPage() {
     [rows, rootSpan, selectedSpanId]
   );
   const SelectedIcon = selectedSpan ? TYPE_META[selectedSpan.type].icon : null;
+
+  useEffect(() => {
+    if (!rootSpan) return;
+    setSelectedSpanId((current) => (current && rows.some((row) => row.id === current) ? current : rootSpan.id));
+  }, [rootSpan, rows]);
 
   const visibleSet = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -523,6 +642,47 @@ export default function TraceDetailsPage() {
       // ignore
     }
   };
+
+  if (!activeWorkspaceId) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+        <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
+        <div className="px-4 py-6 md:px-6 xl:px-8">
+          <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
+            <CardContent className="p-6 text-sm text-slate-300">
+              Select a workspace to inspect trace details.
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading && !traceData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+        <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
+        <div className="px-4 py-6 md:px-6 xl:px-8">
+          <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
+            <CardContent className="p-6 text-sm text-slate-300">Loading trace details…</CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError && !traceData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+        <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
+        <div className="px-4 py-6 md:px-6 xl:px-8">
+          <Card className="rounded-2xl border border-red-500/30 bg-red-500/10">
+            <CardContent className="p-6 text-sm text-red-100">{loadError}</CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">

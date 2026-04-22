@@ -120,6 +120,148 @@ export interface RegisterAgentResponse {
   token: string;
 }
 
+export type TraceStatus = "success" | "warning" | "error";
+export type TraceUseType = "runtime" | "audit";
+export type TraceCacheStatus = "hit" | "miss" | "unknown";
+export type TraceGuardrailStatus = "passed" | "flagged" | "unknown";
+
+export interface TraceSummaryView {
+  id: string;
+  createdAt: string;
+  status: TraceStatus;
+  useType: TraceUseType;
+  environment: string;
+  promptName: string;
+  promptVersion: string;
+  model: string | null;
+  provider: string | null;
+  sidecarName: string | null;
+  durationMs: number;
+  llmLatencyMs: number;
+  tokenCount: number;
+  totalCostUsd: number | null;
+  cacheStatus: TraceCacheStatus;
+  fallbackUsed: boolean;
+  guardrail: TraceGuardrailStatus;
+}
+
+export interface TraceListResponse {
+  items: TraceSummaryView[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface TraceLogView {
+  id: string;
+  timestamp: string;
+  offsetMs: number;
+  level: "debug" | "info" | "warn" | "error";
+  component: string;
+  message: string;
+  spanId?: string;
+}
+
+export interface TraceSpanView {
+  id: string;
+  parentId: string | null;
+  name: string;
+  type:
+    | "incoming_request"
+    | "sidecar_proxy"
+    | "prompt_resolution"
+    | "template_render"
+    | "retrieval_query"
+    | "vector_lookup"
+    | "rerank"
+    | "context_assembly"
+    | "cache"
+    | "model_selection"
+    | "llm_completion"
+    | "guardrail"
+    | "response_parser"
+    | "fallback"
+    | "audit_sink"
+    | "evaluation_hook";
+  service: string;
+  status: TraceStatus;
+  startMs: number;
+  durationMs: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  model?: string;
+  provider?: string;
+  promptVersion?: string;
+  cacheStatus?: "hit" | "miss";
+  guardrailResult?: "passed" | "flagged";
+  retries?: number;
+  criticalPath?: boolean;
+  aiSpecific?: boolean;
+  branch?: "primary" | "fallback";
+  tags?: Record<string, string | number | boolean>;
+  inputPreview?: string;
+  outputPreview?: string;
+}
+
+export interface TraceDetailView {
+  id: string;
+  status: TraceStatus;
+  startedAt: string;
+  env: string;
+  durationMs: number;
+  totalCostUsd: number;
+  tokensIn: number;
+  tokensOut: number;
+  promptName: string;
+  promptVersion: string;
+  sidecarName: string;
+  primaryModel: string;
+  provider: string;
+  cacheStatus: "hit" | "miss";
+  fallbackUsed: boolean;
+  guardrail: "passed" | "flagged";
+  evalScore: number;
+  spans: TraceSpanView[];
+  logs: TraceLogView[];
+  prompt: {
+    name: string;
+    version: string;
+    source: "published" | "draft" | "experiment";
+    publishedBy: string;
+    rolloutPercent: number;
+    releaseTag: string;
+    evalBaseline: number;
+    params: { temperature: number; top_p: number; max_tokens: number };
+    system: string;
+    developer: string;
+    userTemplate: string;
+    renderedPrompt: string;
+    variables: Record<string, string>;
+  };
+  inputs: {
+    userInput: string;
+    variables: Record<string, string>;
+    contextDocs: Array<{ id: string; source: string; title: string; tokenCount: number; content: string }>;
+    headers: Record<string, string>;
+    tenant: string;
+    workspace: string;
+    environment: string;
+    cacheKey: string;
+    sessionId: string;
+    conversationId: string;
+  };
+  outputs: {
+    rawPrimary: string;
+    rawFallback?: string;
+    postProcessed: string;
+    finalDelivered: string;
+    parsedJson?: Record<string, unknown>;
+    safetyNotes: string[];
+  };
+}
+
 type ApiFetchOptions = RequestInit & {
   workspaceId?: string | null;
 };

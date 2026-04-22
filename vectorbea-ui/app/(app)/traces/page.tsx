@@ -1,5 +1,13 @@
-import { redirect } from "next/navigation";
+import { TracesShell } from "@/components/traces/traces-shell";
 
-export default function TracesIndexPage() {
-  redirect("/traces/trace_01HZX9X3B1QKQ19Q5DM7C2A0XE");
+export const dynamic = "force-dynamic";
+
+export default async function TracesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
+
+  return <TracesShell initialQuery={q ?? ""} />;
 }
