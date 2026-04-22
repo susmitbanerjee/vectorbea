@@ -101,7 +101,8 @@ class AuditDispatcher(
             try {
                 hubClient.flushAuditBatch(batch)
             } catch (ex: Exception) {
-                logger.warn("Audit flush failed for {} items, retrying", batch.size, ex)
+                logger.warn("Audit flush failed for {} items, retrying: {}", batch.size, ex.message)
+                logger.debug("Audit flush stacktrace", ex)
                 for (event in batch.asReversed()) {
                     buffer.addFirst(event)
                 }

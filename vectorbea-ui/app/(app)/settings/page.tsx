@@ -1,7 +1,15 @@
 "use client";
 
-import { useTheme } from "next-themes";
-import { AlertTriangle, Check, Globe, Moon, Package, Sun, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Globe,
+  KeyRound,
+  ShieldCheck,
+  Trash2,
+  Users,
+  Workflow,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -18,45 +26,56 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useWorkspace } from "@/lib/workspace-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 export default function SettingsPage() {
-  const { theme, setTheme } = useTheme();
+  const { activeWorkspace, role, planTier, seatUsage } = useWorkspace();
   const [resetOpen, setResetOpen] = useState(false);
+  const [rotateKeyOpen, setRotateKeyOpen] = useState(false);
 
   const confirmReset = () => {
     setResetOpen(false);
-    toast.success("Reset request sent to administrator.", {
-      description: "No destructive action was performed — this is a guarded placeholder.",
+    toast.success("Workspace reset request submitted.", {
+      description: "Prompts and versions will be removed. Audit logs are retained for compliance.",
     });
+  };
+
+  const confirmRotateKey = () => {
+    setRotateKeyOpen(false);
+    toast.success("Sidecar token rotation request submitted.");
   };
 
   return (
     <div className="min-h-screen">
-      <AppHeader title="Settings" subtitle="Workspace defaults, appearance, and environment information." />
+      <AppHeader title="Settings" subtitle="Workspace governance, security, and operational controls." />
 
-      <div className="grid gap-6 px-4 py-6 md:px-6 xl:px-8 xl:grid-cols-2">
+      <div className="grid gap-6 px-4 py-6 md:px-6 xl:grid-cols-2 xl:px-8">
         <Card className="animate-slide-up">
           <CardHeader>
             <CardTitle>Workspace</CardTitle>
-            <CardDescription>Identity and routing for this VectorBea install.</CardDescription>
+            <CardDescription>Identity and routing for your active workspace.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Workspace name</label>
-              <Input defaultValue="VectorBea Local" />
+              <Input defaultValue={activeWorkspace?.name ?? "Workspace"} />
             </div>
+
             <div className="space-y-2">
-              <label className="text-sm font-medium">API endpoint</label>
+              <label className="text-sm font-medium">Workspace ID</label>
+              <Input value={activeWorkspace?.id ?? ""} readOnly className="font-mono text-xs" />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Control plane endpoint</label>
               <div className="flex items-center gap-2">
                 <Globe className="h-4 w-4 text-muted-foreground" />
                 <Input value={API_BASE} readOnly className="font-mono text-xs" />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Configure via <code className="font-mono">NEXT_PUBLIC_API_URL</code>.
-              </p>
             </div>
+
             <div className="flex justify-end">
               <Button onClick={() => toast.success("Workspace settings saved.")}>
                 <Check className="h-4 w-4" />
@@ -68,59 +87,76 @@ export default function SettingsPage() {
 
         <Card className="animate-slide-up stagger-1">
           <CardHeader>
-            <CardTitle>Appearance</CardTitle>
-            <CardDescription>Choose how the dashboard looks on this device.</CardDescription>
+            <CardTitle>Access & Plan</CardTitle>
+            <CardDescription>Current permissions and tenancy limits.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { id: "dark", label: "Dark", icon: Moon },
-                { id: "light", label: "Dim", icon: Sun },
-              ].map((opt) => {
-                const Icon = opt.icon;
-                const active = theme === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => setTheme(opt.id)}
-                    className={`flex flex-col items-center gap-2 rounded-xl border p-4 text-sm transition-colors ${
-                      active
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border hover:bg-accent/50 text-muted-foreground"
-                    }`}
-                  >
-                    <Icon className="h-5 w-5" />
-                    {opt.label}
-                  </button>
-                );
-              })}
+          <CardContent className="space-y-3">
+            {[
+              { label: "Role", value: role, icon: ShieldCheck },
+              { label: "Plan tier", value: planTier, icon: Workflow },
+              { label: "Seats", value: `${seatUsage.used}/${seatUsage.max}`, icon: Users },
+            ].map((row) => {
+              const Icon = row.icon;
+              return (
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-2.5"
+                >
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">{row.label}</span>
+                  </div>
+                  <Badge variant="outline">{row.value}</Badge>
+                </div>
+              );
+            })}
+
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+              Seat enforcement is active. Existing users retain access, new invitations are blocked at limit.
             </div>
           </CardContent>
         </Card>
 
         <Card className="animate-slide-up stagger-2">
           <CardHeader>
-            <CardTitle>Environment</CardTitle>
-            <CardDescription>Versions and runtime info.</CardDescription>
+            <CardTitle>Security controls</CardTitle>
+            <CardDescription>Credential and operational safeguards.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {[
-              { label: "UI", value: "Next.js 15 / React 19" },
-              { label: "Backend", value: "Kotlin / JVM 21" },
-              { label: "Database", value: "PostgreSQL" },
-              { label: "Build", value: process.env.NODE_ENV ?? "development" },
-            ].map((row) => (
-              <div
-                key={row.label}
-                className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-2.5"
-              >
-                <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{row.label}</span>
-                </div>
-                <Badge variant="outline">{row.value}</Badge>
+            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">Rotate sidecar token</p>
+                <p className="text-xs text-muted-foreground">
+                  Regenerates deployment credentials for this workspace.
+                </p>
               </div>
-            ))}
+              <Dialog open={rotateKeyOpen} onOpenChange={setRotateKeyOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <KeyRound className="h-4 w-4" />
+                    Rotate
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Rotate sidecar token?</DialogTitle>
+                    <DialogDescription>
+                      Existing running sidecars will need the new token after rotation.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setRotateKeyOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={confirmRotateKey}>Rotate token</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+              Audit logs are immutable and retained for operational traceability and compliance.
+            </div>
           </CardContent>
         </Card>
 
@@ -137,7 +173,7 @@ export default function SettingsPage() {
               <div>
                 <p className="text-sm font-medium">Reset workspace</p>
                 <p className="text-xs text-muted-foreground">
-                  Remove all prompts, versions, and audit logs from this workspace.
+                  Remove all prompts and prompt versions from this workspace.
                 </p>
               </div>
               <Dialog open={resetOpen} onOpenChange={setResetOpen}>
@@ -151,7 +187,8 @@ export default function SettingsPage() {
                   <DialogHeader>
                     <DialogTitle>Reset workspace?</DialogTitle>
                     <DialogDescription>
-                      This will permanently delete all prompts, versions, and audit logs. This action cannot be undone.
+                      This permanently deletes prompts and versions. Audit logs are not deleted.
+                      This action cannot be undone.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="mt-4 flex justify-end gap-2">

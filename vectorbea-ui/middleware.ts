@@ -230,6 +230,7 @@ async function enforceSessionConcurrency(
 
 export async function middleware(request: NextRequest) {
   const hostname = normalizeHostname(request);
+  const pathname = request.nextUrl.pathname;
 
   if (isPublicProductionHost(hostname)) {
     const authRedirect = enforceAuth(request);
@@ -248,6 +249,12 @@ export async function middleware(request: NextRequest) {
     const concurrencyRedirect = await enforceSessionConcurrency(request);
     if (concurrencyRedirect) return concurrencyRedirect;
 
+    return NextResponse.next();
+  }
+
+  // M2M proxy endpoints perform their own Bearer-token validation and should
+  // not be blocked by dashboard IP allowlists.
+  if (pathname.startsWith("/api/proxy/")) {
     return NextResponse.next();
   }
 

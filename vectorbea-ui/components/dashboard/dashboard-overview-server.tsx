@@ -62,7 +62,8 @@ export function DashboardOverviewFallback() {
       </div>
 
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <DashboardMetricSkeleton />
           <DashboardMetricSkeleton />
           <DashboardMetricSkeleton />
           <DashboardMetricSkeleton />

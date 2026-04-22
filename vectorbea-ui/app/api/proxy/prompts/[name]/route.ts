@@ -126,9 +126,8 @@ export async function GET(
       return NextResponse.json(
         {
           error:
-            `Prompt '${promptName}' not found. ` +
-            `The agent token is linked to workspace ${workspaceId} - ` +
-            `make sure the prompt was created and published in that same workspace.`,
+            `Prompt '${promptName}' not found for this sidecar token. ` +
+            "Make sure the prompt exists and is published in the same workspace as the token.",
         },
         { status: 404 },
       );

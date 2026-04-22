@@ -42,37 +42,50 @@ export async function getRecentAuditLogsForWorkspace(
 
 export async function getDashboardSummaryForWorkspace(
   workspaceId: string,
-  auditLogs?: AuditLogView[],
+  _auditLogs?: AuditLogView[],
 ): Promise<DashboardSummary> {
   const supabase = createVectorBeaAdminClient();
-  const logs = auditLogs ?? (await getRecentAuditLogsForWorkspace(workspaceId));
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
+  const monthStartIso = monthStart.toISOString();
 
-  const runtimeLogs24h = logs.filter(
-    (log) => log.timestamp >= since24h && log.useType === "runtime",
-  );
-  const auditLogsThisMonth = logs.filter(
-    (log) => log.timestamp >= monthStart.toISOString() && log.useType === "audit",
-  );
-
-  const averageLatencyMs =
-    runtimeLogs24h.length > 0
-      ? Math.round(
-          runtimeLogs24h.reduce((sum, log) => sum + log.proxyLatencyMs, 0) / runtimeLogs24h.length,
-        )
-      : 0;
-
-  const { data: agentData, error } = await supabase
-    .from("deployment_agents")
-    .select("id, last_heartbeat")
-    .eq("workspace_id", workspaceId);
+  const [{ data: auditData24h }, { data: auditDataMonth }, { data: agentData, error }] =
+    await Promise.all([
+      supabase
+        .from("audit_logs")
+        .select("proxy_latency_ms, metadata")
+        .eq("workspace_id", workspaceId)
+        .gte("created_at", since24h),
+      supabase
+        .from("audit_logs")
+        .select("metadata")
+        .eq("workspace_id", workspaceId)
+        .gte("created_at", monthStartIso),
+      supabase
+        .from("deployment_agents")
+        .select("id, last_heartbeat")
+        .eq("workspace_id", workspaceId),
+    ]);
 
   if (error) {
     throw new Error(`Failed to load deployment agents: ${error.message}`);
   }
+
+  const runtimeRows24h = (auditData24h ?? []).filter(
+    (row) => resolveUseType((row.metadata as Record<string, unknown>) ?? {}) === "runtime",
+  );
+  const auditRowsMonth = (auditDataMonth ?? []).filter(
+    (row) => resolveUseType((row.metadata as Record<string, unknown>) ?? {}) === "audit",
+  );
+  const averageLatencyMs =
+    runtimeRows24h.length > 0
+      ? Math.round(
+          runtimeRows24h.reduce((sum, row) => sum + (row.proxy_latency_ms ?? 0), 0) /
+            runtimeRows24h.length,
+        )
+      : 0;
 
   const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   const activeAgents = (agentData ?? []).filter(
@@ -80,8 +93,8 @@ export async function getDashboardSummaryForWorkspace(
   ).length;
 
   return {
-    totalApiCallsLast24h: runtimeLogs24h.length,
-    auditsThisMonth: auditLogsThisMonth.length,
+    totalApiCallsLast24h: runtimeRows24h.length,
+    auditsThisMonth: auditRowsMonth.length,
     averageLatencyMs,
     activeAgents,
   };

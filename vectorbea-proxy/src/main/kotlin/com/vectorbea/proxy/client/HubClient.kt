@@ -77,7 +77,7 @@ class HubClient(private val config: AppConfig) {
             // Read the raw body so the caller sees the actual hub error message
             // (e.g. "Prompt not found", "Invalid agent token") rather than a
             // Kotlin deserialization crash about missing PromptPayload fields.
-            val errorBody = response.bodyAsText()
+            val errorBody = sanitizeErrorBody(response.bodyAsText())
             error("Hub returned ${response.status.value} for prompt '$name': $errorBody")
         }
         return json.decodeFromString(PromptPayload.serializer(), response.bodyAsText())
@@ -116,7 +116,12 @@ class HubClient(private val config: AppConfig) {
         }
 
         if (!response.status.isSuccess()) {
-            error("Hub rejected audit batch with ${response.status.value}: ${response.bodyAsText()}")
+            val sanitizedBody = sanitizeErrorBody(response.bodyAsText())
+            if (response.status == HttpStatusCode.Forbidden) {
+                error("Hub rejected audit batch with 403: access denied")
+            } else {
+                error("Hub rejected audit batch with ${response.status.value}: $sanitizedBody")
+            }
         }
     }
 
@@ -179,6 +184,15 @@ class HubClient(private val config: AppConfig) {
 
     fun close() {
         client.close()
+    }
+
+    private fun sanitizeErrorBody(raw: String): String {
+        if (raw.isBlank()) return raw
+        val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+        return raw
+            .replace(uuidPattern, "[redacted]")
+            .replace(Regex("Rejected IP:\\s*[^\\n\\r]+", RegexOption.IGNORE_CASE), "Rejected IP: [redacted]")
+            .replace(Regex("Host:\\s*[^\\n\\r]+", RegexOption.IGNORE_CASE), "Host: [redacted]")
     }
 }
 
