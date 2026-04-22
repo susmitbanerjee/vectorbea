@@ -226,7 +226,7 @@ export function DashboardOverview({
       />
 
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label="API calls (24h)"
             value={dashboardSummary.totalApiCallsLast24h}
