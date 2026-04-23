@@ -1,6 +1,15 @@
 import "server-only";
 
-import type { TraceDetailView, TraceLogView, TraceSpanView, TraceStatus, TraceSummaryView } from "@/lib/api";
+import type {
+  TraceDetailView,
+  TraceEvaluationCheckView,
+  TraceEvaluationLabel,
+  TraceEvaluationView,
+  TraceLogView,
+  TraceSpanView,
+  TraceStatus,
+  TraceSummaryView,
+} from "@/lib/api";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 
 export type AuditLogTraceRow = {
@@ -96,11 +105,30 @@ function inferUseType(metadata: unknown): "runtime" | "audit" {
   return asString(legacy.action) ? "audit" : "runtime";
 }
 
-function inferCacheStatus(metadata: unknown): "hit" | "miss" | "unknown" {
+export function isRuntimeTraceMetadata(metadata: unknown): boolean {
+  const normalized = normalizeTraceMetadataV1(metadata);
+  const legacy = asRecord(normalized.custom);
+  const useType = asString(normalized.tags?.use_type ?? legacy.useType).toLowerCase();
+  const kind = asString(normalized.trace?.kind ?? normalized.tags?.trace_kind ?? legacy.traceKind).toLowerCase();
+  if (useType === "audit" || kind === "admin_audit") return false;
+  if (useType === "runtime" || kind === "runtime_execution") return true;
+  if (normalized.executor?.type) return true;
+  if (normalized.request?.source === "trace_replay") return true;
+  if (normalized.tags?.replay_of || asString(asRecord(legacy.replay).source_trace_id)) return true;
+  if (Array.isArray(normalized.spans) && normalized.spans.length > 0) return true;
+  if (normalized.output?.final_text || normalized.output?.raw_text) return true;
+  return false;
+}
+
+export function isRuntimeTraceRow(row: AuditLogTraceRow): boolean {
+  return isRuntimeTraceMetadata(row.metadata);
+}
+
+function inferCacheStatus(metadata: unknown): "hit" | "miss" | "skipped" | "stale" | "unknown" {
   const normalized = normalizeTraceMetadataV1(metadata);
   const legacy = asRecord(normalized.custom);
   const explicit = asString(normalized.cache?.status ?? legacy.cacheStatus ?? legacy.cache_status).toLowerCase();
-  if (explicit === "hit" || explicit === "miss") return explicit;
+  if (explicit === "hit" || explicit === "miss" || explicit === "skipped" || explicit === "stale") return explicit;
   if (typeof legacy.cacheHit === "boolean") return legacy.cacheHit ? "hit" : "miss";
   return "unknown";
 }
@@ -131,6 +159,67 @@ function readCost(metadata: unknown): number | null {
     if (Number.isFinite(parsed) && parsed >= 0) return parsed;
   }
   return null;
+}
+
+function toEvaluationLabel(value: unknown): TraceEvaluationLabel {
+  const explicit = asString(value).toLowerCase();
+  if (
+    explicit === "better" ||
+    explicit === "same" ||
+    explicit === "worse" ||
+    explicit === "pass" ||
+    explicit === "fail" ||
+    explicit === "unknown"
+  ) {
+    return explicit;
+  }
+  return "unknown";
+}
+
+function normalizeEvaluation(metadata: unknown): TraceEvaluationView | null {
+  const normalized = normalizeTraceMetadataV1(metadata);
+  const legacy = asRecord(normalized.custom);
+  const evaluation = asRecord(normalized.evaluation ?? legacy.evaluation);
+  const score = asNumber(evaluation.score ?? legacy.evalScore ?? legacy.score, Number.NaN);
+  const rawChecks = Array.isArray(evaluation.checks) ? evaluation.checks : [];
+  const checks: TraceEvaluationCheckView[] = rawChecks.map((entry, index) => {
+    const row = asRecord(entry);
+    const checkScore = asNumber(row.score, Number.NaN);
+    return {
+      name: asString(row.name, `Check ${index + 1}`),
+      label: toEvaluationLabel(row.label ?? row.status),
+      score: Number.isFinite(checkScore) ? checkScore : null,
+      reason: asString(row.reason, ""),
+    };
+  });
+
+  if (!Number.isFinite(score) && checks.length === 0) return null;
+
+  return {
+    score: Number.isFinite(score) ? score : null,
+    label: toEvaluationLabel(evaluation.label),
+    runId: asString(evaluation.run_id ?? evaluation.runId) || null,
+    datasetId: asString(evaluation.dataset_id ?? evaluation.datasetId) || null,
+    comparedAgainstTraceId: asString(evaluation.compared_against_trace_id ?? evaluation.comparedAgainstTraceId) || null,
+    evaluationMode: asString(evaluation.evaluation_mode ?? evaluation.evaluationMode) || undefined,
+    checks,
+  };
+}
+
+function inferExecutorType(metadata: unknown): TraceSummaryView["executorType"] {
+  const normalized = normalizeTraceMetadataV1(metadata);
+  const explicit = asString(normalized.executor?.type).toLowerCase();
+  if (explicit === "direct_provider" || explicit === "enterprise_gateway" || explicit === "observe_only") {
+    return explicit;
+  }
+  return "unknown";
+}
+
+function inferExecutorObservability(metadata: unknown): TraceSummaryView["executorObservability"] {
+  const normalized = normalizeTraceMetadataV1(metadata);
+  const explicit = asString(normalized.executor?.response_observability).toLowerCase();
+  if (explicit === "full" || explicit === "partial" || explicit === "minimal") return explicit;
+  return "unknown";
 }
 
 function normalizeTraceLogs(rawLogs: unknown, createdAt: string): TraceLogView[] {
@@ -300,10 +389,10 @@ function buildSyntheticSpans(
       name: "Cache lookup",
       type: "cache",
       service: "prompt-cache",
-      status: cacheStatus === "hit" ? "success" : "warning",
+      status: cacheStatus === "hit" || cacheStatus === "skipped" ? "success" : "warning",
       startMs: 0,
       durationMs: 5,
-      cacheStatus,
+      cacheStatus: cacheStatus === "hit" || cacheStatus === "miss" ? cacheStatus : undefined,
       aiSpecific: true,
     });
   }
@@ -374,6 +463,10 @@ export function mapAuditRowToTraceSummary(row: AuditLogTraceRow): TraceSummaryVi
     promptVersion: asString(row.version_tag, "latest"),
     model: asString(metadata.model?.model ?? asRecord(legacy.model).name ?? legacy.model) || null,
     provider: asString(metadata.model?.provider ?? asRecord(legacy.model).provider ?? legacy.provider) || null,
+    executorType: inferExecutorType(metadata),
+    executorName: asString(metadata.executor?.name ?? legacy.executorName) || null,
+    executorObservability: inferExecutorObservability(metadata),
+    replayOf: asString(metadata.tags?.replay_of ?? asRecord(legacy.replay).source_trace_id) || null,
     sidecarName: asString(legacy.sidecarName ?? legacy.sidecar ?? legacy.agentName ?? legacy.agent_id ?? metadata.tags?.sidecar) || null,
     durationMs,
     llmLatencyMs: asNumber(row.llm_latency_ms, 0),
@@ -450,10 +543,16 @@ export function mapAuditRowToTraceDetail(
     sidecarName: asString(enrichment?.sidecarName ?? legacy.sidecarName ?? legacy.sidecar ?? legacy.agent_id ?? metadata.tags?.sidecar, "unknown-sidecar"),
     primaryModel: modelName,
     provider,
-    cacheStatus: cacheStatus === "unknown" ? "miss" : cacheStatus,
+    executorType: inferExecutorType(metadata),
+    executorName: asString(metadata.executor?.name ?? legacy.executorName, "unknown-executor"),
+    executorOwnership: asString(metadata.executor?.ownership ?? legacy.executorOwnership, "unknown"),
+    executorObservability: inferExecutorObservability(metadata),
+    replayOf: asString(metadata.tags?.replay_of ?? asRecord(legacy.replay).source_trace_id) || null,
+    cacheStatus,
     fallbackUsed: asBoolean(metadata.fallback?.triggered ?? legacy.fallbackUsed, false),
     guardrail: guardrail === "unknown" ? "passed" : guardrail,
     evalScore: asNumber(metadata.evaluation?.score ?? legacy.evalScore ?? legacy.score, 0),
+    evaluation: normalizeEvaluation(metadata),
     spans,
     logs: parsed.logs,
     prompt: {

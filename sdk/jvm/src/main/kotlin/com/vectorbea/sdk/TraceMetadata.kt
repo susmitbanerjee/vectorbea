@@ -26,6 +26,15 @@ internal fun buildTraceMetadataV1(
         put("status", JsonPrimitive(if (metadata["fallbackUsed"] == "true") "warning" else "success"))
     }
 
+    putJsonObject("executor") {
+        put("type", JsonPrimitive(metadata["executorType"] ?: "direct_provider"))
+        put("name", JsonPrimitive(metadata["executorName"] ?: metadata["provider"] ?: "direct-provider"))
+        put("ownership", JsonPrimitive(metadata["executorOwnership"] ?: "vectorbea"))
+        put("request_mode", JsonPrimitive(metadata["executorRequestMode"] ?: "direct"))
+        metadata["executorEndpoint"]?.let { put("endpoint", JsonPrimitive(it)) }
+        put("response_observability", JsonPrimitive(metadata["executorObservability"] ?: "full"))
+    }
+
     putJsonObject("prompt") {
         put("prompt_version_id", JsonPrimitive(promptVersionId))
         if (promptName.isNotBlank()) put("name", JsonPrimitive(promptName))

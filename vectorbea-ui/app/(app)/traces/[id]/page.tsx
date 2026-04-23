@@ -175,22 +175,30 @@ const LEVEL_STYLE: Record<LogLevel, string> = {
 
 const TYPE_META: Record<SpanType, { label: string; color: string; icon: LucideIcon; aiOnly?: boolean }> = {
   incoming_request: { label: "Incoming", color: "bg-slate-500", icon: Network },
-  sidecar_proxy: { label: "Sidecar", color: "bg-sky-500", icon: Server, aiOnly: true },
-  prompt_resolution: { label: "Prompt", color: "bg-cyan-500", icon: Sparkles, aiOnly: true },
-  template_render: { label: "Template", color: "bg-indigo-500", icon: Braces, aiOnly: true },
-  retrieval_query: { label: "Retrieval", color: "bg-violet-500", icon: Database, aiOnly: true },
-  vector_lookup: { label: "VectorDB", color: "bg-purple-500", icon: Database, aiOnly: true },
-  rerank: { label: "Rerank", color: "bg-fuchsia-500", icon: Sparkles, aiOnly: true },
-  context_assembly: { label: "Context", color: "bg-blue-500", icon: Sparkles, aiOnly: true },
-  cache: { label: "Cache", color: "bg-teal-500", icon: Zap, aiOnly: true },
-  model_selection: { label: "Routing", color: "bg-cyan-500", icon: Waypoints, aiOnly: true },
-  llm_completion: { label: "LLM", color: "bg-emerald-500", icon: Bot, aiOnly: true },
-  guardrail: { label: "Guardrail", color: "bg-lime-500", icon: ShieldCheck, aiOnly: true },
-  response_parser: { label: "Parser", color: "bg-orange-500", icon: FileJson, aiOnly: true },
-  fallback: { label: "Fallback", color: "bg-amber-500", icon: GitBranch, aiOnly: true },
-  audit_sink: { label: "Audit", color: "bg-slate-400", icon: ClipboardList },
-  evaluation_hook: { label: "Eval", color: "bg-pink-500", icon: Sparkles, aiOnly: true },
+  sidecar_proxy: { label: "Sidecar", color: "bg-slate-500", icon: Server, aiOnly: true },
+  prompt_resolution: { label: "Prompt", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
+  template_render: { label: "Template", color: "bg-slate-500", icon: Braces, aiOnly: true },
+  retrieval_query: { label: "Retrieval", color: "bg-slate-500", icon: Database, aiOnly: true },
+  vector_lookup: { label: "VectorDB", color: "bg-slate-500", icon: Database, aiOnly: true },
+  rerank: { label: "Rerank", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
+  context_assembly: { label: "Context", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
+  cache: { label: "Cache", color: "bg-slate-500", icon: Zap, aiOnly: true },
+  model_selection: { label: "Routing", color: "bg-slate-500", icon: Waypoints, aiOnly: true },
+  llm_completion: { label: "LLM", color: "bg-slate-500", icon: Bot, aiOnly: true },
+  guardrail: { label: "Guardrail", color: "bg-slate-500", icon: ShieldCheck, aiOnly: true },
+  response_parser: { label: "Parser", color: "bg-slate-500", icon: FileJson, aiOnly: true },
+  fallback: { label: "Fallback", color: "bg-slate-500", icon: GitBranch, aiOnly: true },
+  audit_sink: { label: "Audit", color: "bg-slate-500", icon: ClipboardList },
+  evaluation_hook: { label: "Eval", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
 };
+
+function spanBarTone(row: Span, selected: boolean) {
+  if (selected) return "bg-cyan-300 ring-1 ring-cyan-200/70";
+  if (row.status === "error") return "bg-red-400";
+  if (row.status === "warning" || row.status === "partial") return "bg-amber-300";
+  if (row.criticalPath) return "bg-slate-300";
+  return "bg-slate-500";
+}
 
 const TRACE: TraceData = {
   id: "trace_01HZX9X3B1QKQ19Q5DM7C2A0XE",
@@ -430,10 +438,16 @@ function createEmptyTrace(id: string): TraceDetailView {
     sidecarName: "—",
     primaryModel: "—",
     provider: "—",
-    cacheStatus: "miss",
+    executorType: "unknown",
+    executorName: "—",
+    executorOwnership: "unknown",
+    executorObservability: "unknown",
+    replayOf: null,
+    cacheStatus: "unknown",
     fallbackUsed: false,
     guardrail: "passed",
     evalScore: 0,
+    evaluation: null,
     spans: [],
     logs: [],
     prompt: {
@@ -668,12 +682,21 @@ export default function TraceDetailsPage() {
         throw new Error("Replay completed, but no replay trace id was returned.");
       }
 
-      router.push(`/traces/${encodeURIComponent(payload.traceId)}?org=${encodeURIComponent(activeWorkspaceId)}`);
+      router.push(
+        `/traces/compare?left=${encodeURIComponent(trace.id)}&right=${encodeURIComponent(payload.traceId)}&org=${encodeURIComponent(activeWorkspaceId)}`,
+      );
     } catch (error) {
       setReplayError(error instanceof Error ? error.message : "Failed to replay trace");
     } finally {
       setReplayPending(false);
     }
+  };
+
+  const compareTrace = () => {
+    if (!activeWorkspaceId || !trace.replayOf) return;
+    router.push(
+      `/traces/compare?left=${encodeURIComponent(trace.replayOf)}&right=${encodeURIComponent(trace.id)}&org=${encodeURIComponent(activeWorkspaceId)}`,
+    );
   };
 
   if (!activeWorkspaceId) {
@@ -734,7 +757,17 @@ export default function TraceDetailsPage() {
               <Workflow className="mr-1 h-4 w-4" />
               {replayPending ? "Replaying..." : "Replay"}
             </Button>
-            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200"><GitBranch className="mr-1 h-4 w-4" />Compare</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-slate-700 bg-slate-900 text-slate-200"
+              onClick={compareTrace}
+              disabled={!trace.replayOf}
+              title={trace.replayOf ? "Compare this replay with its source trace" : "Replay this trace first to compare it"}
+            >
+              <GitBranch className="mr-1 h-4 w-4" />
+              Compare
+            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -771,22 +804,49 @@ export default function TraceDetailsPage() {
               <span className="text-xs text-slate-400">{new Date(trace.startedAt).toLocaleString()}</span>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
               <SummaryTile icon={Timer} label="Latency" value={formatDuration(trace.durationMs)} />
               <SummaryTile icon={Clock3} label="Cost" value={formatCost(trace.totalCostUsd)} />
               <SummaryTile icon={Braces} label="Tokens in/out" value={`${trace.tokensIn} / ${trace.tokensOut}`} />
               <SummaryTile icon={Bot} label="Model" value={trace.primaryModel} />
               <SummaryTile icon={Sparkles} label="Prompt" value={`${trace.promptName}@${trace.promptVersion}`} />
               <SummaryTile icon={Server} label="Sidecar" value={trace.sidecarName} />
+              <SummaryTile
+                icon={Workflow}
+                label="Executor"
+                value={trace.executorType === "enterprise_gateway" ? trace.executorName : trace.executorType}
+              />
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
               <SummaryStrip label="Latency" value={formatDuration(trace.durationMs)} />
-              <SummaryStrip label="Cache" value={trace.cacheStatus === "hit" ? "Hit" : "Miss"} tone={trace.cacheStatus === "hit" ? "good" : "warn"} />
+              <SummaryStrip
+                label="Cache"
+                value={trace.cacheStatus === "unknown" ? "Unavailable" : trace.cacheStatus}
+                tone={trace.cacheStatus === "hit" ? "good" : trace.cacheStatus === "miss" || trace.cacheStatus === "stale" ? "warn" : "neutral"}
+              />
               <SummaryStrip label="Fallback" value={trace.fallbackUsed ? "Used" : "Not used"} tone={trace.fallbackUsed ? "warn" : "good"} />
               <SummaryStrip label="Guardrail" value={trace.guardrail === "passed" ? "Passed" : "Flagged"} tone={trace.guardrail === "passed" ? "good" : "warn"} />
               <SummaryStrip label="Eval score" value={trace.evalScore.toFixed(2)} tone={trace.evalScore >= 0.9 ? "good" : "warn"} />
+              <SummaryStrip
+                label="Observability"
+                value={trace.executorObservability}
+                tone={trace.executorObservability === "full" ? "good" : "warn"}
+              />
             </div>
+            {trace.replayOf ? (
+              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+                Replay of <span className="font-mono">{trace.replayOf}</span>
+              </div>
+            ) : null}
+            {trace.evaluation ? (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                Evaluation <span className="font-semibold">{trace.evaluation.label}</span>
+                {typeof trace.evaluation.score === "number" ? (
+                  <span className="ml-2 font-mono">{Math.round(trace.evaluation.score * 100)}%</span>
+                ) : null}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -795,7 +855,7 @@ export default function TraceDetailsPage() {
             <CardContent className="p-4">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="mb-3 grid w-full grid-cols-3 bg-slate-950/60 p-1 md:grid-cols-6">
-                  <TabsTrigger value="waterfall">Waterfall</TabsTrigger>
+                  <TabsTrigger value="waterfall">TraceLoop</TabsTrigger>
                   <TabsTrigger value="spans">Spans</TabsTrigger>
                   <TabsTrigger value="prompt">Prompt</TabsTrigger>
                   <TabsTrigger value="inputs">Inputs</TabsTrigger>
@@ -845,7 +905,7 @@ export default function TraceDetailsPage() {
                             layout
                             className={cn(
                               "grid w-full grid-cols-[minmax(280px,42%)_1fr] items-center border-b border-slate-800/70 px-3 py-2.5 text-left hover:bg-slate-900/70",
-                              selected && "bg-cyan-500/10"
+                              selected && "bg-slate-800/80"
                             )}
                             onClick={() => setSelectedSpanId(row.id)}
                           >
@@ -874,7 +934,7 @@ export default function TraceDetailsPage() {
                                 <div className="flex items-center gap-1.5">
                                   <span className="truncate text-sm">{row.name}</span>
                                   {row.criticalPath ? (
-                                    <Badge variant="outline" className="h-5 border-cyan-500/40 bg-cyan-500/10 text-[10px] text-cyan-200">Critical path</Badge>
+                                    <Badge variant="outline" className="h-5 border-slate-600 bg-slate-800 text-[10px] text-slate-200">Critical path</Badge>
                                   ) : null}
                                   {row.branch === "fallback" ? (
                                     <Badge variant="outline" className="h-5 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-200">Fallback</Badge>
@@ -886,7 +946,7 @@ export default function TraceDetailsPage() {
 
                             <div className="relative h-7">
                               <span className="absolute top-1.5 h-4 rounded-sm bg-slate-800" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
-                              <span className={cn("absolute top-1.5 h-4 rounded-sm opacity-90", meta.color, selected && "ring-1 ring-cyan-300/60")} style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
+                              <span className={cn("absolute top-1.5 h-4 rounded-sm opacity-90", spanBarTone(row, selected))} style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
                               {row.status !== "success" ? (
                                 <span className="absolute right-0 top-1">
                                   {row.status === "warning" ? <AlertTriangle className="h-4 w-4 text-amber-300" /> : <XCircle className="h-4 w-4 text-red-300" />}

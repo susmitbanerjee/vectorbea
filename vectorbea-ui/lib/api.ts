@@ -134,8 +134,11 @@ export type AuditLog = {
 
 export type TraceStatus = "success" | "warning" | "error" | "partial";
 export type TraceUseType = "runtime" | "audit";
-export type TraceCacheStatus = "hit" | "miss" | "unknown";
+export type TraceCacheStatus = "hit" | "miss" | "skipped" | "stale" | "unknown";
 export type TraceGuardrailStatus = "passed" | "flagged" | "unknown";
+export type TraceExecutorType = "direct_provider" | "enterprise_gateway" | "observe_only" | "unknown";
+export type TraceExecutorObservability = "full" | "partial" | "minimal" | "unknown";
+export type TraceEvaluationLabel = "better" | "same" | "worse" | "pass" | "fail" | "unknown";
 
 export interface TraceSummaryView {
   id: string;
@@ -147,6 +150,10 @@ export interface TraceSummaryView {
   promptVersion: string;
   model: string | null;
   provider: string | null;
+  executorType: TraceExecutorType;
+  executorName: string | null;
+  executorObservability: TraceExecutorObservability;
+  replayOf: string | null;
   sidecarName: string | null;
   durationMs: number;
   llmLatencyMs: number;
@@ -231,10 +238,16 @@ export interface TraceDetailView {
   sidecarName: string;
   primaryModel: string;
   provider: string;
-  cacheStatus: "hit" | "miss";
+  executorType: TraceExecutorType;
+  executorName: string;
+  executorOwnership: string;
+  executorObservability: TraceExecutorObservability;
+  replayOf: string | null;
+  cacheStatus: TraceCacheStatus;
   fallbackUsed: boolean;
   guardrail: "passed" | "flagged";
   evalScore: number;
+  evaluation: TraceEvaluationView | null;
   spans: TraceSpanView[];
   logs: TraceLogView[];
   prompt: {
@@ -278,6 +291,92 @@ export interface TraceReplayResponse {
   traceId: string;
   replayedFrom: string;
   createdAt: string;
+}
+
+export interface TraceEvaluationCheckView {
+  name: string;
+  label: TraceEvaluationLabel;
+  score: number | null;
+  reason: string;
+}
+
+export interface TraceEvaluationView {
+  score: number | null;
+  label: TraceEvaluationLabel;
+  runId?: string | null;
+  datasetId?: string | null;
+  comparedAgainstTraceId?: string | null;
+  evaluationMode?: "replay_compare" | "single_trace" | "batch_replay" | string;
+  checks: TraceEvaluationCheckView[];
+}
+
+export interface TraceCompareFieldView {
+  key: string;
+  label: string;
+  left: string | number | boolean | null;
+  right: string | number | boolean | null;
+  changed: boolean;
+  delta?: number | null;
+  note?: string;
+}
+
+export interface TraceCompareResponse {
+  left: TraceDetailView;
+  right: TraceDetailView;
+  summary: {
+    outputChanged: boolean;
+    promptVersionChanged: boolean;
+    executorChanged: boolean;
+    observabilityChanged: boolean;
+    statusChanged: boolean;
+    latencyDeltaMs: number;
+    tokenDelta: number | null;
+    costDeltaUsd: number | null;
+    replayLineage: string | null;
+    evaluation: TraceEvaluationView | null;
+  };
+  fields: TraceCompareFieldView[];
+  callouts: string[];
+}
+
+export type EvaluationRunStatus = "queued" | "running" | "completed" | "failed" | "approved";
+export type EvaluationRecommendation = "ready_for_rollout" | "needs_review" | "regression_detected";
+
+export interface TraceSetEvaluationRunView {
+  id: string;
+  workspaceId: string;
+  status: EvaluationRunStatus;
+  promptName: string;
+  candidatePromptVersionId: string;
+  candidateVersionTag: string;
+  sourceTraceIds: string[];
+  replayTraceIds: string[];
+  createdAt: string;
+  aggregate: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    outputChanged: number;
+    latencyImproved: number;
+    latencyRegressed: number;
+    unavailableObservability: number;
+    averageLatencyDeltaMs: number | null;
+    averageTokenDelta: number | null;
+    score: number | null;
+    recommendation: EvaluationRecommendation;
+  };
+  results: Array<{
+    sourceTraceId: string;
+    replayTraceId: string | null;
+    score: number | null;
+    label: TraceEvaluationLabel;
+    status: TraceStatus;
+    latencyDeltaMs: number | null;
+    tokenDelta: number | null;
+    error?: string | null;
+  }>;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
 }
 
 type ApiFetchOptions = RequestInit & {

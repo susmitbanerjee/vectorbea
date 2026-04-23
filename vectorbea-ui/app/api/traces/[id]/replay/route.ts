@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { executeResolvedPrompt } from "@/lib/server/execution";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { isRuntimeTraceMetadata } from "@/lib/server/traces";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
-import { buildTraceMetadataV1, normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
+import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 
 export const dynamic = "force-dynamic";
 
@@ -35,15 +37,6 @@ function asString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function asNumber(value: unknown, fallback = 0): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
 }
 
 function renderTemplate(template: string, variables: Record<string, unknown>): string {
@@ -90,6 +83,12 @@ export async function POST(
 
     const row = original as AuditLogRow;
     const normalized = normalizeTraceMetadataV1((row.metadata ?? {}) as Record<string, unknown>);
+    if (!isRuntimeTraceMetadata(normalized)) {
+      return NextResponse.json(
+        { error: "Replay is only available for runtime execution traces." },
+        { status: 422 },
+      );
+    }
 
     let promptVersion = null as PromptVersionRow | null;
     if (row.prompt_version_id) {
@@ -141,96 +140,18 @@ export async function POST(
     const templateText = promptVersion?.template_text ?? "";
     const renderedPrompt = renderTemplate(templateText, replayVariables);
 
-    const modelRecord = asRecord(normalized.model);
-    const modelName = asString(modelRecord.model) ?? asString(modelRecord.name) ?? "unknown-model";
-    const provider = asString(modelRecord.provider) ?? "unknown";
-    const outputRecord = asRecord(normalized.output);
-
-    const proxyLatencyMs = Math.max(asNumber(row.proxy_latency_ms, 0), 0);
-    const llmLatencyMs = Math.max(
-      asNumber(modelRecord.latency_ms, asNumber(row.llm_latency_ms, 0)),
-      0,
-    );
-    const tokenCount = Math.max(
-      asNumber(modelRecord.total_tokens, asNumber(row.token_count, 0)),
-      0,
-    );
-
-    const replayMetadata = buildTraceMetadataV1({
-      metadata: {
-        ...normalized,
-        trace: {
-          ...(normalized.trace ?? {}),
-          status: "success",
-          started_at: new Date().toISOString(),
-          duration_ms: proxyLatencyMs + llmLatencyMs,
-          request_id: `replay_${crypto.randomUUID()}`,
-        },
-        request: {
-          ...(normalized.request ?? {}),
-          input: {
-            ...(asRecord(normalized.request?.input)),
-            text: replayInputText,
-            variables: replayVariables,
-          },
-        },
-        prompt: {
-          ...(normalized.prompt ?? {}),
-          name: resolvedPromptName,
-          version_tag: resolvedVersionTag,
-          prompt_version_id: row.prompt_version_id ?? undefined,
-          variables: replayVariables,
-          resolved: {
-            ...(asRecord(normalized.prompt?.resolved)),
-            user: renderedPrompt || undefined,
-          },
-        },
-        model: {
-          ...(normalized.model ?? {}),
-          provider,
-          model: modelName,
-          latency_ms: llmLatencyMs,
-          total_tokens: tokenCount,
-        },
-        output: {
-          ...(normalized.output ?? {}),
-          raw_text: asString(outputRecord.raw_text) ?? undefined,
-          final_text:
-            asString(outputRecord.final_text) ??
-            asString(outputRecord.raw_text) ??
-            "Replay requested. Runtime output is not available for this trace source.",
-        },
-        logs: [
-          ...(Array.isArray(normalized.logs) ? normalized.logs : []),
-          {
-            timestamp: new Date().toISOString(),
-            level: "info",
-            component: "trace-replay",
-            message: "Replay created from trace detail",
-          },
-        ],
-        tags: {
-          ...(normalized.tags ?? {}),
-          replay_of: row.id,
-          replay_mode: "trace_detail",
-        },
-        custom: {
-          ...(normalized.custom ?? {}),
-          replay: {
-            source_trace_id: row.id,
-            triggered_by: auth.user.id,
-            mode: "trace_detail",
-          },
-        },
-      },
-      useType: "runtime",
+    const execution = await executeResolvedPrompt({
       workspaceId,
       promptVersionId: row.prompt_version_id,
       promptName: resolvedPromptName,
       versionTag: resolvedVersionTag,
-      proxyLatencyMs,
-      llmLatencyMs,
-      tokenCount,
+      templateText,
+      variables: replayVariables,
+      inputText: replayInputText,
+      renderedPrompt,
+      sourceMetadata: normalized,
+      replayOf: row.id,
+      triggeredBy: auth.user.id,
     });
 
     const { data: inserted, error: insertError } = await supabase
@@ -240,10 +161,10 @@ export async function POST(
         prompt_version_id: row.prompt_version_id,
         prompt_name: resolvedPromptName,
         version_tag: resolvedVersionTag,
-        proxy_latency_ms: proxyLatencyMs,
-        llm_latency_ms: llmLatencyMs,
-        token_count: tokenCount,
-        metadata: replayMetadata,
+        proxy_latency_ms: execution.proxyLatencyMs,
+        llm_latency_ms: execution.llmLatencyMs,
+        token_count: execution.tokenCount,
+        metadata: execution.metadata,
       })
       .select("id, created_at")
       .single();

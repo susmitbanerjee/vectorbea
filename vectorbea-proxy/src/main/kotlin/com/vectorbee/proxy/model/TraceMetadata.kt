@@ -14,6 +14,7 @@ private const val TRACE_SCHEMA_VERSION = "1.0"
 private val RESERVED_KEYS = setOf(
     "schema_version",
     "trace",
+    "executor",
     "request",
     "prompt",
     "model",
@@ -119,6 +120,7 @@ object TraceMetadataBuilder {
         useType: String = "runtime",
     ): JsonObject {
         val trace = metadata["trace"] as? JsonObject
+        val executor = metadata["executor"] as? JsonObject
         val prompt = metadata["prompt"] as? JsonObject
         val model = metadata["model"] as? JsonObject
         val cache = metadata["cache"] as? JsonObject
@@ -159,6 +161,14 @@ object TraceMetadataBuilder {
                 if (trace?.get("status") == null) {
                     put("status", JsonPrimitive(traceStatus))
                 }
+            }
+
+            putJsonObject("executor") {
+                executor?.forEach { (key, value) -> put(key, value) }
+                if (executor?.get("type") == null) put("type", JsonPrimitive("direct_provider"))
+                if (executor?.get("ownership") == null) put("ownership", JsonPrimitive("vectorbea"))
+                if (executor?.get("request_mode") == null) put("request_mode", JsonPrimitive("direct"))
+                if (executor?.get("response_observability") == null) put("response_observability", JsonPrimitive("full"))
             }
 
             putJsonObject("prompt") {

@@ -58,7 +58,6 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
   const [query, setQuery] = useState(initialQuery);
   const [status, setStatus] = useState(searchParams.get("status") ?? "all");
   const [environment, setEnvironment] = useState(searchParams.get("environment") ?? "all");
-  const [useType, setUseType] = useState(searchParams.get("useType") ?? "runtime");
   const [promptName, setPromptName] = useState(searchParams.get("promptName") ?? "all");
   const [since, setSince] = useState(searchParams.get("since") ?? "all");
   const [sortBy, setSortBy] = useState(searchParams.get("sortBy") ?? "newest");
@@ -81,7 +80,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
     }
     params.set("status", status);
     params.set("environment", environment);
-    params.set("useType", useType);
+    params.delete("useType");
     params.set("promptName", promptName);
     params.set("since", since);
     params.set("sortBy", sortBy);
@@ -91,7 +90,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
     if (next !== current) {
       router.replace(`${pathname}?${next}` as Route);
     }
-  }, [environment, page, pathname, promptName, query, router, searchParams, since, sortBy, status, useType]);
+  }, [environment, page, pathname, promptName, query, router, searchParams, since, sortBy, status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,7 +110,6 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
           q: query,
           status,
           environment,
-          useType,
           promptName,
           since,
           sortBy,
@@ -139,7 +137,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, environment, page, promptName, query, since, sortBy, status, useType]);
+  }, [activeWorkspaceId, environment, page, promptName, query, since, sortBy, status]);
 
   const promptOptions = useMemo(() => {
     const names = new Set((result?.items ?? []).map((item) => item.promptName).filter(Boolean));
@@ -231,7 +229,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
         <Card>
           <CardHeader className="space-y-3">
             <CardTitle>Trace browser</CardTitle>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -248,11 +246,6 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <option value="prod">Prod</option>
                 <option value="staging">Staging</option>
                 <option value="dev">Dev</option>
-              </Select>
-              <Select value={useType} onChange={(event) => { setPage(1); setUseType(event.target.value); }}>
-                <option value="runtime">Runtime traces</option>
-                <option value="audit">Audit traces</option>
-                <option value="all">All types</option>
               </Select>
               <Select value={promptName} onChange={(event) => { setPage(1); setPromptName(event.target.value); }}>
                 <option value="all">All prompts</option>
@@ -314,6 +307,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                         <TableHead>Prompt</TableHead>
                         <TableHead>Version</TableHead>
                         <TableHead>Model</TableHead>
+                        <TableHead>Executor</TableHead>
                         <TableHead>Sidecar</TableHead>
                         <TableHead>Latency</TableHead>
                         <TableHead>Tokens</TableHead>
@@ -349,6 +343,18 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                             <div>{row.model ?? "—"}</div>
                             <div className="text-xs text-muted-foreground">{row.provider ?? "—"}</div>
                           </TableCell>
+                          <TableCell>
+                            <Badge variant={row.executorType === "enterprise_gateway" ? "warning" : "secondary"}>
+                              {row.executorType === "enterprise_gateway"
+                                ? "Gateway"
+                                : row.executorType === "direct_provider"
+                                  ? "Direct"
+                                  : row.executorType}
+                            </Badge>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {row.executorName ?? row.executorObservability}
+                            </div>
+                          </TableCell>
                           <TableCell>{row.sidecarName ?? "—"}</TableCell>
                           <TableCell className="tabular-nums" title={`proxy ${formatDuration(Math.max(row.durationMs - row.llmLatencyMs, 0))} + llm ${formatDuration(row.llmLatencyMs)}`}>
                             {formatDuration(row.durationMs)}
@@ -356,8 +362,8 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                           <TableCell className="tabular-nums">{row.tokenCount}</TableCell>
                           <TableCell className="tabular-nums">{formatCost(row.totalCostUsd)}</TableCell>
                           <TableCell>
-                            <Badge variant={row.cacheStatus === "hit" ? "success" : "secondary"}>
-                              {row.cacheStatus}
+                            <Badge variant={row.cacheStatus === "hit" ? "success" : row.cacheStatus === "miss" || row.cacheStatus === "stale" ? "warning" : "secondary"}>
+                              {row.cacheStatus === "unknown" ? "Unavailable" : row.cacheStatus}
                             </Badge>
                           </TableCell>
                           <TableCell>
@@ -413,7 +419,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
             <Legend icon={CheckCircle2} label="Success" detail="Runtime completed as expected" />
             <Legend icon={AlertTriangle} label="Warning" detail="Fallback, cache miss, or flagged policy path" />
             <Legend icon={XCircle} label="Error" detail="Execution failed or provider error detected" />
-            <Legend icon={Activity} label="Audit trace" detail="Prompt lifecycle changes recorded from UI actions" />
+            <Legend icon={Activity} label="Runtime only" detail="Prompt executions and replays only; admin audit events are excluded" />
           </CardContent>
         </Card>
       </div>

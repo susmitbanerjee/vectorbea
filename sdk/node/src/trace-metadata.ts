@@ -12,12 +12,22 @@ export type CacheStatus =
   | "skipped"
   | "stale";
 
+export type ExecutorType = "direct_provider" | "enterprise_gateway" | "observe_only";
+
 export interface TraceMetadataV1 {
   [key: string]: unknown;
   schema_version: typeof TRACE_METADATA_SCHEMA_VERSION;
   trace?: {
     status?: TraceStatus;
     duration_ms?: number;
+  };
+  executor?: {
+    type?: ExecutorType;
+    name?: string;
+    ownership?: "vectorbea" | "customer";
+    request_mode?: "direct" | "forwarded" | "wrapped";
+    endpoint?: string | null;
+    response_observability?: "full" | "partial" | "minimal";
   };
   prompt?: {
     prompt_version_id?: string;
@@ -65,6 +75,7 @@ function asObject(value: unknown): Record<string, unknown> {
 export function buildTraceMetadataV1(input: BuildInput): TraceMetadataV1 {
   const existing = asObject(input.metadata);
   const trace = asObject(existing.trace);
+  const executor = asObject(existing.executor);
   const prompt = asObject(existing.prompt);
   const model = asObject(existing.model);
   const cache = asObject(existing.cache);
@@ -76,6 +87,7 @@ export function buildTraceMetadataV1(input: BuildInput): TraceMetadataV1 {
     if (
       key !== "schema_version" &&
       key !== "trace" &&
+      key !== "executor" &&
       key !== "prompt" &&
       key !== "model" &&
       key !== "cache" &&
@@ -97,6 +109,15 @@ export function buildTraceMetadataV1(input: BuildInput): TraceMetadataV1 {
       ...trace,
       duration_ms: Number(trace.duration_ms ?? durationMs),
       status: (trace.status as TraceStatus | undefined) ?? (custom.fallbackUsed ? "warning" : "success"),
+    },
+    executor: {
+      ...executor,
+      type: (executor.type as ExecutorType | undefined) ?? "direct_provider",
+      ownership: (executor.ownership as "vectorbea" | "customer" | undefined) ?? "vectorbea",
+      request_mode: (executor.request_mode as "direct" | "forwarded" | "wrapped" | undefined) ?? "direct",
+      endpoint: (executor.endpoint as string | null | undefined) ?? null,
+      response_observability:
+        (executor.response_observability as "full" | "partial" | "minimal" | undefined) ?? "full",
     },
     prompt: {
       ...prompt,

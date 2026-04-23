@@ -4,6 +4,10 @@ export type TraceStatusV1 = "success" | "warning" | "error" | "partial";
 export type CacheStatusV1 = "hit" | "miss" | "skipped" | "stale";
 export type GuardrailActionV1 = "allow" | "redact" | "block" | "warn";
 export type TraceUseType = "runtime" | "audit";
+export type ExecutorTypeV1 = "direct_provider" | "enterprise_gateway" | "observe_only";
+export type ExecutorOwnershipV1 = "vectorbea" | "customer";
+export type ExecutorRequestModeV1 = "direct" | "forwarded" | "wrapped";
+export type ExecutorObservabilityV1 = "full" | "partial" | "minimal";
 
 export type SpanTypeV1 =
   | "root"
@@ -35,6 +39,15 @@ export interface TraceMetadataV1 {
     conversation_id?: string;
     session_id?: string;
     user_id?: string;
+    kind?: "runtime_execution" | "admin_audit" | string;
+  };
+  executor?: {
+    type?: ExecutorTypeV1;
+    name?: string;
+    ownership?: ExecutorOwnershipV1;
+    request_mode?: ExecutorRequestModeV1;
+    endpoint?: string | null;
+    response_observability?: ExecutorObservabilityV1;
   };
   request?: {
     source?: string;
@@ -128,10 +141,13 @@ export interface TraceMetadataV1 {
     label?: string;
     run_id?: string;
     dataset_id?: string;
+    compared_against_trace_id?: string;
+    evaluation_mode?: "replay_compare" | "single_trace" | "batch_replay" | string;
     checks?: Array<{
       name?: string;
       score?: number;
       label?: string;
+      reason?: string;
     }>;
   };
   logs?: Array<{
@@ -159,6 +175,7 @@ export interface TraceMetadataV1 {
 const SECTION_KEYS = new Set([
   "schema_version",
   "trace",
+  "executor",
   "request",
   "prompt",
   "model",
@@ -240,6 +257,8 @@ export function normalizeTraceMetadataV1(input: unknown): TraceMetadataV1 {
 
   const trace = asRecord(root.trace);
   if (Object.keys(trace).length > 0) normalized.trace = trace as TraceMetadataV1["trace"];
+  const executor = asRecord(root.executor);
+  if (Object.keys(executor).length > 0) normalized.executor = executor as TraceMetadataV1["executor"];
   const request = asRecord(root.request);
   if (Object.keys(request).length > 0) normalized.request = request as TraceMetadataV1["request"];
   const prompt = asRecord(root.prompt);
@@ -296,6 +315,11 @@ export function buildTraceMetadataV1(input: BuildMetadataInput): TraceMetadataV1
   const modelRecord = asRecord(legacy.model);
   const provider = asString(root.model?.provider) ?? asString(modelRecord.provider) ?? asString(legacy.provider);
   const model = asString(root.model?.model) ?? asString(modelRecord.name ?? modelRecord.model) ?? asString(legacy.model);
+  const executorRecord = asRecord(root.executor);
+  const executorType =
+    asString(executorRecord.type) ??
+    asString(legacy.executorType) ??
+    (provider ? "direct_provider" : undefined);
 
   const envelope: TraceMetadataV1 = {
     schema_version: TRACE_METADATA_SCHEMA_VERSION,
@@ -323,6 +347,31 @@ export function buildTraceMetadataV1(input: BuildMetadataInput): TraceMetadataV1
       status:
         root.trace?.status ??
         ((asString(legacy.traceStatus) || asString(legacy.status)) as TraceStatusV1 | undefined),
+      kind:
+        root.trace?.kind ??
+        (input.useType === "runtime" ? "runtime_execution" : input.useType === "audit" ? "admin_audit" : undefined),
+    },
+    executor: {
+      ...(root.executor ?? {}),
+      type: executorType as ExecutorTypeV1 | undefined,
+      name:
+        root.executor?.name ??
+        asString(legacy.executorName) ??
+        provider ??
+        model,
+      ownership:
+        root.executor?.ownership ??
+        ((executorType === "enterprise_gateway" ? "customer" : "vectorbea") as ExecutorOwnershipV1 | undefined),
+      request_mode:
+        root.executor?.request_mode ??
+        ((executorType === "enterprise_gateway" ? "forwarded" : executorType ? "direct" : undefined) as ExecutorRequestModeV1 | undefined),
+      endpoint:
+        root.executor?.endpoint ??
+        asString(legacy.executorEndpoint) ??
+        null,
+      response_observability:
+        root.executor?.response_observability ??
+        ((executorType === "enterprise_gateway" ? "partial" : executorType ? "full" : undefined) as ExecutorObservabilityV1 | undefined),
     },
     request: root.request
       ? {
@@ -387,6 +436,7 @@ export function buildTraceMetadataV1(input: BuildMetadataInput): TraceMetadataV1
     tags: {
       ...(root.tags ?? {}),
       ...(input.useType ? { use_type: input.useType } : {}),
+      ...(input.useType === "runtime" ? { trace_kind: "runtime_execution" } : {}),
     },
     custom: {
       ...(root.custom ?? {}),

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import type { TraceListResponse } from "@/lib/api";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
-import { mapAuditRowToTraceSummary, type AuditLogTraceRow } from "@/lib/server/traces";
+import { isRuntimeTraceRow, mapAuditRowToTraceSummary, type AuditLogTraceRow } from "@/lib/server/traces";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,6 @@ export async function GET(request: NextRequest) {
     const query = (request.nextUrl.searchParams.get("q") ?? "").trim().toLowerCase();
     const status = (request.nextUrl.searchParams.get("status") ?? "all").trim().toLowerCase();
     const environment = (request.nextUrl.searchParams.get("environment") ?? "all").trim().toLowerCase();
-    const useType = (request.nextUrl.searchParams.get("useType") ?? "runtime").trim().toLowerCase();
     const promptName = (request.nextUrl.searchParams.get("promptName") ?? "all").trim().toLowerCase();
     const since = (request.nextUrl.searchParams.get("since") ?? "all").trim().toLowerCase();
     const sortBy = (request.nextUrl.searchParams.get("sortBy") ?? "newest").trim().toLowerCase();
@@ -59,10 +58,11 @@ export async function GET(request: NextRequest) {
       throw new Error(error.message);
     }
 
-    let items = ((data ?? []) as AuditLogTraceRow[]).map(mapAuditRowToTraceSummary);
+    let items = ((data ?? []) as AuditLogTraceRow[])
+      .filter(isRuntimeTraceRow)
+      .map(mapAuditRowToTraceSummary);
 
     items = items.filter((item) => {
-      if (useType !== "all" && item.useType !== useType) return false;
       if (status !== "all" && item.status !== status) return false;
       if (environment !== "all" && item.environment.toLowerCase() !== environment) return false;
       if (promptName !== "all" && item.promptName.toLowerCase() !== promptName) return false;
@@ -74,6 +74,8 @@ export async function GET(request: NextRequest) {
         item.promptVersion.toLowerCase().includes(query) ||
         (item.model ?? "").toLowerCase().includes(query) ||
         (item.provider ?? "").toLowerCase().includes(query) ||
+        item.executorType.toLowerCase().includes(query) ||
+        (item.executorName ?? "").toLowerCase().includes(query) ||
         (item.sidecarName ?? "").toLowerCase().includes(query)
       );
     });

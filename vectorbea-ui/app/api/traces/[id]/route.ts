@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
-import { mapAuditRowToTraceDetail, type AuditLogTraceRow } from "@/lib/server/traces";
+import { isRuntimeTraceRow, mapAuditRowToTraceDetail, type AuditLogTraceRow } from "@/lib/server/traces";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 
@@ -41,6 +41,9 @@ export async function GET(
     }
 
     const traceRow = data as AuditLogTraceRow;
+    if (!isRuntimeTraceRow(traceRow)) {
+      return NextResponse.json({ error: "This audit row is not a runtime execution trace." }, { status: 404 });
+    }
     let promptTemplateText: string | null = null;
     let promptParameters: Record<string, unknown> | null = null;
     let promptName: string | null = traceRow.prompt_name;
