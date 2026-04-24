@@ -44,6 +44,7 @@ class Prompt:
     description: Optional[str] = None
     created_at: str = ""
     _prompt_version_id: str = field(default="", repr=False)
+    _proxy_latency_ms: float = field(default=0.0, repr=False)
 
     # Matches both {{ name }} and {{name}} style placeholders
     _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")

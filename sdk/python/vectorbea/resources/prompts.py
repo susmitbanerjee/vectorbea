@@ -245,6 +245,7 @@ class _TraceContext:
         try:
             self._prompts.log_audit(
                 self._prompt,
+                proxy_latency_ms=self._prompt._proxy_latency_ms,
                 llm_latency_ms=self._llm_ms,
                 token_count=self._total_tokens or self._tokens_in + self._tokens_out,
                 metadata=self._build_metadata(),
@@ -291,9 +292,10 @@ class Prompts:
         proxy_latency_ms = (time.monotonic() - t0) * 1000.0
 
         prompt = Prompt._from_dict(data)
+        prompt._proxy_latency_ms = float(proxy_latency_ms)
 
         try:
-            self._report_audit(prompt, proxy_latency_ms=proxy_latency_ms)
+            self._report_audit(prompt, proxy_latency_ms=proxy_latency_ms, use_type="audit")
         except Exception as exc:
             warnings.warn(
                 f"[vectorbea] audit report failed (non-fatal): {exc}",
@@ -430,6 +432,7 @@ class Prompts:
         llm_latency_ms: int = 0,
         token_count: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
+        use_type: str = "runtime",
     ) -> None:
         payload = {
             "promptVersionId": prompt._prompt_version_id,
@@ -446,7 +449,7 @@ class Prompts:
                 proxy_latency_ms=float(proxy_latency_ms),
                 llm_latency_ms=int(llm_latency_ms),
                 token_count=int(token_count),
-                use_type="runtime",
+                use_type=use_type,
             ),
         }
         self._http.post("/v1/audit", json=payload)

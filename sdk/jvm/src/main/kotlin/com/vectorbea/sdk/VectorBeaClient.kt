@@ -42,6 +42,7 @@ class VectorBeaClient private constructor(
         explicitNulls = false
     }
     private val auditPromptVersionIds = Collections.synchronizedMap(WeakHashMap<Prompt, String>())
+    private val promptProxyLatenciesMs = Collections.synchronizedMap(WeakHashMap<Prompt, Double>())
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -69,12 +70,14 @@ class VectorBeaClient private constructor(
         }
         val prompt = rawPrompt.toPrompt()
         auditPromptVersionIds[prompt] = rawPrompt.promptVersionId
+        promptProxyLatenciesMs[prompt] = elapsed.inWholeMilliseconds.toDouble()
 
         // Auto-report the proxy latency — audit failures are non-fatal
         runCatching {
             reportAudit(
                 prompt = prompt,
                 proxyLatencyMs = elapsed.inWholeMilliseconds.toDouble(),
+                useType = "audit",
             )
         }.onFailure { err ->
             // Log but never surface — audit must not break the caller
@@ -146,7 +149,13 @@ class VectorBeaClient private constructor(
         tokenCount: Int = 0,
         richMetadata: Map<String, Any?> = emptyMap(),
     ) {
-        reportAudit(prompt, proxyLatencyMs, llmLatencyMs, tokenCount, richMetadata)
+        reportAudit(
+            prompt,
+            proxyLatencyMs.takeIf { it > 0.0 } ?: promptProxyLatenciesMs[prompt] ?: 0.0,
+            llmLatencyMs,
+            tokenCount,
+            richMetadata,
+        )
     }
 
     /**
@@ -167,6 +176,7 @@ class VectorBeaClient private constructor(
         llmLatencyMs: Long = 0L,
         tokenCount: Int = 0,
         metadata: Map<String, Any?> = emptyMap(),
+        useType: String = "runtime",
     ) {
         val promptVersionId = auditPromptVersionIds[prompt] ?: prompt.promptVersionId.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException(
@@ -180,7 +190,7 @@ class VectorBeaClient private constructor(
             proxyLatencyMs = proxyLatencyMs,
             llmLatencyMs = llmLatencyMs,
             tokenCount = tokenCount,
-            useType = "runtime",
+            useType = useType,
         )
 
         val payload = buildString {

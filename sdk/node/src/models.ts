@@ -43,6 +43,8 @@ export class Prompt {
   readonly createdAt: string;
   /** @internal */
   readonly _promptVersionId: string;
+  /** @internal Proxy fetch latency measured when this prompt was resolved. */
+  _proxyLatencyMs = 0;
 
   /** @internal Use `Prompt.fromPayload()` instead of constructing directly. */
   constructor(payload: PromptPayload) {

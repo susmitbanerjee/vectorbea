@@ -80,6 +80,8 @@ interface AuditPayload {
 }
 
 export interface LogAuditOptions {
+  /** Prompt/proxy resolution latency in milliseconds. */
+  proxyLatencyMs?: number;
   /** Round-trip latency of your LLM call in milliseconds. */
   llmLatencyMs?: number;
   /** Total tokens consumed (prompt + completion). */
@@ -100,6 +102,8 @@ export interface LogAuditOptions {
   cacheStatus?: CacheStatus;
   /** Final text delivered to the caller. */
   outputText?: string;
+  /** @internal Distinguishes runtime traces from SDK audit-only prompt fetches. */
+  useType?: "runtime" | "audit";
 }
 
 // ── TraceSession ─────────────────────────────────────────────────────────────
@@ -244,6 +248,7 @@ export class TraceSession {
     if (this._llmMs === 0) this._llmMs = Math.round(performance.now() - this._llmStart);
     try {
       await this._prompts.logAudit(this._prompt, {
+        proxyLatencyMs: this._prompt._proxyLatencyMs,
         llmLatencyMs: this._llmMs,
         tokenCount:   this._totalTokens || this._tokensIn + this._tokensOut,
         metadata:     this._buildMetadata(),
@@ -307,9 +312,10 @@ export class Prompts {
     const proxyLatencyMs = performance.now() - t0;
 
     const prompt = Prompt.fromPayload(payload);
+    prompt._proxyLatencyMs = proxyLatencyMs;
 
-    // Auto-report the proxy latency — errors are non-fatal
-    this._reportAudit(prompt, { proxyLatencyMs }).catch((err: unknown) => {
+    // Auto-report prompt fetch as audit-only metadata; traced LLM calls include this latency in the final runtime row.
+    this._reportAudit(prompt, { proxyLatencyMs, useType: "audit" }).catch((err: unknown) => {
       // Emit a non-crashing warning — audit must never break the caller
       console.warn(
         `[vectorbea] audit report failed (non-fatal): ${String(err instanceof Error ? err.message : err)}`
@@ -425,7 +431,7 @@ export class Prompts {
         proxyLatencyMs: options.proxyLatencyMs ?? 0,
         llmLatencyMs: options.llmLatencyMs ?? 0,
         tokenCount: options.tokenCount ?? 0,
-        useType: "runtime",
+        useType: options.useType ?? "runtime",
       }),
     };
     await this.http.post("/v1/audit", payload);

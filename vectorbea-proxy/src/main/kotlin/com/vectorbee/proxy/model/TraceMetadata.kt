@@ -126,6 +126,9 @@ object TraceMetadataBuilder {
         val cache = metadata["cache"] as? JsonObject
         val output = metadata["output"] as? JsonObject
         val tags = metadata["tags"] as? JsonObject
+        val effectiveUseType = primitiveContent(tags?.get("use_type") as? JsonPrimitive)
+            ?.takeIf { it == "runtime" || it == "audit" }
+            ?: useType
         val custom = metadata["custom"] as? JsonObject ?: buildJsonObject {
             metadata.forEach { (key, value) ->
                 if (key !in RESERVED_KEYS) {
@@ -158,6 +161,9 @@ object TraceMetadataBuilder {
             putJsonObject("trace") {
                 trace?.forEach { (key, value) -> put(key, value) }
                 put("duration_ms", JsonPrimitive(totalDuration))
+                if (trace?.get("kind") == null) {
+                    put("kind", JsonPrimitive(if (effectiveUseType == "runtime") "runtime_execution" else "admin_audit"))
+                }
                 if (trace?.get("status") == null) {
                     put("status", JsonPrimitive(traceStatus))
                 }
@@ -228,7 +234,10 @@ object TraceMetadataBuilder {
 
             putJsonObject("tags") {
                 tags?.forEach { (key, value) -> put(key, value) }
-                put("use_type", JsonPrimitive(useType))
+                put("use_type", JsonPrimitive(effectiveUseType))
+                if (effectiveUseType == "runtime") {
+                    put("trace_kind", JsonPrimitive("runtime_execution"))
+                }
             }
 
             put("custom", custom)
