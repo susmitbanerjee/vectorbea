@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.vectorbea"
-version = "0.2.5"
+version = "0.2.9"
 
 repositories {
     mavenCentral()
