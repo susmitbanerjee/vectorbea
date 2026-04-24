@@ -14,6 +14,8 @@ export default function GoldenTracesPage() {
   const [traces, setTraces] = useState<GoldenTrace[]>([]);
   const [loading, setLoading] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ traceId: "", promptName: "", label: "", notes: "" });
@@ -63,11 +65,25 @@ export default function GoldenTracesPage() {
   };
 
   const unmarkTrace = async (traceId: string) => {
-    if (!activeWorkspaceId) return;
+    if (!activeWorkspaceId || removingId) return;
+    setRemovingId(traceId);
+    setConfirmRemoveId(null);
+    setError(null);
     try {
-      await fetch(`/api/evaluations/golden-traces/${encodeURIComponent(traceId)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "DELETE" });
+      const res = await fetch(
+        `/api/evaluations/golden-traces/${encodeURIComponent(traceId)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(json.error ?? "Failed to remove golden trace");
+      }
       setTraces(prev => prev.filter(t => t.traceId !== traceId));
-    } catch { /* silent */ }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove golden trace");
+    } finally {
+      setRemovingId(null);
+    }
   };
 
   return (
@@ -130,9 +146,37 @@ export default function GoldenTracesPage() {
                     {trace.notes && <p className="mt-1 text-sm text-muted-foreground">{trace.notes}</p>}
                     <p className="mt-1 text-xs text-muted-foreground">{new Date(trace.createdAt).toLocaleDateString()}</p>
                   </div>
-                  <button type="button" onClick={() => void unmarkTrace(trace.traceId)} title="Remove golden status" className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
-                    <StarOff className="h-4 w-4" />
-                  </button>
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    {confirmRemoveId === trace.traceId ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground">Remove golden?</span>
+                        <button
+                          type="button"
+                          onClick={() => void unmarkTrace(trace.traceId)}
+                          disabled={removingId === trace.traceId}
+                          className="rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                        >
+                          {removingId === trace.traceId ? "Removing…" : "Yes, remove"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRemoveId(null)}
+                          className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRemoveId(trace.traceId)}
+                        title="Remove from golden traces"
+                        className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                      >
+                        <StarOff className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             ))

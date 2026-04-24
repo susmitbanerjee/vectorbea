@@ -64,10 +64,20 @@ export default function BaselineDatasetsPage() {
 
   const deleteDataset = async (id: string) => {
     if (!activeWorkspaceId) return;
+    setError(null);
     try {
-      await fetch(`/api/evaluations/baseline-datasets/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "DELETE" });
+      const res = await fetch(
+        `/api/evaluations/baseline-datasets/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(json.error ?? "Failed to delete dataset");
+      }
       setDatasets(prev => prev.filter(d => d.id !== id));
-    } catch { /* silent */ }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete dataset");
+    }
   };
 
   return (

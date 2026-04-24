@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 import { AUTH_COOKIE_NAME, SESSION_ID_COOKIE_NAME } from "@/lib/auth/cookies";
-import { upsertProfile } from "@/lib/auth/server";
+import { upsertProfile, getPostLoginRedirectForUser } from "@/lib/auth/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -35,7 +35,9 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  // `next` is only used when explicitly set (e.g. post-onboarding deep-links).
+  // For normal logins we derive the redirect from workspace membership below.
+  const explicitNext = searchParams.get("next");
 
   // If there is no code param the user navigated here directly or the
   // provider sent an error — send them back to the login page.
@@ -85,15 +87,29 @@ export async function GET(request: NextRequest) {
   await upsertProfile(user);
 
   // ── Rotate session ID (seat-sharing prevention) ───────────────────────────
-  // Generate a fresh UUID for this login. Writing it to the DB immediately
-  // invalidates any other device's vb_session_id cookie — middleware will
-  // detect the mismatch on their next protected page load.
   const sessionId = crypto.randomUUID();
 
   await createVectorBeaAdminClient()
     .from("profiles")
     .update({ current_session_id: sessionId })
     .eq("id", user.id);
+
+  // ── Resolve redirect destination ─────────────────────────────────────────
+  // For first-time users (no workspace membership) send to /onboarding.
+  // For returning users, send to their first workspace dashboard.
+  // An explicit `next` query param overrides this (used by deep-link flows).
+  let destination: string;
+  if (explicitNext && explicitNext.startsWith("/")) {
+    destination = explicitNext;
+  } else {
+    try {
+      const { redirectTo } = await getPostLoginRedirectForUser(user.id);
+      destination = redirectTo;
+    } catch (err) {
+      console.error("[auth/callback] post-login redirect lookup failed:", err);
+      destination = "/dashboard";
+    }
+  }
 
   // ── Write httpOnly session cookies ────────────────────────────────────────
   const cookieOptions = {
@@ -104,11 +120,7 @@ export async function GET(request: NextRequest) {
     maxAge: 60 * 60 * 24 * 7, // 7 days
   };
 
-  const redirectUrl = new URL(
-    next.startsWith("/") ? next : "/dashboard",
-    request.url,
-  );
-
+  const redirectUrl = new URL(destination, request.url);
   const response = NextResponse.redirect(redirectUrl);
   response.cookies.set(AUTH_COOKIE_NAME, access_token, cookieOptions);
   response.cookies.set(SESSION_ID_COOKIE_NAME, sessionId, cookieOptions);

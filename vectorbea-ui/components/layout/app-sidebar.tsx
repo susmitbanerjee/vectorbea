@@ -189,7 +189,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
       <div className="mt-auto flex flex-col gap-3">
         <Link
-          href="/docs/overview"
+          href={"/docs/overview" as any}
           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-accent/40 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
         >
           <BookOpen className="h-4 w-4 shrink-0" />

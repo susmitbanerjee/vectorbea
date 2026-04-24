@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Loader2, ShieldCheck, ShieldAlert, MessageSquareWarning } from "lucide-react";
+import { ArrowRight, CheckCircle2, GitBranch, Loader2, RefreshCw, ShieldCheck, ShieldAlert, MessageSquareWarning } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(false);
   const [approving, setApproving] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -82,6 +83,33 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
       setError(reviewError instanceof Error ? reviewError.message : "Failed to update review state");
     } finally {
       setReviewing(false);
+    }
+  };
+
+  // Re-run the same evaluation with the same source traces and candidate version
+  const rerunEvaluation = async () => {
+    if (!activeWorkspaceId || !run || rerunning) return;
+    setRerunning(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceTraceIds: run.sourceTraceIds,
+            candidatePromptVersionId: run.candidatePromptVersionId,
+          }),
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Failed to create re-run");
+      window.location.href = `/evaluations/${payload.id}?org=${encodeURIComponent(activeWorkspaceId)}`;
+    } catch (rerunError) {
+      setError(rerunError instanceof Error ? rerunError.message : "Failed to re-run evaluation");
+    } finally {
+      setRerunning(false);
     }
   };
 
@@ -168,6 +196,43 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                       ))}
                     </div>
                   ) : null}
+
+                  {/* ── Next-step actions (state-aware) ── */}
+                  <div className="border-t border-border/60 pt-3 space-y-2">
+                    {/* Approved + promotion allowed → surface rollout link */}
+                    {run.status === "approved" && run.promotion.allowed && (
+                      <Link
+                        href={`/prompts?org=${encodeURIComponent(activeWorkspaceId ?? "")}` as any}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-500/20 transition"
+                      >
+                        <GitBranch className="h-3.5 w-3.5" />
+                        Proceed to rollout — open prompt →
+                      </Link>
+                    )}
+                    {/* Re-run is always available */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={rerunEvaluation}
+                      disabled={rerunning}
+                    >
+                      {rerunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      Re-run evaluation
+                    </Button>
+                    {/* Blocked/rejected guidance */}
+                    {(run.review.status === "rejected" || run.aggregate.recommendation === "blocked" || run.aggregate.recommendation === "regression_detected") && (
+                      <p className="text-xs text-muted-foreground text-center">
+                        Fix the prompt, then re-run to clear the block.
+                      </p>
+                    )}
+                    {/* Pending review guidance */}
+                    {run.review.status === "pending_review" && (
+                      <p className="text-xs text-muted-foreground text-center">
+                        Approve the review above before proceeding to rollout.
+                      </p>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </div>

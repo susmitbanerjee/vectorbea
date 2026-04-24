@@ -5,7 +5,6 @@ import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
 import {
-  Activity,
   AlertTriangle,
   BarChart2,
   Boxes,
@@ -127,7 +126,6 @@ const DOCS_NAV: NavItem[] = [
   {                              href: "/docs/rollout"              as Route, title: "Rollout",             icon: GitBranch   },
   {                              href: "/docs/blocked-rollout"      as Route, title: "Blocked vs Full",     icon: Shield      },
   {                              href: "/docs/scheduled-execution"  as Route, title: "Scheduled Execution", icon: Terminal    },
-  {                              href: "/docs/tracking-model"       as Route, title: "Tracking Model",      icon: Activity    },
 
   // Enterprise
   { section: "Enterprise",      href: "/docs/enterprise"   as Route, title: "Enterprise",  icon: Building2  },
@@ -421,14 +419,6 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Alert evaluation",       href: "#alert-evaluation" },
     { label: "Connections",            href: "#connections" },
   ],
-  "/docs/tracking-model": [
-    { label: "Data entities",          href: "#data-entities" },
-    { label: "Runtime vs audit",       href: "#runtime-vs-audit" },
-    { label: "Metrics derivation",     href: "#metrics-derivation" },
-    { label: "Observability gaps",     href: "#observability-gaps" },
-    { label: "Golden traces model",    href: "#golden-traces-model" },
-    { label: "Rollout state",          href: "#rollout-model" },
-  ],
 };
 
 function TableOfContents({ pathname }: { pathname: string }) {
@@ -480,7 +470,6 @@ const TITLE_BY_PATH: Record<string, string> = {
   "/docs/rollout":               "Rollout & Promotion",
   "/docs/blocked-rollout":       "Blocked vs Full Rollout",
   "/docs/scheduled-execution":   "Scheduled Execution",
-  "/docs/tracking-model":        "Tracking Model",
 };
 
 function Breadcrumb({ pathname }: { pathname: string }) {
