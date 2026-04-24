@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info } from "lucide-react";
+import { Calendar, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RegressionSchedule, BaselineDataset } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
+import { cronToHumanText, validateCron } from "@/lib/cron-humanizer";
 
 export default function ScheduledRegressionsPage() {
   const { activeWorkspaceId } = useWorkspace();
@@ -193,7 +194,23 @@ export default function ScheduledRegressionsPage() {
                 )}
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Cron expression</label>
-                  <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono" value={form.cronExpression} onChange={e => setForm(f => ({ ...f, cronExpression: e.target.value }))} placeholder="e.g. 0 2 * * * (for reference only — not executed here)" />
+                  <input
+                    className={`w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono ${
+                      form.cronExpression.trim() && validateCron(form.cronExpression)
+                        ? "border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                        : "border-border"
+                    }`}
+                    value={form.cronExpression}
+                    onChange={e => setForm(f => ({ ...f, cronExpression: e.target.value }))}
+                    placeholder="e.g. 0 2 * * *  (for reference only — not executed here)"
+                  />
+                  {form.cronExpression.trim() && (() => {
+                    const err = validateCron(form.cronExpression);
+                    const preview = !err ? cronToHumanText(form.cronExpression) : null;
+                    return err
+                      ? <p className="text-xs text-red-400 mt-1">{err}</p>
+                      : <p className="flex items-center gap-1 text-xs text-green-400 mt-1"><Clock className="h-3 w-3" />{preview}</p>;
+                  })()}
                 </div>
               </div>
               <Button onClick={createSchedule} disabled={creating} className="gap-2">
@@ -224,7 +241,10 @@ export default function ScheduledRegressionsPage() {
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">Dataset: {getDatasetName(schedule.baselineDatasetId)}</p>
                     {schedule.cronExpression && (
-                      <p className="mt-0.5 text-xs text-muted-foreground font-mono">cron: {schedule.cronExpression}</p>
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3 shrink-0" />
+                        <span title={schedule.cronExpression}>{cronToHumanText(schedule.cronExpression)}</span>
+                      </p>
                     )}
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
                       {schedule.lastRunAt && <span>Last run: {new Date(schedule.lastRunAt).toLocaleString()}</span>}

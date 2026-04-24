@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS vectorbea.alert_rules (
   metric_type text NOT NULL,
   threshold numeric NOT NULL,
   comparison text NOT NULL DEFAULT 'gt',
-  window text,
+  window_type text,
   window_hours integer NOT NULL DEFAULT 1,
   enabled boolean NOT NULL DEFAULT true,
   created_by uuid,

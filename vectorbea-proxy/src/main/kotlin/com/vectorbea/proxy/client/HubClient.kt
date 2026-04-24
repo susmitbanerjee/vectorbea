@@ -145,6 +145,7 @@ class HubClient(private val config: AppConfig) {
             )
         )
         val response = client.post("${config.hubUrl}/api/agents/heartbeat") {
+            header("X-VectorBea-Host-Id", config.proxyHostId)
             setBody(
                 TextContent(
                     json.encodeToString(HeartbeatPayload.serializer(), payload),

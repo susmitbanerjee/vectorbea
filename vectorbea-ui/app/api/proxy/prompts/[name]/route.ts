@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateProxyApiKey } from "@/lib/proxy-auth-edge";
+import { authenticateRuntimeApiKey } from "@/lib/server/runtime-api-key";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type PromptVersion = {
@@ -182,9 +181,14 @@ export async function GET(
   { params }: { params: Promise<{ name: string }> },
 ) {
   try {
-    const auth = await authenticateProxyApiKey(request);
+    const auth = await authenticateRuntimeApiKey(request);
     if (!auth.ok) return auth.response;
     const workspaceId = auth.workspaceId;
+
+    // Read raw token for rollout seed (used to bucket this caller deterministically).
+    const rawToken =
+      (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim() ||
+      auth.keyId;
 
     const rate = consumeRateLimit(`proxy:prompts:${workspaceId}`, 600, 60_000);
     if (!rate.allowed) {
@@ -227,7 +231,7 @@ export async function GET(
       request.headers.get("x-vectorbea-environment") ??
       request.headers.get("x-environment"),
     );
-    const seedKey = extractSeed(request, auth.rawToken, prompt.id);
+    const seedKey = extractSeed(request, rawToken, prompt.id);
     const rolloutSelection = selectByRollout(sortedVersions, seedKey, runtimeEnvironment);
 
     const resolvedVersion = requestedVersionTag

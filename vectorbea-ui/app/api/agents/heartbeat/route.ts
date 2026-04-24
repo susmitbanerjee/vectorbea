@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { authenticateRuntimeApiKey } from "@/lib/server/runtime-api-key";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -18,16 +19,6 @@ type HeartbeatPayload = {
     status?: string;
   };
 };
-
-function getBearerToken(request: NextRequest) {
-  const authorization = request.headers.get("authorization")?.trim();
-  if (!authorization?.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
-
-  const token = authorization.slice("Bearer ".length).trim();
-  return token || null;
-}
 
 function getFiniteNumber(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -59,13 +50,14 @@ function normalizeStatus(value: unknown) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = getBearerToken(request);
-    if (!token) {
-      return NextResponse.json(
-        { error: "Missing or invalid Authorization header." },
-        { status: 401 },
-      );
-    }
+    const auth = await authenticateRuntimeApiKey(request);
+    if (!auth.ok) return auth.response;
+
+    const workspaceId = auth.workspaceId;
+    const hostId =
+      request.headers.get("x-vectorbea-host-id") ??
+      request.headers.get("x-forwarded-for") ??
+      "unknown-host";
 
     const payload = (await request.json().catch(() => ({}))) as HeartbeatPayload;
     const metrics = payload.metrics;
@@ -95,25 +87,52 @@ export async function POST(request: NextRequest) {
     const status = normalizeStatus(metrics.status);
 
     const supabase = createVectorBeaAdminClient();
-    const { data: agent, error: agentError } = await supabase
-      .from("deployment_agents")
-      .select("id, workspace_id, name")
-      .eq("api_token", token)
-      .single();
 
-    if (agentError || !agent) {
-      return NextResponse.json(
-        { error: "Invalid deployment agent token." },
-        { status: 401 },
-      );
+    // Upsert deployment agent by workspace_id + name (hostId)
+    const { data: existingAgent } = await supabase
+      .from("deployment_agents")
+      .select("id, name")
+      .eq("workspace_id", workspaceId)
+      .eq("name", hostId)
+      .maybeSingle();
+
+    let agentId: string;
+    if (existingAgent) {
+      agentId = existingAgent.id;
+    } else {
+      const now = new Date().toISOString();
+      const { data: newAgent, error: createError } = await supabase
+        .from("deployment_agents")
+        .insert({
+          workspace_id: workspaceId,
+          name: hostId,
+          status: "online",
+          last_heartbeat: now,
+        })
+        .select("id")
+        .single();
+      if (createError) throw new Error(createError.message);
+      agentId = newAgent.id;
     }
 
     const now = new Date().toISOString();
 
+    const { error: heartbeatError } = await supabase
+      .from("deployment_agents")
+      .update({
+        last_heartbeat: now,
+        status,
+      })
+      .eq("id", agentId);
+
+    if (heartbeatError) {
+      throw new Error(`Failed to update agent heartbeat: ${heartbeatError.message}`);
+    }
+
     const { error: metricsError } = await supabase
       .from("agent_metrics")
       .insert({
-        agent_id: agent.id,
+        agent_id: agentId,
         latency_ms: latencyMs,
         cpu_usage_percent: cpuUsagePercent,
         memory_usage_mb: memoryUsageMb,
@@ -125,22 +144,10 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to store agent metrics: ${metricsError.message}`);
     }
 
-    const { error: heartbeatError } = await supabase
-      .from("deployment_agents")
-      .update({
-        last_heartbeat: now,
-        status,
-      })
-      .eq("id", agent.id);
-
-    if (heartbeatError) {
-      throw new Error(`Failed to update agent heartbeat: ${heartbeatError.message}`);
-    }
-
     const { data: pendingCommands, error: commandsError } = await supabase
       .from("agent_commands")
       .select("id, command_type, payload, status, created_at")
-      .eq("agent_id", agent.id)
+      .eq("agent_id", agentId)
       .eq("status", "pending")
       .order("created_at", { ascending: true });
 
@@ -151,9 +158,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       acknowledged: true,
       agent: {
-        id: agent.id,
-        workspaceId: agent.workspace_id,
-        name: agent.name,
+        id: agentId,
+        workspaceId,
+        name: hostId,
         status,
         lastHeartbeat: now,
       },

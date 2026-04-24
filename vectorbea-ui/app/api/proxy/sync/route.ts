@@ -1,11 +1,9 @@
-// Edge runtime — zero cold start, no Node-only modules.
 // Called by the sidecar's HubClient on boot (eager sync) and every 5 min (poll).
 // Also used as the token-validation probe: a 401 means the token is invalid.
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateProxyApiKey } from "@/lib/proxy-auth-edge";
+import { authenticateRuntimeApiKey } from "@/lib/server/runtime-api-key";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -74,26 +72,28 @@ async function supabaseGet<T>(path: string): Promise<T> {
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await authenticateProxyApiKey(request);
+    // 1. Authenticate with workspace API key
+    const auth = await authenticateRuntimeApiKey(request);
     if (!auth.ok) return auth.response;
     const workspaceId = auth.workspaceId;
+
     const rate = consumeRateLimit(`proxy:sync:${workspaceId}`, 120, 60_000);
     if (!rate.allowed) {
       return NextResponse.json({ error: "Rate limit exceeded for sync endpoint" }, { status: 429 });
     }
 
-    // 3. Look up organization for this workspace
+    // 2. Look up organization for this workspace
     const workspaceRows = await supabaseGet<WorkspaceRow[]>(
       `/workspaces?select=id,organization_id&id=eq.${encodeURIComponent(workspaceId)}&limit=1`,
     );
     const organizationId = workspaceRows[0]?.organization_id ?? "";
 
-    // 4. Fetch all prompts (with all versions) for this workspace
+    // 3. Fetch all prompts (with all versions) for this workspace
     const promptRows = await supabaseGet<PromptRow[]>(
       `/prompts?select=id,name,description,workspace_id,prompt_versions(id,version_tag,template_text,parameters,is_published,created_at)&workspace_id=eq.${encodeURIComponent(workspaceId)}`,
     );
 
-    // 5. Build PromptPayload[] — one entry per prompt, latest published version only
+    // 4. Build PromptPayload[] — one entry per prompt, latest published version only
     const payloads = promptRows.flatMap((prompt) => {
       const versions = Array.isArray(prompt.prompt_versions)
         ? prompt.prompt_versions

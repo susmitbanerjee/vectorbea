@@ -43,6 +43,19 @@ data class AppConfig(
     // heartbeat cadence so the two background workers are in-phase.
     val telemetryIntervalMs: Long = 30_000,
 ) {
+    init {
+        // Validate key format early — fail fast before sync/heartbeat start.
+        // Expected prefixes: vb_live_, vb_test_, or legacy vb_
+        // Never log the key value itself.
+        val keyValid = apiKey.startsWith("vb_live_") ||
+                       apiKey.startsWith("vb_test_") ||
+                       apiKey.startsWith("vb_")
+        require(keyValid) {
+            "VECTORBEA_KEY format is invalid. Expected prefix: vb_live_ (production) or vb_test_ (non-production). " +
+            "Generate a key from the VectorBea dashboard → API Keys."
+        }
+    }
+
     companion object {
         fun fromEnv(): AppConfig {
             val hubUrl = env("VECTORBEA_HUB_URL")
