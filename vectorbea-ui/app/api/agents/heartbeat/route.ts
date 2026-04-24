@@ -108,6 +108,11 @@ export async function POST(request: NextRequest) {
           name: hostId,
           status: "online",
           last_heartbeat: now,
+          // api_token has a NOT NULL constraint; heartbeat-registered agents
+          // are identified by their workspace API key, not a per-agent token.
+          // Store a sentinel so the constraint is satisfied without leaking
+          // the Bearer token into this column.
+          api_token: `hub-registered:${auth.keyId}`,
         })
         .select("id")
         .single();
