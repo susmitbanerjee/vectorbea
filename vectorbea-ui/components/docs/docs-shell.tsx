@@ -5,15 +5,26 @@ import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
 import {
+  Activity,
+  AlertTriangle,
+  BarChart2,
   Boxes,
   Building2,
   ChevronRight,
   Container,
+  Database,
   ExternalLink,
+  FlaskConical,
+  GitBranch,
+  Layers,
   LockKeyhole,
   Menu,
+  RefreshCw,
   Rocket,
   PlugZap,
+  Shield,
+  Star,
+  Terminal,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -105,6 +116,18 @@ const DOCS_NAV: NavItem[] = [
   { section: "Platform",        href: "/docs/architecture" as Route, title: "Architecture", icon: Boxes   },
   {                              href: "/docs/integrations" as Route, title: "Integrations", icon: PlugZap },
   {                              href: "/docs/kubernetes"   as Route, title: "Kubernetes",   icon: Container },
+
+  // Features
+  { section: "Features",        href: "/docs/overview"             as Route, title: "Overview",            icon: Layers      },
+  {                              href: "/docs/metrics"              as Route, title: "Metrics",             icon: BarChart2   },
+  {                              href: "/docs/evaluations"          as Route, title: "Evaluations",         icon: FlaskConical },
+  {                              href: "/docs/baseline-datasets"    as Route, title: "Baseline Datasets",   icon: Database    },
+  {                              href: "/docs/golden-traces"        as Route, title: "Golden Traces",       icon: Star        },
+  {                              href: "/docs/regression"           as Route, title: "Regression",          icon: RefreshCw   },
+  {                              href: "/docs/rollout"              as Route, title: "Rollout",             icon: GitBranch   },
+  {                              href: "/docs/blocked-rollout"      as Route, title: "Blocked vs Full",     icon: Shield      },
+  {                              href: "/docs/scheduled-execution"  as Route, title: "Scheduled Execution", icon: Terminal    },
+  {                              href: "/docs/tracking-model"       as Route, title: "Tracking Model",      icon: Activity    },
 
   // Enterprise
   { section: "Enterprise",      href: "/docs/enterprise"   as Route, title: "Enterprise",  icon: Building2  },
@@ -331,6 +354,81 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Data boundary",          href: "#data" },
     { label: "Token model",            href: "#tokens" },
   ],
+  "/docs/overview": [
+    { label: "The core loop",          href: "#the-loop" },
+    { label: "Stage-by-stage",         href: "#stages" },
+    { label: "Core concepts",          href: "#concepts" },
+    { label: "Data flow",              href: "#data-model" },
+    { label: "Where to go next",       href: "#next-steps" },
+  ],
+  "/docs/metrics": [
+    { label: "What is measured",       href: "#overview" },
+    { label: "Partial observability",  href: "#partial-observability" },
+    { label: "Understanding latency",  href: "#latency" },
+    { label: "How to use",             href: "#how-to-use" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/evaluations": [
+    { label: "What is an eval run?",   href: "#what-is-an-evaluation" },
+    { label: "Scoring & checks",       href: "#scoring" },
+    { label: "Verdicts",               href: "#verdicts" },
+    { label: "Human review",           href: "#human-review" },
+    { label: "How to run",             href: "#how-to-use" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/baseline-datasets": [
+    { label: "What is a dataset?",     href: "#what-is-a-dataset" },
+    { label: "What goes in",           href: "#what-goes-in" },
+    { label: "How to create",          href: "#how-to-use" },
+    { label: "Reusability",            href: "#reuse" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/golden-traces": [
+    { label: "What is a golden trace?", href: "#what-are-golden-traces" },
+    { label: "Why mark golden?",        href: "#why-golden" },
+    { label: "Effect on evals",         href: "#golden-in-eval" },
+    { label: "How to mark",             href: "#how-to-use" },
+    { label: "Connections",             href: "#connections" },
+  ],
+  "/docs/regression": [
+    { label: "What is regression?",    href: "#what-is-regression" },
+    { label: "Trigger API",            href: "#trigger-api" },
+    { label: "CI/CD integration",      href: "#ci-integration" },
+    { label: "How to set up",          href: "#how-to-use" },
+    { label: "Alert on regression",    href: "#alert-evaluation" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/rollout": [
+    { label: "Version lifecycle",      href: "#lifecycle" },
+    { label: "Traffic splitting",      href: "#traffic-splitting" },
+    { label: "How to roll out",        href: "#how-to-rollout" },
+    { label: "Rollout rules",          href: "#rollout-rules" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/blocked-rollout": [
+    { label: "Overview",               href: "#overview" },
+    { label: "What causes a block?",   href: "#blocked-reasons" },
+    { label: "Full rollout conditions", href: "#full-rollout-conditions" },
+    { label: "Partial rollout",        href: "#partial-rollout" },
+    { label: "How to revert",          href: "#revert" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/scheduled-execution": [
+    { label: "Design",                 href: "#design" },
+    { label: "API endpoints",          href: "#endpoints" },
+    { label: "GitHub Actions",         href: "#github-actions" },
+    { label: "Kubernetes CronJob",     href: "#kubernetes-cronjob" },
+    { label: "Alert evaluation",       href: "#alert-evaluation" },
+    { label: "Connections",            href: "#connections" },
+  ],
+  "/docs/tracking-model": [
+    { label: "Data entities",          href: "#data-entities" },
+    { label: "Runtime vs audit",       href: "#runtime-vs-audit" },
+    { label: "Metrics derivation",     href: "#metrics-derivation" },
+    { label: "Observability gaps",     href: "#observability-gaps" },
+    { label: "Golden traces model",    href: "#golden-traces-model" },
+    { label: "Rollout state",          href: "#rollout-model" },
+  ],
 };
 
 function TableOfContents({ pathname }: { pathname: string }) {
@@ -371,13 +469,25 @@ const TITLE_BY_PATH: Record<string, string> = {
   "/docs/architecture":  "Architecture",
   "/docs/integrations":  "Integrations",
   "/docs/kubernetes":    "Kubernetes",
-  "/docs/enterprise":    "Enterprise",
-  "/docs/security":      "Security",
+  "/docs/enterprise":            "Enterprise",
+  "/docs/security":              "Security",
+  "/docs/overview":              "Overview",
+  "/docs/metrics":               "Metrics & Observability",
+  "/docs/evaluations":           "Evaluations",
+  "/docs/baseline-datasets":     "Baseline Datasets",
+  "/docs/golden-traces":         "Golden Traces",
+  "/docs/regression":            "Regression",
+  "/docs/rollout":               "Rollout & Promotion",
+  "/docs/blocked-rollout":       "Blocked vs Full Rollout",
+  "/docs/scheduled-execution":   "Scheduled Execution",
+  "/docs/tracking-model":        "Tracking Model",
 };
 
 function Breadcrumb({ pathname }: { pathname: string }) {
   const title = TITLE_BY_PATH[pathname] ?? "Docs";
   const isSdk = pathname.startsWith("/docs/sdk/");
+  const featurePaths = ["/docs/overview", "/docs/metrics", "/docs/evaluations", "/docs/baseline-datasets", "/docs/golden-traces", "/docs/regression", "/docs/rollout", "/docs/blocked-rollout", "/docs/scheduled-execution", "/docs/tracking-model"];
+  const isFeature = featurePaths.some((p) => pathname === p);
   return (
     <nav className="mb-7 flex items-center gap-1 text-[12px] text-muted-foreground">
       <Link href="/" className="transition-colors hover:text-foreground">
@@ -391,6 +501,12 @@ function Breadcrumb({ pathname }: { pathname: string }) {
         <>
           <ChevronRight size={11} className="text-border" />
           <span className="text-muted-foreground">SDKs</span>
+        </>
+      )}
+      {isFeature && (
+        <>
+          <ChevronRight size={11} className="text-border" />
+          <span className="text-muted-foreground">Features</span>
         </>
       )}
       {pathname !== "/docs" && (
