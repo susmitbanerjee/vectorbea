@@ -79,7 +79,7 @@ function isInternalRequest(request: NextRequest): boolean {
 }
 
 function deny(ip: string | null, hostname: string) {
-  return new NextResponse(
+  const response = new NextResponse(
     `Access Denied.\nRejected IP: ${ip ?? "Unavailable"}\nHost: ${hostname || "Unavailable"}\n`,
     {
       status: 403,
@@ -88,6 +88,15 @@ function deny(ip: string | null, hostname: string) {
       },
     },
   );
+  return withSecurityHeaders(response);
+}
+
+function withSecurityHeaders(response: NextResponse) {
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  return response;
 }
 
 function isAuthProtectedPath(pathname: string) {
@@ -234,32 +243,32 @@ export async function middleware(request: NextRequest) {
 
   if (isPublicProductionHost(hostname)) {
     const authRedirect = enforceAuth(request);
-    if (authRedirect) return authRedirect;
+    if (authRedirect) return withSecurityHeaders(authRedirect);
 
     const concurrencyRedirect = await enforceSessionConcurrency(request);
-    if (concurrencyRedirect) return concurrencyRedirect;
+    if (concurrencyRedirect) return withSecurityHeaders(concurrencyRedirect);
 
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   if (!isProtectedHost(hostname)) {
     const authRedirect = enforceAuth(request);
-    if (authRedirect) return authRedirect;
+    if (authRedirect) return withSecurityHeaders(authRedirect);
 
     const concurrencyRedirect = await enforceSessionConcurrency(request);
-    if (concurrencyRedirect) return concurrencyRedirect;
+    if (concurrencyRedirect) return withSecurityHeaders(concurrencyRedirect);
 
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   // M2M proxy endpoints perform their own Bearer-token validation and should
   // not be blocked by dashboard IP allowlists.
   if (pathname.startsWith("/api/proxy/")) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   if (isInternalRequest(request)) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   const clientIp = getClientIp(request);
@@ -270,12 +279,12 @@ export async function middleware(request: NextRequest) {
   }
 
   const authRedirect = enforceAuth(request);
-  if (authRedirect) return authRedirect;
+  if (authRedirect) return withSecurityHeaders(authRedirect);
 
   const concurrencyRedirect = await enforceSessionConcurrency(request);
-  if (concurrencyRedirect) return concurrencyRedirect;
+  if (concurrencyRedirect) return withSecurityHeaders(concurrencyRedirect);
 
-  return NextResponse.next();
+  return withSecurityHeaders(NextResponse.next());
 }
 
 export const config = {

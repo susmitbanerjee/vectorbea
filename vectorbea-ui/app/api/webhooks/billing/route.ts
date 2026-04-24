@@ -9,9 +9,10 @@ import {
   isEventAlreadyProcessed,
   syncSubscription,
   type BillingProvider,
-  type SubscriptionStatus,
   type SubscriptionSyncPayload,
+  type SubscriptionStatus,
 } from "@/lib/server/billing-sync";
+import type { PlanTier } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,40 @@ function requireEnv(name: string): string {
 
 function optionalEnv(name: string): string | undefined {
   return process.env[name] ?? undefined;
+}
+
+function toNumber(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolvePlanTier({
+  productId,
+  variantId,
+  fallback = "team",
+}: {
+  productId?: number | null;
+  variantId?: number | null;
+  fallback?: PlanTier;
+}): PlanTier {
+  const enterpriseVariant = toNumber(optionalEnv("LEMON_SQUEEZY_ENTERPRISE_VARIANT_ID"));
+  const proVariant = toNumber(optionalEnv("LEMON_SQUEEZY_PRO_VARIANT_ID"));
+  const teamVariant = toNumber(optionalEnv("LEMON_SQUEEZY_VARIANT_ID"));
+  const enterpriseProduct = toNumber(optionalEnv("LEMON_SQUEEZY_ENTERPRISE_PRODUCT_ID"));
+  const proProduct = toNumber(optionalEnv("LEMON_SQUEEZY_PRO_PRODUCT_ID"));
+  const teamProduct = toNumber(optionalEnv("LEMON_SQUEEZY_PRODUCT_ID"));
+
+  if ((enterpriseVariant && variantId === enterpriseVariant) || (enterpriseProduct && productId === enterpriseProduct)) {
+    return "enterprise";
+  }
+  if ((proVariant && variantId === proVariant) || (proProduct && productId === proProduct)) {
+    return "pro";
+  }
+  if ((teamVariant && variantId === teamVariant) || (teamProduct && productId === teamProduct)) {
+    return "team";
+  }
+  return fallback;
 }
 
 // ── HMAC verification (Lemon Squeezy) ────────────────────────────────────────
@@ -109,6 +144,13 @@ function extractLsWorkspaceId(payload: LsPayload): string | null {
     getString(payload.data?.attributes?.workspaceId) ??
     getString(payload.data?.attributes?.workspace_id)
   );
+}
+
+function extractLsPlanTier(payload: LsPayload): PlanTier {
+  const attrs = payload.data?.attributes ?? {};
+  const variantId = getNumber(attrs.variant_id);
+  const productId = getNumber(attrs.product_id);
+  return resolvePlanTier({ variantId, productId, fallback: "team" });
 }
 
 // ── Stripe helpers ────────────────────────────────────────────────────────────
@@ -204,6 +246,7 @@ async function handleStripe(
       seatQuantity:     stripeSeatQuantity(sub),
       currentPeriodEnd: stripeCurrentPeriodEnd(sub),
       stripeCustomerId: stripeCustomerId(sub),
+      targetPlanTier: resolvePlanTier({ fallback: "team" }),
     };
   }
 
@@ -220,6 +263,7 @@ async function handleStripe(
       seatQuantity:     1,
       currentPeriodEnd: stripeCurrentPeriodEnd(sub),
       stripeCustomerId: stripeCustomerId(sub),
+      targetPlanTier: resolvePlanTier({ fallback: "team" }),
     };
   }
 
@@ -249,6 +293,7 @@ async function handleStripe(
         seatQuantity:     1,
         currentPeriodEnd: null,
         stripeCustomerId: custId,
+        targetPlanTier: resolvePlanTier({ fallback: "team" }),
       };
     }
   }
@@ -292,9 +337,11 @@ async function handleLemonSqueezy(
     "subscription_created",
     "subscription_updated",
     "subscription_cancelled",   // LS spelling
+    "subscription_resumed",
     "subscription_expired",
     "subscription_paused",
     "subscription_payment_failed",
+    "subscription_payment_success",
   ]);
 
   if (!handled.has(eventName)) {
@@ -319,8 +366,14 @@ async function handleLemonSqueezy(
 
   // ── Derive status ────────────────────────────────────────────────────────
   let status: SubscriptionStatus;
-  if (eventName === "subscription_created" || eventName === "subscription_updated") {
+  if (
+    eventName === "subscription_created" ||
+    eventName === "subscription_updated" ||
+    eventName === "subscription_resumed"
+  ) {
     status = normaliseLsStatus(attrs.status);
+  } else if (eventName === "subscription_payment_success") {
+    status = "active";
   } else if (eventName === "subscription_payment_failed") {
     status = "past_due";
   } else if (eventName === "subscription_paused") {
@@ -343,6 +396,7 @@ async function handleLemonSqueezy(
     status,
     workspaceId:      extractLsWorkspaceId(lsPayload),
     seatQuantity:     extractLsSeatQuantity(attrs),
+    targetPlanTier:   extractLsPlanTier(lsPayload),
     currentPeriodEnd: currentPeriodEnd && !isNaN(currentPeriodEnd.getTime())
       ? currentPeriodEnd
       : null,

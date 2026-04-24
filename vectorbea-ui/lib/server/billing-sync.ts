@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import type { PlanTier } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ export type SubscriptionSyncPayload = {
   currentPeriodEnd: Date | null;    // null = indefinite / unknown
   // Only populated for Stripe — used as fallback lookup when workspaceId is absent
   stripeCustomerId?: string | null;
+  targetPlanTier?: PlanTier | null;
 };
 
 export type SubscriptionStatus =
@@ -138,6 +140,9 @@ export async function syncSubscription(payload: SubscriptionSyncPayload): Promis
 
   // ── 2. Determine action ───────────────────────────────────────────────────
   const isActive = payload.status === "active" || payload.status === "trialing";
+  const resolvedPlanTier: PlanTier = payload.targetPlanTier && payload.targetPlanTier !== "free"
+    ? payload.targetPlanTier
+    : "team";
 
   const orgUpdate: Record<string, unknown> = {
     subscription_id:     payload.subscriptionId,
@@ -146,7 +151,7 @@ export async function syncSubscription(payload: SubscriptionSyncPayload): Promis
   };
 
   if (isActive) {
-    orgUpdate.plan_tier  = "team";
+    orgUpdate.plan_tier  = resolvedPlanTier;
     orgUpdate.max_seats  = Math.max(payload.seatQuantity, 1);
     // Preserve stripe_customer_id when provided
     if (payload.stripeCustomerId) {
@@ -193,7 +198,7 @@ export async function syncSubscription(payload: SubscriptionSyncPayload): Promis
     organizationId,
     workspaceId:     resolvedWorkspaceId ?? payload.workspaceId,
     action:          isActive ? "upgraded" : "downgraded",
-    planTier:        isActive ? "team"     : "free",
+    planTier:        isActive ? resolvedPlanTier : "free",
     subscriptionId:  payload.subscriptionId,
     status:          payload.status,
   };
@@ -208,7 +213,7 @@ export type SyncResult =
       organizationId: string;
       workspaceId:    string | null;
       action:         "upgraded" | "downgraded";
-      planTier:       "team" | "free";
+      planTier:       PlanTier;
       subscriptionId: string;
       status:         SubscriptionStatus;
     };

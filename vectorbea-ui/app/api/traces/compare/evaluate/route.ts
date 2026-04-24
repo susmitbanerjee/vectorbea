@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertFeatureAccess } from "@/lib/server/feature-gates";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { buildTraceComparison, evaluateTraceReplay, toMetadataEvaluation } from "@/lib/server/trace-compare";
 import { isRuntimeTraceRow, mapAuditRowToTraceDetail, type AuditLogTraceRow } from "@/lib/server/traces";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
@@ -33,6 +35,11 @@ export async function POST(request: NextRequest) {
 
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "evaluations");
+    const rate = consumeRateLimit(`traces:compare-evaluate:${workspaceId}:${auth.user.id}`, 30, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded for compare evaluation." }, { status: 429 });
+    }
 
     const body = (await request.json().catch(() => ({}))) as {
       leftTraceId?: string;

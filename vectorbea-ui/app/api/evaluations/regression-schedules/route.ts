@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { listRegressionSchedules, createRegressionSchedule } from "@/lib/server/regression-schedules";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,7 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) return NextResponse.json([]);
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "scheduled_regressions");
     return NextResponse.json(await listRegressionSchedules(workspaceId));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
@@ -22,6 +24,7 @@ export async function POST(request: NextRequest) {
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "scheduled_regressions");
     const body = await request.json().catch(() => ({})) as { name?: string; baselineDatasetId?: string; candidatePromptVersionStrategy?: string; candidatePromptVersionId?: string; promptName?: string; cronExpression?: string };
     if (!body.name || !body.baselineDatasetId) {
       return NextResponse.json({ error: "name and baselineDatasetId are required" }, { status: 400 });

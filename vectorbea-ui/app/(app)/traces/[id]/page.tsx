@@ -839,6 +839,11 @@ export default function TraceDetailsPage() {
                 Replay of <span className="font-mono">{trace.replayOf}</span>
               </div>
             ) : null}
+            {trace.replayOf && trace.executorType !== "enterprise_gateway" ? (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                Simulated replay path: direct-provider replay uses captured output in this repository. Live replay is available through enterprise gateway execution.
+              </div>
+            ) : null}
             {trace.evaluation ? (
               <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
                 Evaluation <span className="font-semibold">{trace.evaluation.label}</span>

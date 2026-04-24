@@ -460,6 +460,11 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
                       Enterprise gateway traces compare using whatever the customer gateway returns. Missing tokens,
                       cost, or model fields are treated as unavailable, not zero.
                     </p>
+                    {comparison.right.executorType !== "enterprise_gateway" ? (
+                      <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-amber-200">
+                        Direct-provider replay is simulated in this repository and may use captured output instead of a live downstream call.
+                      </p>
+                    ) : null}
                     <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                       <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Replay lineage</div>
                       <div className="mt-1 font-mono text-xs text-cyan-200">

@@ -374,6 +374,8 @@ export function ApiKeysClient({ initialKeys }: Props) {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Key</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Last used</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -386,6 +388,14 @@ export function ApiKeysClient({ initialKeys }: Props) {
                         <code className="font-mono text-xs">
                           {revealedRows[key.id] ? key.maskedKey : "vb_••••••••"}
                         </code>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={key.active === false ? "secondary" : "success"}>
+                          {key.active === false ? "Revoked" : "Active"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "Never"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {new Date(key.createdAt).toLocaleString()}

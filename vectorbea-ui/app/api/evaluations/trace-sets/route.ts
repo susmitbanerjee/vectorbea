@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createTraceSetEvaluationRun, listEvaluationRuns } from "@/lib/server/evaluation-runs";
+import { assertFeatureAccess } from "@/lib/server/feature-gates";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
+import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +17,7 @@ export async function GET(request: NextRequest) {
 
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "evaluations");
 
     return NextResponse.json(await listEvaluationRuns(workspaceId));
   } catch (error) {
@@ -33,6 +37,12 @@ export async function POST(request: NextRequest) {
 
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "evaluations");
+    const rate = consumeRateLimit(`evaluations:trace-sets:${workspaceId}:${auth.user.id}`, 20, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded for evaluation creation." }, { status: 429 });
+    }
+    await assertQuotaAvailable(workspaceId, "evaluation_runs", 1);
 
     const body = (await request.json().catch(() => ({}))) as {
       sourceTraceIds?: string[];
@@ -56,9 +66,11 @@ export async function POST(request: NextRequest) {
       { status: 201 },
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to create evaluation run";
+    const quotaExceeded = message.toLowerCase().includes("quota exceeded");
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create evaluation run" },
-      { status: 500 },
+      { error: quotaExceeded ? message : message },
+      { status: quotaExceeded ? 402 : 500 },
     );
   }
 }

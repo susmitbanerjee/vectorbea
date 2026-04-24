@@ -18,9 +18,10 @@ import {
 import { toast } from "sonner";
 
 import { type PromptDetail } from "@/lib/api";
+import type { PromptRolloutDistribution, RolloutStatus } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -183,6 +184,8 @@ export function PromptEditor({
   );
   const [isPending, startTransition] = useTransition();
   const [isPublishPending, startPublishTransition] = useTransition();
+  const [rolloutDist, setRolloutDist] = useState<PromptRolloutDistribution | null>(null);
+  const [rolloutSaving, setRolloutSaving] = useState(false);
 
   // Keep local state in sync when the server component re-fetches after
   // router.refresh() (e.g., right after a save or publish completes).
@@ -215,6 +218,16 @@ export function PromptEditor({
     setTemplateText(selectedVersion.templateText);
     setModelParameters(toFormParameters(selectedVersion.parameters));
   }, [selectedVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!prompt?.promptId || !activeWorkspaceId) return;
+    fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setRolloutDist(d as PromptRolloutDistribution); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [prompt?.promptId, activeWorkspaceId]);
 
   const parsedParameters = useMemo(
     () => toPersistedParameters(modelParameters),
@@ -410,6 +423,26 @@ export function PromptEditor({
         );
       }
     });
+  };
+
+  const saveRollout = async (versionId: string, status: RolloutStatus, percentage: number) => {
+    if (!prompt?.promptId || !activeWorkspaceId || rolloutSaving) return;
+    setRolloutSaving(true);
+    try {
+      const res = await fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promptVersionId: versionId, rolloutStatus: status, rolloutPercentage: percentage }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save rollout");
+      // Re-fetch distribution
+      const r2 = await fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`);
+      const d2 = await r2.json();
+      setRolloutDist(d2 as PromptRolloutDistribution);
+    } catch { /* silent */ } finally {
+      setRolloutSaving(false);
+    }
   };
 
   const copyImportCode = () => {
@@ -650,6 +683,63 @@ export function PromptEditor({
                 </div>
               </CardContent>
             </Card>
+
+            {rolloutDist && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Version Rollout</CardTitle>
+                  <CardDescription className="text-xs">
+                    Control traffic distribution across versions. Candidate versions receive a percentage slice; the active version handles the remainder.
+                    Use deterministic routing via the <code className="text-[11px]">x-request-id</code> or <code className="text-[11px]">x-user-id</code> header.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="text-xs text-muted-foreground">
+                    Total candidate traffic: <span className="font-medium text-foreground">{rolloutDist.totalCandidatePercentage}%</span>
+                    {rolloutDist.totalCandidatePercentage > 100 && (
+                      <span className="ml-2 text-red-400">⚠ Exceeds 100%</span>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {rolloutDist.versions.map((v) => (
+                      <div key={v.promptVersionId} className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-medium">{v.versionTag}</span>
+                          {v.isPublished && <span className="ml-2 text-[10px] text-green-400">published</span>}
+                        </div>
+                        <select
+                          className="rounded border border-border bg-background px-2 py-1 text-xs"
+                          value={v.rolloutStatus}
+                          onChange={(e) => void saveRollout(v.promptVersionId, e.target.value as RolloutStatus, v.rolloutPercentage)}
+                        >
+                          <option value="draft">Draft</option>
+                          <option value="candidate">Candidate</option>
+                          <option value="active">Active</option>
+                          <option value="deprecated">Deprecated</option>
+                        </select>
+                        {v.rolloutStatus === "candidate" && (
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            className="w-16 rounded border border-border bg-background px-2 py-1 text-xs tabular-nums"
+                            value={v.rolloutPercentage}
+                            onChange={(e) => void saveRollout(v.promptVersionId, v.rolloutStatus, parseInt(e.target.value, 10) || 0)}
+                          />
+                        )}
+                        {v.rolloutStatus === "candidate" && (
+                          <span className="text-xs text-muted-foreground">%</span>
+                        )}
+                        {v.rolloutStatus === "active" && (
+                          <span className="text-xs text-green-400">receives all non-candidate traffic</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {rolloutSaving && <p className="text-xs text-muted-foreground">Saving...</p>}
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="preview">

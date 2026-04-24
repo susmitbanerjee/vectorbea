@@ -6,6 +6,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
+  BarChart3,
+  Bell,
   CalendarClock,
   CreditCard,
   ArrowUpRight,
@@ -40,6 +42,7 @@ const ALL_NAV_ITEMS: Array<{
   isSubItem?: boolean;
 }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard/metrics", label: "Metrics", icon: BarChart3 },
   { href: "/dashboard/infrastructure", label: "Infrastructure", icon: Server },
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
@@ -48,6 +51,7 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true },
   { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true },
   { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true },
+  { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/settings/members", label: "Members", icon: Users },

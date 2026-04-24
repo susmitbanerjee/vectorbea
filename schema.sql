@@ -189,3 +189,44 @@ CREATE TABLE IF NOT EXISTS vectorbea.regression_schedules (
   created_at                      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS regression_schedules_workspace_idx ON vectorbea.regression_schedules(workspace_id);
+
+-- ─── Prompt Version Rollout ──────────────────────────────────────────────────────
+ALTER TABLE vectorbea.prompt_versions
+  ADD COLUMN IF NOT EXISTS rollout_status   text NOT NULL DEFAULT 'draft',
+  ADD COLUMN IF NOT EXISTS rollout_percentage integer NOT NULL DEFAULT 0;
+
+-- rollout_status: draft | candidate | active | deprecated
+-- rollout_percentage: 0-100; only used when status = 'candidate'
+-- When status = 'active', the version receives all traffic not assigned to candidates
+
+CREATE INDEX IF NOT EXISTS prompt_versions_rollout_idx
+  ON vectorbea.prompt_versions(prompt_id, rollout_status);
+
+-- ─── Alert Rules ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS vectorbea.alert_rules (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id    uuid NOT NULL REFERENCES vectorbea.workspaces(id) ON DELETE CASCADE,
+  name            text NOT NULL,
+  metric_type     text NOT NULL,   -- latency_p95 | error_rate | eval_score_avg | cache_hit_rate
+  threshold       numeric NOT NULL,
+  comparison      text NOT NULL DEFAULT 'gt',  -- gt | lt | gte | lte
+  window_hours    integer NOT NULL DEFAULT 1,
+  enabled         boolean NOT NULL DEFAULT true,
+  created_by      uuid NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS alert_rules_workspace_idx ON vectorbea.alert_rules(workspace_id);
+
+-- ─── Alert Events ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS vectorbea.alert_events (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  rule_id         uuid NOT NULL REFERENCES vectorbea.alert_rules(id) ON DELETE CASCADE,
+  workspace_id    uuid NOT NULL,
+  metric_value    numeric NOT NULL,
+  threshold       numeric NOT NULL,
+  prompt_name     text,
+  triggered_at    timestamptz NOT NULL DEFAULT now(),
+  resolved_at     timestamptz
+);
+CREATE INDEX IF NOT EXISTS alert_events_workspace_idx ON vectorbea.alert_events(workspace_id);
+CREATE INDEX IF NOT EXISTS alert_events_rule_idx ON vectorbea.alert_events(rule_id);

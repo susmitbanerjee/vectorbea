@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
       .from("api_keys")
-      .select("id, workspace_id, key_name, key_last_four, key_role, created_at")
+      .select("id, workspace_id, key_name, key_last_four, key_role, created_at, last_used_at, revoked_at")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false });
 
@@ -35,6 +35,9 @@ export async function GET(request: NextRequest) {
       name: row.key_name ?? "",
       maskedKey: `vb_****${row.key_last_four ?? ""}`,
       createdAt: row.created_at,
+      lastUsedAt: row.last_used_at ?? null,
+      revokedAt: row.revoked_at ?? null,
+      active: !row.revoked_at,
     }));
 
     return NextResponse.json(keys);
@@ -61,8 +64,9 @@ export async function POST(request: NextRequest) {
     const payload = (await request.json()) as { keyName?: string; agentId?: string; name?: string; keyRole?: string };
     const keyName = payload.keyName?.trim() || payload.name?.trim() || "default";
     const keyRole = payload.keyRole?.trim() || "admin";
+    const keyPrefix = process.env.NODE_ENV === "production" ? "vb_live_" : "vb_test_";
 
-    const rawKey = `vb_${randomBytes(32).toString("base64url")}`;
+    const rawKey = `${keyPrefix}${randomBytes(32).toString("base64url")}`;
     const keyHash = createHash("sha256").update(rawKey).digest("hex");
     const keyLastFour = rawKey.slice(-4);
 
@@ -75,6 +79,7 @@ export async function POST(request: NextRequest) {
         key_hash: keyHash,
         key_last_four: keyLastFour,
         key_role: keyRole,
+        revoked_at: null,
       })
       .select("id, workspace_id, key_name, created_at")
       .single();

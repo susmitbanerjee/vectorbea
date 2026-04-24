@@ -229,7 +229,6 @@ export default function ScheduledRegressionsPage() {
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
                       {schedule.lastRunAt && <span>Last run: {new Date(schedule.lastRunAt).toLocaleString()}</span>}
                       {schedule.lastRunRecommendation && <span>Recommendation: {schedule.lastRunRecommendation}</span>}
-                      {schedule.lastRunStatus && <span>Status: {schedule.lastRunStatus}</span>}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">

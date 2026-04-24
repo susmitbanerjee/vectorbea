@@ -2,16 +2,13 @@
 // Called by the sidecar's HubClient on boot (eager sync) and every 5 min (poll).
 // Also used as the token-validation probe: a 401 means the token is invalid.
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateProxyApiKey } from "@/lib/proxy-auth-edge";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-
-type DeploymentAgent = {
-  id: string;
-  workspace_id: string;
-};
 
 type PromptVersion = {
   id: string;
@@ -77,32 +74,13 @@ async function supabaseGet<T>(path: string): Promise<T> {
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Extract bearer token (the sidecar's VECTORBEA_KEY)
-    const authHeader = request.headers.get("authorization") ?? "";
-    const rawToken = authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7).trim()
-      : null;
-
-    if (!rawToken) {
-      return NextResponse.json(
-        { error: "Authorization header with Bearer token is required" },
-        { status: 401 },
-      );
+    const auth = await authenticateProxyApiKey(request);
+    if (!auth.ok) return auth.response;
+    const workspaceId = auth.workspaceId;
+    const rate = consumeRateLimit(`proxy:sync:${workspaceId}`, 120, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded for sync endpoint" }, { status: 429 });
     }
-
-    // 2. Validate token → get workspace
-    const agentRows = await supabaseGet<DeploymentAgent[]>(
-      `/deployment_agents?select=id,workspace_id&api_token=eq.${encodeURIComponent(rawToken)}&limit=1`,
-    );
-    const agent = agentRows[0];
-    if (!agent) {
-      return NextResponse.json(
-        { error: "Invalid deployment agent token" },
-        { status: 401 },
-      );
-    }
-
-    const workspaceId = agent.workspace_id;
 
     // 3. Look up organization for this workspace
     const workspaceRows = await supabaseGet<WorkspaceRow[]>(
@@ -146,9 +124,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(payloads);
   } catch (error) {
-    console.error("[proxy/sync] unhandled error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
+      { error: "Failed to sync prompts" },
       { status: 500 },
     );
   }

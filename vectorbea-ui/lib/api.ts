@@ -78,6 +78,9 @@ export interface ApiKeyView {
   name: string;
   maskedKey: string;
   createdAt: string;
+  lastUsedAt?: string | null;
+  revokedAt?: string | null;
+  active?: boolean;
 }
 
 export interface CreateApiKeyResponse {
@@ -401,6 +404,7 @@ export interface TraceSetEvaluationRunView {
     recommendation?: TraceSetEvaluationRunView["aggregate"]["recommendation"];
     criticalFailures?: number;
     observabilityNote?: string | null;
+    replayMode?: "simulated" | "live" | null;
     checks?: TraceEvaluationCheckView[];
     error?: string | null;
   }>;
@@ -535,4 +539,88 @@ export type RegressionSchedule = {
   nextRunAt: string | null;
   createdBy: string;
   createdAt: string;
+};
+
+// ─── Rollout ────────────────────────────────────────────────────────────────────
+
+export type RolloutStatus = "draft" | "candidate" | "active" | "deprecated";
+
+export type PromptVersionRollout = {
+  promptVersionId: string;
+  versionTag: string;
+  rolloutStatus: RolloutStatus;
+  rolloutPercentage: number;
+  isPublished: boolean;
+};
+
+export type PromptRolloutDistribution = {
+  promptId: string;
+  promptName: string;
+  versions: PromptVersionRollout[];
+  totalCandidatePercentage: number;
+  activeVersionId: string | null;
+};
+
+// ─── Metrics ────────────────────────────────────────────────────────────────────
+
+export type TimeWindow = "1h" | "24h" | "7d";
+
+export type PromptMetricRow = {
+  promptName: string;
+  requestCount: number;
+  successRate: number;
+  errorRate: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number | null;
+  cacheHitRate: number;
+  evalScoreAvg: number | null;
+  tokenAvg: number | null;
+};
+
+export type WorkspaceMetricsSummary = {
+  window: TimeWindow;
+  totalRequests: number;
+  successRate: number;
+  errorRate: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number | null;
+  cacheHitRate: number;
+  evalScoreAvg: number | null;
+  byPrompt: PromptMetricRow[];
+  latencyTrend: Array<{ bucket: string; avgMs: number; count: number }>;
+};
+
+// ─── Alerts ─────────────────────────────────────────────────────────────────────
+
+export type AlertMetricType = "latency_p95" | "error_rate" | "eval_score_avg" | "cache_hit_rate";
+export type AlertComparison = "gt" | "lt" | "gte" | "lte";
+
+export type AlertRule = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  metricType: AlertMetricType;
+  threshold: number;
+  comparison: AlertComparison;
+  windowHours: number;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type AlertEvent = {
+  id: string;
+  ruleId: string;
+  ruleName?: string | null;
+  workspaceId: string;
+  metricValue: number;
+  threshold: number;
+  promptName: string | null;
+  triggeredAt: string;
+  resolvedAt: string | null;
+};
+
+export type AlertEvaluationResult = {
+  triggered: AlertEvent[];
+  checked: number;
 };

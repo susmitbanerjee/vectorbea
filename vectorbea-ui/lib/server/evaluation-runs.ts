@@ -159,6 +159,7 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
         recommendation: (asString(result.recommendation) as TraceSetEvaluationRunView["results"][number]["recommendation"]) ?? "needs_review",
         criticalFailures: Number(result.critical_failures ?? 0),
         observabilityNote: asString(result.observability_note),
+        replayMode: (asString(result.replay_mode) as TraceSetEvaluationRunView["results"][number]["replayMode"]) ?? null,
         checks: rawChecks.map((entry) => {
           const check = asRecord(entry);
           const checkScore = Number(check.score ?? Number.NaN);
@@ -306,6 +307,7 @@ export async function createTraceSetEvaluationRun(args: {
         recommendation: "blocked",
         criticalFailures: 1,
         observabilityNote: "Replay input metadata missing",
+        replayMode: null,
         checks: [
           {
             name: "replay_completed",
@@ -390,6 +392,7 @@ export async function createTraceSetEvaluationRun(args: {
       promptVersionTag: candidateVersion.version_tag,
     });
     const evaluation = evaluateTraceReplay(sourceDetail, replayDetail);
+    const replayMode = asString(normalizeTraceMetadataV1(replayRow.metadata ?? {}).tags?.replay_mode) as "simulated" | "live" | null;
 
     const metadataWithEvaluation = {
       ...(replayRow.metadata ?? {}),
@@ -439,6 +442,7 @@ export async function createTraceSetEvaluationRun(args: {
               : "needs_review",
       criticalFailures: evaluation.criticalFailures ?? 0,
       observabilityNote: evaluation.observabilityNote ?? null,
+      replayMode,
       checks: evaluation.checks,
       error: null,
     });
@@ -508,6 +512,7 @@ export async function createTraceSetEvaluationRun(args: {
             recommendation: result.recommendation ?? "needs_review",
             critical_failures: result.criticalFailures ?? 0,
             observability_note: result.observabilityNote ?? null,
+            replay_mode: result.replayMode ?? null,
             checks: (result.checks ?? []).map((check) => ({
               name: check.name,
               category: check.category,

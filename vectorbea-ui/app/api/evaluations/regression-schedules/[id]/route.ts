@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { toggleRegressionSchedule, deleteRegressionSchedule } from "@/lib/server/regression-schedules";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "scheduled_regressions");
     const { id } = await params;
     const body = await request.json().catch(() => ({})) as { enabled?: boolean };
     if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "enabled boolean required" }, { status: 400 });
@@ -25,6 +27,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    await assertFeatureAccess(workspaceId, "scheduled_regressions");
     const { id } = await params;
     await deleteRegressionSchedule(workspaceId, id);
     return NextResponse.json({ ok: true });

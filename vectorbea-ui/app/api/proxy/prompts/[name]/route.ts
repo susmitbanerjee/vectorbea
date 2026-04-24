@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateProxyApiKey } from "@/lib/proxy-auth-edge";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-type DeploymentAgent = {
-  id: string;
-  workspace_id: string;
-};
 
 type PromptVersion = {
   id: string;
@@ -14,6 +11,8 @@ type PromptVersion = {
   template_text: string;
   parameters: Record<string, unknown> | null;
   is_published: boolean;
+  rollout_status?: string | null;
+  rollout_percentage?: number | null;
   created_at: string;
 };
 
@@ -47,6 +46,100 @@ function parsePromptReference(rawName: string, requestedVersion: string | null) 
   }
 
   return { promptName, versionTag };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function normalizeEnvironment(value: string | null): string {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : "prod";
+}
+
+function hashBucket(input: string): number {
+  // FNV-1a 32-bit hash, deterministic in Edge runtime.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % 100;
+}
+
+function extractSeed(request: NextRequest, token: string, promptId: string) {
+  const seed =
+    request.headers.get("x-vectorbea-user-id")?.trim() ||
+    request.headers.get("x-user-id")?.trim() ||
+    request.headers.get("x-request-id")?.trim() ||
+    request.nextUrl.searchParams.get("requestId")?.trim() ||
+    request.nextUrl.searchParams.get("userId")?.trim() ||
+    token;
+  return `${seed}:${promptId}`;
+}
+
+function versionEnabledForEnvironment(version: PromptVersion, environment: string): boolean {
+  const params = asRecord(version.parameters);
+  const rollout = asRecord(params.vectorbea_rollout);
+  const environments = rollout.environments;
+  if (!Array.isArray(environments) || environments.length === 0) {
+    return true;
+  }
+  const normalized = environments
+    .map((value) => (typeof value === "string" ? value.trim().toLowerCase() : ""))
+    .filter((value) => value.length > 0);
+  if (normalized.length === 0) return true;
+  return normalized.includes(environment) || normalized.includes("all");
+}
+
+function selectByRollout(versions: PromptVersion[], seedKey: string, environment: string) {
+  const sorted = [...versions].sort((a, b) => a.version_tag.localeCompare(b.version_tag));
+  const candidates = sorted.filter(
+    (version) =>
+      (version.rollout_status ?? "draft") === "candidate" &&
+      (version.rollout_percentage ?? 0) > 0 &&
+      versionEnabledForEnvironment(version, environment),
+  );
+  const active = sorted.find(
+    (version) =>
+      (version.rollout_status ?? "draft") === "active" &&
+      versionEnabledForEnvironment(version, environment),
+  );
+
+  if (candidates.length === 0) {
+    return {
+      version: active ?? sorted.find((version) => version.is_published) ?? null,
+      bucket: null,
+      candidateTotal: 0,
+      selectedBy: active ? "active" : "published",
+    };
+  }
+
+  const bucket = hashBucket(seedKey);
+  let cursor = 0;
+  let selected: PromptVersion | null = null;
+
+  for (const candidate of candidates) {
+    const share = Math.max(0, Math.min(100, candidate.rollout_percentage ?? 0));
+    const end = Math.min(100, cursor + share);
+    if (bucket >= cursor && bucket < end) {
+      selected = candidate;
+      break;
+    }
+    cursor = end;
+    if (cursor >= 100) break;
+  }
+
+  return {
+    version: selected ?? active ?? sorted.find((version) => version.is_published) ?? null,
+    bucket,
+    candidateTotal: Math.min(
+      100,
+      candidates.reduce((sum, version) => sum + Math.max(0, Math.min(100, version.rollout_percentage ?? 0)), 0),
+    ),
+    selectedBy: selected ? "candidate_split" : active ? "active_fallback" : "published_fallback",
+  };
 }
 
 function getSupabaseConfig() {
@@ -89,27 +182,17 @@ export async function GET(
   { params }: { params: Promise<{ name: string }> },
 ) {
   try {
-    const authHeader = request.headers.get("authorization") ?? "";
-    const rawToken = authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7).trim()
-      : null;
+    const auth = await authenticateProxyApiKey(request);
+    if (!auth.ok) return auth.response;
+    const workspaceId = auth.workspaceId;
 
-    if (!rawToken) {
+    const rate = consumeRateLimit(`proxy:prompts:${workspaceId}`, 600, 60_000);
+    if (!rate.allowed) {
       return NextResponse.json(
-        { error: "Authorization header with Bearer token is required" },
-        { status: 401 },
+        { error: "Rate limit exceeded for prompt fetch. Try again shortly." },
+        { status: 429 },
       );
     }
-
-    const agentRows = await supabaseGet<DeploymentAgent[]>(
-      `/deployment_agents?select=id,workspace_id&api_token=eq.${encodeURIComponent(rawToken)}&limit=1`,
-    );
-    const agent = agentRows[0];
-    if (!agent) {
-      return NextResponse.json({ error: "Invalid deployment agent token" }, { status: 401 });
-    }
-
-    const workspaceId = agent.workspace_id;
     const { name } = await params;
     const decodedName = decodeURIComponent(name);
     const { promptName, versionTag: requestedVersionTag } = parsePromptReference(
@@ -118,7 +201,7 @@ export async function GET(
     );
 
     const promptRows = await supabaseGet<PromptRow[]>(
-      `/prompts?select=id,name,description,workspace_id,prompt_versions(id,version_tag,template_text,parameters,is_published,created_at)&name=eq.${encodeURIComponent(promptName)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=1`,
+      `/prompts?select=id,name,description,workspace_id,prompt_versions(id,version_tag,template_text,parameters,is_published,rollout_status,rollout_percentage,created_at)&name=eq.${encodeURIComponent(promptName)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=1`,
     );
     const prompt = promptRows[0];
 
@@ -139,9 +222,17 @@ export async function GET(
       return createdAtOrder !== 0 ? createdAtOrder : b.id.localeCompare(a.id);
     });
 
+    const runtimeEnvironment = normalizeEnvironment(
+      request.nextUrl.searchParams.get("environment") ??
+      request.headers.get("x-vectorbea-environment") ??
+      request.headers.get("x-environment"),
+    );
+    const seedKey = extractSeed(request, auth.rawToken, prompt.id);
+    const rolloutSelection = selectByRollout(sortedVersions, seedKey, runtimeEnvironment);
+
     const resolvedVersion = requestedVersionTag
       ? sortedVersions.find((version) => version.version_tag === requestedVersionTag)
-      : sortedVersions.find((version) => version.is_published);
+      : rolloutSelection.version;
 
     if (!resolvedVersion) {
       const reason = requestedVersionTag
@@ -164,11 +255,18 @@ export async function GET(
       templateText: resolvedVersion.template_text,
       parameters: resolvedVersion.parameters ?? {},
       createdAt: resolvedVersion.created_at,
+      rollout: {
+        status: resolvedVersion.rollout_status ?? "draft",
+        percentage: resolvedVersion.rollout_percentage ?? 0,
+        environment: runtimeEnvironment,
+        selectedBy: requestedVersionTag ? "explicit_version" : rolloutSelection.selectedBy,
+        candidateTotalPercentage: rolloutSelection.candidateTotal,
+        bucket: rolloutSelection.bucket,
+      },
     });
   } catch (error) {
-    console.error("[proxy/prompts-edge] unhandled error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
+      { error: "Failed to resolve prompt" },
       { status: 500 },
     );
   }

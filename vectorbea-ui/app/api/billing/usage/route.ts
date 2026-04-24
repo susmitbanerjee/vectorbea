@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { canUseFeature } from "@/lib/server/feature-gates";
 import {
   getWorkspaceMonthlyAuditCount,
   getWorkspacePlanLimits,
   getWorkspacePromptCount,
 } from "@/lib/server/workspace-limits";
+import { getWorkspaceUsage } from "@/lib/server/usage-quotas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,10 +22,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const [limits, promptsUsed, auditsUsed] = await Promise.all([
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+
+    const [limits, promptsUsed, auditsUsed, usageSnapshot, evalFeature, rolloutFeature, alertsFeature] = await Promise.all([
       getWorkspacePlanLimits(workspaceId),
       getWorkspacePromptCount(workspaceId),
       getWorkspaceMonthlyAuditCount(workspaceId),
+      getWorkspaceUsage(workspaceId),
+      canUseFeature(workspaceId, "evaluations"),
+      canUseFeature(workspaceId, "rollout"),
+      canUseFeature(workspaceId, "alerts"),
     ]);
 
     return NextResponse.json({
@@ -33,6 +43,13 @@ export async function GET(request: NextRequest) {
       auditLimit: limits.monthlyAuditLimit,
       seatsUsed: null,
       seatLimit: limits.maxSeats,
+      usage: usageSnapshot.usage,
+      usageLimits: usageSnapshot.limits,
+      features: {
+        evaluations: evalFeature.allowed,
+        rollout: rolloutFeature.allowed,
+        alerts: alertsFeature.allowed,
+      },
     });
   } catch (error) {
     return NextResponse.json(

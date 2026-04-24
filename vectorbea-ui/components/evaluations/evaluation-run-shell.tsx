@@ -115,7 +115,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                   <Metric label="Recommendation" value={run.aggregate.recommendation.replaceAll("_", " ")} />
                   <Metric label="Avg latency delta" value={run.aggregate.averageLatencyDeltaMs === null ? "Unavailable" : `${Math.round(run.aggregate.averageLatencyDeltaMs)}ms`} />
                   <Metric label="Avg token delta" value={run.aggregate.averageTokenDelta === null ? "Unavailable" : `${Math.round(run.aggregate.averageTokenDelta)}`} />
-                  <Metric label="Score" value={run.aggregate.score === null ? "Not scored" : `${Math.round(run.aggregate.score * 100)}%`} />
+                  <Metric label="Score" value={run.aggregate.score === null ? "Not scored" : `${Math.round(run.aggregate.score * 100)}%`} weightNote />
                   <Metric label="Confidence" value={run.aggregate.confidence === null ? "Unavailable" : `${Math.round(run.aggregate.confidence * 100)}%`} />
                   <Metric label="Critical failures" value={String(run.aggregate.criticalFailures)} />
                   <Metric label="Observability" value={run.aggregate.observabilityLevel} />
@@ -192,6 +192,11 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                 <CardTitle>Per-trace results</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
+                {run && (
+                  <p className="text-xs text-muted-foreground">
+                    Reviewer identity is the authenticated user ID. No expanded reviewer profile is stored.
+                  </p>
+                )}
                 {run.results.map((result) => (
                   <div key={`${result.sourceTraceId}-${result.replayTraceId ?? "missing"}`} className="space-y-2 rounded-lg border border-border bg-card px-4 py-3">
                     <div className="grid gap-3 md:grid-cols-[1.2fr_1.2fr_120px_120px_160px_140px]">
@@ -204,15 +209,32 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                     <div>
                       <div className="text-xs text-muted-foreground">Replay</div>
                       {result.replayTraceId ? (
-                        <Link href={`/traces/compare?left=${encodeURIComponent(result.sourceTraceId)}&right=${encodeURIComponent(result.replayTraceId)}&org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
-                          {result.replayTraceId}
-                          <ArrowRight className="h-3 w-3" />
-                        </Link>
+                        <div className="space-y-1">
+                          <Link href={`/traces/compare?left=${encodeURIComponent(result.sourceTraceId)}&right=${encodeURIComponent(result.replayTraceId)}&org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline">
+                            {result.replayTraceId}
+                            <ArrowRight className="h-3 w-3" />
+                          </Link>
+                          <div className="text-[10px] text-muted-foreground">
+                            {result.replayMode === "simulated"
+                              ? "Simulated replay (direct-provider limitation)"
+                              : result.replayMode === "live"
+                                ? "Live replay (enterprise gateway)"
+                                : "Replay mode unavailable"}
+                          </div>
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">No replay trace</span>
                       )}
                     </div>
-                    <Metric label="Status" value={result.status} />
+                    <div>
+                      <div className="text-xs text-muted-foreground">Status</div>
+                      <div className="mt-1 text-sm font-medium">
+                        {result.status}
+                        {result.observabilityNote && (
+                          <span className="text-[10px] text-muted-foreground"> {result.observabilityNote}</span>
+                        )}
+                      </div>
+                    </div>
                     <Metric label="Score" value={result.score === null ? "Unavailable" : `${Math.round(result.score * 100)}%`} />
                     <div>
                       <div className="text-xs text-muted-foreground">Delta</div>
@@ -244,11 +266,18 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, weightNote }: { label: string; value: string; weightNote?: boolean }) {
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-3">
       <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
+      <div className="mt-1 text-sm font-medium">
+        {value}
+        {weightNote && (
+          <span className="ml-1 text-[10px] text-muted-foreground" title="Scoring weights are code-configured in trace-compare.ts and are not editable via the UI.">
+            (weights: system config)
+          </span>
+        )}
+      </div>
     </div>
   );
 }

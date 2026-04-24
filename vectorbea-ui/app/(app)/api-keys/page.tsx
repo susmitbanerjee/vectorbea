@@ -24,18 +24,30 @@ export default async function ApiKeysPage({
     if (user) {
       const supabase = createVectorBeaAdminClient();
       const { data } = await supabase
-        .from("api_keys")
-        .select("id, workspace_id, key_name, key_last_four, key_role, created_at")
+        .from("workspace_members")
+        .select("workspace_id")
         .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-      keys = (data ?? []).map((row) => ({
-        id: row.id,
-        workspaceId: row.workspace_id,
-        name: row.key_name ?? "",
-        maskedKey: `vb_****${row.key_last_four ?? ""}`,
-        createdAt: row.created_at,
-      }));
+      if (data) {
+        const { data: keyRows } = await supabase
+          .from("api_keys")
+          .select("id, workspace_id, key_name, key_last_four, key_role, created_at, last_used_at, revoked_at")
+          .eq("workspace_id", workspaceId)
+          .order("created_at", { ascending: false });
+
+        keys = (keyRows ?? []).map((row) => ({
+          id: row.id,
+          workspaceId: row.workspace_id,
+          name: row.key_name ?? "",
+          maskedKey: `vb_****${row.key_last_four ?? ""}`,
+          createdAt: row.created_at,
+          lastUsedAt: row.last_used_at ?? null,
+          revokedAt: row.revoked_at ?? null,
+          active: !row.revoked_at,
+        }));
+      }
     }
   }
 

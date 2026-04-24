@@ -5,6 +5,7 @@ import {
   CreditCard,
   ExternalLink,
   FileText,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Users,
@@ -37,6 +38,21 @@ type BillingUsage = {
   auditLimit: number;
   seatsUsed: number | null;
   seatLimit: number;
+  usage?: {
+    runtime_traces?: number;
+    replay_runs?: number;
+    evaluation_runs?: number;
+  };
+  usageLimits?: {
+    runtime_traces?: number | null;
+    replay_runs?: number | null;
+    evaluation_runs?: number | null;
+  };
+  features?: {
+    evaluations?: boolean;
+    rollout?: boolean;
+    alerts?: boolean;
+  };
 };
 
 function UsageBar({
@@ -47,11 +63,12 @@ function UsageBar({
 }: {
   label: string;
   value: number;
-  limit: number;
+  limit: number | null;
   icon: React.ReactNode;
 }) {
-  const percentage = Math.min((value / Math.max(limit, 1)) * 100, 100);
-  const atLimit = value >= limit;
+  const numericLimit = limit ?? Number.MAX_SAFE_INTEGER;
+  const percentage = limit === null ? 0 : Math.min((value / Math.max(numericLimit, 1)) * 100, 100);
+  const atLimit = limit !== null && value >= numericLimit;
 
   return (
     <div className="space-y-3 rounded-2xl border border-border/60 bg-card/50 p-4">
@@ -63,22 +80,26 @@ function UsageBar({
           <div>
             <p className="text-sm font-medium">{label}</p>
             <p className="text-xs text-muted-foreground">
-              {value} / {limit} used
+              {limit === null ? `${value} used` : `${value} / ${numericLimit} used`}
             </p>
           </div>
         </div>
         <Badge variant={atLimit ? "destructive" : "outline"} className="tabular-nums">
-          {value}/{limit}
+          {limit === null ? `${value}/∞` : `${value}/${numericLimit}`}
         </Badge>
       </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-muted/60">
-        <div
-          className={`h-full rounded-full transition-all ${
-            atLimit ? "bg-destructive" : "bg-primary"
-          }`}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
+      {limit !== null ? (
+        <div className="h-2.5 overflow-hidden rounded-full bg-muted/60">
+          <div
+            className={`h-full rounded-full transition-all ${
+              atLimit ? "bg-destructive" : "bg-primary"
+            }`}
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+      ) : (
+        <div className="h-2.5 rounded-full bg-muted/60" />
+      )}
     </div>
   );
 }
@@ -267,6 +288,27 @@ export function BillingDashboard() {
               />
             </div>
 
+            <div className="grid gap-3 lg:grid-cols-3">
+              <UsageBar
+                label="Runtime traces"
+                value={usage?.usage?.runtime_traces ?? 0}
+                limit={usage?.usageLimits?.runtime_traces ?? null}
+                icon={<Sparkles className="h-4 w-4" />}
+              />
+              <UsageBar
+                label="Replay runs"
+                value={usage?.usage?.replay_runs ?? 0}
+                limit={usage?.usageLimits?.replay_runs ?? null}
+                icon={<RefreshCw className="h-4 w-4" />}
+              />
+              <UsageBar
+                label="Evaluation runs"
+                value={usage?.usage?.evaluation_runs ?? 0}
+                limit={usage?.usageLimits?.evaluation_runs ?? null}
+                icon={<ShieldCheck className="h-4 w-4" />}
+              />
+            </div>
+
             {loadingUsage ? (
               <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
                 Loading current usage...
@@ -279,6 +321,13 @@ export function BillingDashboard() {
                 events each month. Upgrade when you need more capacity.
               </div>
             ) : null}
+
+            <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-xs text-muted-foreground">
+              Feature access on this workspace:
+              <span className="ml-2 font-medium">Evaluations</span> {usage?.features?.evaluations ? "enabled" : "locked"} ·
+              <span className="ml-2 font-medium">Rollout</span> {usage?.features?.rollout ? "enabled" : "locked"} ·
+              <span className="ml-2 font-medium">Alerts</span> {usage?.features?.alerts ? "enabled" : "locked"}
+            </div>
 
             {seatUsage.atLimit && (
               <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">

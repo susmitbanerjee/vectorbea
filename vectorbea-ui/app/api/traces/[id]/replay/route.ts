@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { executeResolvedPrompt } from "@/lib/server/execution";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
+import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 import { isRuntimeTraceMetadata } from "@/lib/server/traces";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
@@ -64,6 +66,11 @@ export async function POST(
 
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const rate = consumeRateLimit(`traces:replay:${workspaceId}:${auth.user.id}`, 60, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Rate limit exceeded for replay requests." }, { status: 429 });
+    }
+    await assertQuotaAvailable(workspaceId, "replay_runs", 1);
 
     const supabase = createVectorBeaAdminClient();
 
@@ -177,9 +184,11 @@ export async function POST(
       createdAt: inserted.created_at,
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to replay trace";
+    const quotaExceeded = message.toLowerCase().includes("quota exceeded");
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to replay trace" },
-      { status: 500 },
+      { error: quotaExceeded ? message : "Failed to replay trace" },
+      { status: quotaExceeded ? 402 : 500 },
     );
   }
 }

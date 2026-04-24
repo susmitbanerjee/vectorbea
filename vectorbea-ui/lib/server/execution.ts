@@ -2,6 +2,7 @@ import "server-only";
 
 import type { TraceMetadataV1 } from "@/lib/trace-metadata";
 import { buildTraceMetadataV1, normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
+import { assertSafeGatewayUrl } from "@/lib/server/security";
 
 export type ExecutorType = "direct_provider" | "enterprise_gateway" | "observe_only";
 
@@ -117,13 +118,20 @@ async function executeGateway(
     throw new Error("Enterprise gateway replay requires VECTORBEA_ENTERPRISE_GATEWAY_URL.");
   }
 
-  const url = endpoint?.startsWith("http")
+  const allowPrivate = asString(process.env.VECTORBEA_ALLOW_PRIVATE_GATEWAY_URLS) === "true";
+  const resolvedUrl = endpoint?.startsWith("http")
     ? endpoint
     : `${baseUrl.replace(/\/$/, "")}/${String(endpoint ?? "/completion").replace(/^\//, "")}`;
+  const safeUrl = assertSafeGatewayUrl(resolvedUrl, allowPrivate).toString();
   const authHeader = asString(process.env.VECTORBEA_ENTERPRISE_GATEWAY_AUTH_HEADER) ?? "Authorization";
   const authToken = asString(process.env.VECTORBEA_ENTERPRISE_GATEWAY_AUTH_TOKEN);
+  const timeoutMs = Number(process.env.VECTORBEA_ENTERPRISE_GATEWAY_TIMEOUT_MS ?? "20000");
   const started = Date.now();
-  const response = await fetch(url, {
+  const controller = new AbortController();
+  const timeoutId = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? setTimeout(() => controller.abort("Gateway timeout"), timeoutMs)
+    : null;
+  const response = await fetch(safeUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -146,6 +154,9 @@ async function executeGateway(
       },
     }),
     cache: "no-store",
+    signal: controller.signal,
+  }).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
   });
   const latencyMs = Date.now() - started;
   const contentType = response.headers.get("content-type") ?? "";
@@ -306,7 +317,12 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
       ],
       tags: {
         ...(source.tags ?? {}),
-        ...(input.replayOf ? { replay_of: input.replayOf, replay_mode: "same_executor" } : {}),
+        ...(input.replayOf
+          ? {
+              replay_of: input.replayOf,
+              replay_mode: executor.type === "enterprise_gateway" ? "live" : "simulated",
+            }
+          : {}),
       },
       custom: {
         ...(source.custom ?? {}),
@@ -314,7 +330,7 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
           ? {
               replay: {
                 source_trace_id: input.replayOf,
-                replay_mode: "same_executor",
+                replay_mode: executor.type === "enterprise_gateway" ? "live" : "simulated",
                 source_executor_type: source.executor?.type ?? executor.type,
                 triggered_by: input.triggeredBy,
               },
