@@ -46,8 +46,12 @@ export async function authenticateRuntimeApiKey(request: NextRequest): Promise<R
     };
   }
 
-  // Keep legacy vb_ prefix compatible while supporting explicit env prefixes.
-  if (!/^vb(?:_(?:live|test))?_[A-Za-z0-9\-_]+$/.test(rawToken)) {
+  // Accepted prefixes:
+  //   vb_live_   dashboard production key
+  //   vb_test_   dashboard non-production key
+  //   vb_        legacy short prefix
+  //   vbagent_   legacy agent-provisioned key (vbagent CLI / older SDK)
+  if (!/^(?:vb(?:_(?:live|test))?_|vbagent_)[A-Za-z0-9\-_]+$/.test(rawToken)) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Invalid API key format" }, { status: 401 }),

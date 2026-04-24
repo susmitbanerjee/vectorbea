@@ -45,14 +45,19 @@ data class AppConfig(
 ) {
     init {
         // Validate key format early — fail fast before sync/heartbeat start.
-        // Expected prefixes: vb_live_, vb_test_, or legacy vb_
+        // Accepted prefixes (in order of preference):
+        //   vb_live_   — dashboard-generated production key
+        //   vb_test_   — dashboard-generated non-production key
+        //   vb_        — legacy short prefix
+        //   vbagent_   — legacy agent-provisioned key (vbagent CLI / older SDK)
         // Never log the key value itself.
         val keyValid = apiKey.startsWith("vb_live_") ||
                        apiKey.startsWith("vb_test_") ||
-                       apiKey.startsWith("vb_")
+                       apiKey.startsWith("vb_") ||
+                       apiKey.startsWith("vbagent_")
         require(keyValid) {
-            "VECTORBEA_KEY format is invalid. Expected prefix: vb_live_ (production) or vb_test_ (non-production). " +
-            "Generate a key from the VectorBea dashboard → API Keys."
+            "VECTORBEA_KEY format is invalid. Expected prefix: vb_live_ (production), vb_test_ (non-production), " +
+            "or vbagent_ (agent-provisioned). Generate a key from the VectorBea dashboard → API Keys."
         }
     }
 
