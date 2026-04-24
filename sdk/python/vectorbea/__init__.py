@@ -23,6 +23,7 @@ from vectorbea.errors import (
     VectorBeaError,
 )
 from vectorbea.models import Prompt, PromptTemplate  # PromptTemplate = backward-compat alias
+from vectorbea.trace_metadata import TRACE_METADATA_SCHEMA_VERSION, build_trace_metadata_v1
 
 # ---------------------------------------------------------------------------
 # Deprecated alias — will be removed in v1.0
@@ -44,6 +45,8 @@ __all__ = [
     # Deprecated
     "VectorBea",
     "PromptTemplate",
+    "TRACE_METADATA_SCHEMA_VERSION",
+    "build_trace_metadata_v1",
 ]
 
 __version__ = "0.2.0"

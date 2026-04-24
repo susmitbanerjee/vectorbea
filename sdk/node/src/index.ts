@@ -25,8 +25,8 @@ export { Prompt } from "./models.js";
 export type { PromptPayload } from "./models.js";
 
 // Resources
-export { Prompts } from "./resources/prompts.js";
-export type { LogAuditOptions } from "./resources/prompts.js";
+export { Prompts, TraceSession } from "./resources/prompts.js";
+export type { LogAuditOptions, TraceOptions } from "./resources/prompts.js";
 export { buildTraceMetadataV1, TRACE_METADATA_SCHEMA_VERSION } from "./trace-metadata.js";
 export type { TraceMetadataV1, TraceStatus, CacheStatus } from "./trace-metadata.js";
 

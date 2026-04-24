@@ -37,12 +37,28 @@ data class Prompt(
     /** ISO-8601 timestamp of when this version was created. */
     @SerialName("createdAt")
     val createdAt: String = "",
+
+    /** Internal prompt version id used for tracing and audit correlation. */
+    @SerialName("promptVersionId")
+    val promptVersionId: String = "",
+
+    /** Prompt id returned by the VectorBea API when available. */
+    @SerialName("promptId")
+    val promptId: String = "",
+
+    /** Workspace/organization id returned by older API payloads when available. */
+    @SerialName("organizationId")
+    val organizationId: String = "",
 )
 
 @Serializable
 internal data class RawPrompt(
+    @SerialName("promptId")
+    val promptId: String = "",
     @SerialName("promptVersionId")
     val promptVersionId: String,
+    @SerialName("organizationId")
+    val organizationId: String = "",
     @SerialName("name")
     val name: String,
     @SerialName("versionTag")
@@ -63,6 +79,9 @@ internal data class RawPrompt(
         parameters = parameters,
         description = description,
         createdAt = createdAt,
+        promptVersionId = promptVersionId,
+        promptId = promptId,
+        organizationId = organizationId,
     )
 }
 

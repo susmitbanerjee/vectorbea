@@ -110,9 +110,43 @@ class VectorBeaClient private constructor(
         proxyLatencyMs: Double = 0.0,
         llmLatencyMs: Long = 0L,
         tokenCount: Int = 0,
-        metadata: Map<String, String> = emptyMap(),
+        metadata: Map<String, Any?> = emptyMap(),
     ) {
         reportAudit(prompt, proxyLatencyMs, llmLatencyMs, tokenCount, metadata)
+    }
+
+    /**
+     * Start a traced LLM execution. The returned [TraceSession] records LLM
+     * latency, token usage, cache status, output, and model metadata into a
+     * TraceMetadataV1 audit record when finished or closed.
+     */
+    fun trace(
+        prompt: Prompt,
+        inputText: String = "",
+        sidecar: String = "",
+        environment: String = "prod",
+        metadata: Map<String, Any?> = emptyMap(),
+        costPerInputToken: Double? = null,
+        costPerOutputToken: Double? = null,
+    ): TraceSession = TraceSession(
+        client = this,
+        prompt = prompt,
+        inputText = inputText,
+        sidecar = sidecar,
+        environment = environment,
+        extraMetadata = metadata,
+        costOverrideInput = costPerInputToken,
+        costOverrideOutput = costPerOutputToken,
+    )
+
+    internal suspend fun logAuditRich(
+        prompt: Prompt,
+        proxyLatencyMs: Double = 0.0,
+        llmLatencyMs: Long = 0L,
+        tokenCount: Int = 0,
+        richMetadata: Map<String, Any?> = emptyMap(),
+    ) {
+        reportAudit(prompt, proxyLatencyMs, llmLatencyMs, tokenCount, richMetadata)
     }
 
     /**
@@ -132,9 +166,9 @@ class VectorBeaClient private constructor(
         proxyLatencyMs: Double = 0.0,
         llmLatencyMs: Long = 0L,
         tokenCount: Int = 0,
-        metadata: Map<String, String> = emptyMap(),
+        metadata: Map<String, Any?> = emptyMap(),
     ) {
-        val promptVersionId = auditPromptVersionIds[prompt]
+        val promptVersionId = auditPromptVersionIds[prompt] ?: prompt.promptVersionId.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException(
                 "Prompt audit reference missing. Use the Prompt returned by getPrompt() when calling logAudit().",
             )
