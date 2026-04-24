@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { updateAlertRule, deleteAlertRule } from "@/lib/server/alerts";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,8 @@ export async function PATCH(
     const body = await request.json().catch(() => ({})) as { enabled?: boolean; threshold?: number };
     return NextResponse.json(await updateAlertRule({ workspaceId, id, ...body }));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to update alert rule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
 
@@ -37,6 +39,7 @@ export async function DELETE(
     await deleteAlertRule(workspaceId, id);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to delete alert rule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

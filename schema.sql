@@ -75,6 +75,8 @@ CREATE TABLE vectorbea.organizations (
   plan_tier USER-DEFINED NOT NULL DEFAULT 'free'::plan_tier,
   stripe_customer_id text,
   stripe_subscription_id text,
+  subscription_status text,
+  current_period_end timestamptz,
   max_seats integer NOT NULL DEFAULT 1 CHECK (max_seats >= 1),
   max_prompts integer NOT NULL DEFAULT 5,
   monthly_audit_limit integer NOT NULL DEFAULT 100,
@@ -225,6 +227,8 @@ CREATE TABLE IF NOT EXISTS vectorbea.alert_events (
   metric_value    numeric NOT NULL,
   threshold       numeric NOT NULL,
   prompt_name     text,
+  status          text,
+  metadata        jsonb NOT NULL DEFAULT '{}'::jsonb,
   triggered_at    timestamptz NOT NULL DEFAULT now(),
   resolved_at     timestamptz
 );

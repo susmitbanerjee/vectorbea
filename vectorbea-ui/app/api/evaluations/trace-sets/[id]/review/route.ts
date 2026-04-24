@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { reviewEvaluationRun } from "@/lib/server/evaluation-runs";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -32,9 +33,7 @@ export async function POST(
     });
     return NextResponse.json(run);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update review" },
-      { status: 500 },
-    );
+    const safe = toSafeApiError(error, "Failed to update review");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

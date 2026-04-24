@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { listRegressionSchedules, createRegressionSchedule } from "@/lib/server/regression-schedules";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,8 @@ export async function GET(request: NextRequest) {
     await assertFeatureAccess(workspaceId, "scheduled_regressions");
     return NextResponse.json(await listRegressionSchedules(workspaceId));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to load regression schedules");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
 
@@ -41,6 +43,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(schedule, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to create regression schedule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

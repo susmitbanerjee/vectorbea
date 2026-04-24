@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { evaluateAlerts } from "@/lib/server/alerts";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export async function POST(request: NextRequest) {
     const result = await evaluateAlerts(workspaceId);
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to evaluate alert rules");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

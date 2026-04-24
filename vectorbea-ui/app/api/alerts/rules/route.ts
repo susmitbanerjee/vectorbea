@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { listAlertRules, createAlertRule } from "@/lib/server/alerts";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import type { AlertMetricType, AlertComparison } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,8 @@ export async function GET(request: NextRequest) {
     await assertFeatureAccess(workspaceId, "alerts");
     return NextResponse.json(await listAlertRules(workspaceId));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to load alert rules");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
 
@@ -47,6 +49,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(rule, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to create alert rule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

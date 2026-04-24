@@ -213,6 +213,31 @@ async function loadRuntimeTraceRows(workspaceId: string, ids?: string[]) {
   return ((data ?? []) as AuditLogTraceRow[]).filter(isRuntimeTraceRow);
 }
 
+async function findEvaluationRunRow(workspaceId: string, runIdOrRowId: string): Promise<AuditLogTraceRow | null> {
+  const supabase = createVectorBeaAdminClient();
+  const { data, error } = await supabase
+    .from("audit_logs")
+    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+    .eq("workspace_id", workspaceId)
+    .eq("id", runIdOrRowId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data) return data as AuditLogTraceRow;
+
+  const { data: candidates, error: candidatesError } = await supabase
+    .from("audit_logs")
+    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (candidatesError) throw new Error(candidatesError.message);
+
+  return ((candidates ?? []) as AuditLogTraceRow[]).find((row) => {
+    const run = toRunView(row);
+    return Boolean(run && run.id === runIdOrRowId);
+  }) ?? null;
+}
+
 export async function listEvaluationRuns(workspaceId: string): Promise<TraceSetEvaluationRunView[]> {
   const supabase = createVectorBeaAdminClient();
   const { data, error } = await supabase
@@ -230,17 +255,8 @@ export async function listEvaluationRuns(workspaceId: string): Promise<TraceSetE
 }
 
 export async function getEvaluationRun(workspaceId: string, id: string): Promise<TraceSetEvaluationRunView | null> {
-  const supabase = createVectorBeaAdminClient();
-  const { data, error } = await supabase
-    .from("audit_logs")
-    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
-    .eq("workspace_id", workspaceId)
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!data) return null;
-  return toRunView(data as AuditLogTraceRow);
+  const row = await findEvaluationRunRow(workspaceId, id);
+  return row ? toRunView(row) : null;
 }
 
 export async function createTraceSetEvaluationRun(args: {
@@ -566,15 +582,8 @@ export async function approveEvaluationRun(args: {
   approvedBy: string;
 }) {
   const supabase = createVectorBeaAdminClient();
-  const { data, error } = await supabase
-    .from("audit_logs")
-    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, metadata")
-    .eq("workspace_id", args.workspaceId)
-    .eq("id", args.evaluationRunId)
-    .single();
-  if (error) throw new Error(error.message);
-
-  const row = data as AuditLogTraceRow;
+  const row = await findEvaluationRunRow(args.workspaceId, args.evaluationRunId);
+  if (!row) throw new Error("Evaluation run not found");
   const normalized = normalizeTraceMetadataV1(row.metadata ?? {});
   const runPayload = asRecord(asRecord(normalized.custom).evaluation_run);
   const aggregate = asRecord(runPayload.aggregate);
@@ -690,15 +699,8 @@ export async function reviewEvaluationRun(args: {
   note?: string | null;
 }) {
   const supabase = createVectorBeaAdminClient();
-  const { data, error } = await supabase
-    .from("audit_logs")
-    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, metadata")
-    .eq("workspace_id", args.workspaceId)
-    .eq("id", args.evaluationRunId)
-    .single();
-  if (error) throw new Error(error.message);
-
-  const row = data as AuditLogTraceRow;
+  const row = await findEvaluationRunRow(args.workspaceId, args.evaluationRunId);
+  if (!row) throw new Error("Evaluation run not found");
   const normalized = normalizeTraceMetadataV1(row.metadata ?? {});
   const runPayload = asRecord(asRecord(normalized.custom).evaluation_run);
   if (!runPayload.id) throw new Error("Evaluation run payload is missing.");

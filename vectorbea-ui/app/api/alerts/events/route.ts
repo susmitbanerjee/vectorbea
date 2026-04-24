@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { listAlertEvents, listAlertRules } from "@/lib/server/alerts";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest) {
       })),
     );
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to load alert events");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

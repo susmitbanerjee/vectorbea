@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 import { runRegressionSchedule } from "@/lib/server/regression-schedules";
 
@@ -23,8 +24,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const result = await runRegressionSchedule({ workspaceId, scheduleId: id, triggeredBy: auth.user.id });
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed";
-    const quotaExceeded = message.toLowerCase().includes("quota exceeded");
-    return NextResponse.json({ error: message }, { status: quotaExceeded ? 402 : 500 });
+    const safe = toSafeApiError(error, "Failed to run regression schedule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

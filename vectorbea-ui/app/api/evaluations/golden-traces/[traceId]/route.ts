@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { unmarkGoldenTrace } from "@/lib/server/golden-traces";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await unmarkGoldenTrace(workspaceId, decodeURIComponent(traceId));
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to unmark golden trace");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

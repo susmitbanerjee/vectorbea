@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { listBaselineDatasets, createBaselineDataset } from "@/lib/server/baseline-datasets";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,8 @@ export async function GET(request: NextRequest) {
     if (auth.error) return auth.error;
     return NextResponse.json(await listBaselineDatasets(workspaceId));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to load baseline datasets");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
 
@@ -37,6 +39,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(dataset, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to create baseline dataset");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

@@ -67,9 +67,12 @@ This document covers the launch safety controls currently implemented in the con
 
 - Billing page shows:
   - current plan
+  - normalized billing summary from `/api/billing/usage`
   - prompt/audit usage
   - runtime/replay/evaluation usage counters
   - feature availability
+- Workspace `organizations.plan_tier` is the server-side source of truth for plan gating.
+- LemonSqueezy subscription identifiers enrich portal management state when present.
 
 ## 8) Security hardening controls
 
@@ -87,8 +90,22 @@ This document covers the launch safety controls currently implemented in the con
 
 - Regression schedules and alert evaluations are externally triggered.
 - There is no built-in scheduler in this repository.
+- Trigger endpoints:
+  - `POST /api/evaluations/regression-schedules/{id}/run`
+  - `POST /api/alerts/evaluate`
 
-## 10) Known limitations (explicit)
+## 10) Required database migrations
+
+- Baseline datasets, golden traces, regression schedules, and alerting require the
+  `vectorbea` schema tables to exist in Postgres.
+- Apply migration file:
+  - `migrations/2026-04-24-production-safety.sql`
+- If Supabase returns schema-cache table errors, verify:
+  - the migration was applied to the same database used by the app
+  - PostgREST has `vectorbea` exposed in API settings
+  - API routes are using `createVectorBeaAdminClient()` (schema-scoped client)
+
+## 11) Known limitations (explicit)
 
 - Reviewer identity uses authenticated user id only (no reviewer profile entity).
 - Scoring policy is server-side code-configured (no UI editor yet).

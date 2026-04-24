@@ -4,6 +4,7 @@ import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createTraceSetEvaluationRun, listEvaluationRuns } from "@/lib/server/evaluation-runs";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +22,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(await listEvaluationRuns(workspaceId));
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load evaluation runs" },
-      { status: 500 },
-    );
+    const safe = toSafeApiError(error, "Failed to load evaluation runs");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
 
@@ -66,11 +65,7 @@ export async function POST(request: NextRequest) {
       { status: 201 },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to create evaluation run";
-    const quotaExceeded = message.toLowerCase().includes("quota exceeded");
-    return NextResponse.json(
-      { error: quotaExceeded ? message : message },
-      { status: quotaExceeded ? 402 : 500 },
-    );
+    const safe = toSafeApiError(error, "Failed to create evaluation run");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

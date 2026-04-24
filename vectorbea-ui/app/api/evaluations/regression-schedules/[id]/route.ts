@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { toggleRegressionSchedule, deleteRegressionSchedule } from "@/lib/server/regression-schedules";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "enabled boolean required" }, { status: 400 });
     return NextResponse.json(await toggleRegressionSchedule(workspaceId, id, body.enabled));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to update regression schedule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
 
@@ -32,6 +34,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await deleteRegressionSchedule(workspaceId, id);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    const safe = toSafeApiError(error, "Failed to delete regression schedule");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

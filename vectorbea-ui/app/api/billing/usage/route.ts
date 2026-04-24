@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { canUseFeature } from "@/lib/server/feature-gates";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import {
   getWorkspaceMonthlyAuditCount,
   getWorkspacePlanLimits,
   getWorkspacePromptCount,
 } from "@/lib/server/workspace-limits";
 import { getWorkspaceUsage } from "@/lib/server/usage-quotas";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,13 +37,75 @@ export async function GET(request: NextRequest) {
       canUseFeature(workspaceId, "alerts"),
     ]);
 
+    const supabase = createVectorBeaAdminClient();
+    const { data: workspace } = await supabase
+      .from("workspaces")
+      .select("organization_id")
+      .eq("id", workspaceId)
+      .maybeSingle();
+
+    const organizationId = workspace?.organization_id ?? limits.organizationId;
+    const [{ data: organization }, { count: seatsUsed }] = await Promise.all([
+      supabase
+        .from("organizations")
+        .select("id, plan_tier, stripe_customer_id, stripe_subscription_id, max_seats")
+        .eq("id", organizationId)
+        .maybeSingle(),
+      supabase
+        .from("org_members")
+        .select("user_id", { count: "exact", head: true })
+        .eq("organization_id", organizationId),
+    ]);
+
+    const planTier = (organization?.plan_tier ?? limits.planTier) as "free" | "team" | "pro" | "enterprise";
+    const hasSubscription = Boolean(organization?.stripe_subscription_id);
+    const portalUrl =
+      process.env.NEXT_PUBLIC_BILLING_PORTAL_URL ??
+      process.env.LEMON_SQUEEZY_CUSTOMER_PORTAL_URL ??
+      null;
+
+    const billingSummary = {
+      plan: planTier,
+      planDisplayName:
+        planTier === "enterprise"
+          ? "Enterprise"
+          : planTier === "pro"
+            ? "Pro"
+            : planTier === "team"
+              ? "Team"
+              : "Free",
+      status:
+        planTier === "free"
+          ? "free"
+          : hasSubscription
+            ? "active"
+            : "active_without_subscription",
+      billingInterval: planTier === "free" ? null : "monthly",
+      pricePerSeat:
+        planTier === "team"
+          ? 19.99
+          : planTier === "pro"
+            ? 29
+            : null,
+      originalPricePerSeat: planTier === "team" ? 29 : null,
+      currency: planTier === "free" ? null : "USD",
+      seatCount: seatsUsed ?? null,
+      canUpgrade: planTier === "free",
+      canManageBilling: Boolean(portalUrl),
+      canCancel: planTier !== "free" && Boolean(hasSubscription) && Boolean(portalUrl),
+      canDowngrade: planTier !== "free" && Boolean(hasSubscription) && Boolean(portalUrl),
+      lemonSqueezyCustomerId: organization?.stripe_customer_id ?? null,
+      lemonSqueezySubscriptionId: organization?.stripe_subscription_id ?? null,
+      portalUrl,
+    };
+
     return NextResponse.json({
-      planTier: limits.planTier,
+      planTier,
       promptsUsed,
       promptLimit: limits.maxPrompts,
       auditsUsed,
       auditLimit: limits.monthlyAuditLimit,
-      seatsUsed: null,
+      seatsUsed: seatsUsed ?? null,
       seatLimit: limits.maxSeats,
       usage: usageSnapshot.usage,
       usageLimits: usageSnapshot.limits,
@@ -50,14 +114,10 @@ export async function GET(request: NextRequest) {
         rollout: rolloutFeature.allowed,
         alerts: alertsFeature.allowed,
       },
+      billingSummary,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to load billing usage",
-      },
-      { status: 500 },
-    );
+    const safe = toSafeApiError(error, "Failed to load billing usage");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

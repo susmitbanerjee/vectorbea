@@ -31,7 +31,7 @@ const PLAN_COPY: Record<string, string> = {
 };
 
 type BillingUsage = {
-  planTier: string;
+  planTier: "free" | "team" | "pro" | "enterprise";
   promptsUsed: number;
   promptLimit: number;
   auditsUsed: number;
@@ -52,6 +52,23 @@ type BillingUsage = {
     evaluations?: boolean;
     rollout?: boolean;
     alerts?: boolean;
+  };
+  billingSummary?: {
+    plan: "free" | "team" | "pro" | "enterprise";
+    planDisplayName: string;
+    status: "free" | "active" | "active_without_subscription";
+    billingInterval: "monthly" | null;
+    pricePerSeat: number | null;
+    originalPricePerSeat: number | null;
+    currency: string | null;
+    seatCount: number | null;
+    canUpgrade: boolean;
+    canManageBilling: boolean;
+    canCancel: boolean;
+    canDowngrade: boolean;
+    lemonSqueezyCustomerId: string | null;
+    lemonSqueezySubscriptionId: string | null;
+    portalUrl: string | null;
   };
 };
 
@@ -85,15 +102,13 @@ function UsageBar({
           </div>
         </div>
         <Badge variant={atLimit ? "destructive" : "outline"} className="tabular-nums">
-          {limit === null ? `${value}/∞` : `${value}/${numericLimit}`}
+          {limit === null ? `${value}/unlimited` : `${value}/${numericLimit}`}
         </Badge>
       </div>
       {limit !== null ? (
         <div className="h-2.5 overflow-hidden rounded-full bg-muted/60">
           <div
-            className={`h-full rounded-full transition-all ${
-              atLimit ? "bg-destructive" : "bg-primary"
-            }`}
+            className={`h-full rounded-full transition-all ${atLimit ? "bg-destructive" : "bg-primary"}`}
             style={{ width: `${percentage}%` }}
           />
         </div>
@@ -113,10 +128,15 @@ export function BillingDashboard() {
 
   const seatsUsed = seatUsage.used;
   const maxSeats = seatUsage.max;
-  const portalUrl = activeOrganization?.billingPortalUrl?.trim() || FALLBACK_PORTAL_URL;
-  const planLabel = planTier.charAt(0).toUpperCase() + planTier.slice(1);
+  const effectivePlanTier = (usage?.planTier ?? planTier) as "free" | "team" | "pro" | "enterprise";
+  const planLabel = effectivePlanTier.charAt(0).toUpperCase() + effectivePlanTier.slice(1);
+  const portalUrl =
+    usage?.billingSummary?.portalUrl?.trim() ||
+    activeOrganization?.billingPortalUrl?.trim() ||
+    FALLBACK_PORTAL_URL;
   const parsedSeatCount = Number.parseInt(seatCount, 10);
   const billingWorkspaceId = activeWorkspaceId ?? activeOrganization?.workspaces?.[0]?.id ?? null;
+  const showUpgradeCta = Boolean(usage?.billingSummary?.canUpgrade ?? (effectivePlanTier === "free"));
 
   useEffect(() => {
     if (!billingWorkspaceId) {
@@ -135,33 +155,22 @@ export function BillingDashboard() {
           { cache: "no-store" },
         );
 
-        const payload = (await response.json().catch(() => ({}))) as
-          | BillingUsage
-          | { error?: string };
-
+        const payload = (await response.json().catch(() => ({}))) as BillingUsage | { error?: string };
         if (!response.ok) {
-          throw new Error(
-            "error" in payload && payload.error
-              ? payload.error
-              : "Failed to load billing usage.",
-          );
+          throw new Error("error" in payload && payload.error ? payload.error : "Failed to load billing usage.");
         }
 
         if (!cancelled) {
           setUsage(payload as BillingUsage);
           setSeatCount((current) => {
-            const currentParsed = Number.parseInt(current, 10);
-            if (Number.isFinite(currentParsed) && currentParsed > 0) {
-              return current;
-            }
+            const parsed = Number.parseInt(current, 10);
+            if (Number.isFinite(parsed) && parsed > 0) return current;
             return String(Math.max((payload as BillingUsage).seatLimit, 1));
           });
         }
       } catch (error) {
         if (!cancelled) {
-          toast.error(
-            error instanceof Error ? error.message : "Failed to load billing usage.",
-          );
+          toast.error(error instanceof Error ? error.message : "Failed to load billing usage.");
         }
       } finally {
         if (!cancelled) {
@@ -171,7 +180,6 @@ export function BillingDashboard() {
     }
 
     void loadUsage();
-
     return () => {
       cancelled = true;
     };
@@ -200,33 +208,19 @@ export function BillingDashboard() {
     }
 
     setIsRedirectingToCheckout(true);
-
     try {
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          quantity: parsedSeatCount,
-          workspaceId: targetWorkspaceId,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quantity: parsedSeatCount, workspaceId: targetWorkspaceId }),
       });
-
-      const payload = (await response.json().catch(() => ({}))) as {
-        url?: string;
-        error?: string;
-      };
-
+      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!response.ok || !payload.url) {
         throw new Error(payload.error || "Failed to create Lemon Squeezy checkout.");
       }
-
       window.location.assign(payload.url);
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to create Lemon Squeezy checkout.",
-      );
+      toast.error(error instanceof Error ? error.message : "Failed to create Lemon Squeezy checkout.");
       setIsRedirectingToCheckout(false);
     }
   };
@@ -247,11 +241,9 @@ export function BillingDashboard() {
               </div>
               <div className="space-y-1">
                 <CardTitle className="text-base">Current Plan: {planLabel}</CardTitle>
-                <CardDescription>
-                  {PLAN_COPY[planTier] ?? PLAN_COPY.free}
-                </CardDescription>
+                <CardDescription>{PLAN_COPY[effectivePlanTier] ?? PLAN_COPY.free}</CardDescription>
               </div>
-              <Badge variant={planTier === "free" ? "outline" : "success"} className="ml-auto">
+              <Badge variant={effectivePlanTier === "free" ? "outline" : "success"} className="ml-auto">
                 {planLabel}
               </Badge>
             </div>
@@ -260,9 +252,7 @@ export function BillingDashboard() {
             <div className="rounded-2xl border border-border/60 bg-card/50 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    Seats used
-                  </p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seats used</p>
                   <p className="mt-2 text-2xl font-semibold tabular-nums">
                     {seatsUsed} / {maxSeats}
                   </p>
@@ -274,39 +264,14 @@ export function BillingDashboard() {
             </div>
 
             <div className="grid gap-3 lg:grid-cols-2">
-              <UsageBar
-                label="Prompts"
-                value={effectiveUsage.promptsUsed}
-                limit={effectiveUsage.promptLimit}
-                icon={<FileText className="h-4 w-4" />}
-              />
-              <UsageBar
-                label="Audit events"
-                value={effectiveUsage.auditsUsed}
-                limit={effectiveUsage.auditLimit}
-                icon={<ShieldCheck className="h-4 w-4" />}
-              />
+              <UsageBar label="Prompts" value={effectiveUsage.promptsUsed} limit={effectiveUsage.promptLimit} icon={<FileText className="h-4 w-4" />} />
+              <UsageBar label="Audit events" value={effectiveUsage.auditsUsed} limit={effectiveUsage.auditLimit} icon={<ShieldCheck className="h-4 w-4" />} />
             </div>
 
             <div className="grid gap-3 lg:grid-cols-3">
-              <UsageBar
-                label="Runtime traces"
-                value={usage?.usage?.runtime_traces ?? 0}
-                limit={usage?.usageLimits?.runtime_traces ?? null}
-                icon={<Sparkles className="h-4 w-4" />}
-              />
-              <UsageBar
-                label="Replay runs"
-                value={usage?.usage?.replay_runs ?? 0}
-                limit={usage?.usageLimits?.replay_runs ?? null}
-                icon={<RefreshCw className="h-4 w-4" />}
-              />
-              <UsageBar
-                label="Evaluation runs"
-                value={usage?.usage?.evaluation_runs ?? 0}
-                limit={usage?.usageLimits?.evaluation_runs ?? null}
-                icon={<ShieldCheck className="h-4 w-4" />}
-              />
+              <UsageBar label="Runtime traces" value={usage?.usage?.runtime_traces ?? 0} limit={usage?.usageLimits?.runtime_traces ?? null} icon={<Sparkles className="h-4 w-4" />} />
+              <UsageBar label="Replay runs" value={usage?.usage?.replay_runs ?? 0} limit={usage?.usageLimits?.replay_runs ?? null} icon={<RefreshCw className="h-4 w-4" />} />
+              <UsageBar label="Evaluation runs" value={usage?.usage?.evaluation_runs ?? 0} limit={usage?.usageLimits?.evaluation_runs ?? null} icon={<ShieldCheck className="h-4 w-4" />} />
             </div>
 
             {loadingUsage ? (
@@ -315,25 +280,24 @@ export function BillingDashboard() {
               </div>
             ) : null}
 
-            {planTier === "free" ? (
+            {effectivePlanTier === "free" ? (
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
-                Free plan workspaces default to 1 seat, 5 prompts, and 100 audit
-                events each month. Upgrade when you need more capacity.
+                Free plan workspaces default to 1 seat, 5 prompts, and 100 audit events each month.
               </div>
-            ) : null}
+            ) : (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                {usage?.billingSummary?.status === "active_without_subscription"
+                  ? "Team plan is active from workspace settings, but billing subscription metadata is not linked yet."
+                  : "Paid plan is active and enforced server-side."}
+              </div>
+            )}
 
             <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-xs text-muted-foreground">
               Feature access on this workspace:
-              <span className="ml-2 font-medium">Evaluations</span> {usage?.features?.evaluations ? "enabled" : "locked"} ·
-              <span className="ml-2 font-medium">Rollout</span> {usage?.features?.rollout ? "enabled" : "locked"} ·
+              <span className="ml-2 font-medium">Evaluations</span> {usage?.features?.evaluations ? "enabled" : "locked"} |
+              <span className="ml-2 font-medium">Rollout</span> {usage?.features?.rollout ? "enabled" : "locked"} |
               <span className="ml-2 font-medium">Alerts</span> {usage?.features?.alerts ? "enabled" : "locked"}
             </div>
-
-            {seatUsage.atLimit && (
-              <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                Seat capacity is fully allocated. Upgrade the subscription before inviting more developers.
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -345,7 +309,7 @@ export function BillingDashboard() {
               </div>
               <div>
                 <CardTitle className="text-base">Subscription</CardTitle>
-                <CardDescription>{PLAN_COPY[planTier] ?? PLAN_COPY.free}</CardDescription>
+                <CardDescription>{PLAN_COPY[effectivePlanTier] ?? PLAN_COPY.free}</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -353,16 +317,27 @@ export function BillingDashboard() {
             <div className="rounded-xl border border-border/60 bg-card/50 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    Current plan
-                  </p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Current plan</p>
                   <p className="mt-2 text-lg font-semibold">{planLabel}</p>
                 </div>
-                <Badge variant={planTier === "free" ? "outline" : "success"}>
-                  {planLabel}
-                </Badge>
+                <Badge variant={effectivePlanTier === "free" ? "outline" : "success"}>{planLabel}</Badge>
               </div>
             </div>
+
+            {usage?.billingSummary?.billingInterval ? (
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-sm">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Monthly billing</p>
+                <p className="mt-2 font-medium">
+                  {usage.billingSummary.pricePerSeat !== null ? `$${usage.billingSummary.pricePerSeat.toFixed(2)}` : "Custom"}
+                  {usage.billingSummary.billingInterval ? ` / seat / ${usage.billingSummary.billingInterval}` : ""}
+                </p>
+                {usage.billingSummary.originalPricePerSeat ? (
+                  <p className="text-xs text-muted-foreground">
+                    Early adopter price. Standard price ${usage.billingSummary.originalPricePerSeat.toFixed(2)}.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="rounded-xl border border-border/60 bg-card/50 p-4">
               <div className="flex items-start gap-3">
@@ -376,55 +351,40 @@ export function BillingDashboard() {
               </div>
             </div>
 
-            <TrustBar
-              signals={coreTrustSignals}
-              variant="compact"
-            />
+            <TrustBar signals={coreTrustSignals} variant="compact" />
 
-            <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <p className="text-sm font-medium">Upgrade to Team Plan</p>
+            {showUpgradeCta ? (
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium">Upgrade to Team Plan</p>
+                    </div>
+                    <p className="mt-2 text-2xl font-semibold tracking-tight">
+                      ${TEAM_PLAN_PRICE.toFixed(2)}
+                      <span className="ml-1 text-sm font-medium text-muted-foreground">/ month per seat</span>
+                    </p>
                   </div>
-                  <p className="mt-2 text-2xl font-semibold tracking-tight">
-                    ${TEAM_PLAN_PRICE.toFixed(2)}
-                    <span className="ml-1 text-sm font-medium text-muted-foreground">
-                      / month per seat
-                    </span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Choose how many paid seats this workspace needs, then continue
-                    to Lemon Squeezy checkout.
-                  </p>
+                  <div className="space-y-2">
+                    <label htmlFor="seat-count" className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Number of seats
+                    </label>
+                    <Input id="seat-count" type="number" min={1} step={1} value={seatCount} onChange={(event) => setSeatCount(event.target.value)} />
+                  </div>
+                  <Button type="button" onClick={() => void handleUpgrade()} disabled={isRedirectingToCheckout || !billingWorkspaceId} className="w-full">
+                    {isRedirectingToCheckout ? "Redirecting to checkout..." : "Upgrade to Team Plan"}
+                  </Button>
                 </div>
-                <div className="space-y-2">
-                  <label
-                    htmlFor="seat-count"
-                    className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-                  >
-                    Number of seats
-                  </label>
-                  <Input
-                    id="seat-count"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={seatCount}
-                    onChange={(event) => setSeatCount(event.target.value)}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  onClick={() => void handleUpgrade()}
-                  disabled={isRedirectingToCheckout || !billingWorkspaceId}
-                  className="w-full"
-                >
-                  {isRedirectingToCheckout ? "Redirecting to checkout..." : "Upgrade to Team Plan"}
-                </Button>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-xs text-muted-foreground">
+                This workspace is already on a paid plan.
+                {usage?.billingSummary?.canCancel || usage?.billingSummary?.canDowngrade
+                  ? " Use billing portal actions for cancel or downgrade."
+                  : " Billing portal actions are unavailable until subscription metadata is linked."}
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-3">
               <Button
@@ -439,11 +399,11 @@ export function BillingDashboard() {
                 Manage Subscription
                 <ExternalLink className="h-4 w-4" />
               </Button>
-              {!portalUrl && (
+              {!portalUrl ? (
                 <p className="text-xs text-muted-foreground">
-                  Add a billing portal URL to this organization to enable self-serve subscription management.
+                  Billing portal URL is not configured for this environment.
                 </p>
-              )}
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -451,3 +411,4 @@ export function BillingDashboard() {
     </div>
   );
 }
+
