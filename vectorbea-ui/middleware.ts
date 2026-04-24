@@ -261,9 +261,16 @@ export async function middleware(request: NextRequest) {
     return withSecurityHeaders(NextResponse.next());
   }
 
-  // M2M proxy endpoints perform their own Bearer-token validation and should
-  // not be blocked by dashboard IP allowlists.
-  if (pathname.startsWith("/api/proxy/")) {
+  // M2M endpoints perform their own Bearer-token validation and must not be
+  // blocked by dashboard IP allowlists.  This covers:
+  //   /api/proxy/*      — prompt sync, audit ingest
+  //   /api/agents/*     — heartbeat, agent registration
+  //   /api/health       — unauthenticated liveness probe (hub warmup)
+  if (
+    pathname.startsWith("/api/proxy/") ||
+    pathname.startsWith("/api/agents/") ||
+    pathname === "/api/health"
+  ) {
     return withSecurityHeaders(NextResponse.next());
   }
 

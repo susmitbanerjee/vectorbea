@@ -14,6 +14,12 @@ type ApiKeyRecord = {
   revoked_at: string | null;
 };
 
+type DeploymentAgentRecord = {
+  id: string;
+  workspace_id: string;
+  name: string | null;
+};
+
 export type RuntimeApiKeyAuth =
   | { ok: false; response: NextResponse }
   | {
@@ -32,6 +38,40 @@ function readBearerToken(request: NextRequest): string | null {
 
 export function readRuntimeToken(request: NextRequest): string | null {
   return readBearerToken(request);
+}
+
+/**
+ * Fallback for legacy `vbagent_` keys that were provisioned by the vbagent CLI
+ * and stored as raw tokens in `deployment_agents.api_token` rather than as
+ * SHA-256 hashes in `api_keys.key_hash`.
+ *
+ * This path is only tried when the primary `api_keys` lookup fails (table error)
+ * or finds no row, and the token carries the `vbagent_` prefix.
+ */
+async function authenticateLegacyAgentToken(rawToken: string): Promise<RuntimeApiKeyAuth> {
+  const supabase = createVectorBeaAdminClient();
+  const { data, error } = await supabase
+    .from("deployment_agents")
+    .select("id, workspace_id, name")
+    .eq("api_token", rawToken)
+    .maybeSingle<DeploymentAgentRecord>();
+
+  if (error || !data) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Invalid or revoked API key" }, { status: 401 }),
+    };
+  }
+
+  return {
+    ok: true,
+    keyId: data.id,
+    workspaceId: data.workspace_id,
+    keyName: data.name ?? "agent",
+    // Legacy agent tokens are treated as admin-scoped — they were issued for
+    // sidecar use which requires full read/write access.
+    keyRole: "admin",
+  };
 }
 
 export async function authenticateRuntimeApiKey(request: NextRequest): Promise<RuntimeApiKeyAuth> {
@@ -58,6 +98,7 @@ export async function authenticateRuntimeApiKey(request: NextRequest): Promise<R
     };
   }
 
+  // ── Primary path: api_keys table (SHA-256 hash lookup) ──────────────────
   const keyHash = createHash("sha256").update(rawToken).digest("hex");
   const supabase = createVectorBeaAdminClient();
   const { data, error } = await supabase
@@ -67,13 +108,30 @@ export async function authenticateRuntimeApiKey(request: NextRequest): Promise<R
     .maybeSingle<ApiKeyRecord>();
 
   if (error) {
+    // api_keys query failed (table missing, permission error, etc.).
+    // For vbagent_ tokens fall through to the legacy deployment_agents lookup
+    // so existing sidecars keep working during schema migrations.
+    if (rawToken.startsWith("vbagent_")) {
+      return authenticateLegacyAgentToken(rawToken);
+    }
     return {
       ok: false,
       response: NextResponse.json({ error: "Failed to validate API key" }, { status: 500 }),
     };
   }
 
-  if (!data || data.revoked_at) {
+  if (!data) {
+    // No row found in api_keys. vbagent_ tokens may still be in deployment_agents.
+    if (rawToken.startsWith("vbagent_")) {
+      return authenticateLegacyAgentToken(rawToken);
+    }
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Invalid or revoked API key" }, { status: 401 }),
+    };
+  }
+
+  if (data.revoked_at) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Invalid or revoked API key" }, { status: 401 }),
