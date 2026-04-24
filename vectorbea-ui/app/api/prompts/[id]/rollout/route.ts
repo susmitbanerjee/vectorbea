@@ -15,7 +15,7 @@ export async function GET(
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
-    await assertFeatureAccess(workspaceId, "rollout");
+    // Reading rollout state is allowed on all plans — only writing (POST) is gated.
     const { id } = await params;
     return NextResponse.json(await getPromptRolloutDistribution(workspaceId, id));
   } catch (error) {

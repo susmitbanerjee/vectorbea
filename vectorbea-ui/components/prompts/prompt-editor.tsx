@@ -224,7 +224,14 @@ export function PromptEditor({
     if (!prompt?.promptId || !activeWorkspaceId) return;
     fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`)
       .then(r => r.json())
-      .then(d => { if (!cancelled) setRolloutDist(d as PromptRolloutDistribution); })
+      .then(d => {
+        // Guard: only set state when the response is a valid distribution object.
+        // An error response ({ error: "..." }) must not reach setRolloutDist
+        // because the render calls rolloutDist.versions.map() unconditionally.
+        if (!cancelled && d && Array.isArray(d.versions)) {
+          setRolloutDist(d as PromptRolloutDistribution);
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [prompt?.promptId, activeWorkspaceId]);
@@ -439,7 +446,7 @@ export function PromptEditor({
       // Re-fetch distribution
       const r2 = await fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`);
       const d2 = await r2.json();
-      setRolloutDist(d2 as PromptRolloutDistribution);
+      if (d2 && Array.isArray(d2.versions)) setRolloutDist(d2 as PromptRolloutDistribution);
     } catch { /* silent */ } finally {
       setRolloutSaving(false);
     }

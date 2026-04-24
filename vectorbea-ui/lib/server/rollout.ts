@@ -71,16 +71,35 @@ export async function getPromptRolloutDistribution(
 
   const { data, error } = await supabase
     .from("prompt_versions")
-    .select("id, version_tag, is_published, rollout_status, rollout_percentage")
+    .select("id, version_tag, is_published")
     .eq("prompt_id", promptId)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
 
+  // Fetch rollout columns separately — they are ALTER TABLE additions that may
+  // not exist on all schema versions. Missing columns return a Supabase error
+  // which we catch and fall back to defaults rather than crashing the page.
+  const rolloutById = new Map<string, { rollout_status: string; rollout_percentage: number }>();
+  try {
+    const { data: rolloutData } = await supabase
+      .from("prompt_versions")
+      .select("id, rollout_status, rollout_percentage")
+      .eq("prompt_id", promptId);
+    for (const row of rolloutData ?? []) {
+      rolloutById.set(row.id, {
+        rollout_status: row.rollout_status ?? "draft",
+        rollout_percentage: row.rollout_percentage ?? 0,
+      });
+    }
+  } catch {
+    // Columns not yet migrated — all versions default to draft/0%.
+  }
+
   const versions: PromptVersionRollout[] = (data ?? []).map((row: VersionRow) => ({
     promptVersionId: row.id,
     versionTag: row.version_tag,
-    rolloutStatus: (row.rollout_status ?? "draft") as RolloutStatus,
-    rolloutPercentage: row.rollout_percentage ?? 0,
+    rolloutStatus: ((rolloutById.get(row.id)?.rollout_status) ?? "draft") as RolloutStatus,
+    rolloutPercentage: rolloutById.get(row.id)?.rollout_percentage ?? 0,
     isPublished: row.is_published,
   }));
 
