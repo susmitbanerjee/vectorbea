@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -86,6 +86,22 @@ export async function POST(request: NextRequest) {
 
     if (error || !data) {
       throw new Error(`Failed to register agent: ${error?.message ?? "Unknown error"}`);
+    }
+
+    // Also register an api_keys entry so the sidecar can authenticate immediately.
+    const keyHash = createHash("sha256").update(token).digest("hex");
+    const keyLastFour = token.slice(-4);
+    const { error: keyError } = await supabase
+      .from("api_keys")
+      .insert({
+        workspace_id: workspaceId,
+        key_name: name,
+        key_hash: keyHash,
+        key_last_four: keyLastFour,
+        key_role: "admin",
+      });
+    if (keyError) {
+      console.warn(`[agents] api_keys insert failed for agent "${name}": ${keyError.message}`);
     }
 
     return NextResponse.json(

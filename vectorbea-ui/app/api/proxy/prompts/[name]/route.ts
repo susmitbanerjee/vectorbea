@@ -205,7 +205,7 @@ export async function GET(
     );
 
     const promptRows = await supabaseGet<PromptRow[]>(
-      `/prompts?select=id,name,description,workspace_id,prompt_versions(id,version_tag,template_text,parameters,is_published,rollout_status,rollout_percentage,created_at)&name=eq.${encodeURIComponent(promptName)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=1`,
+      `/prompts?select=id,name,description,workspace_id,prompt_versions(id,version_tag,template_text,parameters,is_published,created_at)&name=eq.${encodeURIComponent(promptName)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=1`,
     );
     const prompt = promptRows[0];
 

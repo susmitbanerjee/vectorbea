@@ -88,15 +88,33 @@ export async function POST(request: NextRequest) {
 
     const supabase = createVectorBeaAdminClient();
 
-    // Upsert deployment agent by workspace_id + name (hostId)
-    const { data: existingAgent } = await supabase
-      .from("deployment_agents")
-      .select("id, name")
-      .eq("workspace_id", workspaceId)
-      .eq("name", hostId)
-      .maybeSingle();
+    // Look up agent by registered key name first, then fall back to hostId.
+    const registeredName = auth.keyName;
+
+    let existingAgent: { id: string; name: string } | null = null;
+
+    if (registeredName) {
+      const { data } = await supabase
+        .from("deployment_agents")
+        .select("id, name")
+        .eq("workspace_id", workspaceId)
+        .eq("name", registeredName)
+        .maybeSingle();
+      existingAgent = data ?? null;
+    }
+
+    if (!existingAgent && hostId !== registeredName) {
+      const { data } = await supabase
+        .from("deployment_agents")
+        .select("id, name")
+        .eq("workspace_id", workspaceId)
+        .eq("name", hostId)
+        .maybeSingle();
+      existingAgent = data ?? null;
+    }
 
     let agentId: string;
+    const agentName = registeredName || hostId;
     if (existingAgent) {
       agentId = existingAgent.id;
     } else {
@@ -105,7 +123,7 @@ export async function POST(request: NextRequest) {
         .from("deployment_agents")
         .insert({
           workspace_id: workspaceId,
-          name: hostId,
+          name: agentName,
           status: "online",
           last_heartbeat: now,
           // api_token has a NOT NULL constraint; heartbeat-registered agents
@@ -165,7 +183,7 @@ export async function POST(request: NextRequest) {
       agent: {
         id: agentId,
         workspaceId,
-        name: hostId,
+        name: agentName,
         status,
         lastHeartbeat: now,
       },
