@@ -3,8 +3,8 @@
  *
  * Handles:
  *   - @hourly / @daily / @weekly / @monthly / @yearly / @midnight
- *   - Every-N-minutes  (*/N * * * *)
- *   - Every-N-hours    (* */N * * *)
+ *   - Every-N-minutes  (*\/N * * * *)
+ *   - Every-N-hours    (* *\/N * * *)
  *   - Daily at HH:MM   (M H * * *)
  *   - Weekday-only     (M H * * 1-5)
  *   - Specific weekday (M H * * N)
