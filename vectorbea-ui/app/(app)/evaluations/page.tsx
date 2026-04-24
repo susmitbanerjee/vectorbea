@@ -8,6 +8,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import type { BaselineDataset, PromptDetail, PromptListItem, TraceSetEvaluationRunView, TraceSummaryView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -31,8 +32,7 @@ export default function EvaluationsPage() {
   const [tracePage, setTracePage] = useState(0);
 
   // Evaluation runs list state
-  const [reviewFilter, setReviewFilter] = useState<"all" | "pending_review" | "in_review" | "approved" | "rejected" | "needs_changes">("all");
-  const [recommendationFilter, setRecommendationFilter] = useState<"all" | "ready_for_rollout" | "ready_with_caution" | "needs_review" | "regression_detected" | "blocked" | "inconclusive">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "needs_review" | "approved" | "rejected" | "blocked" | "running" | "failed">("all");
   const [runsPage, setRunsPage] = useState(0);
 
   const [loading, setLoading] = useState(false);
@@ -122,11 +122,17 @@ export default function EvaluationsPage() {
   // Filtered + paginated evaluation runs
   const filteredRuns = useMemo(() => {
     return runs.filter(run => {
-      if (reviewFilter !== "all" && run.review.status !== reviewFilter) return false;
-      if (recommendationFilter !== "all" && run.aggregate.recommendation !== recommendationFilter) return false;
+      if (statusFilter === "needs_review") {
+        return run.review.status === "pending_review" || run.review.status === "in_review" || run.review.status === "needs_changes" || run.aggregate.recommendation === "needs_review";
+      }
+      if (statusFilter === "approved") return run.review.status === "approved" || run.status === "approved";
+      if (statusFilter === "rejected") return run.review.status === "rejected";
+      if (statusFilter === "blocked") return run.aggregate.recommendation === "blocked" || run.aggregate.recommendation === "regression_detected";
+      if (statusFilter === "running") return run.status === "running" || run.status === "queued";
+      if (statusFilter === "failed") return run.status === "failed" || run.aggregate.failed > 0;
       return true;
     });
-  }, [runs, reviewFilter, recommendationFilter]);
+  }, [runs, statusFilter]);
 
   const runsPageCount = Math.ceil(filteredRuns.length / PAGE_SIZE);
   const visibleRuns = filteredRuns.slice(runsPage * PAGE_SIZE, (runsPage + 1) * PAGE_SIZE);
@@ -382,28 +388,20 @@ export default function EvaluationsPage() {
             <CardDescription>Trace-set evaluations with scoring, review state, and rollout recommendation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            <div className="grid gap-2 pb-2 md:grid-cols-2">
-              <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={reviewFilter} onChange={e => { setReviewFilter(e.target.value as typeof reviewFilter); setRunsPage(0); }}>
-                <option value="all">All review states</option>
-                <option value="pending_review">Pending review</option>
-                <option value="in_review">In review</option>
+            <div className="max-w-xs pb-2">
+              <Select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as typeof statusFilter); setRunsPage(0); }} aria-label="Filter evaluation runs by status">
+                <option value="all">All</option>
+                <option value="needs_review">Needs Review</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
-                <option value="needs_changes">Needs changes</option>
-              </select>
-              <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={recommendationFilter} onChange={e => { setRecommendationFilter(e.target.value as typeof recommendationFilter); setRunsPage(0); }}>
-                <option value="all">All recommendations</option>
-                <option value="ready_for_rollout">Ready for rollout</option>
-                <option value="ready_with_caution">Ready with caution</option>
-                <option value="needs_review">Needs review</option>
-                <option value="regression_detected">Regression detected</option>
                 <option value="blocked">Blocked</option>
-                <option value="inconclusive">Inconclusive</option>
-              </select>
+                <option value="running">Running</option>
+                <option value="failed">Failed</option>
+              </Select>
             </div>
 
             {/* Fixed-height scrollable runs list */}
-            <div className="max-h-[520px] overflow-y-auto space-y-1.5">
+            <div className="max-h-[520px] overflow-y-auto space-y-1.5 vb-scrollbar">
               {filteredRuns.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
                   No evaluation runs match the current filters.

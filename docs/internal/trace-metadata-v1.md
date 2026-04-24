@@ -147,7 +147,7 @@ Stored in `golden_traces` table. Golden trace marking is `audit`-classified and 
 
 Regression schedules pair a baseline dataset with a candidate version strategy and run evaluation runs on demand or via external trigger.  
 Stored in `regression_schedules` table.  
-**No built-in cron runner exists.** Invoke `POST /api/evaluations/regression-schedules/[id]/run` from CI or an external scheduler.
+**Built-in regression runner exists.** Enabled schedules run when due in the app runtime; `POST /api/evaluations/regression-schedules/[id]/run` remains available for Run now and operational triggers.
 
 ---
 
@@ -156,5 +156,6 @@ Stored in `regression_schedules` table.
 - **Reviewer identity**: The reviewer is identified by authenticated user ID only. No expanded reviewer profile entity.
 - **Scoring policy**: Check weights and thresholds are code-configured server-side (in `trace-compare.ts`). Not yet editable by workspace admins via UI.
 - **direct_provider replay**: Replay for `direct_provider` traces uses captured output, not a live provider call. Enterprise gateway is the only path with live execution in replay.
-- **No built-in scheduler**: Scheduled regression checks require external invocation. The API and model exist; the cron runner does not.
+- **Scheduler runtime**: Regression schedules run automatically in long-lived Node app runtimes. The protected run-due endpoint remains available for platform cron fallbacks.
 - **Token/cost data**: Only available when `executor.response_observability === "full"`. Enterprise gateway traces may have `partial` observability. The `token_regression` and cost diff checks correctly mark themselves as `unavailable` in this case.
+

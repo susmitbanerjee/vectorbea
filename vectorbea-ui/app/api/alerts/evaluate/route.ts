@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
  *
  * Evaluates all enabled alert rules for the workspace and persists any triggered events.
  *
- * IMPORTANT: No built-in scheduler exists. This endpoint must be called externally
- * from CI, a cron service, or a scheduled task runner.
+ * IMPORTANT: This endpoint is intentionally callable by operations tooling
+ * whenever alert rules should be evaluated immediately.
  * See docs/internal/alerting.md for invocation guidance.
  */
 export async function POST(request: NextRequest) {
@@ -34,3 +34,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }
+

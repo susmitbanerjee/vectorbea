@@ -30,6 +30,11 @@ type PromptVersionRow = {
   prompts: { name?: string } | Array<{ name?: string }> | null;
 };
 
+type ReplayRequestBody = {
+  providerOverride?: string | null;
+  modelOverride?: string | null;
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -71,6 +76,22 @@ export async function POST(
       return NextResponse.json({ error: "Rate limit exceeded for replay requests." }, { status: 429 });
     }
     await assertQuotaAvailable(workspaceId, "replay_runs", 1);
+    const body = (await request.json().catch(() => ({}))) as ReplayRequestBody;
+    const providerOverride = asString(body.providerOverride);
+    const modelOverride = asString(body.modelOverride);
+
+    if (providerOverride && providerOverride !== "same") {
+      if (providerOverride === "enterprise_gateway") {
+        if (!process.env.VECTORBEA_ENTERPRISE_GATEWAY_URL) {
+          return NextResponse.json({ error: "Provider not configured: enterprise gateway URL is missing." }, { status: 422 });
+        }
+      } else {
+        return NextResponse.json(
+          { error: `Provider not configured: live replay for ${providerOverride} is not available in this deployment.` },
+          { status: 422 },
+        );
+      }
+    }
 
     const supabase = createVectorBeaAdminClient();
 
@@ -159,6 +180,11 @@ export async function POST(
       sourceMetadata: normalized,
       replayOf: row.id,
       triggeredBy: auth.user.id,
+      executorOverride: providerOverride && providerOverride !== "same"
+        ? { type: providerOverride === "enterprise_gateway" ? "enterprise_gateway" : "direct_provider", provider: providerOverride, model: modelOverride }
+        : modelOverride
+          ? { model: modelOverride }
+          : undefined,
     });
 
     const { data: inserted, error: insertError } = await supabase

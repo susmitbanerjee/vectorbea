@@ -11,7 +11,7 @@ VectorBea alerting evaluates aggregated **runtime trace** metrics and stores ale
 
 ## Scheduler model
 
-There is **no built-in scheduler** for alert evaluation.
+Alert evaluation is exposed as an explicit operational endpoint.
 
 Trigger alerts externally:
 
@@ -30,4 +30,5 @@ Recommended external triggers:
 - Alert aggregation uses runtime traces only.
 - Review/audit/promotion events are excluded.
 - Missing observability is treated as unavailable and skipped rather than coerced to zero.
+
 

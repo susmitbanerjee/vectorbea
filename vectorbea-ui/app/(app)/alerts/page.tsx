@@ -202,9 +202,8 @@ export default function AlertsPage() {
           <CardContent className="flex items-start gap-3 p-4">
             <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-400 mt-0.5" />
             <p className="text-sm text-yellow-200">
-              <strong>No built-in scheduler.</strong> Alert evaluation must be triggered externally.
-              Call <code className="rounded bg-yellow-500/20 px-1 py-0.5 text-xs font-mono">POST /api/alerts/evaluate</code> from
-              CI or a cron service. No automatic scheduling exists within this platform.
+              <strong>Alert evaluation endpoint.</strong> Call <code className="rounded bg-yellow-500/20 px-1 py-0.5 text-xs font-mono">POST /api/alerts/evaluate</code>
+              from operations tooling or platform automation when you want to evaluate alert rules immediately.
             </p>
           </CardContent>
         </Card>

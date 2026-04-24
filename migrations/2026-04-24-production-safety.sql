@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS vectorbea.regression_schedules (
   last_run_evaluation_run_id uuid,
   last_run_recommendation text,
   next_run_at timestamptz,
+  last_run_log jsonb NOT NULL DEFAULT '{}'::jsonb,
+  run_history jsonb NOT NULL DEFAULT '[]'::jsonb,
   created_by uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()

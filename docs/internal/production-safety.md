@@ -86,12 +86,15 @@ This document covers the launch safety controls currently implemented in the con
   - `Referrer-Policy`
   - `Permissions-Policy`
 
-## 9) External scheduler note
+## 9) Scheduler and automation notes
 
-- Regression schedules and alert evaluations are externally triggered.
-- There is no built-in scheduler in this repository.
+- Regression schedules run through the built-in app-runtime scheduler when enabled and due.
+- `Run now` uses the same execution path and persists the same run logs.
+- The protected due-run endpoint can still be used by platform cron as an operational fallback.
+- Alert evaluations remain callable through an explicit endpoint.
 - Trigger endpoints:
   - `POST /api/evaluations/regression-schedules/{id}/run`
+  - `POST /api/evaluations/regression-schedules/run-due`
   - `POST /api/alerts/evaluate`
 
 ## 10) Required database migrations

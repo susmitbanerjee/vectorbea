@@ -474,7 +474,7 @@ You should see clear labels such as:
 
 ### What it is
 
-VectorBea stores regression schedules and alert rules, but this repository does not include a built-in scheduler. External systems must call the run endpoints.
+VectorBea stores regression schedules and alert rules. Regression schedules are checked by the built-in app-runtime scheduler when enabled and due; explicit run endpoints remain available for Run now, CI gates, and platform cron fallbacks.
 
 ### Why it exists
 
@@ -518,11 +518,11 @@ Use CI when you want regression checks tied to deployment or prompt release work
 
 ### What to expect in the UI
 
-The UI may show an informational note such as external trigger required. That is expected. It is not an error as long as the backing tables and endpoints are available.
+The UI shows whether a schedule is enabled, when it will run next, and the latest persisted run logs. The Run now action uses the same execution path as the scheduler.
 
 ### Common pitfalls and limitations
 
-- No built-in cron runner exists in this repository.
+- The built-in scheduler runs due regression schedules in long-lived app runtimes; use the protected run-due endpoint as an operational fallback for short-lived deployments.
 - Authentication/session requirements depend on deployment configuration.
 - External callers should handle retries and alerting for failed trigger attempts.
 
@@ -601,3 +601,15 @@ The UI should distinguish:
 | Release safely | Use evaluation, human review, promotion, and rollout percentage |
 | Automate checks | Trigger regression and alert endpoints from CI or cron |
 
+
+## How replay executes
+
+Replay uses the trace metadata captured at runtime: request input, prompt variables, prompt version lineage, executor metadata, and safe output summaries.
+
+| Mode | What happens | Provider keys |
+|------|--------------|---------------|
+| Enterprise gateway live replay | VectorBea resolves the prompt version and forwards the replay request to the configured customer gateway. | VectorBea uses gateway configuration; it does not need customer provider keys. |
+| Direct-provider live replay | Available only if a secure direct-provider executor is explicitly configured. | Provider keys must come from secure environment or encrypted secret storage; raw keys must not be logged. |
+| Simulated direct-provider replay | Used when no live direct-provider executor exists. VectorBea uses captured output and marks replay metadata as `simulated`. | No provider API key is used or stored. |
+
+If a user selects a provider override such as Anthropic, Gemini, or Qwen and that provider is not configured, replay fails with “Provider not configured” instead of creating a misleading live trace.

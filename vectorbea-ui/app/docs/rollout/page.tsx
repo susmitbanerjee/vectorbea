@@ -135,6 +135,30 @@ export default function RolloutPage() {
       </DocsSection>
 
       <DocsSection
+        id="after-full-rollout"
+        title="What happens after full rollout"
+        description="A full rollout means the selected prompt version receives 100% of eligible runtime traffic for that prompt and environment."
+      >
+        <DocsCallout title="Full rollout is not the end of monitoring">
+          Runtime traces continue recording the selected prompt version and rollout
+          decision. Metrics and alert rules continue watching latency, errors,
+          cache behavior, and evaluation score trends for the active version.
+          Baseline datasets and regression schedules should remain in place so
+          future candidate versions are still guarded before promotion.
+        </DocsCallout>
+        <DocsTable
+          headers={["After 100%", "What continues", "Why it matters"]}
+          rows={[
+            ["Traffic", "All eligible requests resolve to the active version", "Users see one stable behavior"],
+            ["Traces", "Selected version and rollout decision are stored", "Debugging remains explainable"],
+            ["Metrics & alerts", "Dashboards keep monitoring the active version", "Production regressions are still visible"],
+            ["Rollback", "Use the existing prompt version lifecycle if rollback is enabled", "Teams can revert safely when needed"],
+            ["Future changes", "Evaluations and regressions guard the next candidate", "Full rollout does not bypass governance"],
+          ]}
+        />
+      </DocsSection>
+
+      <DocsSection
         id="how-to-rollout"
         title="How to promote and roll out a version"
       >

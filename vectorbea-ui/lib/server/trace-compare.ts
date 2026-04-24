@@ -278,6 +278,8 @@ export function buildTraceComparison(left: TraceDetailView, right: TraceDetailVi
     diffField("tokens", "Tokens", leftTokens, rightTokens, leftTokens === null || rightTokens === null ? "Unavailable on one side" : undefined),
     diffField("cost", "Cost", left.totalCostUsd || null, right.totalCostUsd || null),
     diffField("prompt_version", "Prompt version", left.promptVersion, right.promptVersion),
+    diffField("provider", "Provider", left.provider, right.provider),
+    diffField("model", "Model", left.primaryModel, right.primaryModel),
     diffField("executor_type", "Executor type", left.executorType, right.executorType),
     diffField("executor_name", "Executor name", left.executorName, right.executorName),
     diffField("observability", "Observability", left.executorObservability, right.executorObservability),

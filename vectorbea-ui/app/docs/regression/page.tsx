@@ -113,14 +113,14 @@ export default function RegressionPage() {
       <DocsSection
         id="what-is-regression"
         title="What is a regression check?"
-        description="A regression check is an evaluation run that is configured to execute automatically — triggered by a cron schedule or an external API call — rather than manually."
+        description="A regression check is an evaluation run that is configured to execute automatically by the built-in scheduler, the Run now action, or the protected run endpoint."
       >
         <RegressionScheduleMockup />
-        <DocsCallout title="No built-in scheduler">
-          VectorBea does not include a built-in cron scheduler. Regression
-          schedules are triggered externally — from your CI/CD pipeline, a cron job
-          on your infrastructure, or any HTTP client. VectorBea provides the
-          endpoint; you control the timing.
+        <DocsCallout title="Built-in scheduler">
+          VectorBea checks enabled regression schedules and runs them when their
+          next run time is due. The same execution path is used by Run now, so
+          schedule history and failure logs are consistent whether a run is
+          automatic or manual.
         </DocsCallout>
       </DocsSection>
 

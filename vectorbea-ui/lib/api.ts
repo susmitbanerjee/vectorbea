@@ -521,6 +521,21 @@ export type BaselineDataset = {
 
 export type RegressionScheduleStatus = "idle" | "running" | "failed" | "disabled";
 
+export type RegressionScheduleRunLog = {
+  runId: string;
+  status: "running" | "completed" | "failed";
+  scheduleId: string;
+  baselineDatasetId: string | null;
+  baselineDatasetName: string | null;
+  promptVersionId: string | null;
+  evaluationRunId: string | null;
+  replayCount: number;
+  failedTraceIds: string[];
+  errorReason: string | null;
+  startedAt: string;
+  completedAt: string | null;
+};
+
 export type RegressionSchedule = {
   id: string;
   workspaceId: string;
@@ -537,6 +552,8 @@ export type RegressionSchedule = {
   lastRunEvaluationRunId: string | null;
   lastRunRecommendation: string | null;
   nextRunAt: string | null;
+  lastRunLog: RegressionScheduleRunLog | null;
+  runHistory: RegressionScheduleRunLog[];
   createdBy: string;
   createdAt: string;
 };

@@ -197,7 +197,7 @@ function Sidebar({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 space-y-5 overflow-y-auto px-4 py-5">
+        <nav className="flex-1 space-y-5 overflow-y-auto px-4 py-5 vb-scrollbar">
           {DOCS_NAV_GROUPS.map((group) => (
             <div key={group.section ?? group.items[0].href}>
               {group.section && (

@@ -59,20 +59,19 @@ export default function ScheduledExecutionPage() {
   return (
     <DocsPage
       eyebrow="Scheduled Execution & Scripts"
-      title="Automate regression and evaluation from any scheduler"
-      lede="VectorBea does not include a built-in cron scheduler — instead it exposes API endpoints that any external scheduler, CI pipeline, or script can call. This gives you full control over timing, retry logic, and notification routing."
+      title="Automate regression and evaluation runs"
+      lede="VectorBea includes a lightweight app-runtime scheduler for regression schedules and also exposes API endpoints for CI, scripts, and platform cron fallbacks."
     >
       <DocsSection
         id="design"
-        title="Design: external scheduler, VectorBea endpoint"
-        description="The separation is intentional. Your infrastructure already has schedulers — VectorBea provides the API surface they call."
+        title="Design: built-in runner plus explicit endpoints"
+        description="The built-in runner checks due regression schedules in the app runtime. Explicit endpoints remain available for Run now, CI gates, and short-lived serverless deployments."
       >
-        <DocsCallout title="Why no built-in scheduler?">
-          Enterprise environments have existing scheduling infrastructure —
-          Kubernetes CronJobs, AWS EventBridge, GitHub Actions scheduled workflows,
-          Jenkins pipelines. Duplicating that inside VectorBea would add unnecessary
-          overlap. Instead, VectorBea exposes clean REST endpoints that any scheduler
-          can trigger with a single HTTP POST.
+        <DocsCallout title="How scheduled runs execute">
+          Regression schedules run automatically when enabled and due. The Run now
+          button and the protected run endpoints use the same trace-set evaluation
+          path, so logs, replay traces, scores, and failure reasons are persisted
+          the same way.
         </DocsCallout>
         <div className="grid gap-3 sm:grid-cols-2">
           <IntegrationPattern

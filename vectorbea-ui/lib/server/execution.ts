@@ -18,6 +18,11 @@ export type ResolvedExecutionRequest = {
   sourceMetadata?: TraceMetadataV1 | Record<string, unknown> | null;
   replayOf?: string | null;
   triggeredBy?: string | null;
+  executorOverride?: {
+    type?: ExecutorType;
+    provider?: string | null;
+    model?: string | null;
+  };
 };
 
 export type ExecutionResult = {
@@ -83,16 +88,20 @@ function renderFallbackOutput(input: ResolvedExecutionRequest): string {
 function resolveExecutor(input: ResolvedExecutionRequest): NonNullable<TraceMetadataV1["executor"]> {
   const source = normalizeTraceMetadataV1(input.sourceMetadata ?? {});
   const sourceExecutor = source.executor ?? {};
+  const overrideProvider = asString(input.executorOverride?.provider);
+  const overrideType = input.executorOverride?.type ?? (overrideProvider === "enterprise_gateway" ? "enterprise_gateway" : undefined);
   const envType = asString(process.env.VECTORBEA_EXECUTOR_TYPE) as ExecutorType | null;
   const gatewayUrl = asString(process.env.VECTORBEA_ENTERPRISE_GATEWAY_URL);
   const gatewayEndpoint = asString(process.env.VECTORBEA_ENTERPRISE_GATEWAY_ENDPOINT);
-  const type = sourceExecutor.type === "enterprise_gateway" || envType === "enterprise_gateway" || gatewayUrl
+  const type = overrideType ??
+    (sourceExecutor.type === "enterprise_gateway" || envType === "enterprise_gateway" || gatewayUrl
     ? "enterprise_gateway"
-    : sourceExecutor.type ?? envType ?? "direct_provider";
+    : sourceExecutor.type ?? envType ?? "direct_provider");
 
   return {
     type,
     name:
+      (overrideProvider && overrideProvider !== "enterprise_gateway" ? overrideProvider : null) ??
       sourceExecutor.name ??
       asString(process.env.VECTORBEA_EXECUTOR_NAME) ??
       (type === "enterprise_gateway" ? "enterprise-ai-gateway" : "direct-provider"),
@@ -206,6 +215,8 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
     } else {
       outputText = renderFallbackOutput(input);
       downstreamLatencyMs = asNumber(source.model?.latency_ms, 0);
+      provider = asString(input.executorOverride?.provider) ?? provider;
+      model = asString(input.executorOverride?.model) ?? model;
       if (!outputText) status = "partial";
     }
   } catch (error) {
@@ -321,6 +332,8 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
           ? {
               replay_of: input.replayOf,
               replay_mode: executor.type === "enterprise_gateway" ? "live" : "simulated",
+              replay_provider: provider ?? executor.name ?? "unknown",
+              original_provider: asString(source.model?.provider) ?? source.executor?.name ?? "unknown",
             }
           : {}),
       },
@@ -332,6 +345,10 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
                 source_trace_id: input.replayOf,
                 replay_mode: executor.type === "enterprise_gateway" ? "live" : "simulated",
                 source_executor_type: source.executor?.type ?? executor.type,
+                original_provider: asString(source.model?.provider) ?? source.executor?.name ?? null,
+                replay_provider: provider ?? executor.name ?? null,
+                original_model: asString(source.model?.model),
+                replay_model: model ?? null,
                 triggered_by: input.triggeredBy,
               },
             }

@@ -138,11 +138,11 @@ export default function ScheduledRegressionsPage() {
       <AppHeader title="Scheduled Regressions" subtitle="Automatically run evaluation runs against baselines on a schedule." />
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
         {/* CI callout */}
-        <Card className="border-blue-500/30 bg-blue-500/10">
+        <Card className="border-emerald-500/25 bg-emerald-500/10">
           <CardContent className="flex items-start gap-3 p-4">
-            <Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-400" />
-            <p className="text-sm text-blue-100">
-              No built-in cron runner — call <code className="rounded bg-blue-900/40 px-1 py-0.5 font-mono text-xs">POST /api/evaluations/regression-schedules/[id]/run</code> from your CI or external scheduler to execute due schedules.
+            <Info className="h-4 w-4 mt-0.5 shrink-0 text-emerald-300" />
+            <p className="text-sm text-emerald-50">
+              The built-in scheduler checks enabled schedules and runs them when <span className="font-mono text-xs">next_run_at</span> is due. Use <span className="font-medium">Run now</span> for an immediate execution with the same persisted run logs.
             </p>
           </CardContent>
         </Card>
@@ -202,7 +202,7 @@ export default function ScheduledRegressionsPage() {
                     }`}
                     value={form.cronExpression}
                     onChange={e => setForm(f => ({ ...f, cronExpression: e.target.value }))}
-                    placeholder="e.g. 0 2 * * *  (for reference only — not executed here)"
+                    placeholder="e.g. 0 2 * * *"
                   />
                   {form.cronExpression.trim() && (() => {
                     const err = validateCron(form.cronExpression);
@@ -248,8 +248,46 @@ export default function ScheduledRegressionsPage() {
                     )}
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
                       {schedule.lastRunAt && <span>Last run: {new Date(schedule.lastRunAt).toLocaleString()}</span>}
+                      {schedule.nextRunAt && <span>Next run: {new Date(schedule.nextRunAt).toLocaleString()}</span>}
                       {schedule.lastRunRecommendation && <span>Recommendation: {schedule.lastRunRecommendation}</span>}
                     </div>
+                    {schedule.lastRunLog ? (
+                      <details className="mt-3 rounded-lg border border-border/70 bg-muted/30 p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-foreground">
+                          Last run log - {schedule.lastRunLog.status}
+                        </summary>
+                        <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                          <span>Schedule: <code>{schedule.lastRunLog.scheduleId}</code></span>
+                          <span>Dataset: {schedule.lastRunLog.baselineDatasetName ?? schedule.lastRunLog.baselineDatasetId ?? "Unavailable"}</span>
+                          <span>Prompt version: <code>{schedule.lastRunLog.promptVersionId ?? "Unavailable"}</code></span>
+                          <span>Replays: {schedule.lastRunLog.replayCount}</span>
+                          <span>Started: {new Date(schedule.lastRunLog.startedAt).toLocaleString()}</span>
+                          <span>Completed: {schedule.lastRunLog.completedAt ? new Date(schedule.lastRunLog.completedAt).toLocaleString() : "Running"}</span>
+                          {schedule.lastRunLog.evaluationRunId && <span>Evaluation run: <code>{schedule.lastRunLog.evaluationRunId}</code></span>}
+                          {schedule.lastRunLog.failedTraceIds.length > 0 && <span className="sm:col-span-2">Failed traces: {schedule.lastRunLog.failedTraceIds.join(", ")}</span>}
+                          {schedule.lastRunLog.errorReason && <span className="sm:col-span-2 text-red-300">Reason: {schedule.lastRunLog.errorReason}</span>}
+                        </div>
+                      </details>
+                    ) : null}
+                    {schedule.runHistory.length > 1 ? (
+                      <details className="mt-2 rounded-lg border border-border/50 bg-background/40 p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                          Run history ({schedule.runHistory.length})
+                        </summary>
+                        <div className="mt-2 max-h-48 space-y-2 overflow-y-auto vb-scrollbar">
+                          {schedule.runHistory.slice(1).map((run) => (
+                            <div key={run.runId} className="rounded-md border border-border/50 bg-muted/20 p-2 text-xs text-muted-foreground">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant={run.status === "completed" ? "success" : "destructive"}>{run.status}</Badge>
+                                <span>{new Date(run.startedAt).toLocaleString()}</span>
+                                <span>{run.replayCount} replays</span>
+                              </div>
+                              {run.errorReason && <p className="mt-1 text-red-300">{run.errorReason}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
@@ -293,3 +331,4 @@ export default function ScheduledRegressionsPage() {
     </div>
   );
 }
+

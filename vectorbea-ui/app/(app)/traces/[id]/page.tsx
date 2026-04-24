@@ -496,6 +496,8 @@ export default function TraceDetailsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [replayPending, setReplayPending] = useState(false);
   const [replayError, setReplayError] = useState<string | null>(null);
+  const [replayProvider, setReplayProvider] = useState("same");
+  const [replayModel, setReplayModel] = useState("");
   const trace = traceData ?? createEmptyTrace(traceId || "trace");
 
   useEffect(() => {
@@ -669,7 +671,14 @@ export default function TraceDetailsPage() {
     try {
       const response = await fetch(
         `/api/traces/${encodeURIComponent(trace.id)}/replay?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            providerOverride: replayProvider,
+            modelOverride: replayModel.trim() || null,
+          }),
+        },
       );
 
       if (!response.ok) {
@@ -746,7 +755,25 @@ export default function TraceDetailsPage() {
         title="Trace"
         subtitle={`Traces / ${trace.id}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={replayProvider}
+              onChange={(event) => setReplayProvider(event.target.value)}
+              className="h-9 rounded-lg border border-slate-700 bg-slate-900 px-3 pr-8 text-xs text-slate-200"
+              title="Replay executor/provider"
+            >
+              <option value="same">Same executor/provider</option>
+              <option value="enterprise_gateway">Enterprise gateway</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="gemini">Gemini</option>
+              <option value="qwen">Qwen</option>
+            </select>
+            <Input
+              value={replayModel}
+              onChange={(event) => setReplayModel(event.target.value)}
+              placeholder="Replay model override"
+              className="h-9 w-40 border-slate-700 bg-slate-900 text-xs text-slate-200"
+            />
             <Button
               size="sm"
               variant="outline"
@@ -842,6 +869,11 @@ export default function TraceDetailsPage() {
             {trace.replayOf && trace.executorType !== "enterprise_gateway" ? (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                 Simulated replay path: direct-provider replay uses captured output in this repository. Live replay is available through enterprise gateway execution.
+              </div>
+            ) : null}
+            {replayProvider !== "same" ? (
+              <div className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+                Replay override selected: live execution requires a configured executor. Provider API keys are not stored by VectorBea unless a secure provider integration is explicitly configured.
               </div>
             ) : null}
             {trace.evaluation ? (

@@ -145,11 +145,14 @@ export default function EvaluationsPage() {
         description="An evaluation run is a structured experiment: take a baseline dataset of real traces, replay each one against the candidate prompt version, score the outputs, and produce a verdict."
       >
         <EvalFlowDiagram />
-        <DocsCallout title="Replay, not simulation">
+        <DocsCallout title="How replay executes">
           Evaluation runs use your real production inputs — the same messages your
           users actually sent. This means scores reflect real-world diversity, not
-          synthetic test cases. The candidate version receives each input exactly as
-          the active version did at runtime.
+          synthetic test cases. Enterprise gateway replay executes live through the
+          configured customer gateway. Direct-provider replay is only live when a
+          secure provider executor is explicitly configured; otherwise VectorBea
+          marks it as simulated and uses captured output rather than storing or
+          replaying with raw customer provider API keys.
         </DocsCallout>
       </DocsSection>
 

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "crypto";
-import type { RegressionSchedule } from "@/lib/api";
+import type { RegressionSchedule, RegressionScheduleRunLog } from "@/lib/api";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { createTraceSetEvaluationRun } from "@/lib/server/evaluation-runs";
 import { getBaselineDataset } from "@/lib/server/baseline-datasets";
@@ -22,9 +22,78 @@ type RegressionScheduleRow = {
   last_run_evaluation_run_id: string | null;
   last_run_recommendation: string | null;
   next_run_at: string | null;
+  last_run_log: Record<string, unknown> | null;
+  run_history: unknown[] | null;
   created_by: string;
   created_at: string;
 };
+
+function asRunLog(value: unknown): RegressionScheduleRunLog | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.runId !== "string" && typeof record.run_id !== "string") return null;
+  return {
+    runId: String(record.runId ?? record.run_id),
+    status: (record.status === "completed" || record.status === "failed" || record.status === "running" ? record.status : "failed") as RegressionScheduleRunLog["status"],
+    scheduleId: String(record.scheduleId ?? record.schedule_id ?? ""),
+    baselineDatasetId: typeof record.baselineDatasetId === "string" ? record.baselineDatasetId : typeof record.baseline_dataset_id === "string" ? record.baseline_dataset_id : null,
+    baselineDatasetName: typeof record.baselineDatasetName === "string" ? record.baselineDatasetName : typeof record.baseline_dataset_name === "string" ? record.baseline_dataset_name : null,
+    promptVersionId: typeof record.promptVersionId === "string" ? record.promptVersionId : typeof record.prompt_version_id === "string" ? record.prompt_version_id : null,
+    evaluationRunId: typeof record.evaluationRunId === "string" ? record.evaluationRunId : typeof record.evaluation_run_id === "string" ? record.evaluation_run_id : null,
+    replayCount: typeof record.replayCount === "number" ? record.replayCount : typeof record.replay_count === "number" ? record.replay_count : 0,
+    failedTraceIds: Array.isArray(record.failedTraceIds)
+      ? record.failedTraceIds.map(String)
+      : Array.isArray(record.failed_trace_ids)
+        ? record.failed_trace_ids.map(String)
+        : [],
+    errorReason: typeof record.errorReason === "string" ? record.errorReason : typeof record.error_reason === "string" ? record.error_reason : null,
+    startedAt: typeof record.startedAt === "string" ? record.startedAt : typeof record.started_at === "string" ? record.started_at : new Date().toISOString(),
+    completedAt: typeof record.completedAt === "string" ? record.completedAt : typeof record.completed_at === "string" ? record.completed_at : null,
+  };
+}
+
+function asRunHistory(value: unknown): RegressionScheduleRunLog[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(asRunLog).filter((entry): entry is RegressionScheduleRunLog => Boolean(entry));
+}
+
+function toStoredRunLog(log: RegressionScheduleRunLog) {
+  return {
+    runId: log.runId,
+    status: log.status,
+    scheduleId: log.scheduleId,
+    baselineDatasetId: log.baselineDatasetId,
+    baselineDatasetName: log.baselineDatasetName,
+    promptVersionId: log.promptVersionId,
+    evaluationRunId: log.evaluationRunId,
+    replayCount: log.replayCount,
+    failedTraceIds: log.failedTraceIds,
+    errorReason: log.errorReason,
+    startedAt: log.startedAt,
+    completedAt: log.completedAt,
+  };
+}
+
+function computeNextRunAt(cronExpression?: string | null, from = new Date()): string | null {
+  if (!cronExpression?.trim()) return null;
+  const parts = cronExpression.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [minute, hour] = parts;
+  const next = new Date(from.getTime());
+  next.setSeconds(0, 0);
+  const minuteValue = minute === "*" ? null : Number(minute);
+  const hourValue = hour === "*" ? null : Number(hour);
+  if (minuteValue !== null && (!Number.isInteger(minuteValue) || minuteValue < 0 || minuteValue > 59)) return null;
+  if (hourValue !== null && (!Number.isInteger(hourValue) || hourValue < 0 || hourValue > 23)) return null;
+
+  for (let i = 0; i < 24 * 60 * 8; i += 1) {
+    next.setMinutes(next.getMinutes() + 1);
+    const minuteMatches = minuteValue === null || next.getMinutes() === minuteValue;
+    const hourMatches = hourValue === null || next.getHours() === hourValue;
+    if (minuteMatches && hourMatches) return next.toISOString();
+  }
+  return null;
+}
 
 function toView(row: RegressionScheduleRow): RegressionSchedule {
   return {
@@ -43,6 +112,8 @@ function toView(row: RegressionScheduleRow): RegressionSchedule {
     lastRunEvaluationRunId: row.last_run_evaluation_run_id,
     lastRunRecommendation: row.last_run_recommendation,
     nextRunAt: row.next_run_at,
+    lastRunLog: asRunLog(row.last_run_log),
+    runHistory: asRunHistory(row.run_history),
     createdBy: row.created_by,
     createdAt: row.created_at,
   };
@@ -75,6 +146,7 @@ export async function createRegressionSchedule(args: {
   const dataset = await getBaselineDataset(args.workspaceId, args.baselineDatasetId);
   if (!dataset) throw new Error("Baseline dataset not found.");
   const now = new Date().toISOString();
+  const nextRunAt = computeNextRunAt(args.cronExpression, new Date(now));
   const { data, error } = await supabase
     .from("regression_schedules")
     .insert({
@@ -92,7 +164,9 @@ export async function createRegressionSchedule(args: {
       last_run_at: null,
       last_run_evaluation_run_id: null,
       last_run_recommendation: null,
-      next_run_at: null,
+      next_run_at: nextRunAt,
+      last_run_log: {},
+      run_history: [],
       created_by: args.createdBy,
       created_at: now,
     })
@@ -153,33 +227,47 @@ async function resolveCandidateVersionId(schedule: RegressionSchedule, workspace
   return data.id;
 }
 
-/**
- * Run a regression schedule now (manual trigger or cron runner call).
- * Updates the schedule's status and last_run fields.
- * Returns the created evaluation run ID.
- *
- * HOW TO INVOKE:
- * This function is called by the POST /api/evaluations/regression-schedules/[id]/run route.
- * For automated execution, an external cron or scheduled task should call that route with a service token.
- * No built-in cron runner exists in this repo; see docs/internal/regression-schedules.md for guidance.
- */
 export async function runRegressionSchedule(args: {
   workspaceId: string;
   scheduleId: string;
   triggeredBy: string;
-}): Promise<{ evaluationRunId: string }> {
+}): Promise<{ evaluationRunId: string; runLog: RegressionScheduleRunLog }> {
   const supabase = createVectorBeaAdminClient();
-  // Mark running
+  const startedAt = new Date().toISOString();
+  const runId = randomUUID();
   const { data: scheduleData, error: fetchError } = await supabase
     .from("regression_schedules")
-    .update({ status: "running" })
+    .update({
+      status: "running",
+      last_run_log: toStoredRunLog({
+        runId,
+        status: "running",
+        scheduleId: args.scheduleId,
+        baselineDatasetId: null,
+        baselineDatasetName: null,
+        promptVersionId: null,
+        evaluationRunId: null,
+        replayCount: 0,
+        failedTraceIds: [],
+        errorReason: null,
+        startedAt,
+        completedAt: null,
+      }),
+    })
     .eq("workspace_id", args.workspaceId)
     .eq("id", args.scheduleId)
     .select("*")
     .single();
   if (fetchError) throw new Error(fetchError.message);
   const schedule = toView(scheduleData as RegressionScheduleRow);
-  if (!schedule.enabled) throw new Error("Schedule is disabled.");
+  if (!schedule.enabled) {
+    await supabase
+      .from("regression_schedules")
+      .update({ status: "disabled" })
+      .eq("workspace_id", args.workspaceId)
+      .eq("id", args.scheduleId);
+    throw new Error("Schedule is disabled.");
+  }
 
   try {
     const dataset = await getBaselineDataset(args.workspaceId, schedule.baselineDatasetId);
@@ -195,24 +283,104 @@ export async function runRegressionSchedule(args: {
     });
 
     const now = new Date().toISOString();
+    const failedTraceIds = run.results
+      .filter((result) => result.status === "error" || result.error)
+      .map((result) => result.sourceTraceId);
+    const runLog: RegressionScheduleRunLog = {
+      runId,
+      status: failedTraceIds.length > 0 ? "failed" : "completed",
+      scheduleId: args.scheduleId,
+      baselineDatasetId: dataset.id,
+      baselineDatasetName: dataset.name,
+      promptVersionId: candidateVersionId,
+      evaluationRunId: run.id,
+      replayCount: run.results.length,
+      failedTraceIds,
+      errorReason: failedTraceIds.length > 0 ? "One or more baseline traces failed replay or evaluation." : null,
+      startedAt,
+      completedAt: now,
+    };
+    const history = [runLog, ...schedule.runHistory].slice(0, 20).map(toStoredRunLog);
     await supabase
       .from("regression_schedules")
       .update({
-        status: "idle",
+        status: runLog.status === "failed" ? "failed" : "idle",
         last_run_at: now,
         last_run_evaluation_run_id: run.id,
         last_run_recommendation: run.aggregate.recommendation,
+        next_run_at: computeNextRunAt(schedule.cronExpression, new Date(now)),
+        last_run_log: toStoredRunLog(runLog),
+        run_history: history,
       })
       .eq("workspace_id", args.workspaceId)
       .eq("id", args.scheduleId);
 
-    return { evaluationRunId: run.id };
+    return { evaluationRunId: run.id, runLog };
   } catch (error) {
+    const now = new Date().toISOString();
+    const runLog: RegressionScheduleRunLog = {
+      runId,
+      status: "failed",
+      scheduleId: args.scheduleId,
+      baselineDatasetId: schedule?.baselineDatasetId ?? null,
+      baselineDatasetName: schedule?.baselineDatasetName ?? null,
+      promptVersionId: null,
+      evaluationRunId: null,
+      replayCount: 0,
+      failedTraceIds: [],
+      errorReason: error instanceof Error ? error.message : "Regression schedule failed.",
+      startedAt,
+      completedAt: now,
+    };
+    const history = [runLog, ...(schedule?.runHistory ?? [])].slice(0, 20).map(toStoredRunLog);
     await supabase
       .from("regression_schedules")
-      .update({ status: "failed", last_run_at: new Date().toISOString() })
+      .update({
+        status: "failed",
+        last_run_at: now,
+        next_run_at: schedule ? computeNextRunAt(schedule.cronExpression, new Date(now)) : null,
+        last_run_log: toStoredRunLog(runLog),
+        run_history: history,
+      })
       .eq("workspace_id", args.workspaceId)
       .eq("id", args.scheduleId);
     throw error;
   }
 }
+
+export async function listDueRegressionSchedules(now = new Date()): Promise<RegressionSchedule[]> {
+  const supabase = createVectorBeaAdminClient();
+  const { data, error } = await supabase
+    .from("regression_schedules")
+    .select("*")
+    .eq("enabled", true)
+    .neq("status", "running")
+    .not("next_run_at", "is", null)
+    .lte("next_run_at", now.toISOString())
+    .order("next_run_at", { ascending: true })
+    .limit(25);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(toView);
+}
+
+export async function runDueRegressionSchedules(triggeredBy = "system-scheduler") {
+  const due = await listDueRegressionSchedules();
+  const results: Array<{ scheduleId: string; evaluationRunId?: string; error?: string }> = [];
+  for (const schedule of due) {
+    try {
+      const result = await runRegressionSchedule({
+        workspaceId: schedule.workspaceId,
+        scheduleId: schedule.id,
+        triggeredBy,
+      });
+      results.push({ scheduleId: schedule.id, evaluationRunId: result.evaluationRunId });
+    } catch (error) {
+      results.push({ scheduleId: schedule.id, error: error instanceof Error ? error.message : "Schedule failed" });
+    }
+  }
+  return { checked: due.length, results };
+}
+
+export const regressionScheduleInternals = {
+  computeNextRunAt,
+};
