@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, FlaskConical, Loader2, PlayCircle } from "lucide-react";
+import { ArrowRight, Loader2, PlayCircle } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,8 @@ export default function EvaluationsPage() {
   const [selectedPromptId, setSelectedPromptId] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [selectedTraceIds, setSelectedTraceIds] = useState<string[]>([]);
+  const [reviewFilter, setReviewFilter] = useState<"all" | "pending_review" | "in_review" | "approved" | "rejected" | "needs_changes">("all");
+  const [recommendationFilter, setRecommendationFilter] = useState<"all" | "ready_for_rollout" | "ready_with_caution" | "needs_review" | "regression_detected" | "blocked" | "inconclusive">("all");
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +89,14 @@ export default function EvaluationsPage() {
     [selectedVersionId, versions],
   );
 
+  const filteredRuns = useMemo(() => {
+    return runs.filter((run) => {
+      if (reviewFilter !== "all" && run.review.status !== reviewFilter) return false;
+      if (recommendationFilter !== "all" && run.aggregate.recommendation !== recommendationFilter) return false;
+      return true;
+    });
+  }, [runs, reviewFilter, recommendationFilter]);
+
   const createRun = async () => {
     if (!activeWorkspaceId || !selectedVersionId || selectedTraceIds.length === 0 || creating) return;
     setCreating(true);
@@ -120,7 +130,7 @@ export default function EvaluationsPage() {
     <div className="min-h-screen">
       <AppHeader
         title="Evaluations"
-        subtitle="Replay runtime traces against a candidate prompt version, score the results, and decide on rollout."
+        subtitle="Replay runtime traces against a candidate prompt version, score the results, and route through human review before rollout decisions."
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
@@ -134,7 +144,7 @@ export default function EvaluationsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Create trace-set evaluation</CardTitle>
-              <CardDescription>Choose a candidate prompt version and replay a production-like runtime trace set through the existing executor path.</CardDescription>
+              <CardDescription>Choose a candidate prompt version and replay a production-like runtime trace set through the active executor path.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -211,25 +221,47 @@ export default function EvaluationsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Evaluation runs</CardTitle>
-            <CardDescription>Trace-set evaluations stay linked to the replay traces they produced and the candidate prompt version they tested.</CardDescription>
+            <CardDescription>Trace-set evaluations with scoring, review state, and rollout recommendation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {runs.length === 0 ? (
+            <div className="grid gap-2 pb-2 md:grid-cols-2">
+              <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value as typeof reviewFilter)}>
+                <option value="all">All review states</option>
+                <option value="pending_review">Pending review</option>
+                <option value="in_review">In review</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="needs_changes">Needs changes</option>
+              </select>
+              <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={recommendationFilter} onChange={(event) => setRecommendationFilter(event.target.value as typeof recommendationFilter)}>
+                <option value="all">All recommendations</option>
+                <option value="ready_for_rollout">Ready for rollout</option>
+                <option value="ready_with_caution">Ready with caution</option>
+                <option value="needs_review">Needs review</option>
+                <option value="regression_detected">Regression detected</option>
+                <option value="blocked">Blocked</option>
+                <option value="inconclusive">Inconclusive</option>
+              </select>
+            </div>
+            {filteredRuns.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-                No evaluation runs yet.
+                No evaluation runs match the current filters.
               </div>
             ) : (
-              runs.map((run) => (
+              filteredRuns.map((run) => (
                 <Link key={run.id} href={`/evaluations/${encodeURIComponent(run.id)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 transition hover:bg-accent/20">
                   <div>
                     <div className="font-medium">{run.promptName}@{run.candidateVersionTag}</div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      {run.sourceTraceIds.length} traces replayed · recommendation {run.aggregate.recommendation}
+                      {run.sourceTraceIds.length} traces replayed · recommendation {run.aggregate.recommendation.replaceAll("_", " ")}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Badge variant={run.aggregate.recommendation === "ready_for_rollout" ? "success" : run.aggregate.recommendation === "regression_detected" ? "destructive" : "warning"}>
+                    <Badge variant={run.aggregate.recommendation === "ready_for_rollout" ? "success" : run.aggregate.recommendation === "regression_detected" || run.aggregate.recommendation === "blocked" ? "destructive" : "warning"}>
                       {run.aggregate.recommendation.replaceAll("_", " ")}
+                    </Badge>
+                    <Badge variant={run.review.status === "approved" ? "success" : run.review.status === "rejected" ? "destructive" : "secondary"}>
+                      {run.review.status.replaceAll("_", " ")}
                     </Badge>
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />
                   </div>

@@ -13,29 +13,19 @@ export function BeeLoader({ compact = false }: { compact?: boolean }) {
     >
       <motion.div
         className={compact ? "relative h-5 w-5" : "relative h-16 w-16"}
-        initial={{ x: -2, y: 0, rotate: -2 }}
-        animate={{
-          x: [-2, 4, -3, 2, -2],
-          y: [0, -7, -2, -8, 0],
-          rotate: [-2, 5, -3, 4, -2],
-        }}
+        animate={{ scale: [1, 1.04, 1] }}
         transition={{
-          duration: 2.2,
+          duration: 2.5,
           repeat: Infinity,
           ease: "easeInOut",
         }}
       >
-        <motion.div
-          className={compact ? "absolute -top-0.5 left-0.5 h-1.5 w-1.5 rounded-full bg-primary/70" : "absolute -top-1 left-2 h-2 w-2 rounded-full bg-primary/70"}
-          animate={{ opacity: [0.2, 0.8, 0.2], scale: [0.9, 1.15, 0.9] }}
-          transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
-        />
         <BeeLogo className={compact ? "h-5 w-5 drop-shadow-sm" : "h-16 w-16 drop-shadow-md"} />
       </motion.div>
 
       {!compact && (
         <motion.p
-          className="text-sm font-medium tracking-wide text-zinc-500 dark:text-zinc-400"
+          className="text-xs font-medium tracking-wide text-zinc-500 dark:text-zinc-400"
           animate={{ opacity: [0.45, 1, 0.45] }}
           transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
         >

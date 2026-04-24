@@ -132,7 +132,6 @@ export function PromptsTable({
 
       onPromptDeleted?.(promptId);
       toast.success("Prompt deleted");
-      startTransition(() => router.refresh());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to delete prompt");
     } finally {

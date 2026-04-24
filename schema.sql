@@ -138,3 +138,54 @@ CREATE TABLE vectorbea.workspaces (
   CONSTRAINT workspaces_pkey PRIMARY KEY (id),
   CONSTRAINT workspaces_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES vectorbea.organizations(id)
 );
+-- ─── Golden Traces ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS vectorbea.golden_traces (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id  uuid NOT NULL REFERENCES vectorbea.workspaces(id) ON DELETE CASCADE,
+  trace_id      text NOT NULL,
+  prompt_name   text,
+  prompt_version text,
+  label         text,
+  notes         text,
+  created_by    uuid NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (workspace_id, trace_id)
+);
+CREATE INDEX IF NOT EXISTS golden_traces_workspace_idx ON vectorbea.golden_traces(workspace_id);
+
+-- ─── Baseline Datasets ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS vectorbea.baseline_datasets (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id  uuid NOT NULL REFERENCES vectorbea.workspaces(id) ON DELETE CASCADE,
+  name          text NOT NULL,
+  description   text,
+  source_type   text NOT NULL DEFAULT 'trace_set',
+  trace_ids     uuid[] NOT NULL DEFAULT '{}',
+  prompt_name   text,
+  created_by    uuid NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS baseline_datasets_workspace_idx ON vectorbea.baseline_datasets(workspace_id);
+
+-- ─── Regression Schedules ───────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS vectorbea.regression_schedules (
+  id                              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id                    uuid NOT NULL REFERENCES vectorbea.workspaces(id) ON DELETE CASCADE,
+  name                            text NOT NULL,
+  baseline_dataset_id             uuid NOT NULL REFERENCES vectorbea.baseline_datasets(id) ON DELETE CASCADE,
+  baseline_dataset_name           text,
+  candidate_prompt_version_strategy text NOT NULL DEFAULT 'latest_published',
+  candidate_prompt_version_id     uuid,
+  prompt_name                     text,
+  cron_expression                 text,
+  enabled                         boolean NOT NULL DEFAULT true,
+  status                          text NOT NULL DEFAULT 'idle',
+  last_run_at                     timestamptz,
+  last_run_evaluation_run_id      uuid,
+  last_run_recommendation         text,
+  next_run_at                     timestamptz,
+  created_by                      uuid NOT NULL,
+  created_at                      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS regression_schedules_workspace_idx ON vectorbea.regression_schedules(workspace_id);

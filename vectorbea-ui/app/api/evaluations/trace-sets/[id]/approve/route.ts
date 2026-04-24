@@ -27,9 +27,10 @@ export async function POST(
 
     return NextResponse.json(run);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to approve evaluation run";
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to approve evaluation run" },
-      { status: 500 },
+      { error: message },
+      { status: message.toLowerCase().startsWith("promotion blocked:") ? 409 : 500 },
     );
   }
 }

@@ -139,6 +139,15 @@ export type TraceGuardrailStatus = "passed" | "flagged" | "unknown";
 export type TraceExecutorType = "direct_provider" | "enterprise_gateway" | "observe_only" | "unknown";
 export type TraceExecutorObservability = "full" | "partial" | "minimal" | "unknown";
 export type TraceEvaluationLabel = "better" | "same" | "worse" | "pass" | "fail" | "unknown";
+export type TraceEvaluationCheckCategory =
+  | "correctness"
+  | "reliability"
+  | "performance"
+  | "structure"
+  | "observability"
+  | "safety"
+  | "executor_context";
+export type TraceEvaluationCheckStatus = "pass" | "fail" | "warning" | "not_applicable";
 
 export interface TraceSummaryView {
   id: string;
@@ -295,14 +304,23 @@ export interface TraceReplayResponse {
 
 export interface TraceEvaluationCheckView {
   name: string;
+  category?: TraceEvaluationCheckCategory;
+  status?: TraceEvaluationCheckStatus;
   label: TraceEvaluationLabel;
   score: number | null;
+  weight?: number;
+  critical?: boolean;
+  available?: boolean;
   reason: string;
 }
 
 export interface TraceEvaluationView {
   score: number | null;
   label: TraceEvaluationLabel;
+  recommendation?: "ready" | "needs_review" | "blocked" | "regression" | "inconclusive";
+  confidence?: number | null;
+  criticalFailures?: number;
+  observabilityNote?: string | null;
   runId?: string | null;
   datasetId?: string | null;
   comparedAgainstTraceId?: string | null;
@@ -340,7 +358,9 @@ export interface TraceCompareResponse {
 }
 
 export type EvaluationRunStatus = "queued" | "running" | "completed" | "failed" | "approved";
-export type EvaluationRecommendation = "ready_for_rollout" | "needs_review" | "regression_detected";
+export type EvaluationRecommendation = "ready_for_rollout" | "ready_with_caution" | "needs_review" | "regression_detected" | "blocked" | "inconclusive";
+export type EvaluationReviewStatus = "pending_review" | "in_review" | "approved" | "rejected" | "needs_changes";
+export type EvaluationReviewDecision = "approve" | "reject" | "request_changes" | "start_review";
 
 export interface TraceSetEvaluationRunView {
   id: string;
@@ -363,7 +383,11 @@ export interface TraceSetEvaluationRunView {
     averageLatencyDeltaMs: number | null;
     averageTokenDelta: number | null;
     score: number | null;
+    confidence: number | null;
+    criticalFailures: number;
+    observabilityLevel: "full" | "partial" | "minimal" | "unknown";
     recommendation: EvaluationRecommendation;
+    reasons: string[];
   };
   results: Array<{
     sourceTraceId: string;
@@ -373,8 +397,24 @@ export interface TraceSetEvaluationRunView {
     status: TraceStatus;
     latencyDeltaMs: number | null;
     tokenDelta: number | null;
+    confidence?: number | null;
+    recommendation?: TraceSetEvaluationRunView["aggregate"]["recommendation"];
+    criticalFailures?: number;
+    observabilityNote?: string | null;
+    checks?: TraceEvaluationCheckView[];
     error?: string | null;
   }>;
+  review: {
+    status: EvaluationReviewStatus;
+    decision: EvaluationReviewDecision | null;
+    reviewerId: string | null;
+    reviewerNote: string | null;
+    reviewedAt: string | null;
+  };
+  promotion: {
+    allowed: boolean;
+    reasons: string[];
+  };
   approvedAt?: string | null;
   approvedBy?: string | null;
 }
@@ -441,3 +481,58 @@ export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise
 
   return (await response.json()) as T;
 }
+
+// ─── Golden Traces ─────────────────────────────────────────────────────────────
+
+export type GoldenTrace = {
+  id: string;
+  workspaceId: string;
+  traceId: string;
+  promptName: string | null;
+  promptVersion: string | null;
+  label: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+// ─── Baseline Datasets ─────────────────────────────────────────────────────────
+
+export type BaselineDatasetSourceType = "trace_set" | "golden_traces" | "manual";
+
+export type BaselineDataset = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  sourceType: BaselineDatasetSourceType;
+  traceIds: string[];
+  promptName: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// ─── Regression Schedules ──────────────────────────────────────────────────────
+
+export type RegressionScheduleStatus = "idle" | "running" | "failed" | "disabled";
+
+export type RegressionSchedule = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  baselineDatasetId: string;
+  baselineDatasetName: string | null;
+  candidatePromptVersionStrategy: "latest_published" | "specific_version";
+  candidatePromptVersionId: string | null;
+  promptName: string | null;
+  cronExpression: string | null;
+  enabled: boolean;
+  status: RegressionScheduleStatus;
+  lastRunAt: string | null;
+  lastRunEvaluationRunId: string | null;
+  lastRunRecommendation: string | null;
+  nextRunAt: string | null;
+  createdBy: string;
+  createdAt: string;
+};

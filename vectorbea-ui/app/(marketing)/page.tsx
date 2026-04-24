@@ -20,7 +20,6 @@ import {
 import { createServerClient } from "@supabase/ssr";
 
 import { MarketingHero } from "@/components/marketing/hero-scene";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Logo } from "@/components/ui/Logo";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -207,7 +206,6 @@ export default async function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-2 md:gap-3">
-            <ThemeToggle />
             {user ? (
               <Link href="/dashboard" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
                 Go to Dashboard

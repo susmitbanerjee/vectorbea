@@ -1,0 +1,34 @@
+import { NextRequest, NextResponse } from "next/server";
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { toggleRegressionSchedule, deleteRegressionSchedule } from "@/lib/server/regression-schedules";
+
+export const dynamic = "force-dynamic";
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
+    if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    const { id } = await params;
+    const body = await request.json().catch(() => ({})) as { enabled?: boolean };
+    if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "enabled boolean required" }, { status: 400 });
+    return NextResponse.json(await toggleRegressionSchedule(workspaceId, id, body.enabled));
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
+    if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
+    const { id } = await params;
+    await deleteRegressionSchedule(workspaceId, id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+  }
+}

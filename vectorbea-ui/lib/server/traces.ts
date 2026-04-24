@@ -181,14 +181,21 @@ function normalizeEvaluation(metadata: unknown): TraceEvaluationView | null {
   const legacy = asRecord(normalized.custom);
   const evaluation = asRecord(normalized.evaluation ?? legacy.evaluation);
   const score = asNumber(evaluation.score ?? legacy.evalScore ?? legacy.score, Number.NaN);
+  const confidence = asNumber(evaluation.confidence, Number.NaN);
   const rawChecks = Array.isArray(evaluation.checks) ? evaluation.checks : [];
   const checks: TraceEvaluationCheckView[] = rawChecks.map((entry, index) => {
     const row = asRecord(entry);
     const checkScore = asNumber(row.score, Number.NaN);
+    const weightValue = asNumber(row.weight, Number.NaN);
     return {
       name: asString(row.name, `Check ${index + 1}`),
+      category: asString(row.category, "observability") as TraceEvaluationCheckView["category"],
+      status: asString(row.status, "not_applicable") as TraceEvaluationCheckView["status"],
       label: toEvaluationLabel(row.label ?? row.status),
       score: Number.isFinite(checkScore) ? checkScore : null,
+      weight: Number.isFinite(weightValue) ? weightValue : undefined,
+      critical: asBoolean(row.critical, false),
+      available: asBoolean(row.available, Number.isFinite(checkScore)),
       reason: asString(row.reason, ""),
     };
   });
@@ -198,6 +205,10 @@ function normalizeEvaluation(metadata: unknown): TraceEvaluationView | null {
   return {
     score: Number.isFinite(score) ? score : null,
     label: toEvaluationLabel(evaluation.label),
+    recommendation: asString(evaluation.recommendation, "needs_review") as TraceEvaluationView["recommendation"],
+    confidence: Number.isFinite(confidence) ? confidence : null,
+    criticalFailures: asNumber(evaluation.critical_failures ?? evaluation.criticalFailures, 0),
+    observabilityNote: asString(evaluation.observability_note ?? evaluation.observabilityNote) || null,
     runId: asString(evaluation.run_id ?? evaluation.runId) || null,
     datasetId: asString(evaluation.dataset_id ?? evaluation.datasetId) || null,
     comparedAgainstTraceId: asString(evaluation.compared_against_trace_id ?? evaluation.comparedAgainstTraceId) || null,

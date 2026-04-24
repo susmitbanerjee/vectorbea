@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "crypto";
 
-import type { TraceSetEvaluationRunView } from "@/lib/api";
+import type { TraceEvaluationCheckView, TraceSetEvaluationRunView } from "@/lib/api";
 import { evaluateTraceReplay, toMetadataEvaluation } from "@/lib/server/trace-compare";
 import { executeResolvedPrompt } from "@/lib/server/execution";
 import { isRuntimeTraceRow, mapAuditRowToTraceDetail, type AuditLogTraceRow } from "@/lib/server/traces";
@@ -29,6 +29,56 @@ function asString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function aggregateObservability(values: Array<string | null | undefined>): TraceSetEvaluationRunView["aggregate"]["observabilityLevel"] {
+  if (values.some((value) => value === "minimal")) return "minimal";
+  if (values.some((value) => value === "partial")) return "partial";
+  if (values.some((value) => value === "unknown")) return "unknown";
+  return "full";
+}
+
+function defaultReview(): TraceSetEvaluationRunView["review"] {
+  return {
+    status: "pending_review",
+    decision: null,
+    reviewerId: null,
+    reviewerNote: null,
+    reviewedAt: null,
+  };
+}
+
+function buildPromotionGate(input: {
+  status: TraceSetEvaluationRunView["status"];
+  review: TraceSetEvaluationRunView["review"];
+  recommendation: TraceSetEvaluationRunView["aggregate"]["recommendation"];
+  criticalFailures: number;
+  confidence: number | null;
+  failed: number;
+}): TraceSetEvaluationRunView["promotion"] {
+  const reasons: string[] = [];
+  if (input.status !== "completed" && input.status !== "approved") {
+    reasons.push("Evaluation run is not completed");
+  }
+  if (input.review.status !== "approved") {
+    reasons.push("Human review is not approved");
+  }
+  if (input.criticalFailures > 0) {
+    reasons.push("One or more critical checks failed");
+  }
+  if (input.recommendation === "blocked" || input.recommendation === "regression_detected") {
+    reasons.push("Evaluation recommendation indicates regression");
+  }
+  if (input.failed > 0) {
+    reasons.push("Some replay traces failed execution");
+  }
+  if (input.confidence !== null && input.confidence < 0.55) {
+    reasons.push("Evaluation confidence is low because observability is incomplete");
+  }
+  return {
+    allowed: reasons.length === 0,
+    reasons,
+  };
+}
+
 function renderTemplate(template: string, variables: Record<string, unknown>) {
   return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, key: string) => {
     const value = variables[key];
@@ -51,11 +101,25 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
 
   const aggregate = asRecord(payload.aggregate);
   const rawResults = Array.isArray(payload.results) ? payload.results : [];
+  const reviewPayload = asRecord(payload.review);
+  const review: TraceSetEvaluationRunView["review"] = {
+    status: (asString(reviewPayload.status) as TraceSetEvaluationRunView["review"]["status"]) ?? "pending_review",
+    decision: (asString(reviewPayload.decision) as TraceSetEvaluationRunView["review"]["decision"]) ?? null,
+    reviewerId: asString(reviewPayload.reviewer_id ?? reviewPayload.reviewerId),
+    reviewerNote: asString(reviewPayload.reviewer_note ?? reviewPayload.reviewerNote),
+    reviewedAt: asString(reviewPayload.reviewed_at ?? reviewPayload.reviewedAt),
+  };
+
+  const confidenceValue = Number(aggregate.confidence ?? Number.NaN);
+  const recommendation = (asString(aggregate.recommendation) as TraceSetEvaluationRunView["aggregate"]["recommendation"]) ?? "needs_review";
+  const criticalFailures = Number(aggregate.critical_failures ?? 0);
+  const failed = Number(aggregate.failed ?? 0);
+  const status = (asString(payload.status) as TraceSetEvaluationRunView["status"]) ?? "completed";
 
   return {
     id: String(payload.id),
     workspaceId: row.workspace_id,
-    status: (asString(payload.status) as TraceSetEvaluationRunView["status"]) ?? "completed",
+    status,
     promptName: asString(payload.prompt_name) ?? row.prompt_name ?? "unknown-prompt",
     candidatePromptVersionId: asString(payload.candidate_prompt_version_id) ?? "",
     candidateVersionTag: asString(payload.candidate_version_tag) ?? row.version_tag ?? "latest",
@@ -73,10 +137,16 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
       averageLatencyDeltaMs: typeof aggregate.average_latency_delta_ms === "number" ? aggregate.average_latency_delta_ms : null,
       averageTokenDelta: typeof aggregate.average_token_delta === "number" ? aggregate.average_token_delta : null,
       score: typeof aggregate.score === "number" ? aggregate.score : null,
-      recommendation: (asString(aggregate.recommendation) as TraceSetEvaluationRunView["aggregate"]["recommendation"]) ?? "needs_review",
+      confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
+      criticalFailures,
+      observabilityLevel: (asString(aggregate.observability_level) as TraceSetEvaluationRunView["aggregate"]["observabilityLevel"]) ?? "unknown",
+      recommendation,
+      reasons: Array.isArray(aggregate.reasons) ? aggregate.reasons.map(String) : [],
     },
     results: rawResults.map((entry) => {
       const result = asRecord(entry);
+      const confidence = Number(result.confidence ?? Number.NaN);
+      const rawChecks = Array.isArray(result.checks) ? result.checks : [];
       return {
         sourceTraceId: asString(result.source_trace_id) ?? "",
         replayTraceId: asString(result.replay_trace_id),
@@ -85,8 +155,38 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
         status: (asString(result.status) as TraceSetEvaluationRunView["results"][number]["status"]) ?? "error",
         latencyDeltaMs: typeof result.latency_delta_ms === "number" ? result.latency_delta_ms : null,
         tokenDelta: typeof result.token_delta === "number" ? result.token_delta : null,
+        confidence: Number.isFinite(confidence) ? confidence : null,
+        recommendation: (asString(result.recommendation) as TraceSetEvaluationRunView["results"][number]["recommendation"]) ?? "needs_review",
+        criticalFailures: Number(result.critical_failures ?? 0),
+        observabilityNote: asString(result.observability_note),
+        checks: rawChecks.map((entry) => {
+          const check = asRecord(entry);
+          const checkScore = Number(check.score ?? Number.NaN);
+          const weight = Number(check.weight ?? Number.NaN);
+          const mappedCheck: TraceEvaluationCheckView = {
+            name: asString(check.name) ?? "check",
+            category: asString(check.category) as TraceEvaluationCheckView["category"],
+            status: asString(check.status) as TraceEvaluationCheckView["status"],
+            label: (asString(check.label) as TraceEvaluationCheckView["label"]) ?? "unknown",
+            score: Number.isFinite(checkScore) ? checkScore : null,
+            weight: Number.isFinite(weight) ? weight : undefined,
+            critical: Boolean(check.critical),
+            available: check.available === undefined ? true : Boolean(check.available),
+            reason: asString(check.reason) ?? "",
+          };
+          return mappedCheck;
+        }),
         error: asString(result.error),
       };
+    }),
+    review,
+    promotion: buildPromotionGate({
+      status,
+      review,
+      recommendation,
+      criticalFailures,
+      confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
+      failed,
     }),
     approvedAt: asString(payload.approved_at),
     approvedBy: asString(payload.approved_by),
@@ -168,10 +268,13 @@ export async function createTraceSetEvaluationRun(args: {
   const replayTraceIds: string[] = [];
   const latencyDeltas: number[] = [];
   const tokenDeltas: number[] = [];
+  const confidences: number[] = [];
+  const observabilityLevels: Array<string | null> = [];
   let outputChanged = 0;
   let latencyImproved = 0;
   let latencyRegressed = 0;
   let unavailableObservability = 0;
+  let criticalFailures = 0;
   let succeeded = 0;
   let failed = 0;
   const scores: number[] = [];
@@ -199,6 +302,23 @@ export async function createTraceSetEvaluationRun(args: {
         status: "error",
         latencyDeltaMs: null,
         tokenDelta: null,
+        confidence: null,
+        recommendation: "blocked",
+        criticalFailures: 1,
+        observabilityNote: "Replay input metadata missing",
+        checks: [
+          {
+            name: "replay_completed",
+            category: "reliability",
+            status: "fail",
+            label: "fail",
+            score: 0,
+            weight: 1,
+            critical: true,
+            available: true,
+            reason: "Trace metadata lacked replayable input",
+          },
+        ],
         error: "Replay input metadata was missing for this trace.",
       });
       continue;
@@ -285,6 +405,9 @@ export async function createTraceSetEvaluationRun(args: {
     replayTraceIds.push(replayRow.id);
     if (replayDetail.status === "success") succeeded += 1; else failed += 1;
     if (typeof evaluation.score === "number") scores.push(evaluation.score);
+    if (typeof evaluation.confidence === "number") confidences.push(evaluation.confidence);
+    if (typeof evaluation.criticalFailures === "number") criticalFailures += evaluation.criticalFailures;
+    observabilityLevels.push(replayDetail.executorObservability);
     const latencyDelta = replayDetail.durationMs - sourceDetail.durationMs;
     const leftTokens = sourceDetail.tokensIn + sourceDetail.tokensOut;
     const rightTokens = replayDetail.tokensIn + replayDetail.tokensOut;
@@ -304,17 +427,44 @@ export async function createTraceSetEvaluationRun(args: {
       status: replayDetail.status,
       latencyDeltaMs: latencyDelta,
       tokenDelta,
+      confidence: evaluation.confidence ?? null,
+      recommendation: evaluation.recommendation === "ready"
+        ? "ready_for_rollout"
+        : evaluation.recommendation === "regression"
+          ? "regression_detected"
+          : evaluation.recommendation === "blocked"
+            ? "blocked"
+            : evaluation.recommendation === "inconclusive"
+              ? "inconclusive"
+              : "needs_review",
+      criticalFailures: evaluation.criticalFailures ?? 0,
+      observabilityNote: evaluation.observabilityNote ?? null,
+      checks: evaluation.checks,
       error: null,
     });
   }
 
   const aggregateScore = scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
+  const aggregateConfidence = confidences.length ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length : null;
+  const observabilityLevel = aggregateObservability(observabilityLevels);
   const recommendation =
-    failed === 0 && aggregateScore !== null && aggregateScore >= 0.72 && latencyRegressed <= latencyImproved
-      ? "ready_for_rollout"
-      : failed > 0 || latencyRegressed > latencyImproved
-        ? "regression_detected"
-        : "needs_review";
+    criticalFailures > 0 || failed > 0
+      ? "blocked"
+      : aggregateScore === null
+        ? "inconclusive"
+        : aggregateScore >= 0.78 && (aggregateConfidence ?? 0) >= 0.7
+          ? "ready_for_rollout"
+          : aggregateScore <= 0.45 || latencyRegressed > latencyImproved
+            ? "regression_detected"
+            : aggregateConfidence !== null && aggregateConfidence < 0.6
+              ? "ready_with_caution"
+              : "needs_review";
+  const recommendationReasons: string[] = [];
+  if (criticalFailures > 0) recommendationReasons.push("Critical checks failed on one or more traces");
+  if (failed > 0) recommendationReasons.push("One or more replay traces failed");
+  if (observabilityLevel !== "full") recommendationReasons.push("Executor observability is partial; some checks are unavailable");
+  if (recommendation === "regression_detected") recommendationReasons.push("Latency or quality regressed in this run");
+  if (recommendation === "ready_for_rollout") recommendationReasons.push("No critical failures and score threshold passed");
 
   const evaluationMetadata = buildTraceMetadataV1({
     metadata: {
@@ -339,8 +489,13 @@ export async function createTraceSetEvaluationRun(args: {
             average_latency_delta_ms: latencyDeltas.length ? latencyDeltas.reduce((sum, value) => sum + value, 0) / latencyDeltas.length : null,
             average_token_delta: tokenDeltas.length ? tokenDeltas.reduce((sum, value) => sum + value, 0) / tokenDeltas.length : null,
             score: aggregateScore,
+            confidence: aggregateConfidence,
+            critical_failures: criticalFailures,
+            observability_level: observabilityLevel,
             recommendation,
+            reasons: recommendationReasons,
           },
+          review: defaultReview(),
           results: results.map((result) => ({
             source_trace_id: result.sourceTraceId,
             replay_trace_id: result.replayTraceId,
@@ -349,6 +504,21 @@ export async function createTraceSetEvaluationRun(args: {
             status: result.status,
             latency_delta_ms: result.latencyDeltaMs,
             token_delta: result.tokenDelta,
+            confidence: result.confidence ?? null,
+            recommendation: result.recommendation ?? "needs_review",
+            critical_failures: result.criticalFailures ?? 0,
+            observability_note: result.observabilityNote ?? null,
+            checks: (result.checks ?? []).map((check) => ({
+              name: check.name,
+              category: check.category,
+              status: check.status,
+              label: check.label,
+              score: check.score,
+              weight: check.weight,
+              critical: check.critical,
+              available: check.available,
+              reason: check.reason,
+            })),
             error: result.error ?? null,
           })),
         },
@@ -402,6 +572,24 @@ export async function approveEvaluationRun(args: {
   const row = data as AuditLogTraceRow;
   const normalized = normalizeTraceMetadataV1(row.metadata ?? {});
   const runPayload = asRecord(asRecord(normalized.custom).evaluation_run);
+  const aggregate = asRecord(runPayload.aggregate);
+  const review = asRecord(runPayload.review);
+  const reviewStatus = asString(review.status) ?? "pending_review";
+  const recommendation = asString(aggregate.recommendation) ?? "needs_review";
+  const failed = Number(aggregate.failed ?? 0);
+  const criticalFailures = Number(aggregate.critical_failures ?? 0);
+
+  const blockingReasons: string[] = [];
+  if (reviewStatus !== "approved") blockingReasons.push("Human review must be approved before promotion.");
+  if (criticalFailures > 0) blockingReasons.push("Critical evaluation checks are failing.");
+  if (failed > 0) blockingReasons.push("Some replay traces failed execution.");
+  if (recommendation === "blocked" || recommendation === "regression_detected") {
+    blockingReasons.push("Evaluation recommendation indicates regression risk.");
+  }
+  if (blockingReasons.length > 0) {
+    throw new Error(`Promotion blocked: ${blockingReasons.join(" ")}`);
+  }
+
   const candidatePromptVersionId = asString(runPayload.candidate_prompt_version_id) ?? row.prompt_version_id;
   if (!candidatePromptVersionId) throw new Error("Evaluation run is missing candidate prompt version.");
 
@@ -431,6 +619,14 @@ export async function approveEvaluationRun(args: {
       evaluation_run: {
         ...runPayload,
         status: "approved",
+        review: {
+          ...review,
+          status: "approved",
+          decision: "approve",
+          reviewer_id: args.approvedBy,
+          reviewed_at: new Date().toISOString(),
+          reviewer_note: asString(review.reviewer_note) ?? asString(review.reviewerNote) ?? "Approved for rollout",
+        },
         approved_at: new Date().toISOString(),
         approved_by: args.approvedBy,
       },
@@ -476,6 +672,59 @@ export async function approveEvaluationRun(args: {
     token_count: 0,
     metadata: promotionAudit,
   });
+
+  return getEvaluationRun(args.workspaceId, args.evaluationRunId);
+}
+
+export async function reviewEvaluationRun(args: {
+  workspaceId: string;
+  evaluationRunId: string;
+  reviewerId: string;
+  status: TraceSetEvaluationRunView["review"]["status"];
+  decision: TraceSetEvaluationRunView["review"]["decision"];
+  note?: string | null;
+}) {
+  const supabase = createVectorBeaAdminClient();
+  const { data, error } = await supabase
+    .from("audit_logs")
+    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, metadata")
+    .eq("workspace_id", args.workspaceId)
+    .eq("id", args.evaluationRunId)
+    .single();
+  if (error) throw new Error(error.message);
+
+  const row = data as AuditLogTraceRow;
+  const normalized = normalizeTraceMetadataV1(row.metadata ?? {});
+  const runPayload = asRecord(asRecord(normalized.custom).evaluation_run);
+  if (!runPayload.id) throw new Error("Evaluation run payload is missing.");
+
+  const updatedRunPayload = {
+    ...runPayload,
+    review: {
+      ...asRecord(runPayload.review),
+      status: args.status,
+      decision: args.decision,
+      reviewer_id: args.reviewerId,
+      reviewer_note: args.note ?? null,
+      reviewed_at: new Date().toISOString(),
+    },
+  };
+
+  const nextMetadata = {
+    ...normalized,
+    custom: {
+      ...(normalized.custom ?? {}),
+      action: "evaluation_review",
+      evaluation_run: updatedRunPayload,
+    },
+  };
+
+  const { error: updateError } = await supabase
+    .from("audit_logs")
+    .update({ metadata: nextMetadata })
+    .eq("workspace_id", args.workspaceId)
+    .eq("id", row.id);
+  if (updateError) throw new Error(updateError.message);
 
   return getEvaluationRun(args.workspaceId, args.evaluationRunId);
 }

@@ -26,7 +26,6 @@ import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.cio.unixConnector
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
@@ -154,7 +153,6 @@ private fun Application.vectorbeaModule(
     auditDispatcher: AuditDispatcher,
     json: Json,
 ) {
-    install(CallLogging)
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             // Explicit JSON string — no ContentNegotiation / reflection needed.

@@ -1,9 +1,25 @@
 # Trace Metadata v1 (`audit_logs.metadata`)
 
-`audit_logs` remains the execution source of truth.  
+`audit_logs` is the execution source of truth.  
 Each row is one trace. `audit_logs.metadata` is the structured trace envelope.
 
-Important: the Trace product surface is runtime-only. Generic UI/admin audits may still share `audit_logs`, but they must be tagged as `use_type: "audit"` and excluded from Trace list/detail, replay, compare, and evaluation workflows.
+Runtime traces are produced by the VectorBea proxy and sidecar. Generic UI/admin audits share `audit_logs` but must be tagged `use_type: "audit"` and are excluded from the TraceLoop, replay, compare, and evaluation product surfaces.
+
+---
+
+## Timing — proxy-side capture
+
+**Client SDKs do not need to measure LLM latency.**  
+The proxy and sidecar capture all execution timing server-side:
+
+- `proxy_latency_ms` — total proxy-side latency (prompt resolution + cache lookup + executor call + audit persist)
+- `llm_latency_ms` — downstream executor call latency only (LLM or enterprise gateway)
+- Both values are stored directly in `audit_logs` columns and mirrored into `metadata.model.latency_ms` and span timing
+
+The TraceLoop renders proxy spans, cache spans, prompt-resolution spans, and executor spans from this data.  
+Clients may add custom spans via the SDK's span API, but they are optional enrichment, not required for trace correctness.
+
+---
 
 ## Canonical envelope
 
@@ -18,90 +34,127 @@ Every new write should include:
 - `output`
 - `spans` (array, can be empty)
 
-Optional sections:
+Optional sections: `request`, `retrieval`, `guardrail`, `fallback`, `evaluation`, `logs`, `tags`, `custom`
 
-- `request`
-- `retrieval`
-- `guardrail`
-- `fallback`
-- `evaluation`
-- `logs`
-- `tags`
-- `custom`
+---
 
-## Executor-aware execution
+## Executor types
 
-`executor` records where the resolved prompt was executed:
+`executor.type` records where the resolved prompt was executed:
 
-- `type`: `direct_provider`, `enterprise_gateway`, or `observe_only`
-- `name`: provider or gateway name
-- `ownership`: `vectorbea` or `customer`
-- `request_mode`: `direct`, `forwarded`, or `wrapped`
-- `endpoint`: provider endpoint label or customer gateway path
-- `response_observability`: `full`, `partial`, or `minimal`
+- `direct_provider` — preserves existing direct-provider traces and replay behavior. Not backed by a fully real live provider engine in this repo. Replay falls back to captured output for `direct_provider` traces.
+- `enterprise_gateway` — forwards the resolved payload to a customer-owned AI gateway. This is the **strongest fully-real execution path**. `VECTORBEA_ENTERPRISE_GATEWAY_URL` must be set for gateway replay to execute live.
+- `observe_only` — passive observation; no execution is attempted.
 
-VectorBea resolves prompt identity, version, and variables before dispatching to the executor. Enterprise gateway mode forwards the resolved payload to the customer gateway while preserving VectorBea lineage, trace metadata, and replay/audit behavior.
+`executor.response_observability` values:
+- `full` — all latency, token, cost, and output data is available
+- `partial` — enterprise gateway returned a response but did not report token/cost data
+- `minimal` — response received but very limited telemetry
+- `unknown` — observability level was not reported
 
-Direct-provider mode is compatibility-preserving in this repository. It keeps existing direct-provider traces and replay plumbing readable, but the fully real network execution path is enterprise-gateway-ready when gateway configuration is provided.
-
-## Compare and replay evaluation
-
-Trace comparison is built directly on `audit_logs`: the compare view loads two audit rows, normalizes their `metadata`, and computes diffs for prompt version, executor path, observability, output, latency, tokens, and cost. Missing gateway fields are shown as unavailable rather than coerced to zero.
-
-Replay evaluation is a lightweight rule-based MVP. It compares a replayed trace against its source trace and persists the result on the replayed row under `metadata.evaluation`:
-
-- `score`: normalized score from available checks
-- `label`: `better`, `same`, `worse`, `pass`, `fail`, or `unknown`
-- `compared_against_trace_id`: source trace id
-- `evaluation_mode`: `replay_compare`
-- `checks`: status, latency, token usage when available, output availability, and observability notes
-
-This is intentionally not an LLM judge yet. It gives engineers an immediate debug -> replay -> compare -> evaluate loop while keeping enterprise gateway execution honest about partial observability.
+---
 
 ## Runtime write path
 
-- Proxy ingest routes normalize metadata to v1 before dispatch:
-  - `vectorbea-proxy/src/main/kotlin/com/vectorbee/proxy/grpc/VectorBeeGrpcService.kt`
-  - `vectorbea-proxy/src/main/kotlin/com/vectorbee/proxy/http/PublicHttpServer.kt`
-  - `vectorbea-proxy/src/main/kotlin/com/vectorbee/proxy/Main.kt` (`/v1/audit`)
-- Control-plane insert routes also normalize to v1:
-  - `vectorbea-ui/app/api/proxy/audit/batch/route.ts`
-  - `vectorbea-ui/app/api/audit/batch/route.ts`
-  - `vectorbea-ui/app/api/audits/route.ts`
+Proxy ingest routes normalize metadata to v1 before dispatch:
+- `vectorbea-proxy/.../VectorBeeGrpcService.kt`
+- `vectorbea-proxy/.../PublicHttpServer.kt`
+- `vectorbea-proxy/.../Main.kt` (`/v1/audit`)
 
-## Backward compatibility
+Control-plane insert routes also normalize:
+- `vectorbea-ui/app/api/proxy/audit/batch/route.ts`
+- `vectorbea-ui/app/api/audit/batch/route.ts`
+- `vectorbea-ui/app/api/audits/route.ts`
 
-- Old flat metadata remains readable.
-- Unknown/legacy keys are retained under `custom`.
-- UI normalizes first, then falls back to `custom`:
-  - `vectorbea-ui/lib/server/traces.ts`
+---
 
-## Runtime trace identification
+## TraceLoop
 
-Runtime traces are identified in this order:
+The primary trace timeline UI is called **TraceLoop**. It renders:
+- Proxy latency span
+- Cache lookup span (hit/miss/skip)
+- Prompt resolution span
+- Executor/LLM call span
+- Output parsing span (if available)
+- Custom client spans (if provided)
 
-- `tags.use_type === "runtime"`
-- `trace.kind === "runtime_execution"` or `tags.trace_kind === "runtime_execution"`
-- executor metadata present
-- replay lineage present
-- real execution spans or final output present
+Spans are synthesized from `proxy_latency_ms` + `llm_latency_ms` when explicit span data is absent.
 
-Rows tagged `use_type: "audit"` or `trace.kind: "admin_audit"` are not runtime traces and must never appear in the TraceLoop, replay, compare, or trace-set evaluation product surfaces.
+---
 
-## TraceLoop terminology
+## Replay
 
-The primary trace timeline UI is now called `TraceLoop` in the product. Older internal names may still use `waterfall` for implementation compatibility, but user-facing labels should use `TraceLoop`.
+Replay re-executes a runtime trace against a (potentially different) prompt version via the same executor path.  
+For `enterprise_gateway` traces: live execution is performed against the gateway.  
+For `direct_provider` traces: replay uses captured output (no live LLM call). This is a known limitation.
 
-## Trace-set evaluations
+Replay timing is captured the same way as original traces — the replay executor measures latency server-side.
 
-Trace-set evaluations replay a selected set of runtime traces against a candidate prompt version using the same prompt-resolution-first executor path. The resulting replay traces remain runtime traces. The evaluation run record itself is stored as an audit-classified row and must not pollute the Trace product surface.
+---
 
-## UI consumption notes
+## Compare
 
-- Status: prefer `metadata.trace.status`.
-- Cache: prefer `metadata.cache.status`.
-- Model/provider: prefer `metadata.model`.
-- Executor: prefer `metadata.executor`.
-- Prompt/version variables: prefer `metadata.prompt`.
-- Input/output/logs/spans: read from canonical sections when available.
-- If spans are missing, UI synthesizes baseline spans from proxy/LLM latency.
+Trace comparison loads two `audit_logs` rows, normalizes their metadata, and computes diffs for:
+- Prompt version, executor path, observability level
+- Output text (normalized comparison)
+- Latency delta, token delta, cost delta
+
+Missing gateway fields are shown as unavailable rather than coerced to zero.
+
+---
+
+## Evaluations and regression checks
+
+Trace-set evaluations replay a selected set of runtime traces against a candidate prompt version.  
+The resulting replay traces are full runtime traces. The evaluation run record is stored as an `audit`-classified row.
+
+### Regression checks
+
+Checks are run by `evaluateTraceReplay()` in `lib/server/trace-compare.ts`:
+
+| Check | Category | Weight | Critical |
+|---|---|---|---|
+| `execution_success` | reliability | 0.22 | yes |
+| `output_present` | correctness | 0.20 | yes |
+| `latency_regression` | performance | 0.16 | no |
+| `token_regression` | performance | 0.10 | no |
+| `structured_output_valid` | structure | 0.12 | yes |
+| `executor_observability` | executor_context | 0.20 | no |
+
+Checks with `available: false` are excluded from weighted scoring. Missing data is never coerced to zero.  
+Confidence is `observedWeight / configuredWeight` — low confidence means observability was incomplete, not that the run failed.
+
+### Scoring
+
+- `score` — weighted average of available checks (0–1)
+- `confidence` — fraction of configured weight that had observable data
+- `recommendation` — `ready_for_rollout | ready_with_caution | needs_review | regression_detected | blocked | inconclusive`
+- Promotion requires: completed run + approved human review + no critical failures + recommendation not blocked/regression
+
+---
+
+## Baseline datasets
+
+Named collections of runtime trace IDs used as repeatable inputs for evaluation runs.  
+Stored in `baseline_datasets` table (not in `audit_logs`).
+
+## Golden traces
+
+Runtime traces explicitly marked as high-value by engineers.  
+Stored in `golden_traces` table. Golden trace marking is `audit`-classified and must not appear in TraceLoop.
+
+## Scheduled regression checks
+
+Regression schedules pair a baseline dataset with a candidate version strategy and run evaluation runs on demand or via external trigger.  
+Stored in `regression_schedules` table.  
+**No built-in cron runner exists.** Invoke `POST /api/evaluations/regression-schedules/[id]/run` from CI or an external scheduler.
+
+---
+
+## Known limitations and honest gaps
+
+- **Reviewer identity**: The reviewer is identified by authenticated user ID only. No expanded reviewer profile entity.
+- **Scoring policy**: Check weights and thresholds are code-configured server-side (in `trace-compare.ts`). Not yet editable by workspace admins via UI.
+- **direct_provider replay**: Replay for `direct_provider` traces uses captured output, not a live provider call. Enterprise gateway is the only path with live execution in replay.
+- **No built-in scheduler**: Scheduled regression checks require external invocation. The API and model exist; the cron runner does not.
+- **Token/cost data**: Only available when `executor.response_observability === "full"`. Enterprise gateway traces may have `partial` observability. The `token_regression` and cost diff checks correctly mark themselves as `unavailable` in this case.

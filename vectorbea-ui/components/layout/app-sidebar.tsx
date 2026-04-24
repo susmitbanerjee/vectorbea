@@ -6,9 +6,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
+  CalendarClock,
   CreditCard,
   ArrowUpRight,
   BookOpen,
+  Database,
   FlaskConical,
   GitBranch,
   KeyRound,
@@ -19,6 +21,7 @@ import {
   Server,
   Settings2,
   Sparkles,
+  Star,
   Users,
 } from "lucide-react";
 
@@ -34,6 +37,7 @@ const ALL_NAV_ITEMS: Array<{
   label: string;
   icon: typeof LayoutDashboard;
   minRole?: "admin" | "editor" | "viewer";
+  isSubItem?: boolean;
 }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/infrastructure", label: "Infrastructure", icon: Server },
@@ -41,6 +45,9 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
   { href: "/traces", label: "Traces", icon: GitBranch },
   { href: "/evaluations", label: "Evaluations", icon: FlaskConical },
+  { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true },
+  { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true },
+  { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/settings/members", label: "Members", icon: Users },
@@ -118,6 +125,8 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
       <nav className="mt-5 flex flex-col gap-0.5">
         {navigation.map((item) => {
+          if (item.isSubItem && !pathname.startsWith("/evaluations")) return null;
+
           const Icon = item.icon;
           const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
           const active =
@@ -145,14 +154,17 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 startTransition(() => {});
               }}
               className={cn(
-                "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-all duration-200",
+                "group relative flex w-full items-center gap-3 rounded-lg py-2 text-left font-medium transition-all duration-200",
+                item.isSubItem
+                  ? "pl-7 text-[12px]"
+                  : "px-3 text-[13px]",
                 active
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
                 loading && "opacity-80",
               )}
             >
-              {active && (
+              {active && !item.isSubItem && (
                 <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
               )}
               <Icon
@@ -163,7 +175,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 )}
               />
               {loading && (
-                <Loader2 className="absolute left-3 h-4 w-4 animate-spin text-primary" />
+                <Loader2 className={cn("absolute h-4 w-4 animate-spin text-primary", item.isSubItem ? "left-7" : "left-3")} />
               )}
               <span className="flex-1">{item.label}</span>
             </Link>
