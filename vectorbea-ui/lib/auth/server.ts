@@ -78,14 +78,6 @@ function normalizeWorkspaceRole(role?: WorkspaceRole | null): WorkspaceRole {
   return "viewer";
 }
 
-function isBillingPending(org: OrganizationView) {
-  return (
-    org.planTier !== "free" &&
-    !org.stripeCustomerId &&
-    !org.stripeSubscriptionId
-  );
-}
-
 export async function upsertProfile(user: {
   id: string;
   email?: string | null;
@@ -214,13 +206,6 @@ export async function getPostLoginRedirectForUser(userId: string) {
   if (!firstWorkspaceId) {
     return {
       redirectTo: "/onboarding",
-      organizations,
-    };
-  }
-
-  if (organizations.some(isBillingPending)) {
-    return {
-      redirectTo: "/settings/billing",
       organizations,
     };
   }

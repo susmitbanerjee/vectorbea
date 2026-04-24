@@ -31,7 +31,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     ).then(({ data }) => data).catch(() => null),
   ]);
 
-  if (redirectTo === "/onboarding" || redirectTo === "/settings/billing") {
+  if (redirectTo === "/onboarding") {
     redirect(redirectTo);
   }
 
