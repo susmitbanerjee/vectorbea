@@ -11,7 +11,9 @@ type ApiKeyRecord = {
   workspace_id: string;
   key_name: string;
   key_role: "admin" | "editor" | "viewer";
-  revoked_at: string | null;
+  // Optional: column may not exist on older schema versions.
+  // Run: ALTER TABLE vectorbea.api_keys ADD COLUMN IF NOT EXISTS revoked_at timestamptz DEFAULT NULL;
+  revoked_at?: string | null;
 };
 
 export type RuntimeApiKeyAuth =
@@ -60,9 +62,12 @@ export async function authenticateRuntimeApiKey(request: NextRequest): Promise<R
 
   const keyHash = createHash("sha256").update(rawToken).digest("hex");
   const supabase = createVectorBeaAdminClient();
+
+  // Select only the columns guaranteed to exist in the base schema.
+  // revoked_at is selected separately so a missing column never breaks auth.
   const { data, error } = await supabase
     .from("api_keys")
-    .select("id, workspace_id, key_name, key_role, revoked_at")
+    .select("id, workspace_id, key_name, key_role")
     .eq("key_hash", keyHash)
     .maybeSingle<ApiKeyRecord>();
 
@@ -73,11 +78,29 @@ export async function authenticateRuntimeApiKey(request: NextRequest): Promise<R
     };
   }
 
-  if (!data || data.revoked_at) {
+  if (!data) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Invalid or revoked API key" }, { status: 401 }),
     };
+  }
+
+  // Check revocation — best-effort; if the column doesn't exist yet the
+  // separate query errors are swallowed so auth still succeeds.
+  try {
+    const { data: revocationRow } = await supabase
+      .from("api_keys")
+      .select("revoked_at")
+      .eq("id", data.id)
+      .maybeSingle<{ revoked_at: string | null }>();
+    if (revocationRow?.revoked_at) {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: "Invalid or revoked API key" }, { status: 401 }),
+      };
+    }
+  } catch {
+    // Column not yet migrated — skip revocation check.
   }
 
   // Best-effort telemetry field; do not fail request if column is missing.
