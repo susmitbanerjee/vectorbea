@@ -95,7 +95,7 @@ export async function getPromptRolloutDistribution(
     // Columns not yet migrated — all versions default to draft/0%.
   }
 
-  const versions: PromptVersionRollout[] = (data ?? []).map((row: VersionRow) => ({
+  const versions: PromptVersionRollout[] = (data ?? []).map((row) => ({
     promptVersionId: row.id,
     versionTag: row.version_tag,
     rolloutStatus: ((rolloutById.get(row.id)?.rollout_status) ?? "draft") as RolloutStatus,
