@@ -398,6 +398,7 @@ export interface TraceSetEvaluationRunView {
     unresolvedFlagCount?: number;
   };
   results: Array<{
+    datasetItemId?: string | null;
     sourceTraceId: string;
     replayTraceId: string | null;
     score: number | null;
@@ -412,6 +413,43 @@ export interface TraceSetEvaluationRunView {
     replayMode?: "simulated" | "live" | null;
     checks?: TraceEvaluationCheckView[];
     error?: string | null;
+    /** For dataset runs: the input text sent to the LLM */
+    inputText?: string | null;
+    variables?: Record<string, unknown> | null;
+    renderedPrompt?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    evaluationMode?: "expected_output" | "reference_model" | "no_reference" | "trace_replay" | string;
+    /** For dataset runs: the actual LLM output */
+    actualOutput?: string | null;
+    /** For dataset runs: the expected output from the dataset item */
+    expectedOutput?: string | null;
+    referenceOutput?: string | null;
+    similarityScore?: number | null;
+    similarityLabel?: "high" | "medium" | "low" | "unavailable";
+    similarityReason?: string | null;
+    confidenceLabel?: "high" | "medium" | "low" | "insufficient";
+    confidenceReasons?: string[];
+    executionSteps?: Array<{
+      name: string;
+      label: string;
+      status: "pending" | "running" | "success" | "warning" | "error" | "skipped";
+      startedAt?: string | null;
+      completedAt?: string | null;
+      durationMs?: number | null;
+      summary: string;
+      details?: Record<string, unknown>;
+    }>;
+    modelResults?: Array<{
+      provider: string;
+      model: string;
+      score: number | null;
+      similarityScore: number | null;
+      confidence: number | null;
+      latencyMs: number | null;
+      status: TraceStatus;
+      output: string | null;
+    }>;
   }>;
   review: {
     status: EvaluationReviewStatus;

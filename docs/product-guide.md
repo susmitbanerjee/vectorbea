@@ -613,3 +613,29 @@ Replay uses the trace metadata captured at runtime: request input, prompt variab
 | Simulated direct-provider replay | Used when no live direct-provider executor exists. VectorBea uses captured output and marks replay metadata as `simulated`. | No provider API key is used or stored. |
 
 If a user selects a provider override such as Anthropic, Gemini, or Qwen and that provider is not configured, replay fails with “Provider not configured” instead of creating a misleading live trace.
+
+### Evaluation transparency report
+
+Evaluation runs are designed to be inspectable, not black-box. For every dataset item, VectorBea records the input, rendered prompt, configured provider/model, actual LLM output, expected or reference output when available, similarity score, confidence score, weighted checks, and an execution-step timeline.
+
+#### Evaluation modes
+
+| Mode | When it is used | What VectorBea compares |
+|---|---|---|
+| Expected output | `expected_output` is present on the dataset item | Candidate output vs the human-provided expected output |
+| Reference model | A reference provider/model is configured for blank expected outputs | Candidate output vs generated reference output |
+| No reference | No expected output or reference model is available | Execution, output presence, latency, token observability, and structural checks only |
+
+If `expected_output` is blank, VectorBea does not pretend similarity exists. The similarity check is marked unavailable unless a reference output is generated.
+
+#### Similarity and confidence
+
+Similarity is a practical heuristic unless a dedicated embeddings service is configured. The fallback scorer uses lexical overlap/edit-distance style comparison and reports a score from `0` to `1` with a label of high, medium, low, or unavailable.
+
+Confidence is separate from score. It reflects how much evidence was available: provider execution succeeded, actual output was captured, expected or reference output was available, similarity could be calculated, and token/cost/model observability was complete or partial.
+
+#### Per-item execution steps
+
+Each item report records these steps: load dataset item, render prompt, call provider/model, receive output, compare expected or reference output, calculate similarity, calculate confidence, calculate weighted score, and assign verdict.
+
+Provider API keys are never shown in the report. The report stores provider/model names, timing, outputs, and scoring evidence only. Multi-model reports compare configured live-capable provider/model outputs only; unsupported or unconfigured providers are not shown as live results.

@@ -30,6 +30,52 @@ function asString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function similarityLabel(score: number | null): "high" | "medium" | "low" | "unavailable" {
+  if (score === null) return "unavailable";
+  if (score >= 0.78) return "high";
+  if (score >= 0.45) return "medium";
+  return "low";
+}
+
+function confidenceLabel(score: number | null): "high" | "medium" | "low" | "insufficient" {
+  if (score === null) return "insufficient";
+  if (score >= 0.78) return "high";
+  if (score >= 0.5) return "medium";
+  return "low";
+}
+
+type EvaluationStep = NonNullable<TraceSetEvaluationRunView["results"][number]["executionSteps"]>[number];
+
+function completedStep(
+  name: string,
+  label: string,
+  status: EvaluationStep["status"],
+  summary: string,
+  details?: Record<string, unknown>,
+  durationMs = 0,
+): EvaluationStep {
+  const now = new Date().toISOString();
+  return {
+    name,
+    label,
+    status,
+    startedAt: now,
+    completedAt: now,
+    durationMs,
+    summary,
+    details,
+  };
+}
+
 function aggregateObservability(values: Array<string | null | undefined>): TraceSetEvaluationRunView["aggregate"]["observabilityLevel"] {
   if (values.some((value) => value === "minimal")) return "minimal";
   if (values.some((value) => value === "partial")) return "partial";
@@ -180,6 +226,7 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
       const confidence = Number(result.confidence ?? Number.NaN);
       const rawChecks = Array.isArray(result.checks) ? result.checks : [];
       return {
+        datasetItemId: asString(result.dataset_item_id ?? result.datasetItemId),
         sourceTraceId: asString(result.source_trace_id) ?? "",
         replayTraceId: asString(result.replay_trace_id),
         score: typeof result.score === "number" ? result.score : null,
@@ -210,6 +257,54 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
           return mappedCheck;
         }),
         error: asString(result.error),
+        inputText: asString(result.input_text ?? result.inputText),
+        variables: Object.keys(asRecord(result.variables)).length > 0 ? asRecord(result.variables) : null,
+        renderedPrompt: asString(result.rendered_prompt ?? result.renderedPrompt),
+        provider: asString(result.provider),
+        model: asString(result.model),
+        evaluationMode: asString(result.evaluation_mode ?? result.evaluationMode) ?? undefined,
+        actualOutput: asString(result.actual_output ?? result.actualOutput),
+        expectedOutput: asString(result.expected_output ?? result.expectedOutput),
+        referenceOutput: asString(result.reference_output ?? result.referenceOutput),
+        similarityScore: asNumber(result.similarity_score ?? result.similarityScore),
+        similarityLabel: (asString(result.similarity_label ?? result.similarityLabel) as TraceSetEvaluationRunView["results"][number]["similarityLabel"]) ?? "unavailable",
+        similarityReason: asString(result.similarity_reason ?? result.similarityReason),
+        confidenceLabel: (asString(result.confidence_label ?? result.confidenceLabel) as TraceSetEvaluationRunView["results"][number]["confidenceLabel"]) ?? undefined,
+        confidenceReasons: Array.isArray(result.confidence_reasons)
+          ? result.confidence_reasons.map(String)
+          : Array.isArray(result.confidenceReasons)
+            ? result.confidenceReasons.map(String)
+            : [],
+        executionSteps: Array.isArray(result.execution_steps)
+          ? result.execution_steps.map((step) => {
+              const row = asRecord(step);
+              return {
+                name: asString(row.name) ?? "step",
+                label: asString(row.label) ?? "Step",
+                status: (asString(row.status) as EvaluationStep["status"]) ?? "skipped",
+                startedAt: asString(row.started_at ?? row.startedAt),
+                completedAt: asString(row.completed_at ?? row.completedAt),
+                durationMs: asNumber(row.duration_ms ?? row.durationMs),
+                summary: asString(row.summary) ?? "",
+                details: asRecord(row.details),
+              };
+            })
+          : [],
+        modelResults: Array.isArray(result.model_results)
+          ? result.model_results.map((entry) => {
+              const modelResult = asRecord(entry);
+              return {
+                provider: asString(modelResult.provider) ?? "unknown",
+                model: asString(modelResult.model) ?? "unknown",
+                score: asNumber(modelResult.score),
+                similarityScore: asNumber(modelResult.similarity_score ?? modelResult.similarityScore),
+                confidence: asNumber(modelResult.confidence),
+                latencyMs: asNumber(modelResult.latency_ms ?? modelResult.latencyMs),
+                status: (asString(modelResult.status) as TraceSetEvaluationRunView["results"][number]["status"]) ?? "partial",
+                output: asString(modelResult.output),
+              };
+            })
+          : [],
       };
     }),
     review,
@@ -571,6 +666,7 @@ export async function createTraceSetEvaluationRun(args: {
           },
           review: defaultReview(),
           results: results.map((result) => ({
+            dataset_item_id: result.datasetItemId ?? null,
             source_trace_id: result.sourceTraceId,
             replay_trace_id: result.replayTraceId,
             score: result.score,
@@ -595,6 +691,40 @@ export async function createTraceSetEvaluationRun(args: {
               reason: check.reason,
             })),
             error: result.error ?? null,
+            input_text: result.inputText ?? null,
+            variables: result.variables ?? null,
+            rendered_prompt: result.renderedPrompt ?? null,
+            provider: result.provider ?? null,
+            model: result.model ?? null,
+            evaluation_mode: result.evaluationMode ?? null,
+            actual_output: result.actualOutput ?? null,
+            expected_output: result.expectedOutput ?? null,
+            reference_output: result.referenceOutput ?? null,
+            similarity_score: result.similarityScore ?? null,
+            similarity_label: result.similarityLabel ?? "unavailable",
+            similarity_reason: result.similarityReason ?? null,
+            confidence_label: result.confidenceLabel ?? null,
+            confidence_reasons: result.confidenceReasons ?? [],
+            execution_steps: (result.executionSteps ?? []).map((step) => ({
+              name: step.name,
+              label: step.label,
+              status: step.status,
+              started_at: step.startedAt ?? null,
+              completed_at: step.completedAt ?? null,
+              duration_ms: step.durationMs ?? null,
+              summary: step.summary,
+              details: step.details ?? {},
+            })),
+            model_results: (result.modelResults ?? []).map((modelResult) => ({
+              provider: modelResult.provider,
+              model: modelResult.model,
+              score: modelResult.score,
+              similarity_score: modelResult.similarityScore,
+              confidence: modelResult.confidence,
+              latency_ms: modelResult.latencyMs,
+              status: modelResult.status,
+              output: modelResult.output,
+            })),
           })),
         },
       },
@@ -815,6 +945,57 @@ export async function listRuntimeTraceCandidates(workspaceId: string) {
 // so checks focus on execution completeness, output length, and absence
 // of errors rather than output-diff scoring.
 
+// ── String similarity helpers ────────────────────────────────────────────────
+
+/**
+ * Levenshtein distance between two strings (capped at 500 chars each for perf).
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const s1 = a.slice(0, 500);
+  const s2 = b.slice(0, 500);
+  const m = s1.length;
+  const n = s2.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let prev = i;
+    for (let j = 1; j <= n; j++) {
+      const curr = s1[i - 1] === s2[j - 1] ? dp[j - 1] : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      dp[j - 1] = prev;
+      prev = curr;
+    }
+    dp[n] = prev;
+  }
+  return dp[n];
+}
+
+/**
+ * Normalized similarity 0–1 using Levenshtein distance.
+ * 1 = identical, 0 = completely different.
+ */
+function stringSimilarity(a: string, b: string): number {
+  const na = a.toLowerCase().trim();
+  const nb = b.toLowerCase().trim();
+  if (na === nb) return 1;
+  if (!na || !nb) return 0;
+  const dist = levenshteinDistance(na, nb);
+  return 1 - dist / Math.max(na.length, nb.length);
+}
+
+/**
+ * For pipe-delimited structured outputs (e.g. "susmit | deployed | ai proxy | success"),
+ * compare field-by-field. Returns ratio of exactly matching fields.
+ */
+function pipeFieldSimilarity(actual: string, expected: string): number {
+  const aFields = actual.split("|").map((f) => f.trim().toLowerCase());
+  const eFields = expected.split("|").map((f) => f.trim().toLowerCase());
+  const count = Math.max(aFields.length, eFields.length);
+  if (count === 0) return 1;
+  const matches = aFields.filter((f, i) => f === eFields[i]).length;
+  return matches / count;
+}
+
 function buildManualItemChecks(
   outputText: string,
   expectedOutput: string | null,
@@ -822,6 +1003,7 @@ function buildManualItemChecks(
 ): TraceEvaluationCheckView[] {
   const checks: TraceEvaluationCheckView[] = [];
 
+  // Check 1 — execution (critical)
   checks.push({
     name: "execution_completed",
     category: "reliability",
@@ -831,43 +1013,132 @@ function buildManualItemChecks(
     weight: 1,
     critical: true,
     available: true,
-    reason: executionStatus === "success" ? "Prompt executed without errors." : "Prompt execution returned an error status.",
+    reason: executionStatus === "success"
+      ? "Prompt executed successfully — OpenAI returned a response."
+      : "Prompt execution failed — OpenAI returned an error.",
   });
 
+  // Check 2 — non-empty output
+  const hasOutput = outputText.trim().length > 0;
   checks.push({
     name: "output_non_empty",
     category: "correctness",
-    status: outputText.trim().length > 0 ? "pass" : "fail",
-    label: outputText.trim().length > 0 ? "pass" : "fail",
-    score: outputText.trim().length > 0 ? 1 : 0,
+    status: hasOutput ? "pass" : "fail",
+    label: hasOutput ? "pass" : "fail",
+    score: hasOutput ? 1 : 0,
     weight: 1,
     critical: false,
     available: true,
-    reason: outputText.trim().length > 0 ? "Model produced a non-empty response." : "Model produced an empty response.",
+    reason: hasOutput
+      ? "Model produced a non-empty response."
+      : "Model returned an empty response.",
   });
 
-  if (expectedOutput) {
-    const normalOut = outputText.toLowerCase().trim();
-    const normalExp = expectedOutput.toLowerCase().trim();
-    // Loose containment check — not an LLM judge, just a sanity gate
-    const keyWords = normalExp.split(/\s+/).filter((w) => w.length > 4).slice(0, 10);
-    const hits = keyWords.filter((w) => normalOut.includes(w)).length;
-    const matchRatio = keyWords.length > 0 ? hits / keyWords.length : 0;
-    const matchPass = matchRatio >= 0.3;
+  // Check 3 — similarity to expected output (only if expected is provided)
+  if (expectedOutput?.trim()) {
+    const actual = outputText.trim();
+    const expected = expectedOutput.trim();
+
+    // Choose best similarity strategy based on format
+    const isPipeDelimited = (s: string) => s.includes("|") && s.split("|").length >= 3;
+    let similarity: number;
+    let strategy: string;
+
+    if (isPipeDelimited(actual) && isPipeDelimited(expected)) {
+      // Structured extraction output — compare field by field
+      const fieldSim = pipeFieldSimilarity(actual, expected);
+      const strSim = stringSimilarity(actual, expected);
+      similarity = Math.max(fieldSim, strSim);
+      const fieldCount = expected.split("|").length;
+      const matchedFields = Math.round(fieldSim * Math.max(actual.split("|").length, fieldCount));
+      strategy = `Field match: ${matchedFields}/${fieldCount} fields correct. String similarity: ${Math.round(strSim * 100)}%.`;
+    } else {
+      // Free-form output — use normalized Levenshtein similarity
+      similarity = stringSimilarity(actual, expected);
+      strategy = `String similarity: ${Math.round(similarity * 100)}% (normalized edit distance).`;
+    }
+
+    const simPass = similarity >= 0.7;
+    const simWarn = similarity >= 0.4 && similarity < 0.7;
     checks.push({
-      name: "expected_output_similarity",
+      name: "output_matches_expected",
       category: "correctness",
-      status: matchPass ? "pass" : "warning",
-      label: matchPass ? "pass" : "fail",
-      score: matchRatio,
-      weight: 2,
+      status: simPass ? "pass" : simWarn ? "warning" : "fail",
+      label: simPass ? "pass" : "fail",
+      score: similarity,
+      weight: 3,
       critical: false,
       available: true,
-      reason: `Keyword overlap with expected output: ${Math.round(matchRatio * 100)}%.`,
+      reason: strategy,
     });
   }
 
   return checks;
+}
+
+function computeExpectedSimilarity(actualOutput: string, expectedOutput: string | null) {
+  if (!expectedOutput?.trim()) {
+    return {
+      score: null as number | null,
+      label: "unavailable" as const,
+      reason: "No expected or reference output was available, so similarity was not calculated.",
+    };
+  }
+
+  const actual = actualOutput.trim();
+  const expected = expectedOutput.trim();
+  const isPipeDelimited = (s: string) => s.includes("|") && s.split("|").length >= 3;
+  const score = isPipeDelimited(actual) && isPipeDelimited(expected)
+    ? Math.max(pipeFieldSimilarity(actual, expected), stringSimilarity(actual, expected))
+    : stringSimilarity(actual, expected);
+  return {
+    score,
+    label: similarityLabel(score),
+    reason: `Heuristic text similarity is ${Math.round(score * 100)}%. This uses lexical overlap/edit distance and is not an LLM judge.`,
+  };
+}
+
+function computeEvaluationConfidence(input: {
+  executionStatus: string;
+  outputText: string;
+  similarityScore: number | null;
+  expectedOutput: string | null;
+  observabilityLevel?: string | null;
+}) {
+  let score = 0.25;
+  const reasons: string[] = [];
+
+  if (input.executionStatus === "success") {
+    score += 0.25;
+    reasons.push("Provider execution succeeded.");
+  } else {
+    reasons.push("Provider execution failed or returned partial output.");
+  }
+  if (input.outputText.trim()) {
+    score += 0.15;
+    reasons.push("Actual LLM output was captured.");
+  }
+  if (input.expectedOutput?.trim()) {
+    score += 0.2;
+    reasons.push("Human-provided expected output was available.");
+  } else {
+    reasons.push("No expected output was provided, so confidence is lower.");
+  }
+  if (input.similarityScore !== null) {
+    score += 0.15;
+    reasons.push("Similarity score was calculated.");
+  }
+  if (input.observabilityLevel && input.observabilityLevel !== "full") {
+    score -= 0.1;
+    reasons.push("Executor observability is partial, so token/cost evidence may be unavailable.");
+  }
+
+  const normalized = Math.max(0, Math.min(1, score));
+  return {
+    score: normalized,
+    label: confidenceLabel(normalized),
+    reasons,
+  };
 }
 
 export async function createDatasetEvaluationRun(args: {
@@ -1151,7 +1422,18 @@ export async function createDatasetEvaluationRun(args: {
       const metadataVariables = item.metadata && typeof item.metadata === "object"
         ? asRecord(item.metadata)
         : {};
-      const renderedPrompt = renderTemplate(candidateVersion.template_text ?? "", { ...metadataVariables, input: inputText });
+      const variables = { ...metadataVariables, input: inputText };
+      const renderedPrompt = renderTemplate(candidateVersion.template_text ?? "", variables);
+      const executionSteps: EvaluationStep[] = [
+        completedStep("load_dataset_item", "Load dataset item", "success", "Loaded dataset input and expected output.", {
+          dataset_item_id: item.id,
+          has_expected_output: Boolean(item.expectedOutput?.trim()),
+        }),
+        completedStep("render_prompt", "Render prompt", "success", "Rendered the candidate prompt with dataset variables.", {
+          prompt_version_id: candidateVersion.id,
+          variable_keys: Object.keys(variables),
+        }),
+      ];
 
       const execution = await executeResolvedPrompt({
         workspaceId: args.workspaceId,
@@ -1159,11 +1441,21 @@ export async function createDatasetEvaluationRun(args: {
         promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
         versionTag: candidateVersion.version_tag,
         templateText: candidateVersion.template_text ?? "",
-        variables: { ...metadataVariables, input: inputText },
+        variables,
         inputText,
         renderedPrompt,
         triggeredBy: args.triggeredBy,
       });
+      executionSteps.push(
+        completedStep("call_provider", "Call provider/model", execution.status === "success" ? "success" : "error", execution.status === "success" ? "Provider call completed." : "Provider call failed.", {
+          provider: execution.provider ?? "unknown",
+          model: execution.model ?? "unknown",
+        }, execution.llmLatencyMs),
+        completedStep("receive_output", "Receive output", execution.outputText?.trim() ? "success" : "warning", execution.outputText?.trim() ? "Captured LLM output." : "Provider returned an empty output.", {
+          output_length: execution.outputText?.length ?? 0,
+          token_count: execution.tokenCount,
+        }),
+      );
 
       // Store execution as an audit log trace
       const execMetadata = {
@@ -1209,22 +1501,67 @@ export async function createDatasetEvaluationRun(args: {
       replayTraceIds.push(execRow.id);
 
       const itemChecks = buildManualItemChecks(execution.outputText ?? "", item.expectedOutput, execution.status);
+      const similarity = computeExpectedSimilarity(execution.outputText ?? "", item.expectedOutput);
+      const confidence = computeEvaluationConfidence({
+        executionStatus: execution.status,
+        outputText: execution.outputText ?? "",
+        similarityScore: similarity.score,
+        expectedOutput: item.expectedOutput,
+        observabilityLevel: execution.executor.response_observability,
+      });
+      executionSteps.push(
+        completedStep(
+          "compare_expected_or_reference",
+          "Compare expected/reference",
+          item.expectedOutput?.trim() ? "success" : "skipped",
+          item.expectedOutput?.trim()
+            ? "Using human-provided expected output as the comparison target."
+            : "No expected output was provided. Similarity is unavailable and no-reference checks are used.",
+          { mode: item.expectedOutput?.trim() ? "expected_output" : "no_reference" },
+        ),
+        completedStep("calculate_similarity", "Calculate similarity", similarity.score === null ? "skipped" : "success", similarity.reason, {
+          similarity_score: similarity.score,
+          similarity_label: similarity.label,
+        }),
+        completedStep("calculate_confidence", "Calculate confidence", "success", `Confidence is ${confidence.label}.`, {
+          confidence_score: confidence.score,
+          confidence_label: confidence.label,
+          reasons: confidence.reasons,
+        }),
+      );
       const critFails = itemChecks.filter((c) => c.critical && c.status === "fail").length;
       criticalFailures += critFails;
 
       const weightedSum = itemChecks.reduce((sum, c) => sum + (c.score ?? 0) * (c.weight ?? 1), 0);
       const totalWeight = itemChecks.reduce((sum, c) => sum + (c.weight ?? 1), 0);
       const itemScore = totalWeight > 0 ? weightedSum / totalWeight : null;
+      executionSteps.push(
+        completedStep("calculate_weighted_score", "Calculate weighted score", "success", `Weighted score is ${itemScore === null ? "unavailable" : `${Math.round(itemScore * 100)}%`}.`, {
+          weighted_sum: weightedSum,
+          total_weight: totalWeight,
+          final_score: itemScore,
+        }),
+      );
       if (itemScore !== null) scores.push(itemScore);
 
       if (execution.status === "success") succeeded += 1; else failed += 1;
       // No latency delta for fresh executions (no baseline)
-      observabilityLevels.push("full");
+      observabilityLevels.push(execution.executor.response_observability ?? "unknown");
 
       const itemLabel: TraceSetEvaluationRunView["results"][number]["label"] =
         critFails > 0 ? "fail" : (itemScore ?? 0) >= 0.7 ? "pass" : "fail";
+      const recommendation = critFails > 0 ? "blocked" : (itemScore ?? 0) >= 0.7 ? "ready_for_rollout" : "needs_review";
+      executionSteps.push(
+        completedStep("assign_verdict", "Assign verdict", recommendation === "ready_for_rollout" ? "success" : "warning", `Verdict: ${recommendation.replaceAll("_", " ")}.`, {
+          recommendation,
+          critical_failures: critFails,
+        }),
+      );
+      confidences.push(confidence.score);
+      if (execution.executor.response_observability !== "full") unavailableObservability += 1;
 
       results.push({
+        datasetItemId: item.id,
         sourceTraceId: item.id,
         replayTraceId: execRow.id,
         score: itemScore,
@@ -1232,13 +1569,38 @@ export async function createDatasetEvaluationRun(args: {
         status: execution.status === "success" ? "success" : "error",
         latencyDeltaMs: null,
         tokenDelta: null,
-        confidence: 0.85, // fixed confidence for manual items (no replay uncertainty)
-        recommendation: critFails > 0 ? "blocked" : (itemScore ?? 0) >= 0.7 ? "ready_for_rollout" : "needs_review",
+        confidence: confidence.score,
+        recommendation,
         criticalFailures: critFails,
-        observabilityNote: null,
+        observabilityNote: execution.executor.response_observability !== "full" ? "Partial observability: token/cost checks may be unavailable." : null,
         replayMode: "live",
         checks: itemChecks,
         error: execution.status !== "success" ? (execution.outputText ?? "Execution failed") : null,
+        inputText,
+        variables,
+        renderedPrompt,
+        provider: execution.provider ?? execution.executor.name ?? null,
+        model: execution.model ?? null,
+        evaluationMode: item.expectedOutput?.trim() ? "expected_output" : "no_reference",
+        actualOutput: execution.outputText ?? "",
+        expectedOutput: item.expectedOutput ?? null,
+        referenceOutput: null,
+        similarityScore: similarity.score,
+        similarityLabel: similarity.label,
+        similarityReason: similarity.reason,
+        confidenceLabel: confidence.label,
+        confidenceReasons: confidence.reasons,
+        executionSteps,
+        modelResults: [{
+          provider: execution.provider ?? execution.executor.name ?? "unknown",
+          model: execution.model ?? "unknown",
+          score: itemScore,
+          similarityScore: similarity.score,
+          confidence: confidence.score,
+          latencyMs: execution.llmLatencyMs,
+          status: execution.status === "success" ? "success" : "error",
+          output: execution.outputText ?? "",
+        }],
       });
     }
   }
@@ -1307,6 +1669,7 @@ export async function createDatasetEvaluationRun(args: {
           },
           review: defaultReview(),
           results: results.map((result) => ({
+            dataset_item_id: result.datasetItemId ?? null,
             source_trace_id: result.sourceTraceId,
             replay_trace_id: result.replayTraceId,
             score: result.score,
@@ -1331,6 +1694,40 @@ export async function createDatasetEvaluationRun(args: {
               reason: check.reason,
             })),
             error: result.error ?? null,
+            input_text: result.inputText ?? null,
+            variables: result.variables ?? null,
+            rendered_prompt: result.renderedPrompt ?? null,
+            provider: result.provider ?? null,
+            model: result.model ?? null,
+            evaluation_mode: result.evaluationMode ?? null,
+            actual_output: result.actualOutput ?? null,
+            expected_output: result.expectedOutput ?? null,
+            reference_output: result.referenceOutput ?? null,
+            similarity_score: result.similarityScore ?? null,
+            similarity_label: result.similarityLabel ?? "unavailable",
+            similarity_reason: result.similarityReason ?? null,
+            confidence_label: result.confidenceLabel ?? null,
+            confidence_reasons: result.confidenceReasons ?? [],
+            execution_steps: (result.executionSteps ?? []).map((step) => ({
+              name: step.name,
+              label: step.label,
+              status: step.status,
+              started_at: step.startedAt ?? null,
+              completed_at: step.completedAt ?? null,
+              duration_ms: step.durationMs ?? null,
+              summary: step.summary,
+              details: step.details ?? {},
+            })),
+            model_results: (result.modelResults ?? []).map((modelResult) => ({
+              provider: modelResult.provider,
+              model: modelResult.model,
+              score: modelResult.score,
+              similarity_score: modelResult.similarityScore,
+              confidence: modelResult.confidence,
+              latency_ms: modelResult.latencyMs,
+              status: modelResult.status,
+              output: modelResult.output,
+            })),
           })),
         },
       },

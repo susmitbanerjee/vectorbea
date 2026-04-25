@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -29,7 +29,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { TraceSetEvaluationRunView } from "@/lib/api";
+import type { TraceEvaluationCheckView, TraceSetEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -56,6 +56,31 @@ function recommendationStyle(r: string) {
 
 function pct(v: number | null) {
   return v === null ? null : Math.round(v * 100);
+}
+
+function previewText(value?: string | null, fallback = "Unavailable") {
+  const text = value?.trim();
+  if (!text) return fallback;
+  return text.length > 1200 ? `${text.slice(0, 1200)}...` : text;
+}
+
+function EvidenceBlock({
+  title,
+  value,
+  mono = false,
+}: {
+  title: string;
+  value?: string | null;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/25 p-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
+      <pre className={`max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-foreground/90 ${mono ? "font-mono" : "font-sans"}`}>
+        {previewText(value)}
+      </pre>
+    </div>
+  );
 }
 
 // Animated radial score ring
@@ -89,7 +114,7 @@ function ScoreRing({ score, size = 80 }: { score: number | null; size?: number }
 }
 
 // Single check pill
-function CheckPill({ check, delay }: { check: TraceSetEvaluationRunView["results"][number]["checks"][number]; delay: number }) {
+function CheckPill({ check, delay }: { check: TraceEvaluationCheckView; delay: number }) {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), delay);
@@ -220,6 +245,116 @@ function ResultCard({
         {/* Expanded detail */}
         {expanded && (
           <div className="border-t border-border/40 px-4 py-4 space-y-4">
+            {isDatasetRun && (
+              <div className="grid gap-3 xl:grid-cols-2">
+                <EvidenceBlock title="Dataset input" value={result.inputText} />
+                <EvidenceBlock title="Rendered prompt" value={result.renderedPrompt} mono />
+                <EvidenceBlock title="Actual LLM output" value={result.actualOutput} />
+                <EvidenceBlock title={result.referenceOutput ? "Reference output" : "Expected output"} value={result.referenceOutput ?? result.expectedOutput} />
+              </div>
+            )}
+
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                <div className="text-muted-foreground">Mode</div>
+                <div className="mt-1 font-semibold capitalize">{(result.evaluationMode ?? (isDatasetRun ? "no_reference" : "trace_replay")).replaceAll("_", " ")}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                <div className="text-muted-foreground">Provider / model</div>
+                <div className="mt-1 font-semibold">{result.provider ?? "unknown"} / {result.model ?? "unknown"}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                <div className="text-muted-foreground">Similarity</div>
+                <div className="mt-1 font-semibold">
+                  {result.similarityScore === null || result.similarityScore === undefined
+                    ? "Unavailable"
+                    : `${Math.round(result.similarityScore * 100)}% (${result.similarityLabel})`}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                <div className="text-muted-foreground">Confidence</div>
+                <div className="mt-1 font-semibold">
+                  {result.confidence === null || result.confidence === undefined
+                    ? "Unavailable"
+                    : `${Math.round(result.confidence * 100)}% (${result.confidenceLabel ?? "unknown"})`}
+                </div>
+              </div>
+            </div>
+
+            {(result.similarityReason || (result.confidenceReasons && result.confidenceReasons.length > 0)) && (
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+                  <div className="mb-1 font-semibold text-foreground">Similarity explanation</div>
+                  {result.similarityReason ?? "Similarity was unavailable because no expected/reference output was captured."}
+                </div>
+                <div className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+                  <div className="mb-1 font-semibold text-foreground">Confidence explanation</div>
+                  {(result.confidenceReasons ?? []).length > 0
+                    ? result.confidenceReasons?.join(" ")
+                    : "Confidence was not calculated for this legacy result."}
+                </div>
+              </div>
+            )}
+
+            {result.executionSteps && result.executionSteps.length > 0 && (
+              <div className="rounded-lg border border-border bg-card p-3">
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  <Info className="h-3.5 w-3.5" />
+                  Execution steps
+                </div>
+                <div className="space-y-2">
+                  {result.executionSteps.map((step, stepIndex) => (
+                    <div key={`${step.name}-${stepIndex}`} className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs md:grid-cols-[28px_180px_1fr_90px]">
+                      <span className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${
+                        step.status === "success" ? "border-emerald-500/40 text-emerald-400" :
+                        step.status === "warning" || step.status === "skipped" ? "border-amber-500/40 text-amber-400" :
+                        step.status === "error" ? "border-red-500/40 text-red-400" :
+                        "border-border text-muted-foreground"
+                      }`}>
+                        {stepIndex + 1}
+                      </span>
+                      <div>
+                        <div className="font-semibold text-foreground">{step.label}</div>
+                        <div className="text-muted-foreground">{step.status}</div>
+                      </div>
+                      <div className="text-muted-foreground">{step.summary}</div>
+                      <div className="text-right font-mono text-muted-foreground">{step.durationMs === null || step.durationMs === undefined ? "-" : `${Math.round(step.durationMs)}ms`}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.modelResults && result.modelResults.length > 1 && (
+              <div className="rounded-lg border border-border bg-card p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Model comparison</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-muted-foreground">
+                      <tr className="border-b border-border">
+                        <th className="py-2 text-left">Provider/model</th>
+                        <th className="py-2 text-left">Score</th>
+                        <th className="py-2 text-left">Similarity</th>
+                        <th className="py-2 text-left">Latency</th>
+                        <th className="py-2 text-left">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.modelResults.map((modelResult, modelIndex) => (
+                        <tr key={`${modelResult.provider}-${modelResult.model}-${modelIndex}`} className="border-b border-border/50">
+                          <td className="py-2">{modelResult.provider} / {modelResult.model}</td>
+                          <td className="py-2">{modelResult.score === null ? "Unavailable" : `${Math.round(modelResult.score * 100)}%`}</td>
+                          <td className="py-2">{modelResult.similarityScore === null ? "Unavailable" : `${Math.round(modelResult.similarityScore * 100)}%`}</td>
+                          <td className="py-2">{modelResult.latencyMs === null ? "Unavailable" : `${Math.round(modelResult.latencyMs)}ms`}</td>
+                          <td className="py-2">{modelResult.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Flow: Input → Prompt → Output */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               {/* Source / input */}
@@ -313,17 +448,17 @@ function ResultCard({
 // ─── Loading skeleton with step animation ─────────────────────────────────────
 
 function EvaluationLoadingSkeleton() {
-  const steps = [
+  const steps = useMemo(() => [
     { label: "Loading evaluation run", done: false },
     { label: "Reading dataset items", done: false },
     { label: "Executing against candidate prompt", done: false },
     { label: "Scoring results", done: false },
-  ];
+  ], []);
   const [activeStep, setActiveStep] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setActiveStep(s => Math.min(s + 1, steps.length - 1)), 900);
     return () => clearInterval(t);
-  }, []);
+  }, [steps.length]);
 
   return (
     <Card>
