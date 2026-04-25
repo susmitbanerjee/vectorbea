@@ -375,6 +375,9 @@ export interface TraceSetEvaluationRunView {
   candidateVersionTag: string;
   sourceTraceIds: string[];
   replayTraceIds: string[];
+  /** Present when run was created from an evaluation_dataset */
+  datasetId?: string | null;
+  datasetName?: string | null;
   createdAt: string;
   aggregate: {
     total: number;
@@ -516,6 +519,41 @@ export interface ProviderConfig {
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string | null;
+}
+
+// ─── Evaluation Datasets ───────────────────────────────────────────────────────
+
+export type EvaluationDatasetType = "manual" | "imported" | "runtime" | "golden" | "mixed";
+export type EvaluationDatasetItemSourceType = "manual" | "runtime_trace" | "golden_trace" | "imported";
+
+export interface EvaluationDataset {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  datasetType: EvaluationDatasetType;
+  itemCount: number;
+  promptName: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** "baseline" = migrated from baseline_datasets; "evaluation" = native */
+  origin: "baseline" | "evaluation";
+}
+
+export interface EvaluationDatasetItem {
+  id: string;
+  datasetId: string;
+  workspaceId: string;
+  sourceType: EvaluationDatasetItemSourceType;
+  input: string;
+  expectedOutput: string | null;
+  traceId: string | null;
+  metadata: Record<string, unknown> | null;
+  notes: string | null;
+  isGolden: boolean;
+  ord: number;
+  createdAt: string;
 }
 
 // ─── Baseline Datasets ─────────────────────────────────────────────────────────

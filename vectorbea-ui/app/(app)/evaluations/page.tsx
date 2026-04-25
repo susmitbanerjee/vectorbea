@@ -15,7 +15,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { BaselineDataset, GoldenTrace, PromptDetail, PromptListItem, TraceSetEvaluationRunView, TraceSummaryView } from "@/lib/api";
+import type { EvaluationDataset, GoldenTrace, PromptDetail, PromptListItem, TraceSetEvaluationRunView, TraceSummaryView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 const PAGE_SIZE = 20;
@@ -26,7 +26,7 @@ export default function EvaluationsPage() {
   const [traces, setTraces] = useState<TraceSummaryView[]>([]);
   const [prompts, setPrompts] = useState<PromptListItem[]>([]);
   const [versions, setVersions] = useState<PromptDetail[]>([]);
-  const [datasets, setDatasets] = useState<BaselineDataset[]>([]);
+  const [datasets, setDatasets] = useState<EvaluationDataset[]>([]);
   const [goldenTraces, setGoldenTraces] = useState<GoldenTrace[]>([]);
 
   // Create-run form state
@@ -60,7 +60,7 @@ export default function EvaluationsPage() {
           fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}&pageSize=200`, { cache: "no-store" }),
           fetch(`/api/prompts?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
-          fetch(`/api/evaluations/baseline-datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+          fetch(`/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/golden-traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         ]);
         const [runsJson, tracesJson, promptsJson, datasetsJson, goldenJson] = await Promise.all([
@@ -73,7 +73,7 @@ export default function EvaluationsPage() {
           setRuns(runsJson as TraceSetEvaluationRunView[]);
           setTraces((tracesJson.items ?? []) as TraceSummaryView[]);
           setPrompts(promptsJson as PromptListItem[]);
-          setDatasets(Array.isArray(datasetsJson) ? datasetsJson as BaselineDataset[] : []);
+          setDatasets(Array.isArray(datasetsJson) ? datasetsJson as EvaluationDataset[] : []);
           setGoldenTraces(Array.isArray(goldenJson) ? goldenJson as GoldenTrace[] : (goldenJson?.items ?? []));
         }
       } catch (loadError) {
@@ -102,19 +102,15 @@ export default function EvaluationsPage() {
     return () => { cancelled = true; };
   }, [selectedPromptId]);
 
-  // When switching to dataset mode, auto-populate trace IDs from the selected dataset
+  // Sync selectedTraceIds for golden/manual modes; dataset mode uses datasetId directly
   useEffect(() => {
-    if (traceSource === "dataset" && selectedDatasetId) {
-      const ds = datasets.find(d => d.id === selectedDatasetId);
-      if (ds) setSelectedTraceIds(ds.traceIds);
-    } else if (traceSource === "dataset") {
-      setSelectedTraceIds([]);
-    } else if (traceSource === "golden") {
+    if (traceSource === "golden") {
       setSelectedTraceIds(selectedGoldenIds);
     } else if (traceSource === "manual") {
       setSelectedTraceIds([]);
     }
-  }, [traceSource, selectedDatasetId, datasets, selectedGoldenIds]);
+    // dataset mode: no trace IDs needed — datasetId is sent directly to the API
+  }, [traceSource, selectedGoldenIds]);
 
   const selectedVersion = useMemo(
     () => versions.find(v => v.promptVersionId === selectedVersionId) ?? null,
@@ -166,18 +162,25 @@ export default function EvaluationsPage() {
     );
   };
 
+  const canCreateRun = !!selectedVersionId && (
+    traceSource === "dataset" ? !!selectedDatasetId : selectedTraceIds.length > 0
+  );
+
   const createRun = async () => {
-    if (!activeWorkspaceId || !selectedVersionId || selectedTraceIds.length === 0 || creating) return;
+    if (!activeWorkspaceId || !canCreateRun || creating) return;
     setCreating(true);
     setError(null);
     try {
+      const body: Record<string, unknown> = { candidatePromptVersionId: selectedVersionId };
+      if (traceSource === "dataset") {
+        body.datasetId = selectedDatasetId;
+      } else {
+        body.sourceTraceIds = selectedTraceIds;
+      }
       const response = await fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceTraceIds: selectedTraceIds,
-          candidatePromptVersionId: selectedVersionId,
-        }),
+        body: JSON.stringify(body),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Failed to create evaluation run");
@@ -193,7 +196,7 @@ export default function EvaluationsPage() {
     <div className="min-h-screen">
       <AppHeader
         title="Evaluations"
-        subtitle="Replay runtime traces against a candidate prompt version, score the results, and route through human review before rollout decisions."
+        subtitle="Evaluate prompt versions against datasets or runtime traces, score results, and route through human review before rollout decisions."
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
@@ -207,8 +210,8 @@ export default function EvaluationsPage() {
           {/* ── Create run form ── */}
           <Card>
             <CardHeader>
-              <CardTitle>Create trace-set evaluation</CardTitle>
-              <CardDescription>Choose a candidate prompt version and a trace source.</CardDescription>
+              <CardTitle>Create evaluation run</CardTitle>
+              <CardDescription>Choose a candidate prompt version and a trace source or evaluation dataset.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Prompt */}
@@ -289,7 +292,7 @@ export default function EvaluationsPage() {
                     className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${traceSource === "dataset" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
                   >
                     <Database className="h-3.5 w-3.5" />
-                    Baseline dataset
+                    Evaluation dataset
                   </button>
                   <button
                     type="button"
@@ -343,8 +346,8 @@ export default function EvaluationsPage() {
                       >
                         <span className="truncate text-left">
                           {selectedDatasetId
-                            ? (() => { const ds = datasets.find(d => d.id === selectedDatasetId); return ds ? `${ds.name} (${ds.traceIds.length} traces)` : selectedDatasetId; })()
-                            : <span className="text-muted-foreground">Choose a baseline dataset</span>}
+                            ? (() => { const ds = datasets.find(d => d.id === selectedDatasetId); return ds ? `${ds.name} (${ds.itemCount} items)` : selectedDatasetId; })()
+                            : <span className="text-muted-foreground">Choose a dataset</span>}
                         </span>
                         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </button>
@@ -353,20 +356,30 @@ export default function EvaluationsPage() {
                       <DropdownMenuRadioGroup value={selectedDatasetId} onValueChange={setSelectedDatasetId}>
                         {datasets.map(ds => (
                           <DropdownMenuPanelRadioItem key={ds.id} value={ds.id}>
-                            {ds.name} ({ds.traceIds.length} traces)
+                            <span className="flex w-full items-center justify-between gap-2">
+                              <span className="truncate">{ds.name}</span>
+                              <span className="shrink-0 text-muted-foreground text-[10px] tabular-nums">
+                                {ds.itemCount} items · {ds.origin === "baseline" ? "legacy" : ds.datasetType}
+                              </span>
+                            </span>
                           </DropdownMenuPanelRadioItem>
                         ))}
                       </DropdownMenuRadioGroup>
                     </DropdownMenuPanel>
                   </DropdownMenu>
-                  {selectedDatasetId && datasets.find(d => d.id === selectedDatasetId) && (
-                    <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                      {datasets.find(d => d.id === selectedDatasetId)?.traceIds.length} traces loaded from dataset
-                    </div>
-                  )}
+                  {selectedDatasetId && (() => {
+                    const ds = datasets.find(d => d.id === selectedDatasetId);
+                    if (!ds) return null;
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground flex items-center justify-between">
+                        <span>{ds.itemCount} items · <span className="capitalize">{ds.origin === "baseline" ? "legacy baseline" : ds.datasetType}</span></span>
+                        {ds.origin === "baseline" && <Badge variant="secondary" className="text-[10px]">legacy</Badge>}
+                      </div>
+                    );
+                  })()}
                   {datasets.length === 0 && (
                     <p className="text-xs text-muted-foreground">
-                      No baseline datasets yet.{" "}
+                      No datasets yet.{" "}
                       <Link href={`/evaluations/datasets?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="text-primary hover:underline">
                         Create one →
                       </Link>
@@ -376,32 +389,40 @@ export default function EvaluationsPage() {
               )}
 
               {/* Selected count */}
-              <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                {selectedTraceIds.length} trace{selectedTraceIds.length === 1 ? "" : "s"} selected
-                {selectedTraceIds.length > 0 && traceSource === "manual" && (
-                  <button type="button" onClick={() => setSelectedTraceIds([])} className="ml-2 text-xs text-muted-foreground hover:text-foreground">
-                    Clear
-                  </button>
-                )}
-              </div>
+              {traceSource !== "dataset" && (
+                <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                  {selectedTraceIds.length} trace{selectedTraceIds.length === 1 ? "" : "s"} selected
+                  {selectedTraceIds.length > 0 && traceSource === "manual" && (
+                    <button type="button" onClick={() => setSelectedTraceIds([])} className="ml-2 text-xs text-muted-foreground hover:text-foreground">
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Validation summary */}
               <div className="space-y-1 rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
                 <div className={selectedVersionId ? "text-emerald-500" : ""}>
                   {selectedVersionId ? "✓" : "○"} Candidate version: {selectedVersionId ? (selectedVersion?.versionTag ?? selectedVersionId) : "not selected"}
                 </div>
-                <div className={selectedTraceIds.length > 0 ? "text-emerald-500" : ""}>
-                  {selectedTraceIds.length > 0 ? "✓" : "○"} Traces: {selectedTraceIds.length} selected
-                </div>
+                {traceSource === "dataset" ? (
+                  <div className={selectedDatasetId ? "text-emerald-500" : ""}>
+                    {selectedDatasetId ? "✓" : "○"} Dataset: {selectedDatasetId ? (datasets.find(d => d.id === selectedDatasetId)?.name ?? selectedDatasetId) : "not selected"}
+                  </div>
+                ) : (
+                  <div className={selectedTraceIds.length > 0 ? "text-emerald-500" : ""}>
+                    {selectedTraceIds.length > 0 ? "✓" : "○"} Traces: {selectedTraceIds.length} selected
+                  </div>
+                )}
               </div>
 
               <Button
                 className="w-full gap-2"
                 onClick={createRun}
-                disabled={!selectedVersionId || selectedTraceIds.length === 0 || creating}
+                disabled={!canCreateRun || creating}
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-                Run trace-set evaluation
+                {traceSource === "dataset" ? "Run dataset evaluation" : "Run trace-set evaluation"}
               </Button>
             </CardContent>
           </Card>
@@ -409,17 +430,22 @@ export default function EvaluationsPage() {
           {/* ── Runtime trace selector (manual mode only) ── */}
           <Card>
             <CardHeader>
-              <CardTitle>Runtime trace set</CardTitle>
+              <CardTitle>Trace source</CardTitle>
               <CardDescription>
                 {traceSource === "dataset"
-                  ? "Switch to manual selection to pick individual traces."
-                  : "Select traces to include in the evaluation run."}
+                  ? "Dataset selected above — items will be replayed or executed fresh."
+                  : "Select runtime traces to include in the evaluation run."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {traceSource === "dataset" ? (
                 <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                  Using baseline dataset — traces are pre-selected above.
+                  Using evaluation dataset — items are pre-selected above.
+                  {selectedDatasetId && (() => {
+                    const ds = datasets.find(d => d.id === selectedDatasetId);
+                    if (!ds) return null;
+                    return <div className="mt-2 font-medium text-foreground">{ds.name} · {ds.itemCount} items</div>;
+                  })()}
                 </div>
               ) : loading ? (
                 <div className="p-6 text-sm text-muted-foreground">Loading runtime traces…</div>
@@ -501,7 +527,7 @@ export default function EvaluationsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Evaluation runs</CardTitle>
-            <CardDescription>Trace-set evaluations with scoring, review state, and rollout recommendation.</CardDescription>
+            <CardDescription>Evaluation runs with scoring, review state, and rollout recommendation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex flex-wrap gap-2 pb-2">
@@ -559,7 +585,10 @@ export default function EvaluationsPage() {
                     <div>
                       <div className="font-medium">{run.promptName}@{run.candidateVersionTag}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {run.sourceTraceIds.length} traces replayed · {run.aggregate.recommendation.replaceAll("_", " ")}
+                        {run.datasetName
+                          ? <><Database className="inline h-3 w-3 mr-0.5" />{run.datasetName} · </>
+                          : `${run.sourceTraceIds.length} traces · `}
+                        {run.aggregate.recommendation.replaceAll("_", " ")}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">

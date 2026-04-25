@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
-import { createTraceSetEvaluationRun, listEvaluationRuns } from "@/lib/server/evaluation-runs";
+import {
+  createDatasetEvaluationRun,
+  createTraceSetEvaluationRun,
+  listEvaluationRuns,
+} from "@/lib/server/evaluation-runs";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -46,11 +50,34 @@ export async function POST(request: NextRequest) {
     const body = (await request.json().catch(() => ({}))) as {
       sourceTraceIds?: string[];
       candidatePromptVersionId?: string;
+      /** New: run against an evaluation_dataset or baseline_dataset */
+      datasetId?: string;
     };
 
-    if (!Array.isArray(body.sourceTraceIds) || body.sourceTraceIds.length === 0 || !body.candidatePromptVersionId?.trim()) {
+    if (!body.candidatePromptVersionId?.trim()) {
       return NextResponse.json(
-        { error: "sourceTraceIds and candidatePromptVersionId are required" },
+        { error: "candidatePromptVersionId is required" },
+        { status: 400 },
+      );
+    }
+
+    // Dataset-based run path
+    if (body.datasetId?.trim()) {
+      return NextResponse.json(
+        await createDatasetEvaluationRun({
+          workspaceId,
+          datasetId: body.datasetId.trim(),
+          candidatePromptVersionId: body.candidatePromptVersionId.trim(),
+          triggeredBy: auth.user.id,
+        }),
+        { status: 201 },
+      );
+    }
+
+    // Legacy trace-set path
+    if (!Array.isArray(body.sourceTraceIds) || body.sourceTraceIds.length === 0) {
+      return NextResponse.json(
+        { error: "Either datasetId or sourceTraceIds (non-empty) is required" },
         { status: 400 },
       );
     }

@@ -8,6 +8,7 @@ import { executeResolvedPrompt } from "@/lib/server/execution";
 import { isRuntimeTraceRow, mapAuditRowToTraceDetail, type AuditLogTraceRow } from "@/lib/server/traces";
 import { buildTraceMetadataV1, normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { getEvaluationDataset, listDatasetItems } from "@/lib/server/evaluation-datasets";
 
 type PromptVersionRecord = {
   id: string;
@@ -153,6 +154,8 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
     candidateVersionTag: asString(payload.candidate_version_tag) ?? row.version_tag ?? "latest",
     sourceTraceIds: Array.isArray(payload.source_trace_ids) ? payload.source_trace_ids.map(String) : [],
     replayTraceIds: Array.isArray(payload.replay_trace_ids) ? payload.replay_trace_ids.map(String) : [],
+    datasetId: asString(payload.dataset_id),
+    datasetName: asString(payload.dataset_name),
     createdAt: row.created_at,
     aggregate: {
       total: Number(aggregate.total ?? 0),
@@ -799,4 +802,566 @@ export async function reviewEvaluationRun(args: {
 
 export async function listRuntimeTraceCandidates(workspaceId: string) {
   return loadRuntimeTraceRows(workspaceId);
+}
+
+// ── Dataset-based evaluation run ─────────────────────────────────────────────
+//
+// Supports all four item source_types:
+//   manual / imported  → fresh prompt execution, no comparison baseline
+//   runtime_trace      → replay against source trace (existing logic)
+//   golden_trace       → same as runtime_trace, flagged as golden
+//
+// For manual/imported items there is no prior output to compare against,
+// so checks focus on execution completeness, output length, and absence
+// of errors rather than output-diff scoring.
+
+function buildManualItemChecks(
+  outputText: string,
+  expectedOutput: string | null,
+  executionStatus: string,
+): TraceEvaluationCheckView[] {
+  const checks: TraceEvaluationCheckView[] = [];
+
+  checks.push({
+    name: "execution_completed",
+    category: "reliability",
+    status: executionStatus === "success" ? "pass" : "fail",
+    label: executionStatus === "success" ? "pass" : "fail",
+    score: executionStatus === "success" ? 1 : 0,
+    weight: 1,
+    critical: true,
+    available: true,
+    reason: executionStatus === "success" ? "Prompt executed without errors." : "Prompt execution returned an error status.",
+  });
+
+  checks.push({
+    name: "output_non_empty",
+    category: "correctness",
+    status: outputText.trim().length > 0 ? "pass" : "fail",
+    label: outputText.trim().length > 0 ? "pass" : "fail",
+    score: outputText.trim().length > 0 ? 1 : 0,
+    weight: 1,
+    critical: false,
+    available: true,
+    reason: outputText.trim().length > 0 ? "Model produced a non-empty response." : "Model produced an empty response.",
+  });
+
+  if (expectedOutput) {
+    const normalOut = outputText.toLowerCase().trim();
+    const normalExp = expectedOutput.toLowerCase().trim();
+    // Loose containment check — not an LLM judge, just a sanity gate
+    const keyWords = normalExp.split(/\s+/).filter((w) => w.length > 4).slice(0, 10);
+    const hits = keyWords.filter((w) => normalOut.includes(w)).length;
+    const matchRatio = keyWords.length > 0 ? hits / keyWords.length : 0;
+    const matchPass = matchRatio >= 0.3;
+    checks.push({
+      name: "expected_output_similarity",
+      category: "correctness",
+      status: matchPass ? "pass" : "warning",
+      label: matchPass ? "pass" : "fail",
+      score: matchRatio,
+      weight: 2,
+      critical: false,
+      available: true,
+      reason: `Keyword overlap with expected output: ${Math.round(matchRatio * 100)}%.`,
+    });
+  }
+
+  return checks;
+}
+
+export async function createDatasetEvaluationRun(args: {
+  workspaceId: string;
+  datasetId: string;
+  candidatePromptVersionId: string;
+  triggeredBy: string;
+}) {
+  const supabase = createVectorBeaAdminClient();
+
+  // Load dataset + items
+  const dataset = await getEvaluationDataset(args.workspaceId, args.datasetId);
+  if (!dataset) throw new Error("Evaluation dataset not found.");
+
+  const items = await listDatasetItems(args.workspaceId, args.datasetId);
+  if (items.length === 0) throw new Error("Dataset has no items. Add test cases before running an evaluation.");
+
+  // Load candidate prompt version
+  const { data: candidate, error: candidateError } = await supabase
+    .from("prompt_versions")
+    .select("id, prompt_id, version_tag, template_text, parameters, prompts(id, name)")
+    .eq("id", args.candidatePromptVersionId)
+    .single();
+  if (candidateError) throw new Error(candidateError.message);
+  const candidateVersion = candidate as PromptVersionRecord;
+  const promptRow = getPromptRow(candidateVersion);
+  const runId = randomUUID();
+
+  const results: TraceSetEvaluationRunView["results"] = [];
+  const replayTraceIds: string[] = [];
+  const latencyDeltas: number[] = [];
+  const tokenDeltas: number[] = [];
+  const confidences: number[] = [];
+  const observabilityLevels: Array<string | null> = [];
+  const sourceTraceIdList: string[] = [];
+  let outputChanged = 0;
+  let latencyImproved = 0;
+  let latencyRegressed = 0;
+  let unavailableObservability = 0;
+  let criticalFailures = 0;
+  let succeeded = 0;
+  let failed = 0;
+  const scores: number[] = [];
+
+  for (const item of items) {
+    const isTraceItem = item.sourceType === "runtime_trace" || item.sourceType === "golden_trace";
+
+    if (isTraceItem && item.traceId) {
+      // ── Replay path (same as existing trace-set logic) ──────────────────
+      sourceTraceIdList.push(item.traceId);
+      const sourceRows = await loadRuntimeTraceRows(args.workspaceId, [item.traceId]);
+      if (sourceRows.length === 0) {
+        failed += 1;
+        results.push({
+          sourceTraceId: item.traceId,
+          replayTraceId: null,
+          score: null,
+          label: "fail",
+          status: "error",
+          latencyDeltaMs: null,
+          tokenDelta: null,
+          confidence: null,
+          recommendation: "blocked",
+          criticalFailures: 1,
+          observabilityNote: "Source trace not found",
+          replayMode: null,
+          checks: [{
+            name: "replay_completed",
+            category: "reliability",
+            status: "fail",
+            label: "fail",
+            score: 0,
+            weight: 1,
+            critical: true,
+            available: true,
+            reason: "Source trace not found in audit_logs.",
+          }],
+          error: "Source trace not found.",
+        });
+        continue;
+      }
+
+      const sourceRow = sourceRows[0];
+      const sourceMetadata = normalizeTraceMetadataV1(sourceRow.metadata ?? {});
+      const requestInput = asRecord(sourceMetadata.request?.input);
+      const promptVariables = {
+        ...asRecord(sourceMetadata.prompt?.variables),
+        ...asRecord(asRecord(sourceMetadata.custom).variables),
+        ...asRecord(requestInput.variables),
+      };
+      const inputText = asString(requestInput.text) ?? asString(asRecord(sourceMetadata.custom).userInput) ?? "";
+
+      if (!inputText && Object.keys(promptVariables).length === 0) {
+        failed += 1;
+        results.push({
+          sourceTraceId: item.traceId,
+          replayTraceId: null,
+          score: null,
+          label: "fail",
+          status: "error",
+          latencyDeltaMs: null,
+          tokenDelta: null,
+          confidence: null,
+          recommendation: "blocked",
+          criticalFailures: 1,
+          observabilityNote: "Replay input metadata missing",
+          replayMode: null,
+          checks: [{
+            name: "replay_completed",
+            category: "reliability",
+            status: "fail",
+            label: "fail",
+            score: 0,
+            weight: 1,
+            critical: true,
+            available: true,
+            reason: "Trace metadata lacked replayable input.",
+          }],
+          error: "Replay input metadata was missing for this trace.",
+        });
+        continue;
+      }
+
+      const renderedPrompt = renderTemplate(candidateVersion.template_text ?? "", promptVariables);
+      const execution = await executeResolvedPrompt({
+        workspaceId: args.workspaceId,
+        promptVersionId: candidateVersion.id,
+        promptName: promptRow?.name ?? sourceRow.prompt_name ?? "unknown-prompt",
+        versionTag: candidateVersion.version_tag,
+        templateText: candidateVersion.template_text ?? "",
+        variables: promptVariables,
+        inputText,
+        renderedPrompt,
+        sourceMetadata,
+        replayOf: sourceRow.id,
+        triggeredBy: args.triggeredBy,
+      });
+
+      const sourceDetail = mapAuditRowToTraceDetail(sourceRow, {
+        promptTemplateText: candidateVersion.template_text,
+        promptParameters: candidateVersion.parameters,
+        promptName: promptRow?.name ?? sourceRow.prompt_name,
+        promptVersionTag: sourceRow.version_tag,
+      });
+
+      const replayMetadata = {
+        ...execution.metadata,
+        evaluation: undefined,
+        tags: {
+          ...(execution.metadata.tags ?? {}),
+          replay_of: sourceRow.id,
+          evaluation_run_id: runId,
+          candidate_prompt_version_id: candidateVersion.id,
+          dataset_id: args.datasetId,
+          dataset_item_source_type: item.sourceType,
+          is_golden: String(item.isGolden || item.sourceType === "golden_trace"),
+        },
+        custom: {
+          ...(execution.metadata.custom ?? {}),
+          replay: {
+            ...asRecord(execution.metadata.custom?.replay),
+            evaluation_run_id: runId,
+            candidate_prompt_version_id: candidateVersion.id,
+            dataset_id: args.datasetId,
+          },
+        },
+      };
+
+      const { data: insertedReplay, error: replayInsertError } = await supabase
+        .from("audit_logs")
+        .insert({
+          workspace_id: args.workspaceId,
+          prompt_version_id: candidateVersion.id,
+          prompt_name: promptRow?.name ?? sourceRow.prompt_name ?? "",
+          version_tag: candidateVersion.version_tag,
+          proxy_latency_ms: execution.proxyLatencyMs,
+          llm_latency_ms: execution.llmLatencyMs,
+          token_count: execution.tokenCount,
+          metadata: replayMetadata,
+        })
+        .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+        .single();
+
+      if (replayInsertError) throw new Error(replayInsertError.message);
+
+      const replayRow = insertedReplay as AuditLogTraceRow;
+      const replayDetail = mapAuditRowToTraceDetail(replayRow, {
+        promptTemplateText: candidateVersion.template_text,
+        promptParameters: candidateVersion.parameters,
+        promptName: promptRow?.name ?? sourceRow.prompt_name,
+        promptVersionTag: candidateVersion.version_tag,
+      });
+      const evaluation = evaluateTraceReplay(sourceDetail, replayDetail);
+      const replayMode = asString(normalizeTraceMetadataV1(replayRow.metadata ?? {}).tags?.replay_mode) as "simulated" | "live" | null;
+
+      const metadataWithEvaluation = {
+        ...(replayRow.metadata ?? {}),
+        evaluation: toMetadataEvaluation(evaluation),
+      };
+      await supabase
+        .from("audit_logs")
+        .update({ metadata: metadataWithEvaluation })
+        .eq("workspace_id", args.workspaceId)
+        .eq("id", replayRow.id);
+
+      replayTraceIds.push(replayRow.id);
+      if (replayDetail.status === "success") succeeded += 1; else failed += 1;
+      if (typeof evaluation.score === "number") scores.push(evaluation.score);
+      if (typeof evaluation.confidence === "number") confidences.push(evaluation.confidence);
+      if (typeof evaluation.criticalFailures === "number") criticalFailures += evaluation.criticalFailures;
+      observabilityLevels.push(replayDetail.executorObservability);
+      const latencyDelta = replayDetail.durationMs - sourceDetail.durationMs;
+      const leftTokens = sourceDetail.tokensIn + sourceDetail.tokensOut;
+      const rightTokens = replayDetail.tokensIn + replayDetail.tokensOut;
+      const tokenDelta = leftTokens > 0 && rightTokens > 0 ? rightTokens - leftTokens : null;
+      if (latencyDelta < 0) latencyImproved += 1;
+      if (latencyDelta > 0) latencyRegressed += 1;
+      if ((sourceDetail.outputs.finalDelivered || "").trim() !== (replayDetail.outputs.finalDelivered || "").trim()) outputChanged += 1;
+      if (replayDetail.executorObservability !== "full") unavailableObservability += 1;
+      latencyDeltas.push(latencyDelta);
+      if (tokenDelta !== null) tokenDeltas.push(tokenDelta);
+
+      results.push({
+        sourceTraceId: item.traceId,
+        replayTraceId: replayRow.id,
+        score: evaluation.score,
+        label: evaluation.label,
+        status: replayDetail.status,
+        latencyDeltaMs: latencyDelta,
+        tokenDelta,
+        confidence: evaluation.confidence ?? null,
+        recommendation: evaluation.recommendation === "ready"
+          ? "ready_for_rollout"
+          : evaluation.recommendation === "regression"
+            ? "regression_detected"
+            : evaluation.recommendation === "blocked"
+              ? "blocked"
+              : evaluation.recommendation === "inconclusive"
+                ? "inconclusive"
+                : "needs_review",
+        criticalFailures: evaluation.criticalFailures ?? 0,
+        observabilityNote: evaluation.observabilityNote ?? null,
+        replayMode,
+        checks: evaluation.checks,
+        error: null,
+      });
+    } else {
+      // ── Fresh execution path (manual / imported items) ──────────────────
+      const inputText = item.input ?? "";
+      if (!inputText.trim()) {
+        failed += 1;
+        results.push({
+          sourceTraceId: item.id,
+          replayTraceId: null,
+          score: null,
+          label: "fail",
+          status: "error",
+          latencyDeltaMs: null,
+          tokenDelta: null,
+          confidence: null,
+          recommendation: "blocked",
+          criticalFailures: 1,
+          observabilityNote: null,
+          replayMode: null,
+          checks: [{
+            name: "input_provided",
+            category: "reliability",
+            status: "fail",
+            label: "fail",
+            score: 0,
+            weight: 1,
+            critical: true,
+            available: true,
+            reason: "Dataset item has no input text.",
+          }],
+          error: "Dataset item has no input text.",
+        });
+        continue;
+      }
+
+      const metadataVariables = item.metadata && typeof item.metadata === "object"
+        ? asRecord(item.metadata)
+        : {};
+      const renderedPrompt = renderTemplate(candidateVersion.template_text ?? "", { ...metadataVariables, input: inputText });
+
+      const execution = await executeResolvedPrompt({
+        workspaceId: args.workspaceId,
+        promptVersionId: candidateVersion.id,
+        promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+        versionTag: candidateVersion.version_tag,
+        templateText: candidateVersion.template_text ?? "",
+        variables: { ...metadataVariables, input: inputText },
+        inputText,
+        renderedPrompt,
+        triggeredBy: args.triggeredBy,
+      });
+
+      // Store execution as an audit log trace
+      const execMetadata = {
+        ...execution.metadata,
+        tags: {
+          ...(execution.metadata.tags ?? {}),
+          evaluation_run_id: runId,
+          candidate_prompt_version_id: candidateVersion.id,
+          dataset_id: args.datasetId,
+          dataset_item_id: item.id,
+          dataset_item_source_type: item.sourceType,
+        },
+        custom: {
+          ...(execution.metadata.custom ?? {}),
+          dataset_eval: {
+            evaluation_run_id: runId,
+            dataset_id: args.datasetId,
+            dataset_item_id: item.id,
+            input: inputText,
+            expected_output: item.expectedOutput ?? null,
+          },
+        },
+      };
+
+      const { data: insertedExec, error: execInsertError } = await supabase
+        .from("audit_logs")
+        .insert({
+          workspace_id: args.workspaceId,
+          prompt_version_id: candidateVersion.id,
+          prompt_name: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+          version_tag: candidateVersion.version_tag,
+          proxy_latency_ms: execution.proxyLatencyMs,
+          llm_latency_ms: execution.llmLatencyMs,
+          token_count: execution.tokenCount,
+          metadata: execMetadata,
+        })
+        .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+        .single();
+
+      if (execInsertError) throw new Error(execInsertError.message);
+
+      const execRow = insertedExec as AuditLogTraceRow;
+      replayTraceIds.push(execRow.id);
+
+      const itemChecks = buildManualItemChecks(execution.outputText ?? "", item.expectedOutput, execution.status);
+      const critFails = itemChecks.filter((c) => c.critical && c.status === "fail").length;
+      criticalFailures += critFails;
+
+      const weightedSum = itemChecks.reduce((sum, c) => sum + (c.score ?? 0) * (c.weight ?? 1), 0);
+      const totalWeight = itemChecks.reduce((sum, c) => sum + (c.weight ?? 1), 0);
+      const itemScore = totalWeight > 0 ? weightedSum / totalWeight : null;
+      if (itemScore !== null) scores.push(itemScore);
+
+      if (execution.status === "success") succeeded += 1; else failed += 1;
+      // No latency delta for fresh executions (no baseline)
+      observabilityLevels.push("full");
+
+      const itemLabel: TraceSetEvaluationRunView["results"][number]["label"] =
+        critFails > 0 ? "fail" : (itemScore ?? 0) >= 0.7 ? "pass" : "fail";
+
+      results.push({
+        sourceTraceId: item.id,
+        replayTraceId: execRow.id,
+        score: itemScore,
+        label: itemLabel,
+        status: execution.status === "success" ? "success" : "error",
+        latencyDeltaMs: null,
+        tokenDelta: null,
+        confidence: 0.85, // fixed confidence for manual items (no replay uncertainty)
+        recommendation: critFails > 0 ? "blocked" : (itemScore ?? 0) >= 0.7 ? "ready_for_rollout" : "needs_review",
+        criticalFailures: critFails,
+        observabilityNote: null,
+        replayMode: "live",
+        checks: itemChecks,
+        error: execution.status !== "success" ? (execution.outputText ?? "Execution failed") : null,
+      });
+    }
+  }
+
+  // ── Aggregate ─────────────────────────────────────────────────────────────
+  const aggregateScore = scores.length ? scores.reduce((s, v) => s + v, 0) / scores.length : null;
+  const aggregateConfidence = confidences.length ? confidences.reduce((s, v) => s + v, 0) / confidences.length : 0.85;
+  const observabilityLevel = aggregateObservability(observabilityLevels);
+
+  const recommendation =
+    criticalFailures > 0 || failed > 0
+      ? "blocked"
+      : aggregateScore === null
+        ? "inconclusive"
+        : aggregateScore >= 0.78
+          ? "ready_for_rollout"
+          : aggregateScore <= 0.45
+            ? "regression_detected"
+            : "needs_review";
+
+  const recommendationReasons: string[] = [];
+  if (criticalFailures > 0) recommendationReasons.push("Critical checks failed on one or more items");
+  if (failed > 0) recommendationReasons.push("One or more items failed execution");
+  if (recommendation === "ready_for_rollout") recommendationReasons.push("All items executed successfully and score threshold passed");
+
+  // ── Unresolved flags on source traces ────────────────────────────────────
+  const unresolvedFlags = sourceTraceIdList.length > 0
+    ? await getUnresolvedFlags(args.workspaceId, sourceTraceIdList)
+    : [];
+  if (unresolvedFlags.length > 0) {
+    recommendationReasons.push(`${unresolvedFlags.length} source trace(s) have unresolved issue flags`);
+  }
+
+  const evaluationMetadata = buildTraceMetadataV1({
+    metadata: {
+      custom: {
+        action: "evaluation_run",
+        evaluation_run: {
+          id: runId,
+          status: "completed",
+          prompt_name: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+          candidate_prompt_version_id: candidateVersion.id,
+          candidate_version_tag: candidateVersion.version_tag,
+          dataset_id: args.datasetId,
+          dataset_name: dataset.name,
+          source_trace_ids: sourceTraceIdList,
+          replay_trace_ids: replayTraceIds,
+          aggregate: {
+            total: results.length,
+            succeeded,
+            failed,
+            output_changed: outputChanged,
+            latency_improved: latencyImproved,
+            latency_regressed: latencyRegressed,
+            unavailable_observability: unavailableObservability,
+            average_latency_delta_ms: latencyDeltas.length ? latencyDeltas.reduce((s, v) => s + v, 0) / latencyDeltas.length : null,
+            average_token_delta: tokenDeltas.length ? tokenDeltas.reduce((s, v) => s + v, 0) / tokenDeltas.length : null,
+            score: aggregateScore,
+            confidence: aggregateConfidence,
+            critical_failures: criticalFailures,
+            observability_level: observabilityLevel,
+            recommendation,
+            reasons: recommendationReasons,
+            unresolved_flag_count: unresolvedFlags.length,
+            flagged_trace_ids: unresolvedFlags.map((f) => f.traceId),
+          },
+          review: defaultReview(),
+          results: results.map((result) => ({
+            source_trace_id: result.sourceTraceId,
+            replay_trace_id: result.replayTraceId,
+            score: result.score,
+            label: result.label,
+            status: result.status,
+            latency_delta_ms: result.latencyDeltaMs,
+            token_delta: result.tokenDelta,
+            confidence: result.confidence ?? null,
+            recommendation: result.recommendation ?? "needs_review",
+            critical_failures: result.criticalFailures ?? 0,
+            observability_note: result.observabilityNote ?? null,
+            replay_mode: result.replayMode ?? null,
+            checks: (result.checks ?? []).map((check) => ({
+              name: check.name,
+              category: check.category,
+              status: check.status,
+              label: check.label,
+              score: check.score,
+              weight: check.weight,
+              critical: check.critical,
+              available: check.available,
+              reason: check.reason,
+            })),
+            error: result.error ?? null,
+          })),
+        },
+      },
+    },
+    useType: "audit",
+    workspaceId: args.workspaceId,
+    promptVersionId: candidateVersion.id,
+    promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+    versionTag: candidateVersion.version_tag,
+    proxyLatencyMs: 0,
+    llmLatencyMs: 0,
+    tokenCount: 0,
+  });
+
+  const { data: insertedRun, error: runInsertError } = await supabase
+    .from("audit_logs")
+    .insert({
+      workspace_id: args.workspaceId,
+      prompt_version_id: candidateVersion.id,
+      prompt_name: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+      version_tag: candidateVersion.version_tag,
+      proxy_latency_ms: 0,
+      llm_latency_ms: 0,
+      token_count: 0,
+      metadata: evaluationMetadata,
+    })
+    .select("id, workspace_id, prompt_version_id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
+    .single();
+
+  if (runInsertError) throw new Error(runInsertError.message);
+  const view = toRunView(insertedRun as AuditLogTraceRow);
+  if (!view) throw new Error("Dataset evaluation run could not be materialized.");
+  return view;
 }
