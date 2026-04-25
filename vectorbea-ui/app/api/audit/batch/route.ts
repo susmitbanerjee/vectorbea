@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
 import {
   getWorkspaceMonthlyAuditCount,
   getWorkspacePlanLimits,
@@ -37,33 +38,11 @@ function asNumber(value: unknown): number | null {
 }
 
 function resolveProxyLatency(entry: AuditEntry): number {
-  const metadata = asRecord(entry.metadata);
-  const trace = asRecord(metadata.trace);
-  const custom = asRecord(metadata.custom);
-  return Math.max(
-    asNumber(entry.proxyLatencyMs) ??
-      asNumber(trace.proxy_latency_ms) ??
-      asNumber(trace.proxyLatencyMs) ??
-      asNumber(custom.proxyLatencyMs) ??
-      asNumber(custom.proxy_latency_ms) ??
-      0,
-    0,
-  );
+  return resolveAuditProxyLatencyMs(entry.proxyLatencyMs, entry.metadata);
 }
 
 function resolveLlmLatency(entry: AuditEntry): number {
-  const metadata = asRecord(entry.metadata);
-  const model = asRecord(metadata.model);
-  const custom = asRecord(metadata.custom);
-  return Math.max(
-    asNumber(entry.llmLatencyMs) ??
-      asNumber(model.latency_ms) ??
-      asNumber(model.latencyMs) ??
-      asNumber(custom.llmLatencyMs) ??
-      asNumber(custom.llm_latency_ms) ??
-      0,
-    0,
-  );
+  return resolveAuditLlmLatencyMs(entry.llmLatencyMs, entry.metadata);
 }
 
 function resolveTokenCount(entry: AuditEntry): number {

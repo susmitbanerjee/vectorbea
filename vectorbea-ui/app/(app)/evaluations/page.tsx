@@ -2,13 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Database, Loader2, PlayCircle, Search, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Database, Loader2, PlayCircle, Search, X } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { BaselineDataset, GoldenTrace, PromptDetail, PromptListItem, TraceSetEvaluationRunView, TraceSummaryView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -208,23 +214,57 @@ export default function EvaluationsPage() {
               {/* Prompt */}
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Prompt</div>
-                <Select className="h-10" value={selectedPromptId} onChange={e => setSelectedPromptId(e.target.value)}>
-                  <option value="">Select prompt</option>
-                  {prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="truncate text-left">
+                        {selectedPromptId
+                          ? (prompts.find(p => p.id === selectedPromptId)?.name ?? selectedPromptId)
+                          : <span className="text-muted-foreground">Select prompt</span>}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                    <DropdownMenuRadioGroup value={selectedPromptId} onValueChange={setSelectedPromptId}>
+                      {prompts.map(p => (
+                        <DropdownMenuPanelRadioItem key={p.id} value={p.id}>{p.name}</DropdownMenuPanelRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuPanel>
+                </DropdownMenu>
               </div>
 
               {/* Candidate version */}
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Candidate version</div>
-                <Select className="h-10" value={selectedVersionId} onChange={e => setSelectedVersionId(e.target.value)}>
-                  <option value="">Select version</option>
-                  {versions.map(v => (
-                    <option key={v.promptVersionId} value={v.promptVersionId}>
-                      {v.versionTag} {v.isPublished ? "(published)" : "(candidate)"}
-                    </option>
-                  ))}
-                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="truncate text-left">
+                        {selectedVersionId
+                          ? (() => { const v = versions.find(v => v.promptVersionId === selectedVersionId); return v ? `${v.versionTag} ${v.isPublished ? "(published)" : "(candidate)"}` : selectedVersionId; })()
+                          : <span className="text-muted-foreground">Select version</span>}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                    <DropdownMenuRadioGroup value={selectedVersionId} onValueChange={setSelectedVersionId}>
+                      {versions.map(v => (
+                        <DropdownMenuPanelRadioItem key={v.promptVersionId} value={v.promptVersionId}>
+                          {v.versionTag} {v.isPublished ? "(published)" : "(candidate)"}
+                        </DropdownMenuPanelRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuPanel>
+                </DropdownMenu>
                 {selectedVersion ? (
                   <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
                     Candidate: <span className="font-medium text-foreground">{selectedVersion.name}@{selectedVersion.versionTag}</span>
@@ -295,18 +335,30 @@ export default function EvaluationsPage() {
               {traceSource === "dataset" && (
                 <div className="space-y-2">
                   <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Select dataset</div>
-                  <select
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                    value={selectedDatasetId}
-                    onChange={e => setSelectedDatasetId(e.target.value)}
-                  >
-                    <option value="">Choose a baseline dataset</option>
-                    {datasets.map(ds => (
-                      <option key={ds.id} value={ds.id}>
-                        {ds.name} ({ds.traceIds.length} traces)
-                      </option>
-                    ))}
-                  </select>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span className="truncate text-left">
+                          {selectedDatasetId
+                            ? (() => { const ds = datasets.find(d => d.id === selectedDatasetId); return ds ? `${ds.name} (${ds.traceIds.length} traces)` : selectedDatasetId; })()
+                            : <span className="text-muted-foreground">Choose a baseline dataset</span>}
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                      <DropdownMenuRadioGroup value={selectedDatasetId} onValueChange={setSelectedDatasetId}>
+                        {datasets.map(ds => (
+                          <DropdownMenuPanelRadioItem key={ds.id} value={ds.id}>
+                            {ds.name} ({ds.traceIds.length} traces)
+                          </DropdownMenuPanelRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuPanel>
+                  </DropdownMenu>
                   {selectedDatasetId && datasets.find(d => d.id === selectedDatasetId) && (
                     <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
                       {datasets.find(d => d.id === selectedDatasetId)?.traceIds.length} traces loaded from dataset
@@ -465,15 +517,30 @@ export default function EvaluationsPage() {
                 value={candidateFilter}
                 onChange={e => { setCandidateFilter(e.target.value); setRunsPage(0); }}
               />
-              <Select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as typeof statusFilter); setRunsPage(0); }} aria-label="Filter evaluation runs by status">
-                <option value="all">All</option>
-                <option value="needs_review">Needs Review</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-                <option value="blocked">Blocked</option>
-                <option value="running">Running</option>
-                <option value="failed">Failed</option>
-              </Select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 min-w-[140px] items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                  >
+                    <span className="truncate">
+                      {{ all: "All", needs_review: "Needs Review", approved: "Approved", rejected: "Rejected", blocked: "Blocked", running: "Running", failed: "Failed" }[statusFilter]}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel>
+                  <DropdownMenuRadioGroup value={statusFilter} onValueChange={(v) => { setStatusFilter(v as typeof statusFilter); setRunsPage(0); }}>
+                    <DropdownMenuPanelRadioItem value="all">All</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="needs_review">Needs Review</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="approved">Approved</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="rejected">Rejected</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="blocked">Blocked</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="running">Running</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="failed">Failed</DropdownMenuPanelRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
             </div>
 
             {/* Fixed-height scrollable runs list */}

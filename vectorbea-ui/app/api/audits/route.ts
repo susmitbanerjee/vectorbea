@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
 import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import {
@@ -65,11 +66,13 @@ export async function POST(request: NextRequest) {
         llmLatencyMs: e.llmLatencyMs ?? 0,
         tokenCount: e.tokenCount ?? 0,
       });
+      const proxyLatencyMs = resolveAuditProxyLatencyMs(e.proxyLatencyMs, metadata);
+      const llmLatencyMs = resolveAuditLlmLatencyMs(e.llmLatencyMs, metadata);
       return {
         workspace_id: workspaceId,
         prompt_version_id: e.promptVersionId ?? null,
-        proxy_latency_ms: e.proxyLatencyMs ?? 0,
-        llm_latency_ms: e.llmLatencyMs ?? 0,
+        proxy_latency_ms: proxyLatencyMs,
+        llm_latency_ms: llmLatencyMs,
         token_count: e.tokenCount ?? 0,
         prompt_name: e.promptName || metadata.prompt?.name || "",
         version_tag: e.versionTag || metadata.prompt?.version_tag || "",

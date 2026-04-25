@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Activity, AlertTriangle, CheckCircle2, RefreshCw, SearchX, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, RefreshCw, SearchX, XCircle } from "lucide-react";
 
 import type { TraceListResponse, TraceSummaryView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -11,8 +11,14 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
@@ -235,36 +241,121 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search trace, prompt, model, sidecar…"
               />
-              <Select value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }}>
-                <option value="all">All status</option>
-                <option value="success">Success</option>
-                <option value="warning">Warning</option>
-                <option value="error">Error</option>
-              </Select>
-              <Select value={environment} onChange={(event) => { setPage(1); setEnvironment(event.target.value); }}>
-                <option value="all">All environments</option>
-                <option value="prod">Prod</option>
-                <option value="staging">Staging</option>
-                <option value="dev">Dev</option>
-              </Select>
-              <Select value={promptName} onChange={(event) => { setPage(1); setPromptName(event.target.value); }}>
-                <option value="all">All prompts</option>
-                {promptOptions.map((name) => (
-                  <option key={name} value={name.toLowerCase()}>{name}</option>
-                ))}
-              </Select>
-              <Select value={since} onChange={(event) => { setPage(1); setSince(event.target.value); }}>
-                <option value="all">All time</option>
-                <option value="24h">Last 24h</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-              </Select>
-              <Select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
-                <option value="newest">Newest first</option>
-                <option value="latency">Highest latency</option>
-                <option value="tokens">Highest tokens</option>
-                <option value="cost">Highest cost</option>
-              </Select>
+
+              {/* Status filter */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                  >
+                    <span className="truncate">
+                      {{ all: "All status", success: "Success", warning: "Warning", error: "Error" }[status] ?? status}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                  <DropdownMenuRadioGroup value={status} onValueChange={(v) => { setPage(1); setStatus(v); }}>
+                    <DropdownMenuPanelRadioItem value="all">All status</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="success">Success</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="warning">Warning</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="error">Error</DropdownMenuPanelRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
+
+              {/* Environment filter */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                  >
+                    <span className="truncate">
+                      {{ all: "All environments", prod: "Prod", staging: "Staging", dev: "Dev" }[environment] ?? environment}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                  <DropdownMenuRadioGroup value={environment} onValueChange={(v) => { setPage(1); setEnvironment(v); }}>
+                    <DropdownMenuPanelRadioItem value="all">All environments</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="prod">Prod</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="staging">Staging</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="dev">Dev</DropdownMenuPanelRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
+
+              {/* Prompt filter */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                  >
+                    <span className="truncate">
+                      {promptName === "all" ? "All prompts" : promptOptions.find(n => n.toLowerCase() === promptName) ?? promptName}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                  <DropdownMenuRadioGroup value={promptName} onValueChange={(v) => { setPage(1); setPromptName(v); }}>
+                    <DropdownMenuPanelRadioItem value="all">All prompts</DropdownMenuPanelRadioItem>
+                    {promptOptions.map((name) => (
+                      <DropdownMenuPanelRadioItem key={name} value={name.toLowerCase()}>{name}</DropdownMenuPanelRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
+
+              {/* Time range filter */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                  >
+                    <span className="truncate">
+                      {{ all: "All time", "24h": "Last 24h", "7d": "Last 7 days", "30d": "Last 30 days" }[since] ?? since}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                  <DropdownMenuRadioGroup value={since} onValueChange={(v) => { setPage(1); setSince(v); }}>
+                    <DropdownMenuPanelRadioItem value="all">All time</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="24h">Last 24h</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="7d">Last 7 days</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="30d">Last 30 days</DropdownMenuPanelRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
+
+              {/* Sort filter */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                  >
+                    <span className="truncate">
+                      {{ newest: "Newest first", latency: "Highest latency", tokens: "Highest tokens", cost: "Highest cost" }[sortBy] ?? sortBy}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                  <DropdownMenuRadioGroup value={sortBy} onValueChange={setSortBy}>
+                    <DropdownMenuPanelRadioItem value="newest">Newest first</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="latency">Highest latency</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="tokens">Highest tokens</DropdownMenuPanelRadioItem>
+                    <DropdownMenuPanelRadioItem value="cost">Highest cost</DropdownMenuPanelRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
             </div>
           </CardHeader>
           <CardContent>

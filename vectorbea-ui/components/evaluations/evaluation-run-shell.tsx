@@ -2,13 +2,19 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, GitBranch, Loader2, RefreshCw } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, GitBranch, Loader2, RefreshCw } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { TraceSetEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -177,17 +183,29 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                   {/* Review status dropdown */}
                   <div className="space-y-2">
                     <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Review action</label>
-                    <Select
-                      className="h-10"
-                      value={pendingReviewStatus}
-                      onChange={e => setPendingReviewStatus(e.target.value as typeof pendingReviewStatus)}
-                    >
-                      <option value="">Select action…</option>
-                      <option value="in_review">Mark in review</option>
-                      <option value="needs_changes">Request changes</option>
-                      <option value="rejected">Reject</option>
-                      <option value="approved">Approve</option>
-                    </Select>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <span className="truncate text-left">
+                            {pendingReviewStatus
+                              ? ({ in_review: "Mark in review", needs_changes: "Request changes", rejected: "Reject", approved: "Approve" } as Record<string, string>)[pendingReviewStatus] ?? pendingReviewStatus
+                              : <span className="text-muted-foreground">Select action…</span>}
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                        <DropdownMenuRadioGroup value={pendingReviewStatus} onValueChange={(v) => setPendingReviewStatus(v as typeof pendingReviewStatus)}>
+                          <DropdownMenuPanelRadioItem value="in_review">Mark in review</DropdownMenuPanelRadioItem>
+                          <DropdownMenuPanelRadioItem value="needs_changes">Request changes</DropdownMenuPanelRadioItem>
+                          <DropdownMenuPanelRadioItem value="rejected">Reject</DropdownMenuPanelRadioItem>
+                          <DropdownMenuPanelRadioItem value="approved">Approve</DropdownMenuPanelRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuPanel>
+                    </DropdownMenu>
                     <Button
                       className="w-full gap-2"
                       variant="outline"

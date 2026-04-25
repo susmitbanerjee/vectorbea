@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AuditLogView } from "@/lib/api";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
+import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { Activity, Clock, FileText, Zap } from "lucide-react";
@@ -137,11 +138,20 @@ function formatProxyLatency(ms: number): string {
 
 // Stats are computed from up to 500 most-recent logs so they represent a
 // meaningful aggregate rather than just the current page.
-type StatsRow = { proxy_latency_ms: number | null; llm_latency_ms: number | null; token_count: number | null; prompt_name: string | null };
+type StatsRow = {
+  proxy_latency_ms: number | null;
+  llm_latency_ms: number | null;
+  token_count: number | null;
+  prompt_name: string | null;
+  metadata: Record<string, unknown> | null;
+};
 function computeStats(rows: StatsRow[], total: number) {
   if (rows.length === 0) return { total, avgLlmLatency: 0, avgProxyLatency: 0, mostActivePrompt: "N/A" };
-  const avgLlmLatency = Math.round(rows.reduce((s, r) => s + (r.llm_latency_ms ?? 0), 0) / rows.length);
-  const avgProxyLatency = rows.reduce((s, r) => s + (r.proxy_latency_ms ?? 0), 0) / rows.length;
+  const avgLlmLatency = Math.round(
+    rows.reduce((s, r) => s + resolveAuditLlmLatencyMs(r.llm_latency_ms, r.metadata), 0) / rows.length,
+  );
+  const avgProxyLatency =
+    rows.reduce((s, r) => s + resolveAuditProxyLatencyMs(r.proxy_latency_ms, r.metadata), 0) / rows.length;
   const promptCounts = new Map<string, number>();
   for (const row of rows) {
     const name = row.prompt_name ?? "";
@@ -214,7 +224,7 @@ export default async function AuditLogsPage({
       const [statsResult, pageResult] = await Promise.all([
         supabase
           .from("audit_logs")
-          .select("proxy_latency_ms, llm_latency_ms, token_count, prompt_name", { count: "exact" })
+          .select("proxy_latency_ms, llm_latency_ms, token_count, prompt_name, metadata", { count: "exact" })
           .eq("workspace_id", workspaceId)
           .order("created_at", { ascending: false })
           .limit(500),
@@ -245,8 +255,8 @@ export default async function AuditLogsPage({
         workspaceId: workspaceId,
         promptName: row.prompt_name ?? "",
         versionTag: row.version_tag ?? "",
-        proxyLatencyMs: row.proxy_latency_ms ?? 0,
-        llmLatencyMs: row.llm_latency_ms ?? 0,
+        proxyLatencyMs: resolveAuditProxyLatencyMs(row.proxy_latency_ms, row.metadata),
+        llmLatencyMs: resolveAuditLlmLatencyMs(row.llm_latency_ms, row.metadata),
         tokenCount: row.token_count ?? 0,
         useType: resolveUseType((row.metadata as Record<string, unknown>) ?? {}),
         metadata: (row.metadata as Record<string, unknown>) ?? {},

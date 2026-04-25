@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { AuditLogView, DashboardSummary } from "@/lib/api";
+import { resolveAuditProxyLatencyMs, resolveAuditLlmLatencyMs } from "@/lib/server/audit-latency";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
@@ -34,8 +35,8 @@ export async function getRecentAuditLogsForWorkspace(
     workspaceId,
     promptName: row.prompt_name ?? "",
     versionTag: row.version_tag ?? "",
-    proxyLatencyMs: row.proxy_latency_ms ?? 0,
-    llmLatencyMs: row.llm_latency_ms ?? 0,
+    proxyLatencyMs: resolveAuditProxyLatencyMs(row.proxy_latency_ms, row.metadata),
+    llmLatencyMs: resolveAuditLlmLatencyMs(row.llm_latency_ms, row.metadata),
     tokenCount: row.token_count ?? 0,
     useType: resolveUseType((row.metadata as Record<string, unknown>) ?? {}),
     metadata: (row.metadata as Record<string, unknown>) ?? {},
@@ -84,7 +85,7 @@ export async function getDashboardSummaryForWorkspace(
   const averageLatencyMs =
     runtimeRows24h.length > 0
       ? Math.round(
-          runtimeRows24h.reduce((sum, row) => sum + (row.proxy_latency_ms ?? 0), 0) /
+          runtimeRows24h.reduce((sum, row) => sum + resolveAuditProxyLatencyMs(row.proxy_latency_ms, row.metadata), 0) /
             runtimeRows24h.length,
         )
       : 0;

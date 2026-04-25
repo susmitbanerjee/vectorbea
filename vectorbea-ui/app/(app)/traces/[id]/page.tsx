@@ -39,7 +39,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { TraceDetailView, TraceReplayResponse } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -817,20 +823,34 @@ export default function TraceDetailsPage() {
         subtitle={`Traces / ${trace.id}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={replayProvider}
-              onChange={(event) => setReplayProvider(event.target.value)}
-              className="h-9 min-w-[190px] border-slate-700 bg-slate-950/80 text-xs text-slate-200"
-              title="Replay executor/provider"
-            >
-              <option value="same">Same executor/provider</option>
-              <option value="enterprise_gateway">Enterprise gateway</option>
-              {configuredProviders.map((p) => (
-                <option key={p.provider_type} value={p.provider_type}>
-                  {p.display_name}
-                </option>
-              ))}
-            </Select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-9 min-w-[190px] items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-1 text-xs font-medium text-slate-200 shadow-sm transition-colors hover:bg-slate-900/80 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span className="truncate">
+                    {replayProvider === "same"
+                      ? "Same executor/provider"
+                      : replayProvider === "enterprise_gateway"
+                        ? "Enterprise gateway"
+                        : configuredProviders.find((p) => p.provider_type === replayProvider)?.display_name ?? replayProvider}
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuPanel className="min-w-[190px]">
+                <DropdownMenuRadioGroup value={replayProvider} onValueChange={setReplayProvider}>
+                  <DropdownMenuPanelRadioItem value="same">Same executor/provider</DropdownMenuPanelRadioItem>
+                  <DropdownMenuPanelRadioItem value="enterprise_gateway">Enterprise gateway</DropdownMenuPanelRadioItem>
+                  {configuredProviders.map((p) => (
+                    <DropdownMenuPanelRadioItem key={p.provider_type} value={p.provider_type}>
+                      {p.display_name}
+                    </DropdownMenuPanelRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuPanel>
+            </DropdownMenu>
             <Input
               value={replayModel}
               onChange={(event) => setReplayModel(event.target.value)}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import type { AuditLogView } from "@/lib/api";
@@ -43,8 +44,8 @@ export async function GET(request: NextRequest) {
       workspaceId,
       promptName: row.prompt_name ?? "",
       versionTag: row.version_tag ?? "",
-      proxyLatencyMs: row.proxy_latency_ms ?? 0,
-      llmLatencyMs: row.llm_latency_ms ?? 0,
+      proxyLatencyMs: resolveAuditProxyLatencyMs(row.proxy_latency_ms, row.metadata),
+      llmLatencyMs: resolveAuditLlmLatencyMs(row.llm_latency_ms, row.metadata),
       tokenCount: row.token_count ?? 0,
       useType: resolveUseType((row.metadata as Record<string, unknown>) ?? {}),
       metadata: (row.metadata as Record<string, unknown>) ?? {},
