@@ -22,15 +22,16 @@ const MAX_IMPORT_ROWS = 500;
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await params;
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
 
-    const dataset = await getEvaluationDataset(workspaceId, params.id);
+    const dataset = await getEvaluationDataset(workspaceId, id);
     if (!dataset) return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
     if (dataset.origin === "baseline") {
       return NextResponse.json({ error: "Cannot import items into a legacy baseline dataset." }, { status: 400 });

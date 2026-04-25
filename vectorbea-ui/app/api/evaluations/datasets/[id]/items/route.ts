@@ -13,18 +13,19 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await params;
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
 
-    const dataset = await getEvaluationDataset(workspaceId, params.id);
+    const dataset = await getEvaluationDataset(workspaceId, id);
     if (!dataset) return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
 
-    return NextResponse.json(await listDatasetItems(workspaceId, params.id));
+    return NextResponse.json(await listDatasetItems(workspaceId, id));
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to load dataset items");
     return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
@@ -33,15 +34,16 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await params;
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
 
-    const dataset = await getEvaluationDataset(workspaceId, params.id);
+    const dataset = await getEvaluationDataset(workspaceId, id);
     if (!dataset) return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
     if (dataset.origin === "baseline") {
       return NextResponse.json({ error: "Cannot add items to a legacy baseline dataset. Convert it to an evaluation dataset first." }, { status: 400 });
@@ -79,7 +81,7 @@ export async function POST(
       isGolden: item.isGolden ?? false,
     }));
 
-    const added = await addDatasetItems({ workspaceId, datasetId: params.id, items });
+    const added = await addDatasetItems({ workspaceId, datasetId: id, items });
     return NextResponse.json(added, { status: 201 });
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to add dataset items");
@@ -89,9 +91,10 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await params; // satisfy Next.js 15 requirement even though id unused here
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);

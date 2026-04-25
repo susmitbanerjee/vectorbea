@@ -11,20 +11,21 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await params;
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
 
-    const dataset = await getEvaluationDataset(workspaceId, params.id);
+    const dataset = await getEvaluationDataset(workspaceId, id);
     if (!dataset) return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
 
     // Optionally include items if ?includeItems=1
     if (request.nextUrl.searchParams.get("includeItems") === "1") {
-      const items = await listDatasetItems(workspaceId, params.id);
+      const items = await listDatasetItems(workspaceId, id);
       return NextResponse.json({ ...dataset, items });
     }
 
@@ -37,15 +38,16 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await params;
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
 
-    const dataset = await getEvaluationDataset(workspaceId, params.id);
+    const dataset = await getEvaluationDataset(workspaceId, id);
     if (!dataset) return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
 
     if (dataset.origin === "baseline") {
@@ -56,10 +58,10 @@ export async function DELETE(
         .from("baseline_datasets")
         .delete()
         .eq("workspace_id", workspaceId)
-        .eq("id", params.id);
+        .eq("id", id);
       if (error) throw new Error(error.message);
     } else {
-      await deleteEvaluationDataset(workspaceId, params.id);
+      await deleteEvaluationDataset(workspaceId, id);
     }
 
     return new NextResponse(null, { status: 204 });
