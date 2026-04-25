@@ -80,7 +80,7 @@ export async function POST(
 
     const items = await addDatasetItems({
       workspaceId,
-      datasetId: params.id,
+      datasetId: id,
       items: valid.map((row) => ({
         sourceType: "imported",
         input: row.input,
