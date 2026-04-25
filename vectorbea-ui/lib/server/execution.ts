@@ -377,8 +377,16 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
   let rawOutputText: string | undefined;
   let downstreamLatencyMs = 0;
   let tokenCount = asNumber(source.model?.total_tokens, 0);
-  let provider = asString(source.model?.provider) ?? undefined;
-  let model = asString(source.model?.model) ?? undefined;
+  let provider =
+    input.providerConfig?.providerType ??
+    asString(input.executorOverride?.provider) ??
+    asString(source.model?.provider) ??
+    undefined;
+  let model =
+    asString(input.executorOverride?.model) ??
+    input.providerConfig?.model ??
+    asString(source.model?.model) ??
+    undefined;
   let errorMessage: string | undefined;
 
   try {
@@ -402,8 +410,11 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
         liveResult = await executeOpenAI({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: liveModel, systemPrompt, userInput, timeoutMs });
       } else if (cfg.providerType === "anthropic") {
         liveResult = await executeAnthropic({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: liveModel, systemPrompt, userInput, timeoutMs });
-      } else if (cfg.providerType === "google") {
+      } else if (cfg.providerType === "google" || cfg.providerType === "gemini") {
         liveResult = await executeGemini({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: liveModel, systemPrompt, userInput, timeoutMs });
+      } else if (cfg.providerType === "qwen") {
+        liveResult = await executeOpenAI({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl ?? "https://dashscope-intl.aliyuncs.com/compatible-mode", model: liveModel, systemPrompt, userInput, timeoutMs });
+        liveResult = { ...liveResult, provider: "qwen" };
       } else {
         throw new Error(`Live execution for provider type '${cfg.providerType}' is not yet implemented.`);
       }
@@ -552,7 +563,7 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
           ? {
               replay: {
                 source_trace_id: input.replayOf,
-                replay_mode: executor.type === "enterprise_gateway" ? "live" : "simulated",
+                replay_mode: (input.providerConfig || executor.type === "enterprise_gateway") ? "live" : "simulated",
                 source_executor_type: source.executor?.type ?? executor.type,
                 original_provider: asString(source.model?.provider) ?? source.executor?.name ?? null,
                 replay_provider: provider ?? executor.name ?? null,

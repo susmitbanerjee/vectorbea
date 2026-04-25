@@ -20,6 +20,62 @@ type AuditEntry = {
   metadata?: Record<string, unknown>;
 };
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function resolveProxyLatency(entry: AuditEntry): number {
+  const metadata = asRecord(entry.metadata);
+  const trace = asRecord(metadata.trace);
+  const custom = asRecord(metadata.custom);
+  return Math.max(
+    asNumber(entry.proxyLatencyMs) ??
+      asNumber(trace.proxy_latency_ms) ??
+      asNumber(trace.proxyLatencyMs) ??
+      asNumber(custom.proxyLatencyMs) ??
+      asNumber(custom.proxy_latency_ms) ??
+      0,
+    0,
+  );
+}
+
+function resolveLlmLatency(entry: AuditEntry): number {
+  const metadata = asRecord(entry.metadata);
+  const model = asRecord(metadata.model);
+  const custom = asRecord(metadata.custom);
+  return Math.max(
+    asNumber(entry.llmLatencyMs) ??
+      asNumber(model.latency_ms) ??
+      asNumber(model.latencyMs) ??
+      asNumber(custom.llmLatencyMs) ??
+      asNumber(custom.llm_latency_ms) ??
+      0,
+    0,
+  );
+}
+
+function resolveTokenCount(entry: AuditEntry): number {
+  const metadata = asRecord(entry.metadata);
+  const model = asRecord(metadata.model);
+  return Math.max(
+    asNumber(entry.tokenCount) ??
+      asNumber(model.total_tokens) ??
+      asNumber(model.totalTokens) ??
+      0,
+    0,
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const payloadTooLarge = enforceJsonBodySize(request, 512 * 1024);
@@ -68,13 +124,16 @@ export async function POST(request: NextRequest) {
       const promptMeta = entry.promptVersionId ? versionMeta.get(entry.promptVersionId) : undefined;
       const promptName = entry.promptName || promptMeta?.promptName || "";
       const versionTag = entry.versionTag || promptMeta?.versionTag || "";
+      const proxyLatencyMs = resolveProxyLatency(entry);
+      const llmLatencyMs = resolveLlmLatency(entry);
+      const tokenCount = resolveTokenCount(entry);
 
       return {
         workspace_id: workspaceId,
         prompt_version_id: entry.promptVersionId ?? null,
-        proxy_latency_ms: entry.proxyLatencyMs ?? 0,
-        llm_latency_ms: entry.llmLatencyMs ?? 0,
-        token_count: entry.tokenCount ?? 0,
+        proxy_latency_ms: proxyLatencyMs,
+        llm_latency_ms: llmLatencyMs,
+        token_count: tokenCount,
         prompt_name: promptName,
         version_tag: versionTag,
         metadata: buildTraceMetadataV1({
@@ -84,9 +143,9 @@ export async function POST(request: NextRequest) {
           promptVersionId: entry.promptVersionId ?? null,
           promptName,
           versionTag,
-          proxyLatencyMs: entry.proxyLatencyMs ?? 0,
-          llmLatencyMs: entry.llmLatencyMs ?? 0,
-          tokenCount: entry.tokenCount ?? 0,
+          proxyLatencyMs,
+          llmLatencyMs,
+          tokenCount,
         }),
       };
     });
@@ -106,4 +165,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

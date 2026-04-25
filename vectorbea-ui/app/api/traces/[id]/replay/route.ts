@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { executeResolvedPrompt } from "@/lib/server/execution";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
-import { getProviderConfig } from "@/lib/server/provider-keys";
+import { getProviderConfig, listEnabledProviders } from "@/lib/server/provider-keys";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 import { isRuntimeTraceMetadata } from "@/lib/server/traces";
@@ -89,29 +89,6 @@ export async function POST(
       configId: string;
     } | null = null;
 
-    if (providerOverride && providerOverride !== "same") {
-      if (providerOverride === "enterprise_gateway") {
-        if (!process.env.VECTORBEA_ENTERPRISE_GATEWAY_URL) {
-          return NextResponse.json({ error: "Enterprise gateway URL is not configured." }, { status: 422 });
-        }
-      } else {
-        const configResult = await getProviderConfig(workspaceId, providerOverride);
-        if (!configResult) {
-          return NextResponse.json(
-            { error: `Provider '${providerOverride}' is not configured or disabled for this workspace.` },
-            { status: 422 },
-          );
-        }
-        resolvedProviderConfig = {
-          providerType: configResult.config.provider_type,
-          apiKey: configResult.apiKey,
-          baseUrl: configResult.config.base_url,
-          model: modelOverride ?? configResult.config.default_model,
-          configId: configResult.config.id,
-        };
-      }
-    }
-
     const supabase = createVectorBeaAdminClient();
 
     const { data: original, error: originalError } = await supabase
@@ -135,6 +112,65 @@ export async function POST(
         { error: "Replay is only available for runtime execution traces." },
         { status: 422 },
       );
+    }
+
+    const originalProvider =
+      asString(normalized.model?.provider) ??
+      asString(normalized.executor?.name) ??
+      null;
+
+    if (providerOverride && providerOverride !== "same") {
+      if (providerOverride === "enterprise_gateway") {
+        if (!process.env.VECTORBEA_ENTERPRISE_GATEWAY_URL) {
+          return NextResponse.json({ error: "Enterprise gateway URL is not configured." }, { status: 422 });
+        }
+      } else {
+        const configResult = await getProviderConfig(workspaceId, providerOverride);
+        if (!configResult) {
+          return NextResponse.json(
+            { error: `Provider '${providerOverride}' is not configured or disabled for this workspace.` },
+            { status: 422 },
+          );
+        }
+        resolvedProviderConfig = {
+          providerType: configResult.config.provider_type,
+          apiKey: configResult.apiKey,
+          baseUrl: configResult.config.base_url,
+          model: modelOverride ?? configResult.config.default_model,
+          configId: configResult.config.id,
+        };
+      }
+    } else {
+      const normalizedProvider =
+        originalProvider === "google" ? "gemini" :
+        originalProvider === "direct-provider" ? null :
+        originalProvider;
+      const configResult = normalizedProvider
+        ? await getProviderConfig(workspaceId, normalizedProvider)
+        : null;
+      const fallbackConfig = !configResult && modelOverride
+        ? (await listEnabledProviders(workspaceId))[0] ?? null
+        : null;
+      if (configResult) {
+        resolvedProviderConfig = {
+          providerType: configResult.config.provider_type,
+          apiKey: configResult.apiKey,
+          baseUrl: configResult.config.base_url,
+          model: modelOverride ?? configResult.config.default_model,
+          configId: configResult.config.id,
+        };
+      } else if (fallbackConfig) {
+        const fallback = await getProviderConfig(workspaceId, fallbackConfig.provider_type);
+        if (fallback) {
+          resolvedProviderConfig = {
+            providerType: fallback.config.provider_type,
+            apiKey: fallback.apiKey,
+            baseUrl: fallback.config.base_url,
+            model: modelOverride ?? fallback.config.default_model,
+            configId: fallback.config.id,
+          };
+        }
+      }
     }
 
     let promptVersion = null as PromptVersionRow | null;
@@ -201,8 +237,10 @@ export async function POST(
       triggeredBy: auth.user.id,
       executorOverride: providerOverride && providerOverride !== "same"
         ? { type: providerOverride === "enterprise_gateway" ? "enterprise_gateway" : "direct_provider", provider: providerOverride, model: modelOverride }
-        : modelOverride
-          ? { model: modelOverride }
+        : resolvedProviderConfig
+          ? { type: "direct_provider", provider: resolvedProviderConfig.providerType, model: modelOverride ?? resolvedProviderConfig.model }
+          : modelOverride
+          ? { provider: originalProvider, model: modelOverride }
           : undefined,
       providerConfig: resolvedProviderConfig,
     });
