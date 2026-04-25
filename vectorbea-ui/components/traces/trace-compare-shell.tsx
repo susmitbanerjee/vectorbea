@@ -234,16 +234,55 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
 
   const timingRows = useMemo(() => {
     if (!comparison) return [];
-    const leftByName = new Map(comparison.left.spans.map((span) => [span.name, span]));
-    return comparison.right.spans.slice(0, 12).map((rightSpan) => {
-      const leftSpan = leftByName.get(rightSpan.name);
+
+    type TimingRow = {
+      name: string;
+      type: TraceDetailView["spans"][number]["type"];
+      service: string;
+      left: number | null;
+      right: number | null;
+      delta: number | null;
+    };
+    const spanKey = (span: TraceDetailView["spans"][number]) =>
+      `${span.type}:${span.service}:${span.name}`.toLowerCase();
+    const looseSpanKey = (span: TraceDetailView["spans"][number]) =>
+      `${span.type}:${span.service}`.toLowerCase();
+    const leftByExact = new Map(comparison.left.spans.map((span) => [spanKey(span), span]));
+    const leftByLoose = new Map(comparison.left.spans.map((span) => [looseSpanKey(span), span]));
+    const seenLeft = new Set<string>();
+    const rows: TimingRow[] = comparison.right.spans.map((rightSpan) => {
+      const exactKey = spanKey(rightSpan);
+      const leftSpan = leftByExact.get(exactKey) ?? leftByLoose.get(looseSpanKey(rightSpan));
+      if (leftSpan) seenLeft.add(spanKey(leftSpan));
       return {
         name: rightSpan.name,
+        type: rightSpan.type,
+        service: rightSpan.service,
         left: leftSpan?.durationMs ?? null,
         right: rightSpan.durationMs,
         delta: leftSpan ? rightSpan.durationMs - leftSpan.durationMs : null,
       };
     });
+
+    for (const leftSpan of comparison.left.spans) {
+      if (seenLeft.has(spanKey(leftSpan))) continue;
+      rows.push({
+        name: leftSpan.name,
+        type: leftSpan.type,
+        service: leftSpan.service,
+        left: leftSpan.durationMs,
+        right: null,
+        delta: null,
+      });
+    }
+
+    return rows
+      .sort((a, b) => {
+        const leftA = a.left ?? Number.MAX_SAFE_INTEGER;
+        const leftB = b.left ?? Number.MAX_SAFE_INTEGER;
+        return leftA - leftB;
+      })
+      .slice(0, 16);
   }, [comparison]);
 
   if (!activeWorkspaceId) {
@@ -415,12 +454,15 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
                     </CardHeader>
                     <CardContent className="divide-y divide-slate-800">
                       {timingRows.length ? timingRows.map((row) => (
-                        <div key={row.name} className="grid gap-2 py-3 text-sm md:grid-cols-[1fr_120px_120px_120px]">
-                          <div className="text-slate-300">{row.name}</div>
+                        <div key={`${row.type}:${row.service}:${row.name}`} className="grid gap-2 py-3 text-sm md:grid-cols-[1fr_120px_120px_120px]">
+                          <div>
+                            <div className="text-slate-300">{row.name}</div>
+                            <div className="mt-0.5 font-mono text-[11px] text-slate-500">{row.type} / {row.service}</div>
+                          </div>
                           <div className="font-mono text-slate-400">{row.left === null ? "-" : formatDuration(row.left)}</div>
-                          <div className="font-mono text-slate-400">{formatDuration(row.right)}</div>
+                          <div className="font-mono text-slate-400">{row.right === null ? "-" : formatDuration(row.right)}</div>
                           <div className={cn("font-mono", row.delta !== null && row.delta <= 0 ? "text-emerald-300" : "text-amber-300")}>
-                            {row.delta === null ? "new" : formatDelta(row.delta)}
+                            {row.delta === null ? (row.right === null ? "removed" : "new") : formatDelta(row.delta)}
                           </div>
                         </div>
                       )) : (

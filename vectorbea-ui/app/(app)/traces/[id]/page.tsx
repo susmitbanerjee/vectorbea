@@ -39,6 +39,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { TraceDetailView, TraceReplayResponse } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -816,10 +817,10 @@ export default function TraceDetailsPage() {
         subtitle={`Traces / ${trace.id}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <Select
               value={replayProvider}
               onChange={(event) => setReplayProvider(event.target.value)}
-              className="h-9 rounded-lg border border-slate-700 bg-slate-900 px-3 pr-8 text-xs text-slate-200"
+              className="h-9 min-w-[190px] border-slate-700 bg-slate-950/80 text-xs text-slate-200"
               title="Replay executor/provider"
             >
               <option value="same">Same executor/provider</option>
@@ -829,7 +830,7 @@ export default function TraceDetailsPage() {
                   {p.display_name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Input
               value={replayModel}
               onChange={(event) => setReplayModel(event.target.value)}

@@ -506,6 +506,8 @@ export function mapAuditRowToTraceDetail(
   const promptVersion = asString(enrichment?.promptVersionTag ?? row.version_tag, "latest");
   const promptName = asString(enrichment?.promptName ?? row.prompt_name, "unknown-prompt");
   const parsed = parseAuditMetadata(metadata, row.created_at, promptVersion);
+  const resolvedPrompt = asRecord(metadata.prompt?.resolved);
+  const parsedPrompt = asRecord(parsed.input.prompt);
   const cacheStatus = inferCacheStatus(metadata);
   const guardrail = inferGuardrail(metadata);
   const modelName = asString(parsed.model.model ?? parsed.model.name ?? legacy.model, "unknown-model");
@@ -579,10 +581,17 @@ export function mapAuditRowToTraceDetail(
         top_p: asNumber(asRecord(enrichment?.promptParameters).top_p ?? parsed.model.top_p ?? asRecord(parsed.model.params).top_p, 1),
         max_tokens: asNumber(asRecord(enrichment?.promptParameters).max_tokens ?? parsed.model.max_tokens ?? asRecord(parsed.model.params).max_tokens, 0),
       },
-      system: asString(asRecord(parsed.input.prompt).systemPrompt),
-      developer: asString(asRecord(parsed.input.prompt).developerPrompt),
+      system: asString(resolvedPrompt.system ?? parsedPrompt.systemPrompt),
+      developer: asString(resolvedPrompt.developer ?? parsedPrompt.developerPrompt),
       userTemplate: asString(enrichment?.promptTemplateText, ""),
-      renderedPrompt: asString(parsed.input.renderedPrompt ?? legacy.renderedPrompt, ""),
+      renderedPrompt: asString(
+        resolvedPrompt.user ??
+          parsed.input.renderedPrompt ??
+          legacy.renderedPrompt ??
+          enrichment?.promptTemplateText ??
+          parsed.input.text,
+        "",
+      ),
       variables: toStringRecord(parsed.input.variables ?? metadata.prompt?.variables ?? legacy.variables),
     },
     inputs: {
@@ -598,10 +607,30 @@ export function mapAuditRowToTraceDetail(
       conversationId: asString(parsed.input.conversationId ?? metadata.trace?.conversation_id ?? legacy.conversationId, "-"),
     },
     outputs: {
-      rawPrimary: asString(parsed.output.rawPrimary ?? parsed.output.raw ?? parsed.output.raw_text ?? legacy.rawOutput, ""),
+      rawPrimary: asString(
+        parsed.output.rawPrimary ??
+          parsed.output.raw ??
+          parsed.output.raw_text ??
+          parsed.output.final_text ??
+          parsed.output.final ??
+          parsed.output.text ??
+          legacy.rawOutput ??
+          legacy.finalOutput ??
+          legacy.output,
+        "",
+      ),
       rawFallback: asString(parsed.output.rawFallback ?? legacy.fallbackOutput) || undefined,
       postProcessed: asString(parsed.output.postProcessed ?? legacy.postProcessedOutput, ""),
-      finalDelivered: asString(parsed.output.final ?? parsed.output.text ?? parsed.output.final_text ?? legacy.finalOutput ?? legacy.output, ""),
+      finalDelivered: asString(
+        parsed.output.final ??
+          parsed.output.text ??
+          parsed.output.final_text ??
+          parsed.output.raw_text ??
+          legacy.finalOutput ??
+          legacy.output ??
+          legacy.rawOutput,
+        "",
+      ),
       parsedJson: asRecord(parsed.output.parsedJson),
       safetyNotes: Array.isArray(parsed.guardrail.notes)
         ? parsed.guardrail.notes.filter((entry): entry is string => typeof entry === "string")

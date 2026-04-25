@@ -21,7 +21,37 @@ async function loadTraceRow(workspaceId: string, traceId: string) {
   if (error) throw new Error(error.message);
   if (!data) return null;
   const row = data as AuditLogTraceRow;
-  return isRuntimeTraceRow(row) ? mapAuditRowToTraceDetail(row) : null;
+  if (!isRuntimeTraceRow(row)) return null;
+
+  let promptTemplateText: string | null = null;
+  let promptParameters: Record<string, unknown> | null = null;
+  let promptName: string | null = row.prompt_name;
+  let promptVersionTag: string | null = row.version_tag;
+
+  if (row.prompt_version_id) {
+    const { data: promptVersion } = await supabase
+      .from("prompt_versions")
+      .select("template_text, parameters, version_tag, prompts(name)")
+      .eq("id", row.prompt_version_id)
+      .maybeSingle();
+
+    if (promptVersion) {
+      promptTemplateText = promptVersion.template_text ?? null;
+      promptParameters = (promptVersion.parameters as Record<string, unknown> | null) ?? null;
+      promptVersionTag = promptVersion.version_tag ?? promptVersionTag;
+      const promptRow = Array.isArray(promptVersion.prompts)
+        ? promptVersion.prompts[0]
+        : promptVersion.prompts;
+      promptName = (promptRow as { name?: string } | null)?.name ?? promptName;
+    }
+  }
+
+  return mapAuditRowToTraceDetail(row, {
+    promptTemplateText,
+    promptParameters,
+    promptName,
+    promptVersionTag,
+  });
 }
 
 export async function GET(request: NextRequest) {

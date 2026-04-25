@@ -208,23 +208,23 @@ export default function EvaluationsPage() {
               {/* Prompt */}
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Prompt</div>
-                <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={selectedPromptId} onChange={e => setSelectedPromptId(e.target.value)}>
+                <Select className="h-10" value={selectedPromptId} onChange={e => setSelectedPromptId(e.target.value)}>
                   <option value="">Select prompt</option>
                   {prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                </Select>
               </div>
 
               {/* Candidate version */}
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Candidate version</div>
-                <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={selectedVersionId} onChange={e => setSelectedVersionId(e.target.value)}>
+                <Select className="h-10" value={selectedVersionId} onChange={e => setSelectedVersionId(e.target.value)}>
                   <option value="">Select version</option>
                   {versions.map(v => (
                     <option key={v.promptVersionId} value={v.promptVersionId}>
                       {v.versionTag} {v.isPublished ? "(published)" : "(candidate)"}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {selectedVersion ? (
                   <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
                     Candidate: <span className="font-medium text-foreground">{selectedVersion.name}@{selectedVersion.versionTag}</span>

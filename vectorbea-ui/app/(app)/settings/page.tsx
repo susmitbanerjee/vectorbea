@@ -28,6 +28,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import type { ProviderConfig } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -257,12 +258,12 @@ export default function SettingsPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Provider type</label>
-                    <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={providerForm.providerType} onChange={e => setProviderForm(f => ({ ...f, providerType: e.target.value }))}>
+                    <Select className="h-10" value={providerForm.providerType} onChange={e => setProviderForm(f => ({ ...f, providerType: e.target.value }))}>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic</option>
                       <option value="google">Google</option>
                       <option value="enterprise_gateway">Enterprise gateway</option>
-                    </select>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Display name</label>

@@ -26,6 +26,39 @@ async function loadRawTrace(workspaceId: string, traceId: string) {
   return (data ?? null) as AuditLogTraceRow | null;
 }
 
+async function mapTraceDetailWithPromptEnrichment(row: AuditLogTraceRow) {
+  const supabase = createVectorBeaAdminClient();
+  let promptTemplateText: string | null = null;
+  let promptParameters: Record<string, unknown> | null = null;
+  let promptName: string | null = row.prompt_name;
+  let promptVersionTag: string | null = row.version_tag;
+
+  if (row.prompt_version_id) {
+    const { data: promptVersion } = await supabase
+      .from("prompt_versions")
+      .select("template_text, parameters, version_tag, prompts(name)")
+      .eq("id", row.prompt_version_id)
+      .maybeSingle();
+
+    if (promptVersion) {
+      promptTemplateText = promptVersion.template_text ?? null;
+      promptParameters = (promptVersion.parameters as Record<string, unknown> | null) ?? null;
+      promptVersionTag = promptVersion.version_tag ?? promptVersionTag;
+      const promptRow = Array.isArray(promptVersion.prompts)
+        ? promptVersion.prompts[0]
+        : promptVersion.prompts;
+      promptName = (promptRow as { name?: string } | null)?.name ?? promptName;
+    }
+  }
+
+  return mapAuditRowToTraceDetail(row, {
+    promptTemplateText,
+    promptParameters,
+    promptName,
+    promptVersionTag,
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
@@ -64,8 +97,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Evaluation can only run on runtime execution traces." }, { status: 422 });
     }
 
-    const left = mapAuditRowToTraceDetail(leftRow);
-    const right = mapAuditRowToTraceDetail(rightRow);
+    const [left, right] = await Promise.all([
+      mapTraceDetailWithPromptEnrichment(leftRow),
+      mapTraceDetailWithPromptEnrichment(rightRow),
+    ]);
     const evaluation = {
       ...evaluateTraceReplay(left, right),
       runId: randomUUID(),
@@ -103,7 +138,9 @@ export async function POST(request: NextRequest) {
 
     if (updateError) throw new Error(updateError.message);
 
-    return NextResponse.json(buildTraceComparison(left, mapAuditRowToTraceDetail(updated as AuditLogTraceRow)));
+    return NextResponse.json(
+      buildTraceComparison(left, await mapTraceDetailWithPromptEnrichment(updated as AuditLogTraceRow)),
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to evaluate trace replay" },

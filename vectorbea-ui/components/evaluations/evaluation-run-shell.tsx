@@ -8,6 +8,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import type { TraceSetEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -176,8 +177,8 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                   {/* Review status dropdown */}
                   <div className="space-y-2">
                     <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Review action</label>
-                    <select
-                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    <Select
+                      className="h-10"
                       value={pendingReviewStatus}
                       onChange={e => setPendingReviewStatus(e.target.value as typeof pendingReviewStatus)}
                     >
@@ -186,7 +187,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                       <option value="needs_changes">Request changes</option>
                       <option value="rejected">Reject</option>
                       <option value="approved">Approve</option>
-                    </select>
+                    </Select>
                     <Button
                       className="w-full gap-2"
                       variant="outline"
