@@ -30,6 +30,7 @@ export interface PromptDetail {
   parameters: Record<string, unknown>;
   isPublished: boolean;
   createdAt: string | null;
+  lifecycleStatus?: "draft" | "candidate" | "active" | "deprecated" | "blocked" | null;
 }
 
 export interface DashboardSummary {
@@ -391,6 +392,7 @@ export interface TraceSetEvaluationRunView {
     observabilityLevel: "full" | "partial" | "minimal" | "unknown";
     recommendation: EvaluationRecommendation;
     reasons: string[];
+    unresolvedFlagCount?: number;
   };
   results: Array<{
     sourceTraceId: string;
@@ -500,6 +502,22 @@ export type GoldenTrace = {
   createdAt: string;
 };
 
+// ─── Provider Configs ──────────────────────────────────────────────────────────
+
+export interface ProviderConfig {
+  id: string;
+  workspaceId: string;
+  providerType: "openai" | "anthropic" | "google" | "enterprise_gateway";
+  displayName: string;
+  enabled: boolean;
+  defaultModel: string | null;
+  baseUrl: string | null;
+  maskedKey: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
+}
+
 // ─── Baseline Datasets ─────────────────────────────────────────────────────────
 
 export type BaselineDatasetSourceType = "trace_set" | "golden_traces" | "manual";
@@ -560,7 +578,7 @@ export type RegressionSchedule = {
 
 // ─── Rollout ────────────────────────────────────────────────────────────────────
 
-export type RolloutStatus = "draft" | "candidate" | "active" | "deprecated";
+export type RolloutStatus = "draft" | "candidate" | "active" | "deprecated" | "blocked";
 
 export type PromptVersionRollout = {
   promptVersionId: string;
@@ -568,6 +586,8 @@ export type PromptVersionRollout = {
   rolloutStatus: RolloutStatus;
   rolloutPercentage: number;
   isPublished: boolean;
+  evaluationVerdict?: string | null;
+  lifecycleStatus?: string | null;
 };
 
 export type PromptRolloutDistribution = {

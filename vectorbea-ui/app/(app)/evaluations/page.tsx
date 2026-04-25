@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import type { BaselineDataset, PromptDetail, PromptListItem, TraceSetEvaluationRunView, TraceSummaryView } from "@/lib/api";
+import type { BaselineDataset, GoldenTrace, PromptDetail, PromptListItem, TraceSetEvaluationRunView, TraceSummaryView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 const PAGE_SIZE = 20;
@@ -21,9 +21,11 @@ export default function EvaluationsPage() {
   const [prompts, setPrompts] = useState<PromptListItem[]>([]);
   const [versions, setVersions] = useState<PromptDetail[]>([]);
   const [datasets, setDatasets] = useState<BaselineDataset[]>([]);
+  const [goldenTraces, setGoldenTraces] = useState<GoldenTrace[]>([]);
 
   // Create-run form state
-  const [traceSource, setTraceSource] = useState<"manual" | "dataset">("manual");
+  const [traceSource, setTraceSource] = useState<"manual" | "dataset" | "golden">("manual");
+  const [selectedGoldenIds, setSelectedGoldenIds] = useState<string[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
   const [selectedPromptId, setSelectedPromptId] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState("");
@@ -33,6 +35,8 @@ export default function EvaluationsPage() {
 
   // Evaluation runs list state
   const [statusFilter, setStatusFilter] = useState<"all" | "needs_review" | "approved" | "rejected" | "blocked" | "running" | "failed">("all");
+  const [promptFilter, setPromptFilter] = useState("");
+  const [candidateFilter, setCandidateFilter] = useState("");
   const [runsPage, setRunsPage] = useState(0);
 
   const [loading, setLoading] = useState(false);
@@ -46,14 +50,15 @@ export default function EvaluationsPage() {
       setLoading(true);
       setError(null);
       try {
-        const [runsRes, tracesRes, promptsRes, datasetsRes] = await Promise.all([
+        const [runsRes, tracesRes, promptsRes, datasetsRes, goldenRes] = await Promise.all([
           fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}&pageSize=200`, { cache: "no-store" }),
           fetch(`/api/prompts?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/baseline-datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+          fetch(`/api/evaluations/golden-traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         ]);
-        const [runsJson, tracesJson, promptsJson, datasetsJson] = await Promise.all([
-          runsRes.json(), tracesRes.json(), promptsRes.json(), datasetsRes.json(),
+        const [runsJson, tracesJson, promptsJson, datasetsJson, goldenJson] = await Promise.all([
+          runsRes.json(), tracesRes.json(), promptsRes.json(), datasetsRes.json(), goldenRes.json(),
         ]);
         if (!runsRes.ok) throw new Error(runsJson.error || "Failed to load evaluations");
         if (!tracesRes.ok) throw new Error(tracesJson.error || "Failed to load traces");
@@ -63,6 +68,7 @@ export default function EvaluationsPage() {
           setTraces((tracesJson.items ?? []) as TraceSummaryView[]);
           setPrompts(promptsJson as PromptListItem[]);
           setDatasets(Array.isArray(datasetsJson) ? datasetsJson as BaselineDataset[] : []);
+          setGoldenTraces(Array.isArray(goldenJson) ? goldenJson as GoldenTrace[] : (goldenJson?.items ?? []));
         }
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load evaluations");
@@ -97,8 +103,12 @@ export default function EvaluationsPage() {
       if (ds) setSelectedTraceIds(ds.traceIds);
     } else if (traceSource === "dataset") {
       setSelectedTraceIds([]);
+    } else if (traceSource === "golden") {
+      setSelectedTraceIds(selectedGoldenIds);
+    } else if (traceSource === "manual") {
+      setSelectedTraceIds([]);
     }
-  }, [traceSource, selectedDatasetId, datasets]);
+  }, [traceSource, selectedDatasetId, datasets, selectedGoldenIds]);
 
   const selectedVersion = useMemo(
     () => versions.find(v => v.promptVersionId === selectedVersionId) ?? null,
@@ -123,16 +133,23 @@ export default function EvaluationsPage() {
   const filteredRuns = useMemo(() => {
     return runs.filter(run => {
       if (statusFilter === "needs_review") {
-        return run.review.status === "pending_review" || run.review.status === "in_review" || run.review.status === "needs_changes" || run.aggregate.recommendation === "needs_review";
+        if (!(run.review.status === "pending_review" || run.review.status === "in_review" || run.review.status === "needs_changes" || run.aggregate.recommendation === "needs_review")) return false;
+      } else if (statusFilter === "approved") {
+        if (!(run.review.status === "approved" || run.status === "approved")) return false;
+      } else if (statusFilter === "rejected") {
+        if (run.review.status !== "rejected") return false;
+      } else if (statusFilter === "blocked") {
+        if (!(run.aggregate.recommendation === "blocked" || run.aggregate.recommendation === "regression_detected")) return false;
+      } else if (statusFilter === "running") {
+        if (!(run.status === "running" || run.status === "queued")) return false;
+      } else if (statusFilter === "failed") {
+        if (!(run.status === "failed" || run.aggregate.failed > 0)) return false;
       }
-      if (statusFilter === "approved") return run.review.status === "approved" || run.status === "approved";
-      if (statusFilter === "rejected") return run.review.status === "rejected";
-      if (statusFilter === "blocked") return run.aggregate.recommendation === "blocked" || run.aggregate.recommendation === "regression_detected";
-      if (statusFilter === "running") return run.status === "running" || run.status === "queued";
-      if (statusFilter === "failed") return run.status === "failed" || run.aggregate.failed > 0;
+      if (promptFilter && !run.promptName?.toLowerCase().includes(promptFilter.toLowerCase())) return false;
+      if (candidateFilter && !run.candidateVersionTag?.toLowerCase().includes(candidateFilter.toLowerCase())) return false;
       return true;
     });
-  }, [runs, statusFilter]);
+  }, [runs, statusFilter, promptFilter, candidateFilter]);
 
   const runsPageCount = Math.ceil(filteredRuns.length / PAGE_SIZE);
   const visibleRuns = filteredRuns.slice(runsPage * PAGE_SIZE, (runsPage + 1) * PAGE_SIZE);
@@ -218,7 +235,7 @@ export default function EvaluationsPage() {
               {/* Trace source toggle */}
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Trace source</div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => setTraceSource("manual")}
@@ -234,8 +251,45 @@ export default function EvaluationsPage() {
                     <Database className="h-3.5 w-3.5" />
                     Baseline dataset
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setTraceSource("golden")}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${traceSource === "golden" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                  >
+                    Golden traces
+                  </button>
                 </div>
               </div>
+
+              {/* Golden trace selector */}
+              {traceSource === "golden" && (
+                <div className="space-y-2">
+                  <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Select golden traces</div>
+                  {goldenTraces.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No golden traces yet.</p>
+                  ) : (
+                    <div className="max-h-[280px] overflow-y-auto space-y-1 rounded-lg border border-border/50 p-2">
+                      {goldenTraces.map(gt => (
+                        <button
+                          key={gt.id}
+                          type="button"
+                          className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition ${selectedGoldenIds.includes(gt.traceId) ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-accent/20"}`}
+                          onClick={() => setSelectedGoldenIds(ids => ids.includes(gt.traceId) ? ids.filter(id => id !== gt.traceId) : [...ids, gt.traceId])}
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{gt.promptName ?? gt.traceId}</div>
+                            <div className="mt-0.5 font-mono text-muted-foreground">{gt.traceId.slice(0, 20)}…</div>
+                          </div>
+                          {gt.label && <span className="ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-muted">{gt.label}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {selectedGoldenIds.length > 0 && (
+                    <p className="text-xs text-muted-foreground">{selectedGoldenIds.length} golden trace{selectedGoldenIds.length !== 1 ? "s" : ""} selected</p>
+                  )}
+                </div>
+              )}
 
               {/* Dataset selector */}
               {traceSource === "dataset" && (
@@ -277,6 +331,16 @@ export default function EvaluationsPage() {
                     Clear
                   </button>
                 )}
+              </div>
+
+              {/* Validation summary */}
+              <div className="space-y-1 rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
+                <div className={selectedVersionId ? "text-emerald-500" : ""}>
+                  {selectedVersionId ? "✓" : "○"} Candidate version: {selectedVersionId ? (selectedVersion?.versionTag ?? selectedVersionId) : "not selected"}
+                </div>
+                <div className={selectedTraceIds.length > 0 ? "text-emerald-500" : ""}>
+                  {selectedTraceIds.length > 0 ? "✓" : "○"} Traces: {selectedTraceIds.length} selected
+                </div>
               </div>
 
               <Button
@@ -388,7 +452,19 @@ export default function EvaluationsPage() {
             <CardDescription>Trace-set evaluations with scoring, review state, and rollout recommendation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            <div className="max-w-xs pb-2">
+            <div className="flex flex-wrap gap-2 pb-2">
+              <input
+                className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+                placeholder="Filter by prompt…"
+                value={promptFilter}
+                onChange={e => { setPromptFilter(e.target.value); setRunsPage(0); }}
+              />
+              <input
+                className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+                placeholder="Filter by version…"
+                value={candidateFilter}
+                onChange={e => { setCandidateFilter(e.target.value); setRunsPage(0); }}
+              />
               <Select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as typeof statusFilter); setRunsPage(0); }} aria-label="Filter evaluation runs by status">
                 <option value="all">All</option>
                 <option value="needs_review">Needs Review</option>

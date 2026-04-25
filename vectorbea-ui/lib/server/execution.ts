@@ -23,6 +23,13 @@ export type ResolvedExecutionRequest = {
     provider?: string | null;
     model?: string | null;
   };
+  providerConfig?: {
+    providerType: string;
+    apiKey: string;
+    baseUrl: string | null;
+    model: string | null;
+    configId: string;
+  } | null;
 };
 
 export type ExecutionResult = {
@@ -190,10 +197,181 @@ async function executeGateway(
   };
 }
 
+function assertSafeProviderBaseUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("Invalid provider base URL.");
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const allowPrivate = process.env.VECTORBEA_ALLOW_PRIVATE_PROVIDER_URLS === "true";
+  if (!allowPrivate) {
+    const blocked = [
+      /^localhost$/i,
+      /^127\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[01])\./,
+      /^192\.168\./,
+      /^::1$/,
+      /^0\.0\.0\.0$/,
+    ];
+    if (blocked.some((re) => re.test(hostname))) {
+      throw new Error("Custom provider base URL must not point to private/internal network.");
+    }
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("Custom provider base URL must use HTTPS.");
+  }
+}
+
+async function executeOpenAI(args: {
+  apiKey: string;
+  baseUrl: string | null;
+  model: string;
+  systemPrompt: string;
+  userInput: string;
+  timeoutMs: number;
+}): Promise<{ outputText: string; latencyMs: number; tokenCount: number; provider: string; model: string }> {
+  const base = (args.baseUrl ?? "https://api.openai.com").replace(/\/$/, "");
+  const url = `${base}/v1/chat/completions`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort("OpenAI timeout"), args.timeoutMs);
+  const started = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: args.model,
+        messages: [
+          ...(args.systemPrompt ? [{ role: "system", content: args.systemPrompt }] : []),
+          { role: "user", content: args.userInput },
+        ],
+        max_tokens: 2048,
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "");
+      throw new Error(`OpenAI returned ${response.status}: ${errBody.slice(0, 200)}`);
+    }
+    const body = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { total_tokens?: number };
+      model?: string;
+    };
+    const outputText = body.choices?.[0]?.message?.content ?? "";
+    const tokenCount = body.usage?.total_tokens ?? 0;
+    return { outputText, latencyMs, tokenCount, provider: "openai", model: body.model ?? args.model };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function executeAnthropic(args: {
+  apiKey: string;
+  baseUrl: string | null;
+  model: string;
+  systemPrompt: string;
+  userInput: string;
+  timeoutMs: number;
+}): Promise<{ outputText: string; latencyMs: number; tokenCount: number; provider: string; model: string }> {
+  const base = (args.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
+  const url = `${base}/v1/messages`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort("Anthropic timeout"), args.timeoutMs);
+  const started = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": args.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: args.model,
+        max_tokens: 2048,
+        ...(args.systemPrompt ? { system: args.systemPrompt } : {}),
+        messages: [{ role: "user", content: args.userInput }],
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "");
+      throw new Error(`Anthropic returned ${response.status}: ${errBody.slice(0, 200)}`);
+    }
+    const body = (await response.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      model?: string;
+    };
+    const outputText = body.content?.find((c) => c.type === "text")?.text ?? "";
+    const tokenCount = (body.usage?.input_tokens ?? 0) + (body.usage?.output_tokens ?? 0);
+    return { outputText, latencyMs, tokenCount, provider: "anthropic", model: body.model ?? args.model };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function executeGemini(args: {
+  apiKey: string;
+  baseUrl: string | null;
+  model: string;
+  systemPrompt: string;
+  userInput: string;
+  timeoutMs: number;
+}): Promise<{ outputText: string; latencyMs: number; tokenCount: number; provider: string; model: string }> {
+  const modelName = args.model || "gemini-1.5-flash";
+  const base = (args.baseUrl ?? "https://generativelanguage.googleapis.com").replace(/\/$/, "");
+  const url = `${base}/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${args.apiKey}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort("Gemini timeout"), args.timeoutMs);
+  const started = Date.now();
+  try {
+    const parts: Array<{ text: string }> = [];
+    if (args.systemPrompt) parts.push({ text: `System: ${args.systemPrompt}\n\n` });
+    parts.push({ text: args.userInput });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "");
+      throw new Error(
+        `Gemini returned ${response.status}: ${errBody.replace(/key=[^&\s"]+/gi, "key=REDACTED").slice(0, 200)}`,
+      );
+    }
+    const body = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      usageMetadata?: { totalTokenCount?: number };
+    };
+    const outputText = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const tokenCount = body.usageMetadata?.totalTokenCount ?? 0;
+    return { outputText, latencyMs, tokenCount, provider: "google", model: modelName };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Promise<ExecutionResult> {
   const started = Date.now();
   const source = normalizeTraceMetadataV1(input.sourceMetadata ?? {});
-  const executor = resolveExecutor(input);
+  let executor = resolveExecutor(input);
   let status: ExecutionResult["status"] = "success";
   let outputText = "";
   let rawOutputText: string | undefined;
@@ -212,6 +390,36 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
       tokenCount = gateway.tokenCount || tokenCount;
       provider = gateway.provider ?? provider;
       model = gateway.model ?? model;
+    } else if (input.providerConfig) {
+      const cfg = input.providerConfig;
+      if (cfg.baseUrl) assertSafeProviderBaseUrl(cfg.baseUrl);
+      const liveModel = asString(input.executorOverride?.model) ?? cfg.model ?? "gpt-4o-mini";
+      const timeoutMs = 30_000;
+      const systemPrompt = input.renderedPrompt || input.templateText;
+      const userInput = input.inputText;
+      let liveResult: { outputText: string; latencyMs: number; tokenCount: number; provider: string; model: string };
+      if (cfg.providerType === "openai") {
+        liveResult = await executeOpenAI({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: liveModel, systemPrompt, userInput, timeoutMs });
+      } else if (cfg.providerType === "anthropic") {
+        liveResult = await executeAnthropic({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: liveModel, systemPrompt, userInput, timeoutMs });
+      } else if (cfg.providerType === "google") {
+        liveResult = await executeGemini({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: liveModel, systemPrompt, userInput, timeoutMs });
+      } else {
+        throw new Error(`Live execution for provider type '${cfg.providerType}' is not yet implemented.`);
+      }
+      outputText = liveResult.outputText;
+      downstreamLatencyMs = liveResult.latencyMs;
+      tokenCount = liveResult.tokenCount;
+      provider = liveResult.provider;
+      model = liveResult.model;
+      executor = {
+        ...executor,
+        type: "direct_provider" as ExecutorType,
+        name: cfg.providerType,
+        ownership: "customer",
+        request_mode: "direct",
+        response_observability: "full",
+      };
     } else {
       outputText = renderFallbackOutput(input);
       downstreamLatencyMs = asNumber(source.model?.latency_ms, 0);
@@ -331,9 +539,10 @@ export async function executeResolvedPrompt(input: ResolvedExecutionRequest): Pr
         ...(input.replayOf
           ? {
               replay_of: input.replayOf,
-              replay_mode: executor.type === "enterprise_gateway" ? "live" : "simulated",
+              replay_mode: (input.providerConfig || executor.type === "enterprise_gateway") ? "live" : "simulated",
               replay_provider: provider ?? executor.name ?? "unknown",
               original_provider: asString(source.model?.provider) ?? source.executor?.name ?? "unknown",
+              ...(input.providerConfig ? { provider_config_id: input.providerConfig.configId } : {}),
             }
           : {}),
       },

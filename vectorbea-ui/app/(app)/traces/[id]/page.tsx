@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Bot,
   Braces,
+  Loader2,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -498,6 +499,12 @@ export default function TraceDetailsPage() {
   const [replayError, setReplayError] = useState<string | null>(null);
   const [replayProvider, setReplayProvider] = useState("same");
   const [replayModel, setReplayModel] = useState("");
+  const [configuredProviders, setConfiguredProviders] = useState<Array<{ provider_type: string; display_name: string }>>([]);
+  const [flagOpen, setFlagOpen] = useState(false);
+  const [flagReason, setFlagReason] = useState("");
+  const [flagging, setFlagging] = useState(false);
+  const [flagError, setFlagError] = useState<string | null>(null);
+  const [existingFlag, setExistingFlag] = useState<{ reason: string | null; flagged_by_email: string | null; flagged_at: string } | null>(null);
   const trace = traceData ?? createEmptyTrace(traceId || "trace");
 
   useEffect(() => {
@@ -701,6 +708,59 @@ export default function TraceDetailsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    fetch(`/api/settings/providers?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        if (Array.isArray(data)) {
+          setConfiguredProviders(
+            (data as Array<{ provider_type?: string; display_name?: string; enabled?: boolean }>)
+              .filter((p) => p.enabled !== false)
+              .map((p) => ({ provider_type: p.provider_type ?? "", display_name: p.display_name ?? p.provider_type ?? "" })),
+          );
+        }
+      })
+      .catch(() => {/* silent */});
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || !traceId) return;
+    fetch(`/api/traces/${encodeURIComponent(traceId)}/flag?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" })
+      .then(r => r.json())
+      .then((data: unknown) => { if (data && typeof data === "object" && "flagged_at" in data) setExistingFlag(data as typeof existingFlag); })
+      .catch(() => {/* silent — flag table may not exist yet */});
+  }, [activeWorkspaceId, traceId]);
+
+  const submitFlag = async () => {
+    if (!activeWorkspaceId || !traceId || flagging) return;
+    setFlagging(true); setFlagError(null);
+    try {
+      const res = await fetch(`/api/traces/${encodeURIComponent(traceId)}/flag?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: flagReason.trim() || undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to flag trace");
+      setExistingFlag(json as typeof existingFlag);
+      setFlagOpen(false);
+      setFlagReason("");
+    } catch (e) {
+      setFlagError(e instanceof Error ? e.message : "Failed to flag trace");
+    } finally {
+      setFlagging(false);
+    }
+  };
+
+  const resolveFlag = async () => {
+    if (!activeWorkspaceId || !traceId) return;
+    try {
+      await fetch(`/api/traces/${encodeURIComponent(traceId)}/flag?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "DELETE" });
+      setExistingFlag(null);
+    } catch { /* silent */ }
+  };
+
   const compareTrace = () => {
     if (!activeWorkspaceId || !trace.replayOf) return;
     router.push(
@@ -764,9 +824,11 @@ export default function TraceDetailsPage() {
             >
               <option value="same">Same executor/provider</option>
               <option value="enterprise_gateway">Enterprise gateway</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="gemini">Gemini</option>
-              <option value="qwen">Qwen</option>
+              {configuredProviders.map((p) => (
+                <option key={p.provider_type} value={p.provider_type}>
+                  {p.display_name}
+                </option>
+              ))}
             </select>
             <Input
               value={replayModel}
@@ -804,7 +866,9 @@ export default function TraceDetailsPage() {
               <Download className="mr-1 h-4 w-4" />
               Export JSON
             </Button>
-            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200"><Flag className="mr-1 h-4 w-4" />Mark issue</Button>
+            <Button size="sm" variant="outline" className={`border-slate-700 bg-slate-900 ${existingFlag ? "text-amber-400" : "text-slate-200"}`} onClick={() => setFlagOpen(v => !v)}>
+              <Flag className="mr-1 h-4 w-4" />{existingFlag ? "Flagged" : "Mark issue"}
+            </Button>
           </div>
         }
       />
@@ -815,6 +879,43 @@ export default function TraceDetailsPage() {
             <CardContent className="p-4 text-sm text-red-100">{replayError}</CardContent>
           </Card>
         ) : null}
+        {existingFlag && (
+          <Card className="rounded-2xl border border-amber-500/40 bg-amber-500/10">
+            <CardContent className="flex items-start justify-between gap-3 p-4">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-amber-300">
+                  <Flag className="mr-1 inline h-3.5 w-3.5" />
+                  Flagged by {existingFlag.flagged_by_email ?? "unknown"} on {new Date(existingFlag.flagged_at).toLocaleString()}
+                </p>
+                {existingFlag.reason && <p className="text-xs text-amber-200/80">{existingFlag.reason}</p>}
+              </div>
+              <button type="button" onClick={() => void resolveFlag()} className="shrink-0 text-xs text-amber-300 hover:text-amber-100 underline">Resolve</button>
+            </CardContent>
+          </Card>
+        )}
+        {flagOpen && (
+          <Card className="rounded-2xl border border-slate-700 bg-slate-900/80">
+            <CardHeader>
+              <CardTitle className="text-sm text-slate-200">Flag this trace as an issue</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {flagError && <p className="text-sm text-red-300">{flagError}</p>}
+              <textarea
+                className="min-h-20 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500"
+                placeholder="Describe the issue (optional)…"
+                value={flagReason}
+                onChange={e => setFlagReason(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void submitFlag()} disabled={flagging} className="gap-2">
+                  {flagging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Flag className="h-3.5 w-3.5" />}
+                  Submit flag
+                </Button>
+                <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200" onClick={() => setFlagOpen(false)}>Cancel</Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
           <CardContent className="space-y-4 p-4">
             <div className="flex flex-wrap items-center gap-2">

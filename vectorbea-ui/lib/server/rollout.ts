@@ -10,6 +10,7 @@ type VersionRow = {
   is_published: boolean;
   rollout_status: string;
   rollout_percentage: number;
+  lifecycle_status?: string | null;
 };
 
 /**
@@ -28,10 +29,10 @@ export function selectVersionByTrafficSplit(
   seedKey: string,
 ): string | null {
   const candidates = versions
-    .filter((v) => v.rolloutStatus === "candidate" && v.rolloutPercentage > 0)
+    .filter((v) => v.rolloutStatus === "candidate" && v.rolloutPercentage > 0 && v.lifecycleStatus !== "blocked")
     .sort((a, b) => a.versionTag.localeCompare(b.versionTag));
 
-  const active = versions.find((v) => v.rolloutStatus === "active");
+  const active = versions.find((v) => v.rolloutStatus === "active" && v.lifecycleStatus !== "blocked");
 
   if (candidates.length === 0) {
     return active?.promptVersionId ?? null;
@@ -79,16 +80,17 @@ export async function getPromptRolloutDistribution(
   // Fetch rollout columns separately — they are ALTER TABLE additions that may
   // not exist on all schema versions. Missing columns return a Supabase error
   // which we catch and fall back to defaults rather than crashing the page.
-  const rolloutById = new Map<string, { rollout_status: string; rollout_percentage: number }>();
+  const rolloutById = new Map<string, { rollout_status: string; rollout_percentage: number; lifecycle_status: string | null }>();
   try {
     const { data: rolloutData } = await supabase
       .from("prompt_versions")
-      .select("id, rollout_status, rollout_percentage")
+      .select("id, rollout_status, rollout_percentage, lifecycle_status")
       .eq("prompt_id", promptId);
     for (const row of rolloutData ?? []) {
       rolloutById.set(row.id, {
         rollout_status: row.rollout_status ?? "draft",
         rollout_percentage: row.rollout_percentage ?? 0,
+        lifecycle_status: row.lifecycle_status ?? null,
       });
     }
   } catch {
@@ -101,6 +103,7 @@ export async function getPromptRolloutDistribution(
     rolloutStatus: ((rolloutById.get(row.id)?.rollout_status) ?? "draft") as RolloutStatus,
     rolloutPercentage: rolloutById.get(row.id)?.rollout_percentage ?? 0,
     isPublished: row.is_published,
+    lifecycleStatus: rolloutById.get(row.id)?.lifecycle_status ?? null,
   }));
 
   const totalCandidatePercentage = versions
@@ -131,7 +134,61 @@ export async function updateVersionRollout(args: {
 
   const supabase = createVectorBeaAdminClient();
 
-  // If setting to active, check that existing candidates + new percentage ≤ 100
+  // Evaluation gate: candidate/active requires a ready_for_rollout evaluation verdict
+  if (args.rolloutStatus === "candidate" || args.rolloutStatus === "active") {
+    const { data: evalRows } = await supabase
+      .from("audit_logs")
+      .select("id")
+      .eq("workspace_id", args.workspaceId)
+      .filter("metadata->custom->evaluation_run->>candidate_prompt_version_id", "eq", args.promptVersionId)
+      .filter("metadata->custom->evaluation_run->aggregate->>recommendation", "eq", "ready_for_rollout")
+      .limit(1);
+    if (!evalRows || evalRows.length === 0) {
+      throw new Error(
+        "No passing evaluation found for this version. Run an evaluation that returns a ready_for_rollout verdict before promoting.",
+      );
+    }
+  }
+
+  // Blocked versions cannot be promoted to candidate or active
+  if (args.rolloutStatus === "candidate" || args.rolloutStatus === "active") {
+    const { data: current } = await supabase
+      .from("prompt_versions")
+      .select("rollout_status, lifecycle_status")
+      .eq("id", args.promptVersionId)
+      .single();
+    const isBlocked =
+      (current as VersionRow | null)?.rollout_status === "blocked" ||
+      (current as VersionRow | null)?.lifecycle_status === "blocked";
+    if (isBlocked) {
+      throw new Error("Blocked versions cannot be promoted to candidate or active. Unblock the version first.");
+    }
+  }
+
+  // Auto-transition: candidate at 100% becomes active
+  if (args.rolloutStatus === "candidate" && args.rolloutPercentage >= 100) {
+    args.rolloutStatus = "active";
+    args.rolloutPercentage = 0;
+    // Deprecate existing active versions for this prompt
+    await supabase
+      .from("prompt_versions")
+      .update({ rollout_status: "deprecated", rollout_percentage: 0 })
+      .eq("prompt_id", args.promptId)
+      .neq("id", args.promptVersionId)
+      .eq("rollout_status", "active");
+  }
+
+  // When setting directly to active, deprecate other active versions
+  if (args.rolloutStatus === "active") {
+    await supabase
+      .from("prompt_versions")
+      .update({ rollout_status: "deprecated" })
+      .eq("prompt_id", args.promptId)
+      .neq("id", args.promptVersionId)
+      .eq("rollout_status", "active");
+  }
+
+  // If setting to candidate, check that existing candidates + new percentage ≤ 100
   if (args.rolloutStatus === "candidate") {
     const { data: existing } = await supabase
       .from("prompt_versions")

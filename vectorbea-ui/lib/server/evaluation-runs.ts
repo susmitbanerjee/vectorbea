@@ -46,6 +46,29 @@ function defaultReview(): TraceSetEvaluationRunView["review"] {
   };
 }
 
+async function getUnresolvedFlags(workspaceId: string, traceIds: string[]): Promise<Array<{ traceId: string; reason: string | null; flaggedBy: string; flaggedAt: string }>> {
+  if (traceIds.length === 0) return [];
+  const supabase = createVectorBeaAdminClient();
+  const { data, error } = await supabase
+    .from("trace_issue_flags")
+    .select("trace_id, reason, flagged_by, flagged_at")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "open")
+    .in("trace_id", traceIds);
+  if (error) {
+    // If table doesn't exist yet, return empty (graceful degradation)
+    if (error.message?.includes("relation") || error.message?.includes("does not exist")) return [];
+    console.warn("[evaluation-runs] flag check failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(row => ({
+    traceId: row.trace_id as string,
+    reason: row.reason as string | null,
+    flaggedBy: row.flagged_by as string,
+    flaggedAt: row.flagged_at as string,
+  }));
+}
+
 function buildPromotionGate(input: {
   status: TraceSetEvaluationRunView["status"];
   review: TraceSetEvaluationRunView["review"];
@@ -53,6 +76,7 @@ function buildPromotionGate(input: {
   criticalFailures: number;
   confidence: number | null;
   failed: number;
+  unresolvedFlagCount?: number;
 }): TraceSetEvaluationRunView["promotion"] {
   const reasons: string[] = [];
   if (input.status !== "completed" && input.status !== "approved") {
@@ -72,6 +96,9 @@ function buildPromotionGate(input: {
   }
   if (input.confidence !== null && input.confidence < 0.55) {
     reasons.push("Evaluation confidence is low because observability is incomplete");
+  }
+  if ((input.unresolvedFlagCount ?? 0) > 0) {
+    reasons.push(`${input.unresolvedFlagCount} source trace(s) have unresolved issue flags`);
   }
   return {
     allowed: reasons.length === 0,
@@ -114,6 +141,7 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
   const recommendation = (asString(aggregate.recommendation) as TraceSetEvaluationRunView["aggregate"]["recommendation"]) ?? "needs_review";
   const criticalFailures = Number(aggregate.critical_failures ?? 0);
   const failed = Number(aggregate.failed ?? 0);
+  const unresolvedFlagCount = Number(aggregate.unresolved_flag_count ?? 0);
   const status = (asString(payload.status) as TraceSetEvaluationRunView["status"]) ?? "completed";
 
   return {
@@ -142,6 +170,7 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
       observabilityLevel: (asString(aggregate.observability_level) as TraceSetEvaluationRunView["aggregate"]["observabilityLevel"]) ?? "unknown",
       recommendation,
       reasons: Array.isArray(aggregate.reasons) ? aggregate.reasons.map(String) : [],
+      unresolvedFlagCount,
     },
     results: rawResults.map((entry) => {
       const result = asRecord(entry);
@@ -188,6 +217,7 @@ function toRunView(row: AuditLogTraceRow): TraceSetEvaluationRunView | null {
       criticalFailures,
       confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
       failed,
+      unresolvedFlagCount,
     }),
     approvedAt: asString(payload.approved_at),
     approvedBy: asString(payload.approved_by),
@@ -271,6 +301,10 @@ export async function createTraceSetEvaluationRun(args: {
     throw new Error("No runtime traces were found for this evaluation run.");
   }
 
+  // Check for unresolved flags on source traces
+  const sourceTraceIdList = sourceRows.map(r => r.id);
+  const unresolvedFlags = await getUnresolvedFlags(args.workspaceId, sourceTraceIdList);
+
   const { data: candidate, error: candidateError } = await supabase
     .from("prompt_versions")
     .select("id, prompt_id, version_tag, template_text, parameters, prompts(id, name)")
@@ -297,6 +331,7 @@ export async function createTraceSetEvaluationRun(args: {
   const scores: number[] = [];
 
   for (const sourceRow of sourceRows) {
+    const traceFlag = unresolvedFlags.find(f => f.traceId === sourceRow.id);
     const sourceMetadata = normalizeTraceMetadataV1(sourceRow.metadata ?? {});
     const requestInput = asRecord(sourceMetadata.request?.input);
     const promptVariables = {
@@ -438,6 +473,19 @@ export async function createTraceSetEvaluationRun(args: {
     latencyDeltas.push(latencyDelta);
     if (tokenDelta !== null) tokenDeltas.push(tokenDelta);
 
+    const flagCheck: TraceEvaluationCheckView[] = traceFlag ? [{
+      name: "unresolved_trace_flag",
+      category: "safety" as TraceEvaluationCheckView["category"],
+      status: "fail" as TraceEvaluationCheckView["status"],
+      label: "fail" as TraceEvaluationCheckView["label"],
+      score: 0,
+      weight: 1,
+      critical: true,
+      available: true,
+      reason: `Trace is flagged${traceFlag.reason ? `: ${traceFlag.reason}` : ""}. Flagged by ${traceFlag.flaggedBy}.`,
+    }] : [];
+    if (flagCheck.length > 0) criticalFailures += 1;
+
     results.push({
       sourceTraceId: sourceRow.id,
       replayTraceId: replayRow.id,
@@ -456,10 +504,10 @@ export async function createTraceSetEvaluationRun(args: {
             : evaluation.recommendation === "inconclusive"
               ? "inconclusive"
               : "needs_review",
-      criticalFailures: evaluation.criticalFailures ?? 0,
+      criticalFailures: (evaluation.criticalFailures ?? 0) + flagCheck.length,
       observabilityNote: evaluation.observabilityNote ?? null,
       replayMode,
-      checks: evaluation.checks,
+      checks: [...evaluation.checks, ...flagCheck],
       error: null,
     });
   }
@@ -485,6 +533,7 @@ export async function createTraceSetEvaluationRun(args: {
   if (observabilityLevel !== "full") recommendationReasons.push("Executor observability is partial; some checks are unavailable");
   if (recommendation === "regression_detected") recommendationReasons.push("Latency or quality regressed in this run");
   if (recommendation === "ready_for_rollout") recommendationReasons.push("No critical failures and score threshold passed");
+  if (unresolvedFlags.length > 0) recommendationReasons.push(`${unresolvedFlags.length} source trace(s) have unresolved issue flags`);
 
   const evaluationMetadata = buildTraceMetadataV1({
     metadata: {
@@ -514,6 +563,8 @@ export async function createTraceSetEvaluationRun(args: {
             observability_level: observabilityLevel,
             recommendation,
             reasons: recommendationReasons,
+            unresolved_flag_count: unresolvedFlags.length,
+            flagged_trace_ids: unresolvedFlags.map(f => f.traceId),
           },
           review: defaultReview(),
           results: results.map((result) => ({
@@ -600,6 +651,16 @@ export async function approveEvaluationRun(args: {
   if (recommendation === "blocked" || recommendation === "regression_detected") {
     blockingReasons.push("Evaluation recommendation indicates regression risk.");
   }
+
+  // Check for unresolved flags on source traces
+  const sourceTraceIds = Array.isArray(runPayload.source_trace_ids) ? runPayload.source_trace_ids.map(String) : [];
+  if (sourceTraceIds.length > 0) {
+    const unresolvedFlags = await getUnresolvedFlags(args.workspaceId, sourceTraceIds);
+    if (unresolvedFlags.length > 0) {
+      blockingReasons.push(`${unresolvedFlags.length} source trace(s) have unresolved issue flags. Resolve all flags before promoting.`);
+    }
+  }
+
   if (blockingReasons.length > 0) {
     throw new Error(`Promotion blocked: ${blockingReasons.join(" ")}`);
   }

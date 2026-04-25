@@ -31,7 +31,7 @@ export async function GET(
 
     const { data: versions, error: versionsError } = await supabase
       .from("prompt_versions")
-      .select("id, version_tag, is_published, template_text, parameters, created_at")
+      .select("id, version_tag, is_published, template_text, parameters, created_at, lifecycle_status")
       .eq("prompt_id", id)
       .order("created_at", { ascending: false });
 
@@ -48,6 +48,7 @@ export async function GET(
       parameters: (v.parameters as Record<string, unknown>) ?? {},
       isPublished: v.is_published ?? false,
       createdAt: v.created_at ?? null,
+      lifecycleStatus: ((v as Record<string, unknown>).lifecycle_status as PromptDetail["lifecycleStatus"]) ?? null,
     }));
 
     return NextResponse.json(result);

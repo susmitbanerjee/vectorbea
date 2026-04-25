@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, GitBranch, Loader2, RefreshCw, ShieldCheck, ShieldAlert, MessageSquareWarning } from "lucide-react";
+import { ArrowRight, CheckCircle2, GitBranch, Loader2, RefreshCw } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
   const [reviewing, setReviewing] = useState(false);
   const [rerunning, setRerunning] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
+  const [pendingReviewStatus, setPendingReviewStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -158,6 +159,11 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                   <Badge variant={run.aggregate.recommendation === "ready_for_rollout" ? "success" : run.aggregate.recommendation === "regression_detected" ? "destructive" : "warning"}>
                     {run.aggregate.recommendation.replaceAll("_", " ")}
                   </Badge>
+                  {(run.aggregate.unresolvedFlagCount ?? 0) > 0 && (
+                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                      &#x2691; {run.aggregate.unresolvedFlagCount} source trace(s) have unresolved issue flags. Resolve flags before promoting.
+                    </div>
+                  )}
                   <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                     Review status: <span className="font-medium text-foreground">{run.review.status.replaceAll("_", " ")}</span>
                   </div>
@@ -167,22 +173,39 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                     value={reviewNote}
                     onChange={(event) => setReviewNote(event.target.value)}
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button variant="outline" className="gap-2" onClick={() => submitReview("in_review", "start_review")} disabled={reviewing}>
-                      {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                      In review
-                    </Button>
-                    <Button variant="outline" className="gap-2" onClick={() => submitReview("needs_changes", "request_changes")} disabled={reviewing}>
-                      {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquareWarning className="h-4 w-4" />}
-                      Needs changes
-                    </Button>
-                    <Button variant="outline" className="gap-2" onClick={() => submitReview("rejected", "reject")} disabled={reviewing}>
-                      {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
-                      Reject
-                    </Button>
-                    <Button variant="outline" className="gap-2" onClick={() => submitReview("approved", "approve")} disabled={reviewing}>
-                      {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                      Approve review
+                  {/* Review status dropdown */}
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Review action</label>
+                    <select
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      value={pendingReviewStatus}
+                      onChange={e => setPendingReviewStatus(e.target.value as typeof pendingReviewStatus)}
+                    >
+                      <option value="">Select action…</option>
+                      <option value="in_review">Mark in review</option>
+                      <option value="needs_changes">Request changes</option>
+                      <option value="rejected">Reject</option>
+                      <option value="approved">Approve</option>
+                    </select>
+                    <Button
+                      className="w-full gap-2"
+                      variant="outline"
+                      onClick={() => {
+                        const actionMap: Record<string, TraceSetEvaluationRunView["review"]["decision"]> = {
+                          in_review: "start_review",
+                          needs_changes: "request_changes",
+                          rejected: "reject",
+                          approved: "approve",
+                        };
+                        if (pendingReviewStatus && actionMap[pendingReviewStatus]) {
+                          void submitReview(pendingReviewStatus as TraceSetEvaluationRunView["review"]["status"], actionMap[pendingReviewStatus]!);
+                          setPendingReviewStatus("");
+                        }
+                      }}
+                      disabled={reviewing || !pendingReviewStatus}
+                    >
+                      {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Submit review
                     </Button>
                   </div>
                   <Button className="w-full gap-2" onClick={approveRun} disabled={approving || run.status === "approved" || !run.promotion.allowed}>

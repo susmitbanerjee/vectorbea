@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { executeResolvedPrompt } from "@/lib/server/execution";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { getProviderConfig } from "@/lib/server/provider-keys";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 import { isRuntimeTraceMetadata } from "@/lib/server/traces";
@@ -80,16 +81,34 @@ export async function POST(
     const providerOverride = asString(body.providerOverride);
     const modelOverride = asString(body.modelOverride);
 
+    let resolvedProviderConfig: {
+      providerType: string;
+      apiKey: string;
+      baseUrl: string | null;
+      model: string | null;
+      configId: string;
+    } | null = null;
+
     if (providerOverride && providerOverride !== "same") {
       if (providerOverride === "enterprise_gateway") {
         if (!process.env.VECTORBEA_ENTERPRISE_GATEWAY_URL) {
-          return NextResponse.json({ error: "Provider not configured: enterprise gateway URL is missing." }, { status: 422 });
+          return NextResponse.json({ error: "Enterprise gateway URL is not configured." }, { status: 422 });
         }
       } else {
-        return NextResponse.json(
-          { error: `Provider not configured: live replay for ${providerOverride} is not available in this deployment.` },
-          { status: 422 },
-        );
+        const configResult = await getProviderConfig(workspaceId, providerOverride);
+        if (!configResult) {
+          return NextResponse.json(
+            { error: `Provider '${providerOverride}' is not configured or disabled for this workspace.` },
+            { status: 422 },
+          );
+        }
+        resolvedProviderConfig = {
+          providerType: configResult.config.provider_type,
+          apiKey: configResult.apiKey,
+          baseUrl: configResult.config.base_url,
+          model: modelOverride ?? configResult.config.default_model,
+          configId: configResult.config.id,
+        };
       }
     }
 
@@ -185,6 +204,7 @@ export async function POST(
         : modelOverride
           ? { model: modelOverride }
           : undefined,
+      providerConfig: resolvedProviderConfig,
     });
 
     const { data: inserted, error: insertError } = await supabase

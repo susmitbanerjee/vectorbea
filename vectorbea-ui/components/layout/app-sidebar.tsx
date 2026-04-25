@@ -188,14 +188,16 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       </nav>
 
       <div className="mt-auto flex flex-col gap-3">
-        <Link
-          href={"/docs/overview" as any}
+        <a
+          href="/docs/overview"
+          target="_blank"
+          rel="noopener noreferrer"
           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-accent/40 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
         >
           <BookOpen className="h-4 w-4 shrink-0" />
           <span className="flex-1">Documentation</span>
           <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
-        </Link>
+        </a>
 
         {user && (
           <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">

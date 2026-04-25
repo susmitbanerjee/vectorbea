@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock } from "lucide-react";
+import { Calendar, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock, Pencil } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ export default function ScheduledRegressionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", baselineDatasetId: "", candidatePromptVersionStrategy: "latest_published", candidatePromptVersionId: "", promptName: "", cronExpression: "" });
   const [form, setForm] = useState({
     name: "",
     baselineDatasetId: "",
@@ -131,6 +133,30 @@ export default function ScheduledRegressionsPage() {
     } catch { /* silent */ }
   };
 
+  const updateSchedule = async () => {
+    if (!activeWorkspaceId || !editingId) return;
+    try {
+      const res = await fetch(`/api/evaluations/regression-schedules/${encodeURIComponent(editingId)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name.trim() || undefined,
+          baselineDatasetId: editForm.baselineDatasetId || undefined,
+          candidatePromptVersionStrategy: editForm.candidatePromptVersionStrategy || undefined,
+          candidatePromptVersionId: editForm.candidatePromptVersionId.trim() || null,
+          promptName: editForm.promptName.trim() || null,
+          cronExpression: editForm.cronExpression.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to update");
+      setSchedules(prev => prev.map(s => s.id === editingId ? json as RegressionSchedule : s));
+      setEditingId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update schedule");
+    }
+  };
+
   const getDatasetName = (id: string) => datasets.find(d => d.id === id)?.name ?? id;
 
   return (
@@ -229,6 +255,49 @@ export default function ScheduledRegressionsPage() {
           ) : (
             schedules.map(schedule => (
               <Card key={schedule.id}>
+                {editingId === schedule.id && (
+                  <div className="border-b border-border bg-muted/20 px-4 py-3 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Edit schedule</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Name</label>
+                        <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Baseline dataset</label>
+                        <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.baselineDatasetId} onChange={e => setEditForm(f => ({ ...f, baselineDatasetId: e.target.value }))}>
+                          <option value="">Select a dataset…</option>
+                          {datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Strategy</label>
+                        <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.candidatePromptVersionStrategy} onChange={e => setEditForm(f => ({ ...f, candidatePromptVersionStrategy: e.target.value }))}>
+                          <option value="latest_published">Latest published</option>
+                          <option value="specific_version">Specific version</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt name</label>
+                        <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.promptName} onChange={e => setEditForm(f => ({ ...f, promptName: e.target.value }))} placeholder="Optional" />
+                      </div>
+                      {editForm.candidatePromptVersionStrategy === "specific_version" && (
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Candidate prompt version ID</label>
+                          <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono" value={editForm.candidatePromptVersionId} onChange={e => setEditForm(f => ({ ...f, candidatePromptVersionId: e.target.value }))} placeholder="version UUID" />
+                        </div>
+                      )}
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Cron expression</label>
+                        <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono" value={editForm.cronExpression} onChange={e => setEditForm(f => ({ ...f, cronExpression: e.target.value }))} placeholder="e.g. 0 2 * * *" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => void updateSchedule()} className="gap-2">Save changes</Button>
+                      <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
                 <CardContent className="flex items-start justify-between gap-4 p-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -312,6 +381,14 @@ export default function ScheduledRegressionsPage() {
                           ? <ToggleRight className="h-4 w-4 text-green-500" />
                           : <ToggleLeft className="h-4 w-4" />
                       }
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingId(schedule.id); setEditForm({ name: schedule.name, baselineDatasetId: schedule.baselineDatasetId, candidatePromptVersionStrategy: schedule.candidatePromptVersionStrategy, candidatePromptVersionId: schedule.candidatePromptVersionId ?? "", promptName: schedule.promptName ?? "", cronExpression: schedule.cronExpression ?? "" }); }}
+                      title="Edit"
+                      className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    >
+                      <Pencil className="h-4 w-4" />
                     </button>
                     <button
                       type="button"

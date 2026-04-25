@@ -204,7 +204,7 @@ export async function deleteRegressionSchedule(workspaceId: string, id: string):
  * Strategy "latest_published" fetches the currently published version for the prompt.
  * Strategy "specific_version" uses the pinned candidatePromptVersionId.
  */
-async function resolveCandidateVersionId(schedule: RegressionSchedule, workspaceId: string): Promise<string> {
+async function resolveCandidateVersionId(schedule: RegressionSchedule, workspaceId: string, datasetPromptName?: string | null): Promise<string> {
   const supabase = createVectorBeaAdminClient();
   if (schedule.candidatePromptVersionStrategy === "specific_version") {
     if (!schedule.candidatePromptVersionId) {
@@ -213,17 +213,18 @@ async function resolveCandidateVersionId(schedule: RegressionSchedule, workspace
     return schedule.candidatePromptVersionId;
   }
   // latest_published — find the most recently published version for this prompt
-  if (!schedule.promptName) throw new Error("Schedule has no promptName; cannot resolve latest published version.");
+  const resolvedPromptName = schedule.promptName ?? datasetPromptName;
+  if (!resolvedPromptName) throw new Error("No prompt name available. Set a prompt name on the schedule or ensure the dataset is linked to a prompt.");
   const { data, error } = await supabase
     .from("prompt_versions")
     .select("id, prompts!inner(name, workspace_id)")
     .eq("prompts.workspace_id", workspaceId)
-    .eq("prompts.name", schedule.promptName)
+    .eq("prompts.name", resolvedPromptName)
     .eq("is_published", true)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
-  if (error || !data) throw new Error(`No published version found for prompt '${schedule.promptName}'.`);
+  if (error || !data) throw new Error(`No published version found for prompt '${resolvedPromptName}'.`);
   return data.id;
 }
 
@@ -274,7 +275,7 @@ export async function runRegressionSchedule(args: {
     if (!dataset) throw new Error("Baseline dataset not found.");
     if (dataset.traceIds.length === 0) throw new Error("Baseline dataset has no traces.");
 
-    const candidateVersionId = await resolveCandidateVersionId(schedule, args.workspaceId);
+    const candidateVersionId = await resolveCandidateVersionId(schedule, args.workspaceId, dataset.promptName);
     const run = await createTraceSetEvaluationRun({
       workspaceId: args.workspaceId,
       sourceTraceIds: dataset.traceIds,

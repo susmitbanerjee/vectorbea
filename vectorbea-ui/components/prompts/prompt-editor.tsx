@@ -9,6 +9,7 @@ import {
   Copy,
   Eye,
   FileCode2,
+  GitBranch,
   History,
   Loader2,
   Lock,
@@ -186,6 +187,8 @@ export function PromptEditor({
   const [isPublishPending, startPublishTransition] = useTransition();
   const [rolloutDist, setRolloutDist] = useState<PromptRolloutDistribution | null>(null);
   const [rolloutSaving, setRolloutSaving] = useState(false);
+  // Set of promptVersionIds that have a ready_for_rollout evaluation verdict
+  const [readyVersionIds, setReadyVersionIds] = useState<Set<string>>(new Set());
 
   // Keep local state in sync when the server component re-fetches after
   // router.refresh() (e.g., right after a save or publish completes).
@@ -222,17 +225,28 @@ export function PromptEditor({
   useEffect(() => {
     let cancelled = false;
     if (!prompt?.promptId || !activeWorkspaceId) return;
-    fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`)
-      .then(r => r.json())
-      .then(d => {
-        // Guard: only set state when the response is a valid distribution object.
-        // An error response ({ error: "..." }) must not reach setRolloutDist
-        // because the render calls rolloutDist.versions.map() unconditionally.
-        if (!cancelled && d && Array.isArray(d.versions)) {
-          setRolloutDist(d as PromptRolloutDistribution);
+
+    // Fetch rollout distribution and evaluation verdicts in parallel
+    Promise.all([
+      fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`).then(r => r.json()),
+      fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }).then(r => r.json()).catch(() => []),
+    ]).then(([dist, runs]) => {
+      if (cancelled) return;
+      if (dist && Array.isArray(dist.versions)) {
+        setRolloutDist(dist as PromptRolloutDistribution);
+      }
+      // Build set of version IDs that have at least one ready_for_rollout run
+      if (Array.isArray(runs)) {
+        const ready = new Set<string>();
+        for (const run of runs as Array<{ candidatePromptVersionId?: string; aggregate?: { recommendation?: string } }>) {
+          if (run.candidatePromptVersionId && run.aggregate?.recommendation === "ready_for_rollout") {
+            ready.add(run.candidatePromptVersionId);
+          }
         }
-      })
-      .catch(() => {});
+        setReadyVersionIds(ready);
+      }
+    }).catch(() => {});
+
     return () => { cancelled = true; };
   }, [prompt?.promptId, activeWorkspaceId]);
 
@@ -474,6 +488,18 @@ export function PromptEditor({
               >
                 {currentPrompt.isPublished ? "Published" : "Draft"}
               </Badge>
+              {currentPrompt.lifecycleStatus && (
+                <Badge
+                  variant={
+                    currentPrompt.lifecycleStatus === "active" ? "success"
+                    : currentPrompt.lifecycleStatus === "blocked" || currentPrompt.lifecycleStatus === "deprecated" ? "destructive"
+                    : currentPrompt.lifecycleStatus === "candidate" ? "warning"
+                    : "secondary"
+                  }
+                >
+                  {currentPrompt.lifecycleStatus}
+                </Badge>
+              )}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               {currentPrompt.description ??
@@ -535,6 +561,10 @@ export function PromptEditor({
             <TabsTrigger value="preview">
               <Eye className="mr-1.5 h-3.5 w-3.5" />
               Live Preview
+            </TabsTrigger>
+            <TabsTrigger value="rollout">
+              <GitBranch className="mr-1.5 h-3.5 w-3.5" />
+              Rollout
             </TabsTrigger>
           </TabsList>
 
@@ -691,61 +721,184 @@ export function PromptEditor({
               </CardContent>
             </Card>
 
-            {rolloutDist && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Version Rollout</CardTitle>
-                  <CardDescription className="text-xs">
-                    Control traffic distribution across versions. Candidate versions receive a percentage slice; the active version handles the remainder.
-                    Use deterministic routing via the <code className="text-[11px]">x-request-id</code> or <code className="text-[11px]">x-user-id</code> header.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="text-xs text-muted-foreground">
-                    Total candidate traffic: <span className="font-medium text-foreground">{rolloutDist.totalCandidatePercentage}%</span>
-                    {rolloutDist.totalCandidatePercentage > 100 && (
-                      <span className="ml-2 text-red-400">⚠ Exceeds 100%</span>
-                    )}
+          </TabsContent>
+
+          <TabsContent value="rollout" className="space-y-4">
+            {!rolloutDist ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading rollout data...
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground space-y-1 mb-4">
+                  <p className="font-semibold text-foreground">Rollout workflow</p>
+                  <ol className="list-decimal ml-4 space-y-0.5">
+                    <li>Run evaluation against the candidate version.</li>
+                    <li>Set version status to <strong>Candidate</strong>.</li>
+                    <li>Start at 10% rollout percentage.</li>
+                    <li>Monitor metrics on the Dashboard.</li>
+                    <li>Increase rollout percentage gradually.</li>
+                    <li>At 100%, the candidate automatically becomes Active.</li>
+                    <li>Revert by setting percentage to 0 or status to Draft.</li>
+                  </ol>
+                </div>
+
+                {!rolloutDist.activeVersionId && (
+                  <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                    ⚠ No active version. Runtime will return an error until a version is set to Active.
                   </div>
-                  <div className="space-y-2">
-                    {rolloutDist.versions.map((v) => (
-                      <div key={v.promptVersionId} className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                        <div className="min-w-0 flex-1">
-                          <span className="text-xs font-medium">{v.versionTag}</span>
-                          {v.isPublished && <span className="ml-2 text-[10px] text-green-400">published</span>}
+                )}
+
+                <div className="space-y-2">
+                  {rolloutDist.versions.map((v) => {
+                    const isBlocked = v.rolloutStatus === "blocked" || v.lifecycleStatus === "blocked";
+                    const hasReadyEval = readyVersionIds.has(v.promptVersionId);
+                    const canSetCandidate = !isBlocked && hasReadyEval && v.rolloutStatus !== "active" && v.rolloutStatus !== "deprecated";
+                    const canSetActive = !isBlocked && hasReadyEval && v.rolloutStatus !== "deprecated";
+
+                    return (
+                      <div key={v.promptVersionId} className="rounded-lg border border-border bg-card px-4 py-3 space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{v.versionTag}</span>
+                            {v.isPublished && (
+                              <Badge variant="success" className="text-[10px]">Published</Badge>
+                            )}
+                            <Badge
+                              variant={
+                                v.rolloutStatus === "active" ? "success"
+                                : v.rolloutStatus === "candidate" ? "warning"
+                                : v.rolloutStatus === "blocked" ? "destructive"
+                                : v.rolloutStatus === "deprecated" ? "secondary"
+                                : "outline"
+                              }
+                              className="text-[10px] capitalize"
+                            >
+                              {v.rolloutStatus}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {v.rolloutStatus === "active" && "← all non-candidate traffic"}
+                            {v.rolloutStatus === "candidate" && `${v.rolloutPercentage}% of traffic`}
+                            {v.rolloutStatus === "deprecated" && "no traffic"}
+                            {v.rolloutStatus === "draft" && "not in runtime"}
+                            {v.rolloutStatus === "blocked" && "blocked — no traffic"}
+                          </div>
                         </div>
-                        <select
-                          className="rounded border border-border bg-background px-2 py-1 text-xs"
-                          value={v.rolloutStatus}
-                          onChange={(e) => void saveRollout(v.promptVersionId, e.target.value as RolloutStatus, v.rolloutPercentage)}
-                        >
-                          <option value="draft">Draft</option>
-                          <option value="candidate">Candidate</option>
-                          <option value="active">Active</option>
-                          <option value="deprecated">Deprecated</option>
-                        </select>
-                        {v.rolloutStatus === "candidate" && (
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            className="w-16 rounded border border-border bg-background px-2 py-1 text-xs tabular-nums"
-                            value={v.rolloutPercentage}
-                            onChange={(e) => void saveRollout(v.promptVersionId, v.rolloutStatus, parseInt(e.target.value, 10) || 0)}
-                          />
+
+                        {canEdit && (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="space-y-1">
+                              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Status</div>
+                              <select
+                                className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                                value={v.rolloutStatus}
+                                disabled={rolloutSaving || isBlocked}
+                                onChange={(e) => void saveRollout(v.promptVersionId, e.target.value as RolloutStatus, v.rolloutPercentage)}
+                                title={isBlocked ? "This version is blocked. Cannot change status." : undefined}
+                              >
+                                <option value="draft">Draft</option>
+                                <option value="candidate" disabled={!canSetCandidate}>Candidate{!hasReadyEval && v.rolloutStatus !== "candidate" ? " (needs eval)" : ""}</option>
+                                <option value="active" disabled={!canSetActive}>Active{!hasReadyEval && v.rolloutStatus !== "active" ? " (needs eval)" : ""}</option>
+                                <option value="deprecated">Deprecated</option>
+                                <option value="blocked">Blocked</option>
+                              </select>
+                            </div>
+
+                            {v.rolloutStatus === "candidate" && (
+                              <div className="space-y-1">
+                                <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Traffic %</div>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    step={5}
+                                    value={v.rolloutPercentage}
+                                    className="w-28"
+                                    disabled={rolloutSaving}
+                                    onChange={(e) => void saveRollout(v.promptVersionId, v.rolloutStatus, parseInt(e.target.value, 10))}
+                                  />
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    className="w-14 rounded-lg border border-border bg-background px-2 py-1 text-xs tabular-nums"
+                                    value={v.rolloutPercentage}
+                                    disabled={rolloutSaving}
+                                    onChange={(e) => void saveRollout(v.promptVersionId, v.rolloutStatus, parseInt(e.target.value, 10) || 0)}
+                                  />
+                                  <span className="text-xs text-muted-foreground">%</span>
+                                </div>
+                                {v.rolloutPercentage >= 100 && (
+                                  <p className="text-[10px] text-emerald-400">Will auto-activate on save</p>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="flex gap-2 ml-auto">
+                              {v.rolloutStatus === "draft" && !isBlocked && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs h-7"
+                                  onClick={() => void saveRollout(v.promptVersionId, "candidate", 10)}
+                                  disabled={rolloutSaving}
+                                >
+                                  Promote to Candidate (10%)
+                                </Button>
+                              )}
+                              {v.rolloutStatus === "candidate" && !isBlocked && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs h-7"
+                                  onClick={() => void saveRollout(v.promptVersionId, "candidate", 0)}
+                                  disabled={rolloutSaving}
+                                >
+                                  Revert to 0%
+                                </Button>
+                              )}
+                              {v.rolloutStatus === "candidate" && !isBlocked && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs h-7 text-emerald-600 border-emerald-500/40"
+                                  onClick={() => void saveRollout(v.promptVersionId, "active", 0)}
+                                  disabled={rolloutSaving}
+                                >
+                                  Full Rollout (Active)
+                                </Button>
+                              )}
+                            </div>
+                          </div>
                         )}
-                        {v.rolloutStatus === "candidate" && (
-                          <span className="text-xs text-muted-foreground">%</span>
+
+                        {isBlocked && (
+                          <p className="text-xs text-destructive">This version is blocked. Resolve the block before making changes.</p>
                         )}
-                        {v.rolloutStatus === "active" && (
-                          <span className="text-xs text-green-400">receives all non-candidate traffic</span>
+                        {!isBlocked && !hasReadyEval && v.rolloutStatus === "draft" && (
+                          <p className="text-xs text-amber-400">
+                            No passing evaluation yet.{" "}
+                            <a href={`/evaluations?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="underline hover:text-amber-300">
+                              Run an evaluation
+                            </a>{" "}
+                            with a <strong>ready for rollout</strong> verdict before promoting.
+                          </p>
                         )}
                       </div>
-                    ))}
-                  </div>
-                  {rolloutSaving && <p className="text-xs text-muted-foreground">Saving...</p>}
-                </CardContent>
-              </Card>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 rounded-lg border border-border/50 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Candidate traffic total: {rolloutDist.totalCandidatePercentage}%</span>
+                  {rolloutDist.totalCandidatePercentage > 100 && (
+                    <span className="ml-2 text-red-400">⚠ Exceeds 100% — fix before runtime traffic is split</span>
+                  )}
+                  {rolloutSaving && <span className="ml-2 animate-pulse">Saving...</span>}
+                </div>
+              </>
             )}
           </TabsContent>
 

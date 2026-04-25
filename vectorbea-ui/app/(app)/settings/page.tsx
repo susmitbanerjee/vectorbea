@@ -5,12 +5,14 @@ import {
   Check,
   Globe,
   KeyRound,
+  Loader2,
+  Plus,
   ShieldCheck,
   Trash2,
   Users,
   Workflow,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/layout/app-header";
@@ -26,14 +28,90 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import type { ProviderConfig } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 export default function SettingsPage() {
-  const { activeWorkspace, role, planTier, seatUsage } = useWorkspace();
+  const { activeWorkspace, activeWorkspaceId, role, planTier, seatUsage } = useWorkspace();
   const [resetOpen, setResetOpen] = useState(false);
   const [rotateKeyOpen, setRotateKeyOpen] = useState(false);
+
+  // Provider configs state
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [showProviderForm, setShowProviderForm] = useState(false);
+  const [providerForm, setProviderForm] = useState({ providerType: "openai", displayName: "", defaultModel: "", baseUrl: "", apiKey: "" });
+  const [savingProvider, setSavingProvider] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    setProvidersLoading(true);
+    fetch(`/api/settings/providers?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" })
+      .then(r => r.json())
+      .then((data: unknown) => { if (Array.isArray(data)) setProviders(data as ProviderConfig[]); })
+      .catch(() => {/* providers table may not exist yet */})
+      .finally(() => setProvidersLoading(false));
+  }, [activeWorkspaceId]);
+
+  const addProvider = async () => {
+    if (!activeWorkspaceId || savingProvider) return;
+    if (!providerForm.apiKey.trim()) { setProviderError("API key is required."); return; }
+    setSavingProvider(true); setProviderError(null);
+    try {
+      const res = await fetch(`/api/settings/providers?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerType: providerForm.providerType,
+          displayName: providerForm.displayName.trim() || providerForm.providerType,
+          defaultModel: providerForm.defaultModel.trim() || undefined,
+          baseUrl: providerForm.baseUrl.trim() || undefined,
+          apiKey: providerForm.apiKey.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to add provider");
+      setProviders(prev => [json as ProviderConfig, ...prev]);
+      setProviderForm({ providerType: "openai", displayName: "", defaultModel: "", baseUrl: "", apiKey: "" });
+      setShowProviderForm(false);
+      toast.success("Provider config added.");
+    } catch (e) {
+      setProviderError(e instanceof Error ? e.message : "Failed to add provider");
+    } finally {
+      setSavingProvider(false);
+    }
+  };
+
+  const toggleProvider = async (id: string, enabled: boolean) => {
+    if (!activeWorkspaceId) return;
+    try {
+      const res = await fetch(`/api/settings/providers/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to update");
+      setProviders(prev => prev.map(p => p.id === id ? json as ProviderConfig : p));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update provider");
+    }
+  };
+
+  const deleteProvider = async (id: string) => {
+    if (!activeWorkspaceId) return;
+    try {
+      const res = await fetch(`/api/settings/providers/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "DELETE" });
+      if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? "Failed to delete"); }
+      setProviders(prev => prev.filter(p => p.id !== id));
+      toast.success("Provider config removed.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete provider");
+    }
+  };
 
   const confirmReset = () => {
     setResetOpen(false);
@@ -157,6 +235,84 @@ export default function SettingsPage() {
             <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
               Audit logs are immutable and retained for operational traceability and compliance.
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="animate-slide-up stagger-3 xl:col-span-2">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Provider configs</CardTitle>
+                <CardDescription>Manage AI provider API keys for this workspace.</CardDescription>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setShowProviderForm(v => !v)} className="gap-2">
+                <Plus className="h-4 w-4" />{showProviderForm ? "Cancel" : "Add provider"}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {providerError && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">{providerError}</p>}
+            {showProviderForm && (
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Provider type</label>
+                    <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={providerForm.providerType} onChange={e => setProviderForm(f => ({ ...f, providerType: e.target.value }))}>
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google</option>
+                      <option value="enterprise_gateway">Enterprise gateway</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Display name</label>
+                    <Input placeholder="Optional" value={providerForm.displayName} onChange={e => setProviderForm(f => ({ ...f, displayName: e.target.value }))} className="text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Default model</label>
+                    <Input placeholder="e.g. gpt-4.1" value={providerForm.defaultModel} onChange={e => setProviderForm(f => ({ ...f, defaultModel: e.target.value }))} className="text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Base URL (optional)</label>
+                    <Input placeholder="https://…" value={providerForm.baseUrl} onChange={e => setProviderForm(f => ({ ...f, baseUrl: e.target.value }))} className="text-sm" />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">API key *</label>
+                    <Input type="password" placeholder="sk-…" value={providerForm.apiKey} onChange={e => setProviderForm(f => ({ ...f, apiKey: e.target.value }))} className="text-sm font-mono" />
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => void addProvider()} disabled={savingProvider} className="gap-2">
+                  {savingProvider ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Add provider
+                </Button>
+              </div>
+            )}
+            {providersLoading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading providers…</div>
+            ) : providers.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No provider configs yet. Add one above.</div>
+            ) : (
+              providers.map(p => (
+                <div key={p.id} className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{p.displayName}</span>
+                      <Badge variant="outline" className="text-[10px]">{p.providerType}</Badge>
+                      <Badge variant={p.enabled ? "success" : "secondary"} className="text-[10px]">{p.enabled ? "enabled" : "disabled"}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono">{p.maskedKey}{p.defaultModel ? ` · ${p.defaultModel}` : ""}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void toggleProvider(p.id, !p.enabled)}>
+                      {p.enabled ? "Disable" : "Enable"}
+                    </Button>
+                    <button type="button" onClick={() => void deleteProvider(p.id)} className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
