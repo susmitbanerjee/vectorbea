@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import type { Route } from "next";
 import {
   Activity,
   ArrowRight,
@@ -154,8 +155,7 @@ export default async function LandingPage() {
   if (user) {
     try {
       const { redirectTo } = await getPostLoginRedirectForUser(user.id);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      redirect(redirectTo as any);
+      redirect(redirectTo as Route);
     } catch {
       redirect("/dashboard");
     }

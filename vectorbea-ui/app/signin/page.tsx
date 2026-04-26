@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import type { Route } from "next";
 
 import { AuthScreen } from "@/components/auth/auth-screen";
 import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
@@ -22,8 +23,7 @@ export default async function SigninPage({
     if (user) {
       try {
         const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        redirect(destination as any);
+        redirect(destination as Route);
       } catch {
         redirect("/dashboard");
       }
