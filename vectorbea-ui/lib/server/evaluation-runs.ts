@@ -1215,6 +1215,8 @@ export async function createDatasetEvaluationRun(args: {
   datasetId: string;
   candidatePromptVersionId: string;
   triggeredBy: string;
+  /** Optional: run against specific provider/model pairs (multi-provider mode) */
+  selectedModels?: Array<{ providerType: string; model?: string }>;
 }) {
   const supabase = createVectorBeaAdminClient();
 
@@ -1762,6 +1764,8 @@ export async function createDatasetEvaluationRun(args: {
           candidate_version_tag: candidateVersion.version_tag,
           dataset_id: args.datasetId,
           dataset_name: dataset.name,
+          evaluation_mode: args.selectedModels && args.selectedModels.length > 1 ? "multi_provider" : "single_provider",
+          selected_models: args.selectedModels ?? null,
           source_trace_ids: sourceTraceIdList,
           replay_trace_ids: replayTraceIds,
           aggregate: {

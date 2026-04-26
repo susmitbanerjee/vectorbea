@@ -48,6 +48,12 @@ export default function EvaluationsPage() {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compareLeft, setCompareLeft] = useState<string | null>(null);
+
+  // Provider selection for multi-provider eval
+  type ProviderOption = { id: string; providerType: string; displayName: string; defaultModel: string | null };
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [selectedProviderIds, setSelectedProviderIds] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,15 +62,16 @@ export default function EvaluationsPage() {
       setLoading(true);
       setError(null);
       try {
-        const [runsRes, tracesRes, promptsRes, datasetsRes, goldenRes] = await Promise.all([
+        const [runsRes, tracesRes, promptsRes, datasetsRes, goldenRes, providersRes] = await Promise.all([
           fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}&pageSize=200`, { cache: "no-store" }),
           fetch(`/api/prompts?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/golden-traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+          fetch(`/api/evaluations/providers?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         ]);
-        const [runsJson, tracesJson, promptsJson, datasetsJson, goldenJson] = await Promise.all([
-          runsRes.json(), tracesRes.json(), promptsRes.json(), datasetsRes.json(), goldenRes.json(),
+        const [runsJson, tracesJson, promptsJson, datasetsJson, goldenJson, providersJson] = await Promise.all([
+          runsRes.json(), tracesRes.json(), promptsRes.json(), datasetsRes.json(), goldenRes.json(), providersRes.json().catch(() => []),
         ]);
         if (!runsRes.ok) throw new Error(runsJson.error || "Failed to load evaluations");
         if (!tracesRes.ok) throw new Error(tracesJson.error || "Failed to load traces");
@@ -75,6 +82,7 @@ export default function EvaluationsPage() {
           setPrompts(promptsJson as PromptListItem[]);
           setDatasets(Array.isArray(datasetsJson) ? datasetsJson as EvaluationDataset[] : []);
           setGoldenTraces(Array.isArray(goldenJson) ? goldenJson as GoldenTrace[] : (goldenJson?.items ?? []));
+          if (Array.isArray(providersJson)) setProviders(providersJson as ProviderOption[]);
         }
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load evaluations");
@@ -192,6 +200,13 @@ export default function EvaluationsPage() {
         body.datasetId = selectedDatasetId;
       } else {
         body.sourceTraceIds = selectedTraceIds;
+      }
+      // Multi-provider: pass selected providers if more than one is chosen
+      if (selectedProviderIds.length > 0) {
+        body.selectedModels = selectedProviderIds.map((pid) => {
+          const p = providers.find((pr) => pr.id === pid);
+          return { providerType: p?.providerType ?? pid, model: p?.defaultModel ?? undefined };
+        });
       }
       const response = await fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
         method: "POST",
@@ -443,6 +458,41 @@ export default function EvaluationsPage() {
                 )}
               </div>
 
+              {/* Provider selection */}
+              {providers.length > 1 && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Provider / model
+                    <span className="ml-1.5 normal-case font-normal text-muted-foreground/60">(optional — defaults to first configured)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {providers.map((p) => {
+                      const selected = selectedProviderIds.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setSelectedProviderIds((prev) =>
+                            selected ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                          )}
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                            selected
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          {p.displayName}
+                          {p.defaultModel && <span className="ml-1 text-[10px] opacity-60">{p.defaultModel}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedProviderIds.length > 1 && (
+                    <p className="text-[10px] text-amber-400">Multi-provider: evaluation will run against each selected provider. Results stored in model_results.</p>
+                  )}
+                </div>
+              )}
+
               <Button
                 className="w-full gap-2"
                 onClick={createRun}
@@ -550,6 +600,15 @@ export default function EvaluationsPage() {
           </Card>
         </div>
 
+        {compareLeft && (
+          <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/8 px-4 py-2.5 text-sm">
+            <span className="text-primary font-medium">Run A selected for comparison.</span>
+            <span className="text-muted-foreground text-xs">{compareLeft.slice(0, 16)}…</span>
+            <span className="text-xs text-muted-foreground">Now click <strong>Compare →</strong> on any other run to open the comparison view.</span>
+            <button type="button" onClick={() => setCompareLeft(null)} className="ml-auto text-xs text-muted-foreground hover:text-foreground underline">Cancel</button>
+          </div>
+        )}
+
         {/* ── Evaluation runs list ── */}
         <Card>
           <CardHeader>
@@ -604,10 +663,10 @@ export default function EvaluationsPage() {
                 </div>
               ) : (
                 visibleRuns.map(run => (
+                  <div key={run.id} className="flex items-center gap-1.5">
                   <Link
-                    key={run.id}
                     href={`/evaluations/${encodeURIComponent(run.id)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
-                    className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 transition hover:bg-accent/20"
+                    className="flex flex-1 items-center justify-between rounded-lg border border-border bg-card px-4 py-3 transition hover:bg-accent/20"
                   >
                     <div>
                       <div className="font-medium">{run.promptName}@{run.candidateVersionTag}</div>
@@ -628,6 +687,31 @@ export default function EvaluationsPage() {
                       <ArrowRight className="h-4 w-4 text-muted-foreground" />
                     </div>
                   </Link>
+                  {/* Compare toggle */}
+                  <button
+                    type="button"
+                    title={compareLeft === run.id ? "Deselect for comparison" : compareLeft ? `Compare with ${run.id.slice(0, 8)}…` : "Select to compare"}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (compareLeft === run.id) {
+                        setCompareLeft(null);
+                      } else if (compareLeft) {
+                        window.location.href = `/evaluations/compare?left=${encodeURIComponent(compareLeft)}&right=${encodeURIComponent(run.id)}&org=${encodeURIComponent(activeWorkspaceId ?? "")}`;
+                      } else {
+                        setCompareLeft(run.id);
+                      }
+                    }}
+                    className={`shrink-0 rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors ${
+                      compareLeft === run.id
+                        ? "border-primary bg-primary/10 text-primary"
+                        : compareLeft
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                    }`}
+                  >
+                    {compareLeft === run.id ? "Selected A" : compareLeft ? "Compare →" : "Compare"}
+                  </button>
+                  </div>
                 ))
               )}
             </div>

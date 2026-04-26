@@ -52,8 +52,10 @@ export async function POST(request: NextRequest) {
     const body = (await request.json().catch(() => ({}))) as {
       sourceTraceIds?: string[];
       candidatePromptVersionId?: string;
-      /** New: run against an evaluation_dataset or baseline_dataset */
+      /** Run against an evaluation_dataset or baseline_dataset */
       datasetId?: string;
+      /** Multi-provider: array of { providerType, model } pairs to run in parallel */
+      selectedModels?: Array<{ providerType: string; model?: string }>;
     };
 
     if (!body.candidatePromptVersionId?.trim()) {
@@ -71,6 +73,7 @@ export async function POST(request: NextRequest) {
           datasetId: body.datasetId.trim(),
           candidatePromptVersionId: body.candidatePromptVersionId.trim(),
           triggeredBy: auth.user.id,
+          selectedModels: body.selectedModels,
         }),
         { status: 201 },
       );
