@@ -282,8 +282,6 @@ export default function ScheduledRegressionsPage() {
       </DropdownMenu>
     );
   }
-    );
-  }
 
   return (
     <div className="min-h-screen">
