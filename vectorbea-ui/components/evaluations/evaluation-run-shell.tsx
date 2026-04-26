@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -205,8 +205,10 @@ function ResultCard({
           {/* ID / label */}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]">
-                {isDatasetRun ? `item ${index + 1}` : result.sourceTraceId.slice(0, 16) + "…"}
+              <span className="text-xs text-muted-foreground truncate max-w-[240px]">
+                {isDatasetRun
+                  ? (result.inputText ? result.inputText.slice(0, 60) + (result.inputText.length > 60 ? "…" : "") : `item ${index + 1}`)
+                  : <span className="font-mono">{result.sourceTraceId.slice(0, 16)}…</span>}
               </span>
               <Badge variant={rec === "ready_for_rollout" ? "success" : rec === "blocked" || rec === "regression_detected" ? "destructive" : "warning"}>
                 {rec.replaceAll("_", " ")}
@@ -363,7 +365,7 @@ function ResultCard({
                   <CircleDot className="h-3 w-3" /> {isDatasetRun ? "Dataset Input" : "Source Trace"}
                 </div>
                 {isDatasetRun ? (
-                  <div className="font-mono text-foreground/90 break-all">item #{index + 1}</div>
+                  <div className="text-foreground/90 break-words whitespace-pre-wrap">{result.inputText ?? `item #${index + 1}`}</div>
                 ) : (
                   <Link
                     href={`/traces/${encodeURIComponent(result.sourceTraceId)}?org=${encodeURIComponent(workspaceId)}`}
@@ -445,48 +447,129 @@ function ResultCard({
   );
 }
 
-// ─── Loading skeleton with step animation ─────────────────────────────────────
+// ─── Evaluation progress timeline ────────────────────────────────────────────
 
-function EvaluationLoadingSkeleton() {
-  const steps = useMemo(() => [
-    { label: "Loading evaluation run", done: false },
-    { label: "Reading dataset items", done: false },
-    { label: "Executing against candidate prompt", done: false },
-    { label: "Scoring results", done: false },
-  ], []);
+const EVAL_STEPS = [
+  { key: "load_dataset",        label: "Load dataset",            detail: "Fetching dataset items and expected outputs" },
+  { key: "prepare_version",     label: "Prepare prompt version",  detail: "Loading candidate template and parameters" },
+  { key: "render_prompts",      label: "Render prompts",          detail: "Substituting dataset variables into template" },
+  { key: "call_provider",       label: "Call provider",           detail: "Sending rendered prompt + input to OpenAI" },
+  { key: "capture_output",      label: "Capture LLM output",      detail: "Receiving and validating model response" },
+  { key: "compare_expected",    label: "Compare vs expected",     detail: "Matching actual output against reference" },
+  { key: "calculate_similarity",label: "Calculate similarity",    detail: "Computing field-level and string similarity" },
+  { key: "calculate_confidence",label: "Calculate confidence",    detail: "Estimating evaluation reliability score" },
+  { key: "aggregate_score",     label: "Aggregate score",         detail: "Combining per-item scores into run score" },
+  { key: "produce_verdict",     label: "Produce verdict",         detail: "Applying thresholds and writing recommendation" },
+];
+
+// Durations per step in ms (realistic pacing)
+const STEP_DURATIONS = [300, 200, 250, 3500, 400, 300, 250, 200, 200, 300];
+
+function EvaluationLoadingSkeleton({ itemCount = 0 }: { itemCount?: number }) {
   const [activeStep, setActiveStep] = useState(0);
+  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  const [itemsDone, setItemsDone] = useState(0);
+
   useEffect(() => {
-    const t = setInterval(() => setActiveStep(s => Math.min(s + 1, steps.length - 1)), 900);
-    return () => clearInterval(t);
-  }, [steps.length]);
+    let step = 0;
+    let cancelled = false;
+
+    function advance() {
+      if (cancelled || step >= EVAL_STEPS.length) return;
+      setActiveStep(step);
+      const dur = STEP_DURATIONS[step] ?? 400;
+      setTimeout(() => {
+        if (cancelled) return;
+        setCompletedSteps(prev => new Set([...prev, step]));
+        // Simulate item progress during "call_provider" step
+        if (EVAL_STEPS[step].key === "call_provider" && itemCount > 1) {
+          let done = 0;
+          const itemInterval = setInterval(() => {
+            done += 1;
+            setItemsDone(Math.min(done, itemCount));
+            if (done >= itemCount) clearInterval(itemInterval);
+          }, dur / itemCount);
+        }
+        step += 1;
+        advance();
+      }, dur);
+    }
+
+    advance();
+    return () => { cancelled = true; };
+  }, [itemCount]);
+
+  const progressPct = Math.round((completedSteps.size / EVAL_STEPS.length) * 100);
 
   return (
-    <Card>
-      <CardContent className="p-8 space-y-6">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <div className="relative flex h-16 w-16 items-center justify-center">
-            <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping" />
-            <div className="absolute inset-0 rounded-full border-4 border-primary/10 animate-pulse" />
-            <Sparkles className="h-7 w-7 text-primary animate-pulse" />
+    <Card className="border-border/60">
+      <CardContent className="p-6 space-y-5">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/10">
+            <Loader2 className="h-5 w-5 text-primary animate-spin" />
           </div>
-          <div className="text-lg font-semibold">Running evaluation</div>
-          <div className="text-sm text-muted-foreground">Sending each test case to OpenAI and scoring the response…</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold">Evaluation in progress</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{progressPct}%</span>
+            </div>
+            <div className="mt-1.5 h-1 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            {itemCount > 1 && activeStep >= 3 && (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {itemsDone} of {itemCount} inputs evaluated
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="max-w-sm mx-auto space-y-3">
-          {steps.map((step, i) => (
-            <div key={step.label} className={`flex items-center gap-3 transition-all duration-500 ${i > activeStep ? "opacity-30" : "opacity-100"}`}>
-              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-bold transition-all duration-300 ${
-                i < activeStep ? "border-emerald-500 bg-emerald-500/20 text-emerald-400" :
-                i === activeStep ? "border-primary bg-primary/20 text-primary" :
-                "border-border bg-muted/30 text-muted-foreground"
-              }`}>
-                {i < activeStep ? <CheckCircle2 className="h-3.5 w-3.5" /> : i === activeStep ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : i + 1}
-              </span>
-              <span className={`text-sm ${i === activeStep ? "text-foreground font-medium" : "text-muted-foreground"}`}>{step.label}</span>
-            </div>
-          ))}
+        {/* Step list */}
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {EVAL_STEPS.map((step, i) => {
+            const isDone = completedSteps.has(i);
+            const isActive = activeStep === i && !isDone;
+            const isPending = i > activeStep;
+            return (
+              <div
+                key={step.key}
+                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-xs transition-all duration-300 ${
+                  isDone  ? "border-emerald-500/25 bg-emerald-500/8 opacity-100" :
+                  isActive ? "border-primary/30 bg-primary/8 opacity-100" :
+                  "border-border/40 bg-muted/10 opacity-40"
+                }`}
+              >
+                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
+                  isDone  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400" :
+                  isActive ? "border-primary/50 bg-primary/15 text-primary" :
+                  "border-border text-muted-foreground"
+                }`}>
+                  {isDone
+                    ? <CheckCircle2 className="h-3 w-3" />
+                    : isActive
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : i + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className={`font-medium truncate ${isDone ? "text-emerald-400" : isActive ? "text-foreground" : "text-muted-foreground"}`}>
+                    {step.label}
+                  </div>
+                  {(isDone || isActive) && (
+                    <div className="text-[10px] text-muted-foreground truncate">{step.detail}</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+
+        <p className="text-center text-[11px] text-muted-foreground">
+          This page will refresh automatically when the run completes.
+        </p>
       </CardContent>
     </Card>
   );
@@ -557,9 +640,9 @@ function ScoringExplainer({ isDatasetRun }: { isDatasetRun: boolean }) {
               <p>For <strong className="text-foreground">manual / imported dataset items</strong>, each item is sent live to your configured OpenAI API. Three checks are run:</p>
               <div className="space-y-2">
                 {[
-                  { name: "execution_completed", weight: "×1", critical: true, desc: "Did the API call succeed without an error? If this fails, the item is blocked." },
+                  { name: "execution_completed", weight: "×1", critical: true, desc: "Did the OpenAI API call succeed without error? If this fails the item is blocked regardless of other checks." },
                   { name: "output_non_empty", weight: "×1", critical: false, desc: "Did the model return a non-empty response?" },
-                  { name: "expected_output_similarity", weight: "×2", critical: false, desc: "If you provided an expected output, at least 30% of its key words must appear in the model's response. This check has double weight." },
+                  { name: "output_matches_expected", weight: "×3", critical: false, desc: "If you provided an expected output, the actual LLM output is compared using normalized edit-distance similarity. For pipe-delimited extraction outputs (e.g. 'susmit | deployed | ai proxy | success') it also compares field-by-field. Score ≥70% = pass." },
                 ].map(c => (
                   <div key={c.name} className="rounded-lg border border-border bg-card px-3 py-2 text-xs space-y-0.5">
                     <div className="flex items-center gap-2 font-semibold text-foreground">
@@ -571,9 +654,9 @@ function ScoringExplainer({ isDatasetRun }: { isDatasetRun: boolean }) {
                   </div>
                 ))}
               </div>
-              <p>Final score = weighted average of all checks. <strong className="text-foreground">≥78% → ready for rollout</strong>. 50–77% → needs review. &lt;46% → regression.</p>
-              <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200">
-                <strong>Why 50%?</strong> If your expected output uses phrasing that doesn&apos;t overlap 30%+ with the model&apos;s response, the similarity check scores 0. With weights 1+1+0=2 out of 1+1+2=4, you get exactly 50%. Try leaving <code>expected_output</code> blank if you just want to verify the API runs.
+              <p>Final score = weighted average of all checks. Total weight = 1+1+3 = 5. <strong className="text-foreground">≥78% → ready for rollout</strong>. 46–77% → needs review. &lt;46% → regression.</p>
+              <p className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-blue-200 text-xs">
+                <strong>Tip — fill in expected output:</strong> For your extraction prompt the expected output is the pipe-delimited line e.g. <code className="font-mono">susmit | deployed | ai proxy | success</code>. The system splits it into 4 fields and compares each field individually. If all 4 match you get 100% on the similarity check (weight ×3) → overall score ≈ 100%. Without expected output the similarity check is skipped and max score is 40%.
               </p>
             </>
           ) : (
@@ -703,7 +786,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
         )}
 
         {loading || !run ? (
-          <EvaluationLoadingSkeleton />
+          <EvaluationLoadingSkeleton itemCount={run?.aggregate.total ?? 0} />
         ) : (
           <>
             {/* ── Aggregate banner ── */}
