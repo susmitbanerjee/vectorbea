@@ -683,6 +683,8 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
   const [reviewNote, setReviewNote] = useState("");
   const [pendingReviewStatus, setPendingReviewStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showReport, setShowReport] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -773,7 +775,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
   return (
     <div className="min-h-screen">
       <AppHeader
-        title="Evaluation run"
+        title={showReport ? "Evaluation report" : "Evaluation run"}
         subtitle={
           run
             ? `${run.promptName} @ ${run.candidateVersionTag}${run.datasetName ? ` · ${run.datasetName}` : ""}`
@@ -787,30 +789,33 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
 
         {loading || !run ? (
           <EvaluationLoadingSkeleton itemCount={run?.aggregate.total ?? 0} />
-        ) : (
+        ) : showReport ? (
+          /* ══════════════════════════════════════════════════════
+             FULL EVALUATION REPORT VIEW (review + rollout)
+             ══════════════════════════════════════════════════════ */
           <>
-            {/* ── Aggregate banner ── */}
+            {/* Back button */}
+            <button
+              type="button"
+              onClick={() => setShowReport(false)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ChevronRight className="h-3.5 w-3.5 rotate-180" />
+              Back to run summary
+            </button>
+
+            {/* Aggregate banner */}
             <AggregateBanner run={run} />
 
-            {/* ── Scoring explainer ── */}
-            <ScoringExplainer isDatasetRun={isDatasetRun} />
-
-            {/* ── Main grid ── */}
+            {/* Main report grid */}
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
 
-              {/* ── Per-item results ── */}
-              <div className="space-y-3" ref={resultsRef}>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {isDatasetRun ? "Dataset item results" : "Per-trace results"}
-                    <span className="ml-2 text-muted-foreground font-normal">({run.results.length} items)</span>
-                  </h2>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-400" />{run.aggregate.succeeded} passed</span>
-                    {run.aggregate.failed > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-red-400" />{run.aggregate.failed} failed</span>}
-                  </div>
-                </div>
-
+              {/* Left: item-level evidence */}
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-foreground">
+                  {isDatasetRun ? "Dataset item results" : "Per-trace results"}
+                  <span className="ml-2 text-muted-foreground font-normal">({run.results.length} items)</span>
+                </h2>
                 {run.results.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
                     No results recorded for this run.
@@ -828,7 +833,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                 )}
               </div>
 
-              {/* ── Sidebar: review + actions ── */}
+              {/* Right: review + rollout sidebar */}
               <div className="space-y-4">
                 {/* Recommendation card */}
                 <Card className={`border ${recStyle.bg}`}>
@@ -971,6 +976,88 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                   )}
                 </div>
               </div>
+            </div>
+          </>
+        ) : (
+          /* ══════════════════════════════════════════════════════
+             RUN SUMMARY VIEW (default)
+             ══════════════════════════════════════════════════════ */
+          <>
+            {/* Aggregate banner */}
+            <AggregateBanner run={run} />
+
+            {/* Scoring explainer */}
+            <ScoringExplainer isDatasetRun={isDatasetRun} />
+
+            {/* View evaluation report CTA */}
+            <div className="flex items-center justify-between rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+              <div className="space-y-0.5">
+                <div className="text-sm font-semibold">Ready to review?</div>
+                <div className="text-xs text-muted-foreground">
+                  View the full evaluation report with per-item evidence, human review panel, and rollout controls.
+                </div>
+              </div>
+              <Button
+                className="ml-4 shrink-0 gap-2"
+                onClick={() => setShowReport(true)}
+              >
+                <Sparkles className="h-4 w-4" />
+                View evaluation report
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Debug & observability — collapsible */}
+            <div className="rounded-xl border border-border/60 bg-muted/10 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setDebugOpen(o => !o)}
+                className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-white/5 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Info className="h-4 w-4 text-muted-foreground" />
+                  <span>Debug &amp; observability</span>
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground tabular-nums">
+                    {run.results.length} items
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground font-normal">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-400" />{run.aggregate.succeeded} passed
+                    {run.aggregate.failed > 0 && <><XCircle className="h-3 w-3 text-red-400 ml-1" />{run.aggregate.failed} failed</>}
+                  </span>
+                </div>
+                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${debugOpen ? "rotate-90" : ""}`} />
+              </button>
+
+              {debugOpen && (
+                <div className="border-t border-border/40 px-4 py-4 space-y-3" ref={resultsRef}>
+                  <p className="text-xs text-muted-foreground">
+                    Raw per-item execution trace. Use this to debug prompt rendering, provider calls, and scoring. The full report above has the review and rollout controls.
+                  </p>
+                  {run.results.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                      No results recorded for this run.
+                    </div>
+                  ) : (
+                    run.results.map((result, i) => (
+                      <ResultCard
+                        key={`${result.sourceTraceId}-${i}`}
+                        result={result}
+                        index={i}
+                        workspaceId={activeWorkspaceId ?? ""}
+                        isDatasetRun={isDatasetRun}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Quick re-run */}
+            <div className="flex items-center justify-end">
+              <Button variant="outline" size="sm" className="gap-2" onClick={rerunEvaluation} disabled={rerunning}>
+                {rerunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Re-run evaluation
+              </Button>
             </div>
           </>
         )}

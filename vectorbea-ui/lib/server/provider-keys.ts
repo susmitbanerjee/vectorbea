@@ -47,6 +47,15 @@ export async function getProviderConfig(
   return { config, apiKey };
 }
 
+export async function getFirstEnabledProvider(
+  workspaceId: string,
+): Promise<{ config: ProviderConfigRow; apiKey: string } | null> {
+  const providers = await listEnabledProviders(workspaceId);
+  if (providers.length === 0) return null;
+  const config = providers[0];
+  return { config, apiKey: decryptKey(config.encrypted_key) };
+}
+
 export async function listEnabledProviders(workspaceId: string): Promise<ProviderConfigRow[]> {
   const supabase = createVectorBeaAdminClient();
   const { data } = await supabase

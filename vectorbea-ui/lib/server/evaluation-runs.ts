@@ -9,6 +9,7 @@ import { isRuntimeTraceRow, mapAuditRowToTraceDetail, type AuditLogTraceRow } fr
 import { buildTraceMetadataV1, normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { getEvaluationDataset, listDatasetItems } from "@/lib/server/evaluation-datasets";
+import { getFirstEnabledProvider } from "@/lib/server/provider-keys";
 
 type PromptVersionRecord = {
   id: string;
@@ -1156,6 +1157,22 @@ export async function createDatasetEvaluationRun(args: {
   const items = await listDatasetItems(args.workspaceId, args.datasetId);
   if (items.length === 0) throw new Error("Dataset has no items. Add test cases before running an evaluation.");
 
+  // Load the first enabled provider config for this workspace so we can make live LLM calls
+  const firstProvider = await getFirstEnabledProvider(args.workspaceId);
+  if (!firstProvider) {
+    throw new Error(
+      "No enabled provider configuration found for this workspace. " +
+      "Go to Settings → Provider settings and add an API key before running evaluations.",
+    );
+  }
+  const providerConfig = {
+    providerType: firstProvider.config.provider_type,
+    apiKey: firstProvider.apiKey,
+    baseUrl: firstProvider.config.base_url,
+    model: firstProvider.config.default_model,
+    configId: firstProvider.config.id,
+  };
+
   // Load candidate prompt version
   const { data: candidate, error: candidateError } = await supabase
     .from("prompt_versions")
@@ -1275,6 +1292,7 @@ export async function createDatasetEvaluationRun(args: {
         sourceMetadata,
         replayOf: sourceRow.id,
         triggeredBy: args.triggeredBy,
+        providerConfig,
       });
 
       const sourceDetail = mapAuditRowToTraceDetail(sourceRow, {
@@ -1445,6 +1463,7 @@ export async function createDatasetEvaluationRun(args: {
         inputText,
         renderedPrompt,
         triggeredBy: args.triggeredBy,
+        providerConfig,
       });
       executionSteps.push(
         completedStep("call_provider", "Call provider/model", execution.status === "success" ? "success" : "error", execution.status === "success" ? "Provider call completed." : "Provider call failed.", {
