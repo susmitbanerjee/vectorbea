@@ -251,7 +251,8 @@ async function executeOpenAI(args: {
           ...(args.systemPrompt ? [{ role: "system", content: args.systemPrompt }] : []),
           { role: "user", content: args.userInput },
         ],
-        max_tokens: 2048,
+        // o1 / o3 / o4 reasoning models require max_completion_tokens; all others use max_tokens
+        ...(/^o\d/i.test(args.model ?? "") ? { max_completion_tokens: 2048 } : { max_tokens: 2048 }),
       }),
       signal: controller.signal,
       cache: "no-store",
