@@ -6,10 +6,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   Database,
   GitBranch,
-  Info,
   Loader2,
   RefreshCw,
   Search,
@@ -50,8 +48,6 @@ const EVAL_STEPS = [
   { key: "aggregate_score",      label: "Aggregate score",        detail: "Rolling up per-item scores" },
   { key: "produce_verdict",      label: "Verdict",                detail: "Writing recommendation" },
 ];
-const STEP_DURATIONS = [300, 200, 250, 3500, 400, 300, 250, 200, 200, 300];
-
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function pct(v: number | null | undefined) {
@@ -101,36 +97,31 @@ function MiniBar({ value, color = "bg-primary" }: { value: number; color?: strin
   );
 }
 
-// ─── Running skeleton ─────────────────────────────────────────────────────────
+// ─── Running panel (driven by real server data) ───────────────────────────────
 
-function RunningPanel({ itemCount = 0 }: { itemCount?: number }) {
-  const [activeStep, setActiveStep] = useState(0);
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
-  const [itemsDone, setItemsDone] = useState(0);
+function RunningPanel({ run }: { run: TraceSetEvaluationRunView | null }) {
+  const total = run?.aggregate.total ?? 0;
+  const done = (run?.aggregate.succeeded ?? 0) + (run?.aggregate.failed ?? 0);
+  const progressPct = total > 0 ? Math.round((done / total) * 100) : null;
 
-  useEffect(() => {
-    let step = 0;
-    let cancelled = false;
-    function advance() {
-      if (cancelled || step >= EVAL_STEPS.length) return;
-      setActiveStep(step);
-      const dur = STEP_DURATIONS[step] ?? 400;
-      setTimeout(() => {
-        if (cancelled) return;
-        setCompletedSteps(prev => new Set([...prev, step]));
-        if (EVAL_STEPS[step]?.key === "call_provider" && itemCount > 1) {
-          let done = 0;
-          const iv = setInterval(() => { done += 1; setItemsDone(Math.min(done, itemCount)); if (done >= itemCount) clearInterval(iv); }, dur / itemCount);
-        }
-        step += 1;
-        advance();
-      }, dur);
+  // Derive phase from real server signals — no fake timers
+  // Phase: setup (0-2) → calling (3) → post-process (4-7) → verdict (8-9)
+  const setupDone = total > 0;
+  const callingActive = setupDone && done < total;
+  const callingDone = setupDone && done >= total;
+
+  function stepState(i: number): "done" | "active" | "pending" {
+    if (i < 3) return setupDone ? "done" : i === 0 ? "active" : "pending";
+    if (i === 3) {
+      if (callingDone) return "done";
+      if (callingActive) return "active";
+      return setupDone ? "active" : "pending";
     }
-    advance();
-    return () => { cancelled = true; };
-  }, [itemCount]);
-
-  const progressPct = Math.round((completedSteps.size / EVAL_STEPS.length) * 100);
+    // post-process steps: start only after all items called
+    if (i < 8) return callingDone ? "active" : "pending";
+    // verdict
+    return callingDone ? "active" : "pending";
+  }
 
   return (
     <Card className="border-border/60">
@@ -142,29 +133,55 @@ function RunningPanel({ itemCount = 0 }: { itemCount?: number }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-sm font-semibold">Evaluation in progress</span>
-              <span className="text-xs tabular-nums text-muted-foreground">{progressPct}%</span>
+              {progressPct != null && (
+                <span className="text-xs tabular-nums text-muted-foreground">{progressPct}%</span>
+              )}
             </div>
-            <MiniBar value={progressPct} />
-            {itemCount > 1 && activeStep >= 3 && (
-              <div className="mt-1 text-[11px] text-muted-foreground">{itemsDone} of {itemCount} items evaluated</div>
+            {progressPct != null ? (
+              <MiniBar value={progressPct} />
+            ) : (
+              <div className="h-1.5 w-full rounded-full bg-muted/60 overflow-hidden">
+                <div className="h-full w-1/3 rounded-full bg-primary/40 animate-pulse" />
+              </div>
+            )}
+            {total > 0 && (
+              <div className="mt-1 text-[11px] text-muted-foreground">{done} of {total} items evaluated</div>
             )}
           </div>
         </div>
+
         <div className="grid gap-1 sm:grid-cols-5">
           {EVAL_STEPS.map((step, i) => {
-            const done = completedSteps.has(i);
-            const active = activeStep === i && !done;
+            const state = stepState(i);
             return (
-              <div key={step.key} className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] transition-all duration-300 ${done ? "border-emerald-500/25 bg-emerald-500/8" : active ? "border-primary/30 bg-primary/8" : "border-border/30 bg-muted/5 opacity-40"}`}>
-                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold ${done ? "border-emerald-500/40 text-emerald-400" : active ? "border-primary/40 text-primary" : "border-border text-muted-foreground"}`}>
-                  {done ? <CheckCircle2 className="h-2.5 w-2.5" /> : active ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : i + 1}
+              <div
+                key={step.key}
+                className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] transition-colors ${
+                  state === "done"
+                    ? "border-emerald-500/25 bg-emerald-500/8"
+                    : state === "active"
+                    ? "border-primary/30 bg-primary/8"
+                    : "border-border/30 bg-muted/5 opacity-40"
+                }`}
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold ${
+                  state === "done" ? "border-emerald-500/40 text-emerald-400"
+                  : state === "active" ? "border-primary/40 text-primary"
+                  : "border-border text-muted-foreground"
+                }`}>
+                  {state === "done" ? <CheckCircle2 className="h-2.5 w-2.5" /> : state === "active" ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : i + 1}
                 </span>
-                <span className={`truncate font-medium ${done ? "text-emerald-400" : active ? "text-foreground" : "text-muted-foreground"}`}>{step.label}</span>
+                <span className={`truncate font-medium ${
+                  state === "done" ? "text-emerald-400"
+                  : state === "active" ? "text-foreground"
+                  : "text-muted-foreground"
+                }`}>{step.label}</span>
               </div>
             );
           })}
         </div>
-        <p className="text-center text-[11px] text-muted-foreground">Page refreshes automatically on completion.</p>
+
+        <p className="text-center text-[11px] text-muted-foreground">Refreshing automatically — no action needed.</p>
       </CardContent>
     </Card>
   );
@@ -492,8 +509,6 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
   const [reviewing, setReviewing] = useState(false);
   const [rerunning, setRerunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [scoringOpen, setScoringOpen] = useState(false);
-
   useEffect(() => {
     let cancelled = false;
     async function loadRun() {
@@ -599,9 +614,9 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
         )}
 
         {(loading && !run) ? (
-          <RunningPanel itemCount={0} />
+          <RunningPanel run={null} />
         ) : isRunning ? (
-          <RunningPanel itemCount={run?.aggregate.total ?? 0} />
+          <RunningPanel run={run} />
         ) : !run ? null : (
           <>
             {/* ── Header info strip ── */}
@@ -696,41 +711,6 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                     )}
                   </CardContent>
                 </Card>
-
-                {/* How scoring works (collapsible) */}
-                <div className="rounded-xl border border-border/50 bg-muted/10 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setScoringOpen(o => !o)}
-                    className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-white/5 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Info className="h-4 w-4 text-primary" />
-                      How is this scored?
-                    </div>
-                    <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${scoringOpen ? "rotate-90" : ""}`} />
-                  </button>
-                  {scoringOpen && (
-                    <div className="border-t border-border/40 px-4 py-4 text-sm space-y-2 text-muted-foreground">
-                      {isDatasetRun ? (
-                        <>
-                          <p>Each dataset item is sent live to your configured provider. Three checks are applied:</p>
-                          <ul className="space-y-1 text-xs list-none">
-                            <li><strong className="text-foreground">execution_completed</strong> (×1, critical) — API call succeeded.</li>
-                            <li><strong className="text-foreground">output_non_empty</strong> (×1) — Model returned a non-empty response.</li>
-                            <li><strong className="text-foreground">output_matches_expected</strong> (×3) — Levenshtein + pipe-field similarity ≥ 70%. Unavailable if no expected output is set.</li>
-                          </ul>
-                          <p className="text-xs">Score = weighted average. ≥78% → ready. 46–77% → needs review. &lt;46% → regression.</p>
-                          <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-blue-200 text-xs">
-                            <strong>Tip:</strong> For extraction prompts, set expected output as pipe-delimited fields e.g. <code className="font-mono">name | action | service | status</code> — each field is compared individually.
-                          </div>
-                        </>
-                      ) : (
-                        <p>Trace replays compare candidate output against the original trace using output diff, latency delta, and token delta.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
 
                 {/* Per-item results */}
                 <Card>

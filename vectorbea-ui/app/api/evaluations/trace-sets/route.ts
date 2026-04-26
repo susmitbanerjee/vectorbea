@@ -12,6 +12,8 @@ import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 
 export const dynamic = "force-dynamic";
+// Allow up to 5 minutes for long-running multi-item evaluations (LLM calls per item)
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {

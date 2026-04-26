@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition, useCallback } from "react"
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
+  ChevronDown,
   Circle,
   Clock3,
   Copy,
@@ -23,6 +24,13 @@ import type { PromptRolloutDistribution, RolloutStatus } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -457,11 +465,27 @@ export function PromptEditor({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save rollout");
+
       // Re-fetch distribution
       const r2 = await fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`);
       const d2 = await r2.json();
       if (d2 && Array.isArray(d2.versions)) setRolloutDist(d2 as PromptRolloutDistribution);
-    } catch { /* silent */ } finally {
+
+      const vTag = rolloutDist?.versions.find(v => v.promptVersionId === versionId)?.versionTag ?? versionId;
+      if (status === "active") {
+        toast.success(`Version ${vTag} is now active — all traffic routed.`);
+      } else if (status === "candidate") {
+        toast.success(`Version ${vTag} set to candidate at ${percentage}% traffic.`);
+      } else if (status === "deprecated") {
+        toast.info(`Version ${vTag} deprecated.`);
+      } else if (status === "blocked") {
+        toast.warning(`Version ${vTag} blocked.`);
+      } else {
+        toast.success(`Version ${vTag} status updated.`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save rollout");
+    } finally {
       setRolloutSaving(false);
     }
   };
@@ -790,19 +814,39 @@ export function PromptEditor({
                           <div className="flex flex-wrap items-center gap-3">
                             <div className="space-y-1">
                               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Status</div>
-                              <select
-                                className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
-                                value={v.rolloutStatus}
-                                disabled={rolloutSaving || isBlocked}
-                                onChange={(e) => void saveRollout(v.promptVersionId, e.target.value as RolloutStatus, v.rolloutPercentage)}
-                                title={isBlocked ? "This version is blocked. Cannot change status." : undefined}
-                              >
-                                <option value="draft">Draft</option>
-                                <option value="candidate" disabled={!canSetCandidate}>Candidate{!hasReadyEval && v.rolloutStatus !== "candidate" ? " (needs eval)" : ""}</option>
-                                <option value="active" disabled={!canSetActive}>Active{!hasReadyEval && v.rolloutStatus !== "active" ? " (needs eval)" : ""}</option>
-                                <option value="deprecated">Deprecated</option>
-                                <option value="blocked">Blocked</option>
-                              </select>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    disabled={rolloutSaving || isBlocked}
+                                    title={isBlocked ? "This version is blocked. Cannot change status." : undefined}
+                                    className="flex h-8 min-w-[130px] items-center justify-between gap-2 rounded-lg border border-border bg-background px-2.5 text-xs font-medium hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <span className="capitalize">{v.rolloutStatus}</span>
+                                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuPanel>
+                                  <DropdownMenuRadioGroup
+                                    value={v.rolloutStatus}
+                                    onValueChange={(val) => {
+                                      if (!rolloutSaving && !isBlocked) {
+                                        void saveRollout(v.promptVersionId, val as RolloutStatus, v.rolloutPercentage);
+                                      }
+                                    }}
+                                  >
+                                    <DropdownMenuPanelRadioItem value="draft">Draft</DropdownMenuPanelRadioItem>
+                                    <DropdownMenuPanelRadioItem value="candidate" disabled={!canSetCandidate}>
+                                      Candidate{!hasReadyEval && v.rolloutStatus !== "candidate" ? " — needs eval" : ""}
+                                    </DropdownMenuPanelRadioItem>
+                                    <DropdownMenuPanelRadioItem value="active" disabled={!canSetActive}>
+                                      Active{!hasReadyEval && v.rolloutStatus !== "active" ? " — needs eval" : ""}
+                                    </DropdownMenuPanelRadioItem>
+                                    <DropdownMenuPanelRadioItem value="deprecated">Deprecated</DropdownMenuPanelRadioItem>
+                                    <DropdownMenuPanelRadioItem value="blocked">Blocked</DropdownMenuPanelRadioItem>
+                                  </DropdownMenuRadioGroup>
+                                </DropdownMenuPanel>
+                              </DropdownMenu>
                             </div>
 
                             {v.rolloutStatus === "candidate" && (

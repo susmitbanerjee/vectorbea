@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, ChevronDown, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock, Pencil } from "lucide-react";
+import { ArrowRight, Calendar, ChevronDown, ExternalLink, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock, Pencil } from "lucide-react";
+import { toast } from "sonner";
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import type { RegressionSchedule, BaselineDataset, EvaluationDataset, PromptList
 import { useWorkspace } from "@/lib/workspace-context";
 import { cronToHumanText, validateCron } from "@/lib/cron-humanizer";
 
-type AnyDataset = { id: string; name: string; kind: "baseline" | "evaluation"; itemCount?: number; datasetType?: string };
+type AnyDataset = { id: string; name: string; kind: "baseline" | "evaluation"; itemCount?: number; datasetType?: string; promptId?: string | null };
 
 
 export default function ScheduledRegressionsPage() {
@@ -61,7 +62,7 @@ export default function ScheduledRegressionsPage() {
           const baselineDs: AnyDataset[] = (Array.isArray(baselineJson) ? baselineJson as BaselineDataset[] : [])
             .map(d => ({ id: d.id, name: d.name, kind: "baseline" as const, itemCount: d.traceIds?.length }));
           const evalDs: AnyDataset[] = (Array.isArray(evalJson) ? evalJson as EvaluationDataset[] : [])
-            .map(d => ({ id: d.id, name: d.name, kind: "evaluation" as const, itemCount: d.itemCount, datasetType: d.datasetType }));
+            .map(d => ({ id: d.id, name: d.name, kind: "evaluation" as const, itemCount: d.itemCount, datasetType: d.datasetType, promptId: d.promptId ?? null }));
           setDatasets([...evalDs, ...baselineDs]);
           setPrompts(Array.isArray(promptsJson) ? promptsJson as PromptListItem[] : []);
         }
@@ -135,13 +136,28 @@ export default function ScheduledRegressionsPage() {
       const res = await fetch(`/api/evaluations/regression-schedules/${encodeURIComponent(id)}/run?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to run");
-      // Refresh schedule to get updated lastRunAt
+      // Refresh schedule to get updated lastRunAt and run logs
       const refreshRes = await fetch(`/api/evaluations/regression-schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" });
       if (refreshRes.ok) {
         const refreshed = await refreshRes.json();
         setSchedules(refreshed as RegressionSchedule[]);
+        // Show meaningful feedback
+        const updated = (refreshed as RegressionSchedule[]).find(s => s.id === id);
+        const rec = updated?.lastRunRecommendation;
+        if (rec === "ready_for_rollout") {
+          toast.success("Run completed — ready for rollout ✓");
+        } else if (rec === "regression_detected" || rec === "blocked") {
+          toast.error(`Run completed — ${rec.replaceAll("_", " ")}`);
+        } else if (updated?.lastRunLog?.status === "completed") {
+          toast.success("Run completed. Check the log for details.");
+        } else if (updated?.lastRunLog?.status === "failed") {
+          toast.error(`Run failed: ${updated.lastRunLog.errorReason ?? "Unknown error"}`);
+        } else {
+          toast.success("Run triggered. Refreshing results...");
+        }
       }
     } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to run schedule");
       setError(e instanceof Error ? e.message : "Failed to run schedule");
     } finally {
       setRunningId(null);
@@ -183,8 +199,12 @@ export default function ScheduledRegressionsPage() {
   const getDataset = (id: string) => datasets.find(d => d.id === id);
   const getDatasetName = (id: string) => getDataset(id)?.name ?? id;
 
-  function DatasetDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  function DatasetDropdown({ value, onChange, promptId }: { value: string; onChange: (v: string) => void; promptId?: string | null }) {
     const selected = getDataset(value);
+    // Filter: show datasets that are either unscoped or scoped to the selected prompt
+    const compatible = promptId
+      ? datasets.filter(d => !d.promptId || d.promptId === promptId)
+      : datasets;
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -207,10 +227,12 @@ export default function ScheduledRegressionsPage() {
         </DropdownMenuTrigger>
         <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
           <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
-            {datasets.length === 0 && (
-              <div className="px-3 py-2 text-xs text-muted-foreground">No datasets found.</div>
+            {compatible.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                {promptId ? "No datasets scoped to this prompt." : "No datasets found."}
+              </div>
             )}
-            {datasets.map(d => (
+            {compatible.map(d => (
               <DropdownMenuPanelRadioItem key={d.id} value={d.id}>
                 <span className="flex w-full items-center justify-between gap-2">
                   <span className="truncate">{d.name}</span>
@@ -319,16 +341,20 @@ export default function ScheduledRegressionsPage() {
                   <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Nightly regression" />
                 </div>
                 <div className="space-y-1">
+                  <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt *</label>
+                  <PromptDropdown value={form.promptName} onChange={v => setForm(f => ({ ...f, promptName: v, baselineDatasetId: "" }))} />
+                </div>
+                <div className="space-y-1">
                   <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Dataset *</label>
-                  <DatasetDropdown value={form.baselineDatasetId} onChange={v => setForm(f => ({ ...f, baselineDatasetId: v }))} />
+                  <DatasetDropdown
+                    value={form.baselineDatasetId}
+                    onChange={v => setForm(f => ({ ...f, baselineDatasetId: v }))}
+                    promptId={prompts.find(p => p.name === form.promptName)?.id}
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Candidate version strategy</label>
                   <StrategyDropdown value={form.candidatePromptVersionStrategy} onChange={v => setForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt *</label>
-                  <PromptDropdown value={form.promptName} onChange={v => setForm(f => ({ ...f, promptName: v }))} />
                 </div>
                 {form.candidatePromptVersionStrategy === "specific_version" && (
                   <div className="space-y-1 sm:col-span-2">
@@ -383,7 +409,11 @@ export default function ScheduledRegressionsPage() {
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Dataset</label>
-                        <DatasetDropdown value={editForm.baselineDatasetId} onChange={v => setEditForm(f => ({ ...f, baselineDatasetId: v }))} />
+                        <DatasetDropdown
+                          value={editForm.baselineDatasetId}
+                          onChange={v => setEditForm(f => ({ ...f, baselineDatasetId: v }))}
+                          promptId={prompts.find(p => p.name === editForm.promptName)?.id}
+                        />
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Strategy</label>
@@ -434,19 +464,46 @@ export default function ScheduledRegressionsPage() {
                     </div>
                     {schedule.lastRunLog ? (
                       <details className="mt-3 rounded-lg border border-border/70 bg-muted/30 p-3">
-                        <summary className="cursor-pointer text-xs font-medium text-foreground">
-                          Last run log - {schedule.lastRunLog.status}
+                        <summary className="cursor-pointer text-xs font-medium text-foreground flex items-center gap-2">
+                          <span>Last run</span>
+                          <Badge
+                            variant={schedule.lastRunLog.status === "completed" ? "success" : schedule.lastRunLog.status === "failed" ? "destructive" : "secondary"}
+                            className="text-[10px]"
+                          >
+                            {schedule.lastRunLog.status}
+                          </Badge>
+                          {schedule.lastRunRecommendation && (
+                            <Badge
+                              variant={schedule.lastRunRecommendation === "ready_for_rollout" ? "success" : schedule.lastRunRecommendation === "regression_detected" || schedule.lastRunRecommendation === "blocked" ? "destructive" : "warning"}
+                              className="text-[10px]"
+                            >
+                              {schedule.lastRunRecommendation.replaceAll("_", " ")}
+                            </Badge>
+                          )}
                         </summary>
                         <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                          <span>Schedule: <code>{schedule.lastRunLog.scheduleId}</code></span>
-                          <span>Dataset: {schedule.lastRunLog.baselineDatasetName ?? schedule.lastRunLog.baselineDatasetId ?? "Unavailable"}</span>
-                          <span>Prompt version: <code>{schedule.lastRunLog.promptVersionId ?? "Unavailable"}</code></span>
-                          <span>Replays: {schedule.lastRunLog.replayCount}</span>
+                          <span>Dataset: <span className="text-foreground font-medium">{schedule.lastRunLog.baselineDatasetName ?? getDatasetName(schedule.lastRunLog.baselineDatasetId ?? "") ?? "—"}</span></span>
+                          <span>Items run: <span className="text-foreground font-medium tabular-nums">{schedule.lastRunLog.replayCount}</span></span>
                           <span>Started: {new Date(schedule.lastRunLog.startedAt).toLocaleString()}</span>
-                          <span>Completed: {schedule.lastRunLog.completedAt ? new Date(schedule.lastRunLog.completedAt).toLocaleString() : "Running"}</span>
-                          {schedule.lastRunLog.evaluationRunId && <span>Evaluation run: <code>{schedule.lastRunLog.evaluationRunId}</code></span>}
-                          {schedule.lastRunLog.failedTraceIds.length > 0 && <span className="sm:col-span-2">Failed traces: {schedule.lastRunLog.failedTraceIds.join(", ")}</span>}
-                          {schedule.lastRunLog.errorReason && <span className="sm:col-span-2 text-red-300">Reason: {schedule.lastRunLog.errorReason}</span>}
+                          <span>Completed: {schedule.lastRunLog.completedAt ? new Date(schedule.lastRunLog.completedAt).toLocaleString() : <span className="text-amber-400">Still running…</span>}</span>
+                          {schedule.lastRunLog.evaluationRunId && (
+                            <span className="sm:col-span-2">
+                              Evaluation run:{" "}
+                              <a
+                                href={`/evaluations/${encodeURIComponent(schedule.lastRunLog.evaluationRunId)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
+                                className="inline-flex items-center gap-1 text-primary underline hover:text-primary/80"
+                              >
+                                {schedule.lastRunLog.evaluationRunId.slice(0, 20)}…
+                                <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            </span>
+                          )}
+                          {schedule.lastRunLog.failedTraceIds.length > 0 && (
+                            <span className="sm:col-span-2 text-amber-300">{schedule.lastRunLog.failedTraceIds.length} item(s) failed execution.</span>
+                          )}
+                          {schedule.lastRunLog.errorReason && (
+                            <span className="sm:col-span-2 text-red-300">Error: {schedule.lastRunLog.errorReason}</span>
+                          )}
                         </div>
                       </details>
                     ) : null}
@@ -461,7 +518,15 @@ export default function ScheduledRegressionsPage() {
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant={run.status === "completed" ? "success" : "destructive"}>{run.status}</Badge>
                                 <span>{new Date(run.startedAt).toLocaleString()}</span>
-                                <span>{run.replayCount} replays</span>
+                                <span>{run.replayCount} items</span>
+                                {run.evaluationRunId && (
+                                  <a
+                                    href={`/evaluations/${encodeURIComponent(run.evaluationRunId)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
+                                    className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                                  >
+                                    View run <ArrowRight className="h-2.5 w-2.5" />
+                                  </a>
+                                )}
                               </div>
                               {run.errorReason && <p className="mt-1 text-red-300">{run.errorReason}</p>}
                             </div>
