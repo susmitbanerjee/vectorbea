@@ -251,8 +251,9 @@ async function executeOpenAI(args: {
           ...(args.systemPrompt ? [{ role: "system", content: args.systemPrompt }] : []),
           { role: "user", content: args.userInput },
         ],
-        // o1 / o3 / o4 reasoning models require max_completion_tokens; all others use max_tokens
-        ...(/^o\d/i.test(args.model ?? "") ? { max_completion_tokens: 2048 } : { max_tokens: 2048 }),
+        // Use max_completion_tokens — supported by all current OpenAI models (gpt-4o, o1, o3, o4-mini, etc.)
+        // Omit for legacy models that don't recognise it; they will use the API default.
+        ...(/^gpt-3\.5/i.test(args.model ?? "") ? { max_tokens: 2048 } : { max_completion_tokens: 2048 }),
       }),
       signal: controller.signal,
       cache: "no-store",
