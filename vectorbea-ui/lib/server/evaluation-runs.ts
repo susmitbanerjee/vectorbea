@@ -395,6 +395,19 @@ export async function createTraceSetEvaluationRun(args: {
   triggeredBy: string;
 }) {
   const supabase = createVectorBeaAdminClient();
+
+  // Load provider config so live replays actually call the LLM
+  const firstProvider = await getFirstEnabledProvider(args.workspaceId);
+  const providerConfig = firstProvider
+    ? {
+        providerType: firstProvider.config.provider_type,
+        apiKey: firstProvider.apiKey,
+        baseUrl: firstProvider.config.base_url,
+        model: firstProvider.config.default_model,
+        configId: firstProvider.config.id,
+      }
+    : undefined;
+
   const sourceRows = await loadRuntimeTraceRows(args.workspaceId, args.sourceTraceIds);
   if (sourceRows.length === 0) {
     throw new Error("No runtime traces were found for this evaluation run.");
@@ -489,6 +502,7 @@ export async function createTraceSetEvaluationRun(args: {
       sourceMetadata,
       replayOf: sourceRow.id,
       triggeredBy: args.triggeredBy,
+      providerConfig,
     });
 
     const sourceDetail = mapAuditRowToTraceDetail(sourceRow, {

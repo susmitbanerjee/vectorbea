@@ -1,19 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock, Pencil } from "lucide-react";
+import { Calendar, ChevronDown, PlusCircle, Trash2, Loader2, Play, ToggleLeft, ToggleRight, Info, Clock, Pencil } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RegressionSchedule, BaselineDataset } from "@/lib/api";
+import {
+  DropdownMenu,
+  DropdownMenuPanel,
+  DropdownMenuPanelRadioItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { RegressionSchedule, BaselineDataset, EvaluationDataset } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 import { cronToHumanText, validateCron } from "@/lib/cron-humanizer";
+
+type AnyDataset = { id: string; name: string; kind: "baseline" | "evaluation"; itemCount?: number; datasetType?: string };
+
 
 export default function ScheduledRegressionsPage() {
   const { activeWorkspaceId } = useWorkspace();
   const [schedules, setSchedules] = useState<RegressionSchedule[]>([]);
-  const [datasets, setDatasets] = useState<BaselineDataset[]>([]);
+  const [datasets, setDatasets] = useState<AnyDataset[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -37,15 +47,20 @@ export default function ScheduledRegressionsPage() {
       if (!activeWorkspaceId) return;
       setLoading(true); setError(null);
       try {
-        const [schedulesRes, datasetsRes] = await Promise.all([
+        const [schedulesRes, baselineRes, evalRes] = await Promise.all([
           fetch(`/api/evaluations/regression-schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/baseline-datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+          fetch(`/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         ]);
-        const [schedulesJson, datasetsJson] = await Promise.all([schedulesRes.json(), datasetsRes.json()]);
+        const [schedulesJson, baselineJson, evalJson] = await Promise.all([schedulesRes.json(), baselineRes.json(), evalRes.json()]);
         if (!schedulesRes.ok) throw new Error(schedulesJson.error ?? "Failed to load schedules");
         if (!cancelled) {
           setSchedules(schedulesJson as RegressionSchedule[]);
-          setDatasets(Array.isArray(datasetsJson) ? datasetsJson as BaselineDataset[] : []);
+          const baselineDs: AnyDataset[] = (Array.isArray(baselineJson) ? baselineJson as BaselineDataset[] : [])
+            .map(d => ({ id: d.id, name: d.name, kind: "baseline" as const, itemCount: d.traceIds?.length }));
+          const evalDs: AnyDataset[] = (Array.isArray(evalJson) ? evalJson as EvaluationDataset[] : [])
+            .map(d => ({ id: d.id, name: d.name, kind: "evaluation" as const, itemCount: d.itemCount, datasetType: d.datasetType }));
+          setDatasets([...evalDs, ...baselineDs]);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
@@ -157,7 +172,74 @@ export default function ScheduledRegressionsPage() {
     }
   };
 
-  const getDatasetName = (id: string) => datasets.find(d => d.id === id)?.name ?? id;
+  const getDataset = (id: string) => datasets.find(d => d.id === id);
+  const getDatasetName = (id: string) => getDataset(id)?.name ?? id;
+
+  function DatasetDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const selected = getDataset(value);
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+          >
+            <span className="truncate text-left">
+              {selected
+                ? <span className="flex items-center gap-2">
+                    {selected.name}
+                    <span className="text-[10px] text-muted-foreground font-normal">
+                      {selected.kind === "evaluation" ? selected.datasetType ?? "dataset" : "baseline"} · {selected.itemCount ?? 0} items
+                    </span>
+                  </span>
+                : <span className="text-muted-foreground">Select a dataset…</span>}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+          <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+            {datasets.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">No datasets found.</div>
+            )}
+            {datasets.map(d => (
+              <DropdownMenuPanelRadioItem key={d.id} value={d.id}>
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="truncate">{d.name}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                    {d.kind === "evaluation" ? d.datasetType ?? "eval" : "baseline"} · {d.itemCount ?? 0}
+                  </span>
+                </span>
+              </DropdownMenuPanelRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuPanel>
+      </DropdownMenu>
+    );
+  }
+
+  function StrategyDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const labels: Record<string, string> = { latest_published: "Latest published", specific_version: "Specific version" };
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+          >
+            <span className="truncate text-left">{labels[value] ?? value}</span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+          <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+            <DropdownMenuPanelRadioItem value="latest_published">Latest published</DropdownMenuPanelRadioItem>
+            <DropdownMenuPanelRadioItem value="specific_version">Specific version</DropdownMenuPanelRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuPanel>
+      </DropdownMenu>
+    );
+  }
 
   return (
     <div className="min-h-screen">
@@ -195,18 +277,12 @@ export default function ScheduledRegressionsPage() {
                   <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Nightly regression" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Baseline dataset *</label>
-                  <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={form.baselineDatasetId} onChange={e => setForm(f => ({ ...f, baselineDatasetId: e.target.value }))}>
-                    <option value="">Select a dataset…</option>
-                    {datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
+                  <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Dataset *</label>
+                  <DatasetDropdown value={form.baselineDatasetId} onChange={v => setForm(f => ({ ...f, baselineDatasetId: v }))} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Candidate version strategy</label>
-                  <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={form.candidatePromptVersionStrategy} onChange={e => setForm(f => ({ ...f, candidatePromptVersionStrategy: e.target.value }))}>
-                    <option value="latest_published">Latest published</option>
-                    <option value="specific_version">Specific version</option>
-                  </select>
+                  <StrategyDropdown value={form.candidatePromptVersionStrategy} onChange={v => setForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt name</label>
@@ -264,18 +340,12 @@ export default function ScheduledRegressionsPage() {
                         <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Baseline dataset</label>
-                        <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.baselineDatasetId} onChange={e => setEditForm(f => ({ ...f, baselineDatasetId: e.target.value }))}>
-                          <option value="">Select a dataset…</option>
-                          {datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                        </select>
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Dataset</label>
+                        <DatasetDropdown value={editForm.baselineDatasetId} onChange={v => setEditForm(f => ({ ...f, baselineDatasetId: v }))} />
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Strategy</label>
-                        <select className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.candidatePromptVersionStrategy} onChange={e => setEditForm(f => ({ ...f, candidatePromptVersionStrategy: e.target.value }))}>
-                          <option value="latest_published">Latest published</option>
-                          <option value="specific_version">Specific version</option>
-                        </select>
+                        <StrategyDropdown value={editForm.candidatePromptVersionStrategy} onChange={v => setEditForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt name</label>

@@ -3,8 +3,9 @@ import "server-only";
 import { randomUUID } from "crypto";
 import type { RegressionSchedule, RegressionScheduleRunLog } from "@/lib/api";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
-import { createTraceSetEvaluationRun } from "@/lib/server/evaluation-runs";
+import { createTraceSetEvaluationRun, createDatasetEvaluationRun } from "@/lib/server/evaluation-runs";
 import { getBaselineDataset } from "@/lib/server/baseline-datasets";
+import { getEvaluationDataset } from "@/lib/server/evaluation-datasets";
 
 type RegressionScheduleRow = {
   id: string;
@@ -134,6 +135,7 @@ export async function listRegressionSchedules(workspaceId: string): Promise<Regr
 export async function createRegressionSchedule(args: {
   workspaceId: string;
   name: string;
+  /** ID of a baseline_dataset OR evaluation_dataset — we try both tables */
   baselineDatasetId: string;
   candidatePromptVersionStrategy: RegressionSchedule["candidatePromptVersionStrategy"];
   candidatePromptVersionId?: string | null;
@@ -142,9 +144,11 @@ export async function createRegressionSchedule(args: {
   createdBy: string;
 }): Promise<RegressionSchedule> {
   const supabase = createVectorBeaAdminClient();
-  // Look up dataset name for denormalized display
-  const dataset = await getBaselineDataset(args.workspaceId, args.baselineDatasetId);
-  if (!dataset) throw new Error("Baseline dataset not found.");
+  // Try baseline dataset first, fall back to evaluation dataset
+  const dataset =
+    (await getBaselineDataset(args.workspaceId, args.baselineDatasetId)) ??
+    (await getEvaluationDataset(args.workspaceId, args.baselineDatasetId).then(d => d ? { id: d.id, name: d.name, promptName: d.promptName ?? null } : null));
+  if (!dataset) throw new Error("Dataset not found. Provide a valid baseline or evaluation dataset ID.");
   const now = new Date().toISOString();
   const nextRunAt = computeNextRunAt(args.cronExpression, new Date(now));
   const { data, error } = await supabase
@@ -271,17 +275,42 @@ export async function runRegressionSchedule(args: {
   }
 
   try {
-    const dataset = await getBaselineDataset(args.workspaceId, schedule.baselineDatasetId);
-    if (!dataset) throw new Error("Baseline dataset not found.");
-    if (dataset.traceIds.length === 0) throw new Error("Baseline dataset has no traces.");
+    // Try baseline dataset first; if not found, try evaluation dataset
+    const baselineDataset = await getBaselineDataset(args.workspaceId, schedule.baselineDatasetId);
+    const evalDataset = !baselineDataset
+      ? await getEvaluationDataset(args.workspaceId, schedule.baselineDatasetId)
+      : null;
 
-    const candidateVersionId = await resolveCandidateVersionId(schedule, args.workspaceId, dataset.promptName);
-    const run = await createTraceSetEvaluationRun({
-      workspaceId: args.workspaceId,
-      sourceTraceIds: dataset.traceIds,
-      candidatePromptVersionId: candidateVersionId,
-      triggeredBy: args.triggeredBy,
-    });
+    if (!baselineDataset && !evalDataset) throw new Error("Dataset not found.");
+
+    const datasetName = baselineDataset?.name ?? evalDataset?.name ?? "unknown";
+    const datasetPromptName = baselineDataset?.promptName ?? evalDataset?.promptName ?? null;
+
+    const candidateVersionId = await resolveCandidateVersionId(
+      schedule, args.workspaceId,
+      datasetPromptName,
+    );
+
+    let run: Awaited<ReturnType<typeof createTraceSetEvaluationRun>>;
+    if (evalDataset) {
+      // New evaluation dataset — use dataset-based evaluation (calls LLM fresh)
+      run = await createDatasetEvaluationRun({
+        workspaceId: args.workspaceId,
+        datasetId: evalDataset.id,
+        candidatePromptVersionId: candidateVersionId,
+        triggeredBy: args.triggeredBy,
+      });
+    } else {
+      // Legacy baseline dataset — trace replay
+      if (!baselineDataset || baselineDataset.traceIds.length === 0)
+        throw new Error("Baseline dataset has no traces.");
+      run = await createTraceSetEvaluationRun({
+        workspaceId: args.workspaceId,
+        sourceTraceIds: baselineDataset.traceIds,
+        candidatePromptVersionId: candidateVersionId,
+        triggeredBy: args.triggeredBy,
+      });
+    }
 
     const now = new Date().toISOString();
     const failedTraceIds = run.results
@@ -291,8 +320,8 @@ export async function runRegressionSchedule(args: {
       runId,
       status: failedTraceIds.length > 0 ? "failed" : "completed",
       scheduleId: args.scheduleId,
-      baselineDatasetId: dataset.id,
-      baselineDatasetName: dataset.name,
+      baselineDatasetId: baselineDataset?.id ?? evalDataset?.id ?? schedule.baselineDatasetId,
+      baselineDatasetName: datasetName,
       promptVersionId: candidateVersionId,
       evaluationRunId: run.id,
       replayCount: run.results.length,

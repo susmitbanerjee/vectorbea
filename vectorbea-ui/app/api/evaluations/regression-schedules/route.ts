@@ -27,14 +27,15 @@ export async function POST(request: NextRequest) {
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
     await assertFeatureAccess(workspaceId, "scheduled_regressions");
-    const body = await request.json().catch(() => ({})) as { name?: string; baselineDatasetId?: string; candidatePromptVersionStrategy?: string; candidatePromptVersionId?: string; promptName?: string; cronExpression?: string };
-    if (!body.name || !body.baselineDatasetId) {
-      return NextResponse.json({ error: "name and baselineDatasetId are required" }, { status: 400 });
+    const body = await request.json().catch(() => ({})) as { name?: string; baselineDatasetId?: string; datasetId?: string; candidatePromptVersionStrategy?: string; candidatePromptVersionId?: string; promptName?: string; cronExpression?: string };
+    const resolvedDatasetId = body.datasetId ?? body.baselineDatasetId;
+    if (!body.name || !resolvedDatasetId) {
+      return NextResponse.json({ error: "name and a dataset ID are required" }, { status: 400 });
     }
     const schedule = await createRegressionSchedule({
       workspaceId,
       name: body.name,
-      baselineDatasetId: body.baselineDatasetId,
+      baselineDatasetId: resolvedDatasetId,
       candidatePromptVersionStrategy: (body.candidatePromptVersionStrategy as "latest_published" | "specific_version") ?? "latest_published",
       candidatePromptVersionId: body.candidatePromptVersionId,
       promptName: body.promptName,
