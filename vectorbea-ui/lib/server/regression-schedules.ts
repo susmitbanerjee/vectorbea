@@ -11,7 +11,8 @@ type RegressionScheduleRow = {
   id: string;
   workspace_id: string;
   name: string;
-  baseline_dataset_id: string;
+  baseline_dataset_id: string | null;
+  evaluation_dataset_id: string | null;
   baseline_dataset_name: string | null;
   candidate_prompt_version_strategy: string;
   candidate_prompt_version_id: string | null;
@@ -101,7 +102,7 @@ function toView(row: RegressionScheduleRow): RegressionSchedule {
     id: row.id,
     workspaceId: row.workspace_id,
     name: row.name,
-    baselineDatasetId: row.baseline_dataset_id,
+    baselineDatasetId: row.evaluation_dataset_id ?? row.baseline_dataset_id ?? "",
     baselineDatasetName: row.baseline_dataset_name,
     candidatePromptVersionStrategy: row.candidate_prompt_version_strategy as RegressionSchedule["candidatePromptVersionStrategy"],
     candidatePromptVersionId: row.candidate_prompt_version_id,
@@ -144,11 +145,11 @@ export async function createRegressionSchedule(args: {
   createdBy: string;
 }): Promise<RegressionSchedule> {
   const supabase = createVectorBeaAdminClient();
-  // Try baseline dataset first, fall back to evaluation dataset
-  const dataset =
-    (await getBaselineDataset(args.workspaceId, args.baselineDatasetId)) ??
-    (await getEvaluationDataset(args.workspaceId, args.baselineDatasetId).then(d => d ? { id: d.id, name: d.name, promptName: d.promptName ?? null } : null));
-  if (!dataset) throw new Error("Dataset not found. Provide a valid baseline or evaluation dataset ID.");
+  // Determine if this is a baseline dataset or an evaluation dataset
+  const baselineDs = await getBaselineDataset(args.workspaceId, args.baselineDatasetId);
+  const evalDs = !baselineDs ? await getEvaluationDataset(args.workspaceId, args.baselineDatasetId) : null;
+  if (!baselineDs && !evalDs) throw new Error("Dataset not found. Select a valid dataset.");
+  const dataset = baselineDs ?? { id: evalDs!.id, name: evalDs!.name, promptName: evalDs!.promptName ?? null };
   const now = new Date().toISOString();
   const nextRunAt = computeNextRunAt(args.cronExpression, new Date(now));
   const { data, error } = await supabase
@@ -157,7 +158,9 @@ export async function createRegressionSchedule(args: {
       id: randomUUID(),
       workspace_id: args.workspaceId,
       name: args.name.trim(),
-      baseline_dataset_id: args.baselineDatasetId,
+      // Write to the correct FK column depending on dataset type
+      baseline_dataset_id: baselineDs ? args.baselineDatasetId : null,
+      evaluation_dataset_id: evalDs ? args.baselineDatasetId : null,
       baseline_dataset_name: dataset.name,
       candidate_prompt_version_strategy: args.candidatePromptVersionStrategy,
       candidate_prompt_version_id: args.candidatePromptVersionId ?? null,

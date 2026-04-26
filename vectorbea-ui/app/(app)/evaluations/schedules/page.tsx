@@ -13,7 +13,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { RegressionSchedule, BaselineDataset, EvaluationDataset } from "@/lib/api";
+import type { RegressionSchedule, BaselineDataset, EvaluationDataset, PromptListItem } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 import { cronToHumanText, validateCron } from "@/lib/cron-humanizer";
 
@@ -24,6 +24,7 @@ export default function ScheduledRegressionsPage() {
   const { activeWorkspaceId } = useWorkspace();
   const [schedules, setSchedules] = useState<RegressionSchedule[]>([]);
   const [datasets, setDatasets] = useState<AnyDataset[]>([]);
+  const [prompts, setPrompts] = useState<PromptListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -47,12 +48,13 @@ export default function ScheduledRegressionsPage() {
       if (!activeWorkspaceId) return;
       setLoading(true); setError(null);
       try {
-        const [schedulesRes, baselineRes, evalRes] = await Promise.all([
+        const [schedulesRes, baselineRes, evalRes, promptsRes] = await Promise.all([
           fetch(`/api/evaluations/regression-schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/baseline-datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+          fetch(`/api/prompts?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         ]);
-        const [schedulesJson, baselineJson, evalJson] = await Promise.all([schedulesRes.json(), baselineRes.json(), evalRes.json()]);
+        const [schedulesJson, baselineJson, evalJson, promptsJson] = await Promise.all([schedulesRes.json(), baselineRes.json(), evalRes.json(), promptsRes.json()]);
         if (!schedulesRes.ok) throw new Error(schedulesJson.error ?? "Failed to load schedules");
         if (!cancelled) {
           setSchedules(schedulesJson as RegressionSchedule[]);
@@ -61,6 +63,7 @@ export default function ScheduledRegressionsPage() {
           const evalDs: AnyDataset[] = (Array.isArray(evalJson) ? evalJson as EvaluationDataset[] : [])
             .map(d => ({ id: d.id, name: d.name, kind: "evaluation" as const, itemCount: d.itemCount, datasetType: d.datasetType }));
           setDatasets([...evalDs, ...baselineDs]);
+          setPrompts(Array.isArray(promptsJson) ? promptsJson as PromptListItem[] : []);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
@@ -74,18 +77,23 @@ export default function ScheduledRegressionsPage() {
 
   const createSchedule = async () => {
     if (!activeWorkspaceId || creating) return;
-    if (!form.name.trim() || !form.baselineDatasetId) { setError("Name and baseline dataset are required."); return; }
+    if (!form.name.trim() || !form.baselineDatasetId) { setError("Name and dataset are required."); return; }
+    if (!form.promptName.trim()) { setError("Prompt is required."); return; }
     setCreating(true); setError(null);
+    const selectedDs = datasets.find(d => d.id === form.baselineDatasetId);
     try {
       const res = await fetch(`/api/evaluations/regression-schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name.trim(),
-          baselineDatasetId: form.baselineDatasetId,
+          // Send to correct field based on dataset kind
+          ...(selectedDs?.kind === "evaluation"
+            ? { datasetId: form.baselineDatasetId }
+            : { baselineDatasetId: form.baselineDatasetId }),
           candidatePromptVersionStrategy: form.candidatePromptVersionStrategy,
           candidatePromptVersionId: form.candidatePromptVersionId.trim() || null,
-          promptName: form.promptName.trim() || null,
+          promptName: form.promptName.trim(),
           cronExpression: form.cronExpression.trim() || null,
         }),
       });
@@ -241,6 +249,42 @@ export default function ScheduledRegressionsPage() {
     );
   }
 
+  function PromptDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const selected = prompts.find(p => p.name === value);
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+          >
+            <span className="truncate text-left">
+              {selected ? selected.name : <span className="text-muted-foreground">Select a prompt…</span>}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+          <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+            {prompts.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">No prompts found.</div>
+            )}
+            {prompts.map(p => (
+              <DropdownMenuPanelRadioItem key={p.id} value={p.name}>
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="truncate">{p.name}</span>
+                  {p.isPublished && <span className="shrink-0 text-[10px] text-emerald-400">published</span>}
+                </span>
+              </DropdownMenuPanelRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuPanel>
+      </DropdownMenu>
+    );
+  }
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <AppHeader title="Scheduled Regressions" subtitle="Automatically run evaluation runs against baselines on a schedule." />
@@ -285,8 +329,8 @@ export default function ScheduledRegressionsPage() {
                   <StrategyDropdown value={form.candidatePromptVersionStrategy} onChange={v => setForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt name</label>
-                  <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={form.promptName} onChange={e => setForm(f => ({ ...f, promptName: e.target.value }))} placeholder="Optional" />
+                  <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt *</label>
+                  <PromptDropdown value={form.promptName} onChange={v => setForm(f => ({ ...f, promptName: v }))} />
                 </div>
                 {form.candidatePromptVersionStrategy === "specific_version" && (
                   <div className="space-y-1 sm:col-span-2">
@@ -348,8 +392,8 @@ export default function ScheduledRegressionsPage() {
                         <StrategyDropdown value={editForm.candidatePromptVersionStrategy} onChange={v => setEditForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt name</label>
-                        <input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={editForm.promptName} onChange={e => setEditForm(f => ({ ...f, promptName: e.target.value }))} placeholder="Optional" />
+                        <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Prompt</label>
+                        <PromptDropdown value={editForm.promptName} onChange={v => setEditForm(f => ({ ...f, promptName: v }))} />
                       </div>
                       {editForm.candidatePromptVersionStrategy === "specific_version" && (
                         <div className="space-y-1 sm:col-span-2">
