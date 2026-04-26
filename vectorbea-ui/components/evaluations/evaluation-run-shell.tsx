@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EvidenceDialog } from "@/components/evaluations/evidence-dialog";
+import { CategoryBreakdown, FailureExplorer } from "@/components/evaluations/failure-explorer";
 import type { TraceSetEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -693,6 +694,11 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                       </div>
                     )}
 
+                    {/* Category breakdown */}
+                    {run.results.length > 0 && (
+                      <CategoryBreakdown results={run.results} />
+                    )}
+
                     {/* Recommendation reasons */}
                     {run.aggregate.reasons.length > 0 && (
                       <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-1 text-xs text-muted-foreground">
@@ -711,6 +717,17 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                     )}
                   </CardContent>
                 </Card>
+
+                {/* Failure explorer — shown whenever there are failures */}
+                {run.aggregate.failed > 0 && (
+                  <FailureExplorer
+                    results={run.results}
+                    onSelectItem={(idx) => {
+                      // Scroll to results table and open evidence for that item
+                      document.getElementById(`result-row-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                  />
+                )}
 
                 {/* Per-item results */}
                 <Card>

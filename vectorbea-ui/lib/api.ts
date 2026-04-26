@@ -745,3 +745,45 @@ export type AlertEvaluationResult = {
   triggered: AlertEvent[];
   checked: number;
 };
+
+// ─── Release Policy ─────────────────────────────────────────────────────────────
+
+export type PromptReleasePolicy = {
+  id: string;
+  workspaceId: string;
+  promptId: string;
+  minScore: number | null;
+  requireCriticalPass: boolean;
+  maxRegressionCount: number | null;
+  blockOnAnyFailure: boolean;
+  requireJsonValid: boolean;
+  requireNoSafetyFailures: boolean;
+  maxLatencyIncreasePct: number | null;
+  maxCostIncreasePct: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PolicyViolation = {
+  code: string;
+  reason: string;
+  severity: "blocking" | "warning";
+};
+
+export type PolicyCheckResult = {
+  passed: boolean;
+  violations: PolicyViolation[];
+  checkedAt: string;
+};
+
+// ─── Failure Clusters (client-side analysis) ─────────────────────────────────────
+
+export type FailureCluster = {
+  id: string;
+  name: string;
+  severity: "critical" | "high" | "medium";
+  count: number;
+  affectedIndices: number[];
+  explanation: string;
+  suggestedFix: string;
+};

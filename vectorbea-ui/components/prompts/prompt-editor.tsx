@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   Circle,
@@ -15,12 +16,13 @@ import {
   Loader2,
   Lock,
   Save,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { type PromptDetail } from "@/lib/api";
-import type { PromptRolloutDistribution, RolloutStatus } from "@/lib/api";
+import type { PromptReleasePolicy, PromptRolloutDistribution, RolloutStatus } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -197,6 +199,8 @@ export function PromptEditor({
   const [rolloutSaving, setRolloutSaving] = useState(false);
   // Set of promptVersionIds that have a ready_for_rollout evaluation verdict
   const [readyVersionIds, setReadyVersionIds] = useState<Set<string>>(new Set());
+  const [policy, setPolicy] = useState<PromptReleasePolicy | null>(null);
+  const [policySaving, setPolicySaving] = useState(false);
 
   // Keep local state in sync when the server component re-fetches after
   // router.refresh() (e.g., right after a save or publish completes).
@@ -234,11 +238,12 @@ export function PromptEditor({
     let cancelled = false;
     if (!prompt?.promptId || !activeWorkspaceId) return;
 
-    // Fetch rollout distribution and evaluation verdicts in parallel
+    // Fetch rollout distribution, evaluation verdicts, and release policy in parallel
     Promise.all([
       fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`).then(r => r.json()),
       fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }).then(r => r.json()).catch(() => []),
-    ]).then(([dist, runs]) => {
+      fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/policy?workspaceId=${encodeURIComponent(activeWorkspaceId)}`).then(r => r.json()).catch(() => null),
+    ]).then(([dist, runs, pol]) => {
       if (cancelled) return;
       if (dist && Array.isArray(dist.versions)) {
         setRolloutDist(dist as PromptRolloutDistribution);
@@ -253,6 +258,7 @@ export function PromptEditor({
         }
         setReadyVersionIds(ready);
       }
+      if (pol && !pol.error) setPolicy(pol as PromptReleasePolicy);
     }).catch(() => {});
 
     return () => { cancelled = true; };
@@ -487,6 +493,26 @@ export function PromptEditor({
       toast.error(err instanceof Error ? err.message : "Failed to save rollout");
     } finally {
       setRolloutSaving(false);
+    }
+  };
+
+  const savePolicy = async (patch: Partial<PromptReleasePolicy>) => {
+    if (!prompt?.promptId || !activeWorkspaceId || policySaving) return;
+    setPolicySaving(true);
+    try {
+      const res = await fetch(`/api/prompts/${encodeURIComponent(prompt.promptId)}/policy?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save policy");
+      setPolicy(data as PromptReleasePolicy);
+      toast.success("Release policy saved.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save policy");
+    } finally {
+      setPolicySaving(false);
     }
   };
 
@@ -921,14 +947,17 @@ export function PromptEditor({
                         {isBlocked && (
                           <p className="text-xs text-destructive">This version is blocked. Resolve the block before making changes.</p>
                         )}
-                        {!isBlocked && !hasReadyEval && v.rolloutStatus === "draft" && (
-                          <p className="text-xs text-amber-400">
-                            No passing evaluation yet.{" "}
-                            <a href={`/evaluations?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="underline hover:text-amber-300">
-                              Run an evaluation
-                            </a>{" "}
-                            with a <strong>ready for rollout</strong> verdict before promoting.
-                          </p>
+                        {!isBlocked && !hasReadyEval && (v.rolloutStatus === "draft" || v.rolloutStatus === "candidate") && (
+                          <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2">
+                            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-400" />
+                            <p className="text-xs text-amber-300">
+                              <strong>Evaluation gate not cleared.</strong>{" "}
+                              <a href={`/evaluations?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="underline hover:text-amber-200">
+                                Run an evaluation
+                              </a>{" "}
+                              for this version and achieve a <strong>ready for rollout</strong> verdict before promoting to Candidate or Active.
+                            </p>
+                          </div>
                         )}
                       </div>
                     );
@@ -941,6 +970,92 @@ export function PromptEditor({
                     <span className="ml-2 text-red-400">⚠ Exceeds 100% — fix before runtime traffic is split</span>
                   )}
                   {rolloutSaving && <span className="ml-2 animate-pulse">Saving...</span>}
+                </div>
+
+                {/* ── Release Policy Editor ── */}
+                <div className="mt-6 rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                    <ShieldCheck className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold">Release Policy</span>
+                    {policySaving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground ml-auto" />}
+                  </div>
+                  <div className="px-4 py-4 space-y-4 text-xs">
+                    <p className="text-muted-foreground">Define the evaluation gates that must pass before a version can be promoted.</p>
+
+                    {/* Min score */}
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="font-medium">Minimum score</div>
+                        <div className="text-muted-foreground">Required aggregate eval score (0–100%)</div>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        className="w-16 rounded-lg border border-border bg-background px-2 py-1 text-xs tabular-nums text-right"
+                        value={policy?.minScore != null ? Math.round(policy.minScore * 100) : 78}
+                        disabled={!canEdit || policySaving}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!isNaN(v)) void savePolicy({ minScore: v / 100 });
+                        }}
+                      />
+                    </div>
+
+                    {/* Toggles */}
+                    {([
+                      ["requireCriticalPass", "Require critical checks pass", "Block promotion if any critical check fails"],
+                      ["requireNoSafetyFailures", "Require no safety failures", "Block promotion if any safety check fails"],
+                      ["blockOnAnyFailure", "Block on any failure", "Zero-tolerance: block if even one item fails"],
+                      ["requireJsonValid", "Require valid JSON output", "Block if structured output is malformed"],
+                    ] as Array<[keyof PromptReleasePolicy, string, string]>).map(([key, label, description]) => (
+                      <div key={key} className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="font-medium">{label}</div>
+                          <div className="text-muted-foreground">{description}</div>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={Boolean(policy?.[key] ?? (key === "requireCriticalPass" || key === "requireNoSafetyFailures"))}
+                          disabled={!canEdit || policySaving}
+                          onClick={() => void savePolicy({ [key]: !(policy?.[key] ?? (key === "requireCriticalPass" || key === "requireNoSafetyFailures")) })}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                            (policy?.[key] ?? (key === "requireCriticalPass" || key === "requireNoSafetyFailures")) ? "bg-primary" : "bg-muted"
+                          }`}
+                        >
+                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform ${
+                            (policy?.[key] ?? (key === "requireCriticalPass" || key === "requireNoSafetyFailures")) ? "translate-x-4" : "translate-x-0"
+                          }`} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Max regressions */}
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="font-medium">Max regressions allowed</div>
+                        <div className="text-muted-foreground">Items that perform worse than baseline</div>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        className="w-16 rounded-lg border border-border bg-background px-2 py-1 text-xs tabular-nums text-right"
+                        value={policy?.maxRegressionCount ?? 0}
+                        disabled={!canEdit || policySaving}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!isNaN(v) && v >= 0) void savePolicy({ maxRegressionCount: v });
+                        }}
+                      />
+                    </div>
+
+                    {!policy && (
+                      <p className="text-[10px] text-muted-foreground/60 italic">Showing defaults — policy will be saved to database on first edit.</p>
+                    )}
+                  </div>
                 </div>
               </>
             )}
