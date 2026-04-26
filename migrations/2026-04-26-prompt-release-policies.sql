@@ -43,22 +43,6 @@ CREATE INDEX IF NOT EXISTS idx_prompt_release_policies_workspace
 CREATE INDEX IF NOT EXISTS idx_prompt_release_policies_prompt
   ON prompt_release_policies(prompt_id);
 
--- RLS: workspace members can read/write their own policies
-ALTER TABLE prompt_release_policies ENABLE ROW LEVEL SECURITY;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'prompt_release_policies'
-    AND policyname  = 'workspace_member_access'
-  ) THEN
-    CREATE POLICY workspace_member_access ON prompt_release_policies
-      USING (
-        workspace_id IN (
-          SELECT workspace_id FROM workspace_members
-          WHERE user_id = auth.uid()
-        )
-      );
-  END IF;
-END $$;
+-- Note: access is enforced at the API layer via assertWorkspaceMember.
+-- RLS is not enabled here because the workspace_members view used by
+-- other Supabase RLS policies is not available in this schema.
