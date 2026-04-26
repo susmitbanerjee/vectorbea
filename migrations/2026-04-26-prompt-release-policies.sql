@@ -2,7 +2,7 @@
 -- Defines per-prompt evaluation gates that must pass before a version can be
 -- promoted to Candidate or Active. Checked at promotion time by the rollout API.
 
-CREATE TABLE IF NOT EXISTS prompt_release_policies (
+CREATE TABLE IF NOT EXISTS vectorbea.prompt_release_policies (
   id                        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id              UUID        NOT NULL,
   prompt_id                 UUID        NOT NULL,
@@ -38,11 +38,10 @@ CREATE TABLE IF NOT EXISTS prompt_release_policies (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prompt_release_policies_workspace
-  ON prompt_release_policies(workspace_id);
+  ON vectorbea.prompt_release_policies(workspace_id);
 
 CREATE INDEX IF NOT EXISTS idx_prompt_release_policies_prompt
-  ON prompt_release_policies(prompt_id);
+  ON vectorbea.prompt_release_policies(prompt_id);
 
 -- Note: access is enforced at the API layer via assertWorkspaceMember.
--- RLS is not enabled here because the workspace_members view used by
--- other Supabase RLS policies is not available in this schema.
+-- RLS is not enabled here to keep consistent with other vectorbea schema tables.
