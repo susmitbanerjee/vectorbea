@@ -24,7 +24,8 @@ export default async function LoginPage({
     if (user) {
       try {
         const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
-        redirect(destination);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        redirect(destination as any);
       } catch {
         redirect("/dashboard");
       }

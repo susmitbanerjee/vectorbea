@@ -154,7 +154,8 @@ export default async function LandingPage() {
   if (user) {
     try {
       const { redirectTo } = await getPostLoginRedirectForUser(user.id);
-      redirect(redirectTo);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      redirect(redirectTo as any);
     } catch {
       redirect("/dashboard");
     }
