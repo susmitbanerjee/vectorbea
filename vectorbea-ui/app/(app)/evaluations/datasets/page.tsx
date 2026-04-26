@@ -34,6 +34,7 @@ import type {
   EvaluationDatasetItem,
   EvaluationDatasetType,
   GoldenTrace,
+  PromptListItem,
   TraceSummaryView,
 } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -83,6 +84,7 @@ function emptyRow(): ManualRow {
 export default function EvaluationDatasetsPage() {
   const { activeWorkspaceId } = useWorkspace();
   const [datasets, setDatasets] = useState<EvaluationDataset[]>([]);
+  const [prompts, setPrompts] = useState<PromptListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +93,7 @@ export default function EvaluationDatasetsPage() {
   const [createMode, setCreateMode] = useState<CreationMode>("manual");
   const [datasetName, setDatasetName] = useState("");
   const [datasetDesc, setDatasetDesc] = useState("");
+  const [datasetPromptId, setDatasetPromptId] = useState("");
   const [datasetType, setDatasetType] = useState<EvaluationDatasetType>("manual");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -122,13 +125,14 @@ export default function EvaluationDatasetsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
-        { cache: "no-store" },
-      );
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to load datasets");
-      setDatasets(json as EvaluationDataset[]);
+      const [dsRes, promptsRes] = await Promise.all([
+        fetch(`/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+        fetch(`/api/prompts?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+      ]);
+      const [dsJson, promptsJson] = await Promise.all([dsRes.json(), promptsRes.json()]);
+      if (!dsRes.ok) throw new Error(dsJson.error ?? "Failed to load datasets");
+      setDatasets(dsJson as EvaluationDataset[]);
+      if (promptsRes.ok) setPrompts(promptsJson as PromptListItem[]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load datasets");
     } finally {
@@ -187,6 +191,7 @@ export default function EvaluationDatasetsPage() {
   const resetForm = () => {
     setDatasetName("");
     setDatasetDesc("");
+    setDatasetPromptId("");
     setDatasetType("manual");
     setCreateMode("manual");
     setManualRows([emptyRow()]);
@@ -204,6 +209,7 @@ export default function EvaluationDatasetsPage() {
 
   const createDataset = async () => {
     if (!activeWorkspaceId || creating) return;
+    if (!datasetPromptId.trim()) { setCreateError("Please select a prompt to scope this dataset to."); return; }
     if (!datasetName.trim()) { setCreateError("Dataset name is required."); return; }
 
     // Validate mode-specific requirements
@@ -238,6 +244,10 @@ export default function EvaluationDatasetsPage() {
             name: datasetName.trim(),
             description: datasetDesc.trim() || null,
             datasetType: resolvedType,
+            promptId: datasetPromptId.trim() || null,
+            promptName: datasetPromptId.trim()
+              ? (prompts.find((p) => p.id === datasetPromptId)?.name ?? null)
+              : null,
           }),
         },
       );
@@ -393,6 +403,38 @@ export default function EvaluationDatasetsPage() {
                   {createError}
                 </div>
               )}
+
+              {/* Prompt (required for scoping) */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                  Prompt <span className="text-amber-400">*</span>
+                </label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    >
+                      <span className="truncate text-left">
+                        {datasetPromptId
+                          ? (prompts.find((p) => p.id === datasetPromptId)?.name ?? datasetPromptId)
+                          : <span className="text-muted-foreground">Select the prompt this dataset belongs to</span>}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                    <DropdownMenuRadioGroup value={datasetPromptId} onValueChange={setDatasetPromptId}>
+                      {prompts.map((p) => (
+                        <DropdownMenuPanelRadioItem key={p.id} value={p.id}>{p.name}</DropdownMenuPanelRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuPanel>
+                </DropdownMenu>
+                <p className="text-[11px] text-muted-foreground">
+                  Datasets are scoped to a single prompt. The evaluation page will only show datasets matching the selected prompt.
+                </p>
+              </div>
 
               {/* Name + description */}
               <div className="grid gap-3 sm:grid-cols-2">
@@ -698,8 +740,14 @@ export default function EvaluationDatasetsPage() {
                       {dataset.origin === "baseline" && (
                         <Badge variant="outline" className="text-[10px]">legacy</Badge>
                       )}
-                      {dataset.promptName && (
+                      {dataset.promptId ? (
+                        <Badge variant="outline" className="text-[10px] border-primary/40 text-primary/80">
+                          {prompts.find((p) => p.id === dataset.promptId)?.name ?? dataset.promptName ?? "scoped"}
+                        </Badge>
+                      ) : dataset.promptName ? (
                         <Badge variant="outline" className="text-[10px]">{dataset.promptName}</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground/60">unscoped</Badge>
                       )}
                     </div>
                     {dataset.description && (

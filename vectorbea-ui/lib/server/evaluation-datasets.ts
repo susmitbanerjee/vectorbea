@@ -19,6 +19,7 @@ type DatasetRow = {
   dataset_type: string;
   item_count: number;
   prompt_name: string | null;
+  prompt_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -31,6 +32,9 @@ type ItemRow = {
   source_type: string;
   input: string;
   expected_output: string | null;
+  reference_output: string | null;
+  source_prompt_id: string | null;
+  source_prompt_version_id: string | null;
   trace_id: string | null;
   metadata: Record<string, unknown> | null;
   notes: string | null;
@@ -64,6 +68,7 @@ function datasetFromRow(row: DatasetRow, origin: "evaluation" = "evaluation"): E
     datasetType: row.dataset_type as EvaluationDatasetType,
     itemCount: row.item_count ?? 0,
     promptName: row.prompt_name,
+    promptId: row.prompt_id ?? null,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -81,6 +86,7 @@ function datasetFromBaselineRow(row: BaselineRow): EvaluationDataset {
     datasetType: "runtime",
     itemCount: count,
     promptName: row.prompt_name,
+    promptId: null, // legacy baseline datasets have no prompt_id
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -96,6 +102,9 @@ function itemFromRow(row: ItemRow): EvaluationDatasetItem {
     sourceType: row.source_type as EvaluationDatasetItemSourceType,
     input: row.input,
     expectedOutput: row.expected_output,
+    referenceOutput: row.reference_output ?? null,
+    sourcePromptId: row.source_prompt_id ?? null,
+    sourcePromptVersionId: row.source_prompt_version_id ?? null,
     traceId: row.trace_id,
     metadata: row.metadata,
     notes: row.notes,
@@ -181,6 +190,7 @@ export async function createEvaluationDataset(args: {
   description?: string | null;
   datasetType: EvaluationDatasetType;
   promptName?: string | null;
+  promptId?: string | null;
   createdBy: string;
 }): Promise<EvaluationDataset> {
   if (!args.name.trim()) throw new Error("Dataset name is required.");
@@ -196,6 +206,7 @@ export async function createEvaluationDataset(args: {
       dataset_type: args.datasetType,
       item_count: 0,
       prompt_name: args.promptName?.trim() ?? null,
+      prompt_id: args.promptId ?? null,
       created_by: args.createdBy,
       created_at: now,
       updated_at: now,
@@ -266,6 +277,67 @@ export async function listDatasetItems(
   return (data ?? []).map((row) => itemFromRow(row as ItemRow));
 }
 
+/**
+ * For golden_trace items without a referenceOutput, try to populate it
+ * from the audit_log trace metadata.
+ */
+async function enrichGoldenTraceItems(
+  supabase: ReturnType<typeof createVectorBeaAdminClient>,
+  workspaceId: string,
+  items: Array<{
+    sourceType: EvaluationDatasetItemSourceType;
+    traceId?: string | null;
+    referenceOutput?: string | null;
+    sourcePromptId?: string | null;
+    [key: string]: unknown;
+  }>,
+): Promise<void> {
+  const needsEnrichment = items.filter(
+    (item) => item.sourceType === "golden_trace" && item.traceId && !item.referenceOutput,
+  );
+  if (needsEnrichment.length === 0) return;
+
+  const traceIds = needsEnrichment.map((item) => item.traceId as string);
+  const { data: traces } = await supabase
+    .from("audit_logs")
+    .select("id, metadata")
+    .in("id", traceIds)
+    .eq("workspace_id", workspaceId);
+
+  if (!traces) return;
+
+  for (const trace of traces) {
+    const matching = needsEnrichment.filter((item) => item.traceId === trace.id);
+    const meta = trace.metadata as Record<string, unknown> | null;
+    if (!meta) continue;
+
+    // Try to extract output text from various known metadata locations
+    // (mirrors the normalizeTraceMetadataV1 path in traces.ts)
+    const output = meta.output as Record<string, unknown> | null;
+    const response = meta.response as Record<string, unknown> | null;
+    const outputText =
+      (output?.final_text as string | null) ??
+      (output?.final as string | null) ??
+      (output?.text as string | null) ??
+      (output?.raw_text as string | null) ??
+      (output?.rawPrimary as string | null) ??
+      (response?.content as string | null) ??
+      null;
+
+    const tags = meta.tags as Record<string, unknown> | null;
+    const promptId =
+      (meta.promptId as string | null) ??
+      (tags?.prompt_id as string | null) ??
+      (tags?.prompt_version_id as string | null) ??
+      null;
+
+    for (const item of matching) {
+      if (outputText) item.referenceOutput = outputText;
+      if (promptId && !item.sourcePromptId) item.sourcePromptId = promptId;
+    }
+  }
+}
+
 export async function addDatasetItems(args: {
   workspaceId: string;
   datasetId: string;
@@ -273,6 +345,9 @@ export async function addDatasetItems(args: {
     sourceType: EvaluationDatasetItemSourceType;
     input: string;
     expectedOutput?: string | null;
+    referenceOutput?: string | null;
+    sourcePromptId?: string | null;
+    sourcePromptVersionId?: string | null;
     traceId?: string | null;
     metadata?: Record<string, unknown> | null;
     notes?: string | null;
@@ -281,6 +356,9 @@ export async function addDatasetItems(args: {
 }): Promise<EvaluationDatasetItem[]> {
   if (args.items.length === 0) return [];
   const supabase = createVectorBeaAdminClient();
+
+  // Enrich golden trace items with reference output from audit logs
+  await enrichGoldenTraceItems(supabase, args.workspaceId, args.items);
 
   // Determine current max ord
   const { data: existing } = await supabase
@@ -299,6 +377,9 @@ export async function addDatasetItems(args: {
     source_type: item.sourceType,
     input: item.input ?? "",
     expected_output: item.expectedOutput?.trim() ?? null,
+    reference_output: item.referenceOutput?.trim() ?? null,
+    source_prompt_id: item.sourcePromptId ?? null,
+    source_prompt_version_id: item.sourcePromptVersionId ?? null,
     trace_id: item.traceId ?? null,
     metadata: item.metadata ?? null,
     notes: item.notes?.trim() ?? null,

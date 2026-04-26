@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       description?: string;
       datasetType?: EvaluationDatasetType;
       promptName?: string;
+      promptId?: string;
     };
 
     if (!body.name?.trim()) {
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
       description: body.description,
       datasetType,
       promptName: body.promptName,
+      promptId: body.promptId ?? null,
       createdBy: auth.user.id,
     });
 

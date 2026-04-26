@@ -117,6 +117,22 @@ export default function EvaluationsPage() {
     [selectedVersionId, versions],
   );
 
+  // When the prompt changes, reset the dataset selection if the current dataset is scoped to a different prompt
+  useEffect(() => {
+    if (!selectedDatasetId || !selectedPromptId) return;
+    const ds = datasets.find(d => d.id === selectedDatasetId);
+    if (ds?.promptId && ds.promptId !== selectedPromptId) {
+      setSelectedDatasetId("");
+    }
+  }, [selectedPromptId, datasets]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Datasets filtered to those compatible with the selected prompt
+  // A dataset with no promptId (legacy/unscoped) is shown for any prompt
+  const compatibleDatasets = useMemo(() => {
+    if (!selectedPromptId) return datasets;
+    return datasets.filter(d => !d.promptId || d.promptId === selectedPromptId);
+  }, [datasets, selectedPromptId]);
+
   // Filtered + paginated traces for the manual selection panel
   const filteredTraces = useMemo(() => {
     const q = traceSearch.trim().toLowerCase();
@@ -354,7 +370,11 @@ export default function EvaluationsPage() {
                     </DropdownMenuTrigger>
                     <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
                       <DropdownMenuRadioGroup value={selectedDatasetId} onValueChange={setSelectedDatasetId}>
-                        {datasets.map(ds => (
+                        {compatibleDatasets.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-muted-foreground">
+                            {selectedPromptId ? "No datasets scoped to this prompt." : "No datasets yet."}
+                          </div>
+                        ) : compatibleDatasets.map(ds => (
                           <DropdownMenuPanelRadioItem key={ds.id} value={ds.id}>
                             <span className="flex w-full items-center justify-between gap-2">
                               <span className="truncate">{ds.name}</span>
@@ -377,14 +397,21 @@ export default function EvaluationsPage() {
                       </div>
                     );
                   })()}
-                  {datasets.length === 0 && (
+                  {datasets.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
                       No datasets yet.{" "}
                       <Link href={`/evaluations/datasets?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="text-primary hover:underline">
                         Create one →
                       </Link>
                     </p>
-                  )}
+                  ) : compatibleDatasets.length === 0 && selectedPromptId ? (
+                    <p className="text-xs text-amber-400">
+                      No datasets are scoped to this prompt.{" "}
+                      <Link href={`/evaluations/datasets?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="underline">
+                        Create a dataset for this prompt →
+                      </Link>
+                    </p>
+                  ) : null}
                 </div>
               )}
 

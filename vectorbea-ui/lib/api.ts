@@ -572,6 +572,8 @@ export interface EvaluationDataset {
   datasetType: EvaluationDatasetType;
   itemCount: number;
   promptName: string | null;
+  /** UUID of the prompt this dataset is scoped to (null = legacy unscoped dataset) */
+  promptId: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -586,6 +588,12 @@ export interface EvaluationDatasetItem {
   sourceType: EvaluationDatasetItemSourceType;
   input: string;
   expectedOutput: string | null;
+  /** Known-good reference output used for similarity scoring */
+  referenceOutput: string | null;
+  /** UUID of the prompt that generated this item's input/trace */
+  sourcePromptId: string | null;
+  /** UUID of the specific prompt version */
+  sourcePromptVersionId: string | null;
   traceId: string | null;
   metadata: Record<string, unknown> | null;
   notes: string | null;

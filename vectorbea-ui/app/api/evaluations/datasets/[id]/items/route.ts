@@ -54,6 +54,9 @@ export async function POST(
         sourceType?: string;
         input?: string;
         expectedOutput?: string;
+        referenceOutput?: string;
+        sourcePromptId?: string;
+        sourcePromptVersionId?: string;
         traceId?: string;
         metadata?: Record<string, unknown>;
         notes?: string;
@@ -75,6 +78,9 @@ export async function POST(
         : "manual" as EvaluationDatasetItemSourceType,
       input: item.input ?? "",
       expectedOutput: item.expectedOutput ?? null,
+      referenceOutput: item.referenceOutput ?? null,
+      sourcePromptId: item.sourcePromptId ?? null,
+      sourcePromptVersionId: item.sourcePromptVersionId ?? null,
       traceId: item.traceId ?? null,
       metadata: item.metadata ?? null,
       notes: item.notes ?? null,

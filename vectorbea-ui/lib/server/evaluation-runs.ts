@@ -1250,6 +1250,18 @@ export async function createDatasetEvaluationRun(args: {
   if (candidateError) throw new Error(candidateError.message);
   const candidateVersion = candidate as PromptVersionRecord;
   const promptRow = getPromptRow(candidateVersion);
+
+  // Cross-prompt guard: dataset.promptId must match the candidate version's prompt
+  if (dataset.promptId && candidateVersion.prompt_id && dataset.promptId !== candidateVersion.prompt_id) {
+    throw Object.assign(
+      new Error(
+        "Prompt mismatch: this dataset was created for a different prompt. " +
+        "Please select a dataset that belongs to the same prompt as the candidate version.",
+      ),
+      { code: "PROMPT_DATASET_MISMATCH" },
+    );
+  }
+
   const runId = randomUUID();
 
   const results: TraceSetEvaluationRunView["results"] = [];
@@ -1470,6 +1482,12 @@ export async function createDatasetEvaluationRun(args: {
         replayMode,
         checks: evaluation.checks,
         error: null,
+        referenceOutput: item.referenceOutput ?? null,
+        evaluationMode: item.referenceOutput?.trim()
+          ? "reference_output"
+          : item.sourceType === "golden_trace"
+            ? "trace_replay"
+            : "trace_replay",
       });
     } else {
       // ── Fresh execution path (manual / imported items) ──────────────────
@@ -1587,24 +1605,35 @@ export async function createDatasetEvaluationRun(args: {
       const execRow = insertedExec as AuditLogTraceRow;
       replayTraceIds.push(execRow.id);
 
-      const itemChecks = buildManualItemChecks(execution.outputText ?? "", item.expectedOutput, execution.status);
-      const similarity = computeExpectedSimilarity(execution.outputText ?? "", item.expectedOutput);
+      // For golden_trace items, prefer referenceOutput (the captured trace output) over expectedOutput
+      const isGoldenItem = item.sourceType === "golden_trace";
+      const comparisonTarget = isGoldenItem
+        ? (item.referenceOutput ?? item.expectedOutput)
+        : item.expectedOutput;
+      const comparisonMode: string = comparisonTarget?.trim()
+        ? (isGoldenItem && item.referenceOutput?.trim() ? "reference_output" : "expected_output")
+        : "no_reference";
+
+      const itemChecks = buildManualItemChecks(execution.outputText ?? "", comparisonTarget, execution.status);
+      const similarity = computeExpectedSimilarity(execution.outputText ?? "", comparisonTarget);
       const confidence = computeEvaluationConfidence({
         executionStatus: execution.status,
         outputText: execution.outputText ?? "",
         similarityScore: similarity.score,
-        expectedOutput: item.expectedOutput,
+        expectedOutput: comparisonTarget,
         observabilityLevel: execution.executor.response_observability,
       });
       executionSteps.push(
         completedStep(
           "compare_expected_or_reference",
           "Compare expected/reference",
-          item.expectedOutput?.trim() ? "success" : "skipped",
-          item.expectedOutput?.trim()
-            ? "Using human-provided expected output as the comparison target."
-            : "No expected output was provided. Similarity is unavailable and no-reference checks are used.",
-          { mode: item.expectedOutput?.trim() ? "expected_output" : "no_reference" },
+          comparisonTarget?.trim() ? "success" : "skipped",
+          comparisonMode === "reference_output"
+            ? "Using the captured golden trace output as the reference for similarity scoring."
+            : comparisonMode === "expected_output"
+              ? "Using human-provided expected output as the comparison target."
+              : "No reference or expected output was provided for this item. Similarity is unavailable.",
+          { mode: comparisonMode, has_reference: Boolean(item.referenceOutput?.trim()), has_expected: Boolean(item.expectedOutput?.trim()) },
         ),
         completedStep("calculate_similarity", "Calculate similarity", similarity.score === null ? "skipped" : "success", similarity.reason, {
           similarity_score: similarity.score,
@@ -1668,10 +1697,10 @@ export async function createDatasetEvaluationRun(args: {
         renderedPrompt,
         provider: execution.provider ?? execution.executor.name ?? null,
         model: execution.model ?? null,
-        evaluationMode: item.expectedOutput?.trim() ? "expected_output" : "no_reference",
+        evaluationMode: comparisonMode as "reference_output" | "expected_output" | "no_reference",
         actualOutput: execution.outputText ?? "",
         expectedOutput: item.expectedOutput ?? null,
-        referenceOutput: null,
+        referenceOutput: item.referenceOutput ?? null,
         similarityScore: similarity.score,
         similarityLabel: similarity.label,
         similarityReason: similarity.reason,

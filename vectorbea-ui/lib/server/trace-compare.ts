@@ -170,8 +170,8 @@ export function evaluateTraceReplay(left: TraceDetailView, right: TraceDetailVie
     critical: true,
     available: hasStructuredOutput,
     reason: hasStructuredOutput
-      ? "Replay produced structured output payload"
-      : "Structured output not applicable for this trace",
+      ? "Replay produced structured output payload."
+      : "This trace did not return a JSON-structured output, so structured output validation does not apply here.",
   });
 
   const observabilityScore =

@@ -53,7 +53,12 @@ export async function POST(
     }
 
     // Validate + map rows; collect warnings for partial rows
-    const valid: Array<{ input: string; expectedOutput?: string | null; notes?: string | null }> = [];
+    const valid: Array<{
+      input: string;
+      expectedOutput?: string | null;
+      referenceOutput?: string | null;
+      notes?: string | null;
+    }> = [];
     const warnings: string[] = [];
 
     body.rows.forEach((row, i) => {
@@ -70,6 +75,7 @@ export async function POST(
       valid.push({
         input,
         expectedOutput: typeof r.expected_output === "string" ? r.expected_output.trim() || null : null,
+        referenceOutput: typeof r.reference_output === "string" ? r.reference_output.trim() || null : null,
         notes: typeof r.notes === "string" ? r.notes.trim() || null : null,
       });
     });
@@ -85,6 +91,7 @@ export async function POST(
         sourceType: "imported",
         input: row.input,
         expectedOutput: row.expectedOutput,
+        referenceOutput: row.referenceOutput,
         notes: row.notes,
       })),
     });
