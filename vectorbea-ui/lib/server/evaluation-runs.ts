@@ -599,6 +599,51 @@ export async function createTraceSetEvaluationRun(args: {
     }] : [];
     if (flagCheck.length > 0) criticalFailures += 1;
 
+    // Build execution steps for evidence dialog
+    const traceExecSteps: TraceSetEvaluationRunView["results"][number]["executionSteps"] = [
+      {
+        name: "load_trace",
+        label: "Load source trace",
+        status: "success",
+        summary: `Loaded trace ${sourceRow.id.slice(0, 16)}… · ${inputText ? "input present" : "no input text"}`,
+        durationMs: null,
+      },
+      {
+        name: "render_prompt",
+        label: "Render candidate prompt",
+        status: "success",
+        summary: `Rendered template with ${Object.keys(promptVariables).length} variable(s)`,
+        durationMs: null,
+      },
+      {
+        name: "call_provider",
+        label: "Call provider",
+        status: execution.status === "success" ? "success" : "error",
+        summary: execution.status === "success"
+          ? `${execution.provider ?? "provider"} / ${execution.model ?? "unknown"} · ${execution.llmLatencyMs ?? 0}ms`
+          : `Provider call failed: ${execution.outputText?.slice(0, 120) ?? "unknown error"}`,
+        durationMs: execution.llmLatencyMs ?? null,
+      },
+      {
+        name: "capture_output",
+        label: "Capture output",
+        status: execution.outputText?.trim() ? "success" : "warning",
+        summary: execution.outputText?.trim()
+          ? `${execution.outputText.length} chars captured`
+          : "Provider returned an empty output",
+        durationMs: null,
+      },
+      {
+        name: "compare_outputs",
+        label: "Compare vs source trace",
+        status: (sourceDetail.outputs.finalDelivered || "").trim() === (execution.outputText || "").trim() ? "success" : "warning",
+        summary: (sourceDetail.outputs.finalDelivered || "").trim() === (execution.outputText || "").trim()
+          ? "Output matches source trace exactly"
+          : "Output differs from source trace",
+        durationMs: null,
+      },
+    ];
+
     results.push({
       sourceTraceId: sourceRow.id,
       replayTraceId: replayRow.id,
@@ -622,6 +667,15 @@ export async function createTraceSetEvaluationRun(args: {
       replayMode,
       checks: [...evaluation.checks, ...flagCheck],
       error: null,
+      // Evidence fields
+      inputText,
+      renderedPrompt,
+      actualOutput: execution.outputText ?? null,
+      expectedOutput: sourceDetail.outputs.finalDelivered ?? null,
+      provider: execution.provider ?? null,
+      model: execution.model ?? null,
+      evaluationMode: "trace_replay",
+      executionSteps: traceExecSteps,
     });
   }
 
