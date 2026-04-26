@@ -62,7 +62,11 @@ export default function AlertsPage() {
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
-  const [evaluateResult, setEvaluateResult] = useState<string | null>(null);
+  const [evaluateResult, setEvaluateResult] = useState<{
+    checked: number;
+    triggeredCount: number;
+    triggeredNames: string[];
+  } | null>(null);
 
   // Create form state
   const [showCreate, setShowCreate] = useState(false);
@@ -177,8 +181,16 @@ export default function AlertsPage() {
       const res = await fetch(`/api/alerts/evaluate?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Evaluation failed");
-      const triggered = (json as { triggered?: number }).triggered ?? 0;
-      setEvaluateResult(`Evaluation complete. ${triggered} rule${triggered !== 1 ? "s" : ""} triggered.`);
+      const result = json as { triggered?: AlertEvent[]; checked?: number };
+      const triggeredEvents: AlertEvent[] = Array.isArray(result.triggered) ? result.triggered : [];
+      const triggeredCount = triggeredEvents.length;
+      // Resolve rule names from loaded rules list or fall back to ruleId
+      const triggeredNames = triggeredEvents.map((e) => {
+        const rule = rules.find((r) => r.id === e.ruleId);
+        return rule?.name ?? e.ruleId;
+      });
+      setEvaluateResult({ checked: result.checked ?? 0, triggeredCount, triggeredNames });
+      void loadEvents();
       void loadEvents();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Evaluation failed");
@@ -216,9 +228,28 @@ export default function AlertsPage() {
 
         {evaluateResult && (
           <Card className="border-green-500/30 bg-green-500/10">
-            <CardContent className="flex items-center gap-2 p-4 text-sm text-green-200">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              {evaluateResult}
+            <CardContent className="p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm text-green-200">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>
+                  Evaluation complete. {evaluateResult.checked} rule{evaluateResult.checked !== 1 ? "s" : ""} checked
+                  {" — "}
+                  <strong>{evaluateResult.triggeredCount} triggered</strong>.
+                </span>
+              </div>
+              {evaluateResult.triggeredNames.length > 0 && (
+                <ul className="ml-6 space-y-0.5 text-xs text-green-300">
+                  {evaluateResult.triggeredNames.map((name, i) => (
+                    <li key={i} className="flex items-center gap-1.5">
+                      <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />
+                      {name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {evaluateResult.triggeredCount === 0 && (
+                <p className="ml-6 text-xs text-green-400/70">All rules within threshold — no alerts triggered.</p>
+              )}
             </CardContent>
           </Card>
         )}

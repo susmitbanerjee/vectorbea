@@ -111,17 +111,22 @@ function RunningPanel({ run }: { run: TraceSetEvaluationRunView | null }) {
   const callingActive = setupDone && done < total;
   const callingDone = setupDone && done >= total;
 
+  // Which phase are we in? 0=setup, 1=calling, 2=postprocess
+  const phase = !setupDone ? 0 : !callingDone ? 1 : 2;
+
   function stepState(i: number): "done" | "active" | "pending" {
-    if (i < 3) return setupDone ? "done" : i === 0 ? "active" : "pending";
-    if (i === 3) {
-      if (callingDone) return "done";
-      if (callingActive) return "active";
-      return setupDone ? "active" : "pending";
+    if (phase === 0) return i === 0 ? "active" : "pending";
+    if (phase === 1) {
+      if (i < 3) return "done";
+      if (i === 3) return "active";
+      return "pending";
     }
-    // post-process steps: start only after all items called
-    if (i < 8) return callingDone ? "active" : "pending";
-    // verdict
-    return callingDone ? "active" : "pending";
+    // phase 2: post-processing — steps 4-9 run sequentially; show only first as active
+    if (i < 4) return "done";
+    // Estimate post-process progress: we don't have fine-grained step data from server,
+    // so show step 4 as active until run reaches completed state
+    if (i === 4) return "active";
+    return "pending";
   }
 
   return (
@@ -491,7 +496,17 @@ function ReviewPanel({
           </Link>
         )}
 
-        <Button variant="outline" size="sm" className="w-full gap-2" onClick={onRerun} disabled={rerunning}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full gap-2"
+          disabled={rerunning}
+          onClick={() => {
+            if (confirm("This will create a new evaluation run using the same dataset and candidate version. The current run will not be modified. Continue?")) {
+              onRerun();
+            }
+          }}
+        >
           {rerunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           Re-run evaluation
         </Button>
@@ -615,7 +630,10 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
         )}
 
         {(loading && !run) ? (
-          <RunningPanel run={null} />
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+            Loading evaluation run…
+          </div>
         ) : isRunning ? (
           <RunningPanel run={run} />
         ) : !run ? null : (

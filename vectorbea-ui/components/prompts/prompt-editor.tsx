@@ -201,6 +201,11 @@ export function PromptEditor({
   const [readyVersionIds, setReadyVersionIds] = useState<Set<string>>(new Set());
   const [policy, setPolicy] = useState<PromptReleasePolicy | null>(null);
   const [policySaving, setPolicySaving] = useState(false);
+  const [rolloutComplete, setRolloutComplete] = useState<{
+    versionTag: string;
+    versionId: string;
+    evalRunId: string | null;
+  } | null>(null);
 
   // Keep local state in sync when the server component re-fetches after
   // router.refresh() (e.g., right after a save or publish completes).
@@ -477,9 +482,32 @@ export function PromptEditor({
       const d2 = await r2.json();
       if (d2 && Array.isArray(d2.versions)) setRolloutDist(d2 as PromptRolloutDistribution);
 
-      const vTag = rolloutDist?.versions.find(v => v.promptVersionId === versionId)?.versionTag ?? versionId;
-      if (status === "active") {
-        toast.success(`Version ${vTag} is now active — all traffic routed.`);
+      const vTag = d2?.versions?.find((v: { promptVersionId: string; versionTag: string }) => v.promptVersionId === versionId)?.versionTag
+        ?? rolloutDist?.versions.find(v => v.promptVersionId === versionId)?.versionTag
+        ?? versionId;
+
+      // Check if this resulted in an active promotion (direct or via 100% candidate)
+      const resultedInActive = status === "active"
+        || (status === "candidate" && percentage >= 100);
+
+      if (resultedInActive) {
+        // Find the most recent completed evaluation run for this version
+        let evalRunId: string | null = null;
+        if (activeWorkspaceId) {
+          try {
+            const evalRes = await fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" });
+            if (evalRes.ok) {
+              const evalRuns = await evalRes.json() as Array<{ id: string; candidatePromptVersionId?: string; aggregate?: { recommendation?: string }; status?: string }>;
+              const linked = evalRuns.find(r =>
+                r.candidatePromptVersionId === versionId &&
+                r.aggregate?.recommendation === "ready_for_rollout" &&
+                r.status === "completed"
+              );
+              evalRunId = linked?.id ?? null;
+            }
+          } catch { /* non-critical */ }
+        }
+        setRolloutComplete({ versionTag: vTag, versionId, evalRunId });
       } else if (status === "candidate") {
         toast.success(`Version ${vTag} set to candidate at ${percentage}% traffic.`);
       } else if (status === "deprecated") {
@@ -774,6 +802,38 @@ export function PromptEditor({
           </TabsContent>
 
           <TabsContent value="rollout" className="space-y-4">
+            {rolloutComplete && (
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/8 px-5 py-5 space-y-4">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5 shrink-0" />
+                  <div className="space-y-1">
+                    <p className="font-semibold text-emerald-300">Rollout complete</p>
+                    <p className="text-sm text-emerald-200/80">
+                      Version <strong>{rolloutComplete.versionTag}</strong> is now Active — all traffic is routed to this version.
+                      The previous active version has been marked Deprecated.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {rolloutComplete.evalRunId && (
+                    <a
+                      href={`/evaluations/${encodeURIComponent(rolloutComplete.evalRunId)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      View evaluation report
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setRolloutComplete(null)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    Back to rollout
+                  </button>
+                </div>
+              </div>
+            )}
             {!rolloutDist ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading rollout data...
