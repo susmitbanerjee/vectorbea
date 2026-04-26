@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import {
   Activity,
   ArrowRight,
@@ -17,12 +18,12 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { createServerClient } from "@supabase/ssr";
 
 import { MarketingHero } from "@/components/marketing/hero-scene";
 import { Logo } from "@/components/ui/Logo";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
 
 const pillars = [
   {
@@ -146,23 +147,17 @@ const customerLogos = [
 
 export default async function LandingPage() {
   const cookieStore = await cookies();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  let user: { id: string } | null = null;
-  if (supabaseUrl && supabaseAnonKey) {
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll() {
-          // Marketing page only reads session; no cookie writes needed here.
-        },
-      },
-    });
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
+  // If the visitor already has a valid session redirect them straight to their
+  // workspace — they should never see the marketing page when logged in.
+  const user = await getAuthenticatedUserFromCookies(cookieStore);
+  if (user) {
+    try {
+      const { redirectTo } = await getPostLoginRedirectForUser(user.id);
+      redirect(redirectTo);
+    } catch {
+      redirect("/dashboard");
+    }
   }
 
   return (
@@ -206,25 +201,16 @@ export default async function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-2 md:gap-3">
-            {user ? (
-              <Link href="/dashboard" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
-                Go to Dashboard
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            ) : (
-              <>
-                <Link
-                  href="/signin?next=/dashboard"
-                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-                >
-                  Sign in
-                </Link>
-                <Link href="/login" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
-                  Get started
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </>
-            )}
+            <Link
+              href="/signin?next=/dashboard"
+              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+            >
+              Sign in
+            </Link>
+            <Link href="/login" className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}>
+              Get started
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
         </div>
       </header>

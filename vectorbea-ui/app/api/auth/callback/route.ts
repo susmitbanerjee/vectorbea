@@ -35,9 +35,12 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
-  // `next` is only used when explicitly set (e.g. post-onboarding deep-links).
-  // For normal logins we derive the redirect from workspace membership below.
-  const explicitNext = searchParams.get("next");
+  // `next` from the query string (Google / SSO deep-links) OR from the
+  // oauth_next cookie (GitHub server-side flow, which can't carry query params
+  // through the provider round-trip because the redirectTo has no next param).
+  const cookieStore = await cookies();
+  const cookieNext = cookieStore.get("oauth_next")?.value ?? null;
+  const explicitNext = searchParams.get("next") ?? (cookieNext?.startsWith("/") ? cookieNext : null);
 
   // If there is no code param the user navigated here directly or the
   // provider sent an error — send them back to the login page.
@@ -51,8 +54,6 @@ export async function GET(request: NextRequest) {
   // createServerClient needs read/write access to the request cookies so it
   // can find the code_verifier that was stored by the browser client during
   // signInWithOAuth, and then clear it after a successful exchange.
-  const cookieStore = await cookies();
-
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -124,6 +125,8 @@ export async function GET(request: NextRequest) {
   const response = NextResponse.redirect(redirectUrl);
   response.cookies.set(AUTH_COOKIE_NAME, access_token, cookieOptions);
   response.cookies.set(SESSION_ID_COOKIE_NAME, sessionId, cookieOptions);
+  // Clear the oauth_next cookie that the GitHub server-side flow stores
+  response.cookies.set("oauth_next", "", { ...cookieOptions, maxAge: 0 });
 
   return response;
 }

@@ -15,7 +15,7 @@ import {
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser"; // still used by SSO
 
 type Mode = "signin" | "signup";
 
@@ -88,6 +88,17 @@ export function AuthScreen({
     setError(null);
 
     try {
+      // All three providers now use server-side routes so the PKCE
+      // code_verifier is set in the HTTP response headers (atomic with the
+      // redirect) rather than via document.cookie, eliminating the race
+      // condition that caused "callback_failed" on first-ever visits.
+      if (provider === "github") {
+        const url = new URL("/api/auth/github", window.location.origin);
+        if (callbackNext) url.searchParams.set("next", callbackNext);
+        window.location.assign(url.toString());
+        return;
+      }
+
       if (provider === "google") {
         const url = new URL("/api/auth/google", window.location.origin);
         if (callbackNext) url.searchParams.set("next", callbackNext);
@@ -100,20 +111,6 @@ export function AuthScreen({
         if (callbackNext) url.searchParams.set("next", callbackNext);
         window.location.assign(url.toString());
         return;
-      }
-
-      const supabase = getSupabaseBrowserClient();
-      const redirectUrl = buildRedirectUrl();
-
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: redirectUrl.toString(),
-        },
-      });
-
-      if (oauthError) {
-        throw oauthError;
       }
     } catch (submissionError) {
       setError(

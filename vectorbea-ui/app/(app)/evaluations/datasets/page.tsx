@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  Activity,
   CheckSquare,
   ChevronDown,
   Database,
   FileJson,
   FilePlus2,
   Loader2,
+  PenLine,
   PlusCircle,
   Search,
   Square,
@@ -462,17 +464,22 @@ export default function EvaluationDatasetsPage() {
               <div className="space-y-1">
                 <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Data source</label>
                 <div className="flex flex-wrap gap-2">
-                  {(["manual", "import", "traces", "golden"] as CreationMode[]).map((mode) => (
+                  {(
+                    [
+                      { mode: "manual",  Icon: PenLine,  label: "Manual"         },
+                      { mode: "import",  Icon: Upload,   label: "Import file"    },
+                      { mode: "traces",  Icon: Activity, label: "Runtime traces" },
+                      { mode: "golden",  Icon: Star,     label: "Golden traces"  },
+                    ] as { mode: CreationMode; Icon: React.ElementType; label: string }[]
+                  ).map(({ mode, Icon, label }) => (
                     <button
                       key={mode}
                       type="button"
                       onClick={() => setCreateMode(mode)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${createMode === mode ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${createMode === mode ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
                     >
-                      {mode === "manual" && "✏️ Manual"}
-                      {mode === "import" && "📂 Import file"}
-                      {mode === "traces" && "🔁 Runtime traces"}
-                      {mode === "golden" && "⭐ Golden traces"}
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
                     </button>
                   ))}
                 </div>
