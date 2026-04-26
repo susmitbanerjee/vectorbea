@@ -803,8 +803,10 @@ export function PromptEditor({
                   {rolloutDist.versions.map((v) => {
                     const isBlocked = v.rolloutStatus === "blocked" || v.lifecycleStatus === "blocked";
                     const hasReadyEval = readyVersionIds.has(v.promptVersionId);
-                    const canSetCandidate = !isBlocked && hasReadyEval && v.rolloutStatus !== "active" && v.rolloutStatus !== "deprecated";
-                    const canSetActive = !isBlocked && hasReadyEval && v.rolloutStatus !== "deprecated";
+                    // canSet* gates only block/deprecated — the server enforces the eval gate
+                    // and returns a clear toast error; the UI should not hard-disable the controls
+                    const canSetCandidate = !isBlocked && v.rolloutStatus !== "active" && v.rolloutStatus !== "deprecated";
+                    const canSetActive = !isBlocked && v.rolloutStatus !== "deprecated";
 
                     return (
                       <div key={v.promptVersionId} className="rounded-lg border border-border bg-card px-4 py-3 space-y-3">
@@ -863,10 +865,10 @@ export function PromptEditor({
                                   >
                                     <DropdownMenuPanelRadioItem value="draft">Draft</DropdownMenuPanelRadioItem>
                                     <DropdownMenuPanelRadioItem value="candidate" disabled={!canSetCandidate}>
-                                      Candidate{!hasReadyEval && v.rolloutStatus !== "candidate" ? " — needs eval" : ""}
+                                      Candidate
                                     </DropdownMenuPanelRadioItem>
                                     <DropdownMenuPanelRadioItem value="active" disabled={!canSetActive}>
-                                      Active{!hasReadyEval && v.rolloutStatus !== "active" ? " — needs eval" : ""}
+                                      Active
                                     </DropdownMenuPanelRadioItem>
                                     <DropdownMenuPanelRadioItem value="deprecated">Deprecated</DropdownMenuPanelRadioItem>
                                     <DropdownMenuPanelRadioItem value="blocked">Blocked</DropdownMenuPanelRadioItem>
@@ -947,15 +949,15 @@ export function PromptEditor({
                         {isBlocked && (
                           <p className="text-xs text-destructive">This version is blocked. Resolve the block before making changes.</p>
                         )}
-                        {!isBlocked && !hasReadyEval && (v.rolloutStatus === "draft" || v.rolloutStatus === "candidate") && (
+                        {!isBlocked && !hasReadyEval && v.rolloutStatus === "draft" && (
                           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2">
                             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-400" />
                             <p className="text-xs text-amber-300">
-                              <strong>Evaluation gate not cleared.</strong>{" "}
+                              No passing evaluation yet.{" "}
                               <a href={`/evaluations?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="underline hover:text-amber-200">
                                 Run an evaluation
                               </a>{" "}
-                              for this version and achieve a <strong>ready for rollout</strong> verdict before promoting to Candidate or Active.
+                              to get a <strong>ready for rollout</strong> verdict. You can still promote manually — the server will enforce the gate.
                             </p>
                           </div>
                         )}
