@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import { randomUUID } from "crypto";
 
@@ -883,6 +883,20 @@ export async function createTraceSetEvaluationRun(args: {
   if (runInsertError) throw new Error(runInsertError.message);
   const view = toRunView(insertedRun as AuditLogTraceRow);
   if (!view) throw new Error("Evaluation run could not be materialized.");
+
+  // Notify on completion
+  try {
+    const { notifyEvaluationCompleted } = await import("@/lib/server/notifications");
+    await notifyEvaluationCompleted({
+      workspaceId: args.workspaceId,
+      promptName: prompt?.name ?? "unknown-prompt",
+      versionTag: candidateVersion.version_tag,
+      recommendation: "needs_review",
+      score: null,
+      runId: view.id,
+    });
+  } catch { /* notification errors must never fail the main flow */ }
+
   return view;
 }
 
@@ -1987,9 +2001,10 @@ export async function createDatasetEvaluationRun(args: {
   const view = toRunView(insertedRun as AuditLogTraceRow);
   if (!view) throw new Error("Dataset evaluation run could not be materialized.");
 
-  // Fire-and-forget notifications
-  import("@/lib/server/notifications").then(({ notifyEvaluationCompleted }) => {
-    void notifyEvaluationCompleted({
+  // Await so notification completes before the serverless function exits
+  try {
+    const { notifyEvaluationCompleted } = await import("@/lib/server/notifications");
+    await notifyEvaluationCompleted({
       workspaceId: args.workspaceId,
       promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
       versionTag: candidateVersion.version_tag,
@@ -1997,7 +2012,7 @@ export async function createDatasetEvaluationRun(args: {
       score: aggregateScore,
       runId: view.id,
     });
-  }).catch(() => { /* non-blocking */ });
+  } catch { /* notification errors must never fail the main flow */ }
 
   return view;
 }

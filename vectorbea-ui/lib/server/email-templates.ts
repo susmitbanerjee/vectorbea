@@ -32,24 +32,15 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:al
     <td style="background:${headerAccent};padding:24px 32px;">
       <table cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <!-- Bee logo icon -->
+          <!-- Bee logo icon: CSS-only, renders in all email clients including Gmail/Outlook -->
           <td style="padding-right:14px;vertical-align:middle;">
-            <div style="width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;padding:6px;box-sizing:border-box;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <g stroke="#F8D36A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <ellipse cx="7.5" cy="8" rx="3.2" ry="2.2" opacity="0.8" fill="#F8D36A" fill-opacity="0.3"/>
-                  <ellipse cx="16.5" cy="8" rx="3.2" ry="2.2" opacity="0.8" fill="#F8D36A" fill-opacity="0.3"/>
-                  <ellipse cx="12" cy="14" rx="4.2" ry="5.2" fill="#F5B942" fill-opacity="0.25"/>
-                  <path d="M8.4 12.6h7.2"/>
-                  <path d="M8.1 15.2h7.8"/>
-                  <path d="M8.6 17.8h6.8"/>
-                  <path d="M10.4 9.2 L9.2 6.4"/>
-                  <path d="M13.6 9.2 L14.8 6.4"/>
-                  <circle cx="9.2" cy="6.2" r="0.6" fill="#F8D36A"/>
-                  <circle cx="14.8" cy="6.2" r="0.6" fill="#F8D36A"/>
-                </g>
-              </svg>
-            </div>
+            <table cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="width:44px;height:44px;background:rgba(255,255,255,0.18);border-radius:11px;text-align:center;vertical-align:middle;font-size:24px;line-height:44px;">
+                  &#x1F41D;
+                </td>
+              </tr>
+            </table>
           </td>
           <!-- Brand text -->
           <td style="vertical-align:middle;">

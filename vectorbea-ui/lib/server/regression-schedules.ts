@@ -379,16 +379,17 @@ export async function runRegressionSchedule(args: {
       .eq("workspace_id", args.workspaceId)
       .eq("id", args.scheduleId);
 
-    // Notify on failure (fire-and-forget)
-    import("@/lib/server/notifications").then(({ notifyRegressionFailed }) => {
-      void notifyRegressionFailed({
+    // Await so notification completes before the serverless function exits
+    try {
+      const { notifyRegressionFailed } = await import("@/lib/server/notifications");
+      await notifyRegressionFailed({
         workspaceId: args.workspaceId,
         scheduleName: schedule?.name ?? args.scheduleId,
         promptName: schedule?.promptName ?? null,
         reason: errorReason,
         runId: null,
       });
-    }).catch(() => { /* non-blocking */ });
+    } catch { /* notification errors must never fail the main flow */ }
 
     throw error;
   }

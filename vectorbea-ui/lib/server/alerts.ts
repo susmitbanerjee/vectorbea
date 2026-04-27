@@ -206,8 +206,8 @@ export async function evaluateAlerts(workspaceId: string, ruleIds?: string[]): P
         if (!eventError && eventData) {
           const ev = toEventView(eventData as AlertEventRow);
           triggered.push(ev);
-          // Fire-and-forget notification
-          void notifyAlertTriggered({
+          // Await so the notification completes before the serverless function exits
+          await notifyAlertTriggered({
             workspaceId,
             ruleName: rule.name,
             metricType: rule.metricType,

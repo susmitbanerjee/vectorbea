@@ -33,32 +33,33 @@ export async function POST(
       });
     } catch (approvalError) {
       const msg = approvalError instanceof Error ? approvalError.message : "Promotion blocked";
-      // Fire rollout-blocked notification if the error is a gate failure
       if (msg.startsWith("Promotion blocked:")) {
         const reasons = msg.replace("Promotion blocked: ", "").split(/(?<=[.!?])\s+/);
-        import("@/lib/server/notifications").then(({ notifyRolloutBlocked }) => {
-          void notifyRolloutBlocked({
+        try {
+          const { notifyRolloutBlocked } = await import("@/lib/server/notifications");
+          await notifyRolloutBlocked({
             workspaceId,
             promptName: existingRun?.promptName ?? "unknown",
             promptId: existingRun?.candidatePromptVersionId ?? "",
             versionTag: existingRun?.candidateVersionTag ?? "",
             reasons,
           });
-        }).catch(() => {});
+        } catch { /* non-blocking */ }
       }
       throw approvalError;
     }
 
-    // Fire promoted notification (fire-and-forget)
-    import("@/lib/server/notifications").then(({ notifyPromptPromoted }) => {
-      void notifyPromptPromoted({
+    // Await so notification completes before the serverless function exits
+    try {
+      const { notifyPromptPromoted } = await import("@/lib/server/notifications");
+      await notifyPromptPromoted({
         workspaceId,
         promptName: run?.promptName ?? "unknown",
         promptId: run?.candidatePromptVersionId ?? "",
         versionTag: run?.candidateVersionTag ?? "",
         promotedBy: auth.user.id,
       });
-    }).catch(() => {});
+    } catch { /* non-blocking */ }
 
     return NextResponse.json(run);
   } catch (error) {
