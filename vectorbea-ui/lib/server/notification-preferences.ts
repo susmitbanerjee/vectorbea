@@ -60,7 +60,6 @@ export async function getWorkspaceNotificationPrefs(
 ): Promise<WorkspaceNotificationPrefs> {
   const supabase = createVectorBeaAdminClient();
   const { data } = await supabase
-    .schema("vectorbea")
     .from("workspace_notification_prefs")
     .select("*")
     .eq("workspace_id", workspaceId)
@@ -99,7 +98,6 @@ export async function upsertWorkspaceNotificationPrefs(
 
   const supabase = createVectorBeaAdminClient();
   await supabase
-    .schema("vectorbea")
     .from("workspace_notification_prefs")
     .upsert({
       workspace_id: workspaceId,
@@ -118,7 +116,6 @@ export async function upsertWorkspaceNotificationPrefs(
 export async function getUserNotificationPrefs(userId: string): Promise<UserNotificationPrefs> {
   const supabase = createVectorBeaAdminClient();
   const { data } = await supabase
-    .schema("vectorbea")
     .from("user_notification_prefs")
     .select("*")
     .eq("user_id", userId)
@@ -143,7 +140,6 @@ export async function upsertUserNotificationPrefs(
 
   const supabase = createVectorBeaAdminClient();
   await supabase
-    .schema("vectorbea")
     .from("user_notification_prefs")
     .upsert({
       user_id: userId,

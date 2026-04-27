@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { ProviderConfig } from "@/lib/api";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useWorkspace } from "@/lib/workspace-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -400,6 +401,7 @@ export default function SettingsPage() {
                 <div key={p.id} className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
+                      <ProviderIcon providerType={p.providerType} className="h-4 w-4 shrink-0" />
                       <span className="font-medium text-sm">{p.displayName}</span>
                       <Badge variant="outline" className="text-[10px]">{p.providerType}</Badge>
                       <Badge variant={p.enabled ? "success" : "secondary"} className="text-[10px]">{p.enabled ? "enabled" : "disabled"}</Badge>

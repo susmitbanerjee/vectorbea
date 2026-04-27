@@ -25,7 +25,7 @@ import {
   slackPromptPromoted,
 } from "@/lib/server/slack";
 import { shouldEmailWorkspace, shouldSlackWorkspace } from "@/lib/server/notification-preferences";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { createSupabaseAdminClient, createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 const appUrl = () => process.env.APP_URL ?? "https://app.vectorbea.app";
 
@@ -45,6 +45,7 @@ async function getWorkspaceName(workspaceId: string): Promise<string> {
 
 async function getWorkspaceAdminEmails(workspaceId: string): Promise<string[]> {
   try {
+    // Get admin/owner user IDs from the workspace
     const supabase = createVectorBeaAdminClient();
     const { data: members } = await supabase
       .from("workspace_members")
@@ -52,12 +53,15 @@ async function getWorkspaceAdminEmails(workspaceId: string): Promise<string[]> {
       .eq("workspace_id", workspaceId)
       .in("role", ["admin", "owner"]);
     if (!members?.length) return [];
-    const userIds = members.map((m) => m.user_id);
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("email")
-      .in("id", userIds);
-    return (profiles ?? []).map((p) => p.email).filter(Boolean) as string[];
+
+    // Look up emails from auth.users via the service-role admin client
+    const adminClient = createSupabaseAdminClient();
+    const emails: string[] = [];
+    for (const member of members) {
+      const { data } = await adminClient.auth.admin.getUserById(member.user_id as string);
+      if (data?.user?.email) emails.push(data.user.email);
+    }
+    return emails;
   } catch {
     return [];
   }

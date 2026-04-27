@@ -127,7 +127,13 @@ async function sendViaSMTP(payload: EmailPayload): Promise<SendResult> {
 // ─── Public send function ─────────────────────────────────────────────────────
 
 export async function sendEmail(payload: EmailPayload, retries = 2): Promise<SendResult> {
-  const provider = (process.env.EMAIL_PROVIDER ?? "smtp").toLowerCase();
+  // Auto-detect provider from available env vars if EMAIL_PROVIDER is not set explicitly.
+  // This means just adding RESEND_API_KEY to Vercel is enough — no extra env var needed.
+  const explicitProvider = process.env.EMAIL_PROVIDER?.toLowerCase();
+  const provider = explicitProvider
+    ?? (process.env.RESEND_API_KEY ? "resend" : undefined)
+    ?? (process.env.SENDGRID_API_KEY ? "sendgrid" : undefined)
+    ?? "smtp";
 
   let attempt = 0;
   let last: SendResult = { ok: false, provider, error: "No attempts made" };
