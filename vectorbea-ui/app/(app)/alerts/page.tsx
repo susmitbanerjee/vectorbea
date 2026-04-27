@@ -142,6 +142,7 @@ export default function AlertsPage() {
   const [loadingRules, setLoadingRules] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  const [evaluateRuleId, setEvaluateRuleId] = useState<string>(""); // "" = all rules
   const [evaluateResult, setEvaluateResult] = useState<{
     checked: number; triggeredCount: number; triggeredNames: string[];
   } | null>(null);
@@ -160,6 +161,7 @@ export default function AlertsPage() {
   const [triggerRule, setTriggerRule] = useState<AlertRule | null>(null);
   const [triggerPromptId, setTriggerPromptId] = useState<string>("");
   const [triggering, setTriggering] = useState(false);
+  const [triggerResult, setTriggerResult] = useState<{ ok: boolean; recipients?: string[]; errors?: string[] } | null>(null);
 
   const loadRules = useCallback(async () => {
     if (!activeWorkspaceId) return;
@@ -262,7 +264,12 @@ export default function AlertsPage() {
     if (!activeWorkspaceId) return;
     setEvaluating(true); setEvaluateResult(null);
     try {
-      const res = await fetch(`/api/alerts/evaluate?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { method: "POST" });
+      const body = evaluateRuleId ? { ruleIds: [evaluateRuleId] } : {};
+      const res = await fetch(`/api/alerts/evaluate?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Evaluation failed");
       const result = json as { triggered?: AlertEvent[]; checked?: number };
@@ -282,19 +289,18 @@ export default function AlertsPage() {
 
   const triggerAlert = async () => {
     if (!triggerRule || !activeWorkspaceId || triggering) return;
-    setTriggering(true);
+    setTriggering(true); setTriggerResult(null);
     try {
       const res = await fetch(`/api/alerts/trigger?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ruleId: triggerRule.id }),
       });
-      const json = await res.json();
+      const json = await res.json() as { ok?: boolean; recipients?: string[]; errors?: string[]; error?: string };
       if (!res.ok) throw new Error(json.error ?? "Trigger failed");
-      toast.success(`Alert notification sent for "${triggerRule.name}". Check your email.`);
-      setTriggerRule(null); setTriggerPromptId("");
+      setTriggerResult({ ok: json.ok ?? false, recipients: json.recipients, errors: json.errors });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to trigger alert");
+      setTriggerResult({ ok: false, errors: [e instanceof Error ? e.message : "Unknown error"] });
     } finally {
       setTriggering(false);
     }
@@ -343,10 +349,36 @@ export default function AlertsPage() {
               <CardTitle>Alert Rules</CardTitle>
               <CardDescription>Thresholds that trigger notifications when breached.</CardDescription>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+              {/* Rule selector for targeted evaluation */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-8 min-w-[140px] items-center justify-between gap-2 rounded-lg border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-accent/40 transition-colors"
+                  >
+                    <span className="truncate">
+                      {evaluateRuleId
+                        ? (rules.find((r) => r.id === evaluateRuleId)?.name ?? "Selected rule")
+                        : "All rules"}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPanel className="min-w-[200px]">
+                  <DropdownMenuRadioGroup value={evaluateRuleId} onValueChange={setEvaluateRuleId}>
+                    <DropdownMenuPanelRadioItem value="">All rules</DropdownMenuPanelRadioItem>
+                    {rules.map((r) => (
+                      <DropdownMenuPanelRadioItem key={r.id} value={r.id}>
+                        {r.name}
+                      </DropdownMenuPanelRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuPanel>
+              </DropdownMenu>
               <Button size="sm" variant="outline" onClick={runEvaluate} disabled={evaluating}>
                 {evaluating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                <span className="ml-1.5">Run evaluation now</span>
+                <span className="ml-1.5">Run evaluation</span>
               </Button>
               <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -546,7 +578,7 @@ export default function AlertsPage() {
       </div>
 
       {/* Trigger alert dialog */}
-      <Dialog open={!!triggerRule} onOpenChange={(open) => { if (!open) { setTriggerRule(null); setTriggerPromptId(""); } }}>
+      <Dialog open={!!triggerRule} onOpenChange={(open) => { if (!open) { setTriggerRule(null); setTriggerPromptId(""); setTriggerResult(null); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -586,13 +618,37 @@ export default function AlertsPage() {
               </div>
             )}
 
+            {/* Result feedback */}
+            {triggerResult && (
+              <div className={`rounded-lg border px-3 py-2.5 text-xs space-y-1 ${triggerResult.ok ? "border-emerald-500/30 bg-emerald-500/8 text-emerald-300" : "border-red-500/30 bg-red-500/8 text-red-300"}`}>
+                {triggerResult.ok ? (
+                  <>
+                    <p className="font-medium flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Email sent successfully</p>
+                    {triggerResult.recipients && (
+                      <p className="text-emerald-400/70">Recipients: {triggerResult.recipients.join(", ")}</p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" /> Failed to send</p>
+                    {triggerResult.errors?.map((e, i) => <p key={i} className="font-mono text-[10px] break-all">{e}</p>)}
+                    <p className="text-red-400/60 mt-1">Check Vercel logs for full details. Most common cause: FROM_EMAIL env var not set or domain not verified in Resend.</p>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost" onClick={() => { setTriggerRule(null); setTriggerPromptId(""); }}>Cancel</Button>
-              <Button onClick={triggerAlert} disabled={triggering}>
-                {triggering && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-                <Send className="h-3.5 w-3.5 mr-1.5" />
-                Send notification
+              <Button variant="ghost" onClick={() => { setTriggerRule(null); setTriggerPromptId(""); setTriggerResult(null); }}>
+                {triggerResult ? "Close" : "Cancel"}
               </Button>
+              {!triggerResult && (
+                <Button onClick={triggerAlert} disabled={triggering}>
+                  {triggering && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+                  <Send className="h-3.5 w-3.5 mr-1.5" />
+                  Send notification
+                </Button>
+              )}
             </div>
           </div>
         </DialogContent>

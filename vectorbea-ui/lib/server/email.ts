@@ -35,11 +35,19 @@ async function sendViaResend(payload: EmailPayload): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { ok: false, provider: "resend", error: "RESEND_API_KEY not set" };
 
+  const fromEmail = process.env.FROM_EMAIL;
+  if (!fromEmail) {
+    console.error("[email/resend] FROM_EMAIL env var is not set. Set it to your Resend-verified sender address (e.g. noreply@yourdomain.com).");
+    return { ok: false, provider: "resend", error: "FROM_EMAIL env var is not set. Add it to Vercel environment variables." };
+  }
+
+  console.log(`[email/resend] Sending to=${payload.to} from=${fromEmail} subject="${payload.subject}"`);
+
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: process.env.FROM_EMAIL ?? "noreply@vectorbea.app",
+      from: fromEmail,
       to: [payload.to],
       subject: payload.subject,
       html: payload.html,
@@ -47,10 +55,12 @@ async function sendViaResend(payload: EmailPayload): Promise<SendResult> {
     }),
   });
 
+  const responseBody = await res.text().catch(() => "");
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    return { ok: false, provider: "resend", error: `HTTP ${res.status}: ${body.slice(0, 200)}` };
+    console.error(`[email/resend] Failed HTTP ${res.status}: ${responseBody}`);
+    return { ok: false, provider: "resend", error: `HTTP ${res.status}: ${responseBody.slice(0, 300)}` };
   }
+  console.log(`[email/resend] Sent OK: ${responseBody.slice(0, 100)}`);
   return { ok: true, provider: "resend" };
 }
 

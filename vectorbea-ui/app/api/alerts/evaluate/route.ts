@@ -27,7 +27,8 @@ export async function POST(request: NextRequest) {
     if (!rate.allowed) {
       return NextResponse.json({ error: "Rate limit exceeded for alert evaluations." }, { status: 429 });
     }
-    const result = await evaluateAlerts(workspaceId);
+    const body = await request.json().catch(() => ({})) as { ruleIds?: string[] };
+    const result = await evaluateAlerts(workspaceId, body.ruleIds);
     return NextResponse.json(result);
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to evaluate alert rules");

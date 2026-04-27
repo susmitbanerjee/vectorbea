@@ -45,24 +45,38 @@ async function getWorkspaceName(workspaceId: string): Promise<string> {
 
 async function getWorkspaceAdminEmails(workspaceId: string): Promise<string[]> {
   try {
-    // Get admin/owner user IDs from the workspace
+    // Get all admin members (roles: admin, owner, editor — not viewer-only)
     const supabase = createVectorBeaAdminClient();
-    const { data: members } = await supabase
+    const { data: members, error: memberError } = await supabase
       .from("workspace_members")
-      .select("user_id")
+      .select("user_id, role")
       .eq("workspace_id", workspaceId)
-      .in("role", ["admin", "owner"]);
-    if (!members?.length) return [];
+      .in("role", ["admin", "owner", "editor"]);
+
+    if (memberError) {
+      console.error("[notifications] workspace_members query failed:", memberError.message);
+      return [];
+    }
+    if (!members?.length) {
+      console.warn("[notifications] No members found for workspace:", workspaceId);
+      return [];
+    }
 
     // Look up emails from auth.users via the service-role admin client
     const adminClient = createSupabaseAdminClient();
     const emails: string[] = [];
     for (const member of members) {
-      const { data } = await adminClient.auth.admin.getUserById(member.user_id as string);
+      const { data, error } = await adminClient.auth.admin.getUserById(member.user_id as string);
+      if (error) {
+        console.warn("[notifications] getUserById failed for", member.user_id, error.message);
+        continue;
+      }
       if (data?.user?.email) emails.push(data.user.email);
     }
+    console.log(`[notifications] Resolved ${emails.length} recipient(s) for workspace ${workspaceId}:`, emails);
     return emails;
-  } catch {
+  } catch (err) {
+    console.error("[notifications] getWorkspaceAdminEmails error:", err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -71,7 +85,7 @@ async function safeRun(label: string, fn: () => Promise<void>) {
   try {
     await fn();
   } catch (err) {
-    console.warn(`[notifications] ${label} failed:`, err instanceof Error ? err.message : err);
+    console.error(`[notifications] ${label} failed:`, err instanceof Error ? err.message : err);
   }
 }
 

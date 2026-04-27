@@ -158,9 +158,9 @@ export async function listAlertEvents(workspaceId: string, limit = 100): Promise
  * triggered by CI or an external cron). There is no built-in scheduler.
  * See docs/internal/alerting.md for invocation guidance.
  */
-export async function evaluateAlerts(workspaceId: string): Promise<AlertEvaluationResult> {
+export async function evaluateAlerts(workspaceId: string, ruleIds?: string[]): Promise<AlertEvaluationResult> {
   const rules = await listAlertRules(workspaceId);
-  const enabledRules = rules.filter((r) => r.enabled);
+  const enabledRules = rules.filter((r) => r.enabled && (!ruleIds?.length || ruleIds.includes(r.id)));
   if (enabledRules.length === 0) return { triggered: [], checked: 0 };
 
   const supabase = createVectorBeaAdminClient();

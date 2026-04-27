@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { listAlertRules } from "@/lib/server/alerts";
-import { notifyAlertTriggered } from "@/lib/server/notifications";
+import { sendEmail } from "@/lib/server/email";
+import { alertTriggeredEmail } from "@/lib/server/email-templates";
+import { createSupabaseAdminClient, createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
@@ -27,16 +29,55 @@ export async function POST(request: NextRequest) {
     const rule = rules.find((r) => r.id === body.ruleId);
     if (!rule) return NextResponse.json({ error: "Rule not found" }, { status: 404 });
 
-    await notifyAlertTriggered({
-      workspaceId,
+    // Get workspace name
+    const supabase = createVectorBeaAdminClient();
+    const { data: ws } = await supabase.from("workspaces").select("name").eq("id", workspaceId).maybeSingle();
+    const workspaceName = ws?.name ?? workspaceId;
+
+    // Get recipient emails directly — bypass the notification dispatcher so we can return errors
+    const adminClient = createSupabaseAdminClient();
+    const { data: members } = await supabase
+      .from("workspace_members")
+      .select("user_id")
+      .eq("workspace_id", workspaceId)
+      .in("role", ["admin", "owner", "editor"]);
+
+    const emails: string[] = [];
+    for (const m of members ?? []) {
+      const { data } = await adminClient.auth.admin.getUserById(m.user_id as string);
+      if (data?.user?.email) emails.push(data.user.email);
+    }
+
+    if (emails.length === 0) {
+      return NextResponse.json({
+        ok: false,
+        error: "No recipient emails found. Make sure workspace members exist and have admin/editor roles.",
+        debug: { workspaceId, membersFound: members?.length ?? 0 },
+      }, { status: 422 });
+    }
+
+    const alertsUrl = `${process.env.APP_URL ?? "https://app.vectorbea.app"}/alerts?org=${encodeURIComponent(workspaceId)}`;
+    const tmpl = alertTriggeredEmail({
+      workspaceName,
       ruleName: rule.name,
       metricType: rule.metricType,
-      metricValue: rule.threshold, // Use threshold as the value so the alert reads naturally
+      metricValue: rule.threshold,
       threshold: rule.threshold,
       comparison: rule.comparison,
+      alertsUrl,
     });
 
-    return NextResponse.json({ ok: true, ruleName: rule.name });
+    const results = await Promise.all(emails.map((to) => sendEmail({ ...tmpl, to })));
+    const allOk = results.every((r) => r.ok);
+    const errors = results.filter((r) => !r.ok).map((r) => r.error);
+
+    return NextResponse.json({
+      ok: allOk,
+      ruleName: rule.name,
+      recipients: emails,
+      emailResults: results,
+      ...(errors.length > 0 ? { errors } : {}),
+    });
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to trigger alert");
     return NextResponse.json({ error: safe.message }, { status: safe.status });
