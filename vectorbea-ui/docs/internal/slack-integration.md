@@ -11,6 +11,7 @@ VectorBea supports Slack webhook notifications at the workspace level.
 5. Toggle which events should post to Slack
 6. Save
 
+
 ## API
 
 ```
