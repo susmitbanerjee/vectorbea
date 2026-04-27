@@ -11,6 +11,7 @@ import {
   Copy,
   Eye,
   FileCode2,
+  FlaskConical,
   GitBranch,
   History,
   Loader2,
@@ -18,6 +19,7 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -199,6 +201,16 @@ export function PromptEditor({
   const [rolloutSaving, setRolloutSaving] = useState(false);
   // Set of promptVersionIds that have a ready_for_rollout evaluation verdict
   const [readyVersionIds, setReadyVersionIds] = useState<Set<string>>(new Set());
+
+  type AutoEvalRun = {
+    id: string;
+    status: string;
+    recommendation: string | null;
+    score: number | null;
+    createdAt: string | null;
+    triggerReason: string | null;
+  };
+  const [autoEvalRun, setAutoEvalRun] = useState<AutoEvalRun | null | "loading">("loading");
   const [policy, setPolicy] = useState<PromptReleasePolicy | null>(null);
   const [policySaving, setPolicySaving] = useState(false);
   const [rolloutComplete, setRolloutComplete] = useState<{
@@ -254,14 +266,46 @@ export function PromptEditor({
         setRolloutDist(dist as PromptRolloutDistribution);
       }
       // Build set of version IDs that have at least one ready_for_rollout run
+      // Also find latest auto-eval run for the current prompt version
       if (Array.isArray(runs)) {
         const ready = new Set<string>();
-        for (const run of runs as Array<{ candidatePromptVersionId?: string; aggregate?: { recommendation?: string } }>) {
+        type EvalRun = {
+          id: string;
+          candidatePromptVersionId?: string;
+          aggregate?: { recommendation?: string; avgScore?: number | null };
+          status?: string;
+          createdAt?: string | null;
+          triggerReason?: string | null;
+        };
+        const typedRuns = runs as EvalRun[];
+        for (const run of typedRuns) {
           if (run.candidatePromptVersionId && run.aggregate?.recommendation === "ready_for_rollout") {
             ready.add(run.candidatePromptVersionId);
           }
         }
         setReadyVersionIds(ready);
+
+        // Find the latest auto-eval run for the currently displayed version
+        const versionRuns = typedRuns
+          .filter((r) => r.candidatePromptVersionId === prompt.promptVersionId)
+          .sort((a, b) => {
+            const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return tb - ta;
+          });
+        const latest = versionRuns[0] ?? null;
+        setAutoEvalRun(
+          latest
+            ? {
+                id: latest.id,
+                status: latest.status ?? "unknown",
+                recommendation: latest.aggregate?.recommendation ?? null,
+                score: latest.aggregate?.avgScore ?? null,
+                createdAt: latest.createdAt ?? null,
+                triggerReason: latest.triggerReason ?? null,
+              }
+            : null,
+        );
       }
       if (pol && !pol.error) setPolicy(pol as PromptReleasePolicy);
     }).catch(() => {});
@@ -1297,6 +1341,159 @@ export function PromptEditor({
                 <Lock className="h-4 w-4" />
                 Draft prompts are hidden from runtime import paths.
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Auto-eval Status ── */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-primary" />
+              Auto-evaluation
+            </CardTitle>
+            <CardDescription>
+              Latest evaluation run for{" "}
+              <span className="font-medium text-foreground">
+                {currentPrompt.versionTag}
+              </span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {autoEvalRun === "loading" ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Checking…
+              </div>
+            ) : autoEvalRun === null ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                    <Circle className="h-2.5 w-2.5" />
+                    No evaluation yet
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  No evaluation has been run for this version. Auto-eval triggers
+                  when a version is promoted to{" "}
+                  <strong className="text-foreground">candidate</strong> status
+                  and a linked dataset exists.
+                </p>
+                <a
+                  href={`/evaluations?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
+                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  Run an evaluation
+                </a>
+              </div>
+            ) : (
+              (() => {
+                const rec = autoEvalRun.recommendation;
+                const status = autoEvalRun.status;
+
+                type BadgeShape = {
+                  label: string;
+                  icon: React.ReactNode;
+                  cls: string;
+                };
+
+                const badge: BadgeShape =
+                  status === "running" || status === "pending"
+                    ? {
+                        label: status === "running" ? "Running" : "Queued",
+                        icon: <Loader2 className="h-2.5 w-2.5 animate-spin" />,
+                        cls: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+                      }
+                    : status === "failed"
+                      ? {
+                          label: "Run failed",
+                          icon: <XCircle className="h-2.5 w-2.5" />,
+                          cls: "border-red-500/40 bg-red-500/10 text-red-400",
+                        }
+                      : rec === "ready_for_rollout"
+                        ? {
+                            label: "Passed",
+                            icon: <CheckCircle2 className="h-2.5 w-2.5" />,
+                            cls: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+                          }
+                        : rec === "needs_improvement"
+                          ? {
+                              label: "Needs improvement",
+                              icon: <AlertTriangle className="h-2.5 w-2.5" />,
+                              cls: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+                            }
+                          : rec === "blocked"
+                            ? {
+                                label: "Blocked",
+                                icon: <XCircle className="h-2.5 w-2.5" />,
+                                cls: "border-red-500/40 bg-red-500/10 text-red-400",
+                              }
+                            : {
+                                label: rec?.replaceAll("_", " ") ?? "Unknown",
+                                icon: <Circle className="h-2.5 w-2.5" />,
+                                cls: "border-border bg-muted/60 text-muted-foreground",
+                              };
+
+                const isStale =
+                  autoEvalRun.createdAt &&
+                  Date.now() - new Date(autoEvalRun.createdAt).getTime() >
+                    7 * 24 * 60 * 60 * 1000;
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${badge.cls}`}
+                      >
+                        {badge.icon}
+                        {badge.label}
+                      </span>
+                      {isStale && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/8 px-2 py-0.5 text-[10px] text-amber-400">
+                          <Clock3 className="h-2.5 w-2.5" />
+                          Stale
+                        </span>
+                      )}
+                    </div>
+
+                    <dl className="space-y-1.5 text-xs">
+                      {autoEvalRun.score !== null && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Score</dt>
+                          <dd className="font-medium tabular-nums">
+                            {Math.round(autoEvalRun.score * 100)}%
+                          </dd>
+                        </div>
+                      )}
+                      {autoEvalRun.triggerReason && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Trigger</dt>
+                          <dd className="font-medium capitalize">
+                            {autoEvalRun.triggerReason.replaceAll("_", " ")}
+                          </dd>
+                        </div>
+                      )}
+                      {autoEvalRun.createdAt && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Run time</dt>
+                          <dd className="text-muted-foreground">
+                            {relativeTime(autoEvalRun.createdAt)}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    <a
+                      href={`/evaluations/${encodeURIComponent(autoEvalRun.id)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      View full report
+                    </a>
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>

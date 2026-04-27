@@ -114,9 +114,20 @@ export async function getWorkspaceUsage(workspaceId: string) {
 
 export async function assertQuotaAvailable(workspaceId: string, usageType: UsageType, amount = 1) {
   const normalizedAmount = Math.max(1, Math.floor(amount));
-  const snapshot = await getWorkspaceUsage(workspaceId);
-  const used = snapshot.usage[usageType] ?? 0;
-  const limit = snapshot.limits[usageType];
+
+  // Get plan tier to look up raw limits
+  const planLimitsInfo = await getWorkspacePlanLimits(workspaceId);
+  const rawLimits = USAGE_LIMITS[planLimitsInfo.planTier];
+  const limit = rawLimits[usageType];
+
+  // For audit-log-tracked usage types we can compute current usage; for others we skip the count
+  const auditTracked: UsageType[] = ["runtime_traces", "replay_runs", "evaluation_runs"];
+  let used = 0;
+  if (auditTracked.includes(usageType)) {
+    const snapshot = await getWorkspaceUsage(workspaceId);
+    const snapshotUsage = snapshot.usage as Record<string, number | undefined>;
+    used = snapshotUsage[usageType] ?? 0;
+  }
 
   if (limit !== null && used + normalizedAmount > limit) {
     throw new Error(`Quota exceeded for ${usageType}. Used ${used}/${limit} this month.`);

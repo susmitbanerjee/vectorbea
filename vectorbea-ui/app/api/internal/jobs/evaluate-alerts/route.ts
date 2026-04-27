@@ -14,8 +14,8 @@ export const maxDuration = 120;
  * Protected by INTERNAL_JOB_TOKEN.
  *
  * Cron: every 5 minutes
- *   Vercel:   { path: "/api/internal/jobs/evaluate-alerts", schedule: "*/5 * * * *" }
- *   Linux:    */5 * * * *  curl -s -X POST -H "x-internal-job-token: $TOKEN" $APP_URL/api/internal/jobs/evaluate-alerts
+ *   Vercel:   { path: "/api/internal/jobs/evaluate-alerts", schedule: "* /5 * * * *" }
+ *   Linux:    curl every 5 min: curl -s -X POST -H "x-internal-job-token: $TOKEN" $APP_URL/api/internal/jobs/evaluate-alerts
  */
 export async function POST(request: NextRequest) {
   const auth = assertInternalToken(request);

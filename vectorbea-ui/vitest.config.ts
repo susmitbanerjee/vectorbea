@@ -7,6 +7,9 @@ export default defineConfig({
     include: ["__tests__/**/*.test.ts"],
     exclude: ["node_modules", ".next"],
     globals: true,
+    typecheck: {
+      tsconfig: "./tsconfig.test.json",
+    },
   },
   resolve: {
     alias: {

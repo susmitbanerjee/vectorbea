@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { acceptInvitation } from "@/lib/server/invitations";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { createSupabaseAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     // Get authenticated user from session cookie
-    const supabase = createVectorBeaAdminClient();
+    const supabase = createSupabaseAdminClient();
     const authHeader = request.headers.get("authorization");
     const jwt = authHeader?.replace("Bearer ", "") ?? "";
 

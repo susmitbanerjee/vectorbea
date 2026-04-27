@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CheckCircle2, Loader2, XCircle, LogIn } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
-import { Button } from "@/components/ui/button";
 
 type State =
   | { phase: "loading" }
@@ -155,12 +154,13 @@ export default function AcceptInvitePage() {
             <p className="text-sm text-muted-foreground">
               Sign in to your VectorBea account to accept this workspace invitation. You&apos;ll be redirected back automatically.
             </p>
-            <Button className="w-full gap-2" asChild>
-              <Link href={`/login?next=${encodeURIComponent(`/auth/accept-invite?token=${state.token}`)}`}>
-                <LogIn className="h-4 w-4" />
-                Sign in to continue
-              </Link>
-            </Button>
+            <Link
+              href={`/login?next=${encodeURIComponent(`/auth/accept-invite?token=${state.token}`)}`}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow hover:bg-primary/90 transition-colors"
+            >
+              <LogIn className="h-4 w-4" />
+              Sign in to continue
+            </Link>
             <p className="text-xs text-muted-foreground">
               Don&apos;t have an account?{" "}
               <Link href={`/signup?next=${encodeURIComponent(`/auth/accept-invite?token=${state.token}`)}`} className="text-primary hover:underline">
@@ -204,9 +204,12 @@ export default function AcceptInvitePage() {
               Possible reasons: the link has expired, was already accepted, or was revoked.
               Contact the person who invited you to request a new invitation.
             </p>
-            <Button variant="outline" className="w-full" asChild>
-              <Link href="/">Go to dashboard</Link>
-            </Button>
+            <Link
+              href="/"
+              className="inline-flex w-full items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold shadow-sm hover:bg-accent/40 transition-colors"
+            >
+              Go to dashboard
+            </Link>
           </>
         )}
       </div>

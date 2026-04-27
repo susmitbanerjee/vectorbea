@@ -28,7 +28,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useWorkspace } from "@/lib/workspace-context";
-import { toast } from "sonner";
 
 type MemberRole = "admin" | "editor" | "viewer";
 

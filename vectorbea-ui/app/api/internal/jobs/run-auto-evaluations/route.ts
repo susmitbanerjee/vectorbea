@@ -16,8 +16,8 @@ export const maxDuration = 300;
  * Body (optional): { workspaceId: string }
  *
  * Cron: every 30 minutes
- *   Vercel:   { path: "/api/internal/jobs/run-auto-evaluations", schedule: "*/30 * * * *" }
- *   Linux:    */30 * * * *  curl -s -X POST -H "x-internal-job-token: $TOKEN" $APP_URL/api/internal/jobs/run-auto-evaluations
+ *   Vercel:   { path: "/api/internal/jobs/run-auto-evaluations", schedule: "* /30 * * * *" }
+ *   Linux:    curl every 30 min: curl -s -X POST -H "x-internal-job-token: $TOKEN" $APP_URL/api/internal/jobs/run-auto-evaluations
  */
 export async function POST(request: NextRequest) {
   const auth = assertInternalToken(request);
