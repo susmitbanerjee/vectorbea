@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Crown, Eye, Mail, Plus, Shield, UserPlus } from "lucide-react";
+import { CheckCircle2, Clock, Crown, Eye, Mail, Plus, Shield, Trash2, UserPlus, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/layout/app-header";
@@ -28,8 +28,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useWorkspace } from "@/lib/workspace-context";
+import { toast } from "sonner";
 
 type MemberRole = "admin" | "editor" | "viewer";
+
+interface PendingInvitation {
+  id: string;
+  email: string;
+  role: MemberRole;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
 
 interface Member {
   id: string;
@@ -57,13 +68,20 @@ export default function MembersPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("editor");
   const [inviting, setInviting] = useState(false);
+  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
     setLoadingMembers(true);
-    fetch(`/api/workspaces/${activeWorkspaceId}/members`)
-      .then((r) => r.json())
-      .then((data: Member[]) => { if (Array.isArray(data)) setMembers(data); })
+    Promise.all([
+      fetch(`/api/workspaces/${activeWorkspaceId}/members`).then((r) => r.json()),
+      fetch(`/api/workspaces/${activeWorkspaceId}/invitations`).then((r) => r.json()).catch(() => []),
+    ])
+      .then(([membersData, invitesData]: [unknown, unknown]) => {
+        if (Array.isArray(membersData)) setMembers(membersData as Member[]);
+        if (Array.isArray(invitesData)) setInvitations(invitesData as PendingInvitation[]);
+      })
       .catch(() => {})
       .finally(() => setLoadingMembers(false));
   }, [activeWorkspaceId]);
@@ -80,43 +98,55 @@ export default function MembersPage() {
   const handleInvite = async () => {
     const normalizedEmail = inviteEmail.trim().toLowerCase();
     if (seatLimitReached) {
-      toast.error(`Seat limit reached (${seatsUsed}/${maxSeats}). Upgrade the plan to add more developers.`);
+      toast.error(`Seat limit reached (${seatsUsed}/${maxSeats}). Upgrade to add more members.`);
       return;
     }
-    if (!normalizedEmail) {
-      toast.error("Email is required.");
+    if (!normalizedEmail) { toast.error("Email is required."); return; }
+    if (!normalizedEmail.includes("@")) { toast.error("Enter a valid email address."); return; }
+    if (members.some((m) => m.email.toLowerCase() === normalizedEmail)) {
+      toast.error("That user is already a member of this workspace.");
       return;
     }
-    if (members.some((member) => member.email.toLowerCase() === normalizedEmail)) {
-      toast.error("That user is already in this workspace.");
+    if (invitations.some((i) => i.email === normalizedEmail && !i.acceptedAt && !i.revokedAt && new Date(i.expiresAt) > new Date())) {
+      toast.error("A pending invitation already exists for this email.");
       return;
     }
+    if (!activeWorkspaceId) return;
 
     setInviting(true);
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const res = await fetch(`/api/workspaces/${activeWorkspaceId}/invitations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail, role: inviteRole }),
+      });
+      const json = await res.json() as PendingInvitation & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to send invitation");
+      setInvitations((prev) => [json, ...prev]);
+      toast.success(`Invitation sent to ${normalizedEmail}`);
+      setInviteEmail("");
+      setInviteRole("editor");
+      setInviteOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to send invitation");
+    } finally {
+      setInviting(false);
+    }
+  };
 
-    const localPart = normalizedEmail.split("@")[0] ?? normalizedEmail;
-    const displayName = localPart
-      .split(/[._-]/)
-      .filter(Boolean)
-      .map((part) => part[0]?.toUpperCase() + part.slice(1))
-      .join(" ");
-
-    setMembers((current) => [
-      {
-        id: `${Date.now()}`,
-        email: normalizedEmail,
-        displayName: displayName || normalizedEmail,
-        role: inviteRole,
-        joinedAt: new Date().toISOString(),
-      },
-      ...current,
-    ]);
-    toast.success(`Invitation sent to ${normalizedEmail}`);
-    setInviteEmail("");
-    setInviteRole("editor");
-    setInviteOpen(false);
-    setInviting(false);
+  const handleRevoke = async (invitationId: string) => {
+    if (!activeWorkspaceId || revokingId) return;
+    setRevokingId(invitationId);
+    try {
+      const res = await fetch(`/api/workspaces/${activeWorkspaceId}/invitations?invitationId=${encodeURIComponent(invitationId)}`, { method: "DELETE" });
+      if (!res.ok) { const j = await res.json() as { error?: string }; throw new Error(j.error ?? "Failed to revoke"); }
+      setInvitations((prev) => prev.filter((i) => i.id !== invitationId));
+      toast.success("Invitation revoked.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to revoke invitation");
+    } finally {
+      setRevokingId(null);
+    }
   };
 
   return (
@@ -337,6 +367,69 @@ export default function MembersPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Pending invitations */}
+        {invitations.length > 0 && (
+          <Card className="animate-slide-up stagger-2">
+            <CardHeader>
+              <CardTitle>Pending invitations</CardTitle>
+              <CardDescription>{invitations.filter((i) => !i.acceptedAt && !i.revokedAt && new Date(i.expiresAt) > new Date()).length} pending</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Expires</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {invitations.map((inv) => {
+                      const expired = !inv.acceptedAt && !inv.revokedAt && new Date(inv.expiresAt) <= new Date();
+                      const accepted = !!inv.acceptedAt;
+                      const revoked = !!inv.revokedAt;
+                      const isPending = !accepted && !revoked && !expired;
+                      return (
+                        <TableRow key={inv.id}>
+                          <TableCell className="text-sm font-medium">{inv.email}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="capitalize text-[10px]">{inv.role}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {accepted && <span className="flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3 w-3" />Accepted</span>}
+                            {revoked && <span className="flex items-center gap-1 text-xs text-muted-foreground"><XCircle className="h-3 w-3" />Revoked</span>}
+                            {expired && <span className="flex items-center gap-1 text-xs text-amber-400"><Clock className="h-3 w-3" />Expired</span>}
+                            {isPending && <span className="flex items-center gap-1 text-xs text-blue-400"><Clock className="h-3 w-3" />Pending</span>}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {new Date(inv.expiresAt).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => void handleRevoke(inv.id)}
+                                disabled={revokingId === inv.id}
+                                className="rounded p-1 text-muted-foreground hover:text-red-400 disabled:opacity-40 transition-colors"
+                                title="Revoke invitation"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
