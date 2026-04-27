@@ -2,23 +2,5 @@
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
   "outputDirectory": ".next",
-  "framework": "nextjs",
-  "crons": [
-    {
-      "path": "/api/internal/jobs/run-due-regressions",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/internal/jobs/evaluate-alerts",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/internal/jobs/aggregate-metrics",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/internal/jobs/run-auto-evaluations",
-      "schedule": "*/30 * * * *"
-    }
-  ]
+  "framework": "nextjs"
 }
