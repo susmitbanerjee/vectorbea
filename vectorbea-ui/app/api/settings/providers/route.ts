@@ -35,7 +35,20 @@ export async function GET(request: NextRequest) {
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return NextResponse.json(data ?? []);
+    // Map snake_case DB columns → camelCase ProviderConfig shape
+    const mapped = (data ?? []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      workspaceId: row.workspace_id,
+      providerType: row.provider_type,
+      displayName: row.display_name,
+      enabled: row.enabled,
+      defaultModel: row.default_model ?? null,
+      baseUrl: row.base_url ?? null,
+      maskedKey: row.masked_key,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+    return NextResponse.json(mapped);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
@@ -98,7 +111,19 @@ export async function POST(request: NextRequest) {
       .select("id, workspace_id, provider_type, display_name, enabled, default_model, base_url, masked_key, created_at, updated_at")
       .single();
     if (error) throw new Error(error.message);
-    return NextResponse.json(data, { status: 201 });
+    const row = data as Record<string, unknown>;
+    return NextResponse.json({
+      id: row.id,
+      workspaceId: row.workspace_id,
+      providerType: row.provider_type,
+      displayName: row.display_name,
+      enabled: row.enabled,
+      defaultModel: row.default_model ?? null,
+      baseUrl: row.base_url ?? null,
+      maskedKey: row.masked_key,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }

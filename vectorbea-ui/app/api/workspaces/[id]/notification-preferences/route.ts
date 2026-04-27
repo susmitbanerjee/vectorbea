@@ -18,9 +18,13 @@ export async function GET(
     if (auth.error) return auth.error;
     const prefs = await getWorkspaceNotificationPrefs(id);
     return NextResponse.json(prefs);
-  } catch (error) {
-    const safe = toSafeApiError(error, "Failed to get notification preferences");
-    return NextResponse.json({ error: safe.message }, { status: safe.status });
+  } catch {
+    // Table may not exist yet — return safe defaults
+    return NextResponse.json({
+      emailEnabled: true, slackEnabled: false,
+      events: { alerts: true, regressions: true, evaluations: true, rollout: true, quota: true },
+      slackEvents: { alerts: true, regressions: true, evaluations: false, rollout: true, quota: false },
+    });
   }
 }
 

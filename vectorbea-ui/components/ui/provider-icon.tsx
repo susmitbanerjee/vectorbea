@@ -69,10 +69,10 @@ export function ProviderIcon({
   providerType,
   className,
 }: {
-  providerType: string;
+  providerType: string | null | undefined;
   className?: string;
 }) {
-  const t = providerType.toLowerCase();
+  const t = (providerType ?? "").toLowerCase();
   if (t.includes("openai") || t === "open_ai") return <OpenAIIcon className={className} />;
   if (t.includes("anthropic") || t.includes("claude")) return <AnthropicIcon className={className} />;
   if (t.includes("google") || t.includes("gemini") || t.includes("vertex")) return <GoogleIcon className={className} />;
