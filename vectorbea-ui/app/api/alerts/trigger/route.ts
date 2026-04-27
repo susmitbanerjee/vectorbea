@@ -36,23 +36,35 @@ export async function POST(request: NextRequest) {
 
     // Get recipient emails directly — bypass the notification dispatcher so we can return errors
     const adminClient = createSupabaseAdminClient();
-    const { data: members } = await supabase
+    const { data: members, error: membersError } = await supabase
       .from("workspace_members")
-      .select("user_id")
-      .eq("workspace_id", workspaceId)
-      .in("role", ["admin", "owner", "editor"]);
+      .select("user_id, role")
+      .eq("workspace_id", workspaceId);
+
+    if (membersError) {
+      console.error("[alerts/trigger] workspace_members query error:", membersError.message);
+    }
+    console.log(`[alerts/trigger] workspace_members found: ${members?.length ?? 0}`, members?.map(m => ({ user_id: m.user_id, role: m.role })));
 
     const emails: string[] = [];
     for (const m of members ?? []) {
-      const { data } = await adminClient.auth.admin.getUserById(m.user_id as string);
-      if (data?.user?.email) emails.push(data.user.email);
+      const { data, error: userError } = await adminClient.auth.admin.getUserById(m.user_id as string);
+      if (userError) {
+        console.error("[alerts/trigger] getUserById failed for", m.user_id, userError.message);
+        continue;
+      }
+      if (data?.user?.email) {
+        emails.push(data.user.email);
+      } else {
+        console.warn("[alerts/trigger] No email for user", m.user_id);
+      }
     }
 
     if (emails.length === 0) {
       return NextResponse.json({
         ok: false,
-        error: "No recipient emails found. Make sure workspace members exist and have admin/editor roles.",
-        debug: { workspaceId, membersFound: members?.length ?? 0 },
+        error: "No recipient emails found. Check Vercel logs for details.",
+        debug: { workspaceId, membersFound: members?.length ?? 0, membersError: membersError?.message ?? null },
       }, { status: 422 });
     }
 
