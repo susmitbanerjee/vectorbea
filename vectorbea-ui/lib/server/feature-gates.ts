@@ -9,7 +9,11 @@ export type FeatureKey =
   | "rollout"
   | "alerts"
   | "metrics_dashboard"
-  | "enterprise_gateway";
+  | "enterprise_gateway"
+  | "slack_notifications"
+  | "email_notifications"
+  | "team_invitations"
+  | "auto_evaluations";
 
 type FeaturePolicy = Record<PlanTier, boolean>;
 
@@ -50,6 +54,30 @@ const FEATURE_POLICY: Record<FeatureKey, FeaturePolicy> = {
     pro: false,
     enterprise: true,
   },
+  slack_notifications: {
+    free: false,
+    team: true,
+    pro: true,
+    enterprise: true,
+  },
+  email_notifications: {
+    free: false,
+    team: true,
+    pro: true,
+    enterprise: true,
+  },
+  team_invitations: {
+    free: true,
+    team: true,
+    pro: true,
+    enterprise: true,
+  },
+  auto_evaluations: {
+    free: false,
+    team: true,
+    pro: true,
+    enterprise: true,
+  },
 };
 
 function labelFor(feature: FeatureKey) {
@@ -66,6 +94,14 @@ function labelFor(feature: FeatureKey) {
       return "Metrics dashboard";
     case "enterprise_gateway":
       return "Enterprise gateway execution";
+    case "slack_notifications":
+      return "Slack notifications";
+    case "email_notifications":
+      return "Email notifications";
+    case "team_invitations":
+      return "Team invitations";
+    case "auto_evaluations":
+      return "Automatic evaluations";
     default:
       return "Feature";
   }

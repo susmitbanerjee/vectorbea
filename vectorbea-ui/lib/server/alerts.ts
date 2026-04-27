@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import type { AlertComparison, AlertEvent, AlertEvaluationResult, AlertMetricType, AlertRule } from "@/lib/api";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { getWorkspaceMetrics } from "@/lib/server/metrics";
+import { notifyAlertTriggered } from "@/lib/server/notifications";
 
 type AlertRuleRow = {
   id: string;
@@ -203,7 +204,17 @@ export async function evaluateAlerts(workspaceId: string): Promise<AlertEvaluati
           .select("*")
           .single();
         if (!eventError && eventData) {
-          triggered.push(toEventView(eventData as AlertEventRow));
+          const ev = toEventView(eventData as AlertEventRow);
+          triggered.push(ev);
+          // Fire-and-forget notification
+          void notifyAlertTriggered({
+            workspaceId,
+            ruleName: rule.name,
+            metricType: rule.metricType,
+            metricValue: metricValue,
+            threshold: rule.threshold,
+            comparison: rule.comparison,
+          });
         }
       }
     }

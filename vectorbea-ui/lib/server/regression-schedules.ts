@@ -351,6 +351,7 @@ export async function runRegressionSchedule(args: {
     return { evaluationRunId: run.id, runLog };
   } catch (error) {
     const now = new Date().toISOString();
+    const errorReason = error instanceof Error ? error.message : "Regression schedule failed.";
     const runLog: RegressionScheduleRunLog = {
       runId,
       status: "failed",
@@ -361,7 +362,7 @@ export async function runRegressionSchedule(args: {
       evaluationRunId: null,
       replayCount: 0,
       failedTraceIds: [],
-      errorReason: error instanceof Error ? error.message : "Regression schedule failed.",
+      errorReason,
       startedAt,
       completedAt: now,
     };
@@ -377,6 +378,18 @@ export async function runRegressionSchedule(args: {
       })
       .eq("workspace_id", args.workspaceId)
       .eq("id", args.scheduleId);
+
+    // Notify on failure (fire-and-forget)
+    import("@/lib/server/notifications").then(({ notifyRegressionFailed }) => {
+      void notifyRegressionFailed({
+        workspaceId: args.workspaceId,
+        scheduleName: schedule?.name ?? args.scheduleId,
+        promptName: schedule?.promptName ?? null,
+        reason: errorReason,
+        runId: null,
+      });
+    }).catch(() => { /* non-blocking */ });
+
     throw error;
   }
 }

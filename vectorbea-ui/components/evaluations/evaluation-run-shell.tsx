@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EvidenceDialog } from "@/components/evaluations/evidence-dialog";
 import { CategoryBreakdown, FailureExplorer } from "@/components/evaluations/failure-explorer";
+import { EvaluationLabLoader } from "@/components/evaluations/evaluation-lab-loader";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import type { TraceSetEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -193,6 +195,132 @@ function RunningPanel({ run }: { run: TraceSetEvaluationRunView | null }) {
   );
 }
 
+// ─── Multi-provider comparison panel ─────────────────────────────────────────
+
+type ModelResultEntry = NonNullable<TraceSetEvaluationRunView["results"][number]["modelResults"]>[number];
+
+interface ProviderStat {
+  provider: string;
+  model: string;
+  totalItems: number;
+  passedItems: number;
+  avgScore: number | null;
+  avgSimilarity: number | null;
+  avgLatencyMs: number | null;
+}
+
+function aggregateProviderStats(results: TraceSetEvaluationRunView["results"]): ProviderStat[] {
+  const map = new Map<string, { scores: number[]; similarities: number[]; latencies: number[]; passed: number; total: number; model: string }>();
+
+  for (const result of results) {
+    const entries: ModelResultEntry[] = result.modelResults ?? [];
+    for (const mr of entries) {
+      const key = `${mr.provider}/${mr.model}`;
+      if (!map.has(key)) map.set(key, { scores: [], similarities: [], latencies: [], passed: 0, total: 0, model: mr.model });
+      const stat = map.get(key)!;
+      stat.total++;
+      if (mr.status === "success" || (mr.score != null && mr.score >= 0.5)) stat.passed++;
+      if (mr.score != null) stat.scores.push(mr.score);
+      if (mr.similarityScore != null) stat.similarities.push(mr.similarityScore);
+      if (mr.latencyMs != null) stat.latencies.push(mr.latencyMs);
+    }
+  }
+
+  const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+  return Array.from(map.entries()).map(([key, v]) => ({
+    provider: key.split("/")[0]!,
+    model: v.model,
+    totalItems: v.total,
+    passedItems: v.passed,
+    avgScore: avg(v.scores),
+    avgSimilarity: avg(v.similarities),
+    avgLatencyMs: avg(v.latencies),
+  })).sort((a, b) => (b.avgScore ?? 0) - (a.avgScore ?? 0));
+}
+
+function MultiProviderPanel({ results }: { results: TraceSetEvaluationRunView["results"] }) {
+  const stats = aggregateProviderStats(results);
+  if (stats.length < 2) return null;
+
+  const best = stats[0];
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          Multi-provider comparison
+          <span className="ml-2 normal-case font-normal text-[10px] text-primary">{stats.length} providers</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border/60">
+                <th className="pb-2 pr-3 text-left font-semibold text-muted-foreground">Provider / model</th>
+                <th className="pb-2 px-3 text-right font-semibold text-muted-foreground">Pass rate</th>
+                <th className="pb-2 px-3 text-right font-semibold text-muted-foreground">Avg score</th>
+                <th className="pb-2 px-3 text-right font-semibold text-muted-foreground hidden sm:table-cell">Similarity</th>
+                <th className="pb-2 pl-3 text-right font-semibold text-muted-foreground hidden md:table-cell">Latency</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.map((s, idx) => {
+                const passRate = s.totalItems > 0 ? Math.round((s.passedItems / s.totalItems) * 100) : null;
+                const isBest = idx === 0;
+                return (
+                  <tr key={`${s.provider}/${s.model}`} className={`border-b border-border/30 last:border-0 ${isBest ? "bg-emerald-500/5" : ""}`}>
+                    <td className="py-2.5 pr-3">
+                      <div className="flex items-center gap-2">
+                        <ProviderIcon providerType={s.provider} className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <div>
+                          <div className="font-medium capitalize">{s.provider}</div>
+                          <div className="text-[10px] text-muted-foreground">{s.model}</div>
+                        </div>
+                        {isBest && (
+                          <span className="ml-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400 uppercase tracking-wider">
+                            Best
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right tabular-nums">
+                      <div className={`font-bold ${passRate == null ? "text-muted-foreground" : passRate >= 78 ? "text-emerald-400" : passRate >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                        {passRate != null ? `${passRate}%` : "—"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{s.passedItems}/{s.totalItems}</div>
+                    </td>
+                    <td className={`py-2.5 px-3 text-right tabular-nums font-bold ${scoreColor(s.avgScore)}`}>
+                      {s.avgScore != null ? `${Math.round(s.avgScore * 100)}%` : "—"}
+                    </td>
+                    <td className="hidden sm:table-cell py-2.5 px-3 text-right tabular-nums text-muted-foreground">
+                      {s.avgSimilarity != null ? `${Math.round(s.avgSimilarity * 100)}%` : "—"}
+                    </td>
+                    <td className="hidden md:table-cell py-2.5 pl-3 text-right tabular-nums text-muted-foreground">
+                      {s.avgLatencyMs != null ? `${Math.round(s.avgLatencyMs)}ms` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {best && (
+          <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300 flex items-center gap-2">
+            <ProviderIcon providerType={best.provider} className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              <span className="font-semibold capitalize">{best.provider}</span>{" "}
+              ({best.model}) achieved the highest average score across this evaluation run.
+            </span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Per-item results table ───────────────────────────────────────────────────
 
 function ResultsTable({
@@ -339,7 +467,12 @@ function ResultsTable({
                     {result.confidence != null ? `${pct(result.confidence)}%` : "—"}
                   </td>
                   <td className="hidden xl:table-cell py-2.5 px-2 text-muted-foreground">
-                    {result.provider ? `${result.provider}/${result.model ?? "?"}` : "—"}
+                    {result.provider ? (
+                      <span className="flex items-center gap-1.5">
+                        <ProviderIcon providerType={result.provider} className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{result.provider}/{result.model ?? "?"}</span>
+                      </span>
+                    ) : "—"}
                   </td>
                   <td className="py-2.5 pl-2 pr-4 text-right">
                     <button
@@ -630,10 +763,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
         )}
 
         {(loading && !run) ? (
-          <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-            Loading evaluation run…
-          </div>
+          <EvaluationLabLoader phase={0} />
         ) : isRunning ? (
           <RunningPanel run={run} />
         ) : !run ? null : (
@@ -746,6 +876,9 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                     }}
                   />
                 )}
+
+                {/* Multi-provider comparison — shown when 2+ providers ran */}
+                <MultiProviderPanel results={run.results} />
 
                 {/* Per-item results */}
                 <Card>

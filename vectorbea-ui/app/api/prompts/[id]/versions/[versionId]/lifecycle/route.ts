@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { triggerAutoEvaluation } from "@/lib/server/auto-evaluations";
 
 const ALLOWED_STATUSES = ["draft", "candidate", "active", "deprecated", "blocked"] as const;
 type LifecycleStatus = (typeof ALLOWED_STATUSES)[number];
@@ -43,7 +44,21 @@ export async function PATCH(
       .single();
 
     if (error) throw new Error(error.message);
-    return NextResponse.json(data);
+
+    // Trigger auto-evaluation when version is marked candidate
+    if (body.status === "candidate") {
+      void triggerAutoEvaluation({
+        workspaceId,
+        promptId,
+        promptVersionId: versionId,
+        trigger: "candidate_promoted",
+        force: false,
+      }).catch((err: unknown) => {
+        console.warn("[lifecycle] Auto-eval trigger failed:", err instanceof Error ? err.message : err);
+      });
+    }
+
+    return NextResponse.json({ ...data, autoEvalTriggered: body.status === "candidate" });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }

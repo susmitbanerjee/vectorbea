@@ -6,7 +6,13 @@ import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { getWorkspacePlanLimits } from "@/lib/server/workspace-limits";
 
-export type UsageType = "runtime_traces" | "replay_runs" | "evaluation_runs";
+export type UsageType =
+  | "runtime_traces"
+  | "replay_runs"
+  | "evaluation_runs"
+  | "regression_runs"
+  | "alert_rules"
+  | "team_seats";
 
 type UsagePlanLimits = Record<PlanTier, Record<UsageType, number | null>>;
 
@@ -15,21 +21,33 @@ const USAGE_LIMITS: UsagePlanLimits = {
     runtime_traces: 5_000,
     replay_runs: 250,
     evaluation_runs: 20,
+    regression_runs: 0,
+    alert_rules: 0,
+    team_seats: 3,
   },
   team: {
     runtime_traces: 100_000,
     replay_runs: 10_000,
     evaluation_runs: 1_000,
+    regression_runs: 100,
+    alert_rules: 20,
+    team_seats: 15,
   },
   pro: {
     runtime_traces: 250_000,
     replay_runs: 25_000,
     evaluation_runs: 2_500,
+    regression_runs: 500,
+    alert_rules: 50,
+    team_seats: 50,
   },
   enterprise: {
     runtime_traces: null,
     replay_runs: null,
     evaluation_runs: null,
+    regression_runs: null,
+    alert_rules: null,
+    team_seats: null,
   },
 };
 

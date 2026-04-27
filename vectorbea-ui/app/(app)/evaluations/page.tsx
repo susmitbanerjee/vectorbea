@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, ChevronDown, Database, Loader2, PlayCircle, Search, X } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -475,12 +476,13 @@ export default function EvaluationsPage() {
                           onClick={() => setSelectedProviderIds((prev) =>
                             selected ? prev.filter((id) => id !== p.id) : [...prev, p.id]
                           )}
-                          className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                             selected
                               ? "border-primary bg-primary/10 text-primary"
                               : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40"
                           }`}
                         >
+                          <ProviderIcon providerType={p.providerType} className="h-3.5 w-3.5 shrink-0" />
                           {p.displayName}
                           {p.defaultModel && <span className="ml-1 text-[10px] opacity-60">{p.defaultModel}</span>}
                         </button>

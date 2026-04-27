@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, Loader2, TrendingDown, TrendingUp, XCircle } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
+import { EvaluationLabLoader } from "@/components/evaluations/evaluation-lab-loader";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TraceSetEvaluationRunView } from "@/lib/api";
@@ -230,7 +232,12 @@ export default function ComparePage() {
                     <div className="text-xs text-muted-foreground space-y-0.5">
                       <p><span className="font-medium text-foreground">{run.promptName}</span> @ {run.candidateVersionTag}</p>
                       {run.datasetName && <p>Dataset: {run.datasetName}</p>}
-                      <p>{run.results[0]?.provider ?? "—"} / {run.results[0]?.model ?? "—"}</p>
+                      {run.results[0]?.provider && (
+                        <p className="flex items-center gap-1.5">
+                          <ProviderIcon providerType={run.results[0].provider} className="h-3.5 w-3.5 shrink-0" />
+                          {run.results[0].provider} / {run.results[0].model ?? "—"}
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardContent>
@@ -284,15 +291,21 @@ export default function ComparePage() {
                       <th className="py-2.5 pl-4 pr-2 text-left text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground w-40">Metric</th>
                       <th className="py-2.5 px-2 text-center text-xs font-semibold text-muted-foreground">
                         {left.candidateVersionTag ?? "Run A"}
-                        <div className="text-[10px] font-normal text-muted-foreground/60 truncate max-w-[120px]">
-                          {left.results[0]?.provider ?? "—"}
-                        </div>
+                        {left.results[0]?.provider && (
+                          <div className="flex items-center justify-center gap-1 text-[10px] font-normal text-muted-foreground/60 truncate max-w-[120px] mt-0.5">
+                            <ProviderIcon providerType={left.results[0].provider} className="h-3 w-3 shrink-0" />
+                            {left.results[0].provider}
+                          </div>
+                        )}
                       </th>
                       <th className="py-2.5 px-2 text-center text-xs font-semibold text-muted-foreground">
                         {right.candidateVersionTag ?? "Run B"}
-                        <div className="text-[10px] font-normal text-muted-foreground/60 truncate max-w-[120px]">
-                          {right.results[0]?.provider ?? "—"}
-                        </div>
+                        {right.results[0]?.provider && (
+                          <div className="flex items-center justify-center gap-1 text-[10px] font-normal text-muted-foreground/60 truncate max-w-[120px] mt-0.5">
+                            <ProviderIcon providerType={right.results[0].provider} className="h-3 w-3 shrink-0" />
+                            {right.results[0].provider}
+                          </div>
+                        )}
                       </th>
                       <th className="py-2.5 pl-2 pr-4 text-right text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Delta (A→B)</th>
                     </tr>
@@ -431,6 +444,9 @@ export default function ComparePage() {
           </Card>
         )}
 
+        {(loadingLeft || loadingRight) && (
+          <EvaluationLabLoader phase={1} message="Loading evaluation runs for comparison" />
+        )}
         {!ready && !loadingLeft && !loadingRight && (
           <p className="text-center text-sm text-muted-foreground py-8">
             Enter two evaluation run IDs above to start comparing.

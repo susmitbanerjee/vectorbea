@@ -9,7 +9,64 @@ import { isRuntimeTraceRow, mapAuditRowToTraceDetail, type AuditLogTraceRow } fr
 import { buildTraceMetadataV1, normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { getEvaluationDataset, listDatasetItems } from "@/lib/server/evaluation-datasets";
-import { getFirstEnabledProvider } from "@/lib/server/provider-keys";
+import { getFirstEnabledProvider, getProviderConfig, listEnabledProviders } from "@/lib/server/provider-keys";
+
+// ── Multi-provider helper ─────────────────────────────────────────────────────
+
+type ResolvedProviderConfig = {
+  providerType: string;
+  apiKey: string;
+  baseUrl: string | null;
+  model: string | null;
+  configId: string;
+};
+
+/**
+ * Resolve an ordered list of provider configs from the selectedModels array.
+ * Falls back to the first enabled provider when selectedModels is absent.
+ */
+async function resolveProviderConfigs(
+  workspaceId: string,
+  selectedModels?: Array<{ providerType: string; model?: string }>,
+): Promise<ResolvedProviderConfig[]> {
+  if (!selectedModels || selectedModels.length === 0) {
+    const first = await getFirstEnabledProvider(workspaceId);
+    if (!first) return [];
+    return [{
+      providerType: first.config.provider_type,
+      apiKey: first.apiKey,
+      baseUrl: first.config.base_url,
+      model: first.config.default_model,
+      configId: first.config.id,
+    }];
+  }
+  const all = await listEnabledProviders(workspaceId);
+  const result: ResolvedProviderConfig[] = [];
+  for (const sel of selectedModels) {
+    const row = all.find((p) => p.provider_type === sel.providerType);
+    if (!row) continue; // skip unconfigured providers silently
+    // Decrypt key (same logic as provider-keys.ts)
+    const encKey = process.env.VECTORBEA_ENCRYPTION_KEY ?? "";
+    const data = Buffer.from(row.encrypted_key, "base64");
+    let apiKey: string;
+    if (encKey) {
+      const keyBytes = Buffer.from(encKey.slice(0, 32).padEnd(32, "0"));
+      const dec = Buffer.alloc(data.length);
+      for (let i = 0; i < data.length; i++) dec[i] = data[i] ^ keyBytes[i % keyBytes.length];
+      apiKey = dec.toString("utf8");
+    } else {
+      apiKey = data.toString("utf8");
+    }
+    result.push({
+      providerType: row.provider_type,
+      apiKey,
+      baseUrl: row.base_url,
+      model: sel.model ?? row.default_model,
+      configId: row.id,
+    });
+  }
+  return result;
+}
 
 type PromptVersionRecord = {
   id: string;
@@ -1227,21 +1284,16 @@ export async function createDatasetEvaluationRun(args: {
   const items = await listDatasetItems(args.workspaceId, args.datasetId);
   if (items.length === 0) throw new Error("Dataset has no items. Add test cases before running an evaluation.");
 
-  // Load the first enabled provider config for this workspace so we can make live LLM calls
-  const firstProvider = await getFirstEnabledProvider(args.workspaceId);
-  if (!firstProvider) {
+  // Resolve provider configs — supports single or multi-provider mode
+  const providerConfigs = await resolveProviderConfigs(args.workspaceId, args.selectedModels);
+  if (providerConfigs.length === 0) {
     throw new Error(
       "No enabled provider configuration found for this workspace. " +
       "Go to Settings → Provider settings and add an API key before running evaluations.",
     );
   }
-  const providerConfig = {
-    providerType: firstProvider.config.provider_type,
-    apiKey: firstProvider.apiKey,
-    baseUrl: firstProvider.config.base_url,
-    model: firstProvider.config.default_model,
-    configId: firstProvider.config.id,
-  };
+  // Primary config used for single-provider path / aggregate scoring
+  const providerConfig = providerConfigs[0];
 
   // Load candidate prompt version
   const { data: candidate, error: candidateError } = await supabase
@@ -1541,23 +1593,70 @@ export async function createDatasetEvaluationRun(args: {
         }),
       ];
 
-      const execution = await executeResolvedPrompt({
-        workspaceId: args.workspaceId,
-        promptVersionId: candidateVersion.id,
-        promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
-        versionTag: candidateVersion.version_tag,
-        templateText: candidateVersion.template_text ?? "",
-        variables,
-        inputText,
-        renderedPrompt,
-        triggeredBy: args.triggeredBy,
-        providerConfig,
-      });
+      // ── Execute against each selected provider (concurrency: 3) ─────────────
+      const CONCURRENCY = 3;
+      const providerExecutions: Array<{ cfg: ResolvedProviderConfig; result: Awaited<ReturnType<typeof executeResolvedPrompt>> }> = [];
+      for (let pi = 0; pi < providerConfigs.length; pi += CONCURRENCY) {
+        const batch = providerConfigs.slice(pi, pi + CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+          batch.map((cfg) =>
+            executeResolvedPrompt({
+              workspaceId: args.workspaceId,
+              promptVersionId: candidateVersion.id,
+              promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+              versionTag: candidateVersion.version_tag,
+              templateText: candidateVersion.template_text ?? "",
+              variables,
+              inputText,
+              renderedPrompt,
+              triggeredBy: args.triggeredBy,
+              providerConfig: cfg,
+            })
+          ),
+        );
+        for (let bi = 0; bi < batch.length; bi++) {
+          const r = batchResults[bi];
+          if (r.status === "fulfilled") {
+            providerExecutions.push({ cfg: batch[bi], result: r.value });
+          } else {
+            // Provider failed entirely — create a synthetic error result
+            providerExecutions.push({
+              cfg: batch[bi],
+              result: {
+                status: "error",
+                outputText: null,
+                rawOutputText: undefined,
+                proxyLatencyMs: 0,
+                llmLatencyMs: 0,
+                tokenCount: 0,
+                provider: batch[bi].providerType,
+                model: batch[bi].model ?? undefined,
+                errorMessage: r.reason instanceof Error ? r.reason.message : "Provider call failed",
+                executor: { type: "unknown", name: batch[bi].providerType, response_observability: "none" },
+                metadata: {},
+              } as unknown as Awaited<ReturnType<typeof executeResolvedPrompt>>,
+            });
+          }
+        }
+      }
+      // Primary execution = first successful provider, or first provider if all failed
+      const primaryExec = providerExecutions.find((e) => e.result.status === "success") ?? providerExecutions[0];
+      const execution = primaryExec.result;
+
       executionSteps.push(
-        completedStep("call_provider", "Call provider/model", execution.status === "success" ? "success" : "error", execution.status === "success" ? "Provider call completed." : "Provider call failed.", {
-          provider: execution.provider ?? "unknown",
-          model: execution.model ?? "unknown",
-        }, execution.llmLatencyMs),
+        completedStep(
+          "call_provider",
+          providerExecutions.length > 1 ? `Call ${providerExecutions.length} providers` : "Call provider/model",
+          execution.status === "success" ? "success" : "error",
+          execution.status === "success" ? `${providerExecutions.length} provider call(s) completed.` : "Provider call failed.",
+          {
+            provider: execution.provider ?? "unknown",
+            model: execution.model ?? "unknown",
+            multi_provider: providerExecutions.length > 1,
+            provider_count: providerExecutions.length,
+          },
+          execution.llmLatencyMs,
+        ),
         completedStep("receive_output", "Receive output", execution.outputText?.trim() ? "success" : "warning", execution.outputText?.trim() ? "Captured LLM output." : "Provider returned an empty output.", {
           output_length: execution.outputText?.length ?? 0,
           token_count: execution.tokenCount,
@@ -1709,16 +1808,23 @@ export async function createDatasetEvaluationRun(args: {
         confidenceLabel: confidence.label,
         confidenceReasons: confidence.reasons,
         executionSteps,
-        modelResults: [{
-          provider: execution.provider ?? execution.executor.name ?? "unknown",
-          model: execution.model ?? "unknown",
-          score: itemScore,
-          similarityScore: similarity.score,
-          confidence: confidence.score,
-          latencyMs: execution.llmLatencyMs,
-          status: execution.status === "success" ? "success" : "error",
-          output: execution.outputText ?? "",
-        }],
+        modelResults: providerExecutions.map(({ cfg, result: ex }) => {
+          const exSim = computeExpectedSimilarity(ex.outputText ?? "", comparisonTarget);
+          const exChecks = buildManualItemChecks(ex.outputText ?? "", comparisonTarget, ex.status);
+          const exWeight = exChecks.reduce((s, c) => s + (c.weight ?? 1), 0);
+          const exScore = exWeight > 0 ? exChecks.reduce((s, c) => s + (c.score ?? 0) * (c.weight ?? 1), 0) / exWeight : null;
+          return {
+            provider: ex.provider ?? cfg.providerType,
+            model: ex.model ?? cfg.model ?? "unknown",
+            score: exScore,
+            similarityScore: exSim.score,
+            confidence: null,
+            latencyMs: ex.llmLatencyMs,
+            status: ex.status === "success" ? "success" as const : "error" as const,
+            output: ex.outputText ?? "",
+            error: ex.status !== "success" ? ((ex as { errorMessage?: string }).errorMessage ?? "Failed") : undefined,
+          };
+        }),
       });
     }
   }
@@ -1880,5 +1986,18 @@ export async function createDatasetEvaluationRun(args: {
   if (runInsertError) throw new Error(runInsertError.message);
   const view = toRunView(insertedRun as AuditLogTraceRow);
   if (!view) throw new Error("Dataset evaluation run could not be materialized.");
+
+  // Fire-and-forget notifications
+  import("@/lib/server/notifications").then(({ notifyEvaluationCompleted }) => {
+    void notifyEvaluationCompleted({
+      workspaceId: args.workspaceId,
+      promptName: promptRow?.name ?? dataset.promptName ?? "unknown-prompt",
+      versionTag: candidateVersion.version_tag,
+      recommendation,
+      score: aggregateScore,
+      runId: view.id,
+    });
+  }).catch(() => { /* non-blocking */ });
+
   return view;
 }
