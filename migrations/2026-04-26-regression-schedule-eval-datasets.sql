@@ -20,3 +20,4 @@ ALTER TABLE vectorbea.regression_schedules
 
 CREATE INDEX IF NOT EXISTS regression_schedules_eval_dataset_idx
   ON vectorbea.regression_schedules(evaluation_dataset_id);
+
