@@ -29,9 +29,35 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:al
 
   <!-- Header -->
   <tr>
-    <td style="background:${headerAccent};padding:28px 36px;">
-      <p style="margin:0;font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">VectorBea</p>
-      <p style="margin:4px 0 0;font-size:10px;font-weight:500;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.15em;">AI Release Control</p>
+    <td style="background:${headerAccent};padding:24px 32px;">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <!-- Bee logo icon -->
+          <td style="padding-right:14px;vertical-align:middle;">
+            <div style="width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;padding:6px;box-sizing:border-box;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g stroke="#F8D36A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <ellipse cx="7.5" cy="8" rx="3.2" ry="2.2" opacity="0.8" fill="#F8D36A" fill-opacity="0.3"/>
+                  <ellipse cx="16.5" cy="8" rx="3.2" ry="2.2" opacity="0.8" fill="#F8D36A" fill-opacity="0.3"/>
+                  <ellipse cx="12" cy="14" rx="4.2" ry="5.2" fill="#F5B942" fill-opacity="0.25"/>
+                  <path d="M8.4 12.6h7.2"/>
+                  <path d="M8.1 15.2h7.8"/>
+                  <path d="M8.6 17.8h6.8"/>
+                  <path d="M10.4 9.2 L9.2 6.4"/>
+                  <path d="M13.6 9.2 L14.8 6.4"/>
+                  <circle cx="9.2" cy="6.2" r="0.6" fill="#F8D36A"/>
+                  <circle cx="14.8" cy="6.2" r="0.6" fill="#F8D36A"/>
+                </g>
+              </svg>
+            </div>
+          </td>
+          <!-- Brand text -->
+          <td style="vertical-align:middle;">
+            <p style="margin:0;font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">VectorBea</p>
+            <p style="margin:3px 0 0;font-size:10px;font-weight:500;color:rgba(255,255,255,0.55);text-transform:uppercase;letter-spacing:0.15em;">AI Release Control</p>
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>
 
@@ -415,5 +441,42 @@ export function quotaWarningEmail(args: {
     body,
   });
   const text = `Usage warning: ${usageLabel} at ${pct}% (${args.used.toLocaleString()}/${args.limit.toLocaleString()})\n\nUpgrade: ${args.billingUrl}`;
+  return { subject, html, text };
+}
+
+// ─── Prompt promoted ──────────────────────────────────────────────────────────
+
+export function promptPromotedEmail(args: {
+  workspaceName: string;
+  promptName: string;
+  versionTag: string;
+  promotedBy: string;
+  promptUrl: string;
+}) {
+  const subject = `🚀 Prompt promoted: ${args.promptName}@${args.versionTag}`;
+
+  const body = `
+    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Prompt Promoted</p>
+    <p style="margin:0 0 20px;">${badge("Promoted to Production", "#4ade80", "rgba(74,222,128,0.12)")}</p>
+    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
+      Prompt <strong style="color:#e4e4e7;">${args.promptName}</strong>
+      <code style="background:#1e1e2e;padding:2px 6px;border-radius:4px;font-size:12px;color:#a78bfa;">${args.versionTag}</code>
+      has been approved and promoted to production in workspace <strong style="color:#e4e4e7;">${args.workspaceName}</strong>.
+    </p>
+    ${infoCard([
+      { label: "Workspace", value: args.workspaceName },
+      { label: "Prompt", value: args.promptName },
+      { label: "Version", value: args.versionTag, highlight: true },
+      { label: "Promoted by", value: args.promotedBy },
+    ])}
+    ${ctaButton("View prompt →", args.promptUrl, "linear-gradient(135deg,#16a34a,#15803d)")}
+  `;
+
+  const html = layout({
+    preheader: `${args.promptName}@${args.versionTag} promoted to production by ${args.promotedBy}`,
+    headerAccent: "linear-gradient(135deg,#16a34a 0%,#166534 100%)",
+    body,
+  });
+  const text = `Prompt promoted: ${args.promptName}@${args.versionTag}\nPromoted by: ${args.promotedBy}\n\nView: ${args.promptUrl}`;
   return { subject, html, text };
 }

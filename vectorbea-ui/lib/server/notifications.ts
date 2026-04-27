@@ -11,6 +11,7 @@ import {
   alertTriggeredEmail,
   evaluationCompletedEmail,
   evaluationFailedEmail,
+  promptPromotedEmail,
   quotaWarningEmail,
   regressionFailedEmail,
   rolloutBlockedEmail,
@@ -221,6 +222,13 @@ export async function notifyPromptPromoted(args: {
     if (!(await shouldSlackWorkspace(args.workspaceId, "rollout"))) return;
     const wn = await getWorkspaceName(args.workspaceId);
     await sendSlackNotification(args.workspaceId, slackPromptPromoted({ ...args, workspaceName: wn, promptUrl }));
+  });
+
+  await safeRun("email:prompt_promoted", async () => {
+    if (!(await shouldEmailWorkspace(args.workspaceId, "rollout"))) return;
+    const [wn, emails] = await Promise.all([getWorkspaceName(args.workspaceId), getWorkspaceAdminEmails(args.workspaceId)]);
+    const tmpl = promptPromotedEmail({ ...args, workspaceName: wn, promptUrl });
+    await Promise.all(emails.map((to) => sendEmail({ ...tmpl, to })));
   });
 }
 
