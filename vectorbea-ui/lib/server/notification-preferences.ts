@@ -55,33 +55,40 @@ const DEFAULT_USER_EVENTS: Record<UserEventKey, boolean> = {
 
 // ─── Workspace prefs ─────────────────────────────────────────────────────────
 
+const DEFAULT_PREFS = (workspaceId: string): WorkspaceNotificationPrefs => ({
+  workspaceId,
+  emailEnabled: true,
+  slackEnabled: false,
+  events: { ...DEFAULT_WORKSPACE_EVENTS },
+  slackEvents: { ...DEFAULT_SLACK_EVENTS },
+});
+
 export async function getWorkspaceNotificationPrefs(
   workspaceId: string,
 ): Promise<WorkspaceNotificationPrefs> {
-  const supabase = createVectorBeaAdminClient();
-  const { data } = await supabase
-    .from("workspace_notification_prefs")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
+  try {
+    const supabase = createVectorBeaAdminClient();
+    const { data, error } = await supabase
+      .from("workspace_notification_prefs")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
 
-  if (!data) {
+    // If table doesn't exist or any DB error → use defaults so emails still go out
+    if (error) return DEFAULT_PREFS(workspaceId);
+    if (!data) return DEFAULT_PREFS(workspaceId);
+
     return {
       workspaceId,
-      emailEnabled: true,
-      slackEnabled: false,
-      events: { ...DEFAULT_WORKSPACE_EVENTS },
-      slackEvents: { ...DEFAULT_SLACK_EVENTS },
+      emailEnabled: data.email_enabled ?? true,
+      slackEnabled: data.slack_enabled ?? false,
+      events: { ...DEFAULT_WORKSPACE_EVENTS, ...(data.events as Record<WorkspaceEventKey, boolean> ?? {}) },
+      slackEvents: { ...DEFAULT_SLACK_EVENTS, ...(data.slack_events as Record<WorkspaceEventKey, boolean> ?? {}) },
     };
+  } catch {
+    // Table doesn't exist yet — email is enabled by default so notifications go out
+    return DEFAULT_PREFS(workspaceId);
   }
-
-  return {
-    workspaceId,
-    emailEnabled: data.email_enabled ?? true,
-    slackEnabled: data.slack_enabled ?? false,
-    events: { ...DEFAULT_WORKSPACE_EVENTS, ...(data.events as Record<WorkspaceEventKey, boolean> ?? {}) },
-    slackEvents: { ...DEFAULT_SLACK_EVENTS, ...(data.slack_events as Record<WorkspaceEventKey, boolean> ?? {}) },
-  };
 }
 
 export async function upsertWorkspaceNotificationPrefs(
