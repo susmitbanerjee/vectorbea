@@ -311,7 +311,7 @@ export function PromptEditor({
     }).catch(() => {});
 
     return () => { cancelled = true; };
-  }, [prompt?.promptId, activeWorkspaceId]);
+  }, [prompt?.promptId, prompt.promptVersionId, activeWorkspaceId]);
 
   const parsedParameters = useMemo(
     () => toPersistedParameters(modelParameters),

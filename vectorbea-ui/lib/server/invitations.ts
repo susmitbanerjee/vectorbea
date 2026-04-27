@@ -167,7 +167,7 @@ export async function acceptInvitation(token: string, userId: string): Promise<{
   return { workspaceId: inv.workspace_id as string, role: inv.role as InviteRole };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line
 function toInvitationView(row: any): Invitation {
   return {
     id: row.id,
