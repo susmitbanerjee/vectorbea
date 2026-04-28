@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Loader2, ShieldCheck } from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
 import {
@@ -15,17 +15,20 @@ import {
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser"; // still used by SSO
+import { cn } from "@/lib/utils";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type Mode = "signin" | "signup";
+type Provider = "github" | "google" | "azure" | "sso";
 
-export function AuthScreen({
-  mode,
-  next,
-}: {
-  mode: Mode;
-  next?: string;
-}) {
+const TRUST_ITEMS = [
+  "Prompts versioned and reviewed like source code",
+  "Model calls never leave your VPC",
+  "Zero inbound ports — outbound HTTPS only",
+  "Immutable audit log for every operator action",
+];
+
+export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
   const searchParams = useSearchParams();
   const rawError = searchParams.get("error");
   const [error, setError] = useState<string | null>(
@@ -35,370 +38,295 @@ export function AuthScreen({
       ? "Your session expired. Please sign in again."
       : rawError ?? null,
   );
-  const [providerLoading, setProviderLoading] = useState<
-    "github" | "google" | "azure" | "sso" | null
-  >(null);
+  const [loading, setLoading] = useState<Provider | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [ssoEmail, setSsoEmail] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-
     async function hydrateSession() {
       try {
-        const response = await fetch("/api/auth/session", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = (await response.json()) as { redirectTo?: string };
+        const res = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!res.ok) return;
+        const payload = (await res.json()) as { redirectTo?: string };
         if (!cancelled && payload.redirectTo) {
-          const destination = (next && next !== "/") ? next : payload.redirectTo;
-          window.location.assign(destination);
+          const dest = next && next !== "/" ? next : payload.redirectTo;
+          window.location.assign(dest);
         }
       } finally {
-        if (!cancelled) {
-          setCheckingSession(false);
-        }
+        if (!cancelled) setCheckingSession(false);
       }
     }
-
     void hydrateSession();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [next]);
 
-  const alternateHref = mode === "signin" ? "/signup" : "/signin";
-  const alternateLabel =
-    mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in";
-  const callbackNext = next || searchParams.get("next") || undefined;
+  const alternateHref  = mode === "signin" ? "/signup" : "/signin";
+  const alternateLabel = mode === "signin" ? "Create account" : "Sign in";
+  const callbackNext   = next || searchParams.get("next") || undefined;
 
   function buildRedirectUrl() {
-    const redirectUrl = new URL("/api/auth/callback", window.location.origin);
-    if (callbackNext) {
-      redirectUrl.searchParams.set("next", callbackNext);
-    }
-    return redirectUrl;
+    const u = new URL("/api/auth/callback", window.location.origin);
+    if (callbackNext) u.searchParams.set("next", callbackNext);
+    return u;
   }
 
   async function startOAuth(provider: "github" | "google" | "azure") {
-    setProviderLoading(provider);
+    setLoading(provider);
     setError(null);
-
     try {
-      // All three providers now use server-side routes so the PKCE
-      // code_verifier is set in the HTTP response headers (atomic with the
-      // redirect) rather than via document.cookie, eliminating the race
-      // condition that caused "callback_failed" on first-ever visits.
-      if (provider === "github") {
-        const url = new URL("/api/auth/github", window.location.origin);
-        if (callbackNext) url.searchParams.set("next", callbackNext);
-        window.location.assign(url.toString());
-        return;
-      }
-
-      if (provider === "google") {
-        const url = new URL("/api/auth/google", window.location.origin);
-        if (callbackNext) url.searchParams.set("next", callbackNext);
-        window.location.assign(url.toString());
-        return;
-      }
-
-      if (provider === "azure") {
-        const url = new URL("/api/auth/microsoft", window.location.origin);
-        if (callbackNext) url.searchParams.set("next", callbackNext);
-        window.location.assign(url.toString());
-        return;
-      }
-    } catch (submissionError) {
-      setError(
-        submissionError instanceof Error
-          ? submissionError.message
-          : "Sign-in failed. Please try again or use a different provider.",
-      );
-      setProviderLoading(null);
+      const route = provider === "github" ? "/api/auth/github"
+                  : provider === "google" ? "/api/auth/google"
+                  : "/api/auth/microsoft";
+      const url = new URL(route, window.location.origin);
+      if (callbackNext) url.searchParams.set("next", callbackNext);
+      window.location.assign(url.toString());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in failed.");
+      setLoading(null);
     }
   }
 
   async function startSso() {
-    const normalizedEmail = ssoEmail.trim().toLowerCase();
-    const domain = normalizedEmail.split("@")[1]?.trim();
-
-    if (!domain) {
-      setError("Enter a valid work email to continue with SSO.");
-      return;
-    }
-
-    setProviderLoading("sso");
+    const domain = ssoEmail.trim().toLowerCase().split("@")[1]?.trim();
+    if (!domain) { setError("Enter a valid work email."); return; }
+    setLoading("sso");
     setError(null);
-
     try {
       const supabase = getSupabaseBrowserClient();
-      const redirectUrl = buildRedirectUrl();
       const { error: ssoError } = await supabase.auth.signInWithSSO({
         domain,
-        options: {
-          redirectTo: redirectUrl.toString(),
-        },
+        options: { redirectTo: buildRedirectUrl().toString() },
       });
-
-      if (ssoError) {
-        throw ssoError;
-      }
-    } catch (submissionError) {
-      setError(
-        submissionError instanceof Error
-          ? submissionError.message
-          : "SSO failed. Check with your IT admin that the provider is configured, then try again.",
-      );
-      setProviderLoading(null);
+      if (ssoError) throw ssoError;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "SSO failed. Check with your IT admin.");
+      setLoading(null);
     }
   }
 
+  const disabled = checkingSession || loading !== null;
+
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen lg:grid-cols-2">
+      <div className="grid min-h-screen lg:grid-cols-[1fr_480px] xl:grid-cols-[1fr_520px]">
 
-        {/* ── Left panel — brand & trust ──────────────────────────────── */}
-        <section className="relative hidden border-r border-border/80 bg-muted/30 lg:flex">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,128,255,0.14),transparent_42%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.1),transparent_42%)]" />
-          <div className="relative flex w-full flex-col justify-between px-12 py-10 xl:px-16 xl:py-12">
+        {/* ── Left: brand panel ─────────────────────────────────────────── */}
+        <section className="relative hidden lg:flex flex-col border-r border-border/50">
+          {/* Background */}
+          <div className="absolute inset-0 bg-muted/25" />
+          <div className="absolute inset-0 surface-grid opacity-60" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_0%_40%,hsl(var(--primary)/0.08),transparent_65%)]" />
 
-            {/* Logo row */}
-            <div className="flex items-center justify-between">
-              <Link href="/" className="inline-flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border/80 bg-card shadow-sm">
-                  <BeeLogo className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold tracking-tight">VectorBea</p>
-                  <p className="text-xs text-muted-foreground">Prompt &amp; AI settings registry</p>
-                </div>
-              </Link>
-              <ThemeToggle />
-            </div>
+          <div className="relative flex h-full flex-col px-12 py-10 xl:px-16 xl:py-12">
+            {/* Logo */}
+            <Link href="/" className="inline-flex items-center gap-3 group w-fit">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-border/70 bg-background shadow-sm group-hover:border-primary/30 transition-colors">
+                <BeeLogo className="h-4 w-4" />
+              </div>
+              <span className="text-sm font-semibold tracking-tight">VectorBea</span>
+            </Link>
 
-            {/* Main copy */}
-            <div className="max-w-xl space-y-8">
-              <div className="space-y-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">
-                  Privacy-first prompt governance
+            {/* Hero copy — vertically centered */}
+            <div className="flex flex-1 flex-col justify-center max-w-lg space-y-10">
+              <div className="space-y-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+                  AI Release Control
                 </p>
-                <h1 className="text-5xl font-semibold tracking-tight text-foreground xl:text-6xl">
-                  Your prompts live in the cloud.{" "}
-                  <span className="text-muted-foreground">
-                    Your data lives in your infra.
-                  </span>
+                <h1 className="text-[2.75rem] font-semibold leading-[1.1] tracking-[-0.03em] text-foreground xl:text-5xl">
+                  Ship AI features with{" "}
+                  <span className="text-muted-foreground">the discipline of production code.</span>
                 </h1>
-                <p className="text-lg leading-8 text-muted-foreground">
-                  VectorBea is a docker-native prompt and AI settings registry.
-                  The control plane is cloud-hosted — every inference, secret,
-                  and audit event stays inside your own containers.
+                <p className="text-base leading-7 text-muted-foreground">
+                  Version prompts, gate rollouts on evaluations, and keep every
+                  inference inside your own infrastructure — all from one control plane.
                 </p>
               </div>
 
               {/* Trust checklist */}
-              <div className="grid gap-3 sm:grid-cols-2">
+              <ul className="space-y-3">
+                {TRUST_ITEMS.map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                      <Check className="h-3 w-3 text-primary" strokeWidth={2.5} />
+                    </span>
+                    <span className="text-sm leading-6 text-muted-foreground">{item}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {/* Stat strip */}
+              <div className="grid grid-cols-3 gap-3 pt-2">
                 {[
-                  "Sign in once — your workspace is ready immediately after.",
-                  "Free plan, no credit card required.",
-                  "Workspace isolation enforced across the UI and API.",
-                  "Sidecar communicates over outbound HTTPS only — no inbound ports.",
-                ].map((item) => (
-                  <div
-                    key={item}
-                    className="flex items-start gap-3 rounded-2xl border border-border/70 bg-card/90 p-4"
-                  >
-                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-                    <p className="text-sm leading-6 text-muted-foreground">{item}</p>
+                  ["8 ms", "P99 prompt latency"],
+                  ["0", "inbound ports"],
+                  ["100%", "data residency"],
+                ].map(([val, label]) => (
+                  <div key={label} className="rounded-xl border border-border/60 bg-card/80 p-4">
+                    <p className="text-2xl font-semibold tracking-tight text-foreground">{val}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{label}</p>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Stats row */}
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[
-                ["1 identity flow", "Sign in with Google, GitHub, Microsoft, or enterprise SSO."],
-                ["2 surfaces", "Cloud control plane. Local data plane. Fully separate."],
-                ["0 data residency", "VectorBea Cloud holds no inference data, logs, or secrets."],
-              ].map(([title, body]) => (
-                <div
-                  key={title}
-                  className="rounded-2xl border border-border/70 bg-background/85 p-4"
-                >
-                  <p className="text-sm font-semibold text-foreground">{title}</p>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
-                </div>
-              ))}
-            </div>
+            {/* Footer */}
+            <p className="text-xs text-muted-foreground/50">
+              © {new Date().getFullYear()} VectorBea. Privacy-first by design.
+            </p>
           </div>
         </section>
 
-        {/* ── Right panel — auth form ──────────────────────────────────── */}
-        <section className="flex min-h-screen items-center justify-center px-4 py-8 sm:px-8 lg:px-12 xl:px-16">
-          <div className="w-full max-w-xl">
+        {/* ── Right: auth form ───────────────────────────────────────────── */}
+        <section className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-10 sm:px-10">
+          {/* Mobile header */}
+          <div className="mb-8 flex w-full max-w-sm items-center justify-between lg:hidden">
+            <Link href="/" className="inline-flex items-center gap-2">
+              <BeeLogo className="h-7 w-7" />
+              <span className="text-sm font-semibold">VectorBea</span>
+            </Link>
+            <ThemeToggle />
+          </div>
 
-            {/* Mobile logo (hidden on desktop) */}
-            <div className="mb-8 flex items-center justify-between lg:hidden">
-              <Link href="/" className="inline-flex items-center gap-3">
-                <BeeLogo className="h-9 w-9" />
-                <div>
-                  <p className="text-sm font-semibold">VectorBea</p>
-                  <p className="text-xs text-muted-foreground">Prompt &amp; AI settings registry</p>
-                </div>
-              </Link>
+          <div className="w-full max-w-sm space-y-8">
+            {/* Desktop theme toggle */}
+            <div className="hidden lg:flex justify-end">
               <ThemeToggle />
             </div>
 
-            <div className="rounded-[2rem] border border-border/80 bg-card/98 p-8 shadow-[0_28px_90px_-56px_rgba(15,23,42,0.42)] sm:p-10">
+            {/* Heading */}
+            <div className="space-y-1">
+              <h2 className="text-2xl font-semibold tracking-tight">
+                {mode === "signin" ? "Welcome back" : "Create your account"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {mode === "signin"
+                  ? "Sign in to continue to your workspace."
+                  : "Get started — no credit card required."}
+              </p>
+            </div>
 
-              {/* Form header */}
-              <div className="flex items-center justify-between gap-4">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">
-                    {mode === "signin" ? "Sign in" : "Create account"}
-                  </p>
-                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">
-                    {mode === "signin" ? "Welcome back" : "Get started"}
-                  </h2>
-                  <p className="max-w-md text-sm leading-7 text-muted-foreground">
-                    {mode === "signin"
-                      ? "Pick your provider and you'll land straight in your workspace."
-                      : "Sign in with your provider and we'll take you straight to workspace setup. No forms."}
-                  </p>
-                </div>
-                <Link
-                  href={alternateHref}
-                  className="hidden text-sm font-medium text-brand underline-offset-4 hover:underline sm:block"
+            {/* Error */}
+            {error && (
+              <div className="rounded-lg border border-destructive/20 bg-destructive/8 px-4 py-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+
+            {/* OAuth providers */}
+            <div className="space-y-3">
+              <ProviderButton
+                icon={<GitHubMark className="h-[18px] w-[18px]" />}
+                label="Continue with GitHub"
+                loading={loading === "github"}
+                disabled={disabled}
+                onClick={() => void startOAuth("github")}
+              />
+              <ProviderButton
+                icon={<GoogleMark className="h-[18px] w-[18px]" />}
+                label="Continue with Google"
+                loading={loading === "google"}
+                disabled={disabled}
+                onClick={() => void startOAuth("google")}
+              />
+              <ProviderButton
+                icon={<MicrosoftMark className="h-[18px] w-[18px]" />}
+                label="Continue with Microsoft"
+                loading={loading === "azure"}
+                disabled={disabled}
+                onClick={() => void startOAuth("azure")}
+              />
+            </div>
+
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border/60" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-background px-3 text-xs text-muted-foreground">
+                  Enterprise SSO
+                </span>
+              </div>
+            </div>
+
+            {/* SSO */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <EnterpriseSsoMark className="h-4 w-4 text-muted-foreground" />
+                Sign in with your identity provider
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  type="email"
+                  value={ssoEmail}
+                  onChange={(e) => setSsoEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  className="h-10 flex-1 rounded-lg bg-background text-sm"
+                  disabled={disabled}
+                  onKeyDown={(e) => e.key === "Enter" && void startSso()}
+                />
+                <Button
+                  variant="outline"
+                  className="h-10 shrink-0 rounded-lg text-sm"
+                  disabled={disabled}
+                  onClick={() => void startSso()}
                 >
+                  {loading === "sso" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Footer links */}
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <p>
+                {mode === "signin" ? "No account?" : "Already have one?"}{" "}
+                <Link href={alternateHref} className="font-medium text-primary hover:underline underline-offset-4">
                   {alternateLabel}
                 </Link>
-              </div>
-
-              {/* Providers */}
-              <div className="mt-8 space-y-4">
-                {error ? (
-                  <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                    {error}
-                  </div>
-                ) : null}
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-16 w-full justify-between rounded-2xl border-border/80 bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
-                  disabled={checkingSession || providerLoading !== null}
-                  onClick={() => void startOAuth("github")}
-                >
-                  <span className="flex items-center gap-3">
-                    <GitHubMark className="h-5 w-5 text-foreground" />
-                    Continue with GitHub
-                  </span>
-                  {providerLoading === "github" ? (
-                    "Connecting..."
-                  ) : (
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-16 w-full justify-between rounded-2xl border-border/80 bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
-                  disabled={checkingSession || providerLoading !== null}
-                  onClick={() => void startOAuth("azure")}
-                >
-                  <span className="flex items-center gap-3">
-                    <MicrosoftMark className="h-5 w-5" />
-                    Continue with Microsoft
-                  </span>
-                  {providerLoading === "azure" ? (
-                    "Connecting..."
-                  ) : (
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-16 w-full justify-between rounded-2xl border-border/80 bg-background px-5 text-left text-base font-medium shadow-none hover:bg-accent/40"
-                  disabled={checkingSession || providerLoading !== null}
-                  onClick={() => void startOAuth("google")}
-                >
-                  <span className="flex items-center gap-3">
-                    <GoogleMark className="h-5 w-5" />
-                    Continue with Google
-                  </span>
-                  {providerLoading === "google" ? (
-                    "Connecting..."
-                  ) : (
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
-              </div>
-
-              {/* Enterprise SSO */}
-              <div className="mt-6 rounded-2xl border border-border/70 bg-muted/30 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border border-border/70 bg-background text-muted-foreground">
-                    <EnterpriseSsoMark className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Enterprise SSO</p>
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        Enter your work email and we&apos;ll route you through your
-                        organization&apos;s identity provider.
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-3 sm:flex-row">
-                      <Input
-                        type="email"
-                        value={ssoEmail}
-                        onChange={(event) => setSsoEmail(event.target.value)}
-                        placeholder="you@company.com"
-                        className="h-12 rounded-2xl bg-background"
-                        disabled={checkingSession || providerLoading !== null}
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-12 rounded-2xl px-5"
-                        disabled={checkingSession || providerLoading !== null}
-                        onClick={() => void startSso()}
-                      >
-                        {providerLoading === "sso" ? "Connecting..." : "Continue with SSO"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Privacy notice */}
-              <div className="mt-6 rounded-2xl border border-border/70 bg-muted/20 px-4 py-4 text-sm leading-6 text-muted-foreground">
-                We only use your name and email to set up your profile and
-                workspace. We don&apos;t store inference data, prompt content,
-                or secrets.
-              </div>
-
-              {/* Mobile alternate link */}
-              <div className="mt-6 sm:hidden">
-                <Link
-                  href={alternateHref}
-                  className="text-sm font-medium text-brand underline-offset-4 hover:underline"
-                >
-                  {alternateLabel}
-                </Link>
-              </div>
+              </p>
+              <Link href="/docs/security" className="hover:text-foreground transition-colors">
+                Privacy
+              </Link>
             </div>
           </div>
         </section>
 
       </div>
     </div>
+  );
+}
+
+/* ── Provider button ─────────────────────────────────────────────────────── */
+function ProviderButton({
+  icon, label, loading, disabled, onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  loading: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "relative flex h-11 w-full items-center gap-3 rounded-lg border border-border/70 bg-background px-4",
+        "text-sm font-medium text-foreground",
+        "transition-all duration-150",
+        "hover:bg-muted/50 hover:border-border hover:-translate-y-px hover:shadow-sm",
+        "active:scale-[0.98]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        "disabled:pointer-events-none disabled:opacity-40",
+      )}
+    >
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+        {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : icon}
+      </span>
+      <span className="flex-1 text-left">{loading ? "Connecting…" : label}</span>
+      {!loading && <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/60" />}
+    </button>
   );
 }

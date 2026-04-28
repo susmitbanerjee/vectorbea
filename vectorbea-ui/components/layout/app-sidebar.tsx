@@ -111,161 +111,142 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   }, [activeWorkspaceId, summary]);
 
   return (
-    // h-full fills the locked h-screen parent; overflow-y-auto lets the sidebar
-    // scroll independently if the nav list ever overflows (e.g. small viewports)
-    // while keeping mt-auto pinning the sign-out card to the bottom.
-    <aside className="hidden w-[260px] shrink-0 border-r border-border/50 bg-card/30 px-3 py-4 backdrop-blur-sm lg:flex lg:flex-col h-full overflow-y-auto">
-      <div className="mb-6 flex items-center gap-3 px-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card">
-          <Logo />
+    <aside className="hidden w-[232px] shrink-0 border-r border-border/40 bg-background lg:flex lg:flex-col h-full overflow-y-auto">
+
+      {/* Logo + workspace */}
+      <div className="px-4 pt-5 pb-3">
+        <div className="mb-4 flex items-center gap-2.5 px-1">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/70 bg-card shadow-xs">
+            <Logo />
+          </div>
+          <span className="text-[13px] font-semibold tracking-tight">VectorBea</span>
         </div>
-        <div>
-          <p className="text-sm font-semibold tracking-tight">VectorBea</p>
-          <p className="text-[11px] text-muted-foreground">Enterprise AI Infrastructure Platform</p>
-        </div>
+        <WorkspaceSwitcher />
       </div>
 
-      <WorkspaceSwitcher />
+      {/* Nav */}
+      <nav className="flex-1 px-3 pb-3">
+        <div className="space-y-0.5">
+          {navigation.map((item) => {
+            if (item.isSubItem && !pathname.startsWith("/evaluations")) return null;
 
-      <nav className="mt-5 flex flex-col gap-0.5">
-        {navigation.map((item) => {
-          if (item.isSubItem && !pathname.startsWith("/evaluations")) return null;
+            const Icon = item.icon;
+            const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
+            const active =
+              pathname === item.href ||
+              (pathname.startsWith(`${item.href}/`) &&
+                !navigation.some(
+                  (other) =>
+                    other.href !== item.href &&
+                    (pathname === other.href || pathname.startsWith(`${other.href}/`)),
+                ));
+            const loading = isPending && pendingHref === fullHref;
 
-          const Icon = item.icon;
-          const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
-          const active =
-            pathname === item.href ||
-            (pathname.startsWith(`${item.href}/`) &&
-              !navigation.some(
-                (other) =>
-                  other.href !== item.href &&
-                  (pathname === other.href || pathname.startsWith(`${other.href}/`)),
-              ));
-          const loading = isPending && pendingHref === fullHref;
-
-          return (
-            // Use <Link> so browser back/forward, middle-click, and right-click
-            // "open in new tab" all work correctly. onClick marks the transition
-            // pending for the loading spinner without bypassing Link's own
-            // history management.
-            <Link
-              key={item.href}
-              href={fullHref as Route}
-              aria-current={active ? "page" : undefined}
-              onClick={() => {
-                if (pathname === item.href || pendingHref === fullHref) return;
-                setPendingHref(fullHref);
-                startTransition(() => {});
-              }}
-              className={cn(
-                "group relative flex w-full items-center gap-3 rounded-lg py-2 text-left font-medium transition-all duration-200",
-                item.isSubItem
-                  ? "pl-7 text-[12px]"
-                  : "px-3 text-[13px]",
-                active
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
-                loading && "opacity-80",
-              )}
-            >
-              {active && !item.isSubItem && (
-                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
-              )}
-              <Icon
+            return (
+              <Link
+                key={item.href}
+                href={fullHref as Route}
+                aria-current={active ? "page" : undefined}
+                onClick={() => {
+                  if (pathname === item.href || pendingHref === fullHref) return;
+                  setPendingHref(fullHref);
+                  startTransition(() => {});
+                }}
                 className={cn(
-                  "h-4 w-4 transition-colors",
-                  active ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
-                  loading && "opacity-0",
+                  "group relative flex w-full items-center gap-2.5 rounded-md text-left transition-all duration-150",
+                  item.isSubItem ? "pl-8 pr-3 py-1.5 text-[12px]" : "px-3 py-1.5 text-[13px]",
+                  active
+                    ? "bg-primary/[0.08] text-primary font-medium"
+                    : "text-muted-foreground font-normal hover:bg-muted/60 hover:text-foreground",
+                  loading && "opacity-60",
                 )}
-              />
-              {loading && (
-                <Loader2 className={cn("absolute h-4 w-4 animate-spin text-primary", item.isSubItem ? "left-7" : "left-3")} />
-              )}
-              <span className="flex-1">{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
+              >
+                <Icon
+                  className={cn(
+                    "h-[15px] w-[15px] shrink-0 transition-colors",
+                    active ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground",
+                    loading && "opacity-0",
+                  )}
+                />
+                {loading && (
+                  <Loader2 className={cn(
+                    "absolute h-[14px] w-[14px] animate-spin text-primary",
+                    item.isSubItem ? "left-8" : "left-3"
+                  )} />
+                )}
+                <span className="truncate flex-1">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
 
-      <div className="mt-auto flex flex-col gap-3">
+        {/* Divider before bottom links */}
+        <div className="mt-4 mb-2 border-t border-border/40" />
+
         <a
           href="/docs/overview"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-accent/40 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+          className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] text-muted-foreground transition-all duration-150 hover:bg-muted/60 hover:text-foreground"
         >
-          <BookOpen className="h-4 w-4 shrink-0" />
+          <BookOpen className="h-[15px] w-[15px] shrink-0" />
           <span className="flex-1">Documentation</span>
-          <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+          <ArrowUpRight className="h-3 w-3 shrink-0 opacity-50" />
         </a>
+      </nav>
 
+      {/* Bottom: sidecar status + user */}
+      <div className="border-t border-border/40 px-3 py-3 space-y-2">
+        {/* Sidecar pill */}
+        <div className="flex items-center gap-2 rounded-md border border-border/50 bg-card/60 px-3 py-2">
+          <span className={cn("live-dot h-1.5 w-1.5", !workspaceSummary && "!bg-red-500")} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-medium text-foreground truncate">
+              {workspaceSummary ? `${workspaceSummary.averageLatencyMs} ms` : "—"}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              {workspaceSummary ? `${workspaceSummary.activeAgents} sidecars live` : "No sidecar connected"}
+            </p>
+          </div>
+          <Badge variant={workspaceSummary ? "success" : "destructive"} className="text-[10px] px-1.5 py-0.5 shrink-0">
+            {workspaceSummary ? "Live" : "Off"}
+          </Badge>
+        </div>
+
+        {/* User */}
         {user && (
-          <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">
+          <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
             {user.avatar_url ? (
               <Image
                 src={user.avatar_url}
                 alt={user.full_name ?? user.email ?? "User"}
-                width={28}
-                height={28}
-                className="h-7 w-7 rounded-full border border-border/60 object-cover shrink-0"
+                width={24}
+                height={24}
+                className="h-6 w-6 rounded-full border border-border/60 object-cover shrink-0"
               />
             ) : (
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[11px] font-semibold text-muted-foreground">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[10px] font-semibold text-muted-foreground">
                 {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              {user.full_name && (
-                <p className="truncate text-[12px] font-medium leading-none">{user.full_name}</p>
-              )}
+              <p className="truncate text-[12px] font-medium leading-none text-foreground">
+                {user.full_name ?? user.email?.split("@")[0] ?? "User"}
+              </p>
               {user.email && (
-                <p className="truncate text-[10px] text-muted-foreground leading-none mt-0.5">{user.email}</p>
+                <p className="truncate text-[10px] text-muted-foreground mt-0.5">{user.email}</p>
               )}
             </div>
             <button
               type="button"
-              onClick={() => {
-                void fetch("/api/auth/session", { method: "DELETE" }).then(() => {
-                  window.location.assign("/login");
-                });
-              }}
+              onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
               title="Sign out"
-              className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
-
-        <div className="rounded-xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm">
-          <div className="mb-3 flex items-center gap-2">
-            <span className={cn("live-dot", !workspaceSummary && "!bg-red-500")} />
-            <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-              Sidecar Status
-            </p>
-          </div>
-          {workspaceSummary ? (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xl font-semibold tabular-nums">
-                  {workspaceSummary.averageLatencyMs} ms
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  {workspaceSummary.averageLatencyMs} ms avg · {workspaceSummary.activeAgents} sidecars live
-                </p>
-              </div>
-              <Badge variant="success">Connected</Badge>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xl font-semibold tabular-nums">-</p>
-                <p className="text-[11px] text-muted-foreground">No sidecar connected</p>
-              </div>
-              <Badge variant="destructive">Disconnected</Badge>
-            </div>
-          )}
-        </div>
       </div>
     </aside>
   );
