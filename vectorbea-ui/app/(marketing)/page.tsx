@@ -3,19 +3,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   CheckCircle2,
-  Clock3,
   Eye,
-  GitBranch,
-  Layers3,
-  ShieldCheck,
   Siren,
   SlidersHorizontal,
-  Split,
 } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
@@ -101,6 +95,184 @@ const faq = [
   },
 ];
 
+function ProviderPill({
+  name,
+  badge,
+  bg,
+}: {
+  name: string;
+  badge: string;
+  bg: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-[#E5E0D8] bg-white px-3 py-2">
+      <span
+        className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-semibold text-white"
+        style={{ backgroundColor: bg }}
+      >
+        {badge}
+      </span>
+      <span className="text-xs font-semibold text-[#1F2937]">{name}</span>
+    </div>
+  );
+}
+
+function DeepDiveVisual({ index }: { index: number }) {
+  if (index === 0) {
+    return (
+      <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">TraceLoop</p>
+          <span className="rounded-full border border-[#D7E6FF] bg-[#EEF4FF] px-2 py-0.5 text-[10px] font-semibold text-[#2563EB]">
+            Live trace
+          </span>
+        </div>
+        <div className="space-y-2.5">
+          {[
+            ["Prompt resolution", "42 ms", "26%"],
+            ["LLM call", "612 ms", "100%"],
+            ["Output parse", "28 ms", "18%"],
+          ].map(([name, ms, width]) => (
+            <div key={name} className="rounded-lg border border-[#E5E0D8] bg-white p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-semibold text-[#111827]">{name}</p>
+                <p className="text-xs text-[#6B7280]">{ms}</p>
+              </div>
+              <div className="h-2 rounded-full bg-[#F1ECE3]">
+                <div
+                  className="h-2 rounded-full bg-[#2563EB] animate-pulse"
+                  style={{ width }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (index === 1) {
+    return (
+      <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Evaluation score</p>
+          <span className="rounded-full border border-[#DCEFE4] bg-[#EDF9F1] px-2 py-0.5 text-[10px] font-semibold text-[#047857]">
+            Ready
+          </span>
+        </div>
+        <div className="rounded-lg border border-[#E5E0D8] bg-white p-4">
+          <p className="text-[28px] font-semibold leading-none text-[#111827]">
+            82
+            <span className="ml-1 text-sm font-medium text-[#6B7280]">out of 100</span>
+          </p>
+          <div className="mt-3 h-2 rounded-full bg-[#F1ECE3]">
+            <div className="h-2 rounded-full bg-[#047857]" style={{ width: "82%", animation: "pulse 2.4s ease-in-out infinite" }} />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-[#4B5563]">
+            <p>Similarity high</p>
+            <p>Latency stable</p>
+            <p>Critical checks pass</p>
+            <p>Confidence strong</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (index === 2) {
+    return (
+      <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Regression runs</p>
+          <span className="rounded-full border border-[#F4DFD0] bg-[#FFF5EC] px-2 py-0.5 text-[10px] font-semibold text-[#B45309]">
+            Schedule active
+          </span>
+        </div>
+        <div className="space-y-2.5">
+          {[
+            ["Dataset support flows", "14 traces", "Passed"],
+            ["Dataset checkout flows", "11 traces", "Warning"],
+            ["Dataset onboarding flows", "9 traces", "Passed"],
+          ].map(([dataset, count, status]) => (
+            <div key={dataset} className="rounded-lg border border-[#E5E0D8] bg-white p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[#111827]">{dataset}</p>
+                  <p className="text-xs text-[#6B7280]">{count}</p>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                    status === "Passed"
+                      ? "border border-[#DCEFE4] bg-[#EDF9F1] text-[#047857]"
+                      : "border border-[#F4DFD0] bg-[#FFF5EC] text-[#B45309]",
+                  )}
+                >
+                  {status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (index === 3) {
+    return (
+      <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Rollout gate</p>
+          <span className="rounded-full border border-[#F2D2D2] bg-[#FFF3F3] px-2 py-0.5 text-[10px] font-semibold text-[#B91C1C]">
+            Blocked
+          </span>
+        </div>
+        <div className="rounded-lg border border-[#E5E0D8] bg-white p-4">
+          <div className="flex items-center justify-between text-xs font-medium text-[#6B7280]">
+            <span>Traffic split</span>
+            <span>Candidate 20%</span>
+          </div>
+          <div className="mt-2 h-2 rounded-full bg-[#F1ECE3]">
+            <div className="h-2 rounded-full bg-[#2563EB]" style={{ width: "20%", animation: "pulse 2.6s ease-in-out infinite" }} />
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between text-xs text-[#374151]">
+              <span>Critical checks</span>
+              <span className="font-semibold text-[#B91C1C]">1 failed</span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-[#374151]">
+              <span>Review status</span>
+              <span className="font-semibold text-[#111827]">Needs review</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Provider compare</p>
+        <span className="rounded-full border border-[#D7E6FF] bg-[#EEF4FF] px-2 py-0.5 text-[10px] font-semibold text-[#2563EB]">
+          Evidence mode
+        </span>
+      </div>
+      <div className="grid gap-2.5">
+        <ProviderPill name="OpenAI" badge="O" bg="#10A37F" />
+        <ProviderPill name="Claude" badge="C" bg="#D97706" />
+        <ProviderPill name="Google Gemini" badge="G" bg="#2563EB" />
+      </div>
+      <div className="mt-4 rounded-lg border border-[#E5E0D8] bg-white p-3">
+        <div className="flex items-center justify-between text-xs text-[#4B5563]">
+          <span>Recommended provider</span>
+          <span className="font-semibold text-[#111827]">OpenAI for this workload</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default async function MarketingPage() {
   const cookieStore = await cookies();
   const user = await getAuthenticatedUserFromCookies(cookieStore);
@@ -178,17 +350,53 @@ export default async function MarketingPage() {
 
           <div className="rounded-2xl border border-[#E5E0D8] bg-white p-6 shadow-[0_12px_30px_rgba(17,24,39,0.06)]">
             <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                ["TraceLoop", "Prompt model timing output"],
-                ["Evaluation score", "Ready 82 confidence high"],
-                ["Provider compare", "OpenAI Anthropic Gemini"],
-                ["Rollout gate", "Candidate blocked by regression"],
-              ].map(([title, value]) => (
-                <div key={title} className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">{title}</p>
-                  <p className="mt-2 text-sm font-semibold text-[#111827]">{value}</p>
+              <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">TraceLoop</p>
+                <div className="mt-3 space-y-2.5">
+                  {["Prompt resolve", "LLM call", "Output parse"].map((span, i) => (
+                    <div key={span}>
+                      <div className="mb-1.5 flex items-center justify-between text-xs text-[#4B5563]">
+                        <span>{span}</span>
+                        <span>{i === 1 ? "612 ms" : i === 0 ? "42 ms" : "28 ms"}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-[#F1ECE3]">
+                        <div
+                          className="h-1.5 rounded-full bg-[#2563EB]"
+                          style={{
+                            width: i === 1 ? "100%" : i === 0 ? "26%" : "18%",
+                            animation: "pulse 2.3s ease-in-out infinite",
+                            animationDelay: `${i * 0.2}s`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+              <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Evaluation score</p>
+                <p className="mt-2 text-sm font-semibold text-[#111827]">Ready with confidence high</p>
+                <p className="mt-3 text-3xl font-semibold leading-none text-[#111827]">82</p>
+                <div className="mt-3 h-2 rounded-full bg-[#F1ECE3]">
+                  <div className="h-2 rounded-full bg-[#047857] animate-pulse" style={{ width: "82%" }} />
+                </div>
+              </div>
+              <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Provider compare</p>
+                <div className="mt-3 grid gap-2">
+                  <ProviderPill name="OpenAI" badge="O" bg="#10A37F" />
+                  <ProviderPill name="Claude" badge="C" bg="#D97706" />
+                  <ProviderPill name="Google Gemini" badge="G" bg="#2563EB" />
+                </div>
+              </div>
+              <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Rollout gate</p>
+                <p className="mt-2 text-sm font-semibold text-[#111827]">Candidate blocked by regression</p>
+                <div className="mt-3 h-2 rounded-full bg-[#F1ECE3]">
+                  <div className="h-2 rounded-full bg-[#2563EB] animate-pulse" style={{ width: "20%" }} />
+                </div>
+                <p className="mt-2 text-xs text-[#6B7280]">Traffic split candidate 20 active 80</p>
+              </div>
             </div>
           </div>
         </section>
@@ -292,19 +500,7 @@ export default async function MarketingPage() {
                   ))}
                 </div>
               </div>
-              <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-5">
-                <div className="space-y-3">
-                  {[1, 2, 3].map((n) => (
-                    <div key={n} className="rounded-lg border border-[#E5E0D8] bg-white p-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-[#111827]">Signal {n}</p>
-                        <Clock3 className="h-4 w-4 text-[#6B7280]" />
-                      </div>
-                      <p className="mt-1 text-xs text-[#6B7280]">Runtime evidence with clear attribution</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <DeepDiveVisual index={idx} />
             </div>
           ))}
         </section>
