@@ -14,6 +14,7 @@ import {
 
 import { Logo } from "@/components/ui/Logo";
 import { buttonVariants } from "@/components/ui/button";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { cn } from "@/lib/utils";
 import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
 
@@ -97,20 +98,15 @@ const faq = [
 
 function ProviderPill({
   name,
-  badge,
-  bg,
+  providerType,
 }: {
   name: string;
-  badge: string;
-  bg: string;
+  providerType: string;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-[#E5E0D8] bg-white px-3 py-2">
-      <span
-        className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-semibold text-white"
-        style={{ backgroundColor: bg }}
-      >
-        {badge}
+      <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-[#F3F4F6] text-[#374151]">
+        <ProviderIcon providerType={providerType} className="h-3.5 w-3.5" />
       </span>
       <span className="text-xs font-semibold text-[#1F2937]">{name}</span>
     </div>
@@ -259,9 +255,9 @@ function DeepDiveVisual({ index }: { index: number }) {
         </span>
       </div>
       <div className="grid gap-2.5">
-        <ProviderPill name="OpenAI" badge="O" bg="#10A37F" />
-        <ProviderPill name="Claude" badge="C" bg="#D97706" />
-        <ProviderPill name="Google Gemini" badge="G" bg="#2563EB" />
+        <ProviderPill name="OpenAI" providerType="openai" />
+        <ProviderPill name="Claude" providerType="claude" />
+        <ProviderPill name="Google Gemini" providerType="google" />
       </div>
       <div className="mt-4 rounded-lg border border-[#E5E0D8] bg-white p-3">
         <div className="flex items-center justify-between text-xs text-[#4B5563]">
@@ -384,9 +380,9 @@ export default async function MarketingPage() {
               <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Provider compare</p>
                 <div className="mt-3 grid gap-2">
-                  <ProviderPill name="OpenAI" badge="O" bg="#10A37F" />
-                  <ProviderPill name="Claude" badge="C" bg="#D97706" />
-                  <ProviderPill name="Google Gemini" badge="G" bg="#2563EB" />
+                  <ProviderPill name="OpenAI" providerType="openai" />
+                  <ProviderPill name="Claude" providerType="claude" />
+                  <ProviderPill name="Google Gemini" providerType="google" />
                 </div>
               </div>
               <div className="rounded-xl border border-[#EDE6DA] bg-[#FFFCF7] p-4">
