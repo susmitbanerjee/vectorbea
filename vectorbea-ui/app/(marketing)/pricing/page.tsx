@@ -123,7 +123,7 @@ export default function PricingPage() {
             </div>
             <div>
               <p className="text-sm font-semibold tracking-tight text-white">VectorBea</p>
-              <p className="text-xs text-zinc-400">Enterprise AI Infrastructure Platform</p>
+              <p className="text-xs text-zinc-400">AI Risk Control for Production LLMs</p>
             </div>
           </Link>
           <div className="flex items-center gap-3">

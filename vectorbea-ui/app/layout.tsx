@@ -16,7 +16,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "VectorBea",
   description:
-    "The Enterprise AI Infrastructure Platform. Manage, evaluate, and deliver prompts at the edge with zero latency. Run the VectorBea Sidecar in your VPC to separate AI behavior from your codebase without compromising data privacy.",
+    "AI Risk Control for Production LLMs. Prevent bad AI outputs, detect regressions, block unsafe rollouts, and audit every inference — control plane in the cloud, data stays in your VPC.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     shortcut: "/icon.svg",

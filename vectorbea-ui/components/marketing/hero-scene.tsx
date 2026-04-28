@@ -29,14 +29,13 @@ export function MarketingHero() {
                 <span className="absolute inline-flex h-full w-full rounded-full bg-primary/50 animate-ping" style={{ animationDuration: "2.4s" }} />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
               </span>
-              AI Release Control &nbsp;·&nbsp; Version 2 available
+              AI Risk Control for Production LLMs &nbsp;·&nbsp; v2
             </div>
 
             {/* H1 */}
             <h1 className="mt-7 text-balance text-[2.625rem] font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl md:text-[3.5rem] xl:text-[4rem]">
-              Govern AI prompts like{" "}
-              <br className="hidden sm:block" />
-              you govern{" "}
+              Control, evaluate, and safely deploy
+              {" "}LLM behavior in production.
               <span
                 className="bg-gradient-to-r from-primary via-primary to-brand-muted bg-clip-text text-transparent"
               >

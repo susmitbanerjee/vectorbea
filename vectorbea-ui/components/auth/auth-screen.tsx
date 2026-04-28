@@ -22,10 +22,10 @@ type Mode = "signin" | "signup";
 type Provider = "github" | "google" | "azure" | "sso";
 
 const TRUST_ITEMS = [
-  "Prompts versioned and reviewed like source code",
-  "Model calls never leave your VPC",
-  "Zero inbound ports — outbound HTTPS only",
-  "Immutable audit log for every operator action",
+  "Detect regressions before users notice",
+  "Block unsafe rollouts with evaluation gates",
+  "Model calls and audit events stay in your VPC",
+  "Immutable log of every AI decision and operator action",
 ];
 
 export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
@@ -131,15 +131,15 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
             <div className="flex flex-1 flex-col justify-center max-w-lg space-y-10">
               <div className="space-y-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-                  AI Release Control
+                  AI Risk Control for Production LLMs
                 </p>
                 <h1 className="text-[2.75rem] font-semibold leading-[1.1] tracking-[-0.03em] text-foreground xl:text-5xl">
-                  Ship AI features with{" "}
-                  <span className="text-muted-foreground">the discipline of production code.</span>
+                  Prevent bad AI outputs.{" "}
+                  <span className="text-muted-foreground">Before they reach production.</span>
                 </h1>
                 <p className="text-base leading-7 text-muted-foreground">
-                  Version prompts, gate rollouts on evaluations, and keep every
-                  inference inside your own infrastructure — all from one control plane.
+                  Control prompt behavior, detect regressions, block unsafe rollouts,
+                  and audit every AI decision — all from one control plane.
                 </p>
               </div>
 

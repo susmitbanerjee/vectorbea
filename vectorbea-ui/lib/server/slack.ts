@@ -107,13 +107,19 @@ export function slackAlertTriggered(args: {
   metricType: string;
   metricValue: number;
   threshold: number;
+  comparison: string;
   alertsUrl: string;
 }): SlackPayload {
+  const metricLabel = args.metricType.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const ops: Record<string, string> = { gt: ">", lt: "<", gte: "≥", lte: "≤" };
+  const op = ops[args.comparison] ?? args.comparison;
+  const val = args.metricType === "latency_p95" ? `${Math.round(args.metricValue)} ms` : `${(Math.round(args.metricValue * 10) / 10).toFixed(1)}`;
+  const thresh = args.metricType === "latency_p95" ? `${args.threshold} ms` : String(args.threshold);
   return {
-    text: `Alert triggered: ${args.ruleName} in ${args.workspaceName}`,
+    text: `🚨 Alert triggered: ${args.ruleName} — ${metricLabel} is ${val}`,
     blocks: mkBlock(
-      `🚨 Alert triggered`,
-      `*Rule:* ${args.ruleName}\n*Metric:* ${args.metricType.replaceAll("_", " ")} = ${Math.round(args.metricValue * 100) / 100} (threshold: ${args.threshold})\n*Workspace:* ${args.workspaceName}`,
+      `🚨 Alert triggered — threshold breached`,
+      `*Rule:* ${args.ruleName}\n*${metricLabel}:* ${val} (threshold: ${op} ${thresh})\n*Workspace:* ${args.workspaceName}`,
       args.alertsUrl,
     ),
   };
@@ -122,14 +128,16 @@ export function slackAlertTriggered(args: {
 export function slackRegressionFailed(args: {
   workspaceName: string;
   scheduleName: string;
+  promptName?: string | null;
   reason: string;
   runUrl: string | null;
 }): SlackPayload {
+  const promptLine = args.promptName ? `\n*Prompt:* ${args.promptName}` : "";
   return {
-    text: `Regression failed: ${args.scheduleName} in ${args.workspaceName}`,
+    text: `🚨 Regression detected — ${args.scheduleName}`,
     blocks: mkBlock(
-      `⚠️ Regression failed`,
-      `*Schedule:* ${args.scheduleName}\n*Reason:* ${args.reason}\n*Workspace:* ${args.workspaceName}`,
+      `🚨 Regression detected in production behavior`,
+      `*Schedule:* ${args.scheduleName}${promptLine}\n*Reason:* ${args.reason}\n*Workspace:* ${args.workspaceName}`,
       args.runUrl ?? undefined,
     ),
   };

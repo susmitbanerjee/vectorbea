@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 const APP_URL = () => process.env.APP_URL ?? "https://app.vectorbea.app";
 
@@ -178,7 +178,7 @@ export function evaluationCompletedEmail(args: {
 }) {
   const label = args.recommendation.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
   const isPass = args.recommendation.toLowerCase().includes("pass") || args.recommendation.toLowerCase().includes("promote");
-  const subject = `Evaluation complete: ${args.promptName}@${args.versionTag} — ${label}`;
+  const subject = `Evaluation completed — ${args.promptName}`;
 
   const scoreRow = args.score != null
     ? [{ label: "Score", value: `${Math.round(args.score * 100)}%`, highlight: true }]
@@ -215,7 +215,7 @@ export function evaluationFailedEmail(args: {
   reason: string;
   runUrl: string;
 }) {
-  const subject = `Evaluation failed: ${args.promptName}@${args.versionTag}`;
+  const subject = `Evaluation failed — action required`;
 
   const body = `
     <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Evaluation Failed</p>
@@ -251,7 +251,7 @@ export function regressionFailedEmail(args: {
   reason: string;
   runUrl: string | null;
 }) {
-  const subject = `Regression schedule failed: ${args.scheduleName}`;
+  const subject = `Regression detected in production behavior`;
   const promptRow = args.promptName ? [{ label: "Prompt", value: args.promptName }] : [];
 
   const body = `
@@ -293,7 +293,7 @@ export function alertTriggeredEmail(args: {
   const metricDisplay = formatMetricValue(args.metricType, args.metricValue);
   const thresholdDisplay = formatMetricValue(args.metricType, args.threshold);
   const comparisonLabel = formatComparison(args.comparison);
-  const subject = `🚨 Alert triggered: ${args.ruleName} — ${metricLabel} is ${metricDisplay}`;
+  const subject = `Alert triggered: ${args.ruleName}`;
 
   const body = `
     <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Alert Triggered</p>
@@ -343,7 +343,7 @@ export function rolloutBlockedEmail(args: {
   reasons: string[];
   promptUrl: string;
 }) {
-  const subject = `Rollout blocked: ${args.promptName}@${args.versionTag}`;
+  const subject = `Rollout blocked — ${args.promptName}@${args.versionTag}`;
   const reasonsList = args.reasons.map((r) =>
     `<tr><td style="padding:6px 16px;border-bottom:1px solid #1e1e2e;"><p style="margin:0;font-size:13px;color:#fca5a5;">⚠ ${r}</p></td></tr>`
   ).join("");
@@ -388,7 +388,7 @@ export function quotaWarningEmail(args: {
 }) {
   const pct = Math.round((args.used / args.limit) * 100);
   const usageLabel = args.usageType.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  const subject = `Usage warning: ${usageLabel} at ${pct}%`;
+  const subject = `You are nearing your usage limit`;
   const barFilled = Math.min(pct, 100);
   const barColor = pct >= 90 ? "#ef4444" : pct >= 75 ? "#f59e0b" : "#6366f1";
 
@@ -444,7 +444,7 @@ export function promptPromotedEmail(args: {
   promotedBy: string;
   promptUrl: string;
 }) {
-  const subject = `🚀 Prompt promoted: ${args.promptName}@${args.versionTag}`;
+  const subject = `Rollout completed — ${args.promptName}@${args.versionTag}`;
 
   const body = `
     <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Prompt Promoted</p>

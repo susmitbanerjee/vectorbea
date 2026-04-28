@@ -298,7 +298,11 @@ export default function AlertsPage() {
       });
       const json = await res.json() as { ok?: boolean; recipients?: string[]; errors?: string[]; error?: string };
       if (!res.ok) throw new Error(json.error ?? "Trigger failed");
-      setTriggerResult({ ok: json.ok ?? false, recipients: json.recipients, errors: json.errors });
+      // Coerce errors to string[] to prevent [object Object] display
+      const errors = (json.errors ?? []).map((e: unknown) =>
+        typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e)
+      );
+      setTriggerResult({ ok: json.ok ?? false, recipients: json.recipients, errors: errors.length ? errors : undefined });
     } catch (e) {
       setTriggerResult({ ok: false, errors: [e instanceof Error ? e.message : "Unknown error"] });
     } finally {
@@ -313,7 +317,7 @@ export default function AlertsPage() {
 
   return (
     <div className="min-h-screen">
-      <AppHeader title="Alerts" subtitle="Monitor prompt performance and trigger on threshold breaches." />
+      <AppHeader title="Alerts" subtitle="Detect regressions, latency spikes, and score drops before users notice." />
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
 
         {evaluateResult && (

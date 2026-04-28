@@ -173,7 +173,7 @@ export default async function LandingPage() {
             <div>
               <p className="text-sm font-semibold tracking-tight">VectorBea</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Enterprise AI Infrastructure Platform
+                AI Risk Control for Production LLMs
               </p>
             </div>
           </Link>

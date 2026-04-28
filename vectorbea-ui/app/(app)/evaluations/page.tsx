@@ -228,7 +228,7 @@ export default function EvaluationsPage() {
     <div className="min-h-screen">
       <AppHeader
         title="Evaluations"
-        subtitle="Evaluate prompt versions against datasets or runtime traces, score results, and route through human review before rollout decisions."
+        subtitle="Score prompt behavior, detect regressions, and gate rollouts — before bad outputs reach production."
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">

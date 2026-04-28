@@ -83,10 +83,12 @@ async function getWorkspaceAdminEmails(workspaceId: string): Promise<string[]> {
 }
 
 async function safeRun(label: string, fn: () => Promise<void>) {
+  const start = Date.now();
   try {
     await fn();
+    console.log(`[notifications] ✓ ${label} sent (${Date.now() - start}ms)`);
   } catch (err) {
-    console.error(`[notifications] ${label} failed:`, err instanceof Error ? err.message : err);
+    console.error(`[notifications] ✗ ${label} failed (${Date.now() - start}ms):`, err instanceof Error ? err.message : err);
   }
 }
 

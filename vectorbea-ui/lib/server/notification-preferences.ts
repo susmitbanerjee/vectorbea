@@ -162,11 +162,15 @@ export async function upsertUserNotificationPrefs(
 /** Should we send an email for this workspace-level event? */
 export async function shouldEmailWorkspace(workspaceId: string, event: WorkspaceEventKey): Promise<boolean> {
   const prefs = await getWorkspaceNotificationPrefs(workspaceId);
-  return prefs.emailEnabled && (prefs.events[event] ?? true);
+  const enabled = prefs.emailEnabled && (prefs.events[event] ?? true);
+  if (!enabled) console.log(`[notifications] email skipped — workspace=${workspaceId} event=${event} emailEnabled=${prefs.emailEnabled} eventEnabled=${prefs.events[event]}`);
+  return enabled;
 }
 
 /** Should we send a Slack notification for this workspace-level event? */
 export async function shouldSlackWorkspace(workspaceId: string, event: WorkspaceEventKey): Promise<boolean> {
   const prefs = await getWorkspaceNotificationPrefs(workspaceId);
-  return prefs.slackEnabled && (prefs.slackEvents[event] ?? false);
+  const enabled = prefs.slackEnabled && (prefs.slackEvents[event] ?? false);
+  if (!enabled) console.log(`[notifications] slack skipped — workspace=${workspaceId} event=${event} slackEnabled=${prefs.slackEnabled} eventEnabled=${prefs.slackEvents[event]}`);
+  return enabled;
 }
