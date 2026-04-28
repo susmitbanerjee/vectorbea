@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import type { TimeWindow, WorkspaceMetricsSummary } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -77,8 +78,8 @@ export default function MetricsPage() {
               {w}
             </Button>
           ))}
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          <Select
+            className="h-9 min-w-[170px] text-sm font-medium"
             value={environment}
             onChange={(event) => setEnvironment(event.target.value as "all" | "prod" | "staging" | "dev")}
           >
@@ -86,9 +87,9 @@ export default function MetricsPage() {
             <option value="prod">Prod</option>
             <option value="staging">Staging</option>
             <option value="dev">Dev</option>
-          </select>
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          </Select>
+          <Select
+            className="h-9 min-w-[170px] text-sm font-medium"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
           >
@@ -96,7 +97,7 @@ export default function MetricsPage() {
             {(metrics?.byPrompt ?? []).map((row) => (
               <option key={row.promptName} value={row.promptName}>{row.promptName}</option>
             ))}
-          </select>
+          </Select>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
 

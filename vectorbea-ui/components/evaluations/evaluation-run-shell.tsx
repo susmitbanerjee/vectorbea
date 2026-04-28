@@ -64,15 +64,15 @@ function fmtPct(v: number | null | undefined, fallback = "—") {
 
 function scoreColor(score: number | null | undefined) {
   if (score == null) return "text-muted-foreground";
-  if (score >= 0.78) return "text-emerald-400";
-  if (score >= 0.5) return "text-amber-400";
-  return "text-red-400";
+  if (score >= 0.78) return "text-emerald-700";
+  if (score >= 0.5) return "text-amber-700";
+  return "text-red-700";
 }
 
 function recMeta(rec: string) {
-  if (rec === "ready_for_rollout") return { label: "Ready for rollout", Icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30", badgeVariant: "success" as const };
-  if (rec === "regression_detected" || rec === "blocked") return { label: rec === "blocked" ? "Blocked" : "Regression detected", Icon: XCircle, color: "text-red-400", bg: "bg-red-500/10 border-red-500/30", badgeVariant: "destructive" as const };
-  return { label: "Needs review", Icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30", badgeVariant: "warning" as const };
+  if (rec === "ready_for_rollout") return { label: "Ready for rollout", Icon: CheckCircle2, color: "text-emerald-700", bg: "bg-emerald-500/10 border-emerald-500/30", badgeVariant: "success" as const };
+  if (rec === "regression_detected" || rec === "blocked") return { label: rec === "blocked" ? "Blocked" : "Regression detected", Icon: XCircle, color: "text-red-700", bg: "bg-red-500/10 border-red-500/30", badgeVariant: "destructive" as const };
+  return { label: "Needs review", Icon: AlertTriangle, color: "text-amber-700", bg: "bg-amber-500/10 border-amber-500/30", badgeVariant: "warning" as const };
 }
 
 type ResultFilter = "all" | "passed" | "failed" | "needs_review" | "low_confidence" | "no_output";
@@ -80,7 +80,7 @@ type ResultFilter = "all" | "passed" | "failed" | "needs_review" | "low_confiden
 // ─── KPI card ─────────────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: "green" | "red" | "amber" }) {
-  const cls = accent === "green" ? "text-emerald-400" : accent === "red" ? "text-red-400" : accent === "amber" ? "text-amber-400" : "text-foreground";
+  const cls = accent === "green" ? "text-emerald-700" : accent === "red" ? "text-red-700" : accent === "amber" ? "text-amber-700" : "text-foreground";
   return (
     <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-1">
       <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
@@ -173,14 +173,14 @@ function RunningPanel({ run }: { run: TraceSetEvaluationRunView | null }) {
                 }`}
               >
                 <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold ${
-                  state === "done" ? "border-emerald-500/40 text-emerald-400"
+                  state === "done" ? "border-emerald-500/40 text-emerald-700"
                   : state === "active" ? "border-primary/40 text-primary"
                   : "border-border text-muted-foreground"
                 }`}>
                   {state === "done" ? <CheckCircle2 className="h-2.5 w-2.5" /> : state === "active" ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : i + 1}
                 </span>
                 <span className={`truncate font-medium ${
-                  state === "done" ? "text-emerald-400"
+                  state === "done" ? "text-emerald-700"
                   : state === "active" ? "text-foreground"
                   : "text-muted-foreground"
                 }`}>{step.label}</span>
@@ -279,14 +279,14 @@ function MultiProviderPanel({ results }: { results: TraceSetEvaluationRunView["r
                           <div className="text-[10px] text-muted-foreground">{s.model}</div>
                         </div>
                         {isBest && (
-                          <span className="ml-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400 uppercase tracking-wider">
+                          <span className="ml-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 uppercase tracking-wider">
                             Best
                           </span>
                         )}
                       </div>
                     </td>
                     <td className="py-2.5 px-3 text-right tabular-nums">
-                      <div className={`font-bold ${passRate == null ? "text-muted-foreground" : passRate >= 78 ? "text-emerald-400" : passRate >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                      <div className={`font-bold ${passRate == null ? "text-muted-foreground" : passRate >= 78 ? "text-emerald-700" : passRate >= 50 ? "text-amber-700" : "text-red-700"}`}>
                         {passRate != null ? `${passRate}%` : "—"}
                       </div>
                       <div className="text-[10px] text-muted-foreground mt-0.5">{s.passedItems}/{s.totalItems}</div>
@@ -448,12 +448,12 @@ function ResultsTable({
                       </Link>
                     )}
                     {!hasOutput && (
-                      <span className="mt-0.5 block text-[10px] text-amber-400">Output unavailable</span>
+                      <span className="mt-0.5 block text-[10px] text-amber-700">Output unavailable</span>
                     )}
                   </td>
                   <td className="py-2.5 px-2">
                     <div className="flex items-center gap-1.5">
-                      {pass ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" /> : <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />}
+                    {pass ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" /> : <XCircle className="h-3.5 w-3.5 text-red-700 shrink-0" />}
                       <Badge variant={bv} className="text-[10px]">{rec.replaceAll("_", " ")}</Badge>
                     </div>
                   </td>
@@ -554,8 +554,8 @@ function ReviewPanel({
   return (
     <div className="space-y-3">
       {/* Review status */}
-      <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-        <span className="text-muted-foreground">Review status</span>
+      <div className="flex items-center justify-between rounded-lg border border-[#D8CFC2] bg-[#FFFCF7] px-3 py-2 text-xs">
+        <span className="text-[#374151]">Review status</span>
         <span className="font-semibold capitalize">{run.review.status.replaceAll("_", " ")}</span>
       </div>
 
@@ -568,7 +568,7 @@ function ReviewPanel({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button type="button" className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 text-sm font-medium hover:bg-accent/40">
+          <button type="button" className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 text-sm font-medium hover:bg-[#F8F4EC]">
             <span className="truncate text-left">
               {pending ? labelMap[pending] ?? pending : <span className="text-muted-foreground">Select decision…</span>}
             </span>
@@ -622,7 +622,7 @@ function ReviewPanel({
         {run.status === "approved" && (
           <Link
             href={`/prompts?org=${encodeURIComponent(activeWorkspaceId ?? "")}` as any}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/20 transition"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/20 transition"
           >
             <GitBranch className="h-3.5 w-3.5" />
             Open prompts to complete rollout →
@@ -774,16 +774,16 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                 <rm.Icon className="h-3.5 w-3.5" />
                 {rm.label}
               </Badge>
-              <span>{run.promptName} <span className="text-muted-foreground/60">@</span> {run.candidateVersionTag}</span>
+              <span>{run.promptName} <span className="text-muted-foreground">@</span> {run.candidateVersionTag}</span>
               {run.datasetName && <span className="flex items-center gap-1"><Database className="h-3 w-3" />{run.datasetName}</span>}
-              <span className="text-muted-foreground/60">·</span>
+              <span className="text-muted-foreground">·</span>
               <span>{new Date(run.createdAt).toLocaleString()}</span>
             </div>
 
             {/* ── Verdict alert (only when blocked/regression) ── */}
             {(rec === "blocked" || rec === "regression_detected") && (
               <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
-                <XCircle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
+                <XCircle className="h-4 w-4 text-red-700 mt-0.5 shrink-0" />
                 <div className="text-sm space-y-1">
                   <div className="font-semibold text-red-700">{rm.label}</div>
                   {run.aggregate.reasons.length > 0 && (
@@ -945,7 +945,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
                           color="bg-primary"
                         />
                       )}
-                      <p className="text-muted-foreground/60 text-[10px]">Items without expected output skip the similarity check (max score 40%).</p>
+                      <p className="text-muted-foreground text-[10px]">Items without expected output skip the similarity check (max score 40%).</p>
                     </CardContent>
                   </Card>
                 )}

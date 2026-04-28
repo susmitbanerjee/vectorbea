@@ -27,7 +27,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={() => { void navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}
       className="ml-auto flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
     >
-      {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+      {copied ? <Check className="h-3 w-3 text-emerald-700" /> : <Copy className="h-3 w-3" />}
       {copied ? "Copied" : "Copy"}
     </button>
   );
@@ -54,7 +54,7 @@ function CheckRow({ check, idx }: { check: TraceEvaluationCheckView; idx: number
   const pass = check.status === "pass";
   const warn = check.status === "warning";
   const Icon = pass ? CheckCircle2 : warn ? AlertTriangle : XCircle;
-  const color = pass ? "text-emerald-400" : warn ? "text-amber-400" : "text-red-400";
+  const color = pass ? "text-emerald-700" : warn ? "text-amber-700" : "text-red-700";
   return (
     <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs">
       <Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${color}`} />
@@ -96,7 +96,7 @@ export function EvidenceDialog({ open, onClose, result, index }: EvidenceDialogP
             <DialogTitle className="text-base font-semibold">Evidence — item {index + 1}</DialogTitle>
             <Badge variant={badgeVariant}>{rec.replaceAll("_", " ")}</Badge>
             {score !== null && (
-              <span className={`text-sm font-bold tabular-nums ${pass ? "text-emerald-400" : "text-red-400"}`}>{score}%</span>
+        <span className={`text-sm font-bold tabular-nums ${pass ? "text-emerald-700" : "text-red-700"}`}>{score}%</span>
             )}
           </div>
           <DialogDescription className="text-xs">
@@ -142,7 +142,7 @@ export function EvidenceDialog({ open, onClose, result, index }: EvidenceDialogP
             {result.actualOutput?.trim() ? (
               <TextBlock label="Actual LLM output" value={result.actualOutput} />
             ) : (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs text-amber-200 space-y-1">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs text-amber-700 space-y-1">
                 <div className="font-semibold">Output unavailable</div>
                 <div>
                   {result.error
@@ -191,7 +191,7 @@ export function EvidenceDialog({ open, onClose, result, index }: EvidenceDialogP
               </div>
             )}
             {result.error && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700">
                 <span className="font-semibold">Error: </span>{result.error}
               </div>
             )}
@@ -203,9 +203,9 @@ export function EvidenceDialog({ open, onClose, result, index }: EvidenceDialogP
               <p className="text-xs text-muted-foreground">No execution steps recorded for this item.</p>
             ) : (
               result.executionSteps.map((step, i) => {
-                const sc = step.status === "success" ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/8"
-                  : step.status === "error" ? "border-red-500/30 text-red-400 bg-red-500/8"
-                  : step.status === "warning" || step.status === "skipped" ? "border-amber-500/30 text-amber-400 bg-amber-500/8"
+                const sc = step.status === "success" ? "border-emerald-500/30 text-emerald-700 bg-emerald-500/8"
+                  : step.status === "error" ? "border-red-500/30 text-red-700 bg-red-500/8"
+                  : step.status === "warning" || step.status === "skipped" ? "border-amber-500/30 text-amber-700 bg-amber-500/8"
                   : "border-border text-muted-foreground bg-muted/20";
                 const Icon = step.status === "success" ? CheckCircle2 : step.status === "error" ? XCircle : AlertTriangle;
                 return (

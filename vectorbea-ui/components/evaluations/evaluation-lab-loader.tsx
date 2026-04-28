@@ -125,7 +125,7 @@ export function EvaluationLabLoader({ phase = null, message }: EvaluationLabLoad
   const liquidPct = phase != null ? (phase + 1) * 25 : ((tick % 40) / 40) * 100;
 
   return (
-    <div className="flex min-h-[400px] flex-col items-center justify-center rounded-2xl border border-border/60 bg-gradient-to-br from-slate-900 via-slate-950 to-background px-8 py-12 text-center">
+    <div className="flex min-h-[400px] flex-col items-center justify-center rounded-2xl border border-[#D8CFC2] bg-gradient-to-br from-[#FFFCF7] via-[#FBFAF7] to-[#F8F5EF] px-8 py-12 text-center shadow-sm">
       {/* Flask animation */}
       <div className="relative mb-6 flex items-end gap-6">
         {reduced ? (

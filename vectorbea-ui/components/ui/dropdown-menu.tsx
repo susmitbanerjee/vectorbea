@@ -31,7 +31,7 @@ export function DropdownMenuPanel({
       <DropdownMenuContent
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-[12rem] max-h-[min(420px,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl backdrop-blur-xl vb-scrollbar",
+          "z-[90] min-w-[12rem] max-h-[min(420px,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg vb-scrollbar",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className,
         )}
@@ -86,7 +86,7 @@ export function DropdownMenuPanelRadioItem({
   return (
     <DropdownMenuRadioItem
       className={cn(
-        "relative flex cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-2.5 text-sm text-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[state=checked]:bg-accent/60 data-[state=checked]:text-foreground",
+        "relative flex cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-2.5 text-sm text-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[state=checked]:bg-sidebar-active data-[state=checked]:text-foreground",
         className,
       )}
       {...props}

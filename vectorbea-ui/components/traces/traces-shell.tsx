@@ -247,7 +247,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC]"
                   >
                     <span className="truncate">
                       {{ all: "All status", success: "Success", warning: "Warning", error: "Error" }[status] ?? status}
@@ -270,7 +270,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC]"
                   >
                     <span className="truncate">
                       {{ all: "All environments", prod: "Prod", staging: "Staging", dev: "Dev" }[environment] ?? environment}
@@ -293,7 +293,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC]"
                   >
                     <span className="truncate">
                       {promptName === "all" ? "All prompts" : promptOptions.find(n => n.toLowerCase() === promptName) ?? promptName}
@@ -316,7 +316,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC]"
                   >
                     <span className="truncate">
                       {{ all: "All time", "24h": "Last 24h", "7d": "Last 7 days", "30d": "Last 30 days" }[since] ?? since}
@@ -339,7 +339,7 @@ export function TracesShell({ initialQuery }: { initialQuery: string }) {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    className="flex h-9 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC]"
                   >
                     <span className="truncate">
                       {{ newest: "Newest first", latency: "Highest latency", tokens: "Highest tokens", cost: "Highest cost" }[sortBy] ?? sortBy}

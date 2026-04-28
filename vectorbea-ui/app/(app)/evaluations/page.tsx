@@ -234,7 +234,7 @@ export default function EvaluationsPage() {
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
         {error ? (
           <Card className="border-red-500/30 bg-red-500/10">
-            <CardContent className="p-4 text-sm text-red-100">{error}</CardContent>
+            <CardContent className="p-4 text-sm text-red-700">{error}</CardContent>
           </Card>
         ) : null}
 
@@ -253,7 +253,7 @@ export default function EvaluationsPage() {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <span className="truncate text-left">
                         {selectedPromptId
@@ -280,7 +280,7 @@ export default function EvaluationsPage() {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <span className="truncate text-left">
                         {selectedVersionId
@@ -374,7 +374,7 @@ export default function EvaluationsPage() {
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <span className="truncate text-left">
                           {selectedDatasetId
@@ -421,7 +421,7 @@ export default function EvaluationsPage() {
                       </Link>
                     </p>
                   ) : compatibleDatasets.length === 0 && selectedPromptId ? (
-                    <p className="text-xs text-amber-400">
+                    <p className="text-xs text-amber-700">
                       No datasets are scoped to this prompt.{" "}
                       <Link href={`/evaluations/datasets?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="underline">
                         Create a dataset for this prompt →
@@ -464,7 +464,7 @@ export default function EvaluationsPage() {
                 <div className="space-y-1.5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                     Provider / model
-                    <span className="ml-1.5 normal-case font-normal text-muted-foreground/60">(optional — defaults to first configured)</span>
+                    <span className="ml-1.5 normal-case font-normal text-muted-foreground">(optional — defaults to first configured)</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {providers.map((p) => {
@@ -490,7 +490,7 @@ export default function EvaluationsPage() {
                     })}
                   </div>
                   {selectedProviderIds.length > 1 && (
-                    <p className="text-[10px] text-amber-400">Multi-provider: evaluation will run against each selected provider. Results stored in model_results.</p>
+                    <p className="text-[10px] text-amber-700">Multi-provider: evaluation will run against each selected provider. Results stored in model_results.</p>
                   )}
                 </div>
               )}
@@ -635,7 +635,7 @@ export default function EvaluationsPage() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 min-w-[140px] items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent/40"
+                    className="flex h-9 min-w-[140px] items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC]"
                   >
                     <span className="truncate">
                       {{ all: "All", needs_review: "Needs Review", approved: "Approved", rejected: "Rejected", blocked: "Blocked", running: "Running", failed: "Failed" }[statusFilter]}

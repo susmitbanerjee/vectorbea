@@ -809,7 +809,7 @@ export default function TraceDetailsPage() {
         <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
         <div className="px-4 py-6 md:px-6 xl:px-8">
           <Card className="rounded-2xl border border-red-500/30 bg-red-500/10">
-            <CardContent className="p-6 text-sm text-red-100">{loadError}</CardContent>
+            <CardContent className="p-6 text-sm text-red-700">{loadError}</CardContent>
           </Card>
         </div>
       </div>
@@ -827,7 +827,7 @@ export default function TraceDetailsPage() {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex h-9 min-w-[190px] items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex h-9 min-w-[190px] items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="truncate">
                     {replayProvider === "same"
@@ -855,7 +855,7 @@ export default function TraceDetailsPage() {
               value={replayModel}
               onChange={(event) => setReplayModel(event.target.value)}
               placeholder="Replay model override"
-              className="h-9 w-40 border-border bg-card text-xs text-foreground"
+              className="h-9 w-40 border-[#D8CFC2] bg-card text-xs text-foreground"
             />
             <Button
               size="sm"
@@ -896,15 +896,15 @@ export default function TraceDetailsPage() {
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
         {replayError ? (
-          <Card className="rounded-2xl border border-red-500/30 bg-red-500/10">
-            <CardContent className="p-4 text-sm text-red-100">{replayError}</CardContent>
+            <Card className="rounded-2xl border border-red-500/30 bg-red-500/10">
+              <CardContent className="p-4 text-sm text-red-700">{replayError}</CardContent>
           </Card>
         ) : null}
         {existingFlag && (
           <Card className="rounded-2xl border border-amber-500/40 bg-amber-500/10">
             <CardContent className="flex items-start justify-between gap-3 p-4">
               <div className="space-y-0.5">
-                <p className="text-sm font-medium text-amber-300">
+                <p className="text-sm font-medium text-amber-800">
                   <Flag className="mr-1 inline h-3.5 w-3.5" />
                   Flagged by {existingFlag.flagged_by_email ?? "unknown"} on {new Date(existingFlag.flagged_at).toLocaleString()}
                 </p>
