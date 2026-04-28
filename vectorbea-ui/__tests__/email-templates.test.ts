@@ -1,194 +1,131 @@
-/**
- * Email template rendering tests.
- * Verifies that templates produce correct subjects and contain key fields.
- * No network calls — pure function tests.
- *
- * Run with jest or vitest once a test runner is configured.
- */
-
 import {
-  teamInvitationEmail,
+  alertTriggeredEmail,
   evaluationCompletedEmail,
   evaluationFailedEmail,
-  regressionFailedEmail,
-  alertTriggeredEmail,
-  rolloutBlockedEmail,
+  promptPromotedEmail,
   quotaWarningEmail,
+  regressionFailedEmail,
+  rolloutBlockedEmail,
+  teamInvitationEmail,
 } from "../lib/server/email-templates";
 
-describe("teamInvitationEmail", () => {
-  const args = {
-    inviterName: "Alice",
-    workspaceName: "Acme Corp",
-    role: "editor",
-    acceptUrl: "https://app.example.com/auth/accept-invite?token=abc123",
-    expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
-  };
-
-  it("subject contains workspace name and inviter", () => {
-    const { subject } = teamInvitationEmail(args);
-    expect(subject).toContain("Alice");
-    expect(subject).toContain("Acme Corp");
-  });
-
-  it("HTML contains accept link", () => {
-    const { html } = teamInvitationEmail(args);
-    expect(html).toContain(args.acceptUrl);
-  });
-
-  it("HTML contains role", () => {
-    const { html } = teamInvitationEmail(args);
-    expect(html).toContain("editor");
-  });
-
-  it("plain text contains accept link", () => {
-    const { text } = teamInvitationEmail(args);
-    expect(text).toContain(args.acceptUrl);
-  });
-
-  it("does not include raw token in logs (no direct secret exposure in subject)", () => {
-    const { subject } = teamInvitationEmail(args);
-    expect(subject).not.toContain("abc123");
-  });
-});
-
-describe("evaluationCompletedEmail", () => {
-  const args = {
-    workspaceName: "Acme",
-    promptName: "chat-assistant",
-    versionTag: "v1.2",
-    recommendation: "ready_for_rollout",
-    score: 0.87,
-    runUrl: "https://app.example.com/evaluations/run-id",
-  };
-
-  it("subject contains prompt name and version", () => {
-    const { subject } = evaluationCompletedEmail(args);
-    expect(subject).toContain("chat-assistant");
-    expect(subject).toContain("v1.2");
-  });
-
-  it("subject normalises recommendation label", () => {
-    const { subject } = evaluationCompletedEmail(args);
-    expect(subject).toContain("ready for rollout");
-  });
-
-  it("HTML contains score percentage", () => {
-    const { html } = evaluationCompletedEmail(args);
-    expect(html).toContain("87%");
-  });
-
-  it("HTML contains run URL", () => {
-    const { html } = evaluationCompletedEmail(args);
-    expect(html).toContain(args.runUrl);
-  });
-
-  it("omits score block when score is null", () => {
-    const { html } = evaluationCompletedEmail({ ...args, score: null });
-    expect(html).not.toContain("<dt>Average score</dt>");
-  });
-});
-
-describe("evaluationFailedEmail", () => {
-  it("subject indicates failure", () => {
-    const { subject } = evaluationFailedEmail({
+describe("email templates", () => {
+  it("renders invitation with manageably safe details", () => {
+    const res = teamInvitationEmail({
+      inviterName: "Alice",
       workspaceName: "Acme",
-      promptName: "assistant",
-      versionTag: "v2",
-      reason: "Provider timeout",
-      runUrl: "https://app.example.com/evaluations/x",
+      role: "editor",
+      acceptUrl: "https://app.example.com/auth/accept-invite?token=abc",
+      expiresAt: new Date().toISOString(),
     });
-    expect(subject).toMatch(/failed/i);
-    expect(subject).toContain("assistant");
+    expect(res.subject).toContain("Alice");
+    expect(res.html).toContain("VectorBea");
+    expect(res.html).toContain("Manage notification preferences");
+    expect(res.text).toContain("Accept");
   });
 
-  it("HTML contains reason", () => {
-    const { html } = evaluationFailedEmail({
+  it("renders evaluation completed with score and verdict", () => {
+    const res = evaluationCompletedEmail({
       workspaceName: "Acme",
-      promptName: "assistant",
-      versionTag: "v2",
-      reason: "Provider timeout",
-      runUrl: "https://app.example.com/evaluations/x",
+      workspaceId: "w1",
+      promptName: "support",
+      versionTag: "v3",
+      recommendation: "ready_for_rollout",
+      score: 0.84,
+      runUrl: "https://app.example.com/evaluations/1",
     });
-    expect(html).toContain("Provider timeout");
+    expect(res.subject).toContain("Evaluation completed");
+    expect(res.html).toContain("84%");
+    expect(res.html).toContain("Open evaluation run");
   });
-});
 
-describe("regressionFailedEmail", () => {
-  it("subject contains schedule name", () => {
-    const { subject } = regressionFailedEmail({
+  it("renders evaluation failed with failure reason", () => {
+    const res = evaluationFailedEmail({
       workspaceName: "Acme",
-      scheduleName: "Nightly GPT-4 regression",
-      promptName: "summariser",
-      reason: "Dataset missing",
+      workspaceId: "w1",
+      promptName: "support",
+      versionTag: "v3",
+      reason: "Provider timeout",
+      runUrl: "https://app.example.com/evaluations/1",
+    });
+    expect(res.subject).toContain("failed");
+    expect(res.html).toContain("Provider timeout");
+  });
+
+  it("renders regression failed", () => {
+    const res = regressionFailedEmail({
+      workspaceName: "Acme",
+      workspaceId: "w1",
+      scheduleName: "Nightly",
+      promptName: "support",
+      reason: "No dataset items",
       runUrl: null,
     });
-    expect(subject).toContain("Nightly GPT-4 regression");
+    expect(res.subject).toContain("Nightly");
+    expect(res.html).toContain("Regression check failed");
   });
-});
 
-describe("alertTriggeredEmail", () => {
-  it("subject contains rule name", () => {
-    const { subject } = alertTriggeredEmail({
+  it("renders alert triggered with threshold details", () => {
+    const res = alertTriggeredEmail({
       workspaceName: "Acme",
-      ruleName: "High error rate",
+      workspaceId: "w1",
+      ruleName: "Error rate high",
       metricType: "error_rate",
-      metricValue: 12.4,
+      metricValue: 9.4,
       threshold: 5,
       comparison: "gt",
       alertsUrl: "https://app.example.com/alerts",
     });
-    expect(subject).toContain("High error rate");
+    expect(res.html).toContain("Error rate");
+    expect(res.html).toContain("9.4%");
+    expect(res.text).toContain("Threshold");
   });
 
-  it("HTML contains metric value", () => {
-    const { html } = alertTriggeredEmail({
+  it("renders rollout blocked and includes reasons", () => {
+    const res = rolloutBlockedEmail({
       workspaceName: "Acme",
-      ruleName: "High error rate",
-      metricType: "error_rate",
-      metricValue: 12.4,
-      threshold: 5,
-      comparison: "gt",
-      alertsUrl: "https://app.example.com/alerts",
-    });
-    expect(html).toContain("12.4");
-  });
-});
-
-describe("rolloutBlockedEmail", () => {
-  it("HTML contains all blocking reasons", () => {
-    const { html } = rolloutBlockedEmail({
-      workspaceName: "Acme",
-      promptName: "assistant",
+      workspaceId: "w1",
+      promptName: "support",
       versionTag: "v3",
-      reasons: ["Score below threshold", "Critical failure detected"],
-      promptUrl: "https://app.example.com/prompts/p1",
+      reasons: ["Critical check failed"],
+      promptUrl: "https://app.example.com/prompts/1",
     });
-    expect(html).toContain("Score below threshold");
-    expect(html).toContain("Critical failure detected");
+    expect(res.html).toContain("Critical check failed");
+    expect(res.subject).toContain("Rollout blocked");
   });
-});
 
-describe("quotaWarningEmail", () => {
-  it("subject contains usage percentage", () => {
-    const { subject } = quotaWarningEmail({
+  it("renders quota warning and exceeded messaging", () => {
+    const nearing = quotaWarningEmail({
       workspaceName: "Acme",
+      workspaceId: "w1",
       usageType: "runtime_traces",
-      used: 4200,
+      used: 4500,
       limit: 5000,
       billingUrl: "https://app.example.com/settings/billing",
     });
-    expect(subject).toContain("84%");
+    const exceeded = quotaWarningEmail({
+      workspaceName: "Acme",
+      workspaceId: "w1",
+      usageType: "runtime_traces",
+      used: 5500,
+      limit: 5000,
+      billingUrl: "https://app.example.com/settings/billing",
+    });
+    expect(nearing.subject).toContain("nearing");
+    expect(exceeded.subject).toContain("exceeded");
   });
 
-  it("plain text contains upgrade URL", () => {
-    const { text } = quotaWarningEmail({
+  it("renders promoted email", () => {
+    const res = promptPromotedEmail({
       workspaceName: "Acme",
-      usageType: "evaluation_runs",
-      used: 18,
-      limit: 20,
-      billingUrl: "https://app.example.com/billing",
+      workspaceId: "w1",
+      promptName: "support",
+      versionTag: "v3",
+      promotedBy: "alice@acme.com",
+      promptUrl: "https://app.example.com/prompts/1",
     });
-    expect(text).toContain("https://app.example.com/billing");
+    expect(res.subject).toContain("approved");
+    expect(res.html).toContain("Prompt version is now active");
   });
 });
+

@@ -1,136 +1,171 @@
-﻿import "server-only";
+import "server-only";
 
 const APP_URL = () => process.env.APP_URL ?? "https://app.vectorbea.app";
+const PREF_URL = (workspaceId: string) =>
+  `${APP_URL()}/settings?tab=notifications${workspaceId ? `&org=${encodeURIComponent(workspaceId)}` : ""}`;
 
-// ─── Shared layout wrapper (table-based, email-client safe) ──────────────────
+type StatusTone = "success" | "warning" | "failure" | "info" | "neutral";
 
-function layout({
-  preheader = "",
-  headerAccent = "linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)",
-  body,
-}: {
-  preheader?: string;
-  headerAccent?: string;
-  body: string;
-}): string {
-  return `<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta http-equiv="X-UA-Compatible" content="IE=edge"/>
-<title>VectorBea</title>
-</head>
-<body style="margin:0;padding:0;background:#09090b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
-${preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${preheader}</div>` : ""}
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09090b;min-height:100vh;">
-<tr><td align="center" style="padding:40px 16px;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#0f0f14;border:1px solid #1e1e2e;border-radius:16px;overflow:hidden;">
+const TOKENS = {
+  page: "#F8F5EF",
+  card: "#FFFFFF",
+  border: "#E5E0D8",
+  borderStrong: "#DED8CE",
+  textPrimary: "#111827",
+  textBody: "#1F2937",
+  textMuted: "#4B5563",
+  accent: "#2563EB",
+  successText: "#047857",
+  successBg: "#ECFDF5",
+  successBorder: "#A7F3D0",
+  warningText: "#D97706",
+  warningBg: "#FFFBEB",
+  warningBorder: "#FDE68A",
+  failureText: "#DC2626",
+  failureBg: "#FEF2F2",
+  failureBorder: "#FECACA",
+  infoText: "#1D4ED8",
+  infoBg: "#EFF6FF",
+  infoBorder: "#BFDBFE",
+  neutralBg: "#FAF7F0",
+} as const;
 
-  <!-- Header -->
+function calloutStyle(tone: StatusTone): { text: string; bg: string; border: string } {
+  if (tone === "success") return { text: TOKENS.successText, bg: TOKENS.successBg, border: TOKENS.successBorder };
+  if (tone === "warning") return { text: TOKENS.warningText, bg: TOKENS.warningBg, border: TOKENS.warningBorder };
+  if (tone === "failure") return { text: TOKENS.failureText, bg: TOKENS.failureBg, border: TOKENS.failureBorder };
+  if (tone === "info") return { text: TOKENS.infoText, bg: TOKENS.infoBg, border: TOKENS.infoBorder };
+  return { text: TOKENS.textBody, bg: TOKENS.neutralBg, border: TOKENS.border };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;");
+}
+
+function statusBadge(label: string, tone: StatusTone): string {
+  const s = calloutStyle(tone);
+  return `<span style="display:inline-block;padding:4px 10px;border-radius:999px;background:${s.bg};border:1px solid ${s.border};color:${s.text};font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${escapeHtml(label)}</span>`;
+}
+
+function keyValueTable(rows: Array<{ key: string; value: string }>): string {
+  const body = rows
+    .map(
+      (row) => `<tr>
+  <td style="padding:10px 14px;border-bottom:1px solid ${TOKENS.border};width:38%;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${TOKENS.textMuted};">${escapeHtml(row.key)}</td>
+  <td style="padding:10px 14px;border-bottom:1px solid ${TOKENS.border};font-size:13px;font-weight:600;color:${TOKENS.textPrimary};">${escapeHtml(row.value)}</td>
+</tr>`,
+    )
+    .join("");
+
+  return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${TOKENS.border};border-radius:12px;overflow:hidden;background:${TOKENS.card};margin:0 0 20px;">${body}</table>`;
+}
+
+function actionButton(label: string, href: string): string {
+  return `<table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
   <tr>
-    <td style="background:${headerAccent};padding:24px 32px;">
-      <table cellpadding="0" cellspacing="0" border="0">
+    <td style="background:${TOKENS.accent};border-radius:10px;">
+      <a href="${href}" style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">${escapeHtml(label)}</a>
+    </td>
+  </tr>
+</table>`;
+}
+
+function sectionHeading(text: string): string {
+  return `<p style="margin:0 0 10px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${TOKENS.textMuted};">${escapeHtml(text)}</p>`;
+}
+
+function hint(text: string): string {
+  return `<p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:${TOKENS.textMuted};">${escapeHtml(text)}</p>`;
+}
+
+function recommendation(text: string): string {
+  return `<div style="margin:0 0 20px;padding:12px 14px;border-radius:10px;background:${TOKENS.neutralBg};border:1px solid ${TOKENS.border};">
+  <p style="margin:0;font-size:13px;line-height:1.6;color:${TOKENS.textBody};">${escapeHtml(text)}</p>
+</div>`;
+}
+
+function layout(args: {
+  workspaceId?: string;
+  workspaceName?: string;
+  preheader?: string;
+  body: string;
+  reason?: string;
+}) {
+  const preheader = args.preheader ?? "";
+  const workspaceName = args.workspaceName ? escapeHtml(args.workspaceName) : "VectorBea";
+  const prefsLink = PREF_URL(args.workspaceId ?? "");
+  const reason = args.reason ?? "You received this because notifications are enabled for this workspace";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<title>VectorBea notification</title>
+</head>
+<body style="margin:0;padding:0;background:${TOKENS.page};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+${preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>` : ""}
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${TOKENS.page};padding:24px 12px;">
+  <tr>
+    <td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background:${TOKENS.card};border:1px solid ${TOKENS.border};border-radius:18px;overflow:hidden;">
         <tr>
-          <!-- Bee logo icon: CSS-only, renders in all email clients including Gmail/Outlook -->
-          <td style="padding-right:14px;vertical-align:middle;">
-            <table cellpadding="0" cellspacing="0" border="0">
+          <td style="padding:20px 24px;border-bottom:1px solid ${TOKENS.border};background:${TOKENS.neutralBg};">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="width:44px;height:44px;background:rgba(255,255,255,0.18);border-radius:11px;text-align:center;vertical-align:middle;font-size:24px;line-height:44px;">
-                  &#x1F41D;
-                </td>
+                <td align="left" style="font-size:20px;font-weight:800;color:${TOKENS.textPrimary};">VectorBea</td>
+                <td align="right" style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${TOKENS.textMuted};">${workspaceName}</td>
               </tr>
             </table>
           </td>
-          <!-- Brand text -->
-          <td style="vertical-align:middle;">
-            <p style="margin:0;font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">VectorBea</p>
-            <p style="margin:3px 0 0;font-size:10px;font-weight:500;color:rgba(255,255,255,0.55);text-transform:uppercase;letter-spacing:0.15em;">AI Release Control</p>
+        </tr>
+        <tr>
+          <td style="padding:26px 24px 20px;">${args.body}</td>
+        </tr>
+        <tr>
+          <td style="padding:16px 24px 22px;border-top:1px solid ${TOKENS.borderStrong};background:${TOKENS.neutralBg};">
+            <p style="margin:0 0 8px;font-size:12px;color:${TOKENS.textMuted};">${escapeHtml(reason)}</p>
+            <p style="margin:0 0 8px;font-size:12px;color:${TOKENS.textMuted};">
+              Manage notification preferences
+              <a href="${prefsLink}" style="color:${TOKENS.accent};text-decoration:none;font-weight:600;"> in VectorBea</a>
+            </p>
+            <p style="margin:0;font-size:11px;color:${TOKENS.textMuted};">${workspaceName}</p>
           </td>
         </tr>
       </table>
     </td>
   </tr>
-
-  <!-- Body -->
-  <tr><td style="padding:36px 36px 28px;">${body}</td></tr>
-
-  <!-- Footer -->
-  <tr>
-    <td style="background:#09090b;border-top:1px solid #1e1e2e;padding:18px 36px;">
-      <p style="margin:0;font-size:11px;color:#3f3f46;text-align:center;">
-        VectorBea — AI Release Control &nbsp;·&nbsp;
-        <a href="${APP_URL()}" style="color:#4f46e5;text-decoration:none;">${APP_URL()}</a>
-      </p>
-    </td>
-  </tr>
-
 </table>
-</td></tr>
-</table>
-</body></html>`;
+</body>
+</html>`;
 }
 
-/** Render a key-value info card */
-function infoCard(rows: { label: string; value: string; highlight?: boolean }[]): string {
-  const rowsHtml = rows.map(({ label, value, highlight }) => `
-    <tr>
-      <td style="padding:10px 16px;border-bottom:1px solid #1e1e2e;width:40%;">
-        <p style="margin:0;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.12em;color:#71717a;">${label}</p>
-      </td>
-      <td style="padding:10px 16px;border-bottom:1px solid #1e1e2e;">
-        <p style="margin:0;font-size:13px;font-weight:600;color:${highlight ? "#a78bfa" : "#f4f4f5"};">${value}</p>
-      </td>
-    </tr>`).join("");
-  return `
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0a0f;border:1px solid #1e1e2e;border-radius:10px;overflow:hidden;margin-bottom:24px;">
-    ${rowsHtml}
-  </table>`;
-}
-
-/** Render a CTA button */
-function ctaButton(label: string, url: string, color = "linear-gradient(135deg,#4f46e5,#7c3aed)"): string {
-  return `
-  <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-    <tr>
-      <td style="background:${color};border-radius:10px;">
-        <a href="${url}" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.1px;">${label}</a>
-      </td>
-    </tr>
-  </table>`;
-}
-
-/** Render a status badge pill */
-function badge(text: string, color: string, bg: string): string {
-  return `<span style="display:inline-block;padding:3px 10px;background:${bg};border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.08em;color:${color};text-transform:uppercase;">${text}</span>`;
-}
-
-/** Format metric type for display */
 function formatMetricType(raw: string): string {
   const map: Record<string, string> = {
-    latency_p95: "P95 Latency",
-    error_rate: "Error Rate",
-    eval_score_avg: "Avg Eval Score",
-    cache_hit_rate: "Cache Hit Rate",
+    latency_p95: "P95 latency",
+    error_rate: "Error rate",
+    eval_score_avg: "Evaluation score",
+    cache_hit_rate: "Cache hit rate",
   };
-  return map[raw] ?? raw.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return map[raw] ?? raw.replaceAll("_", " ");
 }
 
-/** Format comparison operator */
 function formatComparison(op: string): string {
-  const map: Record<string, string> = { gt: ">", lt: "<", gte: "≥", lte: "≤" };
+  const map: Record<string, string> = { gt: ">", lt: "<", gte: ">=", lte: "<=" };
   return map[op] ?? op;
 }
 
-/** Format metric value with unit */
 function formatMetricValue(metricType: string, value: number): string {
   if (metricType === "latency_p95") return `${Math.round(value)} ms`;
   if (metricType === "error_rate" || metricType === "cache_hit_rate") return `${(Math.round(value * 10) / 10).toFixed(1)}%`;
   if (metricType === "eval_score_avg") return `${(Math.round(value * 100) / 100).toFixed(2)}`;
   return String(value);
 }
-
-// ─── Team invitation ──────────────────────────────────────────────────────────
 
 export function teamInvitationEmail(args: {
   inviterName: string;
@@ -139,149 +174,150 @@ export function teamInvitationEmail(args: {
   acceptUrl: string;
   expiresAt: string;
 }) {
-  const subject = `You've been invited to join ${args.workspaceName} on VectorBea`;
+  const subject = `${args.inviterName} invited you to ${args.workspaceName} in VectorBea`;
   const expiryDate = new Date(args.expiresAt).toLocaleDateString("en-US", { dateStyle: "long" });
-  const roleCapitalized = args.role.charAt(0).toUpperCase() + args.role.slice(1);
-
   const body = `
-    <p style="margin:0 0 8px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">You're invited!</p>
-    <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      <strong style="color:#e4e4e7;">${args.inviterName}</strong> has invited you to join the
-      <strong style="color:#e4e4e7;">${args.workspaceName}</strong> workspace.
-    </p>
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Your role", value: roleCapitalized, highlight: true },
-      { label: "Expires", value: expiryDate },
-    ])}
-    ${ctaButton("Accept invitation →", args.acceptUrl)}
-    <p style="margin:0 0 6px;font-size:12px;color:#71717a;">If the button doesn't work, copy this link:</p>
-    <p style="margin:0 0 24px;font-size:11px;font-family:'Courier New',monospace;color:#6366f1;word-break:break-all;">${args.acceptUrl}</p>
-    <hr style="border:none;border-top:1px solid #1e1e2e;margin:0 0 20px;"/>
-    <p style="margin:0;font-size:12px;color:#52525b;">🔒 If you didn't expect this invite, you can safely ignore this email.</p>
-  `;
+${statusBadge("Workspace invite", "info")}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">You are invited to join ${escapeHtml(args.workspaceName)}</h1>
+${hint(`${args.inviterName} invited you with role ${args.role}`)}
+${keyValueTable([
+  { key: "Workspace", value: args.workspaceName },
+  { key: "Role", value: args.role },
+  { key: "Expires", value: expiryDate },
+])}
+${actionButton("Accept invitation", args.acceptUrl)}
+${recommendation("Use this invitation from a secure trusted session")}
+`;
 
-  const html = layout({ preheader: `${args.inviterName} invited you to ${args.workspaceName} — accept before ${expiryDate}`, body });
-  const text = `You've been invited to join ${args.workspaceName} on VectorBea\n\n${args.inviterName} invited you as ${args.role}.\n\nAccept: ${args.acceptUrl}\n\nExpires: ${expiryDate}`;
-  return { subject, html, text };
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      preheader: `Invitation to ${args.workspaceName}`,
+      body,
+      reason: "You received this because a workspace admin invited your email address",
+    }),
+    text: `Invitation to ${args.workspaceName}\nInvited by ${args.inviterName}\nRole ${args.role}\nExpires ${expiryDate}\nAccept ${args.acceptUrl}`,
+  };
 }
-
-// ─── Evaluation completed ─────────────────────────────────────────────────────
 
 export function evaluationCompletedEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   promptName: string;
   versionTag: string;
   recommendation: string;
   score: number | null;
   runUrl: string;
 }) {
-  const label = args.recommendation.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  const isPass = args.recommendation.toLowerCase().includes("pass") || args.recommendation.toLowerCase().includes("promote");
-  const subject = `Evaluation completed — ${args.promptName}`;
-
-  const scoreRow = args.score != null
-    ? [{ label: "Score", value: `${Math.round(args.score * 100)}%`, highlight: true }]
-    : [];
-
+  const verdict = args.recommendation.replaceAll("_", " ");
+  const tone: StatusTone = verdict.includes("fail") ? "failure" : verdict.includes("review") ? "warning" : "success";
+  const subject = `Evaluation completed for ${args.promptName}`;
+  const scoreText = args.score == null ? "Unavailable" : `${Math.round(args.score * 100)}%`;
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Evaluation Complete</p>
-    <p style="margin:0 0 20px;">${badge(label, isPass ? "#4ade80" : "#f87171", isPass ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      The evaluation run for <strong style="color:#e4e4e7;">${args.promptName}</strong>
-      <code style="background:#1e1e2e;padding:2px 6px;border-radius:4px;font-size:12px;color:#a78bfa;">${args.versionTag}</code> has completed.
-    </p>
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Prompt", value: args.promptName },
-      { label: "Version", value: args.versionTag, highlight: true },
-      { label: "Verdict", value: label, highlight: true },
-      ...scoreRow,
-    ])}
-    ${ctaButton("View evaluation report →", args.runUrl)}
-  `;
+${statusBadge(verdict, tone)}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Evaluation completed</h1>
+${hint(`Candidate version ${args.versionTag} for ${args.promptName} has finished`)}
+${keyValueTable([
+  { key: "Prompt", value: args.promptName },
+  { key: "Candidate version", value: args.versionTag },
+  { key: "Verdict", value: verdict },
+  { key: "Score", value: scoreText },
+])}
+${actionButton("Open evaluation run", args.runUrl)}
+${recommendation(
+  tone === "success"
+    ? "Review score breakdown then continue rollout when ready"
+    : "Review failed checks and evidence before promoting this candidate",
+)}
+`;
 
-  const html = layout({ preheader: `${label}: ${args.promptName}@${args.versionTag}`, body });
-  const text = `Evaluation complete: ${args.promptName}@${args.versionTag}\nVerdict: ${label}${args.score != null ? `\nScore: ${Math.round(args.score * 100)}%` : ""}\n\nView: ${args.runUrl}`;
-  return { subject, html, text };
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `${args.promptName} ${args.versionTag} ${verdict}`,
+      body,
+      reason: "You received this because evaluation notifications are enabled for this workspace",
+    }),
+    text: `Evaluation completed\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nVerdict ${verdict}\nScore ${scoreText}\nOpen ${args.runUrl}`,
+  };
 }
-
-// ─── Evaluation failed ────────────────────────────────────────────────────────
 
 export function evaluationFailedEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   promptName: string;
   versionTag: string;
   reason: string;
   runUrl: string;
 }) {
-  const subject = `Evaluation failed — action required`;
-
+  const subject = `Evaluation failed for ${args.promptName}`;
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Evaluation Failed</p>
-    <p style="margin:0 0 20px;">${badge("Failed", "#f87171", "rgba(248,113,113,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      The evaluation run for <strong style="color:#e4e4e7;">${args.promptName}</strong>
-      <code style="background:#1e1e2e;padding:2px 6px;border-radius:4px;font-size:12px;color:#a78bfa;">${args.versionTag}</code> encountered an error.
-    </p>
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Prompt", value: args.promptName },
-      { label: "Version", value: args.versionTag, highlight: true },
-      { label: "Reason", value: args.reason },
-    ])}
-    ${ctaButton("View details →", args.runUrl)}
-  `;
-
-  const html = layout({
-    preheader: `Evaluation failed for ${args.promptName}@${args.versionTag}`,
-    headerAccent: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
-    body,
-  });
-  const text = `Evaluation failed: ${args.promptName}@${args.versionTag}\nReason: ${args.reason}\n\nView: ${args.runUrl}`;
-  return { subject, html, text };
+${statusBadge("Evaluation failed", "failure")}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Evaluation failed</h1>
+${hint(`Run for ${args.promptName} ${args.versionTag} failed and needs investigation`)}
+${keyValueTable([
+  { key: "Prompt", value: args.promptName },
+  { key: "Version", value: args.versionTag },
+  { key: "Failure reason", value: args.reason },
+])}
+${actionButton("Open evaluation details", args.runUrl)}
+${recommendation("Inspect provider execution logs and failed checks then rerun evaluation")}
+`;
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `Evaluation failed for ${args.promptName}`,
+      body,
+      reason: "You received this because evaluation failure notifications are enabled for this workspace",
+    }),
+    text: `Evaluation failed\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nReason ${args.reason}\nOpen ${args.runUrl}`,
+  };
 }
-
-// ─── Regression failed ───────────────────────────────────────────────────────
 
 export function regressionFailedEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   scheduleName: string;
   promptName: string | null;
   reason: string;
   runUrl: string | null;
 }) {
-  const subject = `Regression detected in production behavior`;
-  const promptRow = args.promptName ? [{ label: "Prompt", value: args.promptName }] : [];
-
+  const subject = `Regression failed for schedule ${args.scheduleName}`;
+  const rows = [
+    { key: "Schedule", value: args.scheduleName },
+    ...(args.promptName ? [{ key: "Prompt", value: args.promptName }] : []),
+    { key: "Result", value: "Failed" },
+    { key: "Reason", value: args.reason },
+  ];
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Regression Failed</p>
-    <p style="margin:0 0 20px;">${badge("Schedule Error", "#f87171", "rgba(248,113,113,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      A scheduled regression run has failed for schedule <strong style="color:#e4e4e7;">${args.scheduleName}</strong>.
-    </p>
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Schedule", value: args.scheduleName, highlight: true },
-      ...promptRow,
-      { label: "Reason", value: args.reason },
-    ])}
-    ${args.runUrl ? ctaButton("View evaluation run →", args.runUrl) : ""}
-  `;
-
-  const html = layout({
-    preheader: `Regression failed: ${args.scheduleName}`,
-    headerAccent: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
-    body,
-  });
-  const text = `Regression failed: ${args.scheduleName}\nReason: ${args.reason}${args.runUrl ? `\n\nView: ${args.runUrl}` : ""}`;
-  return { subject, html, text };
+${statusBadge("Regression failed", "failure")}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Regression check failed</h1>
+${hint("Scheduled quality checks detected an issue that needs review")}
+${keyValueTable(rows)}
+${args.runUrl ? actionButton("Open regression run", args.runUrl) : ""}
+${recommendation("Compare failed cases and inspect recent prompt or provider changes")}
+`;
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `Regression failed ${args.scheduleName}`,
+      body,
+      reason: "You received this because regression notifications are enabled for this workspace",
+    }),
+    text: `Regression failed\nSchedule ${args.scheduleName}\nReason ${args.reason}${args.runUrl ? `\nOpen ${args.runUrl}` : ""}`,
+  };
 }
-
-// ─── Alert triggered ─────────────────────────────────────────────────────────
 
 export function alertTriggeredEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   ruleName: string;
   metricType: string;
   metricValue: number;
@@ -290,184 +326,145 @@ export function alertTriggeredEmail(args: {
   alertsUrl: string;
 }) {
   const metricLabel = formatMetricType(args.metricType);
-  const metricDisplay = formatMetricValue(args.metricType, args.metricValue);
-  const thresholdDisplay = formatMetricValue(args.metricType, args.threshold);
-  const comparisonLabel = formatComparison(args.comparison);
-  const subject = `Alert triggered: ${args.ruleName}`;
-
+  const metricValue = formatMetricValue(args.metricType, args.metricValue);
+  const thresholdValue = formatMetricValue(args.metricType, args.threshold);
+  const comparison = formatComparison(args.comparison);
+  const subject = `Alert triggered ${args.ruleName}`;
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Alert Triggered</p>
-    <p style="margin:0 0 20px;">${badge("Threshold Breached", "#fbbf24", "rgba(251,191,36,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      An alert rule has been triggered in workspace <strong style="color:#e4e4e7;">${args.workspaceName}</strong>.
-      The metric <strong style="color:#e4e4e7;">${metricLabel}</strong> has breached its configured threshold.
-    </p>
-
-    <!-- Metric highlight card -->
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,rgba(220,38,38,0.12),rgba(153,27,27,0.08));border:1px solid rgba(220,38,38,0.3);border-radius:12px;overflow:hidden;margin-bottom:24px;">
-      <tr>
-        <td style="padding:20px 24px;" align="center">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.14em;color:#f87171;">${metricLabel}</p>
-          <p style="margin:0;font-size:36px;font-weight:800;color:#fca5a5;letter-spacing:-1px;">${metricDisplay}</p>
-          <p style="margin:4px 0 0;font-size:12px;color:#ef4444;">Threshold: ${comparisonLabel} ${thresholdDisplay}</p>
-        </td>
-      </tr>
-    </table>
-
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Rule", value: args.ruleName, highlight: true },
-      { label: "Metric", value: metricLabel },
-      { label: "Current value", value: metricDisplay, highlight: true },
-      { label: "Threshold", value: `${comparisonLabel} ${thresholdDisplay}` },
-    ])}
-    ${ctaButton("View alerts →", args.alertsUrl, "linear-gradient(135deg,#dc2626,#b91c1c)")}
-    <p style="margin:0;font-size:12px;color:#52525b;">You received this because alert notifications are enabled for your workspace.</p>
-  `;
-
-  const html = layout({
-    preheader: `Alert: ${args.ruleName} — ${metricLabel} is ${metricDisplay} (threshold: ${comparisonLabel} ${thresholdDisplay})`,
-    headerAccent: "linear-gradient(135deg,#dc2626 0%,#7f1d1d 100%)",
-    body,
-  });
-  const text = `Alert triggered: ${args.ruleName}\nMetric: ${metricLabel} = ${metricDisplay}\nThreshold: ${comparisonLabel} ${thresholdDisplay}\n\nView alerts: ${args.alertsUrl}`;
-  return { subject, html, text };
+${statusBadge("Alert triggered", "warning")}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Production alert triggered</h1>
+${hint(`${metricLabel} crossed the configured threshold for this workspace`)}
+${keyValueTable([
+  { key: "Alert rule", value: args.ruleName },
+  { key: "Metric", value: metricLabel },
+  { key: "Current value", value: metricValue },
+  { key: "Threshold", value: `${comparison} ${thresholdValue}` },
+])}
+${actionButton("View alert", args.alertsUrl)}
+${recommendation("Review recent traces then compare against previous stable behavior")}
+`;
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `${args.ruleName} ${metricValue}`,
+      body,
+      reason: "You received this because alert notifications are enabled for this workspace",
+    }),
+    text: `Alert triggered\nRule ${args.ruleName}\nMetric ${metricLabel}\nCurrent ${metricValue}\nThreshold ${comparison} ${thresholdValue}\nOpen ${args.alertsUrl}`,
+  };
 }
-
-// ─── Rollout blocked ─────────────────────────────────────────────────────────
 
 export function rolloutBlockedEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   promptName: string;
   versionTag: string;
   reasons: string[];
   promptUrl: string;
 }) {
-  const subject = `Rollout blocked — ${args.promptName}@${args.versionTag}`;
-  const reasonsList = args.reasons.map((r) =>
-    `<tr><td style="padding:6px 16px;border-bottom:1px solid #1e1e2e;"><p style="margin:0;font-size:13px;color:#fca5a5;">⚠ ${r}</p></td></tr>`
-  ).join("");
-
+  const subject = `Rollout blocked for ${args.promptName} ${args.versionTag}`;
+  const reasonsList = args.reasons.map((r) => `<li style="margin:0 0 6px;color:${TOKENS.textBody};font-size:13px;line-height:1.5;">${escapeHtml(r)}</li>`).join("");
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Rollout Blocked</p>
-    <p style="margin:0 0 20px;">${badge("Promotion Blocked", "#fbbf24", "rgba(251,191,36,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      The rollout of <strong style="color:#e4e4e7;">${args.promptName}</strong>
-      <code style="background:#1e1e2e;padding:2px 6px;border-radius:4px;font-size:12px;color:#a78bfa;">${args.versionTag}</code>
-      was blocked in workspace <strong style="color:#e4e4e7;">${args.workspaceName}</strong>.
-    </p>
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Prompt", value: args.promptName },
-      { label: "Version", value: args.versionTag, highlight: true },
-    ])}
-    <p style="margin:0 0 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#71717a;">Blocking reasons</p>
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0a0f;border:1px solid rgba(220,38,38,0.3);border-radius:10px;overflow:hidden;margin-bottom:24px;">
-      ${reasonsList}
-    </table>
-    ${ctaButton("View prompt →", args.promptUrl)}
-  `;
-
-  const html = layout({
-    preheader: `Rollout blocked: ${args.promptName}@${args.versionTag}`,
-    headerAccent: "linear-gradient(135deg,#d97706 0%,#92400e 100%)",
-    body,
-  });
-  const text = `Rollout blocked: ${args.promptName}@${args.versionTag}\nReasons:\n${args.reasons.map((r) => `- ${r}`).join("\n")}\n\nView: ${args.promptUrl}`;
-  return { subject, html, text };
+${statusBadge("Rollout blocked", "failure")}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Rollout blocked by safety gate</h1>
+${hint(`Candidate version ${args.versionTag} for ${args.promptName} did not meet release criteria`)}
+${keyValueTable([
+  { key: "Prompt", value: args.promptName },
+  { key: "Candidate version", value: args.versionTag },
+  { key: "Status", value: "Blocked" },
+])}
+${sectionHeading("Blocking reasons")}
+<ul style="margin:0 0 18px;padding:0 0 0 16px;">${reasonsList}</ul>
+${actionButton("Review rollout block", args.promptUrl)}
+${recommendation("Fix failed checks then rerun evaluation and regression before retrying rollout")}
+`;
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `Rollout blocked ${args.promptName} ${args.versionTag}`,
+      body,
+      reason: "You received this because rollout notifications are enabled for this workspace",
+    }),
+    text: `Rollout blocked\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nReasons ${args.reasons.join("; ")}\nOpen ${args.promptUrl}`,
+  };
 }
-
-// ─── Quota warning ───────────────────────────────────────────────────────────
 
 export function quotaWarningEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   usageType: string;
   used: number;
   limit: number;
   billingUrl: string;
 }) {
   const pct = Math.round((args.used / args.limit) * 100);
-  const usageLabel = args.usageType.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  const subject = `You are nearing your usage limit`;
-  const barFilled = Math.min(pct, 100);
-  const barColor = pct >= 90 ? "#ef4444" : pct >= 75 ? "#f59e0b" : "#6366f1";
-
+  const isExceeded = pct >= 100;
+  const label = args.usageType.replaceAll("_", " ");
+  const tone: StatusTone = isExceeded ? "failure" : "warning";
+  const subject = isExceeded
+    ? `Quota exceeded for ${args.workspaceName}`
+    : `Quota nearing for ${args.workspaceName}`;
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Usage Warning</p>
-    <p style="margin:0 0 20px;">${badge(`${pct}% used`, pct >= 90 ? "#f87171" : "#fbbf24", pct >= 90 ? "rgba(248,113,113,0.12)" : "rgba(251,191,36,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      Workspace <strong style="color:#e4e4e7;">${args.workspaceName}</strong> is approaching its
-      <strong style="color:#e4e4e7;">${usageLabel}</strong> limit.
-    </p>
-
-    <!-- Progress bar -->
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0a0f;border:1px solid #1e1e2e;border-radius:10px;padding:20px 24px;margin-bottom:24px;">
-      <tr>
-        <td>
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">
-            <tr>
-              <td><p style="margin:0;font-size:13px;font-weight:600;color:#f4f4f5;">${usageLabel}</p></td>
-              <td align="right"><p style="margin:0;font-size:13px;font-weight:700;color:${barColor};">${args.used.toLocaleString()} / ${args.limit.toLocaleString()}</p></td>
-            </tr>
-          </table>
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1e1e2e;border-radius:4px;overflow:hidden;height:8px;">
-            <tr>
-              <td width="${barFilled}%" style="background:${barColor};height:8px;border-radius:4px;"></td>
-              <td></td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-
-    ${ctaButton("Upgrade plan →", args.billingUrl, `linear-gradient(135deg,${barColor},${pct >= 90 ? "#b91c1c" : "#d97706"})`)}
-    <p style="margin:0;font-size:12px;color:#52525b;">Upgrade your plan to increase limits and avoid service interruptions.</p>
-  `;
-
-  const html = layout({
-    preheader: `You've used ${pct}% of your ${usageLabel} quota`,
-    headerAccent: pct >= 90
-      ? "linear-gradient(135deg,#dc2626 0%,#7f1d1d 100%)"
-      : "linear-gradient(135deg,#d97706 0%,#92400e 100%)",
-    body,
-  });
-  const text = `Usage warning: ${usageLabel} at ${pct}% (${args.used.toLocaleString()}/${args.limit.toLocaleString()})\n\nUpgrade: ${args.billingUrl}`;
-  return { subject, html, text };
+${statusBadge(isExceeded ? "Quota exceeded" : "Quota nearing", tone)}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">${isExceeded ? "Workspace usage exceeded limit" : "Workspace usage nearing limit"}</h1>
+${hint(`${label} usage is now ${pct}% of plan limit`)}
+${keyValueTable([
+  { key: "Usage type", value: label },
+  { key: "Current usage", value: `${args.used.toLocaleString()}` },
+  { key: "Limit", value: `${args.limit.toLocaleString()}` },
+  { key: "Percent used", value: `${pct}%` },
+])}
+${actionButton("Manage usage", args.billingUrl)}
+${recommendation("Review usage patterns and adjust plan or retention settings if needed")}
+`;
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `${label} ${pct}%`,
+      body,
+      reason: "You received this because quota notifications are enabled and you are an admin or owner",
+    }),
+    text: `Usage notification\nWorkspace ${args.workspaceName}\nUsage type ${label}\nCurrent ${args.used}\nLimit ${args.limit}\nPercent ${pct}%\nManage ${args.billingUrl}`,
+  };
 }
-
-// ─── Prompt promoted ──────────────────────────────────────────────────────────
 
 export function promptPromotedEmail(args: {
   workspaceName: string;
+  workspaceId?: string;
   promptName: string;
   versionTag: string;
   promotedBy: string;
   promptUrl: string;
 }) {
-  const subject = `Rollout completed — ${args.promptName}@${args.versionTag}`;
-
+  const subject = `Rollout approved for ${args.promptName} ${args.versionTag}`;
   const body = `
-    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">Prompt Promoted</p>
-    <p style="margin:0 0 20px;">${badge("Promoted to Production", "#4ade80", "rgba(74,222,128,0.12)")}</p>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#a1a1aa;">
-      Prompt <strong style="color:#e4e4e7;">${args.promptName}</strong>
-      <code style="background:#1e1e2e;padding:2px 6px;border-radius:4px;font-size:12px;color:#a78bfa;">${args.versionTag}</code>
-      has been approved and promoted to production in workspace <strong style="color:#e4e4e7;">${args.workspaceName}</strong>.
-    </p>
-    ${infoCard([
-      { label: "Workspace", value: args.workspaceName },
-      { label: "Prompt", value: args.promptName },
-      { label: "Version", value: args.versionTag, highlight: true },
-      { label: "Promoted by", value: args.promotedBy },
-    ])}
-    ${ctaButton("View prompt →", args.promptUrl, "linear-gradient(135deg,#16a34a,#15803d)")}
-  `;
-
-  const html = layout({
-    preheader: `${args.promptName}@${args.versionTag} promoted to production by ${args.promotedBy}`,
-    headerAccent: "linear-gradient(135deg,#16a34a 0%,#166534 100%)",
-    body,
-  });
-  const text = `Prompt promoted: ${args.promptName}@${args.versionTag}\nPromoted by: ${args.promotedBy}\n\nView: ${args.promptUrl}`;
-  return { subject, html, text };
+${statusBadge("Rollout approved", "success")}
+<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Prompt version is now active</h1>
+${hint(`Version ${args.versionTag} for ${args.promptName} has been approved for rollout`)}
+${keyValueTable([
+  { key: "Prompt", value: args.promptName },
+  { key: "Version", value: args.versionTag },
+  { key: "Approved by", value: args.promotedBy },
+  { key: "Status", value: "Active" },
+])}
+${actionButton("View active version", args.promptUrl)}
+${recommendation("Continue monitoring metrics alerts and regressions as traffic increases")}
+`;
+  return {
+    subject,
+    html: layout({
+      workspaceName: args.workspaceName,
+      workspaceId: args.workspaceId,
+      preheader: `Rollout approved ${args.promptName} ${args.versionTag}`,
+      body,
+      reason: "You received this because rollout notifications are enabled for this workspace",
+    }),
+    text: `Rollout approved\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen ${args.promptUrl}`,
+  };
 }
