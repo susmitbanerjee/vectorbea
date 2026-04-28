@@ -176,7 +176,7 @@ function Sidebar({
         {/* Logo */}
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-sidebar-border px-5">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] shadow-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card shadow-sm">
               <BeeLogo className="h-5 w-5" />
             </div>
             <div className="leading-none">
@@ -257,16 +257,16 @@ function SidebarNavItem({
     <Link
       href={href}
       className={cn(
-        "flex items-center gap-2 rounded-[5px] px-2 py-[6px] text-[13px] transition-colors",
-        active
-          ? "rounded-xl border border-white/15 bg-white/[0.08] font-medium text-sidebar-fg shadow-sm"
-          : "text-sidebar-muted hover:bg-white/[0.06] hover:text-sidebar-fg",
+          "flex items-center gap-2 rounded-[9px] px-2.5 py-2 text-[13px] transition-colors",
+          active
+          ? "border border-sidebar-border bg-sidebar-active font-semibold text-sidebar-fg"
+          : "text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-fg",
       )}
     >
       <Icon size={13} className="shrink-0" />
       <span className="flex-1">{title}</span>
       {badge && (
-        <span className="rounded-full border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-sidebar-muted">
+        <span className="rounded-full border border-sidebar-border bg-background px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-sidebar-muted">
           {badge}
         </span>
       )}
@@ -524,7 +524,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
 
       <div className="lg:pl-[272px]">
         {/* Mobile top bar */}
-        <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-[#FBF8F1]/95 px-4 backdrop-blur lg:hidden">
+        <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-[#FBFAF7]/95 px-4 backdrop-blur lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-1 text-muted-foreground transition-colors hover:text-foreground"

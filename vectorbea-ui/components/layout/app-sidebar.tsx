@@ -111,7 +111,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   }, [activeWorkspaceId, summary]);
 
   return (
-    <aside className="sidebar-scroll hidden h-full w-[232px] shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
+    <aside className="sidebar-scroll hidden h-full w-[248px] shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
 
       {/* Logo + workspace */}
       <div className="px-4 pb-3 pt-5">
@@ -154,7 +154,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 }}
                 className={cn(
                   "group relative flex w-full items-center gap-2.5 rounded-md text-left transition-all duration-150",
-                  item.isSubItem ? "pl-8 pr-3 py-1.5 text-[12px]" : "px-3 py-1.5 text-[13px]",
+                  item.isSubItem ? "pl-8 pr-3 py-2 text-[12px]" : "px-3 py-2 text-[13px]",
                   active
                     ? "bg-sidebar-active text-sidebar-fg font-semibold"
                     : "text-sidebar-muted font-normal hover:bg-sidebar-hover hover:text-sidebar-fg",
@@ -164,7 +164,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 <Icon
                   className={cn(
                     "h-[15px] w-[15px] shrink-0 transition-colors",
-                    active ? "text-brand-muted" : "text-sidebar-muted/70 group-hover:text-sidebar-fg",
+                    active ? "text-sidebar-fg" : "text-sidebar-muted/80 group-hover:text-sidebar-fg",
                     loading && "opacity-0",
                   )}
                 />

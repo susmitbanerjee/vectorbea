@@ -51,12 +51,12 @@ const config: Config = {
         },
         // Sidebar design tokens — Vercel-style neutral light
         sidebar: {
-          DEFAULT:    "#FFFFFF",
+          DEFAULT:    "#FBFAF7",
           fg:         "#111111",
-          muted:      "#6B7280",
-          border:     "#E5E7EB",
-          active:     "#F3F4F6",
-          hover:      "#F9FAFB",
+          muted:      "#1F2937",
+          border:     "#E7DED1",
+          active:     "#EDE7DC",
+          hover:      "#F1ECE3",
         },
       },
       borderRadius: {

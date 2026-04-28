@@ -33,7 +33,7 @@ const stageConfig: Record<RolloutStage, StageConfig> = {
     badgeVariant: "secondary",
     icon: PencilLine,
     tone: "text-muted-foreground",
-    fill: "bg-zinc-400 dark:bg-zinc-500",
+    fill: "bg-zinc-400",
     iconTone: "text-muted-foreground",
   },
   canary: {
@@ -50,27 +50,27 @@ const stageConfig: Record<RolloutStage, StageConfig> = {
     shortLabel: "Ramp",
     badgeVariant: "outline",
     icon: TrendingUp,
-    tone: "text-cyan-600 dark:text-cyan-400",
-    fill: "bg-cyan-500",
-    iconTone: "text-cyan-600 dark:text-cyan-400",
+    tone: "text-blue-700",
+    fill: "bg-blue-500",
+    iconTone: "text-blue-700",
   },
   full: {
     label: "Full rollout",
     shortLabel: "Full",
     badgeVariant: "success",
     icon: CheckCircle2,
-    tone: "text-emerald-600 dark:text-emerald-400",
+    tone: "text-emerald-700",
     fill: "bg-emerald-500",
-    iconTone: "text-emerald-600 dark:text-emerald-400",
+    iconTone: "text-emerald-700",
   },
   "rolled-back": {
     label: "Rolled back",
     shortLabel: "Rollback",
     badgeVariant: "destructive",
     icon: Undo2,
-    tone: "text-red-600 dark:text-red-400",
+    tone: "text-red-700",
     fill: "bg-red-500",
-    iconTone: "text-red-600 dark:text-red-400",
+    iconTone: "text-red-700",
   },
 };
 
@@ -200,9 +200,7 @@ export function RolloutStatus({
     stage === "rolled-back"
       ? "border-red-500/25 bg-red-500/5"
       : "border-border/70",
-    isHero
-      ? "overflow-hidden rounded-[1.5rem] border-white/10 bg-white/[0.04] p-5 text-white shadow-[0_24px_70px_-40px_rgba(0,0,0,0.75)]"
-      : "p-4",
+    isHero ? "overflow-hidden rounded-[1.5rem] p-5" : "p-4",
     interactive &&
       "cursor-pointer hover:-translate-y-0.5 hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
     className,
@@ -215,7 +213,7 @@ export function RolloutStatus({
             <span
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-xl bg-muted/50",
-                isHero ? config.iconTone.replace("text-", "text-") : config.iconTone,
+                config.iconTone,
               )}
             >
               <Icon className="h-4 w-4" />
@@ -224,7 +222,7 @@ export function RolloutStatus({
               <p
                 className={cn(
                   "font-mono text-xs font-semibold uppercase tracking-[0.2em]",
-                  isHero ? "text-zinc-400" : "text-muted-foreground",
+                  "text-muted-foreground",
                 )}
               >
                 {version}
@@ -233,7 +231,7 @@ export function RolloutStatus({
                 <p
                   className={cn(
                     "text-sm font-medium",
-                    isHero ? "text-white" : "text-foreground",
+                    "text-foreground",
                   )}
                 >
                   {label}
@@ -248,7 +246,7 @@ export function RolloutStatus({
               <span
                 className={cn(
                   "text-xs",
-                  isHero ? "text-zinc-400" : "text-muted-foreground",
+                  "text-muted-foreground",
                 )}
               >
                 {policy}
@@ -261,7 +259,7 @@ export function RolloutStatus({
           <p
             className={cn(
               "font-mono text-lg font-semibold tabular-nums",
-              isHero ? "text-white" : "text-foreground",
+               "text-foreground",
             )}
           >
             {safeProgress}/{safeTarget}%
@@ -270,7 +268,7 @@ export function RolloutStatus({
             <div
               className={cn(
                 "mt-1 text-xs",
-                isHero ? "text-zinc-400" : "text-muted-foreground",
+                 "text-muted-foreground",
               )}
             >
               {meta}
@@ -282,7 +280,7 @@ export function RolloutStatus({
       <div
         className={cn(
           "mt-4 h-2.5 overflow-hidden rounded-full",
-          isHero ? "bg-white/10" : "bg-muted/70",
+          "bg-muted/70",
         )}
       >
         <div
@@ -298,7 +296,7 @@ export function RolloutStatus({
       <div
         className={cn(
           "mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs",
-          isHero ? "text-zinc-400" : "text-muted-foreground",
+          "text-muted-foreground",
         )}
       >
         {relativeTime ? <span>Started {relativeTime}</span> : null}

@@ -12,7 +12,7 @@
      Primary:  #2563EB (blue accent, restrained)
   ──────────────────────────────────────────────────────────────────────── */
   :root {
-    --background:         0 0% 98%;          /* #FAFAFA */
+    --background:         40 33% 95%;         /* #F8F5EF */
     --foreground:         0 0% 7%;         /* #111111 near-black */
     --card:               0 0% 100%;       /* #FFFFFF */
     --card-foreground:    0 0% 7%;
@@ -22,17 +22,17 @@
     --primary:            221 83% 53%;     /* #2563EB blue */
     --primary-foreground: 0 0% 100%;
 
-    --secondary:          0 0% 96%;          /* #F6F6F6 */
+    --secondary:          42 30% 97%;          /* #FBFAF7 */
     --secondary-foreground: 0 0% 7%;
 
-    --muted:              0 0% 96%;          /* neutral section */
+    --muted:              42 24% 95%;          /* #F1ECE3-ish */
     --muted-foreground:   220 8% 46%;      /* #6B7280 */
 
-    --accent:             0 0% 96%;          /* hover */
+    --accent:             42 24% 95%;          /* warm hover */
     --accent-foreground:  0 0% 7%;
 
-    --border:             220 13% 91%;       /* #E5E7EB */
-    --input:              220 13% 91%;
+    --border:             35 31% 89%;       /* #E7DED1 */
+    --input:              35 31% 89%;
     --ring:               221 83% 53%;
 
     /* Brand aliases */
@@ -96,10 +96,10 @@
 
   /* ── Sidebar scrollbar (dark) ──────────────────────────────────────── */
   .sidebar-scroll {
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
+    scrollbar-color: rgba(120, 113, 108, 0.35) transparent;
   }
   .sidebar-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.1);
+    background: rgba(120, 113, 108, 0.35);
   }
 
   /* ── Select ─────────────────────────────────────────────────────────── */
@@ -136,28 +136,28 @@
 
   /* Warm page surface — use on main content areas */
   .page-surface {
-    background-color: #FBF8F1;
+    background-color: #FBFAF7;
   }
 
   /* Grid surface (subtle dot grid) */
   .surface-grid {
     background-image:
-      linear-gradient(rgba(60, 40, 20, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(60, 40, 20, 0.04) 1px, transparent 1px);
+      linear-gradient(rgba(79, 70, 60, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 70, 60, 0.04) 1px, transparent 1px);
     background-size: 28px 28px;
   }
 
   .docs-shell-grid {
     background-image:
-      linear-gradient(rgba(60, 40, 20, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(60, 40, 20, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(79, 70, 60, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 70, 60, 0.03) 1px, transparent 1px);
     background-size: 32px 32px;
   }
 
   /* Warm card surface */
   .card-warm {
     background: #FFFFFF;
-    border: 1px solid #E5E7EB;
+    border: 1px solid #E7DED1;
     border-radius: 14px;
     box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
   }

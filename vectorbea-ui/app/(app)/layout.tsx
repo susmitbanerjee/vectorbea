@@ -41,9 +41,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           Sidebar and main each manage their own internal scroll so the
           sign-out button (mt-auto in the sidebar) is always visible at
           the bottom of the screen regardless of page content length. */}
-      <div className="flex h-screen overflow-hidden bg-[#FAFAFA]">
+      <div className="flex h-screen overflow-hidden bg-background">
         <AppSidebar summary={null} user={profile} />
-        <main className="min-w-0 h-full flex-1 overflow-y-auto bg-white">{children}</main>
+        <main className="page-surface min-w-0 h-full flex-1 overflow-y-auto">{children}</main>
       </div>
     </WorkspaceProvider>
   );
