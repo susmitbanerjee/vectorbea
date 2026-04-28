@@ -55,34 +55,34 @@ function formatTraceId(id: string) {
 }
 
 function labelTone(label: string) {
-  if (label === "better" || label === "pass") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
-  if (label === "worse" || label === "fail") return "border-red-500/30 bg-red-500/10 text-red-200";
-  return "border-slate-700 bg-slate-900 text-slate-300";
+  if (label === "better" || label === "pass") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700";
+  if (label === "worse" || label === "fail") return "border-red-500/30 bg-red-500/10 text-red-700";
+  return "border-border bg-card text-foreground";
 }
 
 function TraceIdentity({ label, trace }: { label: string; trace: TraceDetailView }) {
   return (
-    <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+    <Card className="rounded-2xl border-border bg-card">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-sm text-slate-100">{label}</CardTitle>
+          <CardTitle className="text-sm text-foreground">{label}</CardTitle>
           <Badge className={cn("border", labelTone(trace.status))}>{trace.status}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <div className="font-mono text-xs text-cyan-200">{trace.id}</div>
+        <div className="font-mono text-xs text-primary">{trace.id}</div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="outline" className="border-slate-700 text-slate-300">
+          <Badge variant="outline" className="border-border text-foreground">
             {trace.promptName}@{trace.promptVersion}
           </Badge>
-          <Badge variant="outline" className="border-slate-700 text-slate-300">
+          <Badge variant="outline" className="border-border text-foreground">
             {trace.executorType}
           </Badge>
-          <Badge variant="outline" className="border-slate-700 text-slate-300">
+          <Badge variant="outline" className="border-border text-foreground">
             {trace.executorObservability} observability
           </Badge>
         </div>
-        <div className="text-xs text-slate-400">{new Date(trace.startedAt).toLocaleString()}</div>
+        <div className="text-xs text-muted-foreground">{new Date(trace.startedAt).toLocaleString()}</div>
       </CardContent>
     </Card>
   );
@@ -102,18 +102,18 @@ function SummaryCard({
   return (
     <Card
       className={cn(
-        "rounded-2xl border bg-slate-900/70",
+        "rounded-2xl border bg-card",
         tone === "good"
           ? "border-emerald-500/30"
           : tone === "warn"
             ? "border-amber-500/30"
-            : "border-slate-800",
+            : "border-border",
       )}
     >
       <CardContent className="space-y-2 p-4">
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">{label}</div>
-        <div className="text-2xl font-semibold text-slate-100">{value}</div>
-        <div className="text-xs text-slate-400">{hint}</div>
+        <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">{label}</div>
+        <div className="text-2xl font-semibold text-foreground">{value}</div>
+        <div className="text-xs text-muted-foreground">{hint}</div>
       </CardContent>
     </Card>
   );
@@ -131,15 +131,15 @@ function SideBySide({
   mono?: boolean;
 }) {
   return (
-    <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+    <Card className="rounded-2xl border-border bg-card">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm text-slate-100">{title}</CardTitle>
+        <CardTitle className="text-sm text-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-3 lg:grid-cols-2">
-        <pre className={cn("min-h-40 whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300", mono && "font-mono text-xs")}>
+        <pre className={cn("min-h-40 whitespace-pre-wrap rounded-xl border border-border bg-muted/40 p-4 text-sm text-foreground", mono && "font-mono text-xs")}>
           {left || "No data captured"}
         </pre>
-        <pre className={cn("min-h-40 whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300", mono && "font-mono text-xs")}>
+        <pre className={cn("min-h-40 whitespace-pre-wrap rounded-xl border border-border bg-muted/40 p-4 text-sm text-foreground", mono && "font-mono text-xs")}>
           {right || "No data captured"}
         </pre>
       </CardContent>
@@ -149,13 +149,13 @@ function SideBySide({
 
 function EvaluationCheck({ check }: { check: TraceEvaluationCheckView }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+    <div className="rounded-xl border border-border bg-muted/40 p-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="font-medium text-slate-100">{check.name}</div>
+        <div className="font-medium text-foreground">{check.name}</div>
         <Badge className={cn("border", labelTone(check.label))}>{check.label}</Badge>
       </div>
-      <div className="mt-2 text-sm text-slate-400">{check.reason}</div>
-      <div className="mt-2 font-mono text-xs text-slate-500">score {formatScore(check.score)}</div>
+      <div className="mt-2 text-sm text-muted-foreground">{check.reason}</div>
+      <div className="mt-2 font-mono text-xs text-muted-foreground">score {formatScore(check.score)}</div>
     </div>
   );
 }
@@ -287,14 +287,14 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
 
   if (!activeWorkspaceId) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+      <div className="min-h-screen page-surface text-foreground">
         <AppHeader title="Compare traces" subtitle="Select a workspace to compare executions." />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+    <div className="min-h-screen page-surface text-foreground">
       <AppHeader
         title="Compare traces"
         subtitle="Debug prompt, executor, output, and replay differences from audit-log traces."
@@ -303,20 +303,20 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
             {comparison ? (
               <>
                 <Link
-                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-800"
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground transition hover:bg-muted/70"
                   href={`/traces/${encodeURIComponent(comparison.left.id)}?org=${encodeURIComponent(activeWorkspaceId)}`}
                 >
                   Source trace
                 </Link>
                 <Link
-                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-800"
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground transition hover:bg-muted/70"
                   href={`/traces/${encodeURIComponent(comparison.right.id)}?org=${encodeURIComponent(activeWorkspaceId)}`}
                 >
                   Replay trace
                 </Link>
               </>
             ) : null}
-            <Button size="sm" className="bg-cyan-500 text-slate-950 hover:bg-cyan-400" onClick={runEvaluation} disabled={!comparison || evaluating}>
+            <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={runEvaluation} disabled={!comparison || evaluating}>
               {evaluating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlayCircle className="mr-2 h-4 w-4" />}
               Run evaluation
             </Button>
@@ -327,13 +327,13 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
         {error ? (
           <Card className="rounded-2xl border-red-500/30 bg-red-500/10">
-            <CardContent className="p-4 text-sm text-red-100">{error}</CardContent>
+            <CardContent className="p-4 text-sm text-red-700">{error}</CardContent>
           </Card>
         ) : null}
 
         {loading ? (
-          <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
-            <CardContent className="flex items-center gap-3 p-6 text-slate-300">
+          <Card className="rounded-2xl border-border bg-card">
+            <CardContent className="flex items-center gap-3 p-6 text-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading trace comparison...
             </CardContent>
@@ -341,8 +341,8 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
         ) : null}
 
         {!loading && !comparison ? (
-          <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
-            <CardContent className="p-6 text-sm text-slate-400">
+          <Card className="rounded-2xl border-border bg-card">
+            <CardContent className="p-6 text-sm text-muted-foreground">
               Provide both source and replay trace ids to compare executions.
             </CardContent>
           </Card>
@@ -353,8 +353,8 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
               <TraceIdentity label="Source execution" trace={comparison.left} />
               <div className="hidden items-center justify-center xl:flex">
-                <div className="rounded-full border border-slate-800 bg-slate-900 p-3">
-                  <GitCompareArrows className="h-5 w-5 text-cyan-300" />
+                <div className="rounded-full border border-border bg-card p-3">
+                  <GitCompareArrows className="h-5 w-5 text-primary" />
                 </div>
               </div>
               <TraceIdentity label="Replay execution" trace={comparison.right} />
@@ -393,7 +393,7 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
               <Tabs defaultValue="summary" className="space-y-4">
-                <TabsList className="border border-slate-800 bg-slate-900/80">
+                <TabsList className="border border-border bg-card">
                   <TabsTrigger value="summary">Summary</TabsTrigger>
                   <TabsTrigger value="prompt">Prompt</TabsTrigger>
                   <TabsTrigger value="input">Input</TabsTrigger>
@@ -403,27 +403,27 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
                 </TabsList>
 
                 <TabsContent value="summary" className="space-y-3">
-                  <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+                  <Card className="rounded-2xl border-border bg-card">
                     <CardContent className="space-y-2 p-4">
                       {comparison.callouts.map((callout) => (
-                        <div key={callout} className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-300">
-                          <Sparkles className="mt-0.5 h-4 w-4 text-cyan-300" />
+                        <div key={callout} className="flex items-start gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm text-foreground">
+                          <Sparkles className="mt-0.5 h-4 w-4 text-primary" />
                           <span>{callout}</span>
                         </div>
                       ))}
                     </CardContent>
                   </Card>
-                  <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+                  <Card className="rounded-2xl border-border bg-card">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm text-slate-100">Field diffs</CardTitle>
+                      <CardTitle className="text-sm text-foreground">Field diffs</CardTitle>
                     </CardHeader>
-                    <CardContent className="divide-y divide-slate-800">
+                    <CardContent className="divide-y divide-border">
                       {comparison.fields.map((field) => (
                         <div key={field.key} className="grid gap-2 py-3 text-sm md:grid-cols-[180px_1fr_1fr_100px]">
-                          <div className="text-slate-400">{field.label}</div>
-                          <div className="font-mono text-slate-300">{String(field.left ?? "Unavailable")}</div>
-                          <div className="font-mono text-slate-300">{String(field.right ?? "Unavailable")}</div>
-                          <Badge className={cn("w-fit border", field.changed ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200")}>
+                          <div className="text-muted-foreground">{field.label}</div>
+                          <div className="font-mono text-foreground">{String(field.left ?? "Unavailable")}</div>
+                          <div className="font-mono text-foreground">{String(field.right ?? "Unavailable")}</div>
+                          <Badge className={cn("w-fit border", field.changed ? "border-amber-500/30 bg-amber-500/10 text-amber-700" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700")}>
                             {field.changed ? "changed" : "same"}
                           </Badge>
                         </div>
@@ -448,25 +448,25 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
                 </TabsContent>
 
                 <TabsContent value="timing" className="space-y-3">
-                  <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+                  <Card className="rounded-2xl border-border bg-card">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm text-slate-100">Span timing deltas</CardTitle>
+                      <CardTitle className="text-sm text-foreground">Span timing deltas</CardTitle>
                     </CardHeader>
-                    <CardContent className="divide-y divide-slate-800">
+                    <CardContent className="divide-y divide-border">
                       {timingRows.length ? timingRows.map((row) => (
                         <div key={`${row.type}:${row.service}:${row.name}`} className="grid gap-2 py-3 text-sm md:grid-cols-[1fr_120px_120px_120px]">
                           <div>
-                            <div className="text-slate-300">{row.name}</div>
-                            <div className="mt-0.5 font-mono text-[11px] text-slate-500">{row.type} / {row.service}</div>
+                            <div className="text-foreground">{row.name}</div>
+                            <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{row.type} / {row.service}</div>
                           </div>
-                          <div className="font-mono text-slate-400">{row.left === null ? "-" : formatDuration(row.left)}</div>
-                          <div className="font-mono text-slate-400">{row.right === null ? "-" : formatDuration(row.right)}</div>
+                          <div className="font-mono text-muted-foreground">{row.left === null ? "-" : formatDuration(row.left)}</div>
+                          <div className="font-mono text-muted-foreground">{row.right === null ? "-" : formatDuration(row.right)}</div>
                           <div className={cn("font-mono", row.delta !== null && row.delta <= 0 ? "text-emerald-300" : "text-amber-300")}>
                             {row.delta === null ? (row.right === null ? "removed" : "new") : formatDelta(row.delta)}
                           </div>
                         </div>
                       )) : (
-                        <div className="py-8 text-sm text-slate-400">No comparable spans captured.</div>
+                        <div className="py-8 text-sm text-muted-foreground">No comparable spans captured.</div>
                       )}
                     </CardContent>
                   </Card>
@@ -480,8 +480,8 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
                       ))}
                     </div>
                   ) : (
-                    <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
-                      <CardContent className="p-6 text-sm text-slate-400">
+                    <Card className="rounded-2xl border-border bg-card">
+                      <CardContent className="p-6 text-sm text-muted-foreground">
                         No evaluation has been persisted for this replay yet. Run evaluation to attach a rule-based replay score.
                       </CardContent>
                     </Card>
@@ -490,52 +490,52 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
               </Tabs>
 
               <div className="space-y-3 xl:sticky xl:top-4 xl:h-fit">
-                <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+                <Card className="rounded-2xl border-border bg-card">
                   <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-sm text-slate-100">
-                      <ShieldAlert className="h-4 w-4 text-cyan-300" />
+                    <CardTitle className="flex items-center gap-2 text-sm text-foreground">
+                      <ShieldAlert className="h-4 w-4 text-primary" />
                       Observability note
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-3 text-sm text-slate-400">
+                  <CardContent className="space-y-3 text-sm text-muted-foreground">
                     <p>
                       Enterprise gateway traces compare using whatever the customer gateway returns. Missing tokens,
                       cost, or model fields are treated as unavailable, not zero.
                     </p>
                     {comparison.right.executorType !== "enterprise_gateway" ? (
-                      <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-amber-200">
+                      <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-amber-700">
                         Direct-provider replay is simulated in this repository and may use captured output instead of a live downstream call.
                       </p>
                     ) : null}
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                      <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Replay lineage</div>
-                      <div className="mt-1 font-mono text-xs text-cyan-200">
+                    <div className="rounded-xl border border-border bg-muted/40 p-3">
+                      <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Replay lineage</div>
+                      <div className="mt-1 font-mono text-xs text-primary">
                         {comparison.summary.replayLineage ? formatTraceId(comparison.summary.replayLineage) : "No lineage tag"}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+                <Card className="rounded-2xl border-border bg-card">
                   <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-sm text-slate-100">
-                      <BarChart3 className="h-4 w-4 text-cyan-300" />
+                    <CardTitle className="flex items-center gap-2 text-sm text-foreground">
+                      <BarChart3 className="h-4 w-4 text-primary" />
                       Evaluation summary
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Score</span>
-                      <span className="font-mono text-slate-100">{formatScore(comparison.summary.evaluation?.score)}</span>
+                      <span className="text-muted-foreground">Score</span>
+                      <span className="font-mono text-foreground">{formatScore(comparison.summary.evaluation?.score)}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Label</span>
+                      <span className="text-muted-foreground">Label</span>
                       <Badge className={cn("border", labelTone(comparison.summary.evaluation?.label ?? "unknown"))}>
                         {comparison.summary.evaluation?.label ?? "not run"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Compared against</span>
-                      <span className="font-mono text-xs text-slate-300">
+                      <span className="text-muted-foreground">Compared against</span>
+                      <span className="font-mono text-xs text-foreground">
                         {comparison.summary.evaluation?.comparedAgainstTraceId
                           ? formatTraceId(comparison.summary.evaluation.comparedAgainstTraceId)
                           : "-"}
@@ -543,14 +543,14 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="rounded-2xl border-slate-800 bg-slate-900/70">
+                <Card className="rounded-2xl border-border bg-card">
                   <CardContent className="grid gap-2 p-4 text-sm">
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <Timer className="h-4 w-4 text-cyan-300" />
+                    <div className="flex items-center gap-2 text-foreground">
+                      <Timer className="h-4 w-4 text-primary" />
                       {formatDuration(comparison.left.durationMs)} <ArrowRight className="h-3.5 w-3.5" /> {formatDuration(comparison.right.durationMs)}
                     </div>
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <CheckCircle2 className="h-4 w-4 text-cyan-300" />
+                    <div className="flex items-center gap-2 text-foreground">
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
                       {formatCost(comparison.left.totalCostUsd)} <ArrowRight className="h-3.5 w-3.5" /> {formatCost(comparison.right.totalCostUsd)}
                     </div>
                   </CardContent>
@@ -563,3 +563,6 @@ export function TraceCompareShell({ leftTraceId, rightTraceId }: Props) {
     </div>
   );
 }
+
+
+

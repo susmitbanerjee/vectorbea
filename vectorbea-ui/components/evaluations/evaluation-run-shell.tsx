@@ -308,7 +308,7 @@ function MultiProviderPanel({ results }: { results: TraceSetEvaluationRunView["r
         </div>
 
         {best && (
-          <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300 flex items-center gap-2">
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700">
             <ProviderIcon providerType={best.provider} className="h-3.5 w-3.5 shrink-0" />
             <span>
               <span className="font-semibold capitalize">{best.provider}</span>{" "}
@@ -611,7 +611,7 @@ function ReviewPanel({
         </Button>
 
         {!run.promotion.allowed && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 space-y-1">
+          <div className="space-y-1 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
             <div className="font-semibold">Promotion blocked:</div>
             {run.promotion.reasons.map((r, i) => (
               <div key={i} className="flex gap-1.5"><span className="shrink-0">·</span>{r}</div>
@@ -759,7 +759,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
 
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700">{error}</div>
         )}
 
         {(loading && !run) ? (
@@ -785,9 +785,9 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
               <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
                 <XCircle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
                 <div className="text-sm space-y-1">
-                  <div className="font-semibold text-red-300">{rm.label}</div>
+                  <div className="font-semibold text-red-700">{rm.label}</div>
                   {run.aggregate.reasons.length > 0 && (
-                    <div className="text-xs text-red-200/80">{run.aggregate.reasons[0]}</div>
+                    <div className="text-xs text-red-700/80">{run.aggregate.reasons[0]}</div>
                   )}
                 </div>
               </div>
@@ -858,7 +858,7 @@ export function EvaluationRunShell({ runId }: { runId: string }) {
 
                     {/* Unresolved flags */}
                     {(run.aggregate.unresolvedFlagCount ?? 0) > 0 && (
-                      <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                         {run.aggregate.unresolvedFlagCount} source trace(s) with unresolved flags. Resolve before promoting.
                       </div>

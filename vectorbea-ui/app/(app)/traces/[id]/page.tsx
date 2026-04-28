@@ -176,36 +176,36 @@ const STATUS_STYLE: Record<SpanStatus, string> = {
 
 const LEVEL_STYLE: Record<LogLevel, string> = {
   debug: "text-muted-foreground",
-  info: "text-cyan-600",
+  info: "text-primary",
   warn: "text-amber-600",
   error: "text-red-600",
 };
 
 const TYPE_META: Record<SpanType, { label: string; color: string; icon: LucideIcon; aiOnly?: boolean }> = {
-  incoming_request: { label: "Incoming", color: "bg-slate-500", icon: Network },
-  sidecar_proxy: { label: "Sidecar", color: "bg-slate-500", icon: Server, aiOnly: true },
-  prompt_resolution: { label: "Prompt", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
-  template_render: { label: "Template", color: "bg-slate-500", icon: Braces, aiOnly: true },
-  retrieval_query: { label: "Retrieval", color: "bg-slate-500", icon: Database, aiOnly: true },
-  vector_lookup: { label: "VectorDB", color: "bg-slate-500", icon: Database, aiOnly: true },
-  rerank: { label: "Rerank", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
-  context_assembly: { label: "Context", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
-  cache: { label: "Cache", color: "bg-slate-500", icon: Zap, aiOnly: true },
-  model_selection: { label: "Routing", color: "bg-slate-500", icon: Waypoints, aiOnly: true },
-  llm_completion: { label: "LLM", color: "bg-slate-500", icon: Bot, aiOnly: true },
-  guardrail: { label: "Guardrail", color: "bg-slate-500", icon: ShieldCheck, aiOnly: true },
-  response_parser: { label: "Parser", color: "bg-slate-500", icon: FileJson, aiOnly: true },
-  fallback: { label: "Fallback", color: "bg-slate-500", icon: GitBranch, aiOnly: true },
-  audit_sink: { label: "Audit", color: "bg-slate-500", icon: ClipboardList },
-  evaluation_hook: { label: "Eval", color: "bg-slate-500", icon: Sparkles, aiOnly: true },
+  incoming_request: { label: "Incoming", color: "bg-slate-400", icon: Network },
+  sidecar_proxy: { label: "Sidecar", color: "bg-slate-400", icon: Server, aiOnly: true },
+  prompt_resolution: { label: "Prompt", color: "bg-slate-400", icon: Sparkles, aiOnly: true },
+  template_render: { label: "Template", color: "bg-slate-400", icon: Braces, aiOnly: true },
+  retrieval_query: { label: "Retrieval", color: "bg-slate-400", icon: Database, aiOnly: true },
+  vector_lookup: { label: "VectorDB", color: "bg-slate-400", icon: Database, aiOnly: true },
+  rerank: { label: "Rerank", color: "bg-slate-400", icon: Sparkles, aiOnly: true },
+  context_assembly: { label: "Context", color: "bg-slate-400", icon: Sparkles, aiOnly: true },
+  cache: { label: "Cache", color: "bg-slate-400", icon: Zap, aiOnly: true },
+  model_selection: { label: "Routing", color: "bg-slate-400", icon: Waypoints, aiOnly: true },
+  llm_completion: { label: "LLM", color: "bg-slate-400", icon: Bot, aiOnly: true },
+  guardrail: { label: "Guardrail", color: "bg-slate-400", icon: ShieldCheck, aiOnly: true },
+  response_parser: { label: "Parser", color: "bg-slate-400", icon: FileJson, aiOnly: true },
+  fallback: { label: "Fallback", color: "bg-slate-400", icon: GitBranch, aiOnly: true },
+  audit_sink: { label: "Audit", color: "bg-slate-400", icon: ClipboardList },
+  evaluation_hook: { label: "Eval", color: "bg-slate-400", icon: Sparkles, aiOnly: true },
 };
 
 function spanBarTone(row: Span, selected: boolean) {
-  if (selected) return "bg-cyan-300 ring-1 ring-cyan-200/70";
+  if (selected) return "bg-primary/80 ring-1 ring-primary/30";
   if (row.status === "error") return "bg-red-400";
   if (row.status === "warning" || row.status === "partial") return "bg-amber-300";
-  if (row.criticalPath) return "bg-slate-300";
-  return "bg-slate-500";
+  if (row.criticalPath) return "bg-slate-400";
+  return "bg-slate-400";
 }
 
 const TRACE: TraceData = {
@@ -380,7 +380,7 @@ function FilterChip({ active, label, onClick }: { active: boolean; label: string
       onClick={onClick}
       className={cn(
         "rounded-lg px-2.5 py-1.5 text-xs transition",
-        active ? "bg-cyan-500/20 text-cyan-200" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
       {label}
@@ -777,7 +777,7 @@ export default function TraceDetailsPage() {
 
   if (!activeWorkspaceId) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+      <div className="min-h-screen page-surface text-foreground">
         <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
         <div className="px-4 py-6 md:px-6 xl:px-8">
           <Card className="rounded-2xl border border-border bg-card">
@@ -792,7 +792,7 @@ export default function TraceDetailsPage() {
 
   if (loading && !traceData) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+      <div className="min-h-screen page-surface text-foreground">
         <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
         <div className="px-4 py-6 md:px-6 xl:px-8">
           <Card className="rounded-2xl border border-border bg-card">
@@ -805,7 +805,7 @@ export default function TraceDetailsPage() {
 
   if (loadError && !traceData) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+      <div className="min-h-screen page-surface text-foreground">
         <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
         <div className="px-4 py-6 md:px-6 xl:px-8">
           <Card className="rounded-2xl border border-red-500/30 bg-red-500/10">
@@ -817,7 +817,7 @@ export default function TraceDetailsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
+    <div className="min-h-screen page-surface text-foreground">
       <AppHeader
         title="Trace"
         subtitle={`Traces / ${trace.id}`}
@@ -908,7 +908,7 @@ export default function TraceDetailsPage() {
                   <Flag className="mr-1 inline h-3.5 w-3.5" />
                   Flagged by {existingFlag.flagged_by_email ?? "unknown"} on {new Date(existingFlag.flagged_at).toLocaleString()}
                 </p>
-                {existingFlag.reason && <p className="text-xs text-amber-200/80">{existingFlag.reason}</p>}
+                {existingFlag.reason && <p className="text-xs text-amber-700/80">{existingFlag.reason}</p>}
               </div>
               <button type="button" onClick={() => void resolveFlag()} className="shrink-0 text-xs text-amber-300 hover:text-amber-100 underline">Resolve</button>
             </CardContent>
@@ -984,7 +984,7 @@ export default function TraceDetailsPage() {
               />
             </div>
             {trace.replayOf ? (
-              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+              <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary">
                 Replay of <span className="font-mono">{trace.replayOf}</span>
               </div>
             ) : null}
@@ -1096,7 +1096,7 @@ export default function TraceDetailsPage() {
                                     <Badge variant="outline" className="h-5 border-border bg-muted/80 text-[10px] text-foreground">Critical path</Badge>
                                   ) : null}
                                   {row.branch === "fallback" ? (
-                                    <Badge variant="outline" className="h-5 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-200">Fallback</Badge>
+                                    <Badge variant="outline" className="h-5 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-700">Fallback</Badge>
                                   ) : null}
                                 </div>
                                 <div className="text-xs text-muted-foreground">{row.service} · {formatDuration(row.durationMs)}</div>
@@ -1136,7 +1136,7 @@ export default function TraceDetailsPage() {
                           key={row.id}
                           className={cn(
                             "grid w-full grid-cols-[2fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr_0.9fr_1.2fr] items-center border-b border-border/70 px-3 py-2 text-left hover:bg-muted/40",
-                            selectedSpan?.id === row.id && "bg-cyan-500/10"
+                            selectedSpan?.id === row.id && "bg-primary/10"
                           )}
                           onClick={() => setSelectedSpanId(row.id)}
                         >
@@ -1304,7 +1304,7 @@ export default function TraceDetailsPage() {
                       onClick={() => setLogsSelectedOnly((v) => !v)}
                       className={cn(
                         "rounded-lg border px-3 py-2 text-xs transition",
-                        logsSelectedOnly ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200" : "border-border bg-card text-muted-foreground"
+                        logsSelectedOnly ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground"
                       )}
                     >
                       Selected span only
@@ -1321,7 +1321,7 @@ export default function TraceDetailsPage() {
                           <span className={cn("uppercase", LEVEL_STYLE[log.level])}>{log.level}</span>
                           <span className="text-muted-foreground">{log.component}</span>
                           <span className="text-muted-foreground">{log.message}</span>
-                          <button onClick={() => log.spanId && setSelectedSpanId(log.spanId)} className="text-left text-cyan-300 hover:underline">
+                          <button onClick={() => log.spanId && setSelectedSpanId(log.spanId)} className="text-left text-primary hover:underline">
                             {log.spanId ?? "—"}
                           </button>
                         </div>
@@ -1457,9 +1457,9 @@ function SummaryStrip({
       className={cn(
         "rounded-lg border px-3 py-2 text-sm",
         tone === "good"
-          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
           : tone === "warn"
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700"
           : "border-border bg-muted/40 text-foreground"
       )}
     >
@@ -1507,3 +1507,4 @@ function OutputBlock({
     </div>
   );
 }
+

@@ -169,28 +169,28 @@ function Sidebar({
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-30 flex h-screen w-[272px] flex-col border-r border-border bg-muted/[0.18] backdrop-blur transition-transform duration-200 ease-in-out",
+          "sidebar-scroll fixed left-0 top-0 z-30 flex h-screen w-[272px] flex-col border-r border-sidebar-border bg-sidebar backdrop-blur transition-transform duration-200 ease-in-out",
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-5">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-sidebar-border px-5">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card shadow-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] shadow-sm">
               <BeeLogo className="h-5 w-5" />
             </div>
             <div className="leading-none">
-              <p className="text-[13px] font-semibold tracking-tight text-foreground">
+              <p className="text-[13px] font-semibold tracking-tight text-sidebar-fg">
                 VectorBea
               </p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-[11px] text-sidebar-muted">
                 Documentation
               </p>
             </div>
           </Link>
           <button
             onClick={onClose}
-            className="p-1 text-muted-foreground hover:text-foreground lg:hidden"
+            className="p-1 text-sidebar-muted hover:text-sidebar-fg lg:hidden"
           >
             <X size={15} />
           </button>
@@ -201,7 +201,7 @@ function Sidebar({
           {DOCS_NAV_GROUPS.map((group) => (
             <div key={group.section ?? group.items[0].href}>
               {group.section && (
-                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-muted">
                   {group.section}
                 </p>
               )}
@@ -226,10 +226,10 @@ function Sidebar({
         </nav>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-border px-5 py-4">
+        <div className="shrink-0 border-t border-sidebar-border px-5 py-4">
           <Link
             href="/"
-            className="flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1.5 text-[12px] text-sidebar-muted transition-colors hover:text-sidebar-fg"
           >
             <ExternalLink size={11} />
             Back to app
@@ -259,14 +259,14 @@ function SidebarNavItem({
       className={cn(
         "flex items-center gap-2 rounded-[5px] px-2 py-[6px] text-[13px] transition-colors",
         active
-          ? "rounded-xl border border-border bg-background font-medium text-foreground shadow-sm"
-          : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+          ? "rounded-xl border border-white/15 bg-white/[0.08] font-medium text-sidebar-fg shadow-sm"
+          : "text-sidebar-muted hover:bg-white/[0.06] hover:text-sidebar-fg",
       )}
     >
       <Icon size={13} className="shrink-0" />
       <span className="flex-1">{title}</span>
       {badge && (
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="rounded-full border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-sidebar-muted">
           {badge}
         </span>
       )}
@@ -515,7 +515,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="page-surface min-h-screen text-foreground">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -524,7 +524,7 @@ export function DocsShell({ children }: { children: ReactNode }) {
 
       <div className="lg:pl-[272px]">
         {/* Mobile top bar */}
-        <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
+        <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-[#FBF8F1]/95 px-4 backdrop-blur lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-1 text-muted-foreground transition-colors hover:text-foreground"

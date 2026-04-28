@@ -3,32 +3,36 @@
 @tailwind utilities;
 
 @layer base {
-  /* ── Light mode (primary) ─────────────────────────────────────────────────
-     Target: #F8FAFC bg, #FFFFFF card, #E2E8F0 border, #0F172A text
-     Accent: #2563EB blue primary
+  /* ── Warm light mode — Claude/Linear-inspired premium palette ──────────────
+     App bg:   #F8F5EF  (warm cream)
+     Page bg:  #FBF8F1  (slightly warmer)
+     Card:     #FFFFFF  → optional warm #FFFCF7
+     Border:   #E7DED1  (warm sand border)
+     Text:     #111111 / #4B5563 / #6B7280
+     Primary:  #2563EB (blue accent, restrained)
   ──────────────────────────────────────────────────────────────────────── */
   :root {
-    --background:         210 40% 98%;     /* #F8FAFC */
-    --foreground:         222 47% 11%;     /* #0F172A */
+    --background:         40 38% 95%;      /* #F8F5EF warm cream */
+    --foreground:         0 0% 7%;         /* #111111 near-black */
     --card:               0 0% 100%;       /* #FFFFFF */
-    --card-foreground:    222 47% 11%;
+    --card-foreground:    0 0% 7%;
     --popover:            0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 0 0% 7%;
 
     --primary:            221 83% 53%;     /* #2563EB blue */
     --primary-foreground: 0 0% 100%;
 
-    --secondary:          210 40% 96%;     /* #F1F5F9 */
-    --secondary-foreground: 222 47% 11%;
+    --secondary:          40 25% 92%;      /* warm off-white */
+    --secondary-foreground: 0 0% 7%;
 
-    --muted:              210 40% 96%;     /* #F1F5F9 */
-    --muted-foreground:   215 16% 47%;     /* #64748B */
+    --muted:              36 20% 92%;      /* warm light muted surface */
+    --muted-foreground:   220 8% 46%;      /* #6B7280 */
 
-    --accent:             214 100% 97%;    /* very light blue tint #EFF6FF */
-    --accent-foreground:  221 83% 43%;     /* darker blue */
+    --accent:             40 38% 90%;      /* warm tint hover */
+    --accent-foreground:  0 0% 7%;
 
-    --border:             214 32% 91%;     /* #E2E8F0 */
-    --input:              214 32% 91%;
+    --border:             36 31% 86%;      /* #E7DED1 */
+    --input:              36 31% 86%;
     --ring:               221 83% 53%;
 
     /* Brand aliases */
@@ -36,66 +40,25 @@
     --brand-foreground:   0 0% 100%;
     --brand-muted:        213 94% 68%;     /* #60A5FA */
 
-    /* Status */
-    --success:            142 71% 45%;
+    /* Status — semantic, high-contrast on light bg */
+    --success:            142 76% 36%;     /* #15803D */
     --success-foreground: 0 0% 100%;
-    --warning:            38 92% 50%;
-    --warning-foreground: 0 0% 4%;
-    --destructive:        0 72% 51%;       /* #DC2626 */
+    --warning:            32 81% 37%;      /* #B45309 */
+    --warning-foreground: 0 0% 100%;
+    --destructive:        0 73% 41%;       /* #B91C1C */
     --destructive-foreground: 0 0% 100%;
+    --info:               221 83% 53%;
 
     /* Charts */
     --chart-1: 221 83% 53%;
     --chart-2: 197 71% 52%;
-    --chart-3: 142 71% 45%;
-    --chart-4: 38 92% 50%;
-    --chart-5: 262 83% 58%;
+    --chart-3: 142 76% 36%;
+    --chart-4: 32 81% 37%;
+    --chart-5: 262 52% 47%;
   }
 
-  /* ── Dark mode (refined) ──────────────────────────────────────────────────
-     Target: #0B0F14 bg, #111827 card, #1F2937 border, #E5E7EB text
-  ──────────────────────────────────────────────────────────────────────── */
-  .dark {
-    --background:         218 33% 6%;      /* #0B0F14 */
-    --foreground:         220 9% 92%;      /* #E5E7EB */
-    --card:               222 47% 11%;     /* #111827 */
-    --card-foreground:    220 9% 92%;
-    --popover:            222 47% 11%;
-    --popover-foreground: 220 9% 92%;
-
-    --primary:            239 76% 68%;     /* lighter indigo on dark */
-    --primary-foreground: 0 0% 4%;
-
-    --secondary:          217 33% 17%;     /* #1F2937 */
-    --secondary-foreground: 220 9% 92%;
-
-    --muted:              217 33% 15%;
-    --muted-foreground:   215 14% 58%;     /* #9CA3AF approx */
-
-    --accent:             239 50% 20%;
-    --accent-foreground:  239 76% 80%;
-
-    --border:             217 33% 17%;     /* #1F2937 */
-    --input:              217 33% 17%;
-    --ring:               239 76% 68%;
-
-    --brand:              239 76% 68%;
-    --brand-foreground:   0 0% 4%;
-    --brand-muted:        239 60% 78%;
-
-    --success:            142 71% 50%;
-    --success-foreground: 0 0% 4%;
-    --warning:            38 92% 55%;
-    --warning-foreground: 0 0% 4%;
-    --destructive:        0 65% 58%;
-    --destructive-foreground: 0 0% 100%;
-
-    --chart-1: 239 76% 68%;
-    --chart-2: 217 91% 65%;
-    --chart-3: 142 71% 50%;
-    --chart-4: 38 92% 55%;
-    --chart-5: 280 67% 65%;
-  }
+  /* Dark block kept for sidebar/code via [data-theme="dark"] on sub-elements.
+     The root ThemeProvider forces "light" so .dark never activates globally. */
 
   /* ── Base resets ─────────────────────────────────────────────────────── */
   * {
@@ -131,6 +94,14 @@
     background: hsl(var(--muted-foreground) / 0.4);
   }
 
+  /* ── Sidebar scrollbar (dark) ──────────────────────────────────────── */
+  .sidebar-scroll {
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.1);
+  }
+
   /* ── Select ─────────────────────────────────────────────────────────── */
   select {
     color-scheme: light;
@@ -146,74 +117,63 @@
     background-repeat: no-repeat;
   }
 
-  .dark select { color-scheme: dark; }
-
   /* ── Focus ring ─────────────────────────────────────────────────────── */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }
 
-  /* ── Headings defaults ──────────────────────────────────────────────── */
+  /* ── Headings ───────────────────────────────────────────────────────── */
   h1, h2, h3, h4, h5 {
     letter-spacing: -0.02em;
     font-weight: 600;
+    color: #111111;
   }
 }
 
 /* ── Utility layer ─────────────────────────────────────────────────────── */
 @layer utilities {
 
-  /* Grid surface (subtle dot/line grid for hero sections) */
-  .surface-grid {
-    background-image:
-      linear-gradient(rgba(100, 100, 120, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(100, 100, 120, 0.04) 1px, transparent 1px);
-    background-size: 28px 28px;
+  /* Warm page surface — use on main content areas */
+  .page-surface {
+    background-color: #FBF8F1;
   }
 
-  .dark .surface-grid {
+  /* Grid surface (subtle dot grid) */
+  .surface-grid {
     background-image:
-      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      linear-gradient(rgba(60, 40, 20, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(60, 40, 20, 0.04) 1px, transparent 1px);
     background-size: 28px 28px;
   }
 
   .docs-shell-grid {
     background-image:
-      linear-gradient(rgba(127, 127, 127, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(127, 127, 127, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(60, 40, 20, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(60, 40, 20, 0.03) 1px, transparent 1px);
     background-size: 32px 32px;
   }
 
-  /* Glass utility */
-  .glass       { @apply border border-border/60 bg-card/80 backdrop-blur-xl; }
-  .glass-strong { @apply border border-border/80 bg-card/95 backdrop-blur-2xl; }
-
-  /* Gradient border */
-  .gradient-border { position: relative; }
-  .gradient-border::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(135deg, hsl(var(--brand) / 0.25), transparent 55%, hsl(var(--brand-muted) / 0.18));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
+  /* Warm card surface */
+  .card-warm {
+    background: linear-gradient(180deg, #FFFFFF 0%, #FFFCF7 100%);
+    border: 1px solid #E7DED1;
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(17, 24, 39, 0.06), 0 0 0 1px rgba(231, 222, 209, 0.5);
   }
+
+  /* Glass utility */
+  .glass       { @apply border border-border/60 bg-card/90 backdrop-blur-xl; }
+  .glass-strong { @apply border border-border/80 bg-card/98 backdrop-blur-2xl; }
 
   /* Skeleton loading */
   .skeleton {
     @apply rounded-md;
     background: linear-gradient(
       90deg,
-      hsl(var(--muted)) 0%,
-      hsl(var(--muted) / 0.5) 50%,
-      hsl(var(--muted)) 100%
+      #F0EAE0 0%,
+      #E8E1D6 50%,
+      #F0EAE0 100%
     );
     background-size: 200% 100%;
     animation: shimmer 1.8s ease-in-out infinite;
@@ -247,14 +207,14 @@
 
   /* ── Docs prose ──────────────────────────────────────────────────────── */
   .docs-prose {
-    @apply prose prose-slate max-w-[68ch] text-[0.9375rem] leading-[1.8] text-foreground dark:prose-invert;
+    @apply prose prose-slate max-w-[68ch] text-[0.9375rem] leading-[1.8] text-foreground;
   }
   .docs-prose > :first-child { @apply mt-0; }
-  .docs-prose h1 { @apply mt-0 text-[2.25rem] font-semibold tracking-tight sm:text-5xl; }
-  .docs-prose h2 { @apply mt-12 border-t border-border/50 pt-8 text-[1.375rem] font-semibold tracking-tight; }
-  .docs-prose h3 { @apply mt-8 text-[1.0625rem] font-semibold tracking-tight; }
+  .docs-prose h1 { @apply mt-0 text-[2.25rem] font-semibold tracking-tight sm:text-5xl; color: #111111; }
+  .docs-prose h2 { @apply mt-12 border-t border-border/50 pt-8 text-[1.375rem] font-semibold tracking-tight; color: #111111; }
+  .docs-prose h3 { @apply mt-8 text-[1.0625rem] font-semibold tracking-tight; color: #111111; }
   .docs-prose p  { @apply mt-4 text-[0.9375rem] leading-[1.8] text-muted-foreground; }
-  .docs-prose strong { @apply font-semibold text-foreground; }
+  .docs-prose strong { @apply font-semibold; color: #111111; }
   .docs-prose a {
     @apply font-medium text-brand underline decoration-brand/25 underline-offset-4 transition-colors hover:text-brand/80;
   }
@@ -262,10 +222,13 @@
   .docs-prose ol { @apply mt-4 space-y-2.5 pl-5 text-muted-foreground; }
   .docs-prose li { @apply pl-1; }
   .docs-prose code {
-    @apply rounded border border-border/60 bg-muted/80 px-1.5 py-0.5 font-mono text-[0.875em] text-foreground;
+    @apply rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[0.875em];
+    color: #111111;
   }
   .docs-prose pre {
-    @apply mt-6 overflow-x-auto rounded-xl border border-border bg-[#0d1117] px-5 py-4 text-sm leading-7 shadow-md;
+    @apply mt-6 overflow-x-auto rounded-xl border border-[#2A2A2A] px-5 py-4 text-sm leading-7 shadow-md;
+    background: #111111;
+    color: #F8F5EF;
   }
   .docs-prose pre code { @apply bg-transparent border-none p-0 text-inherit; }
   .docs-prose blockquote {

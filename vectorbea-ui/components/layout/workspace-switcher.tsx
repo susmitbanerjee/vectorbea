@@ -121,22 +121,22 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-all hover:border-primary/30 hover:bg-accent/40"
+          className="group flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-left transition-all hover:border-white/20 hover:bg-white/[0.08]"
         >
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
-              <Layers3 className="h-4 w-4 text-primary" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06]">
+              <Layers3 className="h-4 w-4 text-brand-muted" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-foreground">
+              <p className="truncate text-sm font-medium text-sidebar-fg">
                 {activeWorkspace?.name ?? "No workspace"}
               </p>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <p className="text-[10px] uppercase tracking-wider text-sidebar-muted">
                 {activeWorkspace?.organizationName ?? "Select workspace"}
               </p>
             </div>
           </div>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-colors group-hover:text-sidebar-fg" />
         </button>
       </DropdownMenuTrigger>
 

@@ -111,15 +111,15 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   }, [activeWorkspaceId, summary]);
 
   return (
-    <aside className="hidden w-[232px] shrink-0 border-r border-border/40 bg-background lg:flex lg:flex-col h-full overflow-y-auto">
+    <aside className="sidebar-scroll hidden h-full w-[232px] shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
 
       {/* Logo + workspace */}
-      <div className="px-4 pt-5 pb-3">
+      <div className="px-4 pb-3 pt-5">
         <div className="mb-4 flex items-center gap-2.5 px-1">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/70 bg-card shadow-xs">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] shadow-xs">
             <Logo />
           </div>
-          <span className="text-[13px] font-semibold tracking-tight">VectorBea</span>
+          <span className="text-[13px] font-semibold tracking-tight text-sidebar-fg">VectorBea</span>
         </div>
         <WorkspaceSwitcher />
       </div>
@@ -156,15 +156,15 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   "group relative flex w-full items-center gap-2.5 rounded-md text-left transition-all duration-150",
                   item.isSubItem ? "pl-8 pr-3 py-1.5 text-[12px]" : "px-3 py-1.5 text-[13px]",
                   active
-                    ? "bg-primary/[0.08] text-primary font-medium"
-                    : "text-muted-foreground font-normal hover:bg-muted/60 hover:text-foreground",
+                    ? "bg-sidebar-active text-sidebar-fg font-medium"
+                    : "text-sidebar-muted font-normal hover:bg-sidebar-hover hover:text-sidebar-fg",
                   loading && "opacity-60",
                 )}
               >
                 <Icon
                   className={cn(
                     "h-[15px] w-[15px] shrink-0 transition-colors",
-                    active ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground",
+                    active ? "text-brand-muted" : "text-sidebar-muted/70 group-hover:text-sidebar-fg",
                     loading && "opacity-0",
                   )}
                 />
@@ -181,13 +181,13 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         </div>
 
         {/* Divider before bottom links */}
-        <div className="mt-4 mb-2 border-t border-border/40" />
+        <div className="mb-2 mt-4 border-t border-sidebar-border" />
 
         <a
           href="/docs/overview"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] text-muted-foreground transition-all duration-150 hover:bg-muted/60 hover:text-foreground"
+          className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] text-sidebar-muted transition-all duration-150 hover:bg-sidebar-hover hover:text-sidebar-fg"
         >
           <BookOpen className="h-[15px] w-[15px] shrink-0" />
           <span className="flex-1">Documentation</span>
@@ -196,15 +196,15 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       </nav>
 
       {/* Bottom: sidecar status + user */}
-      <div className="border-t border-border/40 px-3 py-3 space-y-2">
+      <div className="space-y-2 border-t border-sidebar-border px-3 py-3">
         {/* Sidecar pill */}
-        <div className="flex items-center gap-2 rounded-md border border-border/50 bg-card/60 px-3 py-2">
+        <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
           <span className={cn("live-dot h-1.5 w-1.5", !workspaceSummary && "!bg-red-500")} />
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-medium text-foreground truncate">
+            <p className="truncate text-[11px] font-medium text-sidebar-fg">
               {workspaceSummary ? `${workspaceSummary.averageLatencyMs} ms` : "—"}
             </p>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[10px] text-sidebar-muted">
               {workspaceSummary ? `${workspaceSummary.activeAgents} sidecars live` : "No sidecar connected"}
             </p>
           </div>
@@ -222,26 +222,26 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 alt={user.full_name ?? user.email ?? "User"}
                 width={24}
                 height={24}
-                className="h-6 w-6 rounded-full border border-border/60 object-cover shrink-0"
+                className="h-6 w-6 shrink-0 rounded-full border border-white/15 object-cover"
               />
             ) : (
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[10px] font-semibold text-muted-foreground">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] text-[10px] font-semibold text-sidebar-muted">
                 {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] font-medium leading-none text-foreground">
+              <p className="truncate text-[12px] font-medium leading-none text-sidebar-fg">
                 {user.full_name ?? user.email?.split("@")[0] ?? "User"}
               </p>
               {user.email && (
-                <p className="truncate text-[10px] text-muted-foreground mt-0.5">{user.email}</p>
+                <p className="mt-0.5 truncate text-[10px] text-sidebar-muted">{user.email}</p>
               )}
             </div>
             <button
               type="button"
               onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
               title="Sign out"
-              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
+              className="shrink-0 rounded p-1 text-sidebar-muted transition-colors hover:bg-white/[0.08] hover:text-sidebar-fg"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>
@@ -251,3 +251,4 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
     </aside>
   );
 }
+

@@ -49,6 +49,15 @@ const config: Config = {
           4: "hsl(var(--chart-4))",
           5: "hsl(var(--chart-5))",
         },
+        // Sidebar design tokens — charcoal dark
+        sidebar: {
+          DEFAULT:    "#0F1115",
+          fg:         "#F8F5EF",
+          muted:      "#9CA3AF",
+          border:     "rgba(255,255,255,0.07)",
+          active:     "rgba(255,255,255,0.08)",
+          hover:      "rgba(255,255,255,0.05)",
+        },
       },
       borderRadius: {
         "2xl": "1rem",
@@ -58,31 +67,31 @@ const config: Config = {
         sm:    "0.375rem",
       },
       boxShadow: {
-        // Elevation system — use shadow not border for depth
-        xs:    "0 1px 2px rgba(0,0,0,0.05)",
-        sm:    "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)",
-        md:    "0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -1px rgba(0,0,0,0.05)",
-        lg:    "0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04)",
-        xl:    "0 20px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.04)",
-        panel: "0 0 0 1px rgba(0,0,0,0.06), 0 8px 32px rgba(0,0,0,0.07)",
-        card:  "0 0 0 1px hsl(var(--border)), 0 2px 8px rgba(0,0,0,0.04)",
-        glow:  "0 0 24px rgba(37,99,235,0.18), 0 0 8px rgba(37,99,235,0.12)",
+        // Warm elevation system
+        xs:    "0 1px 2px rgba(17,24,39,0.05)",
+        sm:    "0 1px 3px rgba(17,24,39,0.07), 0 1px 2px rgba(17,24,39,0.04)",
+        md:    "0 4px 8px -1px rgba(17,24,39,0.07), 0 2px 4px -1px rgba(17,24,39,0.04)",
+        lg:    "0 10px 18px -3px rgba(17,24,39,0.08), 0 4px 6px -2px rgba(17,24,39,0.04)",
+        xl:    "0 20px 28px -5px rgba(17,24,39,0.08), 0 8px 12px -6px rgba(17,24,39,0.04)",
+        // Card-specific warm shadow
+        card:  "0 0 0 1px #E7DED1, 0 2px 8px rgba(17,24,39,0.06)",
+        "card-hover": "0 0 0 1px #D8CFC2, 0 4px 16px rgba(17,24,39,0.09)",
+        panel: "0 0 0 1px #E7DED1, 0 8px 32px rgba(17,24,39,0.07)",
+        // Blue glow for primary actions
+        glow:     "0 0 24px rgba(37,99,235,0.18), 0 0 8px rgba(37,99,235,0.12)",
         "glow-sm": "0 0 12px rgba(37,99,235,0.14)",
-        // Dark elevation
-        "dark-sm":  "0 1px 3px rgba(0,0,0,0.35)",
-        "dark-md":  "0 4px 12px rgba(0,0,0,0.4)",
-        "dark-lg":  "0 12px 32px rgba(0,0,0,0.45)",
+        // Sidebar elevation
+        sidebar: "1px 0 0 rgba(255,255,255,0.05)",
       },
       backgroundImage: {
-        // Hero radial glow — indigo centered at top
-        "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.12), transparent 65%)",
-        // Subtle grid
+        "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.10), transparent 65%)",
         "grid-fade":
           "radial-gradient(ellipse at top, hsl(var(--primary)/0.06), transparent 45%), " +
-          "linear-gradient(rgba(100,100,120,0.04) 1px, transparent 1px), " +
-          "linear-gradient(90deg, rgba(100,100,120,0.04) 1px, transparent 1px)",
-        // Auth left panel gradient
-        "auth-panel": "linear-gradient(135deg, hsl(var(--primary)/0.08) 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, hsl(var(--brand-muted)/0.12), transparent 50%)",
+          "linear-gradient(rgba(60,40,20,0.04) 1px, transparent 1px), " +
+          "linear-gradient(90deg, rgba(60,40,20,0.04) 1px, transparent 1px)",
+        "auth-panel": "linear-gradient(135deg, hsl(var(--primary)/0.06) 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, rgba(37,99,235,0.08), transparent 50%)",
+        // Warm card gradient
+        "card-warm": "linear-gradient(180deg, #FFFFFF 0%, #FFFCF7 100%)",
       },
       backgroundSize: {
         grid: "100% 100%, 28px 28px, 28px 28px",
@@ -92,31 +101,19 @@ const config: Config = {
           css: {
             maxWidth: "68ch",
             color: "hsl(var(--muted-foreground))",
-            "--tw-prose-headings": "hsl(var(--foreground))",
-            h1: {
-              color: "hsl(var(--foreground))",
-              fontWeight: "600",
-              letterSpacing: "-0.03em",
-            },
-            h2: {
-              color: "hsl(var(--foreground))",
-              fontWeight: "600",
-              letterSpacing: "-0.025em",
-            },
-            h3: {
-              color: "hsl(var(--foreground))",
-              fontWeight: "600",
-              letterSpacing: "-0.02em",
-            },
+            "--tw-prose-headings": "#111111",
+            h1: { color: "#111111", fontWeight: "650", letterSpacing: "-0.03em" },
+            h2: { color: "#111111", fontWeight: "600", letterSpacing: "-0.025em" },
+            h3: { color: "#111111", fontWeight: "600", letterSpacing: "-0.02em" },
             p: { lineHeight: "1.8" },
             a: {
               color: "hsl(var(--brand))",
               textDecorationColor: "hsl(var(--brand) / 0.25)",
               fontWeight: "500",
             },
-            strong: { color: "hsl(var(--foreground))" },
+            strong: { color: "#111111" },
             code: {
-              color: "hsl(var(--foreground))",
+              color: "#111111",
               backgroundColor: "hsl(var(--muted))",
               border: "1px solid hsl(var(--border))",
               borderRadius: "0.375rem",
@@ -126,15 +123,15 @@ const config: Config = {
             "code::before": { content: '""' },
             "code::after":  { content: '""' },
             pre: {
-              color: "#e2e8f0",
-              backgroundColor: "#0d1117",
+              color: "#F8F5EF",
+              backgroundColor: "#111111",
               borderRadius: "0.75rem",
-              border: "1px solid rgba(255,255,255,0.07)",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.35)",
+              border: "1px solid #2A2A2A",
+              boxShadow: "0 4px 24px rgba(0,0,0,0.25)",
             },
             "pre code": { backgroundColor: "transparent", border: "none", padding: "0", color: "inherit" },
             blockquote: {
-              color: "hsl(var(--foreground))",
+              color: "#111111",
               borderLeftColor: "hsl(var(--brand))",
               backgroundColor: "hsl(var(--muted) / 0.5)",
               borderRadius: "0.625rem",
@@ -189,7 +186,6 @@ const config: Config = {
         shimmer:           "shimmer 1.8s ease-in-out infinite",
         "pulse-dot":       "pulse-dot 1.8s ease-in-out infinite",
         "counter-up":      "counter-up 0.45s ease-out both",
-        // legacy alias
         pulse_dot:         "pulse-dot 1.8s ease-in-out infinite",
       },
     },
