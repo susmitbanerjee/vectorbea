@@ -31,7 +31,7 @@ import {
 function PipelineFlow() {
   const stages = [
     { icon: Zap,          label: "Trace",    sub: "Runtime calls are captured as traces", color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/30"   },
-    { icon: Play,         label: "Replay",   sub: "Traces are replayed against new prompt versions", color: "text-violet-500", bg: "bg-violet-500/10", border: "border-violet-500/30" },
+    { icon: Play,         label: "Replay",   sub: "Traces are replayed against new prompt versions", color: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/30" },
     { icon: RefreshCw,    label: "Compare",  sub: "Outputs are compared to baseline expectations", color: "text-amber-500",  bg: "bg-amber-500/10",  border: "border-amber-500/30"  },
     { icon: FlaskConical, label: "Evaluate", sub: "Checks and scores determine if the version is ready", color: "text-emerald-500", bg: "bg-emerald-500/10", border: "border-emerald-500/30" },
     { icon: CheckCircle2, label: "Promote",  sub: "Passing versions are marked as candidates", color: "text-teal-500",   bg: "bg-teal-500/10",   border: "border-teal-500/30"   },

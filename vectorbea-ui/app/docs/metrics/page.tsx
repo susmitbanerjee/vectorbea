@@ -66,7 +66,7 @@ function MetricsDashboardMockup() {
         <MetricCard icon={Activity}    label="Requests"        value="14,302"  sub="+4.2% vs yesterday"  color="bg-blue-500/15" />
         <MetricCard icon={CheckCircle2} label="Success rate"   value="99.1%"   sub="128 errors total"    color="bg-emerald-500/15" />
         <MetricCard icon={Clock}       label="Avg latency"     value="241 ms"  sub="p95: 610 ms"         color="bg-amber-500/15" />
-        <MetricCard icon={Zap}         label="Cache hit rate"  value="63.4%"   sub="9,069 cache hits"    color="bg-violet-500/15" />
+        <MetricCard icon={Zap}         label="Cache hit rate"  value="63.4%"   sub="9,069 cache hits"    color="bg-blue-500/15" />
         <MetricCard icon={TrendingUp}  label="Eval score"      value="0.87"    sub="↑ 0.03 this week"   color="bg-teal-500/15" />
         <MetricCard icon={DollarSign}  label="Est. cost"       value="$3.12"   sub="~$0.00022 / req"    color="bg-orange-500/15" />
       </div>

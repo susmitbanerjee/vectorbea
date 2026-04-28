@@ -56,7 +56,7 @@ export function MarketingHero() {
                 href="/login"
                 className={cn(
                   buttonVariants({ size: "lg" }),
-                  "gap-2 px-6 shadow-[0_0_24px_rgba(79,70,229,0.25)] hover:shadow-[0_0_32px_rgba(79,70,229,0.35)]",
+                  "gap-2 px-6 shadow-[0_0_24px_rgba(37,99,235,0.25)] hover:shadow-[0_0_32px_rgba(37,99,235,0.35)]",
                 )}
               >
                 Get started free

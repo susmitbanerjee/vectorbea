@@ -29,7 +29,7 @@ import {
 function EvalFlowDiagram() {
   const steps = [
     { icon: ClipboardList, label: "Baseline dataset",   detail: "Set of real traces (inputs + expected outputs)", color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/30"   },
-    { icon: Play,          label: "Replay",             detail: "Each trace input is sent to the candidate version", color: "text-violet-500", bg: "bg-violet-500/10", border: "border-violet-500/30" },
+    { icon: Play,          label: "Replay",             detail: "Each trace input is sent to the candidate version", color: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/30" },
     { icon: Scale,         label: "Score checks",       detail: "Each output is scored against configured checks",   color: "text-amber-500",  bg: "bg-amber-500/10",  border: "border-amber-500/30"  },
     { icon: CheckCircle2,  label: "Verdict",            detail: "Pass, block, needs review, or inconclusive",        color: "text-emerald-500", bg: "bg-emerald-500/10", border: "border-emerald-500/30" },
   ];

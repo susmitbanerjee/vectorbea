@@ -168,17 +168,17 @@ type TraceData = {
 type SpanRow = Span & { depth: number; children: Span[] };
 
 const STATUS_STYLE: Record<SpanStatus, string> = {
-  success: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  warning: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  error: "bg-red-500/15 text-red-300 border-red-500/30",
-  partial: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+  success: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25",
+  warning: "bg-amber-500/10 text-amber-700 border-amber-500/25",
+  error: "bg-red-500/10 text-red-700 border-red-500/25",
+  partial: "bg-blue-500/10 text-blue-700 border-blue-500/25",
 };
 
 const LEVEL_STYLE: Record<LogLevel, string> = {
-  debug: "text-slate-400",
-  info: "text-cyan-300",
-  warn: "text-amber-300",
-  error: "text-red-300",
+  debug: "text-muted-foreground",
+  info: "text-cyan-600",
+  warn: "text-amber-600",
+  error: "text-red-600",
 };
 
 const TYPE_META: Record<SpanType, { label: string; color: string; icon: LucideIcon; aiOnly?: boolean }> = {
@@ -380,7 +380,7 @@ function FilterChip({ active, label, onClick }: { active: boolean; label: string
       onClick={onClick}
       className={cn(
         "rounded-lg px-2.5 py-1.5 text-xs transition",
-        active ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+        active ? "bg-cyan-500/20 text-cyan-200" : "text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
       {label}
@@ -400,10 +400,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/60">
+    <div className="rounded-lg border border-border bg-muted/40">
       <button className="flex w-full items-center justify-between px-3 py-2.5 text-sm" onClick={onToggle}>
         <span>{title}</span>
-        {open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
       </button>
       <AnimatePresence initial={false}>
         {open ? (
@@ -425,8 +425,8 @@ function Section({
 function KV({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-3">
-      <div className="text-slate-400">{label}</div>
-      <div className={cn("max-w-[68%] break-all text-right text-slate-200", mono && "font-mono")}>{value}</div>
+      <div className="text-muted-foreground">{label}</div>
+      <div className={cn("max-w-[68%] break-all text-right text-foreground", mono && "font-mono")}>{value}</div>
     </div>
   );
 }
@@ -780,8 +780,8 @@ export default function TraceDetailsPage() {
       <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
         <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
         <div className="px-4 py-6 md:px-6 xl:px-8">
-          <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
-            <CardContent className="p-6 text-sm text-slate-300">
+          <Card className="rounded-2xl border border-border bg-card">
+            <CardContent className="p-6 text-sm text-muted-foreground">
               Select a workspace to inspect trace details.
             </CardContent>
           </Card>
@@ -795,8 +795,8 @@ export default function TraceDetailsPage() {
       <div className="min-h-screen bg-gradient-to-b from-[#050b16] via-[#050c17] to-[#030711] text-slate-100">
         <AppHeader title="Trace" subtitle={`Traces / ${traceId || "unknown"}`} />
         <div className="px-4 py-6 md:px-6 xl:px-8">
-          <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
-            <CardContent className="p-6 text-sm text-slate-300">Loading trace details…</CardContent>
+          <Card className="rounded-2xl border border-border bg-card">
+            <CardContent className="p-6 text-sm text-muted-foreground">Loading trace details…</CardContent>
           </Card>
         </div>
       </div>
@@ -827,7 +827,7 @@ export default function TraceDetailsPage() {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex h-9 min-w-[190px] items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-1 text-xs font-medium text-slate-200 shadow-sm transition-colors hover:bg-slate-900/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex h-9 min-w-[190px] items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="truncate">
                     {replayProvider === "same"
@@ -836,7 +836,7 @@ export default function TraceDetailsPage() {
                         ? "Enterprise gateway"
                         : configuredProviders.find((p) => p.provider_type === replayProvider)?.display_name ?? replayProvider}
                   </span>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuPanel className="min-w-[190px]">
@@ -855,12 +855,12 @@ export default function TraceDetailsPage() {
               value={replayModel}
               onChange={(event) => setReplayModel(event.target.value)}
               placeholder="Replay model override"
-              className="h-9 w-40 border-slate-700 bg-slate-900 text-xs text-slate-200"
+              className="h-9 w-40 border-border bg-card text-xs text-foreground"
             />
             <Button
               size="sm"
               variant="outline"
-              className="border-slate-700 bg-slate-900 text-slate-200"
+              className="border-border bg-card text-foreground"
               onClick={replayTrace}
               disabled={replayPending}
             >
@@ -870,7 +870,7 @@ export default function TraceDetailsPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-slate-700 bg-slate-900 text-slate-200"
+              className="border-border bg-card text-foreground"
               onClick={compareTrace}
               disabled={!trace.replayOf}
               title={trace.replayOf ? "Compare this replay with its source trace" : "Replay this trace first to compare it"}
@@ -881,13 +881,13 @@ export default function TraceDetailsPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-slate-700 bg-slate-900 text-slate-200"
+              className="border-border bg-card text-foreground"
               onClick={() => copy(JSON.stringify(trace, null, 2))}
             >
               <Download className="mr-1 h-4 w-4" />
               Export JSON
             </Button>
-            <Button size="sm" variant="outline" className={`border-slate-700 bg-slate-900 ${existingFlag ? "text-amber-400" : "text-slate-200"}`} onClick={() => setFlagOpen(v => !v)}>
+            <Button size="sm" variant="outline" className={`border-border bg-card ${existingFlag ? "text-amber-400" : "text-foreground"}`} onClick={() => setFlagOpen(v => !v)}>
               <Flag className="mr-1 h-4 w-4" />{existingFlag ? "Flagged" : "Mark issue"}
             </Button>
           </div>
@@ -915,14 +915,14 @@ export default function TraceDetailsPage() {
           </Card>
         )}
         {flagOpen && (
-          <Card className="rounded-2xl border border-slate-700 bg-slate-900/80">
+          <Card className="rounded-2xl border border-border bg-background">
             <CardHeader>
-              <CardTitle className="text-sm text-slate-200">Flag this trace as an issue</CardTitle>
+              <CardTitle className="text-sm text-foreground">Flag this trace as an issue</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {flagError && <p className="text-sm text-red-300">{flagError}</p>}
               <textarea
-                className="min-h-20 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500"
+                className="min-h-20 w-full rounded-lg border border-border bg-muted/80 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
                 placeholder="Describe the issue (optional)…"
                 value={flagReason}
                 onChange={e => setFlagReason(e.target.value)}
@@ -932,12 +932,12 @@ export default function TraceDetailsPage() {
                   {flagging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Flag className="h-3.5 w-3.5" />}
                   Submit flag
                 </Button>
-                <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 text-slate-200" onClick={() => setFlagOpen(false)}>Cancel</Button>
+                <Button size="sm" variant="outline" className="border-border bg-card text-foreground" onClick={() => setFlagOpen(false)}>Cancel</Button>
               </div>
             </CardContent>
           </Card>
         )}
-        <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
+        <Card className="rounded-2xl border border-border bg-card">
           <CardContent className="space-y-4 p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge className={cn("border", STATUS_STYLE[trace.status])}>
@@ -949,8 +949,8 @@ export default function TraceDetailsPage() {
                       ? "Partial"
                       : "Error"}
               </Badge>
-              <Badge variant="outline" className="border-slate-700 text-slate-300">{trace.env}</Badge>
-              <span className="text-xs text-slate-400">{new Date(trace.startedAt).toLocaleString()}</span>
+              <Badge variant="outline" className="border-border text-muted-foreground">{trace.env}</Badge>
+              <span className="text-xs text-muted-foreground">{new Date(trace.startedAt).toLocaleString()}</span>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
@@ -994,7 +994,7 @@ export default function TraceDetailsPage() {
               </div>
             ) : null}
             {replayProvider !== "same" ? (
-              <div className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                 Replay override selected: live execution requires a configured executor. Provider API keys are not stored by VectorBea unless a secure provider integration is explicitly configured.
               </div>
             ) : null}
@@ -1010,10 +1010,10 @@ export default function TraceDetailsPage() {
         </Card>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Card className="rounded-2xl border border-slate-800/80 bg-slate-900/60">
+          <Card className="rounded-2xl border border-border bg-card">
             <CardContent className="p-4">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="mb-3 grid w-full grid-cols-3 bg-slate-950/60 p-1 md:grid-cols-6">
+                <TabsList className="mb-3 grid w-full grid-cols-3 bg-muted/40 p-1 md:grid-cols-6">
                   <TabsTrigger value="waterfall">TraceLoop</TabsTrigger>
                   <TabsTrigger value="spans">Spans</TabsTrigger>
                   <TabsTrigger value="prompt">Prompt</TabsTrigger>
@@ -1025,15 +1025,15 @@ export default function TraceDetailsPage() {
                 <TabsContent value="waterfall" className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="relative">
-                      <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-500" />
+                      <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search span name/service"
-                        className="h-9 w-[260px] border-slate-700 bg-slate-900/80 pl-8 text-slate-200"
+                        className="h-9 w-[260px] border-border bg-background pl-8 text-foreground"
                       />
                     </div>
-                    <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/60 p-1">
+                    <div className="flex items-center gap-1 rounded-xl border border-border bg-muted/40 p-1">
                       <FilterChip active={filter === "all"} label="All spans" onClick={() => setFilter("all")} />
                       <FilterChip active={filter === "errors"} label="Errors only" onClick={() => setFilter("errors")} />
                       <FilterChip active={filter === "slow"} label="Slow spans" onClick={() => setFilter("slow")} />
@@ -1042,8 +1042,8 @@ export default function TraceDetailsPage() {
                     </div>
                   </div>
 
-                  <div className="overflow-hidden rounded-xl border border-slate-800">
-                    <div className="grid grid-cols-[minmax(280px,42%)_1fr] border-b border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] uppercase tracking-wider text-slate-400">
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    <div className="grid grid-cols-[minmax(280px,42%)_1fr] border-b border-border bg-muted/50 px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
                       <span>Span / Service</span>
                       <span>Timeline</span>
                     </div>
@@ -1063,8 +1063,8 @@ export default function TraceDetailsPage() {
                             key={row.id}
                             layout
                             className={cn(
-                              "grid w-full grid-cols-[minmax(280px,42%)_1fr] items-center border-b border-slate-800/70 px-3 py-2.5 text-left hover:bg-slate-900/70",
-                              selected && "bg-slate-800/80"
+                              "grid w-full grid-cols-[minmax(280px,42%)_1fr] items-center border-b border-border/70 px-3 py-2.5 text-left hover:bg-muted/40",
+                              selected && "bg-muted/60"
                             )}
                             onClick={() => setSelectedSpanId(row.id)}
                           >
@@ -1072,7 +1072,7 @@ export default function TraceDetailsPage() {
                               <div style={{ width: row.depth * 14 }} />
                               {hasChildren ? (
                                 <span
-                                  className="rounded p-0.5 hover:bg-slate-800"
+                                  className="rounded p-0.5 hover:bg-muted"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setCollapsed((prev) => {
@@ -1083,28 +1083,28 @@ export default function TraceDetailsPage() {
                                     });
                                   }}
                                 >
-                                  {isCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-slate-300" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-300" />}
+                                  {isCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                                 </span>
                               ) : (
                                 <span className="w-4" />
                               )}
-                              <Icon className="h-4 w-4 text-slate-300" />
+                              <Icon className="h-4 w-4 text-muted-foreground" />
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <span className="truncate text-sm">{row.name}</span>
                                   {row.criticalPath ? (
-                                    <Badge variant="outline" className="h-5 border-slate-600 bg-slate-800 text-[10px] text-slate-200">Critical path</Badge>
+                                    <Badge variant="outline" className="h-5 border-border bg-muted/80 text-[10px] text-foreground">Critical path</Badge>
                                   ) : null}
                                   {row.branch === "fallback" ? (
                                     <Badge variant="outline" className="h-5 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-200">Fallback</Badge>
                                   ) : null}
                                 </div>
-                                <div className="text-xs text-slate-400">{row.service} · {formatDuration(row.durationMs)}</div>
+                                <div className="text-xs text-muted-foreground">{row.service} · {formatDuration(row.durationMs)}</div>
                               </div>
                             </div>
 
                             <div className="relative h-7">
-                              <span className="absolute top-1.5 h-4 rounded-sm bg-slate-800" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
+                              <span className="absolute top-1.5 h-4 rounded-sm bg-muted/80" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
                               <span className={cn("absolute top-1.5 h-4 rounded-sm opacity-90", spanBarTone(row, selected))} style={{ left: `${leftPct}%`, width: `${widthPct}%` }} />
                               {row.status !== "success" ? (
                                 <span className="absolute right-0 top-1">
@@ -1124,10 +1124,10 @@ export default function TraceDetailsPage() {
                     value={spansSearch}
                     onChange={(e) => setSpansSearch(e.target.value)}
                     placeholder="Search spans"
-                    className="h-9 max-w-[320px] border-slate-700 bg-slate-900/80 text-slate-200"
+                    className="h-9 max-w-[320px] border-border bg-background text-foreground"
                   />
-                  <div className="overflow-hidden rounded-xl border border-slate-800">
-                    <div className="grid grid-cols-[2fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr_0.9fr_1.2fr] bg-slate-950/70 px-3 py-2 text-[11px] uppercase tracking-wider text-slate-400">
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    <div className="grid grid-cols-[2fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr_0.9fr_1.2fr] bg-muted/50 px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
                       <span>Span</span><span>Type</span><span>Service</span><span>Start</span><span>Duration</span><span>Status</span><span>Tokens</span><span>Prompt/Model</span>
                     </div>
                     <div className="max-h-[620px] overflow-y-auto">
@@ -1135,19 +1135,19 @@ export default function TraceDetailsPage() {
                         <button
                           key={row.id}
                           className={cn(
-                            "grid w-full grid-cols-[2fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr_0.9fr_1.2fr] items-center border-b border-slate-800/70 px-3 py-2 text-left hover:bg-slate-900/70",
+                            "grid w-full grid-cols-[2fr_1fr_1.2fr_0.8fr_0.8fr_0.8fr_0.9fr_1.2fr] items-center border-b border-border/70 px-3 py-2 text-left hover:bg-muted/40",
                             selectedSpan?.id === row.id && "bg-cyan-500/10"
                           )}
                           onClick={() => setSelectedSpanId(row.id)}
                         >
                           <span className="truncate text-sm">{row.name}</span>
-                          <span className="text-xs text-slate-300">{TYPE_META[row.type].label}</span>
-                          <span className="truncate text-xs text-slate-400">{row.service}</span>
-                          <span className="text-xs text-slate-400">{row.startMs}ms</span>
+                          <span className="text-xs text-muted-foreground">{TYPE_META[row.type].label}</span>
+                          <span className="truncate text-xs text-muted-foreground">{row.service}</span>
+                          <span className="text-xs text-muted-foreground">{row.startMs}ms</span>
                           <span className="text-xs">{formatDuration(row.durationMs)}</span>
                           <span><Badge className={cn("border", STATUS_STYLE[row.status])}>{row.status}</Badge></span>
                           <span className="text-xs">{(row.tokensIn ?? 0) + (row.tokensOut ?? 0)}</span>
-                          <span className="truncate text-xs text-slate-400">{row.model ?? row.promptVersion ?? "—"}</span>
+                          <span className="truncate text-xs text-muted-foreground">{row.model ?? row.promptVersion ?? "—"}</span>
                         </button>
                       ))}
                     </div>
@@ -1155,7 +1155,7 @@ export default function TraceDetailsPage() {
                 </TabsContent>
 
                 <TabsContent value="prompt" className="grid gap-3 xl:grid-cols-[1fr_320px]">
-                  <Card className="border-slate-800 bg-slate-950/50">
+                  <Card className="border-border bg-muted/30">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base">{trace.prompt.name}@{trace.prompt.version}</CardTitle>
                       <CardDescription>Rendered prompt and sections used for this execution</CardDescription>
@@ -1168,7 +1168,7 @@ export default function TraceDetailsPage() {
                     </CardContent>
                   </Card>
                   <div className="space-y-3">
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Prompt metadata</CardTitle></CardHeader>
                       <CardContent className="space-y-2 text-sm">
                         <KV label="Source" value={trace.prompt.source} />
@@ -1178,36 +1178,36 @@ export default function TraceDetailsPage() {
                         <KV label="Eval baseline" value={trace.prompt.evalBaseline.toFixed(2)} mono />
                       </CardContent>
                     </Card>
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Model parameters</CardTitle></CardHeader>
                       <CardContent className="space-y-2 text-sm">
                         <KV label="temperature" value={String(trace.prompt.params.temperature)} mono />
                         <KV label="top_p" value={String(trace.prompt.params.top_p)} mono />
                         <KV label="max_tokens" value={String(trace.prompt.params.max_tokens)} mono />
-                        <Button size="sm" variant="outline" className="mt-2 border-slate-700 bg-slate-900">Diff from previous version</Button>
+                        <Button size="sm" variant="outline" className="mt-2 border-border bg-card">Diff from previous version</Button>
                       </CardContent>
                     </Card>
                   </div>
                 </TabsContent>
 
                 <TabsContent value="inputs" className="space-y-3">
-                  <Card className="border-slate-800 bg-slate-950/50">
+                  <Card className="border-border bg-muted/30">
                     <CardHeader className="pb-2"><CardTitle className="text-sm">User input</CardTitle></CardHeader>
-                    <CardContent><pre className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-sm">{trace.inputs.userInput}</pre></CardContent>
+                    <CardContent><pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 text-sm">{trace.inputs.userInput}</pre></CardContent>
                   </Card>
                   <div className="grid gap-3 xl:grid-cols-2">
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Variables</CardTitle></CardHeader>
                       <CardContent className="grid gap-2 sm:grid-cols-2">
                         {Object.entries(trace.inputs.variables).map(([k, v]) => (
-                          <div key={k} className="rounded-md border border-slate-800 bg-slate-900/70 p-2 text-xs">
-                            <div className="text-slate-400">{k}</div>
+                          <div key={k} className="rounded-md border border-border bg-muted/40 p-2 text-xs">
+                            <div className="text-muted-foreground">{k}</div>
                             <div className="mt-1">{v}</div>
                           </div>
                         ))}
                       </CardContent>
                     </Card>
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Runtime metadata</CardTitle></CardHeader>
                       <CardContent className="space-y-2">
                         <KV label="Tenant" value={trace.inputs.tenant} mono />
@@ -1219,19 +1219,19 @@ export default function TraceDetailsPage() {
                       </CardContent>
                     </Card>
                   </div>
-                  <Card className="border-slate-800 bg-slate-950/50">
+                  <Card className="border-border bg-muted/30">
                     <CardHeader className="pb-2"><CardTitle className="text-sm">Retrieval context</CardTitle></CardHeader>
                     <CardContent className="space-y-2">
                       {trace.inputs.contextDocs.map((doc) => (
-                        <details key={doc.id} className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+                        <details key={doc.id} className="rounded-lg border border-border bg-muted/40 p-3">
                           <summary className="cursor-pointer list-none text-sm">
                             <div className="flex items-center justify-between">
                               <span>{doc.title}</span>
-                              <Badge variant="outline" className="border-slate-700 text-slate-300">{doc.tokenCount} tokens</Badge>
+                              <Badge variant="outline" className="border-border text-muted-foreground">{doc.tokenCount} tokens</Badge>
                             </div>
-                            <div className="text-xs text-slate-500">{doc.source}</div>
+                            <div className="text-xs text-muted-foreground">{doc.source}</div>
                           </summary>
-                          <p className="mt-2 text-sm text-slate-300">{doc.content}</p>
+                          <p className="mt-2 text-sm text-muted-foreground">{doc.content}</p>
                         </details>
                       ))}
                     </CardContent>
@@ -1240,13 +1240,13 @@ export default function TraceDetailsPage() {
 
                 <TabsContent value="output" className="space-y-3">
                   <div className="grid gap-3 xl:grid-cols-[1fr_320px]">
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2">
                         <div className="flex items-center justify-between gap-2">
                           <CardTitle className="text-sm">Output pipeline</CardTitle>
                           <div className="flex gap-2">
-                            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900" onClick={() => copy(trace.outputs.finalDelivered)}><Copy className="mr-1 h-3.5 w-3.5" />Copy</Button>
-                            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900" onClick={() => setShowRawOutput((v) => !v)}><TerminalSquare className="mr-1 h-3.5 w-3.5" />{showRawOutput ? "Hide raw" : "View raw"}</Button>
+                            <Button size="sm" variant="outline" className="border-border bg-card" onClick={() => copy(trace.outputs.finalDelivered)}><Copy className="mr-1 h-3.5 w-3.5" />Copy</Button>
+                            <Button size="sm" variant="outline" className="border-border bg-card" onClick={() => setShowRawOutput((v) => !v)}><TerminalSquare className="mr-1 h-3.5 w-3.5" />{showRawOutput ? "Hide raw" : "View raw"}</Button>
                           </div>
                         </div>
                       </CardHeader>
@@ -1256,14 +1256,14 @@ export default function TraceDetailsPage() {
                         {showRawOutput ? <OutputBlock title="Raw model output" text={trace.outputs.rawPrimary} mono /> : null}
                       </CardContent>
                     </Card>
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Summary</CardTitle></CardHeader>
                       <CardContent className="space-y-2">
                         <KV label="Latency" value={formatDuration(trace.durationMs)} />
                         <KV label="Tokens in/out" value={`${trace.tokensIn}/${trace.tokensOut}`} mono />
                         <KV label="Cost" value={formatCost(trace.totalCostUsd)} mono />
                         {trace.outputs.safetyNotes.map((note, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-slate-300">
+                          <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
                             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 text-emerald-300" />
                             <span>{note}</span>
                           </div>
@@ -1272,7 +1272,7 @@ export default function TraceDetailsPage() {
                     </Card>
                   </div>
                   {trace.outputs.rawFallback ? (
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Primary vs Fallback compare</CardTitle></CardHeader>
                       <CardContent className="grid gap-3 xl:grid-cols-2">
                         <OutputBlock title="Primary output" text={trace.outputs.rawPrimary} mono tone="warn" />
@@ -1281,10 +1281,10 @@ export default function TraceDetailsPage() {
                     </Card>
                   ) : null}
                   {trace.outputs.parsedJson ? (
-                    <Card className="border-slate-800 bg-slate-950/50">
+                    <Card className="border-border bg-muted/30">
                       <CardHeader className="pb-2"><CardTitle className="text-sm">Parsed JSON</CardTitle></CardHeader>
                       <CardContent>
-                        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-xs">
+                        <pre className="overflow-x-auto rounded-lg border border-border bg-muted/40 p-3 text-xs">
                           {JSON.stringify(trace.outputs.parsedJson, null, 2)}
                         </pre>
                       </CardContent>
@@ -1298,29 +1298,29 @@ export default function TraceDetailsPage() {
                       value={logsSearch}
                       onChange={(e) => setLogsSearch(e.target.value)}
                       placeholder="Search logs"
-                      className="h-9 max-w-[320px] border-slate-700 bg-slate-900/80 text-slate-200"
+                      className="h-9 max-w-[320px] border-border bg-background text-foreground"
                     />
                     <button
                       onClick={() => setLogsSelectedOnly((v) => !v)}
                       className={cn(
                         "rounded-lg border px-3 py-2 text-xs transition",
-                        logsSelectedOnly ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200" : "border-slate-700 bg-slate-900 text-slate-300"
+                        logsSelectedOnly ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200" : "border-border bg-card text-muted-foreground"
                       )}
                     >
                       Selected span only
                     </button>
                   </div>
-                  <div className="overflow-hidden rounded-xl border border-slate-800">
-                    <div className="grid grid-cols-[140px_80px_120px_1fr_120px] bg-slate-950/70 px-3 py-2 text-[11px] uppercase tracking-wider text-slate-400">
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    <div className="grid grid-cols-[140px_80px_120px_1fr_120px] bg-muted/50 px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
                       <span>Timestamp</span><span>Level</span><span>Component</span><span>Message</span><span>Span</span>
                     </div>
                     <div className="max-h-[620px] overflow-y-auto">
                       {logsRows.map((log) => (
-                        <div key={log.id} className="grid grid-cols-[140px_80px_120px_1fr_120px] items-center border-b border-slate-800/70 px-3 py-2 text-xs">
-                          <span className="font-mono text-slate-400">{new Date(new Date(trace.startedAt).getTime() + log.offsetMs).toLocaleTimeString()}</span>
+                        <div key={log.id} className="grid grid-cols-[140px_80px_120px_1fr_120px] items-center border-b border-border/70 px-3 py-2 text-xs">
+                          <span className="font-mono text-muted-foreground">{new Date(new Date(trace.startedAt).getTime() + log.offsetMs).toLocaleTimeString()}</span>
                           <span className={cn("uppercase", LEVEL_STYLE[log.level])}>{log.level}</span>
-                          <span className="text-slate-300">{log.component}</span>
-                          <span className="text-slate-300">{log.message}</span>
+                          <span className="text-muted-foreground">{log.component}</span>
+                          <span className="text-muted-foreground">{log.message}</span>
                           <button onClick={() => log.spanId && setSelectedSpanId(log.spanId)} className="text-left text-cyan-300 hover:underline">
                             {log.spanId ?? "—"}
                           </button>
@@ -1333,7 +1333,7 @@ export default function TraceDetailsPage() {
             </CardContent>
           </Card>
 
-          <Card className="h-fit rounded-2xl border border-slate-800/80 bg-slate-900/60 xl:sticky xl:top-4">
+          <Card className="h-fit rounded-2xl border border-border bg-card xl:sticky xl:top-4">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Span details</CardTitle>
               <CardDescription>{selectedSpan?.name ?? "Trace summary"}</CardDescription>
@@ -1341,9 +1341,9 @@ export default function TraceDetailsPage() {
             <CardContent className="space-y-2">
               {selectedSpan ? (
                 <>
-                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="rounded-lg border border-border bg-muted/40 p-3">
                     <div className="mb-2 flex items-center gap-2">
-                      {SelectedIcon ? <SelectedIcon className="h-4 w-4 text-slate-300" /> : null}
+                      {SelectedIcon ? <SelectedIcon className="h-4 w-4 text-muted-foreground" /> : null}
                       <span className="text-sm">{selectedSpan.name}</span>
                       <Badge className={cn("ml-auto border", STATUS_STYLE[selectedSpan.status])}>{selectedSpan.status}</Badge>
                     </div>
@@ -1356,8 +1356,8 @@ export default function TraceDetailsPage() {
                       <KV label="Type" value={TYPE_META[selectedSpan.type].label} />
                     </div>
                     <div className="mt-2 flex gap-2">
-                      <Button size="sm" variant="outline" className="h-7 border-slate-700 bg-slate-900 text-xs" onClick={() => selectedSpan.parentId && setSelectedSpanId(selectedSpan.parentId)} disabled={!selectedSpan.parentId}>Jump to parent</Button>
-                      <Button size="sm" variant="outline" className="h-7 border-slate-700 bg-slate-900 text-xs" onClick={() => setSelectedSpanId(rootSpan?.id ?? "")}>Jump to root</Button>
+                      <Button size="sm" variant="outline" className="h-7 border-border bg-card text-xs" onClick={() => selectedSpan.parentId && setSelectedSpanId(selectedSpan.parentId)} disabled={!selectedSpan.parentId}>Jump to parent</Button>
+                      <Button size="sm" variant="outline" className="h-7 border-border bg-card text-xs" onClick={() => setSelectedSpanId(rootSpan?.id ?? "")}>Jump to root</Button>
                     </div>
                   </div>
 
@@ -1377,33 +1377,33 @@ export default function TraceDetailsPage() {
                     {selectedSpan.tags && Object.keys(selectedSpan.tags).length > 0 ? (
                       Object.entries(selectedSpan.tags).map(([k, v]) => <KV key={k} label={k} value={String(v)} mono={typeof v !== "boolean"} />)
                     ) : (
-                      <div className="text-slate-400">No metadata for this span</div>
+                      <div className="text-muted-foreground">No metadata for this span</div>
                     )}
                   </Section>
 
                   <Section title="Logs" open={openSections.logs} onToggle={() => toggleSection("logs")}>
                     {spanLogs.length ? (
                       spanLogs.map((log) => (
-                        <div key={log.id} className="rounded-md border border-slate-800 bg-slate-900/70 p-2">
+                        <div key={log.id} className="rounded-md border border-border bg-muted/40 p-2">
                           <div className={cn("uppercase", LEVEL_STYLE[log.level])}>{log.level}</div>
-                          <div className="text-slate-300">{log.message}</div>
+                          <div className="text-muted-foreground">{log.message}</div>
                         </div>
                       ))
                     ) : (
-                      <div className="text-slate-400">No logs for this span</div>
+                      <div className="text-muted-foreground">No logs for this span</div>
                     )}
                   </Section>
 
                   <Section title="Payload preview" open={openSections.payload} onToggle={() => toggleSection("payload")}>
                     <div>
-                      <div className="mb-1 text-slate-400">Input</div>
-                      <pre className="max-h-28 overflow-auto rounded-md border border-slate-800 bg-slate-900/70 p-2 text-slate-300">
+                      <div className="mb-1 text-muted-foreground">Input</div>
+                      <pre className="max-h-28 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-muted-foreground">
                         {selectedSpan.inputPreview ?? "No input preview"}
                       </pre>
                     </div>
                     <div>
-                      <div className="mb-1 text-slate-400">Output</div>
-                      <pre className="max-h-28 overflow-auto rounded-md border border-slate-800 bg-slate-900/70 p-2 text-slate-300">
+                      <div className="mb-1 text-muted-foreground">Output</div>
+                      <pre className="max-h-28 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-muted-foreground">
                         {selectedSpan.outputPreview ?? "No output preview"}
                       </pre>
                     </div>
@@ -1412,13 +1412,13 @@ export default function TraceDetailsPage() {
                   <Section title="Related spans" open={openSections.related} onToggle={() => toggleSection("related")}>
                     {(byParent.get(selectedSpan.id) ?? []).length ? (
                       (byParent.get(selectedSpan.id) ?? []).map((child) => (
-                        <button key={child.id} className="flex w-full items-center justify-between rounded-md border border-slate-800 bg-slate-900/70 px-2 py-1.5 text-left hover:bg-slate-800" onClick={() => setSelectedSpanId(child.id)}>
+                        <button key={child.id} className="flex w-full items-center justify-between rounded-md border border-border bg-muted/40 px-2 py-1.5 text-left hover:bg-muted" onClick={() => setSelectedSpanId(child.id)}>
                           <span>{child.name}</span>
-                          <ArrowRight className="h-3.5 w-3.5 text-slate-500" />
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
                         </button>
                       ))
                     ) : (
-                      <div className="text-slate-400">No child spans</div>
+                      <div className="text-muted-foreground">No child spans</div>
                     )}
                   </Section>
                 </>
@@ -1433,10 +1433,10 @@ export default function TraceDetailsPage() {
 
 function SummaryTile({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
-      <Icon className="h-4 w-4 text-slate-300" />
+    <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2">
+      <Icon className="h-4 w-4 text-muted-foreground" />
       <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
         <div className="truncate text-sm">{value}</div>
       </div>
     </div>
@@ -1460,10 +1460,10 @@ function SummaryStrip({
           ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
           : tone === "warn"
           ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-          : "border-slate-800 bg-slate-950/60 text-slate-200"
+          : "border-border bg-muted/40 text-foreground"
       )}
     >
-      <span className="text-xs uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <div>{value}</div>
     </div>
   );
@@ -1472,8 +1472,8 @@ function SummaryStrip({
 function PromptBlock({ title, text }: { title: string; text: string }) {
   return (
     <div>
-      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">{title}</div>
-      <pre className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-xs text-slate-200">{text}</pre>
+      <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">{title}</div>
+      <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 text-xs text-foreground">{text}</pre>
     </div>
   );
 }
@@ -1499,11 +1499,11 @@ function OutputBlock({
           ? "border-amber-500/30 bg-amber-500/10"
           : tone === "good"
           ? "border-emerald-500/30 bg-emerald-500/10"
-          : "border-slate-800 bg-slate-900/70"
+          : "border-border bg-muted/40"
       )}
     >
-      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">{title}</div>
-      <pre className={cn("whitespace-pre-wrap text-sm text-slate-200", strong && "font-medium", mono && "font-mono text-xs")}>{text}</pre>
+      <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">{title}</div>
+      <pre className={cn("whitespace-pre-wrap text-sm text-foreground", strong && "font-medium", mono && "font-mono text-xs")}>{text}</pre>
     </div>
   );
 }

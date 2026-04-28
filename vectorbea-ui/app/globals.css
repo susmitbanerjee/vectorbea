@@ -4,37 +4,37 @@
 
 @layer base {
   /* ── Light mode (primary) ─────────────────────────────────────────────────
-     Target: #FAFAFA bg, #FFFFFF card, #E5E7EB border, #0A0A0A text
-     Accent: #4F46E5 indigo primary
+     Target: #F8FAFC bg, #FFFFFF card, #E2E8F0 border, #0F172A text
+     Accent: #2563EB blue primary
   ──────────────────────────────────────────────────────────────────────── */
   :root {
-    --background:         0 0% 98%;        /* #FAFAFA */
-    --foreground:         0 0% 4%;         /* #0A0A0A */
+    --background:         210 40% 98%;     /* #F8FAFC */
+    --foreground:         222 47% 11%;     /* #0F172A */
     --card:               0 0% 100%;       /* #FFFFFF */
-    --card-foreground:    0 0% 4%;
+    --card-foreground:    222 47% 11%;
     --popover:            0 0% 100%;
-    --popover-foreground: 0 0% 4%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary:            239 84% 59%;     /* #4F46E5 indigo */
+    --primary:            221 83% 53%;     /* #2563EB blue */
     --primary-foreground: 0 0% 100%;
 
-    --secondary:          220 14% 96%;     /* #F3F4F6 */
-    --secondary-foreground: 0 0% 4%;
+    --secondary:          210 40% 96%;     /* #F1F5F9 */
+    --secondary-foreground: 222 47% 11%;
 
-    --muted:              220 14% 96%;
-    --muted-foreground:   220 9% 46%;      /* #6B7280 */
+    --muted:              210 40% 96%;     /* #F1F5F9 */
+    --muted-foreground:   215 16% 47%;     /* #64748B */
 
-    --accent:             239 84% 97%;     /* very light indigo tint */
-    --accent-foreground:  239 84% 40%;
+    --accent:             214 100% 97%;    /* very light blue tint #EFF6FF */
+    --accent-foreground:  221 83% 43%;     /* darker blue */
 
-    --border:             220 13% 91%;     /* #E5E7EB */
-    --input:              220 13% 91%;
-    --ring:               239 84% 59%;
+    --border:             214 32% 91%;     /* #E2E8F0 */
+    --input:              214 32% 91%;
+    --ring:               221 83% 53%;
 
     /* Brand aliases */
-    --brand:              239 84% 59%;
+    --brand:              221 83% 53%;
     --brand-foreground:   0 0% 100%;
-    --brand-muted:        239 68% 72%;
+    --brand-muted:        213 94% 68%;     /* #60A5FA */
 
     /* Status */
     --success:            142 71% 45%;
@@ -45,11 +45,11 @@
     --destructive-foreground: 0 0% 100%;
 
     /* Charts */
-    --chart-1: 239 84% 59%;
-    --chart-2: 217 91% 60%;
+    --chart-1: 221 83% 53%;
+    --chart-2: 197 71% 52%;
     --chart-3: 142 71% 45%;
     --chart-4: 38 92% 50%;
-    --chart-5: 280 67% 60%;
+    --chart-5: 262 83% 58%;
   }
 
   /* ── Dark mode (refined) ──────────────────────────────────────────────────

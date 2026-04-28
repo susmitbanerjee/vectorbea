@@ -66,8 +66,8 @@ const config: Config = {
         xl:    "0 20px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.04)",
         panel: "0 0 0 1px rgba(0,0,0,0.06), 0 8px 32px rgba(0,0,0,0.07)",
         card:  "0 0 0 1px hsl(var(--border)), 0 2px 8px rgba(0,0,0,0.04)",
-        glow:  "0 0 24px rgba(79,70,229,0.15), 0 0 8px rgba(79,70,229,0.1)",
-        "glow-sm": "0 0 12px rgba(79,70,229,0.12)",
+        glow:  "0 0 24px rgba(37,99,235,0.18), 0 0 8px rgba(37,99,235,0.12)",
+        "glow-sm": "0 0 12px rgba(37,99,235,0.14)",
         // Dark elevation
         "dark-sm":  "0 1px 3px rgba(0,0,0,0.35)",
         "dark-md":  "0 4px 12px rgba(0,0,0,0.4)",

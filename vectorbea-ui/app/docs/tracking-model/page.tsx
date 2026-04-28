@@ -67,9 +67,9 @@ function DataModelDiagram() {
       icon: BarChart2,
       table: "(aggregated)",
       label: "Metrics",
-      color: "text-violet-500",
-      bg: "bg-violet-500/5",
-      border: "border-violet-500/20",
+      color: "text-blue-500",
+      bg: "bg-blue-500/5",
+      border: "border-blue-500/20",
       fields: ["request_count", "error_rate", "avg_latency", "p95_latency", "cache_hit_rate"],
     },
     {
