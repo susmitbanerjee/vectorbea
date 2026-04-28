@@ -116,7 +116,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       {/* Logo + workspace */}
       <div className="px-4 pb-3 pt-5">
         <div className="mb-4 flex items-center gap-2.5 px-1">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] shadow-xs">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-background shadow-xs">
             <Logo />
           </div>
           <span className="text-[13px] font-semibold tracking-tight text-sidebar-fg">VectorBea</span>
@@ -156,7 +156,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   "group relative flex w-full items-center gap-2.5 rounded-md text-left transition-all duration-150",
                   item.isSubItem ? "pl-8 pr-3 py-1.5 text-[12px]" : "px-3 py-1.5 text-[13px]",
                   active
-                    ? "bg-sidebar-active text-sidebar-fg font-medium"
+                    ? "bg-sidebar-active text-sidebar-fg font-semibold"
                     : "text-sidebar-muted font-normal hover:bg-sidebar-hover hover:text-sidebar-fg",
                   loading && "opacity-60",
                 )}
@@ -198,7 +198,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       {/* Bottom: sidecar status + user */}
       <div className="space-y-2 border-t border-sidebar-border px-3 py-3">
         {/* Sidecar pill */}
-        <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
           <span className={cn("live-dot h-1.5 w-1.5", !workspaceSummary && "!bg-red-500")} />
           <div className="flex-1 min-w-0">
             <p className="truncate text-[11px] font-medium text-sidebar-fg">
@@ -222,10 +222,10 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 alt={user.full_name ?? user.email ?? "User"}
                 width={24}
                 height={24}
-                className="h-6 w-6 shrink-0 rounded-full border border-white/15 object-cover"
+                className="h-6 w-6 shrink-0 rounded-full border border-border object-cover"
               />
             ) : (
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] text-[10px] font-semibold text-sidebar-muted">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted/60 text-[10px] font-semibold text-sidebar-muted">
                 {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
               </div>
             )}
@@ -241,7 +241,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
               type="button"
               onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
               title="Sign out"
-              className="shrink-0 rounded p-1 text-sidebar-muted transition-colors hover:bg-white/[0.08] hover:text-sidebar-fg"
+              className="shrink-0 rounded p-1 text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-fg"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>

@@ -49,14 +49,14 @@ const config: Config = {
           4: "hsl(var(--chart-4))",
           5: "hsl(var(--chart-5))",
         },
-        // Sidebar design tokens — charcoal dark
+        // Sidebar design tokens — Vercel-style neutral light
         sidebar: {
-          DEFAULT:    "#0F1115",
-          fg:         "#F8F5EF",
-          muted:      "#9CA3AF",
-          border:     "rgba(255,255,255,0.07)",
-          active:     "rgba(255,255,255,0.08)",
-          hover:      "rgba(255,255,255,0.05)",
+          DEFAULT:    "#FFFFFF",
+          fg:         "#111111",
+          muted:      "#6B7280",
+          border:     "#E5E7EB",
+          active:     "#F3F4F6",
+          hover:      "#F9FAFB",
         },
       },
       borderRadius: {
@@ -81,17 +81,17 @@ const config: Config = {
         glow:     "0 0 24px rgba(37,99,235,0.18), 0 0 8px rgba(37,99,235,0.12)",
         "glow-sm": "0 0 12px rgba(37,99,235,0.14)",
         // Sidebar elevation
-        sidebar: "1px 0 0 rgba(255,255,255,0.05)",
+        sidebar: "1px 0 0 rgba(15,23,42,0.04)",
       },
       backgroundImage: {
         "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.10), transparent 65%)",
         "grid-fade":
           "radial-gradient(ellipse at top, hsl(var(--primary)/0.06), transparent 45%), " +
-          "linear-gradient(rgba(60,40,20,0.04) 1px, transparent 1px), " +
-          "linear-gradient(90deg, rgba(60,40,20,0.04) 1px, transparent 1px)",
+          "linear-gradient(rgba(15,23,42,0.04) 1px, transparent 1px), " +
+          "linear-gradient(90deg, rgba(15,23,42,0.04) 1px, transparent 1px)",
         "auth-panel": "linear-gradient(135deg, hsl(var(--primary)/0.06) 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, rgba(37,99,235,0.08), transparent 50%)",
-        // Warm card gradient
-        "card-warm": "linear-gradient(180deg, #FFFFFF 0%, #FFFCF7 100%)",
+        // Neutral card surface
+        "card-warm": "linear-gradient(180deg, #FFFFFF 0%, #FFFFFF 100%)",
       },
       backgroundSize: {
         grid: "100% 100%, 28px 28px, 28px 28px",

@@ -12,7 +12,7 @@
      Primary:  #2563EB (blue accent, restrained)
   ──────────────────────────────────────────────────────────────────────── */
   :root {
-    --background:         40 38% 95%;      /* #F8F5EF warm cream */
+    --background:         0 0% 98%;          /* #FAFAFA */
     --foreground:         0 0% 7%;         /* #111111 near-black */
     --card:               0 0% 100%;       /* #FFFFFF */
     --card-foreground:    0 0% 7%;
@@ -22,17 +22,17 @@
     --primary:            221 83% 53%;     /* #2563EB blue */
     --primary-foreground: 0 0% 100%;
 
-    --secondary:          40 25% 92%;      /* warm off-white */
+    --secondary:          0 0% 96%;          /* #F6F6F6 */
     --secondary-foreground: 0 0% 7%;
 
-    --muted:              36 20% 92%;      /* warm light muted surface */
+    --muted:              0 0% 96%;          /* neutral section */
     --muted-foreground:   220 8% 46%;      /* #6B7280 */
 
-    --accent:             40 38% 90%;      /* warm tint hover */
+    --accent:             0 0% 96%;          /* hover */
     --accent-foreground:  0 0% 7%;
 
-    --border:             36 31% 86%;      /* #E7DED1 */
-    --input:              36 31% 86%;
+    --border:             220 13% 91%;       /* #E5E7EB */
+    --input:              220 13% 91%;
     --ring:               221 83% 53%;
 
     /* Brand aliases */
@@ -54,7 +54,7 @@
     --chart-2: 197 71% 52%;
     --chart-3: 142 76% 36%;
     --chart-4: 32 81% 37%;
-    --chart-5: 262 52% 47%;
+    --chart-5: 220 9% 46%;
   }
 
   /* Dark block kept for sidebar/code via [data-theme="dark"] on sub-elements.
@@ -156,10 +156,10 @@
 
   /* Warm card surface */
   .card-warm {
-    background: linear-gradient(180deg, #FFFFFF 0%, #FFFCF7 100%);
-    border: 1px solid #E7DED1;
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
     border-radius: 14px;
-    box-shadow: 0 1px 3px rgba(17, 24, 39, 0.06), 0 0 0 1px rgba(231, 222, 209, 0.5);
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
   }
 
   /* Glass utility */
@@ -171,9 +171,9 @@
     @apply rounded-md;
     background: linear-gradient(
       90deg,
-      #F0EAE0 0%,
-      #E8E1D6 50%,
-      #F0EAE0 100%
+      #F3F4F6 0%,
+      #E5E7EB 50%,
+      #F3F4F6 100%
     );
     background-size: 200% 100%;
     animation: shimmer 1.8s ease-in-out infinite;
@@ -262,3 +262,4 @@
   88%  { opacity: 0.3; }
   100% { transform: translateX(20%); opacity: 0; }
 }
+
