@@ -176,7 +176,9 @@ export async function getUserNotificationPrefs(userId: string): Promise<UserNoti
       events: { ...DEFAULT_USER_EVENTS },
       emailEnabled: true,
       channels: { email: true, slack: false },
-      severityThreshold: "warning",
+      // Default to "info" so all operational events go through by default.
+      // Users can raise this to "warning" or "critical" in preferences if they want fewer emails.
+      severityThreshold: "info",
       filters: {},
     };
   }
@@ -197,7 +199,7 @@ export async function getUserNotificationPrefs(userId: string): Promise<UserNoti
     severityThreshold:
       severity === "critical" || severity === "warning" || severity === "info"
         ? severity
-        : "warning",
+        : "info",
     filters: {
       environments: Array.isArray(filtersRaw.environments) ? filtersRaw.environments : [],
       prompts: Array.isArray(filtersRaw.prompts) ? filtersRaw.prompts : [],
@@ -264,7 +266,7 @@ export function shouldNotifyRecipientByContext(
   const userEventEnabled = userPrefs.events[event.category as UserEventKey];
   if (typeof userEventEnabled === "boolean" && !userEventEnabled) return false;
 
-  const threshold = userPrefs.severityThreshold ?? "warning";
+  const threshold = userPrefs.severityThreshold ?? "info";
   const severity = event.severity ?? "warning";
   if (severityRank(severity) < severityRank(threshold)) return false;
 

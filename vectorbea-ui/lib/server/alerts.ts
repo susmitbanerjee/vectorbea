@@ -214,6 +214,7 @@ export async function evaluateAlerts(workspaceId: string, ruleIds?: string[]): P
             metricValue: metricValue,
             threshold: rule.threshold,
             comparison: rule.comparison,
+            alertEventId: ev.id,
           });
         }
       }

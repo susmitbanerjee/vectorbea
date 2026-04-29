@@ -891,9 +891,18 @@ export async function createTraceSetEvaluationRun(args: {
       workspaceId: args.workspaceId,
       promptName: prompt?.name ?? "unknown-prompt",
       versionTag: candidateVersion.version_tag,
-      recommendation: "needs_review",
-      score: null,
+      recommendation,
+      score: aggregateScore,
       runId: view.id,
+      runType: "trace_set",
+      passRate: results.length > 0 ? succeeded / results.length : null,
+      totalCount: results.length,
+      failedCount: failed,
+      needsReviewCount: recommendation === "needs_review" || recommendation === "ready_with_caution" ? results.length - succeeded : 0,
+      hardFailureCount: criticalFailures,
+      averageConfidence: aggregateConfidence,
+      provider: results[0]?.provider ?? null,
+      model: results[0]?.model ?? null,
     });
   } catch { /* notification errors must never fail the main flow */ }
 

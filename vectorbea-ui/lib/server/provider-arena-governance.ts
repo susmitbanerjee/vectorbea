@@ -471,6 +471,19 @@ export async function evaluateRolloutGate(args: {
   targetEnvironment?: string;
 }) {
   const supabase = createVectorBeaAdminClient();
+  const [promptRow, versionRow] = await Promise.all([
+    supabase
+      .from("prompts")
+      .select("name")
+      .eq("workspace_id", args.workspaceId)
+      .eq("id", args.promptId)
+      .maybeSingle(),
+    supabase
+      .from("prompt_versions")
+      .select("version_tag")
+      .eq("id", args.promptVersionId)
+      .maybeSingle(),
+  ]);
   const [arenaRes, behaviorRes, reviewsRes] = await Promise.all([
     supabase
       .from("evaluation_runs")
@@ -581,5 +594,24 @@ export async function evaluateRolloutGate(args: {
       evaluation_run_ids: evalIds,
     },
   });
+
+  if (status === "blocked") {
+    try {
+      const { notifyRolloutBlocked } = await import("@/lib/server/notifications");
+      await notifyRolloutBlocked({
+        workspaceId: args.workspaceId,
+        promptName: String(promptRow.data?.name ?? args.promptId),
+        promptId: args.promptId,
+        versionTag: String(versionRow.data?.version_tag ?? args.promptVersionId),
+        reasons,
+        rolloutCheckId: String(data.id),
+        requestedBy: args.checkedBy,
+        targetEnvironment: args.targetEnvironment ?? "production",
+      });
+    } catch {
+      // Notification failures must not break rollout gate checks
+    }
+  }
+
   return data;
 }

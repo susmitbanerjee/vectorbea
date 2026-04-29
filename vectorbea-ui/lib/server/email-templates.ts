@@ -6,40 +6,49 @@ const PREF_URL = (workspaceId: string) =>
 
 type StatusTone = "success" | "warning" | "failure" | "info" | "neutral";
 
-const TOKENS = {
-  page: "#F8F5EF",
-  card: "#FFFFFF",
-  border: "#E5E0D8",
-  borderStrong: "#DED8CE",
-  textPrimary: "#111827",
-  textBody: "#1F2937",
-  textMuted: "#4B5563",
-  accent: "#2563EB",
-  successText: "#047857",
-  successBg: "#ECFDF5",
+// ─── Design tokens ─────────────────────────────────────────────────────────────
+const T = {
+  page:          "#F8F5EF",
+  card:          "#FFFFFF",
+  border:        "#E5E0D8",
+  borderStrong:  "#DED8CE",
+  textPrimary:   "#111827",
+  textBody:      "#1F2937",
+  textSecondary: "#374151",
+  textMuted:     "#4B5563",
+  accent:        "#2563EB",
+  accentDark:    "#1D4ED8",
+  successText:   "#047857",
+  successHeading:"#064E3B",
+  successBg:     "#ECFDF5",
   successBorder: "#A7F3D0",
-  warningText: "#D97706",
-  warningBg: "#FFFBEB",
+  warningText:   "#D97706",
+  warningHeading:"#92400E",
+  warningBg:     "#FFFBEB",
   warningBorder: "#FDE68A",
-  failureText: "#DC2626",
-  failureBg: "#FEF2F2",
+  failureText:   "#DC2626",
+  failureHeading:"#991B1B",
+  failureBg:     "#FEF2F2",
   failureBorder: "#FECACA",
-  infoText: "#1D4ED8",
-  infoBg: "#EFF6FF",
-  infoBorder: "#BFDBFE",
-  neutralBg: "#FAF7F0",
+  infoText:      "#1D4ED8",
+  infoBg:        "#EFF6FF",
+  infoBorder:    "#BFDBFE",
+  neutralBg:     "#FAF7F0",
 } as const;
 
-function calloutStyle(tone: StatusTone): { text: string; bg: string; border: string } {
-  if (tone === "success") return { text: TOKENS.successText, bg: TOKENS.successBg, border: TOKENS.successBorder };
-  if (tone === "warning") return { text: TOKENS.warningText, bg: TOKENS.warningBg, border: TOKENS.warningBorder };
-  if (tone === "failure") return { text: TOKENS.failureText, bg: TOKENS.failureBg, border: TOKENS.failureBorder };
-  if (tone === "info") return { text: TOKENS.infoText, bg: TOKENS.infoBg, border: TOKENS.infoBorder };
-  return { text: TOKENS.textBody, bg: TOKENS.neutralBg, border: TOKENS.border };
+function toneColors(tone: StatusTone) {
+  if (tone === "success") return { text: T.successText, heading: T.successHeading, bg: T.successBg, border: T.successBorder };
+  if (tone === "warning") return { text: T.warningText, heading: T.warningHeading, bg: T.warningBg, border: T.warningBorder };
+  if (tone === "failure") return { text: T.failureText, heading: T.failureHeading, bg: T.failureBg, border: T.failureBorder };
+  if (tone === "info")    return { text: T.infoText, heading: T.infoText, bg: T.infoBg, border: T.infoBorder };
+  return { text: T.textBody, heading: T.textPrimary, bg: T.neutralBg, border: T.border };
 }
 
-function escapeHtml(value: string): string {
-  return value
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function esc(value: string | number | null | undefined): string {
+  const s = String(value ?? "");
+  return s
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -47,46 +56,78 @@ function escapeHtml(value: string): string {
 }
 
 function statusBadge(label: string, tone: StatusTone): string {
-  const s = calloutStyle(tone);
-  return `<span style="display:inline-block;padding:4px 10px;border-radius:999px;background:${s.bg};border:1px solid ${s.border};color:${s.text};font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${escapeHtml(label)}</span>`;
+  const c = toneColors(tone);
+  return `<span style="display:inline-block;padding:4px 12px;border-radius:999px;background:${c.bg};border:1px solid ${c.border};color:${c.text};font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">${esc(label)}</span>`;
 }
 
-function keyValueTable(rows: Array<{ key: string; value: string }>): string {
-  const body = rows
+function kvTable(rows: Array<{ key: string; value: string | null | undefined }>): string {
+  const filtered = rows.filter((r) => r.value != null && String(r.value).trim().length > 0);
+  if (filtered.length === 0) return "";
+  const body = filtered
     .map(
       (row) => `<tr>
-  <td style="padding:10px 14px;border-bottom:1px solid ${TOKENS.border};width:38%;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${TOKENS.textMuted};">${escapeHtml(row.key)}</td>
-  <td style="padding:10px 14px;border-bottom:1px solid ${TOKENS.border};font-size:13px;font-weight:600;color:${TOKENS.textPrimary};">${escapeHtml(row.value)}</td>
+  <td style="padding:9px 14px;border-bottom:1px solid ${T.border};width:36%;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${T.textMuted};vertical-align:top;">${esc(row.key)}</td>
+  <td style="padding:9px 14px;border-bottom:1px solid ${T.border};font-size:13px;font-weight:600;color:${T.textPrimary};word-break:break-word;">${esc(row.value ?? "")}</td>
 </tr>`,
     )
     .join("");
-
-  return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${TOKENS.border};border-radius:12px;overflow:hidden;background:${TOKENS.card};margin:0 0 20px;">${body}</table>`;
+  return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${T.border};border-radius:12px;overflow:hidden;background:${T.card};margin:0 0 20px;">${body}</table>`;
 }
 
 function actionButton(label: string, href: string): string {
   return `<table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
   <tr>
-    <td style="background:${TOKENS.accent};border-radius:10px;">
-      <a href="${href}" style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">${escapeHtml(label)}</a>
+    <td style="background:${T.accent};border-radius:10px;">
+      <a href="${href}" style="display:inline-block;padding:13px 24px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;line-height:1;">${esc(label)}</a>
     </td>
   </tr>
 </table>`;
 }
 
-function sectionHeading(text: string): string {
-  return `<p style="margin:0 0 10px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${TOKENS.textMuted};">${escapeHtml(text)}</p>`;
-}
-
-function hint(text: string): string {
-  return `<p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:${TOKENS.textMuted};">${escapeHtml(text)}</p>`;
-}
-
-function recommendation(text: string): string {
-  return `<div style="margin:0 0 20px;padding:12px 14px;border-radius:10px;background:${TOKENS.neutralBg};border:1px solid ${TOKENS.border};">
-  <p style="margin:0;font-size:13px;line-height:1.6;color:${TOKENS.textBody};">${escapeHtml(text)}</p>
+function calloutBox(text: string, tone: StatusTone): string {
+  const c = toneColors(tone);
+  return `<div style="margin:0 0 20px;padding:12px 16px;border-radius:10px;background:${c.bg};border:1px solid ${c.border};">
+  <p style="margin:0;font-size:13px;line-height:1.6;color:${c.heading};font-weight:600;">${esc(text)}</p>
 </div>`;
 }
+
+function nextStep(text: string): string {
+  return `<div style="margin:0 0 20px;padding:12px 16px;border-radius:10px;background:${T.neutralBg};border:1px solid ${T.border};">
+  <p style="margin:0 0 3px;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${T.textMuted};">Recommended next step</p>
+  <p style="margin:0;font-size:13px;line-height:1.6;color:${T.textBody};">${esc(text)}</p>
+</div>`;
+}
+
+function sectionHeading(text: string): string {
+  return `<p style="margin:20px 0 8px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:${T.textMuted};">${esc(text)}</p>`;
+}
+
+function divider(): string {
+  return `<hr style="border:0;border-top:1px solid ${T.border};margin:20px 0;" />`;
+}
+
+function gateRow(gate: string, status: "passed" | "failed" | "missing" | "not_required"): string {
+  const icons: Record<string, string> = {
+    passed: "✓",
+    failed: "✗",
+    missing: "—",
+    not_required: "·",
+  };
+  const colors: Record<string, string> = {
+    passed: T.successText,
+    failed: T.failureText,
+    missing: T.textMuted,
+    not_required: T.textMuted,
+  };
+  const icon = icons[status] ?? "?";
+  const color = colors[status] ?? T.textBody;
+  return `<tr>
+  <td style="padding:7px 14px;border-bottom:1px solid ${T.border};font-size:13px;color:${T.textSecondary};">${esc(gate)}</td>
+  <td style="padding:7px 14px;border-bottom:1px solid ${T.border};font-size:13px;font-weight:700;color:${color};text-align:right;">${icon} ${esc(status.replaceAll("_", " "))}</td>
+</tr>`;
+}
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
 
 function layout(args: {
   workspaceId?: string;
@@ -96,7 +137,7 @@ function layout(args: {
   reason?: string;
 }) {
   const preheader = args.preheader ?? "";
-  const workspaceName = args.workspaceName ? escapeHtml(args.workspaceName) : "VectorBea";
+  const workspaceName = args.workspaceName ? esc(args.workspaceName) : "VectorBea";
   const prefsLink = PREF_URL(args.workspaceId ?? "");
   const reason = args.reason ?? "You received this because notifications are enabled for this workspace";
 
@@ -108,35 +149,46 @@ function layout(args: {
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <title>VectorBea notification</title>
 </head>
-<body style="margin:0;padding:0;background:${TOKENS.page};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
-${preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>` : ""}
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${TOKENS.page};padding:24px 12px;">
+<body style="margin:0;padding:0;background:${T.page};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;mso-hide:all;">${esc(preheader)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>` : ""}
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${T.page};padding:28px 12px;">
   <tr>
     <td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background:${TOKENS.card};border:1px solid ${TOKENS.border};border-radius:18px;overflow:hidden;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;">
+
+        <!-- Header / logo row -->
         <tr>
-          <td style="padding:20px 24px;border-bottom:1px solid ${TOKENS.border};background:${TOKENS.neutralBg};">
+          <td style="padding:0 0 6px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td align="left" style="font-size:20px;font-weight:800;color:${TOKENS.textPrimary};">VectorBea</td>
-                <td align="right" style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${TOKENS.textMuted};">${workspaceName}</td>
+                <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">VectorBea</td>
+                <td align="right" style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${T.textMuted};">${workspaceName}</td>
               </tr>
             </table>
           </td>
         </tr>
+
+        <!-- Main card -->
         <tr>
-          <td style="padding:26px 24px 20px;">${args.body}</td>
-        </tr>
-        <tr>
-          <td style="padding:16px 24px 22px;border-top:1px solid ${TOKENS.borderStrong};background:${TOKENS.neutralBg};">
-            <p style="margin:0 0 8px;font-size:12px;color:${TOKENS.textMuted};">${escapeHtml(reason)}</p>
-            <p style="margin:0 0 8px;font-size:12px;color:${TOKENS.textMuted};">
-              Manage notification preferences
-              <a href="${prefsLink}" style="color:${TOKENS.accent};text-decoration:none;font-weight:600;"> in VectorBea</a>
-            </p>
-            <p style="margin:0;font-size:11px;color:${TOKENS.textMuted};">${workspaceName}</p>
+          <td style="background:${T.card};border:1px solid ${T.border};border-radius:16px;overflow:hidden;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="padding:28px 28px 24px;">${args.body}</td>
+              </tr>
+            </table>
           </td>
         </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:16px 4px 8px;">
+            <p style="margin:0 0 6px;font-size:12px;color:${T.textMuted};line-height:1.5;">${esc(reason)}</p>
+            <p style="margin:0;font-size:12px;color:${T.textMuted};">
+              <a href="${prefsLink}" style="color:${T.accent};text-decoration:none;font-weight:600;">Manage notification preferences</a>
+            </p>
+          </td>
+        </tr>
+
       </table>
     </td>
   </tr>
@@ -145,27 +197,55 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:al
 </html>`;
 }
 
-function formatMetricType(raw: string): string {
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
+function fmtScore(score: number | null | undefined): string {
+  if (score == null) return "Unavailable";
+  return `${Math.round(score * 100)}%`;
+}
+
+function fmtPct(rate: number | null | undefined): string {
+  if (rate == null) return "Unavailable";
+  return `${Math.round(rate * 100)}%`;
+}
+
+function fmtDuration(ms: number | null | undefined): string {
+  if (ms == null) return "Unavailable";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+}
+
+function fmtMetricType(raw: string): string {
   const map: Record<string, string> = {
     latency_p95: "P95 latency",
     error_rate: "Error rate",
-    eval_score_avg: "Evaluation score",
+    eval_score_avg: "Evaluation score avg",
     cache_hit_rate: "Cache hit rate",
   };
   return map[raw] ?? raw.replaceAll("_", " ");
 }
 
-function formatComparison(op: string): string {
-  const map: Record<string, string> = { gt: ">", lt: "<", gte: ">=", lte: "<=" };
-  return map[op] ?? op;
-}
-
-function formatMetricValue(metricType: string, value: number): string {
+function fmtMetricValue(metricType: string, value: number): string {
   if (metricType === "latency_p95") return `${Math.round(value)} ms`;
   if (metricType === "error_rate" || metricType === "cache_hit_rate") return `${(Math.round(value * 10) / 10).toFixed(1)}%`;
   if (metricType === "eval_score_avg") return `${(Math.round(value * 100) / 100).toFixed(2)}`;
   return String(value);
 }
+
+function fmtComparison(op: string): string {
+  const map: Record<string, string> = { gt: ">", lt: "<", gte: "≥", lte: "≤" };
+  return map[op] ?? op;
+}
+
+function fmtRunType(runType: string | null | undefined): string {
+  if (runType === "behavioral") return "Behavioral";
+  if (runType === "baseline") return "Baseline";
+  if (runType === "trace_set") return "Trace replay";
+  return "Standard";
+}
+
+// ─── Template 1: Team invitation ─────────────────────────────────────────────
 
 export function teamInvitationEmail(args: {
   inviterName: string;
@@ -174,32 +254,33 @@ export function teamInvitationEmail(args: {
   acceptUrl: string;
   expiresAt: string;
 }) {
-  const subject = `${args.inviterName} invited you to ${args.workspaceName} in VectorBea`;
+  const subject = `${args.inviterName} invited you to ${args.workspaceName} on VectorBea`;
   const expiryDate = new Date(args.expiresAt).toLocaleDateString("en-US", { dateStyle: "long" });
   const body = `
 ${statusBadge("Workspace invite", "info")}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">You are invited to join ${escapeHtml(args.workspaceName)}</h1>
-${hint(`${args.inviterName} invited you with role ${args.role}`)}
-${keyValueTable([
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">You have been invited to join ${esc(args.workspaceName)}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">${esc(args.inviterName)} has invited you to collaborate on VectorBea</p>
+${kvTable([
   { key: "Workspace", value: args.workspaceName },
   { key: "Role", value: args.role },
   { key: "Expires", value: expiryDate },
 ])}
 ${actionButton("Accept invitation", args.acceptUrl)}
-${recommendation("Use this invitation from a secure trusted session")}
+${nextStep("Accept this invitation from a secure, trusted device. The link expires on " + expiryDate + ".")}
 `;
-
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
-      preheader: `Invitation to ${args.workspaceName}`,
+      preheader: `Invitation to join ${args.workspaceName} on VectorBea`,
       body,
       reason: "You received this because a workspace admin invited your email address",
     }),
-    text: `Invitation to ${args.workspaceName}\nInvited by ${args.inviterName}\nRole ${args.role}\nExpires ${expiryDate}\nAccept ${args.acceptUrl}`,
+    text: `Invited to ${args.workspaceName}\nBy ${args.inviterName}\nRole ${args.role}\nExpires ${expiryDate}\nAccept ${args.acceptUrl}`,
   };
 }
+
+// ─── Template 2: Evaluation completed ────────────────────────────────────────
 
 export function evaluationCompletedEmail(args: {
   workspaceName: string;
@@ -209,27 +290,70 @@ export function evaluationCompletedEmail(args: {
   recommendation: string;
   score: number | null;
   runUrl: string;
+  datasetName?: string | null;
+  runType?: "baseline" | "behavioral" | "trace_set";
+  passRate?: number | null;
+  totalCount?: number;
+  failedCount?: number;
+  needsReviewCount?: number;
+  hardFailureCount?: number;
+  averageConfidence?: number | null;
+  rubricName?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  durationMs?: number | null;
+  startedBy?: string | null;
 }) {
   const verdict = args.recommendation.replaceAll("_", " ");
-  const tone: StatusTone = verdict.includes("fail") ? "failure" : verdict.includes("review") ? "warning" : "success";
-  const subject = `Evaluation completed for ${args.promptName}`;
-  const scoreText = args.score == null ? "Unavailable" : `${Math.round(args.score * 100)}%`;
+  const isFailed    = verdict.includes("fail") || verdict.includes("block");
+  const isReview    = verdict.includes("review") || verdict.includes("caution");
+  const tone: StatusTone = isFailed ? "failure" : isReview ? "warning" : "success";
+  const isBehavioral = args.runType === "behavioral";
+
+  const subjectVerdict = isFailed ? "needs attention" : isReview ? "needs review" : "passed";
+  const subject = `Evaluation ${subjectVerdict} — ${args.promptName} ${args.versionTag}`;
+
+  const summaryRows = [
+    { key: "Evaluation type",  value: fmtRunType(args.runType) },
+    { key: "Prompt",           value: args.promptName },
+    { key: "Version",          value: args.versionTag },
+    { key: "Dataset",          value: args.datasetName },
+    { key: "Score",            value: fmtScore(args.score) },
+    { key: "Pass rate",        value: args.passRate != null ? fmtPct(args.passRate) : null },
+    { key: "Total cases",      value: args.totalCount != null ? String(args.totalCount) : null },
+    { key: "Failed cases",     value: args.failedCount != null ? String(args.failedCount) : null },
+    { key: "Needs review",     value: args.needsReviewCount != null ? String(args.needsReviewCount) : null },
+    ...(isBehavioral ? [
+      { key: "Rubric",         value: args.rubricName },
+      { key: "Hard failures",  value: args.hardFailureCount != null ? String(args.hardFailureCount) : null },
+      { key: "Avg confidence", value: args.averageConfidence != null ? fmtPct(args.averageConfidence) : null },
+    ] : []),
+    { key: "Provider",         value: args.provider },
+    { key: "Model",            value: args.model },
+    { key: "Duration",         value: fmtDuration(args.durationMs) },
+  ];
+
+  const calloutText = isFailed
+    ? "This evaluation did not pass. Review failed cases before promoting this version."
+    : isReview
+      ? "This evaluation requires manual review. Check uncertain cases before rolling out."
+      : "This evaluation passed successfully. The version is ready for rollout review.";
+
+  const nextStepText = isFailed
+    ? "Open the evaluation run to inspect failed checks, scoring details, and individual item outputs."
+    : isReview
+      ? "Review the flagged cases in the evaluation run and decide whether to promote or rerun."
+      : "Review the score breakdown, then promote this version to candidate when ready.";
+
   const body = `
 ${statusBadge(verdict, tone)}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Evaluation completed</h1>
-${hint(`Candidate version ${args.versionTag} for ${args.promptName} has finished`)}
-${keyValueTable([
-  { key: "Prompt", value: args.promptName },
-  { key: "Candidate version", value: args.versionTag },
-  { key: "Verdict", value: verdict },
-  { key: "Score", value: scoreText },
-])}
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Evaluation completed for ${esc(args.promptName)}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">The run finished with a <strong>${esc(verdict)}</strong> result${args.datasetName ? ` on dataset <strong>${esc(args.datasetName)}</strong>` : ""}</p>
+${calloutBox(calloutText, tone)}
+${sectionHeading("Run summary")}
+${kvTable(summaryRows)}
 ${actionButton("Open evaluation run", args.runUrl)}
-${recommendation(
-  tone === "success"
-    ? "Review score breakdown then continue rollout when ready"
-    : "Review failed checks and evidence before promoting this candidate",
-)}
+${nextStep(nextStepText)}
 `;
 
   return {
@@ -237,13 +361,23 @@ ${recommendation(
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${args.promptName} ${args.versionTag} ${verdict}`,
+      preheader: `${args.promptName} ${args.versionTag} — ${verdict}`,
       body,
       reason: "You received this because evaluation notifications are enabled for this workspace",
     }),
-    text: `Evaluation completed\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nVerdict ${verdict}\nScore ${scoreText}\nOpen ${args.runUrl}`,
+    text: [
+      `Evaluation completed — ${args.promptName} ${args.versionTag}`,
+      `Verdict: ${verdict}`,
+      `Score: ${fmtScore(args.score)}`,
+      args.datasetName ? `Dataset: ${args.datasetName}` : "",
+      args.provider ? `Provider: ${args.provider}` : "",
+      args.model ? `Model: ${args.model}` : "",
+      `Open: ${args.runUrl}`,
+    ].filter(Boolean).join("\n"),
   };
 }
+
+// ─── Template 3: Evaluation failed ───────────────────────────────────────────
 
 export function evaluationFailedEmail(args: {
   workspaceName: string;
@@ -252,32 +386,49 @@ export function evaluationFailedEmail(args: {
   versionTag: string;
   reason: string;
   runUrl: string;
+  datasetName?: string | null;
+  runType?: "baseline" | "behavioral" | "trace_set";
+  provider?: string | null;
+  model?: string | null;
+  startedBy?: string | null;
 }) {
-  const subject = `Evaluation failed for ${args.promptName}`;
+  const subject = `Evaluation failed — ${args.promptName} ${args.versionTag}`;
+  const safeReason = args.reason.slice(0, 300); // never leak full stack traces
+
   const body = `
 ${statusBadge("Evaluation failed", "failure")}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Evaluation failed</h1>
-${hint(`Run for ${args.promptName} ${args.versionTag} failed and needs investigation`)}
-${keyValueTable([
-  { key: "Prompt", value: args.promptName },
-  { key: "Version", value: args.versionTag },
-  { key: "Failure reason", value: args.reason },
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Evaluation failed for ${esc(args.promptName)}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">The evaluation run could not complete. Review the details and rerun when the issue is resolved.</p>
+${calloutBox("This evaluation failed due to an execution error. No scoring was performed.", "failure")}
+${sectionHeading("Run details")}
+${kvTable([
+  { key: "Evaluation type", value: fmtRunType(args.runType) },
+  { key: "Prompt",          value: args.promptName },
+  { key: "Version",         value: args.versionTag },
+  { key: "Dataset",         value: args.datasetName },
+  { key: "Provider",        value: args.provider },
+  { key: "Model",           value: args.model },
+  { key: "Started by",      value: args.startedBy },
+  { key: "Failure reason",  value: safeReason },
 ])}
 ${actionButton("Open evaluation details", args.runUrl)}
-${recommendation("Inspect provider execution logs and failed checks then rerun evaluation")}
+${nextStep("Check provider connectivity and model availability. Inspect execution logs in the app for the full error detail.")}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Evaluation failed for ${args.promptName}`,
+      preheader: `Evaluation failed — ${args.promptName}`,
       body,
       reason: "You received this because evaluation failure notifications are enabled for this workspace",
     }),
-    text: `Evaluation failed\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nReason ${args.reason}\nOpen ${args.runUrl}`,
+    text: `Evaluation failed\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nReason ${safeReason}\nOpen ${args.runUrl}`,
   };
 }
+
+// ─── Template 4: Regression failed ───────────────────────────────────────────
 
 export function regressionFailedEmail(args: {
   workspaceName: string;
@@ -286,34 +437,57 @@ export function regressionFailedEmail(args: {
   promptName: string | null;
   reason: string;
   runUrl: string | null;
+  previousScore?: number | null;
+  currentScore?: number | null;
+  failedCases?: number;
+  datasetName?: string | null;
+  promptVersion?: string | null;
 }) {
-  const subject = `Regression failed for schedule ${args.scheduleName}`;
-  const rows = [
-    { key: "Schedule", value: args.scheduleName },
-    ...(args.promptName ? [{ key: "Prompt", value: args.promptName }] : []),
-    { key: "Result", value: "Failed" },
-    { key: "Reason", value: args.reason },
-  ];
+  const subject = `Regression failed — ${args.scheduleName}`;
+  const hasScores = args.previousScore != null && args.currentScore != null;
+  const scoreDelta = hasScores ? Math.round((args.currentScore! - args.previousScore!) * 100) : null;
+
   const body = `
 ${statusBadge("Regression failed", "failure")}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Regression check failed</h1>
-${hint("Scheduled quality checks detected an issue that needs review")}
-${keyValueTable(rows)}
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Scheduled regression failed${args.promptName ? ` for ${esc(args.promptName)}` : ""}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">The latest regression check did not meet the configured threshold or failed during execution.</p>
+${calloutBox("Regression detected. Review prompt or provider changes that may have introduced this regression.", "failure")}
+${sectionHeading("Regression details")}
+${kvTable([
+  { key: "Schedule",       value: args.scheduleName },
+  { key: "Prompt",         value: args.promptName },
+  { key: "Version",        value: args.promptVersion },
+  { key: "Dataset",        value: args.datasetName },
+  { key: "Previous score", value: hasScores ? fmtScore(args.previousScore) : null },
+  { key: "Current score",  value: hasScores ? fmtScore(args.currentScore) : null },
+  { key: "Score change",   value: scoreDelta != null ? `${scoreDelta > 0 ? "+" : ""}${scoreDelta}%` : null },
+  { key: "Failed cases",   value: args.failedCases != null ? String(args.failedCases) : null },
+  { key: "Reason",         value: args.reason },
+])}
 ${args.runUrl ? actionButton("Open regression run", args.runUrl) : ""}
-${recommendation("Compare failed cases and inspect recent prompt or provider changes")}
+${nextStep("Compare failed cases against previous passing results. Look for recent changes in prompt templates, model settings, or dataset content.")}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Regression failed ${args.scheduleName}`,
+      preheader: `Regression failed — ${args.scheduleName}`,
       body,
       reason: "You received this because regression notifications are enabled for this workspace",
     }),
-    text: `Regression failed\nSchedule ${args.scheduleName}\nReason ${args.reason}${args.runUrl ? `\nOpen ${args.runUrl}` : ""}`,
+    text: [
+      `Regression failed — ${args.scheduleName}`,
+      args.promptName ? `Prompt: ${args.promptName}` : "",
+      hasScores ? `Score: ${fmtScore(args.previousScore)} → ${fmtScore(args.currentScore)}` : "",
+      `Reason: ${args.reason}`,
+      args.runUrl ? `Open: ${args.runUrl}` : "",
+    ].filter(Boolean).join("\n"),
   };
 }
+
+// ─── Template 5: Alert triggered ─────────────────────────────────────────────
 
 export function alertTriggeredEmail(args: {
   workspaceName: string;
@@ -324,37 +498,65 @@ export function alertTriggeredEmail(args: {
   threshold: number;
   comparison: string;
   alertsUrl: string;
+  alertEventId?: string | null;
+  promptName?: string | null;
+  environment?: string | null;
+  provider?: string | null;
+  model?: string | null;
 }) {
-  const metricLabel = formatMetricType(args.metricType);
-  const metricValue = formatMetricValue(args.metricType, args.metricValue);
-  const thresholdValue = formatMetricValue(args.metricType, args.threshold);
-  const comparison = formatComparison(args.comparison);
-  const subject = `Alert triggered ${args.ruleName}`;
+  const metricLabel = fmtMetricType(args.metricType);
+  const metricVal   = fmtMetricValue(args.metricType, args.metricValue);
+  const threshVal   = fmtMetricValue(args.metricType, args.threshold);
+  const comparison  = fmtComparison(args.comparison);
+
+  // Severity-based tone
+  const isError = args.metricType === "error_rate";
+  const tone: StatusTone = isError && args.metricValue >= args.threshold * 2 ? "failure" : "warning";
+
+  const subject = `Alert triggered — ${args.ruleName}`;
+
   const body = `
-${statusBadge("Alert triggered", "warning")}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Production alert triggered</h1>
-${hint(`${metricLabel} crossed the configured threshold for this workspace`)}
-${keyValueTable([
-  { key: "Alert rule", value: args.ruleName },
-  { key: "Metric", value: metricLabel },
-  { key: "Current value", value: metricValue },
-  { key: "Threshold", value: `${comparison} ${thresholdValue}` },
+${statusBadge("Alert triggered", tone)}
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">${esc(args.ruleName)} triggered${args.environment ? ` in ${esc(args.environment)}` : ""}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">The configured threshold was crossed for <strong>${esc(metricLabel)}</strong>${args.promptName ? ` on prompt <strong>${esc(args.promptName)}</strong>` : ""}</p>
+${calloutBox(`${metricLabel} is currently ${metricVal} (threshold ${comparison} ${threshVal})`, tone)}
+${sectionHeading("Alert details")}
+${kvTable([
+  { key: "Alert rule",   value: args.ruleName },
+  { key: "Metric",       value: metricLabel },
+  { key: "Current value",value: metricVal },
+  { key: "Threshold",    value: `${comparison} ${threshVal}` },
+  { key: "Environment",  value: args.environment },
+  { key: "Prompt",       value: args.promptName },
+  { key: "Provider",     value: args.provider },
+  { key: "Model",        value: args.model },
+  { key: "Triggered at", value: new Date().toISOString() },
 ])}
 ${actionButton("View alert", args.alertsUrl)}
-${recommendation("Review recent traces then compare against previous stable behavior")}
+${nextStep("Review recent traces for the affected prompt. Compare against the baseline period to identify the change that triggered this alert.")}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${args.ruleName} ${metricValue}`,
+      preheader: `${args.ruleName} — ${metricLabel} ${metricVal}`,
       body,
       reason: "You received this because alert notifications are enabled for this workspace",
     }),
-    text: `Alert triggered\nRule ${args.ruleName}\nMetric ${metricLabel}\nCurrent ${metricValue}\nThreshold ${comparison} ${thresholdValue}\nOpen ${args.alertsUrl}`,
+    text: [
+      `Alert triggered — ${args.ruleName}`,
+      `Metric: ${metricLabel}`,
+      `Current: ${metricVal}`,
+      `Threshold: ${comparison} ${threshVal}`,
+      args.environment ? `Environment: ${args.environment}` : "",
+      `Open: ${args.alertsUrl}`,
+    ].filter(Boolean).join("\n"),
   };
 }
+
+// ─── Template 6: Rollout blocked ─────────────────────────────────────────────
 
 export function rolloutBlockedEmail(args: {
   workspaceName: string;
@@ -363,35 +565,62 @@ export function rolloutBlockedEmail(args: {
   versionTag: string;
   reasons: string[];
   promptUrl: string;
+  rolloutCheckId?: string | null;
+  requestedBy?: string | null;
+  targetEnvironment?: string | null;
+  rolloutPercentage?: number | null;
+  gateResults?: Array<{ gate: string; status: "passed" | "failed" | "missing" | "not_required" }>;
 }) {
-  const subject = `Rollout blocked for ${args.promptName} ${args.versionTag}`;
-  const reasonsList = args.reasons.map((r) => `<li style="margin:0 0 6px;color:${TOKENS.textBody};font-size:13px;line-height:1.5;">${escapeHtml(r)}</li>`).join("");
+  const subject = `Rollout blocked — ${args.promptName} ${args.versionTag}`;
+
+  const reasonsList = args.reasons
+    .map((r) => `<li style="margin:0 0 6px;color:${T.textBody};font-size:13px;line-height:1.5;">${esc(r)}</li>`)
+    .join("");
+
+  const gateTable = args.gateResults && args.gateResults.length > 0
+    ? `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${T.border};border-radius:12px;overflow:hidden;background:${T.card};margin:0 0 20px;">
+${args.gateResults.map((g) => gateRow(g.gate, g.status)).join("")}
+</table>`
+    : "";
+
   const body = `
 ${statusBadge("Rollout blocked", "failure")}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Rollout blocked by safety gate</h1>
-${hint(`Candidate version ${args.versionTag} for ${args.promptName} did not meet release criteria`)}
-${keyValueTable([
-  { key: "Prompt", value: args.promptName },
-  { key: "Candidate version", value: args.versionTag },
-  { key: "Status", value: "Blocked" },
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Rollout blocked for ${esc(args.promptName)}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">VectorBea blocked this rollout because one or more safety gates failed</p>
+${calloutBox("This version cannot be rolled out until the failing gates are resolved.", "failure")}
+${sectionHeading("Rollout details")}
+${kvTable([
+  { key: "Prompt",       value: args.promptName },
+  { key: "Version",      value: args.versionTag },
+  { key: "Environment",  value: args.targetEnvironment },
+  { key: "Rollout %",    value: args.rolloutPercentage != null ? `${args.rolloutPercentage}%` : null },
+  { key: "Requested by", value: args.requestedBy },
 ])}
-${sectionHeading("Blocking reasons")}
-<ul style="margin:0 0 18px;padding:0 0 0 16px;">${reasonsList}</ul>
+${args.reasons.length > 0 ? `${sectionHeading("Blocking reasons")}
+<ul style="margin:0 0 20px;padding:0 0 0 16px;">${reasonsList}</ul>` : ""}
+${gateTable ? `${sectionHeading("Gate status")}${gateTable}` : ""}
 ${actionButton("Review rollout block", args.promptUrl)}
-${recommendation("Fix failed checks then rerun evaluation and regression before retrying rollout")}
+${nextStep("Open the failing gate and review the latest evaluation result. Fix the issues and rerun the evaluation before attempting rollout again.")}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Rollout blocked ${args.promptName} ${args.versionTag}`,
+      preheader: `Rollout blocked — ${args.promptName} ${args.versionTag}`,
       body,
       reason: "You received this because rollout notifications are enabled for this workspace",
     }),
-    text: `Rollout blocked\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nReasons ${args.reasons.join("; ")}\nOpen ${args.promptUrl}`,
+    text: [
+      `Rollout blocked — ${args.promptName} ${args.versionTag}`,
+      `Reasons: ${args.reasons.join("; ")}`,
+      `Open: ${args.promptUrl}`,
+    ].filter(Boolean).join("\n"),
   };
 }
+
+// ─── Template 7: Quota warning ────────────────────────────────────────────────
 
 export function quotaWarningEmail(args: {
   workspaceName: string;
@@ -406,33 +635,43 @@ export function quotaWarningEmail(args: {
   const label = args.usageType.replaceAll("_", " ");
   const tone: StatusTone = isExceeded ? "failure" : "warning";
   const subject = isExceeded
-    ? `Quota exceeded for ${args.workspaceName}`
-    : `Quota nearing for ${args.workspaceName}`;
+    ? `Usage limit reached — ${args.workspaceName}`
+    : `Usage nearing limit — ${args.workspaceName}`;
+
   const body = `
 ${statusBadge(isExceeded ? "Quota exceeded" : "Quota nearing", tone)}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">${isExceeded ? "Workspace usage exceeded limit" : "Workspace usage nearing limit"}</h1>
-${hint(`${label} usage is now ${pct}% of plan limit`)}
-${keyValueTable([
-  { key: "Usage type", value: label },
-  { key: "Current usage", value: `${args.used.toLocaleString()}` },
-  { key: "Limit", value: `${args.limit.toLocaleString()}` },
-  { key: "Percent used", value: `${pct}%` },
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">${isExceeded ? "Usage limit reached" : "Usage nearing limit"}</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">${esc(label)} usage is at <strong>${pct}%</strong> of the plan limit</p>
+${calloutBox(
+  isExceeded
+    ? `${label} limit reached. New ${label.toLowerCase()} will be rejected until the limit resets or the plan is upgraded.`
+    : `${label} usage is at ${pct}%. Consider upgrading the plan before the limit is reached.`,
+  tone,
+)}
+${kvTable([
+  { key: "Usage type",    value: label },
+  { key: "Current usage", value: args.used.toLocaleString() },
+  { key: "Plan limit",    value: args.limit.toLocaleString() },
+  { key: "Used",          value: `${pct}%` },
 ])}
 ${actionButton("Manage usage", args.billingUrl)}
-${recommendation("Review usage patterns and adjust plan or retention settings if needed")}
+${nextStep("Review usage patterns and consider upgrading the plan or adjusting retention settings.")}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${label} ${pct}%`,
+      preheader: `${label} ${pct}% — ${args.workspaceName}`,
       body,
-      reason: "You received this because quota notifications are enabled and you are an admin or owner",
+      reason: "You received this because quota notifications are enabled and you are a workspace admin or owner",
     }),
-    text: `Usage notification\nWorkspace ${args.workspaceName}\nUsage type ${label}\nCurrent ${args.used}\nLimit ${args.limit}\nPercent ${pct}%\nManage ${args.billingUrl}`,
+    text: `Usage notification — ${args.workspaceName}\n${label}: ${args.used.toLocaleString()} / ${args.limit.toLocaleString()} (${pct}%)\nManage: ${args.billingUrl}`,
   };
 }
+
+// ─── Template 8: Prompt promoted ─────────────────────────────────────────────
 
 export function promptPromotedEmail(args: {
   workspaceName: string;
@@ -442,29 +681,31 @@ export function promptPromotedEmail(args: {
   promotedBy: string;
   promptUrl: string;
 }) {
-  const subject = `Rollout approved for ${args.promptName} ${args.versionTag}`;
+  const subject = `Rollout approved — ${args.promptName} ${args.versionTag}`;
+
   const body = `
 ${statusBadge("Rollout approved", "success")}
-<h1 style="margin:14px 0 8px;font-size:24px;line-height:1.2;color:${TOKENS.textPrimary};">Prompt version is now active</h1>
-${hint(`Version ${args.versionTag} for ${args.promptName} has been approved for rollout`)}
-${keyValueTable([
-  { key: "Prompt", value: args.promptName },
-  { key: "Version", value: args.versionTag },
+<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Prompt version is now active</h1>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">Version ${esc(args.versionTag)} for <strong>${esc(args.promptName)}</strong> has been approved and is now receiving traffic</p>
+${kvTable([
+  { key: "Prompt",      value: args.promptName },
+  { key: "Version",     value: args.versionTag },
   { key: "Approved by", value: args.promotedBy },
-  { key: "Status", value: "Active" },
+  { key: "Status",      value: "Active" },
 ])}
 ${actionButton("View active version", args.promptUrl)}
-${recommendation("Continue monitoring metrics alerts and regressions as traffic increases")}
+${nextStep("Continue monitoring metrics, alerts, and scheduled regressions as traffic scales up.")}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Rollout approved ${args.promptName} ${args.versionTag}`,
+      preheader: `Rollout approved — ${args.promptName} ${args.versionTag}`,
       body,
       reason: "You received this because rollout notifications are enabled for this workspace",
     }),
-    text: `Rollout approved\nPrompt ${args.promptName}\nVersion ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen ${args.promptUrl}`,
+    text: `Rollout approved — ${args.promptName} ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen: ${args.promptUrl}`,
   };
 }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { approveEvaluationRun, getEvaluationRun } from "@/lib/server/evaluation-runs";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -36,11 +37,21 @@ export async function POST(
       if (msg.startsWith("Promotion blocked:")) {
         const reasons = msg.replace("Promotion blocked: ", "").split(/(?<=[.!?])\s+/);
         try {
+          let promptId = "";
+          if (existingRun?.candidatePromptVersionId) {
+            const supabase = createVectorBeaAdminClient();
+            const { data: version } = await supabase
+              .from("prompt_versions")
+              .select("prompt_id")
+              .eq("id", existingRun.candidatePromptVersionId)
+              .maybeSingle();
+            promptId = version?.prompt_id ?? "";
+          }
           const { notifyRolloutBlocked } = await import("@/lib/server/notifications");
           await notifyRolloutBlocked({
             workspaceId,
             promptName: existingRun?.promptName ?? "unknown",
-            promptId: existingRun?.candidatePromptVersionId ?? "",
+            promptId,
             versionTag: existingRun?.candidateVersionTag ?? "",
             reasons,
           });

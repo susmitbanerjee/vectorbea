@@ -9,6 +9,7 @@ import {
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 
 export const dynamic = "force-dynamic";
@@ -34,14 +35,19 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let workspaceIdForFailure: string | null = null;
+  let candidatePromptVersionIdForFailure: string | null = null;
+  let triggeredByForFailure: string | null = null;
   try {
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
     if (!workspaceId) {
       return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     }
+    workspaceIdForFailure = workspaceId;
 
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    triggeredByForFailure = auth.user.id;
     await assertFeatureAccess(workspaceId, "evaluations");
     const rate = consumeRateLimit(`evaluations:trace-sets:${workspaceId}:${auth.user.id}`, 20, 60_000);
     if (!rate.allowed) {
@@ -64,6 +70,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    candidatePromptVersionIdForFailure = body.candidatePromptVersionId.trim();
 
     // Dataset-based run path
     if (body.datasetId?.trim()) {
@@ -97,6 +104,33 @@ export async function POST(request: NextRequest) {
       { status: 201 },
     );
   } catch (error) {
+    if (workspaceIdForFailure && candidatePromptVersionIdForFailure) {
+      try {
+        const supabase = createVectorBeaAdminClient();
+        const { data: version } = await supabase
+          .from("prompt_versions")
+          .select("version_tag, prompts(name)")
+          .eq("id", candidatePromptVersionIdForFailure)
+          .maybeSingle();
+        const promptsData = (version as { prompts?: { name?: string } | Array<{ name?: string }> } | null)?.prompts;
+        const promptName =
+          (promptsData &&
+            (Array.isArray(promptsData) ? promptsData[0]?.name : promptsData.name)) ||
+          "unknown-prompt";
+        const versionTag = version?.version_tag ?? "unknown-version";
+        const { notifyEvaluationFailed } = await import("@/lib/server/notifications");
+        await notifyEvaluationFailed({
+          workspaceId: workspaceIdForFailure,
+          promptName,
+          versionTag,
+          reason: error instanceof Error ? error.message : "Evaluation run failed",
+          runType: "trace_set",
+          startedBy: triggeredByForFailure,
+        });
+      } catch {
+        // Notification failures must never fail the API error response path
+      }
+    }
     const safe = toSafeApiError(error, "Failed to create evaluation run");
     return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }

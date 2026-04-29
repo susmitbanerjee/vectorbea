@@ -30,11 +30,17 @@ import { createSupabaseAdminClient, createVectorBeaAdminClient } from "@/lib/sup
 
 const appUrl = () => process.env.APP_URL ?? "https://app.vectorbea.app";
 
+// ─── Internal types ───────────────────────────────────────────────────────────
+
 interface NotificationRecipient {
   userId: string;
   role: string | null;
   email: string;
 }
+
+type DeliveryStatus = "sent" | "skipped" | "failed";
+
+// ─── Workspace helpers ────────────────────────────────────────────────────────
 
 async function getWorkspaceName(workspaceId: string): Promise<string> {
   try {
@@ -59,15 +65,35 @@ async function getWorkspaceRecipients(workspaceId: string): Promise<Notification
       .eq("workspace_id", workspaceId);
     if (error || !members?.length) return [];
 
-    const admin = createSupabaseAdminClient();
+    // Primary path: resolve member emails from profiles table.
+    // This is more reliable than auth admin lookups in restricted environments.
+    const memberIds = members.map((m) => String(m.user_id));
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, email")
+      .in("id", memberIds);
+    const profileEmailById = new Map(
+      (profiles ?? [])
+        .filter((p) => typeof p.id === "string" && typeof p.email === "string" && p.email.trim().length > 0)
+        .map((p) => [String(p.id), String(p.email)]),
+    );
+
+    const adminClient = createSupabaseAdminClient();
     const recipients: NotificationRecipient[] = [];
     for (const member of members) {
-      const { data, error: userError } = await admin.auth.admin.getUserById(member.user_id as string);
-      if (userError || !data?.user?.email) continue;
+      const userId = String(member.user_id);
+      let email = profileEmailById.get(userId) ?? null;
+      if (!email) {
+        const { data, error: userError } = await adminClient.auth.admin.getUserById(userId);
+        if (!userError && data?.user?.email) {
+          email = data.user.email;
+        }
+      }
+      if (!email) continue;
       recipients.push({
-        userId: member.user_id as string,
+        userId,
         role: (member.role as string | null) ?? null,
-        email: data.user.email,
+        email,
       });
     }
     return recipients;
@@ -76,55 +102,133 @@ async function getWorkspaceRecipients(workspaceId: string): Promise<Notification
   }
 }
 
+// ─── Idempotency ─────────────────────────────────────────────────────────────
+
+/** Returns true if this email has already been sent (prevents duplicate sends). */
+async function alreadySent(args: {
+  eventType: string;
+  eventId: string | null | undefined;
+  recipientEmail: string;
+  channel: string;
+}): Promise<boolean> {
+  if (!args.eventId) return false;
+  try {
+    const supabase = createVectorBeaAdminClient();
+    const { data } = await supabase
+      .from("notification_deliveries")
+      .select("id")
+      .eq("event_type", args.eventType)
+      .eq("event_id", args.eventId)
+      .eq("recipient_email", args.recipientEmail)
+      .eq("channel", args.channel)
+      .eq("status", "sent")
+      .maybeSingle();
+    return Boolean(data);
+  } catch {
+    return false; // If we can't check, allow send (better to duplicate than miss)
+  }
+}
+
+// ─── Audit log ───────────────────────────────────────────────────────────────
+
+async function recordDelivery(args: {
+  workspaceId: string;
+  channel: "email" | "slack";
+  eventType: string;
+  eventId?: string | null;
+  recipientUserId?: string | null;
+  recipientEmail: string;
+  status: DeliveryStatus;
+  skipReason?: string;
+  providerMessageId?: string;
+  errorMessage?: string;
+}) {
+  try {
+    const supabase = createVectorBeaAdminClient();
+    await supabase.from("notification_deliveries").insert({
+      workspace_id: args.workspaceId,
+      channel: args.channel,
+      event_type: args.eventType,
+      event_id: args.eventId ?? null,
+      recipient_user_id: args.recipientUserId ?? null,
+      recipient_email: args.recipientEmail,
+      status: args.status,
+      skip_reason: args.skipReason ?? null,
+      provider_message_id: args.providerMessageId ?? null,
+      error_message: args.errorMessage ?? null,
+      sent_at: args.status === "sent" ? new Date().toISOString() : null,
+      created_at: new Date().toISOString(),
+    });
+  } catch {
+    // Audit table may not exist yet — never fail the main flow
+  }
+}
+
+// ─── Recipient / preference resolution ───────────────────────────────────────
+
+interface ResolvedRecipient extends NotificationRecipient {
+  skipReason?: string;
+}
+
 async function resolveEmailRecipients(args: {
   workspaceId: string;
   event: NotificationEventContext;
-}): Promise<string[]> {
+  /** Override: only consider these user IDs (in addition to normal resolution). */
+  targetUserIds?: string[];
+}): Promise<ResolvedRecipient[]> {
   const [workspacePrefs, recipients] = await Promise.all([
     getWorkspaceNotificationPrefs(args.workspaceId),
     getWorkspaceRecipients(args.workspaceId),
   ]);
-  if (!workspacePrefs.emailEnabled) return [];
-  if (!(workspacePrefs.events[args.event.category] ?? true)) return [];
 
-  const result: string[] = [];
+  if (!workspacePrefs.emailEnabled) {
+    console.log(`[notifications] email skipped — workspace=${args.workspaceId} emailEnabled=false`);
+    return [];
+  }
+  if (!(workspacePrefs.events[args.event.category] ?? true)) {
+    console.log(`[notifications] email skipped — workspace=${args.workspaceId} category=${args.event.category} disabled`);
+    return [];
+  }
+
+  const result: ResolvedRecipient[] = [];
   for (const recipient of recipients) {
+    // If targetUserIds is provided, skip members not in the target list
+    if (args.targetUserIds && args.targetUserIds.length > 0) {
+      if (!args.targetUserIds.includes(recipient.userId)) continue;
+    }
+
     const userPrefs = await getUserNotificationPrefs(recipient.userId).catch(() => undefined);
-    if (
-      shouldNotifyRecipientByContext(
-        { workspacePrefs, userPrefs, role: recipient.role },
-        args.event,
-      )
-    ) {
-      result.push(recipient.email);
+    const allowed = shouldNotifyRecipientByContext(
+      { workspacePrefs, userPrefs, role: recipient.role },
+      args.event,
+    );
+
+    if (allowed) {
+      result.push(recipient);
+    } else {
+      // Determine skip reason for audit
+      let skipReason = "preference_filtered";
+      if (!userPrefs) {
+        skipReason = "no_user_prefs";
+      } else if (userPrefs.emailEnabled === false) {
+        skipReason = "email_channel_disabled";
+      } else if (userPrefs.channels?.email === false) {
+        skipReason = "email_channel_disabled";
+      } else if (args.event.severity) {
+        const sev = args.event.severity;
+        const threshold = userPrefs.severityThreshold ?? "info";
+        const rankMap = { info: 1, warning: 2, critical: 3 };
+        if ((rankMap[sev] ?? 1) < (rankMap[threshold] ?? 1)) {
+          skipReason = "severity_below_threshold";
+        }
+      }
+      result.push({ ...recipient, skipReason });
     }
   }
   return result;
 }
 
-async function recordNotificationDelivery(args: {
-  workspaceId: string;
-  channel: "email" | "slack";
-  eventType: string;
-  recipient: string;
-  status: "sent" | "failed";
-  reason?: string;
-}) {
-  try {
-    const supabase = createVectorBeaAdminClient();
-    await supabase.schema("vectorbea").from("notification_deliveries").insert({
-      workspace_id: args.workspaceId,
-      channel: args.channel,
-      event_type: args.eventType,
-      recipient: args.recipient,
-      status: args.status,
-      reason: args.reason ?? null,
-      created_at: new Date().toISOString(),
-    });
-  } catch {
-    // optional table
-  }
-}
+// ─── Safe wrapper ─────────────────────────────────────────────────────────────
 
 async function safeRun(label: string, fn: () => Promise<void>) {
   const startedAt = Date.now();
@@ -137,6 +241,71 @@ async function safeRun(label: string, fn: () => Promise<void>) {
   }
 }
 
+// ─── Send with audit ──────────────────────────────────────────────────────────
+
+async function sendWithAudit(args: {
+  workspaceId: string;
+  eventType: string;
+  eventId?: string | null;
+  recipients: ResolvedRecipient[];
+  template: { subject: string; html: string; text: string };
+  channel: "email";
+}) {
+  await Promise.all(
+    args.recipients.map(async (recipient) => {
+      if (recipient.skipReason) {
+        await recordDelivery({
+          workspaceId: args.workspaceId,
+          channel: args.channel,
+          eventType: args.eventType,
+          eventId: args.eventId,
+          recipientUserId: recipient.userId,
+          recipientEmail: recipient.email,
+          status: "skipped",
+          skipReason: recipient.skipReason,
+        });
+        return;
+      }
+
+      // Idempotency check
+      if (await alreadySent({ eventType: args.eventType, eventId: args.eventId, recipientEmail: recipient.email, channel: args.channel })) {
+        console.log(`[notifications] idempotency skip ${args.eventType} → ${recipient.email}`);
+        await recordDelivery({
+          workspaceId: args.workspaceId,
+          channel: args.channel,
+          eventType: args.eventType,
+          eventId: args.eventId,
+          recipientUserId: recipient.userId,
+          recipientEmail: recipient.email,
+          status: "skipped",
+          skipReason: "already_sent",
+        });
+        return;
+      }
+
+      const result = await sendEmail({ ...args.template, to: recipient.email });
+      await recordDelivery({
+        workspaceId: args.workspaceId,
+        channel: args.channel,
+        eventType: args.eventType,
+        eventId: args.eventId,
+        recipientUserId: recipient.userId,
+        recipientEmail: recipient.email,
+        status: result.ok ? "sent" : "failed",
+        errorMessage: result.ok ? undefined : result.error,
+      });
+
+      if (!result.ok) {
+        console.error(`[notifications] email failed ${args.eventType} → ${recipient.email}: ${result.error}`);
+      } else {
+        console.log(`[notifications] email sent ${args.eventType} → ${recipient.email}`);
+      }
+    }),
+  );
+}
+
+// ─── Public notification functions ───────────────────────────────────────────
+
 export async function notifyEvaluationCompleted(args: {
   workspaceId: string;
   promptName: string;
@@ -144,6 +313,20 @@ export async function notifyEvaluationCompleted(args: {
   recommendation: string;
   score: number | null;
   runId: string;
+  // Rich context — optional for backwards compatibility
+  datasetName?: string | null;
+  runType?: "baseline" | "behavioral" | "trace_set";
+  passRate?: number | null;
+  totalCount?: number;
+  failedCount?: number;
+  needsReviewCount?: number;
+  hardFailureCount?: number;
+  averageConfidence?: number | null;
+  rubricName?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  durationMs?: number | null;
+  startedBy?: string | null;
 }) {
   const runUrl = `${appUrl()}/evaluations/${args.runId}?org=${encodeURIComponent(args.workspaceId)}`;
 
@@ -157,27 +340,23 @@ export async function notifyEvaluationCompleted(args: {
   });
 
   await safeRun("email:evaluation_completed", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
-        event: { category: "evaluations", severity: "info", promptName: args.promptName },
+        // Use "warning" not "info" so the default threshold doesn't filter it out
+        event: { category: "evaluations", severity: "warning", promptName: args.promptName },
       }),
     ]);
     const template = evaluationCompletedEmail({ ...args, workspaceId: args.workspaceId, workspaceName, runUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: "EVALUATION_COMPLETED",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: "EVALUATION_COMPLETED",
+      eventId: args.runId,
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 }
 
@@ -186,9 +365,16 @@ export async function notifyEvaluationFailed(args: {
   promptName: string;
   versionTag: string;
   reason: string;
-  runId: string;
+  runId?: string;
+  datasetName?: string | null;
+  runType?: "baseline" | "behavioral" | "trace_set";
+  provider?: string | null;
+  model?: string | null;
+  startedBy?: string | null;
 }) {
-  const runUrl = `${appUrl()}/evaluations/${args.runId}?org=${encodeURIComponent(args.workspaceId)}`;
+  const runUrl = args.runId
+    ? `${appUrl()}/evaluations/${args.runId}?org=${encodeURIComponent(args.workspaceId)}`
+    : `${appUrl()}/evaluations?org=${encodeURIComponent(args.workspaceId)}`;
 
   await safeRun("slack:evaluation_failed", async () => {
     if (!(await shouldSlackWorkspace(args.workspaceId, "evaluations"))) return;
@@ -200,7 +386,7 @@ export async function notifyEvaluationFailed(args: {
   });
 
   await safeRun("email:evaluation_failed", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
@@ -208,19 +394,14 @@ export async function notifyEvaluationFailed(args: {
       }),
     ]);
     const template = evaluationFailedEmail({ ...args, workspaceId: args.workspaceId, workspaceName, runUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: "EVALUATION_FAILED",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: "EVALUATION_FAILED",
+      eventId: args.runId,
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 }
 
@@ -230,6 +411,12 @@ export async function notifyRegressionFailed(args: {
   promptName: string | null;
   reason: string;
   runId: string | null;
+  // Rich context
+  previousScore?: number | null;
+  currentScore?: number | null;
+  failedCases?: number;
+  datasetName?: string | null;
+  promptVersion?: string | null;
 }) {
   const runUrl = args.runId
     ? `${appUrl()}/evaluations/${args.runId}?org=${encodeURIComponent(args.workspaceId)}`
@@ -245,7 +432,7 @@ export async function notifyRegressionFailed(args: {
   });
 
   await safeRun("email:regression_failed", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
@@ -253,19 +440,14 @@ export async function notifyRegressionFailed(args: {
       }),
     ]);
     const template = regressionFailedEmail({ ...args, workspaceId: args.workspaceId, workspaceName, runUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: "REGRESSION_FAILED",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: "REGRESSION_FAILED",
+      eventId: args.runId,
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 }
 
@@ -276,6 +458,12 @@ export async function notifyAlertTriggered(args: {
   metricValue: number;
   threshold: number;
   comparison: string;
+  // Rich context
+  alertEventId?: string | null;
+  promptName?: string | null;
+  environment?: string | null;
+  provider?: string | null;
+  model?: string | null;
 }) {
   const alertsUrl = `${appUrl()}/alerts?org=${encodeURIComponent(args.workspaceId)}`;
   const severity: "warning" | "critical" =
@@ -293,27 +481,22 @@ export async function notifyAlertTriggered(args: {
   });
 
   await safeRun("email:alert_triggered", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
-        event: { category: "alerts", severity },
+        event: { category: "alerts", severity, promptName: args.promptName, environment: args.environment },
       }),
     ]);
     const template = alertTriggeredEmail({ ...args, workspaceId: args.workspaceId, workspaceName, alertsUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: "ALERT_TRIGGERED",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: "ALERT_TRIGGERED",
+      eventId: args.alertEventId,
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 }
 
@@ -323,6 +506,12 @@ export async function notifyRolloutBlocked(args: {
   promptId: string;
   versionTag: string;
   reasons: string[];
+  // Rich context
+  rolloutCheckId?: string | null;
+  requestedBy?: string | null;
+  targetEnvironment?: string | null;
+  rolloutPercentage?: number | null;
+  gateResults?: Array<{ gate: string; status: "passed" | "failed" | "missing" | "not_required" }>;
 }) {
   const promptUrl = `${appUrl()}/prompts/${args.promptId}?org=${encodeURIComponent(args.workspaceId)}`;
 
@@ -336,7 +525,7 @@ export async function notifyRolloutBlocked(args: {
   });
 
   await safeRun("email:rollout_blocked", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
@@ -344,19 +533,14 @@ export async function notifyRolloutBlocked(args: {
       }),
     ]);
     const template = rolloutBlockedEmail({ ...args, workspaceId: args.workspaceId, workspaceName, promptUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: "ROLLOUT_BLOCKED",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: "ROLLOUT_BLOCKED",
+      eventId: args.rolloutCheckId,
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 }
 
@@ -379,7 +563,7 @@ export async function notifyPromptPromoted(args: {
   });
 
   await safeRun("email:prompt_promoted", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
@@ -387,19 +571,13 @@ export async function notifyPromptPromoted(args: {
       }),
     ]);
     const template = promptPromotedEmail({ ...args, workspaceId: args.workspaceId, workspaceName, promptUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: "ROLLOUT_APPROVED",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: "ROLLOUT_APPROVED",
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 }
 
@@ -413,7 +591,7 @@ export async function notifyQuotaWarning(args: {
   const pct = Math.round((args.used / args.limit) * 100);
 
   await safeRun("email:quota_warning", async () => {
-    const [workspaceName, recipients] = await Promise.all([
+    const [workspaceName, resolved] = await Promise.all([
       getWorkspaceName(args.workspaceId),
       resolveEmailRecipients({
         workspaceId: args.workspaceId,
@@ -421,19 +599,13 @@ export async function notifyQuotaWarning(args: {
       }),
     ]);
     const template = quotaWarningEmail({ ...args, workspaceId: args.workspaceId, workspaceName, billingUrl });
-    await Promise.all(
-      recipients.map(async (email) => {
-        const result = await sendEmail({ ...template, to: email });
-        await recordNotificationDelivery({
-          workspaceId: args.workspaceId,
-          channel: "email",
-          eventType: pct >= 100 ? "QUOTA_EXCEEDED" : "QUOTA_NEARING",
-          recipient: email,
-          status: result.ok ? "sent" : "failed",
-          reason: result.error,
-        });
-      }),
-    );
+    await sendWithAudit({
+      workspaceId: args.workspaceId,
+      eventType: pct >= 100 ? "QUOTA_EXCEEDED" : "QUOTA_NEARING",
+      recipients: resolved,
+      template,
+      channel: "email",
+    });
   });
 
   await safeRun("slack:quota_warning", async () => {

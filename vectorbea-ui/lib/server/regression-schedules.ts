@@ -348,6 +348,24 @@ export async function runRegressionSchedule(args: {
       .eq("workspace_id", args.workspaceId)
       .eq("id", args.scheduleId);
 
+    if (runLog.status === "failed") {
+      try {
+        const { notifyRegressionFailed } = await import("@/lib/server/notifications");
+        await notifyRegressionFailed({
+          workspaceId: args.workspaceId,
+          scheduleName: schedule.name,
+          promptName: schedule.promptName ?? datasetPromptName,
+          reason: runLog.errorReason ?? "Regression run completed with failures.",
+          runId: run.id,
+          datasetName,
+          promptVersion: candidateVersionId,
+          failedCases: failedTraceIds.length,
+        });
+      } catch {
+        // Notification failures must never fail the regression run
+      }
+    }
+
     return { evaluationRunId: run.id, runLog };
   } catch (error) {
     const now = new Date().toISOString();
