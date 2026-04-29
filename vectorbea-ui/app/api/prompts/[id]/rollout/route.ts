@@ -47,13 +47,24 @@ export async function POST(
       body.rolloutStatus === "active" ||
       (body.rolloutStatus === "candidate" && (body.rolloutPercentage ?? 0) > 0);
     if (shouldGate) {
-      const gate = await evaluateRolloutGate({
-        workspaceId,
-        promptId,
-        promptVersionId: body.promptVersionId,
-        checkedBy: auth.user.id,
-        targetEnvironment: "production",
-      });
+      let gate;
+      try {
+        gate = await evaluateRolloutGate({
+          workspaceId,
+          promptId,
+          promptVersionId: body.promptVersionId,
+          checkedBy: auth.user.id,
+          targetEnvironment: "production",
+        });
+      } catch (gateError) {
+        return NextResponse.json(
+          {
+            error: gateError instanceof Error ? gateError.message : "Unable to evaluate rollout safety gate",
+            code: "ROLLOUT_GATE_UNAVAILABLE",
+          },
+          { status: 409 },
+        );
+      }
       if (gate.status !== "passed") {
         return NextResponse.json(
           {

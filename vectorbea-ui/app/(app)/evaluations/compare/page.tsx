@@ -26,7 +26,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { TraceSetEvaluationRunView } from "@/lib/api";
+import type { BehavioralEvaluationRunView, TraceSetEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 function pct(v: number | null | undefined) {
@@ -47,11 +47,85 @@ function fmtDelta(d: number | null, unit = "", asPct = false) {
   return `${sign}${abs}${unit}`;
 }
 
+type ComparableRun = TraceSetEvaluationRunView | BehavioralEvaluationRunView;
+
 type RunSummary = {
   id: string;
   label: string;
-  run: TraceSetEvaluationRunView;
+  run: ComparableRun;
 };
+
+type RunSource = "trace_set" | "behavioral";
+
+function getRunPromptName(run: ComparableRun): string {
+  return (run.promptName ?? "Unknown prompt").trim() || "Unknown prompt";
+}
+
+function getRunVersionTag(run: ComparableRun): string {
+  if ("candidateVersionTag" in run) return run.candidateVersionTag ?? "Unknown version";
+  return run.promptVersionTag ?? "Unknown version";
+}
+
+function getRunCreatedAt(run: ComparableRun): string {
+  return run.createdAt;
+}
+
+function getRunAggregate(run: ComparableRun) {
+  if ("candidatePromptVersionId" in run) {
+    const aggregate = run.aggregate;
+    return {
+      total: aggregate.total,
+      succeeded: aggregate.succeeded,
+      failed: aggregate.failed,
+      score: aggregate.score,
+      confidence: aggregate.confidence,
+      criticalFailures: aggregate.criticalFailures,
+      averageLatencyDeltaMs: aggregate.averageLatencyDeltaMs,
+      recommendation: aggregate.recommendation,
+    };
+  }
+  const aggregate = run.aggregate;
+  return {
+    total: aggregate.total,
+    succeeded: aggregate.passCount,
+    failed: aggregate.failCount + aggregate.failed,
+    score: aggregate.finalScore,
+    confidence: aggregate.averageConfidence,
+    criticalFailures: aggregate.hardFailureCount,
+    averageLatencyDeltaMs: null as number | null,
+    recommendation: aggregate.passed ? "ready_for_rollout" : "needs_review",
+  };
+}
+
+function getRunProvider(run: ComparableRun): string | null {
+  if ("candidatePromptVersionId" in run) return run.results[0]?.provider ?? null;
+  return run.provider ?? null;
+}
+
+function getRunModel(run: ComparableRun): string | null {
+  if ("candidatePromptVersionId" in run) return run.results[0]?.model ?? null;
+  return run.model ?? null;
+}
+
+function getRunRecommendation(run: ComparableRun): string {
+  if ("candidatePromptVersionId" in run) return run.aggregate.recommendation;
+  return run.aggregate.passed ? "ready_for_rollout" : "needs_review";
+}
+
+function getRunItemRows(run: ComparableRun): Array<{ input: string; score: number | null; pass: boolean | null }> {
+  if ("candidatePromptVersionId" in run) {
+    return run.results.map((r) => ({
+      input: r.inputText?.slice(0, 70) ?? r.sourceTraceId?.slice(0, 18) ?? "—",
+      score: r.score,
+      pass: r.label === "pass",
+    }));
+  }
+  return run.results.map((r) => ({
+    input: r.input?.slice(0, 70) ?? r.datasetItemId?.slice(0, 18) ?? "—",
+    score: r.judge?.overallScore ?? null,
+    pass: r.judge?.pass ?? null,
+  }));
+}
 
 function MetricRow({
   label,
@@ -91,10 +165,10 @@ function buildRecommendation(left: RunSummary, right: RunSummary): {
   summary: string;
   reasons: string[];
 } {
-  const la = left.run.aggregate;
-  const ra = right.run.aggregate;
+  const la = getRunAggregate(left.run);
+  const ra = getRunAggregate(right.run);
 
-  if (left.run.promptName !== right.run.promptName) {
+  if (getRunPromptName(left.run) !== getRunPromptName(right.run)) {
     return {
       winner: "inconclusive",
       summary: "Cannot recommend because selected runs belong to different prompts",
@@ -102,9 +176,9 @@ function buildRecommendation(left: RunSummary, right: RunSummary): {
     };
   }
 
-  const sameDataset =
-    left.run.datasetName === right.run.datasetName ||
-    (!left.run.datasetName && !right.run.datasetName);
+  const leftDataset = left.run.datasetName ?? null;
+  const rightDataset = right.run.datasetName ?? null;
+  const sameDataset = leftDataset === rightDataset || (!leftDataset && !rightDataset);
 
   const reasons: string[] = [];
   let leftScore = 0;
@@ -169,7 +243,8 @@ function buildRecommendation(left: RunSummary, right: RunSummary): {
 export default function ComparePage() {
   const { activeWorkspaceId } = useWorkspace();
 
-  const [runs, setRuns] = useState<TraceSetEvaluationRunView[]>([]);
+  const [runs, setRuns] = useState<ComparableRun[]>([]);
+  const [runSourceById, setRunSourceById] = useState<Record<string, RunSource>>({});
   const [runsLoading, setRunsLoading] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
 
@@ -177,8 +252,8 @@ export default function ComparePage() {
   const [leftId, setLeftId] = useState("");
   const [rightId, setRightId] = useState("");
 
-  const [left, setLeft] = useState<TraceSetEvaluationRunView | null>(null);
-  const [right, setRight] = useState<TraceSetEvaluationRunView | null>(null);
+  const [left, setLeft] = useState<ComparableRun | null>(null);
+  const [right, setRight] = useState<ComparableRun | null>(null);
   const [loadingLeft, setLoadingLeft] = useState(false);
   const [loadingRight, setLoadingRight] = useState(false);
   const [errorLeft, setErrorLeft] = useState<string | null>(null);
@@ -187,7 +262,7 @@ export default function ComparePage() {
   const promptOptions = useMemo(() => {
     const unique = new Map<string, string>();
     for (const run of runs) {
-      const promptLabel = run.promptName?.trim() || "Unknown prompt";
+      const promptLabel = getRunPromptName(run);
       const key = promptLabel.toLowerCase();
       if (!unique.has(key)) unique.set(key, promptLabel);
     }
@@ -199,8 +274,8 @@ export default function ComparePage() {
   const promptScopedRuns = useMemo(() => {
     if (!selectedPrompt) return [];
     return runs
-      .filter((run) => (run.promptName?.trim().toLowerCase() || "unknown prompt") === selectedPrompt)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .filter((run) => (getRunPromptName(run).toLowerCase() || "unknown prompt") === selectedPrompt)
+      .sort((a, b) => new Date(getRunCreatedAt(b)).getTime() - new Date(getRunCreatedAt(a)).getTime());
   }, [runs, selectedPrompt]);
 
   const leftRunOptions = promptScopedRuns;
@@ -219,25 +294,38 @@ export default function ComparePage() {
     let cancelled = false;
     setRunsLoading(true);
     setRunsError(null);
-    fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" })
-      .then(async (response) => {
-        const json = await response.json().catch(() => []);
-        if (!response.ok) throw new Error(json?.error ?? "Failed to load evaluation runs");
-        return Array.isArray(json) ? (json as TraceSetEvaluationRunView[]) : [];
+    Promise.all([
+      fetch(`/api/evaluations/trace-sets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+      fetch(`/api/evaluations/behavioral-runs?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+    ])
+      .then(async ([traceRes, behavioralRes]) => {
+        const traceJson = await traceRes.json().catch(() => []);
+        const behavioralJson = await behavioralRes.json().catch(() => []);
+        if (!traceRes.ok) throw new Error(traceJson?.error ?? "Failed to load trace-set runs");
+        if (!behavioralRes.ok) throw new Error(behavioralJson?.error ?? "Failed to load behavioral runs");
+        const traceItems = Array.isArray(traceJson) ? (traceJson as TraceSetEvaluationRunView[]) : [];
+        const behavioralItems = Array.isArray(behavioralJson) ? (behavioralJson as BehavioralEvaluationRunView[]) : [];
+        const sourceMap: Record<string, RunSource> = {};
+        for (const run of traceItems) sourceMap[run.id] = "trace_set";
+        for (const run of behavioralItems) sourceMap[run.id] = "behavioral";
+        const items: ComparableRun[] = [...traceItems, ...behavioralItems];
+        items.sort((a, b) => new Date(getRunCreatedAt(b)).getTime() - new Date(getRunCreatedAt(a)).getTime());
+        return { items, sourceMap };
       })
-      .then((items) => {
+      .then(({ items, sourceMap }) => {
         if (cancelled) return;
         setRuns(items);
+        setRunSourceById(sourceMap);
 
         const idsFromUrl = new Set([leftId, rightId].filter(Boolean));
         const matched = items.filter((run) => idsFromUrl.has(run.id));
-        const promptFromUrl = matched[0]?.promptName?.trim().toLowerCase();
+        const promptFromUrl = matched[0] ? getRunPromptName(matched[0]).toLowerCase() : "";
         if (promptFromUrl) {
           setSelectedPrompt(promptFromUrl);
           return;
         }
         if (items.length > 0) {
-          setSelectedPrompt(items[0]?.promptName?.trim().toLowerCase() || "unknown prompt");
+          setSelectedPrompt(getRunPromptName(items[0]).toLowerCase() || "unknown prompt");
         }
       })
       .catch((error) => {
@@ -260,13 +348,18 @@ export default function ComparePage() {
     setLoading(true);
     setError(null);
     try {
+      const source = runSourceById[id];
+      const endpoint =
+        source === "behavioral"
+          ? `/api/evaluations/behavioral-runs/${encodeURIComponent(id.trim())}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`
+          : `/api/evaluations/trace-sets/${encodeURIComponent(id.trim())}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`;
       const res = await fetch(
-        `/api/evaluations/trace-sets/${encodeURIComponent(id.trim())}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        endpoint,
         { cache: "no-store" },
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to load run");
-      setRun(json as TraceSetEvaluationRunView);
+      setRun(json as ComparableRun);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load run");
     } finally {
@@ -278,18 +371,18 @@ export default function ComparePage() {
     if (leftId) void loadRun(leftId, "left");
     else setLeft(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftId, activeWorkspaceId]);
+  }, [leftId, activeWorkspaceId, runSourceById]);
 
   useEffect(() => {
     if (rightId) void loadRun(rightId, "right");
     else setRight(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rightId, activeWorkspaceId]);
+  }, [rightId, activeWorkspaceId, runSourceById]);
 
   useEffect(() => {
     if (!selectedPrompt) return;
-    const promptKeyFor = (run?: TraceSetEvaluationRunView) =>
-      run?.promptName?.trim().toLowerCase() || "unknown prompt";
+    const promptKeyFor = (run?: ComparableRun) =>
+      (run ? getRunPromptName(run).toLowerCase() : "unknown prompt");
     const leftRun = runs.find((run) => run.id === leftId);
     const rightRun = runs.find((run) => run.id === rightId);
 
@@ -307,14 +400,14 @@ export default function ComparePage() {
 
   const ready = left && right;
   const rec = ready
-    ? buildRecommendation(
-        { id: leftId, label: left.candidateVersionTag ?? "Run A", run: left },
-        { id: rightId, label: right.candidateVersionTag ?? "Run B", run: right },
+      ? buildRecommendation(
+        { id: leftId, label: getRunVersionTag(left), run: left },
+        { id: rightId, label: getRunVersionTag(right), run: right },
       )
     : null;
 
-  const la = left?.aggregate;
-  const ra = right?.aggregate;
+  const la = left ? getRunAggregate(left) : null;
+  const ra = right ? getRunAggregate(right) : null;
 
   return (
     <div className="min-h-screen">
@@ -378,7 +471,7 @@ export default function ComparePage() {
                       disabled={!selectedPrompt || leftRunOptions.length === 0}
                     >
                       <span className="truncate text-left">
-                        {leftRunOptions.find((run) => run.id === leftId)?.candidateVersionTag ?? "Select first run"}
+                        {leftRunOptions.find((run) => run.id === leftId) ? getRunVersionTag(leftRunOptions.find((run) => run.id === leftId) as ComparableRun) : "Select first run"}
                       </span>
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     </button>
@@ -393,7 +486,7 @@ export default function ComparePage() {
                     >
                       {leftRunOptions.map((run) => (
                         <DropdownMenuPanelRadioItem key={run.id} value={run.id}>
-                          {run.candidateVersionTag ?? run.id.slice(0, 8)} · {new Date(run.createdAt).toLocaleDateString()}
+                          {getRunVersionTag(run)} · {new Date(getRunCreatedAt(run)).toLocaleDateString()}
                         </DropdownMenuPanelRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -411,7 +504,7 @@ export default function ComparePage() {
                       disabled={!selectedPrompt || rightRunOptions.length === 0}
                     >
                       <span className="truncate text-left">
-                        {rightRunOptions.find((run) => run.id === rightId)?.candidateVersionTag ?? "Select second run"}
+                        {rightRunOptions.find((run) => run.id === rightId) ? getRunVersionTag(rightRunOptions.find((run) => run.id === rightId) as ComparableRun) : "Select second run"}
                       </span>
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     </button>
@@ -420,7 +513,7 @@ export default function ComparePage() {
                     <DropdownMenuRadioGroup value={rightId} onValueChange={setRightId}>
                       {rightRunOptions.map((run) => (
                         <DropdownMenuPanelRadioItem key={run.id} value={run.id}>
-                          {run.candidateVersionTag ?? run.id.slice(0, 8)} · {new Date(run.createdAt).toLocaleDateString()}
+                          {getRunVersionTag(run)} · {new Date(getRunCreatedAt(run)).toLocaleDateString()}
                         </DropdownMenuPanelRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -453,13 +546,13 @@ export default function ComparePage() {
                   ) : run ? (
                     <div className="text-xs text-muted-foreground space-y-1">
                       <p>
-                        <span className="font-medium text-foreground">{run.promptName}</span> @ {run.candidateVersionTag}
+                        <span className="font-medium text-foreground">{getRunPromptName(run)}</span> @ {getRunVersionTag(run)}
                       </p>
                       {run.datasetName && <p>Dataset: {run.datasetName}</p>}
-                      {run.results[0]?.provider && (
+                      {getRunProvider(run) && (
                         <p className="flex items-center gap-1.5">
-                          <ProviderIcon providerType={run.results[0].provider} className="h-3.5 w-3.5 shrink-0" />
-                          {run.results[0].provider} / {run.results[0].model ?? "—"}
+                          <ProviderIcon providerType={getRunProvider(run) as string} className="h-3.5 w-3.5 shrink-0" />
+                          {getRunProvider(run)} / {getRunModel(run) ?? "—"}
                         </p>
                       )}
                     </div>
@@ -517,20 +610,20 @@ export default function ComparePage() {
                     <tr className="border-b border-border bg-muted/30">
                       <th className="w-40 py-2.5 pl-4 pr-2 text-left text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Metric</th>
                       <th className="py-2.5 px-2 text-center text-xs font-semibold text-muted-foreground">
-                        {left.candidateVersionTag ?? "Run A"}
-                        {left.results[0]?.provider && (
+                        {getRunVersionTag(left)}
+                        {getRunProvider(left) && (
                           <div className="flex items-center justify-center gap-1 text-[10px] font-normal text-muted-foreground/70 truncate max-w-[140px] mt-0.5">
-                            <ProviderIcon providerType={left.results[0].provider} className="h-3 w-3 shrink-0" />
-                            {left.results[0].provider}
+                            <ProviderIcon providerType={getRunProvider(left) as string} className="h-3 w-3 shrink-0" />
+                            {getRunProvider(left)}
                           </div>
                         )}
                       </th>
                       <th className="py-2.5 px-2 text-center text-xs font-semibold text-muted-foreground">
-                        {right.candidateVersionTag ?? "Run B"}
-                        {right.results[0]?.provider && (
+                        {getRunVersionTag(right)}
+                        {getRunProvider(right) && (
                           <div className="flex items-center justify-center gap-1 text-[10px] font-normal text-muted-foreground/70 truncate max-w-[140px] mt-0.5">
-                            <ProviderIcon providerType={right.results[0].provider} className="h-3 w-3 shrink-0" />
-                            {right.results[0].provider}
+                            <ProviderIcon providerType={getRunProvider(right) as string} className="h-3 w-3 shrink-0" />
+                            {getRunProvider(right)}
                           </div>
                         )}
                       </th>
@@ -566,7 +659,7 @@ export default function ComparePage() {
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {[left, right].map((run, index) => {
-                  const recommendation = run.aggregate.recommendation;
+                  const recommendation = getRunRecommendation(run);
                   const variant =
                     recommendation === "ready_for_rollout"
                       ? "success"
@@ -576,7 +669,7 @@ export default function ComparePage() {
                   const runId = index === 0 ? leftId : rightId;
                   return (
                     <div key={runId} className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
-                      <span className="text-xs text-muted-foreground">{run.candidateVersionTag}</span>
+                      <span className="text-xs text-muted-foreground">{getRunVersionTag(run)}</span>
                       <div className="flex items-center gap-2">
                         <Badge variant={variant} className="text-[10px] capitalize">
                           {recommendation?.replaceAll("_", " ") ?? "—"}
@@ -593,7 +686,7 @@ export default function ComparePage() {
           </Card>
         )}
 
-        {ready && left.results.length > 0 && right.results.length > 0 && (
+        {ready && getRunItemRows(left).length > 0 && getRunItemRows(right).length > 0 && (
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -607,29 +700,29 @@ export default function ComparePage() {
                     <tr className="border-b border-border bg-muted/30">
                       <th className="py-2.5 pl-4 pr-2 text-left font-semibold text-muted-foreground">#</th>
                       <th className="py-2.5 px-2 text-left font-semibold text-muted-foreground">Input</th>
-                      <th className="py-2.5 px-2 text-right font-semibold text-muted-foreground">{left.candidateVersionTag ?? "A"} score</th>
-                      <th className="py-2.5 px-2 text-right font-semibold text-muted-foreground">{right.candidateVersionTag ?? "B"} score</th>
+                      <th className="py-2.5 px-2 text-right font-semibold text-muted-foreground">{getRunVersionTag(left)} score</th>
+                      <th className="py-2.5 px-2 text-right font-semibold text-muted-foreground">{getRunVersionTag(right)} score</th>
                       <th className="py-2.5 pl-2 pr-4 text-right font-semibold text-muted-foreground">Delta</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {left.results.slice(0, 50).map((lr, i) => {
-                      const rr = right.results[i];
+                    {getRunItemRows(left).slice(0, 50).map((lr, i) => {
+                      const rr = getRunItemRows(right)[i];
                       const d = rr && lr.score != null && rr.score != null ? rr.score - lr.score : null;
                       const dColor = d == null ? "" : d > 0.02 ? "text-emerald-700" : d < -0.02 ? "text-red-700" : "text-muted-foreground";
                       return (
                         <tr key={i} className="border-b border-border/40 last:border-0 hover:bg-muted/10">
                           <td className="py-2 pl-4 pr-2 text-muted-foreground">{i + 1}</td>
                           <td className="py-2 px-2 max-w-[220px] truncate text-foreground/80">
-                            {lr.inputText?.slice(0, 70) ?? lr.sourceTraceId?.slice(0, 18) ?? "—"}
+                            {lr.input}
                           </td>
                           <td className="py-2 px-2 text-right tabular-nums font-medium">
                             {lr.score != null ? `${Math.round(lr.score * 100)}%` : "—"}
-                            {lr.label !== "pass" && <XCircle className="inline h-3 w-3 ml-1 text-red-700" />}
+                            {lr.pass === false && <XCircle className="inline h-3 w-3 ml-1 text-red-700" />}
                           </td>
                           <td className="py-2 px-2 text-right tabular-nums font-medium">
                             {rr?.score != null ? `${Math.round(rr.score * 100)}%` : "—"}
-                            {rr && rr.label !== "pass" && <XCircle className="inline h-3 w-3 ml-1 text-red-700" />}
+                            {rr && rr.pass === false && <XCircle className="inline h-3 w-3 ml-1 text-red-700" />}
                           </td>
                           <td className={`py-2 pl-2 pr-4 text-right tabular-nums font-medium ${dColor}`}>
                             {d != null ? `${d > 0 ? "+" : ""}${Math.round(d * 100)}%` : "—"}
@@ -640,7 +733,7 @@ export default function ComparePage() {
                   </tbody>
                 </table>
               </div>
-              {left.results.length > 50 && (
+              {getRunItemRows(left).length > 50 && (
                 <p className="mt-2 text-[10px] text-muted-foreground text-center">Showing first 50 items.</p>
               )}
             </CardContent>

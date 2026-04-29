@@ -57,7 +57,7 @@ function esc(value: string | number | null | undefined): string {
 
 function statusBadge(label: string, tone: StatusTone): string {
   const c = toneColors(tone);
-  return `<span style="display:inline-block;padding:4px 12px;border-radius:999px;background:${c.bg};border:1px solid ${c.border};color:${c.text};font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">${esc(label)}</span>`;
+  return `<span style="display:inline-block;padding:4px 12px;border-radius:999px;background:${c.bg};border:1px solid ${c.border};color:${c.text};font-size:11px;font-weight:700;">${esc(label)}</span>`;
 }
 
 function kvTable(rows: Array<{ key: string; value: string | null | undefined }>): string {
@@ -66,7 +66,7 @@ function kvTable(rows: Array<{ key: string; value: string | null | undefined }>)
   const body = filtered
     .map(
       (row) => `<tr>
-  <td style="padding:9px 14px;border-bottom:1px solid ${T.border};width:36%;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${T.textMuted};vertical-align:top;">${esc(row.key)}</td>
+  <td style="padding:9px 14px;border-bottom:1px solid ${T.border};width:36%;font-size:11px;font-weight:700;color:${T.textMuted};vertical-align:top;">${esc(row.key)}</td>
   <td style="padding:9px 14px;border-bottom:1px solid ${T.border};font-size:13px;font-weight:600;color:${T.textPrimary};word-break:break-word;">${esc(row.value ?? "")}</td>
 </tr>`,
     )
@@ -93,13 +93,13 @@ function calloutBox(text: string, tone: StatusTone): string {
 
 function nextStep(text: string): string {
   return `<div style="margin:0 0 20px;padding:12px 16px;border-radius:10px;background:${T.neutralBg};border:1px solid ${T.border};">
-  <p style="margin:0 0 3px;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${T.textMuted};">Recommended next step</p>
+  <p style="margin:0 0 3px;font-size:11px;font-weight:700;color:${T.textMuted};">Recommended next step</p>
   <p style="margin:0;font-size:13px;line-height:1.6;color:${T.textBody};">${esc(text)}</p>
 </div>`;
 }
 
 function sectionHeading(text: string): string {
-  return `<p style="margin:20px 0 8px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:${T.textMuted};">${esc(text)}</p>`;
+  return `<p style="margin:20px 0 8px;font-size:11px;font-weight:700;color:${T.textMuted};">${esc(text)}</p>`;
 }
 
 function divider(): string {
@@ -149,7 +149,7 @@ function layout(args: {
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <title>VectorBea notification</title>
 </head>
-<body style="margin:0;padding:0;background:${T.page};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:${T.page};font-family:Geist,Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;mso-hide:all;">${esc(preheader)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>` : ""}
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${T.page};padding:28px 12px;">
   <tr>
@@ -161,8 +161,13 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
           <td style="padding:0 0 6px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">VectorBea</td>
-                <td align="right" style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${T.textMuted};">${workspaceName}</td>
+                <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">
+                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textPrimary};display:inline-flex;align-items:center;gap:8px;">
+                    <img src="${APP_URL()}/icon.svg" width="18" height="18" alt="VectorBea logo" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;" />
+                    <span style="display:inline-block;vertical-align:middle;">VectorBea</span>
+                  </a>
+                </td>
+                <td align="right" style="font-size:11px;font-weight:600;color:${T.textMuted};">${workspaceName}</td>
               </tr>
             </table>
           </td>
