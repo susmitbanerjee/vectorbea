@@ -8,6 +8,7 @@ import type { Route } from "next";
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { BehavioralEvaluationRunView } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -143,6 +144,107 @@ export function BehavioralRunShell({ runId }: { runId: string }) {
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={selectedIndex !== null} onOpenChange={(open) => { if (!open) setSelectedIndex(null); }}>
+          {selected && (
+            <DialogContent className="max-w-4xl border-[#E7DED1] bg-white">
+              <DialogHeader>
+                <DialogTitle className="text-[#111111]">Case details</DialogTitle>
+                <DialogDescription className="text-[#6B7280]">
+                  {selected.provider}/{selected.model} · execution {selected.evaluationExecutionId.slice(0, 8)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1 text-sm">
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Input</p>
+                  <div className="whitespace-pre-wrap rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111]">{selected.input}</div>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Context</p>
+                  <div className="whitespace-pre-wrap rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111]">{selected.context ?? "No context provided"}</div>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Model output</p>
+                  <div className="whitespace-pre-wrap rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-[#111111]">{selected.output ?? "No output"}</div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] p-3">
+                    <p className="text-xs text-[#6B7280]">Overall score</p>
+                    <p className={`mt-1 text-xl font-semibold ${scoreTone(selected.judge?.overallScore ?? null)}`}>
+                      {selected.judge?.overallScore != null ? `${Math.round(selected.judge.overallScore)}%` : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] p-3">
+                    <p className="text-xs text-[#6B7280]">Pass or fail</p>
+                    <p className={`mt-1 text-xl font-semibold ${selected.judge?.pass ? "text-[#065F46]" : "text-[#991B1B]"}`}>
+                      {selected.judge?.pass ? "Pass" : "Fail"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] p-3">
+                    <p className="text-xs text-[#6B7280]">Confidence</p>
+                    <p className="mt-1 text-xl font-semibold text-[#111111]">
+                      {selected.judge?.confidence != null ? `${Math.round(selected.judge.confidence * 100)}%` : "—"}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Dimension scores</p>
+                    <div className="space-y-1 rounded-xl border border-[#E7DED1] bg-white px-3 py-2">
+                      {Object.entries(selected.judge?.dimensionScores ?? {}).length === 0 ? (
+                        <p className="text-[#6B7280]">No dimension scores</p>
+                      ) : (
+                        Object.entries(selected.judge?.dimensionScores ?? {}).map(([name, value]) => (
+                          <div key={name} className="flex items-center justify-between text-[#374151]">
+                            <span>{name}</span>
+                            <span className={scoreTone(value)}>{Math.round(value)}%</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Hard failures</p>
+                    <div className="space-y-1 rounded-xl border border-[#E7DED1] bg-white px-3 py-2">
+                      {(selected.judge?.hardFailures.length ?? 0) === 0 ? (
+                        <p className="text-[#6B7280]">No hard failures</p>
+                      ) : selected.judge?.hardFailures.map((failure, index) => (
+                        <div key={`${failure.rule}-${index}`} className="text-[#991B1B]">
+                          <p className="font-medium">{failure.rule} · {failure.severity}</p>
+                          <p className="text-xs text-[#7F1D1D]">{failure.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Strengths</p>
+                    <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-[#374151]">
+                      {(selected.judge?.strengths?.length ?? 0) > 0 ? selected.judge?.strengths.join(", ") : "None"}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Weaknesses</p>
+                    <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-[#374151]">
+                      {(selected.judge?.weaknesses?.length ?? 0) > 0 ? selected.judge?.weaknesses.join(", ") : "None"}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Risk flags</p>
+                    <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-[#374151]">
+                      {(selected.judge?.riskFlags?.length ?? 0) > 0 ? selected.judge?.riskFlags.join(", ") : "None"}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Judge reasoning</p>
+                  <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111]">{selected.judge?.verdictReason ?? "Unavailable"}</div>
+                </div>
+              </div>
+            </DialogContent>
+          )}
+        </Dialog>
 
         {run.runType === "provider_arena" && run.arenaReport && (
           <>
@@ -331,7 +433,7 @@ export function BehavioralRunShell({ runId }: { runId: string }) {
           </CardContent>
         </Card>
 
-        {selected && (
+        {selected !== null && false && (
           <Card className="border-[#E7DED1] bg-white">
             <CardHeader className="flex-row items-start justify-between space-y-0">
               <CardTitle className="text-[#111111]">Case detail</CardTitle>
@@ -340,23 +442,23 @@ export function BehavioralRunShell({ runId }: { runId: string }) {
             <CardContent className="space-y-4 text-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Input</p>
-                <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 whitespace-pre-wrap text-[#111111]">{selected.input}</div>
+                <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 whitespace-pre-wrap text-[#111111]">{selected?.input}</div>
               </div>
-              {!!selected.context && (
+              {!!selected?.context && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Context</p>
-                  <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 whitespace-pre-wrap text-[#111111]">{selected.context}</div>
+                  <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 whitespace-pre-wrap text-[#111111]">{selected?.context}</div>
                 </div>
               )}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Output</p>
-                <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 whitespace-pre-wrap text-[#111111]">{selected.output ?? "No output"}</div>
+                <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 whitespace-pre-wrap text-[#111111]">{selected?.output ?? "No output"}</div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Dimension scores</p>
                   <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 space-y-1">
-                    {Object.entries(selected.judge?.dimensionScores ?? {}).map(([name, value]) => (
+                    {Object.entries(selected?.judge?.dimensionScores ?? {}).map(([name, value]) => (
                       <div key={name} className="flex items-center justify-between text-[#374151]">
                         <span>{name}</span>
                         <span className={scoreTone(value)}>{Math.round(value)}%</span>
@@ -367,9 +469,9 @@ export function BehavioralRunShell({ runId }: { runId: string }) {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Hard failures</p>
                   <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2 space-y-1">
-                    {(selected.judge?.hardFailures.length ?? 0) === 0 ? (
+                    {(selected?.judge?.hardFailures.length ?? 0) === 0 ? (
                       <p className="text-[#6B7280]">No hard failures</p>
-                    ) : selected.judge?.hardFailures.map((failure, index) => (
+                    ) : selected?.judge?.hardFailures.map((failure, index) => (
                       <div key={`${failure.rule}-${index}`} className="text-[#991B1B]">
                         <p className="font-medium">{failure.rule} · {failure.severity}</p>
                         <p className="text-xs text-[#7F1D1D]">{failure.reason}</p>
@@ -380,7 +482,7 @@ export function BehavioralRunShell({ runId }: { runId: string }) {
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Judge reasoning</p>
-                <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111]">{selected.judge?.verdictReason ?? "Unavailable"}</div>
+                <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111]">{selected?.judge?.verdictReason ?? "Unavailable"}</div>
               </div>
             </CardContent>
           </Card>
