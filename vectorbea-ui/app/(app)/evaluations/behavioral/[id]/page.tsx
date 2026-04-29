@@ -1489,7 +1489,7 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
         BehavioralEvaluationRunView[] | { error?: string },
         EvaluationRubric[] | { error?: string },
         Array<{ providerType: string; defaultModel: string | null }> | { error?: string },
-        Array<{ id: string; versionTag: string }> | { error?: string },
+        Array<{ id?: string; promptVersionId?: string; versionTag?: string }> | { error?: string },
       ];
       if (!runsRes.ok) throw new Error((runsJson as { error?: string }).error ?? "Failed to load runs");
       if (!arenaRes.ok) throw new Error((arenaJson as { error?: string }).error ?? "Failed to load provider arena runs");
@@ -1505,11 +1505,17 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
       setRubrics(rubricRows);
       const providerRows = providersJson as Array<{ providerType: string; defaultModel: string | null }>;
       setProviders(providerRows);
-      setVersions(versionsJson as Array<{ id: string; versionTag: string }>);
+      const normalizedVersions = ((versionsJson as Array<{ id?: string; promptVersionId?: string; versionTag?: string }>) ?? [])
+        .map((entry) => ({
+          id: String(entry.id ?? entry.promptVersionId ?? "").trim(),
+          versionTag: String(entry.versionTag ?? "").trim(),
+        }))
+        .filter((entry) => entry.id.length > 0);
+      setVersions(normalizedVersions);
 
       if (!rubricId && rubricRows[0]?.id) setRubricId(rubricRows[0].id);
-      if (!promptVersionId && (versionsJson as Array<{ id: string; versionTag: string }>)[0]?.id) {
-        setPromptVersionId((versionsJson as Array<{ id: string; versionTag: string }>)[0].id);
+      if (!promptVersionId && normalizedVersions[0]?.id) {
+        setPromptVersionId(normalizedVersions[0].id);
       }
       if (!provider && providerRows[0]?.providerType) {
         setProvider(providerRows[0].providerType);

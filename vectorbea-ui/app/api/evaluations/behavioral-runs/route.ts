@@ -59,7 +59,15 @@ export async function POST(request: NextRequest) {
       runName?: string;
     };
 
-    if (!body.datasetId?.trim() || !body.rubricId?.trim() || !body.promptVersionId?.trim() || !body.provider?.trim()) {
+    const promptVersionId = body.promptVersionId?.trim();
+    if (
+      !body.datasetId?.trim() ||
+      !body.rubricId?.trim() ||
+      !promptVersionId ||
+      promptVersionId === "undefined" ||
+      promptVersionId === "null" ||
+      !body.provider?.trim()
+    ) {
       return NextResponse.json(
         { error: "datasetId, rubricId, promptVersionId and provider are required" },
         { status: 400 },
@@ -69,7 +77,7 @@ export async function POST(request: NextRequest) {
       workspaceId,
       datasetId: body.datasetId.trim(),
       rubricId: body.rubricId.trim(),
-      promptVersionId: body.promptVersionId.trim(),
+      promptVersionId,
       provider: body.provider.trim(),
       model: body.model?.trim() || "default",
       runName: body.runName?.trim() || undefined,

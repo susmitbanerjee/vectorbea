@@ -355,13 +355,19 @@ function computeConfidence(args: {
 }
 
 async function loadPromptVersion(promptVersionId: string) {
+  const normalizedId = promptVersionId.trim();
+  if (!normalizedId || normalizedId === "undefined" || normalizedId === "null") {
+    throw new Error("Prompt version not found: invalid promptVersionId");
+  }
   const supabase = createVectorBeaAdminClient();
   const { data, error } = await supabase
     .from("prompt_versions")
     .select("id,prompt_id,version_tag,template_text,prompts(id,name)")
-    .eq("id", promptVersionId)
+    .eq("id", normalizedId)
     .single();
-  if (error || !data) throw new Error("Prompt version not found");
+  if (error || !data) {
+    throw new Error(`Prompt version not found for id '${normalizedId}'`);
+  }
   return data as PromptVersionRow;
 }
 

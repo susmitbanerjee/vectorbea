@@ -42,7 +42,16 @@ export async function POST(request: NextRequest) {
       runName?: string;
       candidates?: ProviderArenaCandidateInput[];
     };
-    if (!body.datasetId?.trim() || !body.rubricId?.trim() || !body.promptVersionId?.trim() || !Array.isArray(body.candidates) || body.candidates.length === 0) {
+    const promptVersionId = body.promptVersionId?.trim();
+    if (
+      !body.datasetId?.trim() ||
+      !body.rubricId?.trim() ||
+      !promptVersionId ||
+      promptVersionId === "undefined" ||
+      promptVersionId === "null" ||
+      !Array.isArray(body.candidates) ||
+      body.candidates.length === 0
+    ) {
       return NextResponse.json({ error: "datasetId, rubricId, promptVersionId and candidates are required" }, { status: 400 });
     }
 
@@ -55,7 +64,7 @@ export async function POST(request: NextRequest) {
       workspaceId,
       datasetId: body.datasetId.trim(),
       rubricId: body.rubricId.trim(),
-      promptVersionId: body.promptVersionId.trim(),
+      promptVersionId,
       runName: body.runName?.trim() || undefined,
       candidates: body.candidates,
       startedBy: auth.user.id,
