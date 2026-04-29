@@ -30,6 +30,7 @@ export type WorkspacePlanLimits = {
 function normalizePlanTier(planTier?: PlanTier | null): PlanTier {
   if (
     planTier === "team" ||
+    planTier === "plus" ||
     planTier === "pro" ||
     planTier === "enterprise"
   ) {

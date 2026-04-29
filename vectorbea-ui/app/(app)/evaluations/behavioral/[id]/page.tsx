@@ -1530,6 +1530,14 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
 
   useEffect(() => { void load(); }, [load]);
 
+  // Poll every 4 seconds while any run is in "running" state
+  useEffect(() => {
+    const hasRunning = [...runs, ...arenaRuns].some((run) => run.status === "running");
+    if (!hasRunning) return;
+    const timer = setInterval(() => { void load(); }, 4000);
+    return () => clearInterval(timer);
+  }, [runs, arenaRuns, load]);
+
   useEffect(() => {
     const selected = providers.find((item) => item.providerType === provider);
     if (selected?.defaultModel) setModel(selected.defaultModel);
@@ -1793,9 +1801,16 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
                       <td className="py-2.5 text-[#374151]">{run.provider}</td>
                       <td className="py-2.5 text-[#374151]">{run.model}</td>
                       <td className="py-2.5">
-                        <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#EFF6FF] text-[#1D4ED8]"}>
-                          {run.status}
-                        </Badge>
+                        {run.status === "running" ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-xs font-medium text-[#1D4ED8]">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Running…
+                          </span>
+                        ) : (
+                          <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#F3F4F6] text-[#374151]"}>
+                            {run.status}
+                          </Badge>
+                        )}
                       </td>
                       <td className="py-2.5 text-right font-medium text-[#111111]">{run.aggregate.finalScore !== null ? `${Math.round(run.aggregate.finalScore)}%` : "—"}</td>
                       <td className="py-2.5 text-right">

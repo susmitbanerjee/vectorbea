@@ -897,6 +897,12 @@ export async function createTraceSetEvaluationRun(args: {
     });
   } catch { /* notification errors must never fail the main flow */ }
 
+  // Populate the human review queue for any low-confidence or hard-failure items
+  try {
+    const { buildReviewQueueForRun } = await import("@/lib/server/provider-arena-governance");
+    await buildReviewQueueForRun({ workspaceId: args.workspaceId, evaluationRunId: view.id });
+  } catch { /* review queue population must never fail the main flow */ }
+
   return view;
 }
 
@@ -2013,6 +2019,12 @@ export async function createDatasetEvaluationRun(args: {
       runId: view.id,
     });
   } catch { /* notification errors must never fail the main flow */ }
+
+  // Populate the human review queue for any low-confidence or hard-failure items
+  try {
+    const { buildReviewQueueForRun } = await import("@/lib/server/provider-arena-governance");
+    await buildReviewQueueForRun({ workspaceId: args.workspaceId, evaluationRunId: view.id });
+  } catch { /* review queue population must never fail the main flow */ }
 
   return view;
 }

@@ -295,7 +295,7 @@ export default function ScheduledRegressionsPage() {
               <DropdownMenuPanelRadioItem key={p.id} value={p.name}>
                 <span className="flex w-full items-center justify-between gap-2">
                   <span className="truncate">{p.name}</span>
-                  {p.isPublished && <span className="shrink-0 text-[10px] text-emerald-400">published</span>}
+                  {p.isPublished && <span className="shrink-0 text-[10px] text-[#065F46] font-medium">published</span>}
                 </span>
               </DropdownMenuPanelRadioItem>
             ))}
@@ -310,11 +310,11 @@ export default function ScheduledRegressionsPage() {
       <AppHeader title="Scheduled Regressions" subtitle="Automatically run evaluation runs against baselines on a schedule." />
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
         {/* CI callout */}
-        <Card className="border-emerald-500/25 bg-emerald-500/10">
+        <Card className="border-[#6EE7B7]/50 bg-[#ECFDF5]">
           <CardContent className="flex items-start gap-3 p-4">
-            <Info className="h-4 w-4 mt-0.5 shrink-0 text-emerald-300" />
-            <p className="text-sm text-emerald-50">
-              The built-in scheduler checks enabled schedules and runs them when <span className="font-mono text-xs">next_run_at</span> is due. Use <span className="font-medium">Run now</span> for an immediate execution with the same persisted run logs.
+            <Info className="h-4 w-4 mt-0.5 shrink-0 text-[#065F46]" />
+            <p className="text-sm text-[#047857]">
+              The built-in scheduler checks enabled schedules and runs them when <span className="font-mono text-xs bg-[#D1FAE5] px-1 rounded text-[#065F46]">next_run_at</span> is due. Use <span className="font-medium">Run now</span> for an immediate execution with the same persisted run logs.
             </p>
           </CardContent>
         </Card>
@@ -379,7 +379,7 @@ export default function ScheduledRegressionsPage() {
                     const preview = !err ? cronToHumanText(form.cronExpression) : null;
                     return err
                       ? <p className="text-xs text-red-400 mt-1">{err}</p>
-                      : <p className="flex items-center gap-1 text-xs text-green-400 mt-1"><Clock className="h-3 w-3" />{preview}</p>;
+                      : <p className="flex items-center gap-1 text-xs text-[#047857] mt-1"><Clock className="h-3 w-3" />{preview}</p>;
                   })()}
                 </div>
               </div>
@@ -485,7 +485,7 @@ export default function ScheduledRegressionsPage() {
                           <span>Dataset: <span className="text-foreground font-medium">{schedule.lastRunLog.baselineDatasetName ?? getDatasetName(schedule.lastRunLog.baselineDatasetId ?? "") ?? "—"}</span></span>
                           <span>Items run: <span className="text-foreground font-medium tabular-nums">{schedule.lastRunLog.replayCount}</span></span>
                           <span>Started: {new Date(schedule.lastRunLog.startedAt).toLocaleString()}</span>
-                          <span>Completed: {schedule.lastRunLog.completedAt ? new Date(schedule.lastRunLog.completedAt).toLocaleString() : <span className="text-amber-400">Still running…</span>}</span>
+                          <span>Completed: {schedule.lastRunLog.completedAt ? new Date(schedule.lastRunLog.completedAt).toLocaleString() : <span className="text-amber-700 font-medium">Still running…</span>}</span>
                           {schedule.lastRunLog.evaluationRunId && (
                             <span className="sm:col-span-2">
                               Evaluation run:{" "}
@@ -499,10 +499,10 @@ export default function ScheduledRegressionsPage() {
                             </span>
                           )}
                           {schedule.lastRunLog.failedTraceIds.length > 0 && (
-                            <span className="sm:col-span-2 text-amber-300">{schedule.lastRunLog.failedTraceIds.length} item(s) failed execution.</span>
+                            <span className="sm:col-span-2 text-amber-700">{schedule.lastRunLog.failedTraceIds.length} item(s) failed execution.</span>
                           )}
                           {schedule.lastRunLog.errorReason && (
-                            <span className="sm:col-span-2 text-red-300">Error: {schedule.lastRunLog.errorReason}</span>
+                            <span className="sm:col-span-2 text-red-700">Error: {schedule.lastRunLog.errorReason}</span>
                           )}
                         </div>
                       </details>
@@ -528,7 +528,7 @@ export default function ScheduledRegressionsPage() {
                                   </a>
                                 )}
                               </div>
-                              {run.errorReason && <p className="mt-1 text-red-300">{run.errorReason}</p>}
+                              {run.errorReason && <p className="mt-1 text-red-700">{run.errorReason}</p>}
                             </div>
                           ))}
                         </div>
@@ -555,7 +555,7 @@ export default function ScheduledRegressionsPage() {
                       {togglingId === schedule.id
                         ? <Loader2 className="h-4 w-4 animate-spin" />
                         : schedule.enabled
-                          ? <ToggleRight className="h-4 w-4 text-green-500" />
+                          ? <ToggleRight className="h-4 w-4 text-[#059669]" />
                           : <ToggleLeft className="h-4 w-4" />
                       }
                     </button>

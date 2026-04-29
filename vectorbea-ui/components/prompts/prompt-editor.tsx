@@ -847,12 +847,12 @@ export function PromptEditor({
 
           <TabsContent value="rollout" className="space-y-4">
             {rolloutComplete && (
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/8 px-5 py-5 space-y-4">
+              <div className="rounded-xl border border-[#6EE7B7]/60 bg-[#ECFDF5] px-5 py-5 space-y-4">
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5 shrink-0" />
+                  <CheckCircle2 className="h-5 w-5 text-[#065F46] mt-0.5 shrink-0" />
                   <div className="space-y-1">
-                    <p className="font-semibold text-emerald-300">Rollout complete</p>
-                    <p className="text-sm text-emerald-200/80">
+                    <p className="font-semibold text-[#065F46]">Rollout complete</p>
+                    <p className="text-sm text-[#047857]">
                       Version <strong>{rolloutComplete.versionTag}</strong> is now Active — all traffic is routed to this version.
                       The previous active version has been marked Deprecated.
                     </p>
@@ -862,7 +862,7 @@ export function PromptEditor({
                   {rolloutComplete.evalRunId && (
                     <a
                       href={`/evaluations/${encodeURIComponent(rolloutComplete.evalRunId)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#6EE7B7]/60 bg-white px-3 py-1.5 text-xs font-medium text-[#065F46] hover:bg-[#D1FAE5] transition-colors"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
                       View evaluation report
@@ -898,7 +898,7 @@ export function PromptEditor({
                 </div>
 
                 {!rolloutDist.activeVersionId && (
-                  <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                  <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                     ⚠ No active version. Runtime will return an error until a version is set to Active.
                   </div>
                 )}

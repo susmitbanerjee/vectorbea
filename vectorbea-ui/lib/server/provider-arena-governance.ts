@@ -511,14 +511,18 @@ export async function evaluateRolloutGate(args: {
   if (behavioral) evalIds.push(String(behavioral.id));
   if (arena) evalIds.push(String(arena.id));
 
-  const behavioralSummary = asRecord(behavioral?.summary);
-  const behavioralPassed = Boolean(behavioralSummary.passed);
-  if (!behavioral || !behavioralPassed) {
-    reasons.push("Behavioral evaluation is missing or not passed");
-    decision = "needs_review";
-    status = "needs_review";
+  // Behavioral eval is optional — only block if it exists and explicitly failed
+  if (behavioral) {
+    const behavioralSummary = asRecord(behavioral.summary);
+    const behavioralPassed = Boolean(behavioralSummary.passed);
+    if (!behavioralPassed) {
+      reasons.push("Behavioral evaluation did not pass");
+      decision = "needs_review";
+      status = "needs_review";
+    }
   }
 
+  // Provider Arena run is optional — only factor in if a run exists
   if (arena) {
     const arenaSummary = asRecord(arena.summary);
     const maybeRisk = asNumber(arenaSummary.risk_score ?? asRecord(arenaSummary.arena_report).risk_score);
@@ -535,10 +539,6 @@ export async function evaluateRolloutGate(args: {
     } else if (recommendation === "rollout_with_caution" && status === "passed") {
       decision = "rollout_with_caution";
     }
-  } else {
-    reasons.push("Provider Arena run is missing for this prompt version");
-    decision = "needs_review";
-    status = "needs_review";
   }
 
   const openCriticalReviews = (reviewsRes.data ?? []).filter((entry) => String(entry.severity).toLowerCase() === "critical");

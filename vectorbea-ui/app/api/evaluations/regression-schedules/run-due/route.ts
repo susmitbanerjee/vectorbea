@@ -4,6 +4,7 @@ import { runDueRegressionSchedules } from "@/lib/server/regression-schedules";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {

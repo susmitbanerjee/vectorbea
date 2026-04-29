@@ -33,6 +33,14 @@ const USAGE_LIMITS: UsagePlanLimits = {
     alert_rules: 20,
     team_seats: 15,
   },
+  plus: {
+    runtime_traces: 100_000,
+    replay_runs: 10_000,
+    evaluation_runs: 1_000,
+    regression_runs: 100,
+    alert_rules: 20,
+    team_seats: 15,
+  },
   pro: {
     runtime_traces: 250_000,
     replay_runs: 25_000,

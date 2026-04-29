@@ -71,7 +71,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<DashboardSummary | null>(summary);
   const { isAdmin, isEditor } = useRBAC();
-  const { activeWorkspaceId } = useWorkspace();
+  const { activeWorkspaceId, planTier } = useWorkspace();
 
   const navigation = useMemo(() => {
     return ALL_NAV_ITEMS.filter((item) => {
@@ -215,6 +215,24 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             {workspaceSummary ? "Live" : "Off"}
           </Badge>
         </div>
+
+        {/* Plan badge */}
+        {planTier && planTier !== "free" && (
+          <div className="px-2 pb-0.5">
+            <span className={[
+              "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+              planTier === "enterprise"
+                ? "bg-[#1E1B4B]/10 text-[#3730A3]"
+                : planTier === "pro"
+                  ? "bg-[#2563EB]/10 text-[#1D4ED8]"
+                  : planTier === "plus"
+                    ? "bg-[#7C3AED]/10 text-[#6D28D9]"
+                    : "bg-[#E7DED1] text-[#78716C]",
+            ].join(" ")}>
+              {planTier === "plus" ? "Plus" : planTier === "pro" ? "Pro" : planTier === "team" ? "Team" : "Enterprise"}
+            </span>
+          </div>
+        )}
 
         {/* User */}
         {user && (

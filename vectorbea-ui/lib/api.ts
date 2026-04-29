@@ -46,7 +46,7 @@ export interface DailyRequestPoint {
 }
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";
-export type PlanTier = "free" | "team" | "pro" | "enterprise";
+export type PlanTier = "free" | "team" | "plus" | "pro" | "enterprise";
 
 export interface OrganizationWorkspaceView {
   id: string;

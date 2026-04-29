@@ -7,6 +7,8 @@ import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
 import { runRegressionSchedule } from "@/lib/server/regression-schedules";
 
 export const dynamic = "force-dynamic";
+// Allow up to 5 minutes — regression runs invoke LLM evaluations per dataset item
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
