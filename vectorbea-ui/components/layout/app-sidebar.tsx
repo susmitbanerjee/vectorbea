@@ -50,6 +50,7 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/evaluations", label: "Evaluations", icon: FlaskConical },
   { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true },
   { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true },
+  { href: "/evaluations/behavioral", label: "Behavioral Datasets", icon: BookOpen, isSubItem: true },
   { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },

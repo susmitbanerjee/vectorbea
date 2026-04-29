@@ -787,3 +787,96 @@ export type FailureCluster = {
   explanation: string;
   suggestedFix: string;
 };
+
+// ─── Behavioral Evaluations ───────────────────────────────────────────────────
+
+export type BehavioralPromptType =
+  | "customer_support"
+  | "rag_answer"
+  | "summarization"
+  | "classification"
+  | "extraction"
+  | "agent_workflow"
+  | "general";
+
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+
+export type RubricRuleType = "must_do" | "must_not_do" | "hard_fail";
+
+export type RubricSeverity = "low" | "medium" | "high" | "critical";
+
+export interface BehavioralDataset {
+  id: string;
+  workspaceId: string;
+  promptId: string;
+  name: string;
+  description: string | null;
+  promptType: BehavioralPromptType;
+  isArchived: boolean;
+  itemCount: number;
+  /** Prompt name resolved client-side from the prompts list */
+  promptName?: string | null;
+  rubricId?: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BehavioralDatasetItem {
+  id: string;
+  datasetId: string;
+  input: string;
+  context: string | null;
+  metadata: Record<string, unknown> | null;
+  tags: string[];
+  riskLevel: RiskLevel;
+  referenceOutput: string | null;
+  rubricOverride: Record<string, unknown> | null;
+  sourceTraceId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvaluationRubric {
+  id: string;
+  workspaceId: string;
+  datasetId: string;
+  promptId: string;
+  name: string;
+  promptType: BehavioralPromptType;
+  goal: string | null;
+  passThreshold: number;
+  judgeModel: string | null;
+  judgeProvider: string | null;
+  isLocked: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Eagerly loaded */
+  dimensions?: RubricDimension[];
+  rules?: RubricRule[];
+}
+
+export interface RubricDimension {
+  id: string;
+  rubricId: string;
+  name: string;
+  description: string | null;
+  weight: number;
+  scaleMin: number;
+  scaleMax: number;
+  passThreshold: number;
+  ord: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RubricRule {
+  id: string;
+  rubricId: string;
+  ruleType: RubricRuleType;
+  description: string;
+  severity: RubricSeverity;
+  createdAt: string;
+  updatedAt: string;
+}

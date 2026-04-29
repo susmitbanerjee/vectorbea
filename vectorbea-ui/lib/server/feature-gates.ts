@@ -13,7 +13,8 @@ export type FeatureKey =
   | "slack_notifications"
   | "email_notifications"
   | "team_invitations"
-  | "auto_evaluations";
+  | "auto_evaluations"
+  | "behavioral_evaluations";
 
 type FeaturePolicy = Record<PlanTier, boolean>;
 
@@ -78,6 +79,12 @@ const FEATURE_POLICY: Record<FeatureKey, FeaturePolicy> = {
     pro: true,
     enterprise: true,
   },
+  behavioral_evaluations: {
+    free: false,
+    team: false,
+    pro: true,
+    enterprise: true,
+  },
 };
 
 function labelFor(feature: FeatureKey) {
@@ -102,6 +109,8 @@ function labelFor(feature: FeatureKey) {
       return "Team invitations";
     case "auto_evaluations":
       return "Automatic evaluations";
+    case "behavioral_evaluations":
+      return "Behavioral evaluations";
     default:
       return "Feature";
   }
