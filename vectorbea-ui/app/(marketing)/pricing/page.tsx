@@ -319,9 +319,20 @@ export default function PricingPage() {
 
             <div className="mt-8 overflow-x-auto rounded-2xl border border-[#E7DED1] bg-white shadow-sm">
               <table className="w-full min-w-[640px] text-left text-[13px]">
+                {/* colgroup locks column widths so the sticky header stays aligned */}
+                <colgroup>
+                  <col style={{ width: "36%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "16%" }} />
+                </colgroup>
                 <thead className="sticky top-16 z-10">
-                  <tr className="border-b border-[#F1ECE3] bg-[#FFFCF7]">
-                    <th className="px-5 py-3.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#6B7280] w-[35%]">
+                  <tr
+                    className="bg-[#FFFCF7]"
+                    style={{ boxShadow: "inset 0 -1px 0 #F1ECE3" }}
+                  >
+                    <th className="px-5 py-3.5 text-left text-[12px] font-semibold uppercase tracking-[0.12em] text-[#6B7280]">
                       Feature
                     </th>
                     {PLANS.map((p) => (
