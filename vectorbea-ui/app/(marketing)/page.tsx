@@ -17,6 +17,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { cn } from "@/lib/utils";
 import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
+import { PLANS } from "@/lib/pricing-data";
 
 const topNav = ["Platform", "Solutions", "Customers", "Pricing", "Docs"];
 
@@ -269,6 +270,102 @@ function DeepDiveVisual({ index }: { index: number }) {
   );
 }
 
+// ─── Pricing preview (compact, 4 cards) ───────────────────────────────────────
+
+const PLAN_CTA: Record<string, { label: string; href: string }> = {
+  free:       { label: "Start free",        href: "/signup" },
+  plus:       { label: "Upgrade to Plus",   href: "/signup?plan=plus" },
+  pro:        { label: "Start Pro",         href: "/signup?plan=pro" },
+  enterprise: { label: "Talk to sales",     href: "/book-demo" },
+};
+
+function PricingPreview() {
+  return (
+    <section className="mx-auto w-full max-w-[1280px] px-4 py-20 md:px-6 xl:px-8">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">
+            Pricing built for production AI teams
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-[#4B5563]">
+            Start free, validate with Plus, move to Pro when production controls matter
+          </p>
+        </div>
+        <Link
+          href="/pricing"
+          className="shrink-0 text-sm font-medium text-[#2563EB] transition-colors hover:text-[#1D4ED8] whitespace-nowrap"
+        >
+          Compare all plans →
+        </Link>
+      </div>
+
+      <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {PLANS.map((plan) => {
+          const cta = PLAN_CTA[plan.id];
+          return (
+            <article
+              key={plan.id}
+              className={cn(
+                "relative flex flex-col rounded-2xl border bg-white p-5",
+                plan.highlight
+                  ? "border-[#2563EB] shadow-[0_0_0_1px_#2563EB,0_4px_20px_rgba(37,99,235,0.08)]"
+                  : "border-[#E5E0D8] shadow-sm",
+              )}
+            >
+              {plan.badge && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#2563EB]">
+                  {plan.badge}
+                </div>
+              )}
+
+              <div>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">
+                  {plan.name}
+                </p>
+                <p className="mt-1 text-[13px] leading-5 text-[#4B5563]">{plan.positioning}</p>
+              </div>
+
+              <div className="mt-4">
+                <span className="text-[1.875rem] font-semibold tracking-tight text-[#111111]">
+                  {plan.monthlyPrice === null ? "Custom" : plan.monthlyPrice === 0 ? "$0" : `$${plan.monthlyPrice}`}
+                </span>
+                {plan.monthlyPrice !== null && plan.monthlyPrice > 0 && (
+                  <span className="ml-1.5 text-[12px] text-[#9CA3AF]">{plan.priceSuffix}</span>
+                )}
+              </div>
+
+              <ul className="mt-4 space-y-2 border-t border-[#F1ECE3] pt-4">
+                {plan.compactFeatures.map((f) => (
+                  <li key={f} className="flex items-center gap-2 text-[13px] text-[#374151]">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#15803D]" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+
+              <Link
+                href={cta.href as Route}
+                className={cn(
+                  "mt-5 flex h-9 items-center justify-center rounded-lg text-[13px] font-semibold transition-all",
+                  plan.highlight
+                    ? "bg-[#111111] text-white hover:bg-[#1F1F1F]"
+                    : "border border-[#E5E0D8] bg-[#F8F5EF] text-[#111111] hover:bg-[#F1ECE3] hover:border-[#D8CFC2]",
+                )}
+              >
+                {cta.label}
+              </Link>
+            </article>
+          );
+        })}
+      </div>
+
+      <p className="mt-6 text-center text-[13px] text-[#6B7280]">
+        Production controls (regressions, rollout gates, Slack alerts, audit trail) start with Pro
+      </p>
+    </section>
+  );
+}
+
 export default async function MarketingPage() {
   const cookieStore = await cookies();
   const user = await getAuthenticatedUserFromCookies(cookieStore);
@@ -296,7 +393,7 @@ export default async function MarketingPage() {
             {topNav.map((item) => (
               <Link
                 key={item}
-                href={item === "Docs" ? "/docs" : "#"}
+                href={item === "Docs" ? "/docs" : item === "Pricing" ? "/pricing" : "#"}
                 className="transition-colors hover:text-[#111827]"
               >
                 {item}
@@ -551,33 +648,7 @@ export default async function MarketingPage() {
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-[1280px] px-4 py-20 md:px-6 xl:px-8">
-          <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Pricing preview</h2>
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
-            {[
-              { name: "Free", subtitle: "For getting started", cta: "Start free" },
-              { name: "Team", subtitle: "For product and engineering teams", cta: "Book demo", highlight: true },
-              { name: "Enterprise", subtitle: "For scale governance and advanced controls", cta: "Talk to sales" },
-            ].map((plan) => (
-              <article
-                key={plan.name}
-                className={cn(
-                  "rounded-2xl border bg-white p-6",
-                  plan.highlight ? "border-[#2563EB]" : "border-[#E5E0D8]",
-                )}
-              >
-                <h3 className="text-xl font-semibold">{plan.name}</h3>
-                <p className="mt-2 text-sm text-[#4B5563]">{plan.subtitle}</p>
-                <ul className="mt-4 space-y-2 text-sm text-[#374151]">
-                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-[#059669]" />Trace and replay</li>
-                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-[#059669]" />Evaluation workflows</li>
-                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-[#059669]" />Rollout and alert controls</li>
-                </ul>
-                <Link href={plan.cta === "Book demo" ? "/book-demo" : "/signup"} className={cn(buttonVariants({ variant: plan.highlight ? "default" : "outline" }), "mt-6 w-full")}>{plan.cta}</Link>
-              </article>
-            ))}
-          </div>
-        </section>
+        <PricingPreview />
 
         <section className="border-y border-[#E5E0D8] bg-[#FBF8F1]">
           <div className="mx-auto w-full max-w-[980px] px-4 py-20 md:px-6">

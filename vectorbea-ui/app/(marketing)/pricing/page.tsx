@@ -1,273 +1,465 @@
+"use client";
+
+import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Building2, Check, Code2, Sparkles } from "lucide-react";
+import type { Route } from "next";
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  GitBranch,
+  ShieldCheck,
+  Bell,
+  ClipboardList,
+  SlidersHorizontal,
+  Minus,
+} from "lucide-react";
 
-import { RolloutStatus } from "@/components/ui/rollout-status";
-import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import { Logo } from "@/components/ui/Logo";
-import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  PLANS,
+  COMPARISON_CATEGORIES,
+  PRICING_FAQ,
+  PRODUCTION_BOUNDARY,
+  ADD_ONS,
+  formatPrice,
+  type Billing,
+  type PricingPlan,
+} from "@/lib/pricing-data";
 
-interface Tier {
-  id: string;
-  name: string;
-  tagline: string;
-  priceLabel: string;
-  originalPriceLabel?: string;
-  priceSuffix: string;
-  billingNote: string;
-  cta: { label: string; href: string };
-  highlight?: boolean;
-  icon: typeof Sparkles;
-  features: string[];
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function BillingToggle({ billing, onChange }: { billing: Billing; onChange: (b: Billing) => void }) {
+  return (
+    <div className="inline-flex items-center gap-3">
+      <div className="flex items-center rounded-lg border border-[#E7DED1] bg-white p-1 shadow-sm">
+        <button
+          type="button"
+          onClick={() => onChange("monthly")}
+          className={cn(
+            "rounded-md px-4 py-1.5 text-[13px] font-medium transition-all",
+            billing === "monthly"
+              ? "bg-[#111111] text-white shadow-sm"
+              : "text-[#6B7280] hover:text-[#111111]",
+          )}
+        >
+          Monthly
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("annual")}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-4 py-1.5 text-[13px] font-medium transition-all",
+            billing === "annual"
+              ? "bg-[#111111] text-white shadow-sm"
+              : "text-[#6B7280] hover:text-[#111111]",
+          )}
+        >
+          Annual
+          <span className={cn(
+            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-wide transition-colors",
+            billing === "annual"
+              ? "bg-[#15803D] text-white"
+              : "bg-[#DCFCE7] text-[#15803D]",
+          )}>
+            Save 20%
+          </span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
-const tiers: Tier[] = [
-  {
-    id: "developer",
-    name: "Developer",
-    tagline: "For solo builders validating the sidecar path",
-    priceLabel: "$0",
-    priceSuffix: "/ month",
-    billingNote: "Free forever, no card required",
-    cta: { label: "Start free", href: "/login" },
-    icon: Code2,
-    features: [
-      "1 workspace, 1 seat",
-      "10,000 proxied calls / month",
-      "30-day audit retention",
-      "Self-hosted sidecar runtime",
-      "Community support",
-    ],
-  },
-  {
-    id: "team",
-    name: "Team",
-    tagline: "For platform teams rolling out governed prompt delivery",
-    priceLabel: "$19.99",
-    originalPriceLabel: "$29",
-    priceSuffix: "/ seat / month",
-    billingNote: "Early adopter pricing, then standardizes at $29 / seat",
-    cta: { label: "Get started", href: "/login" },
-    highlight: true,
-    icon: Sparkles,
-    features: [
-      "Unlimited workspaces",
-      "1,000,000 proxied calls / month included",
-      "Prompt versioning and rollout control",
-      "RBAC and SSO",
-      "1-year audit retention",
-      "Priority support",
-    ],
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    tagline: "For security, procurement, and dedicated rollout controls",
-    priceLabel: "Custom",
-    priceSuffix: "",
-    billingNote: "Quarterly or annual contracts with private deployment support",
-    cta: { label: "Book demo", href: "/book-demo" },
-    icon: Building2,
-    features: [
-      "VPC and air-gapped deployment options",
-      "Security review and procurement workflows",
-      "Custom retention and regional posture",
-      "SAML / SCIM roadmap alignment",
-      "Dedicated solutions partner",
-      "Commercial SLA and onboarding support",
-    ],
-  },
-];
+function PricingCard({ plan, billing }: { plan: PricingPlan; billing: Billing }) {
+  const priceStr    = formatPrice(plan, billing);
+  const isCustom    = plan.monthlyPrice === null;
+  const isFree      = plan.monthlyPrice === 0;
+  const billingNote = billing === "annual" ? plan.billingNoteAnnual : plan.billingNoteMonthly;
 
-const faq = [
-  {
-    question: "What counts as a proxied call?",
-    answer:
-      "Any request served through the VectorBea Sidecar to an LLM provider counts as a proxied call. Prompt edits, dashboard reads, and admin actions do not.",
-  },
-  {
-    question: "How does seat billing work?",
-    answer:
-      "Every active user in a workspace counts as a seat. Teams can scale seats up as they expand the people touching rollout, governance, and auditing.",
-  },
-  {
-    question: "Can we run VectorBea inside our own network?",
-    answer:
-      "Yes. The core product posture is sidecar-first deployment, with the runtime running in your environment and the control plane handling policy, versions, and visibility.",
-  },
-  {
-    question: "Do you support enterprise identity?",
-    answer:
-      "Team already supports Google and Microsoft sign-in. Enterprise plans are where SAML, procurement review, and deeper identity workflows are handled.",
-  },
-  {
-    question: "How are upgrades managed?",
-    answer:
-      "Developer can upgrade into Team at any time. Enterprise is handled through a sales conversation so legal, security, and billing expectations are aligned before rollout.",
-  },
-  {
-    question: "What happens when usage grows?",
-    answer:
-      "Team includes a large monthly call allowance and scales with overage pricing. Enterprise plans are designed around higher-volume production traffic and tailored commercial terms.",
-  },
-];
+  return (
+    <div
+      className={cn(
+        "relative flex flex-col rounded-2xl border bg-white p-6 transition-shadow",
+        plan.highlight
+          ? "border-[#2563EB] shadow-[0_0_0_1px_#2563EB,0_8px_32px_rgba(37,99,235,0.10)]"
+          : "border-[#E7DED1] shadow-sm hover:shadow-md",
+      )}
+    >
+      {plan.badge && (
+        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-3.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#2563EB]">
+          {plan.badge}
+        </div>
+      )}
+
+      <div>
+        <p className="text-[13px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">
+          {plan.name}
+        </p>
+        <p className="mt-1 text-[13px] leading-5 text-[#4B5563]">{plan.positioning}</p>
+      </div>
+
+      <div className="mt-5">
+        <div className="flex items-end gap-1.5">
+          <span className={cn(
+            "font-semibold tracking-tight leading-none",
+            isCustom ? "text-[2rem]" : "text-[2.25rem]",
+            "text-[#111111]",
+          )}>
+            {priceStr}
+          </span>
+          {!isCustom && !isFree && (
+            <span className="mb-1 text-[13px] text-[#6B7280]">{plan.priceSuffix}</span>
+          )}
+        </div>
+        <p className="mt-1.5 text-[12px] text-[#9CA3AF]">{billingNote}</p>
+      </div>
+
+      <Link
+        href={plan.cta.href as Route}
+        className={cn(
+          "mt-5 flex h-10 w-full items-center justify-center gap-1.5 rounded-lg text-[13px] font-semibold transition-all",
+          plan.highlight
+            ? "bg-[#111111] text-white hover:bg-[#1F1F1F] shadow-sm"
+            : "border border-[#E7DED1] bg-white text-[#111111] hover:bg-[#F8F5EF] hover:border-[#D8CFC2]",
+        )}
+      >
+        {plan.cta.label}
+        <ArrowRight className="h-3.5 w-3.5" />
+      </Link>
+
+      <ul className="mt-5 space-y-2.5 border-t border-[#F1ECE3] pt-5">
+        {plan.features.slice(0, 12).map((f) => (
+          <li key={f} className="flex items-start gap-2.5 text-[13px] leading-5 text-[#374151]">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#15803D]" />
+            {f}
+          </li>
+        ))}
+        {plan.features.length > 12 && (
+          <li className="pt-1 text-[12px] text-[#9CA3AF]">
+            +{plan.features.length - 12} more included
+          </li>
+        )}
+      </ul>
+
+      {plan.notIncluded && plan.notIncluded.length > 0 && (
+        <ul className="mt-4 space-y-2 border-t border-[#F1ECE3] pt-4">
+          {plan.notIncluded.map((f) => (
+            <li key={f} className="flex items-center gap-2.5 text-[12px] text-[#9CA3AF]">
+              <Minus className="h-3 w-3 shrink-0" />
+              {f}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function CellValue({ value }: { value: string }) {
+  if (value === "✓")
+    return <Check className="mx-auto h-4 w-4 text-[#15803D]" />;
+  if (value === "—")
+    return <Minus className="mx-auto h-3.5 w-3.5 text-[#D1C9BE]" />;
+  return <span>{value}</span>;
+}
+
+function FaqItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-b border-[#F1ECE3] last:border-0">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-4 py-4 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="text-[14px] font-semibold text-[#111111]">{q}</span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-[#9CA3AF] transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <p className="pb-4 text-[14px] leading-7 text-[#4B5563]">{a}</p>
+      )}
+    </div>
+  );
+}
+
+const BOUNDARY_ICONS = [GitBranch, SlidersHorizontal, Bell, ClipboardList];
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PricingPage() {
+  const [billing, setBilling] = useState<Billing>("monthly");
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-50">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-zinc-950/88 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link href="/" className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/5">
-              <Logo />
-            </div>
-            <div>
-              <p className="text-sm font-semibold tracking-tight text-white">VectorBea</p>
-              <p className="text-xs text-zinc-400">AI Risk Control for Production LLMs</p>
-            </div>
+    <div className="min-h-screen bg-[#F8F5EF] text-[#111111]">
+
+      {/* ── Navbar ── */}
+      <header className="sticky top-0 z-40 border-b border-[#E7DED1] bg-[#FBF8F1]/90 backdrop-blur">
+        <div className="mx-auto flex h-16 w-full max-w-[1280px] items-center justify-between px-4 md:px-6 xl:px-8">
+          <Link href="/" className="inline-flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E7DED1] bg-white">
+              <Logo className="h-4.5 w-4.5" />
+            </span>
+            <span className="text-sm font-semibold tracking-tight text-[#111111]">VectorBea</span>
           </Link>
-          <div className="flex items-center gap-3">
-            <Link href="/" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-zinc-300 hover:text-white")}>
-              Home
+          <div className="flex items-center gap-2">
+            <Link href="/signin" className="px-3 py-1.5 text-[13px] text-[#6B7280] transition-colors hover:text-[#111111]">
+              Sign in
             </Link>
-            <Link
-              href="/login"
-              className={cn(buttonVariants({ size: "sm" }), "gap-1.5 rounded-lg")}
-            >
-              Get started
+            <Link href="/signup" className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#111111] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1F1F1F]">
+              Start free
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 pb-24 pt-16">
-        <section className="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-end">
-          <div className="space-y-6">
-            <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-400">
-              Pricing built for teams shipping AI into production
-            </div>
-            <div className="space-y-4">
-              <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-white md:text-5xl">
-                Choose the control plane that matches your rollout surface
-              </h1>
-              <p className="max-w-2xl text-base leading-8 text-zinc-400 md:text-lg">
-                VectorBea starts free for builders, scales into governed sidecar delivery for teams,
-                and expands into enterprise infrastructure for organizations that need trust, rollout
-                control, and procurement-ready posture.
-              </p>
-            </div>
-          </div>
+      <main>
 
-          <RolloutStatus
-            version="v12"
-            label="checkout-assistant"
-            stage="ramp"
-            progress={60}
-            target={100}
-            policy="Auto 10% / hr"
-            startedAt={new Date(Date.now() - 90 * 60 * 1000)}
-            variant="hero"
-            className="border-white/10 bg-white/[0.04]"
-          />
+        {/* ── 1. Hero ── */}
+        <section className="border-b border-[#E7DED1] bg-[#FBF8F1]">
+          <div className="mx-auto w-full max-w-[1280px] px-4 py-16 text-center md:px-6 xl:px-8">
+            <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#2563EB]">
+              Pricing
+            </p>
+            <h1 className="mx-auto mt-3 max-w-2xl text-balance text-[2.5rem] font-semibold leading-tight tracking-tight md:text-[3.25rem]">
+              Pricing that scales with your AI risk
+            </h1>
+            <p className="mx-auto mt-4 max-w-xl text-[15px] leading-7 text-[#4B5563]">
+              Start free, upgrade when you need regressions, rollout gates, alerts, and governance
+            </p>
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+              <Link href="/signup" className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#111111] px-5 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F1F1F]">
+                Start free
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/book-demo" className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#E7DED1] bg-white px-5 text-[14px] font-semibold text-[#111111] transition-colors hover:bg-[#F8F5EF] hover:border-[#D8CFC2]">
+                Book demo
+              </Link>
+            </div>
+            <p className="mt-5 text-[12px] text-[#9CA3AF]">
+              Built for teams shipping production LLM features
+            </p>
+          </div>
         </section>
 
-        <section className="mt-14 grid gap-5 lg:grid-cols-3">
-          {tiers.map((tier) => {
-            const Icon = tier.icon;
-            return (
-              <div
-                key={tier.id}
-                className={cn(
-                  "relative flex flex-col rounded-[1.5rem] border bg-white/[0.03] p-7 shadow-[0_20px_70px_-45px_rgba(0,0,0,0.85)]",
-                  tier.highlight
-                    ? "border-primary/50 ring-1 ring-primary/25"
-                    : "border-white/10",
-                )}
-              >
-                {tier.highlight ? (
-                  <div className="absolute -top-3 left-6 rounded-full border border-primary/30 bg-primary/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-                    Most popular
+        {/* ── 2 + 3. Billing toggle + Pricing cards ── */}
+        <section className="mx-auto w-full max-w-[1280px] px-4 py-14 md:px-6 xl:px-8">
+          <div className="mb-8 flex justify-center">
+            <BillingToggle billing={billing} onChange={setBilling} />
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {PLANS.map((plan) => (
+              <PricingCard key={plan.id} plan={plan} billing={billing} />
+            ))}
+          </div>
+        </section>
+
+        {/* ── 4. Production boundary callout ── */}
+        <section className="border-y border-[#E7DED1] bg-[#FBF8F1]">
+          <div className="mx-auto w-full max-w-[1280px] px-4 py-14 md:px-6 xl:px-8">
+            <div className="mx-auto max-w-3xl text-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#2563EB]">
+                Pro only
+              </span>
+              <h2 className="mt-3 text-balance text-[1.75rem] font-semibold tracking-tight md:text-[2.25rem]">
+                Production controls start with Pro
+              </h2>
+              <p className="mx-auto mt-3 max-w-xl text-[14px] leading-7 text-[#4B5563]">
+                Plus helps builders validate LLM behavior — Pro gives teams scheduled regressions, rollout gates, Slack alerts, audit trails, and production controls
+              </p>
+            </div>
+            <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {PRODUCTION_BOUNDARY.map(({ title, body }, i) => {
+                const Icon = BOUNDARY_ICONS[i];
+                return (
+                  <div key={title} className="rounded-2xl border border-[#E7DED1] bg-white p-5 shadow-sm">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#2563EB]">
+                      <Icon className="h-4.5 w-4.5" />
+                    </div>
+                    <p className="mt-4 text-[14px] font-semibold text-[#111111]">{title}</p>
+                    <p className="mt-1.5 text-[13px] leading-5 text-[#6B7280]">{body}</p>
                   </div>
-                ) : null}
+                );
+              })}
+            </div>
+          </div>
+        </section>
 
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Icon className="h-5 w-5" />
-                </div>
+        {/* ── 5. Usage add-ons ── */}
+        <section className="mx-auto w-full max-w-[1280px] px-4 py-14 md:px-6 xl:px-8">
+          <div className="max-w-xl">
+            <h2 className="text-[1.75rem] font-semibold tracking-tight">Need more capacity</h2>
+            <p className="mt-2 text-[14px] leading-6 text-[#4B5563]">
+              Add trace, evaluation, and retention capacity as production usage grows
+            </p>
+          </div>
 
-                <div className="mt-6 space-y-2">
-                  <h2 className="text-xl font-semibold text-white">{tier.name}</h2>
-                  <p className="text-sm leading-6 text-zinc-400">{tier.tagline}</p>
-                </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {ADD_ONS.map(({ title, body, pricing }) => (
+              <div key={title} className="rounded-2xl border border-[#E7DED1] bg-white p-5 shadow-sm">
+                <p className="text-[14px] font-semibold text-[#111111]">{title}</p>
+                <p className="mt-1.5 text-[13px] leading-5 text-[#4B5563]">{body}</p>
+                <p className="mt-4 text-[12px] font-semibold text-[#2563EB]">{pricing}</p>
+              </div>
+            ))}
+          </div>
 
-                <div className="mt-8 flex items-end gap-2">
-                  {tier.originalPriceLabel ? (
-                    <span className="pb-1 text-xl font-medium text-zinc-500 line-through">
-                      {tier.originalPriceLabel}
-                    </span>
-                  ) : null}
-                  <span className="text-4xl font-semibold tracking-tight text-white">
-                    {tier.priceLabel}
-                  </span>
-                  {tier.priceSuffix ? (
-                    <span className="pb-1 text-sm text-zinc-400">{tier.priceSuffix}</span>
-                  ) : null}
-                </div>
-                <p className="mt-2 text-sm text-zinc-400">{tier.billingNote}</p>
+          <p className="mt-5 text-[12px] text-[#9CA3AF]">
+            Evaluation execution means one test case evaluated against one prompt version or provider
+          </p>
+        </section>
 
-                <a
-                  href={tier.cta.href}
-                  className={cn(
-                    buttonVariants({
-                      size: "lg",
-                      variant: tier.highlight ? "default" : "outline",
-                    }),
-                    "mt-8 w-full justify-center rounded-lg",
-                  )}
-                >
-                  {tier.cta.label}
-                  <ArrowRight className="h-4 w-4" />
-                </a>
+        {/* ── 6. Feature comparison table ── */}
+        <section className="border-t border-[#E7DED1] bg-[#FBF8F1]">
+          <div className="mx-auto w-full max-w-[1280px] px-4 py-14 md:px-6 xl:px-8">
+            <h2 className="text-[1.75rem] font-semibold tracking-tight">Compare all plans</h2>
+            <p className="mt-2 text-[14px] text-[#4B5563]">Full feature breakdown across Free, Plus, Pro, and Enterprise</p>
 
-                <ul className="mt-8 space-y-3 border-t border-white/10 pt-6">
-                  {tier.features.map((feature) => (
-                    <li key={feature} className="flex items-start gap-3 text-sm leading-6 text-zinc-300">
-                      <Check className="mt-1 h-4 w-4 shrink-0 text-primary" />
-                      <span>{feature}</span>
+            <div className="mt-8 overflow-x-auto rounded-2xl border border-[#E7DED1] bg-white shadow-sm">
+              <table className="w-full min-w-[640px] text-left text-[13px]">
+                <thead className="sticky top-16 z-10">
+                  <tr className="border-b border-[#F1ECE3] bg-[#FFFCF7]">
+                    <th className="px-5 py-3.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#6B7280] w-[35%]">
+                      Feature
+                    </th>
+                    {PLANS.map((p) => (
+                      <th key={p.id} className={cn(
+                        "px-4 py-3.5 text-center text-[12px] font-semibold uppercase tracking-[0.12em]",
+                        p.highlight ? "text-[#2563EB]" : "text-[#6B7280]",
+                      )}>
+                        {p.name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {COMPARISON_CATEGORIES.map((cat) => (
+                    <React.Fragment key={cat.name}>
+                      <tr className="border-b border-[#F1ECE3] bg-[#F8F5EF]">
+                        <td colSpan={5} className="px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">
+                          {cat.name}
+                        </td>
+                      </tr>
+                      {cat.rows.map((row, ri) => (
+                        <tr key={row.label} className={cn(
+                          "border-b border-[#F1ECE3] last:border-0",
+                          ri % 2 === 0 ? "bg-white" : "bg-[#FEFCFA]",
+                          "hover:bg-[#FBF8F1] transition-colors",
+                        )}>
+                          <td className="px-5 py-3 font-medium text-[#374151]">{row.label}</td>
+                          <td className="px-4 py-3 text-center text-[#4B5563]"><CellValue value={row.free} /></td>
+                          <td className="px-4 py-3 text-center text-[#4B5563]"><CellValue value={row.plus} /></td>
+                          <td className={cn("px-4 py-3 text-center font-medium", "text-[#111111]")}><CellValue value={row.pro} /></td>
+                          <td className="px-4 py-3 text-center text-[#4B5563]"><CellValue value={row.enterprise} /></td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* ── 7. Enterprise trust section ── */}
+        <section className="mx-auto w-full max-w-[1280px] px-4 py-14 md:px-6 xl:px-8">
+          <div className="rounded-2xl border border-[#D8CFC2] bg-white p-8 shadow-sm md:p-12">
+            <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div className="space-y-4">
+                <span className="inline-block text-[12px] font-semibold uppercase tracking-[0.18em] text-[#6B7280]">
+                  Enterprise
+                </span>
+                <h2 className="text-balance text-[1.75rem] font-semibold tracking-tight md:text-[2.25rem]">
+                  Need governance across production AI
+                </h2>
+                <p className="max-w-xl text-[14px] leading-7 text-[#4B5563]">
+                  For teams that need security controls, private deployment, custom retention, organization policies, and audit-ready workflows
+                </p>
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    "SSO and SAML",
+                    "Advanced RBAC",
+                    "Private deployment",
+                    "Custom retention",
+                    "Audit logs",
+                    "Data residency",
+                    "PII redaction policies",
+                    "Dedicated onboarding",
+                  ].map((item) => (
+                    <li key={item} className="flex items-center gap-2 text-[13px] text-[#374151]">
+                      <Check className="h-3.5 w-3.5 shrink-0 text-[#15803D]" />
+                      {item}
                     </li>
                   ))}
                 </ul>
               </div>
-            );
-          })}
-        </section>
-
-        <section className="mt-8">
-          <TrustBar
-            signals={coreTrustSignals}
-            variant="compact"
-            className="border-white/10 bg-white/[0.04]"
-          />
-        </section>
-
-        <section className="mt-16 rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-8">
-          <div className="max-w-2xl">
-            <h2 className="text-2xl font-semibold text-white">Frequently asked</h2>
-            <p className="mt-3 text-sm leading-7 text-zinc-400">
-              The questions enterprise buyers, platform teams, and security reviewers ask before
-              rollout starts
-            </p>
-          </div>
-          <div className="mt-8 grid gap-6 md:grid-cols-2">
-            {faq.map((item) => (
-              <div key={item.question} className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                <p className="text-sm font-semibold text-white">{item.question}</p>
-                <p className="mt-2 text-sm leading-7 text-zinc-400">{item.answer}</p>
+              <div className="shrink-0">
+                <Link
+                  href="/book-demo"
+                  className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#111111] px-6 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F1F1F] whitespace-nowrap"
+                >
+                  Talk to sales
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
               </div>
-            ))}
+            </div>
           </div>
         </section>
+
+        {/* ── 8. FAQ ── */}
+        <section className="border-t border-[#E7DED1] bg-[#FBF8F1]">
+          <div className="mx-auto w-full max-w-[860px] px-4 py-14 md:px-6">
+            <h2 className="text-[1.75rem] font-semibold tracking-tight">Frequently asked</h2>
+            <p className="mt-2 text-[14px] text-[#4B5563]">
+              Common questions from builders and production teams
+            </p>
+            <div className="mt-8 rounded-2xl border border-[#E7DED1] bg-white px-6 shadow-sm">
+              {PRICING_FAQ.map((item) => (
+                <FaqItem key={item.q} q={item.q} a={item.a} />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── 9. Final CTA ── */}
+        <section className="mx-auto w-full max-w-[1280px] px-4 pb-20 pt-14 md:px-6 xl:px-8">
+          <div className="rounded-2xl border border-[#D8CFC2] bg-white p-10 text-center shadow-[0_8px_32px_rgba(17,24,39,0.06)] md:p-16">
+            <h2 className="text-balance text-[1.875rem] font-semibold tracking-tight md:text-[2.5rem]">
+              Ship production AI with confidence
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-[15px] leading-7 text-[#4B5563]">
+              Start free, or book a demo to see how VectorBea handles regressions, rollout gates, alerts, and governance
+            </p>
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+              <Link href="/signup" className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#111111] px-6 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F1F1F]">
+                Start free
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/book-demo" className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#E7DED1] bg-white px-6 text-[14px] font-semibold text-[#111111] transition-colors hover:bg-[#F8F5EF] hover:border-[#D8CFC2]">
+                Book demo
+              </Link>
+            </div>
+          </div>
+        </section>
+
       </main>
+
+      <footer className="border-t border-[#E7DED1] bg-[#FBF8F1] py-8">
+        <div className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center justify-between gap-4 px-4 md:px-6 xl:px-8">
+          <Link href="/" className="inline-flex items-center gap-2 text-[13px] font-medium text-[#374151] transition-colors hover:text-[#111111]">
+            <Logo className="h-4 w-4" />
+            VectorBea
+          </Link>
+          <div className="flex flex-wrap gap-5 text-[13px] text-[#6B7280]">
+            <Link href="/"        className="hover:text-[#111111]">Home</Link>
+            <Link href="/docs"    className="hover:text-[#111111]">Docs</Link>
+            <Link href="/pricing" className="font-medium text-[#111111]">Pricing</Link>
+            <Link href="/book-demo" className="hover:text-[#111111]">Book demo</Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
