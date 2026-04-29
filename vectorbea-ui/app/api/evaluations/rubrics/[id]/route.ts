@@ -66,6 +66,16 @@ export async function PATCH(
       isLocked?: boolean;
     };
 
+    if (existing.isLocked && body.isLocked === undefined) {
+      return NextResponse.json(
+        { error: "Rubric is locked. Enterprise admin must unlock before editing." },
+        { status: 403 },
+      );
+    }
+    if (body.isLocked !== undefined) {
+      await assertFeatureAccess(workspaceId, "enterprise_rubric_locking");
+    }
+
     if (body.passThreshold !== undefined &&
         (body.passThreshold < 0 || body.passThreshold > 100)) {
       return NextResponse.json({ error: "passThreshold must be 0-100" }, { status: 400 });
@@ -96,6 +106,12 @@ export async function DELETE(
     const existing = await getRubricWithDetails(id);
     if (!existing || existing.workspaceId !== workspaceId) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (existing.isLocked) {
+      return NextResponse.json(
+        { error: "Rubric is locked. Enterprise admin must unlock before deleting." },
+        { status: 403 },
+      );
     }
 
     await deleteRubric(id);

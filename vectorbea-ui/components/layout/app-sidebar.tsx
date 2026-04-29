@@ -51,6 +51,8 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true },
   { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true },
   { href: "/evaluations/behavioral", label: "Behavioral Datasets", icon: BookOpen, isSubItem: true },
+  { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true },
+  { href: "/evaluations/compare", label: "Evaluation Comparison", icon: ArrowUpRight, isSubItem: true },
   { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
@@ -252,4 +254,3 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
     </aside>
   );
 }
-

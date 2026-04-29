@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle,
   BookOpen,
@@ -46,6 +46,8 @@ import type {
   BehavioralDatasetItem,
   BehavioralPromptType,
   EvaluationRubric,
+  ProviderArenaCandidateInput,
+  BehavioralEvaluationRunView,
   RubricDimension,
   RubricRule,
   RubricRuleType,
@@ -53,6 +55,7 @@ import type {
   RiskLevel,
 } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
+import { canUseBehavioralEvaluations } from "@/lib/behavioral-gate";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1439,6 +1442,411 @@ function PlaceholderTab({ label, description }: { label: string; description: st
   );
 }
 
+function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspaceId: string }) {
+  const router = useRouter();
+  const { planTier } = useWorkspace();
+  const [runs, setRuns] = useState<BehavioralEvaluationRunView[]>([]);
+  const [arenaRuns, setArenaRuns] = useState<BehavioralEvaluationRunView[]>([]);
+  const [rubrics, setRubrics] = useState<EvaluationRubric[]>([]);
+  const [providers, setProviders] = useState<Array<{ providerType: string; defaultModel: string | null }>>([]);
+  const [versions, setVersions] = useState<Array<{ id: string; versionTag: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showSetup, setShowSetup] = useState(false);
+  const [mode, setMode] = useState<"rubric_scoring" | "provider_arena">("rubric_scoring");
+
+  const [rubricId, setRubricId] = useState("");
+  const [promptVersionId, setPromptVersionId] = useState("");
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
+  const [runName, setRunName] = useState("");
+  const [arenaCandidates, setArenaCandidates] = useState<ProviderArenaCandidateInput[]>([
+    { provider: "", model: "", label: "" },
+  ]);
+
+  const isAllowed = canUseBehavioralEvaluations(planTier);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [runsRes, arenaRes, rubricsRes, providersRes, versionsRes] = await Promise.all([
+        fetch(`/api/evaluations/behavioral-runs?workspaceId=${encodeURIComponent(workspaceId)}`, { cache: "no-store" }),
+        fetch(`/api/evaluations/provider-arena?workspaceId=${encodeURIComponent(workspaceId)}`, { cache: "no-store" }),
+        fetch(`/api/evaluations/rubrics?datasetId=${encodeURIComponent(dataset.id)}&workspaceId=${encodeURIComponent(workspaceId)}`, { cache: "no-store" }),
+        fetch(`/api/evaluations/providers?workspaceId=${encodeURIComponent(workspaceId)}`, { cache: "no-store" }),
+        fetch(`/api/prompts/${encodeURIComponent(dataset.promptId)}/versions`, { cache: "no-store" }),
+      ]);
+      const [runsJson, arenaJson, rubricsJson, providersJson, versionsJson] = await Promise.all([
+        runsRes.json(),
+        arenaRes.json(),
+        rubricsRes.json(),
+        providersRes.json(),
+        versionsRes.json(),
+      ]) as [
+        BehavioralEvaluationRunView[] | { error?: string },
+        BehavioralEvaluationRunView[] | { error?: string },
+        EvaluationRubric[] | { error?: string },
+        Array<{ providerType: string; defaultModel: string | null }> | { error?: string },
+        Array<{ id: string; versionTag: string }> | { error?: string },
+      ];
+      if (!runsRes.ok) throw new Error((runsJson as { error?: string }).error ?? "Failed to load runs");
+      if (!arenaRes.ok) throw new Error((arenaJson as { error?: string }).error ?? "Failed to load provider arena runs");
+      if (!rubricsRes.ok) throw new Error((rubricsJson as { error?: string }).error ?? "Failed to load rubrics");
+      if (!providersRes.ok) throw new Error((providersJson as { error?: string }).error ?? "Failed to load providers");
+      if (!versionsRes.ok) throw new Error((versionsJson as { error?: string }).error ?? "Failed to load prompt versions");
+
+      const runRows = (runsJson as BehavioralEvaluationRunView[]).filter((run) => run.datasetId === dataset.id);
+      const arenaRows = (arenaJson as BehavioralEvaluationRunView[]).filter((run) => run.datasetId === dataset.id);
+      setRuns(runRows);
+      setArenaRuns(arenaRows);
+      const rubricRows = rubricsJson as EvaluationRubric[];
+      setRubrics(rubricRows);
+      const providerRows = providersJson as Array<{ providerType: string; defaultModel: string | null }>;
+      setProviders(providerRows);
+      setVersions(versionsJson as Array<{ id: string; versionTag: string }>);
+
+      if (!rubricId && rubricRows[0]?.id) setRubricId(rubricRows[0].id);
+      if (!promptVersionId && (versionsJson as Array<{ id: string; versionTag: string }>)[0]?.id) {
+        setPromptVersionId((versionsJson as Array<{ id: string; versionTag: string }>)[0].id);
+      }
+      if (!provider && providerRows[0]?.providerType) {
+        setProvider(providerRows[0].providerType);
+        setModel(providerRows[0].defaultModel ?? "");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load run setup");
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId, dataset.id, dataset.promptId, provider, promptVersionId, rubricId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const selected = providers.find((item) => item.providerType === provider);
+    if (selected?.defaultModel) setModel(selected.defaultModel);
+  }, [provider, providers]);
+
+  const handleStart = async () => {
+    if (!rubricId || !promptVersionId) {
+      setError("Rubric and prompt version are required");
+      return;
+    }
+    setRunning(true);
+    setError(null);
+    try {
+      if (mode === "provider_arena") {
+        const candidates = arenaCandidates
+          .map((candidate) => ({
+            provider: candidate.provider.trim(),
+            model: candidate.model.trim(),
+            label: candidate.label?.trim() || undefined,
+            temperature: candidate.temperature ?? null,
+            maxTokens: candidate.maxTokens ?? null,
+            config: candidate.config ?? {},
+          }))
+          .filter((candidate) => candidate.provider && candidate.model);
+        if (candidates.length < 2) {
+          throw new Error("Provider Arena needs at least two provider candidates");
+        }
+        const arenaRes = await fetch(`/api/evaluations/provider-arena?workspaceId=${encodeURIComponent(workspaceId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            datasetId: dataset.id,
+            rubricId,
+            promptVersionId,
+            candidates,
+            runName: runName.trim() || undefined,
+          }),
+        });
+        const arenaJson = await arenaRes.json() as BehavioralEvaluationRunView & { error?: string };
+        if (!arenaRes.ok) throw new Error(arenaJson.error ?? "Failed to start Provider Arena run");
+        setShowSetup(false);
+        router.push((`/evaluations/runs/${arenaJson.id}`) as Route);
+        return;
+      }
+
+      if (!provider) {
+        throw new Error("Provider is required for rubric scoring mode");
+      }
+      const res = await fetch(`/api/evaluations/behavioral-runs?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          datasetId: dataset.id,
+          rubricId,
+          promptVersionId,
+          provider,
+          model: model.trim() || undefined,
+          runName: runName.trim() || undefined,
+        }),
+      });
+      const json = await res.json() as BehavioralEvaluationRunView & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to start behavioral evaluation");
+      setShowSetup(false);
+      router.push((`/evaluations/runs/${json.id}`) as Route);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start run");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (!isAllowed) {
+    return (
+      <Card className="border-[#E7DED1] bg-white">
+        <CardHeader>
+          <CardTitle className="text-[#111111]">Behavioral evaluations are available on Pro</CardTitle>
+          <CardDescription className="text-[#6B7280]">Upgrade to run rubric scoring for non deterministic prompts</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link href={"/settings/billing" as Route}>
+            <Button className="bg-[#2563EB] text-white hover:bg-[#1D4ED8]">Upgrade to Pro</Button>
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loading) {
+    return <div className="flex items-center gap-2 text-sm text-[#6B7280]"><Loader2 className="h-4 w-4 animate-spin" />Loading runs…</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-[#E7DED1] bg-white">
+        <CardHeader className="flex-row items-start justify-between space-y-0">
+          <div>
+            <CardTitle className="text-[#111111]">Behavioral evaluation runs</CardTitle>
+            <CardDescription className="text-[#6B7280]">Run this dataset against a single provider and score output with your rubric</CardDescription>
+          </div>
+          <Button className="gap-2 bg-[#2563EB] text-white hover:bg-[#1D4ED8]" onClick={() => setShowSetup((prev) => !prev)}>
+            <FlaskConical className="h-4 w-4" />
+            {showSetup ? "Close setup" : "Run evaluation"}
+          </Button>
+        </CardHeader>
+        {showSetup && (
+          <CardContent className="space-y-4 border-t border-[#EFE7DA] pt-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Evaluation mode</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode("rubric_scoring")}
+                    className={`rounded-xl border px-3 py-2 text-sm ${mode === "rubric_scoring" ? "border-[#2563EB] bg-[#EFF6FF] text-[#1D4ED8]" : "border-[#D8CFC2] bg-white text-[#374151]"}`}
+                  >
+                    Single provider rubric scoring
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("provider_arena")}
+                    className={`rounded-xl border px-3 py-2 text-sm ${mode === "provider_arena" ? "border-[#2563EB] bg-[#EFF6FF] text-[#1D4ED8]" : "border-[#D8CFC2] bg-white text-[#374151]"}`}
+                  >
+                    Provider Arena
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Rubric</label>
+                <select className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={rubricId} onChange={(e) => setRubricId(e.target.value)}>
+                  <option value="">Select rubric</option>
+                  {rubrics.map((rubric) => <option key={rubric.id} value={rubric.id}>{rubric.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Prompt version</label>
+                <select className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={promptVersionId} onChange={(e) => setPromptVersionId(e.target.value)}>
+                  <option value="">Select prompt version</option>
+                  {versions.map((version) => <option key={version.id} value={version.id}>{version.versionTag}</option>)}
+                </select>
+              </div>
+              {mode === "rubric_scoring" && (
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Provider</label>
+                <select className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={provider} onChange={(e) => setProvider(e.target.value)}>
+                  <option value="">Select provider</option>
+                  {providers.map((item) => <option key={item.providerType} value={item.providerType}>{item.providerType}</option>)}
+                </select>
+              </div>
+              )}
+              {mode === "rubric_scoring" && (
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Model</label>
+                <input className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={model} onChange={(e) => setModel(e.target.value)} placeholder="Use provider default model" />
+              </div>
+              )}
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Run name</label>
+                <input className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={runName} onChange={(e) => setRunName(e.target.value)} placeholder="Optional run name" />
+              </div>
+              {mode === "provider_arena" && (
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Provider candidates</label>
+                  {arenaCandidates.map((candidate, index) => (
+                    <div key={`candidate-${index}`} className="grid gap-2 md:grid-cols-4">
+                      <select
+                        className="h-10 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
+                        value={candidate.provider}
+                        onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, provider: event.target.value } : entry))}
+                      >
+                        <option value="">Provider</option>
+                        {providers.map((item) => <option key={item.providerType} value={item.providerType}>{item.providerType}</option>)}
+                      </select>
+                      <input
+                        className="h-10 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
+                        value={candidate.model}
+                        placeholder="Model"
+                        onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, model: event.target.value } : entry))}
+                      />
+                      <input
+                        className="h-10 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
+                        value={candidate.label ?? ""}
+                        placeholder="Label"
+                        onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, label: event.target.value } : entry))}
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
+                          value={candidate.temperature ?? ""}
+                          placeholder="Temp"
+                          onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, temperature: event.target.value ? Number(event.target.value) : null } : entry))}
+                        />
+                        <button
+                          type="button"
+                          className="rounded-xl border border-[#D8CFC2] px-3 text-xs text-[#374151] hover:bg-[#F8F5EF]"
+                          onClick={() => setArenaCandidates((prev) => prev.filter((_, entryIndex) => entryIndex !== index))}
+                          disabled={arenaCandidates.length <= 1}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="rounded-xl border border-[#D8CFC2] px-3 py-2 text-xs text-[#374151] hover:bg-[#F8F5EF]"
+                    onClick={() => setArenaCandidates((prev) => [...prev, { provider: "", model: "", label: "" }])}
+                  >
+                    Add provider
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-xs text-[#4B5563]">
+              {mode === "provider_arena"
+                ? "This Provider Arena run will execute every dataset item across each candidate and score outputs with the rubric"
+                : "This run will evaluate each dataset item against the selected rubric"}
+              <div className="mt-1 text-[#6B7280]">
+                Items: <span className="font-medium text-[#111111]">{dataset.itemCount}</span> · Provider executions: <span className="font-medium text-[#111111]">{mode === "provider_arena" ? dataset.itemCount * arenaCandidates.filter((candidate) => candidate.provider && candidate.model).length : dataset.itemCount}</span> · Judge executions: <span className="font-medium text-[#111111]">{mode === "provider_arena" ? dataset.itemCount * arenaCandidates.filter((candidate) => candidate.provider && candidate.model).length : dataset.itemCount}</span>
+              </div>
+              {mode === "provider_arena" && (
+                <div className="mt-1 text-[#B45309]">
+                  Provider Arena consumes more evaluation capacity than single provider runs
+                </div>
+              )}
+            </div>
+            {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
+            <div className="flex justify-end">
+              <Button onClick={() => void handleStart()} disabled={running} className="gap-2 bg-[#2563EB] text-white hover:bg-[#1D4ED8]">
+                {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
+                Start run
+              </Button>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      <Card className="border-[#E7DED1] bg-white">
+        <CardHeader>
+          <CardTitle className="text-[#111111]">Recent runs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {runs.length === 0 ? (
+            <p className="text-sm text-[#6B7280]">No runs yet for this dataset</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#EFE7DA] text-xs text-[#6B7280]">
+                    <th className="py-2 text-left font-semibold">Started</th>
+                    <th className="py-2 text-left font-semibold">Provider</th>
+                    <th className="py-2 text-left font-semibold">Model</th>
+                    <th className="py-2 text-left font-semibold">Status</th>
+                    <th className="py-2 text-right font-semibold">Score</th>
+                    <th className="py-2 text-right font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((run) => (
+                    <tr key={run.id} className="border-b border-[#F1ECE3] last:border-0">
+                      <td className="py-2.5 text-[#374151]">{new Date(run.createdAt).toLocaleString()}</td>
+                      <td className="py-2.5 text-[#374151]">{run.provider}</td>
+                      <td className="py-2.5 text-[#374151]">{run.model}</td>
+                      <td className="py-2.5">
+                        <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#EFF6FF] text-[#1D4ED8]"}>
+                          {run.status}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 text-right font-medium text-[#111111]">{run.aggregate.finalScore !== null ? `${Math.round(run.aggregate.finalScore)}%` : "—"}</td>
+                      <td className="py-2.5 text-right">
+                        <Link href={`/evaluations/runs/${run.id}` as Route} className="text-[#2563EB] hover:text-[#1D4ED8]">View report</Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-[#E7DED1] bg-white">
+        <CardHeader>
+          <CardTitle className="text-[#111111]">Provider Arena runs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {arenaRuns.length === 0 ? (
+            <p className="text-sm text-[#6B7280]">No Provider Arena runs yet for this dataset</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#EFE7DA] text-xs text-[#6B7280]">
+                    <th className="py-2 text-left font-semibold">Started</th>
+                    <th className="py-2 text-left font-semibold">Candidates</th>
+                    <th className="py-2 text-left font-semibold">Recommendation</th>
+                    <th className="py-2 text-right font-semibold">Decision score</th>
+                    <th className="py-2 text-right font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arenaRuns.map((run) => (
+                    <tr key={run.id} className="border-b border-[#F1ECE3] last:border-0">
+                      <td className="py-2.5 text-[#374151]">{new Date(run.createdAt).toLocaleString()}</td>
+                      <td className="py-2.5 text-[#374151]">{run.candidates?.length ?? 0}</td>
+                      <td className="py-2.5">
+                        <Badge className="bg-[#EFF6FF] text-[#1D4ED8]">{run.arenaReport?.rolloutRecommendation ?? "pending"}</Badge>
+                      </td>
+                      <td className="py-2.5 text-right font-medium text-[#111111]">{run.arenaReport?.decisionScore != null ? `${Math.round(run.arenaReport.decisionScore)}%` : "—"}</td>
+                      <td className="py-2.5 text-right">
+                        <Link href={`/evaluations/runs/${run.id}` as Route} className="text-[#2563EB] hover:text-[#1D4ED8]">View report</Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function BehavioralDatasetDetailPage() {
@@ -1550,11 +1958,8 @@ export default function BehavioralDatasetDetailPage() {
             description="Organize items into named scenario groups — e.g. angry customer, missing order, policy edge case. Scenario-level scoring coming soon."
           />
         )}
-        {activeTab === "runs" && (
-          <PlaceholderTab
-            label="Evaluation runs"
-            description="Run behavioral evaluations against a candidate prompt version using the rubric above. Scoring powered by LLM-as-judge. Coming in the next release."
-          />
+        {activeTab === "runs" && activeWorkspaceId && (
+          <RunsTab dataset={dataset} workspaceId={activeWorkspaceId} />
         )}
       </div>
     </div>

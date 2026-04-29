@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { getPromptRolloutDistribution, updateVersionRollout } from "@/lib/server/rollout";
+import { evaluateRolloutGate } from "@/lib/server/provider-arena-governance";
 import type { RolloutStatus } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,28 @@ export async function POST(
     };
     if (!body.promptVersionId || !body.rolloutStatus) {
       return NextResponse.json({ error: "promptVersionId and rolloutStatus are required" }, { status: 400 });
+    }
+    const shouldGate =
+      body.rolloutStatus === "active" ||
+      (body.rolloutStatus === "candidate" && (body.rolloutPercentage ?? 0) > 0);
+    if (shouldGate) {
+      const gate = await evaluateRolloutGate({
+        workspaceId,
+        promptId,
+        promptVersionId: body.promptVersionId,
+        checkedBy: auth.user.id,
+        targetEnvironment: "production",
+      });
+      if (gate.status !== "passed") {
+        return NextResponse.json(
+          {
+            error: "Rollout blocked by safety gate",
+            code: "ROLLOUT_BLOCKED",
+            gate,
+          },
+          { status: 409 },
+        );
+      }
     }
     const result = await updateVersionRollout({
       workspaceId,

@@ -28,6 +28,12 @@ export async function GET(
     if (!rubric || rubric.workspaceId !== workspaceId) {
       return NextResponse.json({ error: "Rubric not found" }, { status: 404 });
     }
+    if (rubric.isLocked) {
+      return NextResponse.json(
+        { error: "Rubric is locked. Enterprise admin must unlock before editing rules." },
+        { status: 403 },
+      );
+    }
 
     return NextResponse.json(await listRules(rubricId));
   } catch (error) {

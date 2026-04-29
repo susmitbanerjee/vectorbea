@@ -14,7 +14,12 @@ export type FeatureKey =
   | "email_notifications"
   | "team_invitations"
   | "auto_evaluations"
-  | "behavioral_evaluations";
+  | "behavioral_evaluations"
+  | "provider_arena"
+  | "evaluation_comparison"
+  | "human_review_queue"
+  | "rollout_decision_reports"
+  | "enterprise_rubric_locking";
 
 type FeaturePolicy = Record<PlanTier, boolean>;
 
@@ -85,6 +90,36 @@ const FEATURE_POLICY: Record<FeatureKey, FeaturePolicy> = {
     pro: true,
     enterprise: true,
   },
+  provider_arena: {
+    free: false,
+    team: false,
+    pro: true,
+    enterprise: true,
+  },
+  evaluation_comparison: {
+    free: false,
+    team: false,
+    pro: true,
+    enterprise: true,
+  },
+  human_review_queue: {
+    free: false,
+    team: false,
+    pro: true,
+    enterprise: true,
+  },
+  rollout_decision_reports: {
+    free: false,
+    team: false,
+    pro: true,
+    enterprise: true,
+  },
+  enterprise_rubric_locking: {
+    free: false,
+    team: false,
+    pro: false,
+    enterprise: true,
+  },
 };
 
 function labelFor(feature: FeatureKey) {
@@ -111,6 +146,16 @@ function labelFor(feature: FeatureKey) {
       return "Automatic evaluations";
     case "behavioral_evaluations":
       return "Behavioral evaluations";
+    case "provider_arena":
+      return "Provider Arena";
+    case "evaluation_comparison":
+      return "Evaluation comparison";
+    case "human_review_queue":
+      return "Human review queue";
+    case "rollout_decision_reports":
+      return "Rollout decision reports";
+    case "enterprise_rubric_locking":
+      return "Enterprise rubric locking";
     default:
       return "Feature";
   }
@@ -133,4 +178,3 @@ export async function assertFeatureAccess(workspaceId: string, feature: FeatureK
   }
   return result;
 }
-

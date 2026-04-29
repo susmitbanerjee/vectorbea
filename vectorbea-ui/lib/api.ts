@@ -880,3 +880,221 @@ export interface RubricRule {
   createdAt: string;
   updatedAt: string;
 }
+
+export type BehavioralEvaluationRunType =
+  | "baseline"
+  | "golden_trace"
+  | "behavioral_rubric"
+  | "provider_arena"
+  | "pairwise";
+
+export type BehavioralEvaluationRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type BehavioralJudgeStepStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "warning"
+  | "error"
+  | "skipped";
+
+export interface BehavioralJudgeHardFailure {
+  rule: string;
+  severity: string;
+  reason: string;
+}
+
+export interface BehavioralJudgeResult {
+  overallScore: number;
+  judgeOverallScore: number | null;
+  computedScore: number;
+  pass: boolean;
+  confidence: number;
+  confidenceLabel: "high" | "medium" | "low" | "insufficient";
+  confidenceReasons: string[];
+  dimensionScores: Record<string, number>;
+  hardFailures: BehavioralJudgeHardFailure[];
+  strengths: string[];
+  weaknesses: string[];
+  riskFlags: string[];
+  verdictReason: string;
+  needsReview: boolean;
+  rawJudgeOutput?: Record<string, unknown> | null;
+}
+
+export interface BehavioralExecutionStep {
+  name: string;
+  label: string;
+  status: BehavioralJudgeStepStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  summary: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface BehavioralEvaluationCaseResult {
+  evaluationExecutionId: string;
+  datasetItemId: string;
+  status: "completed" | "failed";
+  input: string;
+  context: string | null;
+  output: string | null;
+  provider: string;
+  model: string;
+  promptVersionId: string;
+  latencyMs: number | null;
+  tokensInput: number | null;
+  tokensOutput: number | null;
+  error: string | null;
+  expectedOutput: string | null;
+  referenceOutput: string | null;
+  renderedPrompt: string | null;
+  judge: BehavioralJudgeResult | null;
+  executionSteps: BehavioralExecutionStep[];
+}
+
+export interface BehavioralEvaluationRunView {
+  id: string;
+  workspaceId: string;
+  runType: BehavioralEvaluationRunType;
+  status: BehavioralEvaluationRunStatus;
+  datasetId: string;
+  datasetName: string | null;
+  rubricId: string;
+  rubricName: string | null;
+  promptId: string;
+  promptName: string | null;
+  promptVersionId: string;
+  promptVersionTag: string | null;
+  provider: string;
+  model: string;
+  startedBy: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  aggregate: {
+    total: number;
+    completed: number;
+    failed: number;
+    passCount: number;
+    failCount: number;
+    needsReviewCount: number;
+    averageScore: number | null;
+    averageConfidence: number | null;
+    hardFailureCount: number;
+    finalScore: number | null;
+    passed: boolean;
+    dimensionAverages: Record<string, number>;
+  };
+  candidates?: Array<{
+    id: string;
+    provider: string;
+    model: string;
+    label: string;
+    temperature: number | null;
+    maxTokens: number | null;
+    config: Record<string, unknown> | null;
+  }>;
+  arenaReport?: {
+    id: string;
+    recommendedCandidateId: string | null;
+    rolloutRecommendation: "safe_to_rollout" | "rollout_with_caution" | "needs_review" | "do_not_rollout";
+    decisionScore: number | null;
+    riskScore: number | null;
+    summary: string | null;
+    providerRankings: Array<Record<string, unknown>>;
+    dimensionSummary: Record<string, unknown>;
+    failureClusters: Array<Record<string, unknown>>;
+    costSummary: Record<string, unknown>;
+    latencySummary: Record<string, unknown>;
+  } | null;
+  pairwise?: {
+    total: number;
+    byResult: Record<"a_wins" | "b_wins" | "tie" | "both_bad" | "needs_review", number>;
+    matrix: Array<{
+      rowCandidateId: string;
+      colCandidateId: string;
+      winRate: number | null;
+      sampleSize: number;
+    }>;
+    comparisons: Array<{
+      id: string;
+      datasetItemId: string;
+      candidateAExecutionId: string;
+      candidateBExecutionId: string;
+      winnerExecutionId: string | null;
+      result: "a_wins" | "b_wins" | "tie" | "both_bad" | "needs_review";
+      confidence: number | null;
+      reasoning: string | null;
+      dimensionPreferences: Record<string, "a" | "b" | "tie">;
+      blindOrder: Record<string, unknown>;
+      riskFlags: string[];
+      needsReviewReason: string | null;
+      createdAt: string;
+    }>;
+  } | null;
+  reviewQueue?: {
+    open: number;
+    inReview: number;
+    criticalOpen: number;
+  } | null;
+  results: BehavioralEvaluationCaseResult[];
+}
+
+export interface ProviderArenaCandidateInput {
+  provider: string;
+  model: string;
+  label?: string;
+  temperature?: number | null;
+  maxTokens?: number | null;
+  config?: Record<string, unknown>;
+}
+
+export interface HumanReviewItem {
+  id: string;
+  workspaceId: string;
+  evaluationRunId: string;
+  datasetItemId: string | null;
+  evaluationExecutionId: string | null;
+  pairwiseComparisonId: string | null;
+  status: "open" | "in_review" | "resolved" | "dismissed";
+  assignedTo: string | null;
+  reason: string;
+  severity: "low" | "medium" | "high" | "critical";
+  reviewerDecision:
+    | "acceptable"
+    | "not_acceptable"
+    | "provider_a_better"
+    | "provider_b_better"
+    | "both_acceptable"
+    | "both_unacceptable"
+    | "rubric_needs_update"
+    | null;
+  reviewerNotes: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+}
+
+export interface EvaluationComparisonReport {
+  id: string;
+  workspaceId: string;
+  createdBy: string;
+  runIds: string[];
+  summary: string | null;
+  scoreDelta: Record<string, unknown>;
+  passRateDelta: Record<string, unknown>;
+  failureDelta: Record<string, unknown>;
+  dimensionDeltas: Record<string, unknown>;
+  costDelta: Record<string, unknown>;
+  latencyDelta: Record<string, unknown>;
+  regressionCases: Array<Record<string, unknown>>;
+  improvementCases: Array<Record<string, unknown>>;
+  createdAt: string;
+}

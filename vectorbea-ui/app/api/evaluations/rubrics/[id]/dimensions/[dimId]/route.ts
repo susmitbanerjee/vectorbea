@@ -24,6 +24,12 @@ export async function PATCH(
     if (!rubric || rubric.workspaceId !== workspaceId) {
       return NextResponse.json({ error: "Rubric not found" }, { status: 404 });
     }
+    if (rubric.isLocked) {
+      return NextResponse.json(
+        { error: "Rubric is locked. Enterprise admin must unlock before editing dimensions." },
+        { status: 403 },
+      );
+    }
 
     const body = await request.json().catch(() => ({})) as {
       name?: string;
@@ -62,6 +68,12 @@ export async function DELETE(
     const rubric = await getRubricWithDetails(rubricId);
     if (!rubric || rubric.workspaceId !== workspaceId) {
       return NextResponse.json({ error: "Rubric not found" }, { status: 404 });
+    }
+    if (rubric.isLocked) {
+      return NextResponse.json(
+        { error: "Rubric is locked. Enterprise admin must unlock before deleting dimensions." },
+        { status: 403 },
+      );
     }
 
     await deleteDimension(dimId);
