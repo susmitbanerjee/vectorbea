@@ -66,7 +66,7 @@ const tiers: Tier[] = [
     priceLabel: "Custom",
     priceSuffix: "",
     billingNote: "Quarterly or annual contracts with private deployment support",
-    cta: { label: "Talk to sales", href: "mailto:sales@vectorbea.com" },
+    cta: { label: "Book demo", href: "/book-demo" },
     icon: Building2,
     features: [
       "VPC and air-gapped deployment options",

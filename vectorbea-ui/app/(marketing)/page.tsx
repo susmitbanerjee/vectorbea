@@ -308,7 +308,7 @@ export default async function MarketingPage() {
             <Link href="/signin" className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
               Sign in
             </Link>
-            <Link href="/signup" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+            <Link href="/book-demo" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               Book demo
             </Link>
             <Link href="/signup" className={cn(buttonVariants({ size: "sm" }))}>
@@ -335,7 +335,7 @@ export default async function MarketingPage() {
                 Start free
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link href="/signup" className={cn(buttonVariants({ variant: "outline", size: "lg" }))}>
+              <Link href="/book-demo" className={cn(buttonVariants({ variant: "outline", size: "lg" }))}>
                 Book demo
               </Link>
               <Link href="#platform" className={cn(buttonVariants({ variant: "ghost", size: "lg" }))}>
@@ -573,9 +573,7 @@ export default async function MarketingPage() {
                   <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-[#059669]" />Evaluation workflows</li>
                   <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-[#059669]" />Rollout and alert controls</li>
                 </ul>
-                <Link href="/signup" className={cn(buttonVariants({ variant: plan.highlight ? "default" : "outline" }), "mt-6 w-full")}>
-                  {plan.cta}
-                </Link>
+                <Link href={plan.cta === "Book demo" ? "/book-demo" : "/signup"} className={cn(buttonVariants({ variant: plan.highlight ? "default" : "outline" }), "mt-6 w-full")}>{plan.cta}</Link>
               </article>
             ))}
           </div>
@@ -608,7 +606,7 @@ export default async function MarketingPage() {
                 Start free
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link href="/signup" className={cn(buttonVariants({ variant: "outline", size: "lg" }))}>
+              <Link href="/book-demo" className={cn(buttonVariants({ variant: "outline", size: "lg" }))}>
                 Book demo
               </Link>
             </div>
