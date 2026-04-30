@@ -360,6 +360,7 @@ export async function runRegressionSchedule(args: {
           datasetName,
           promptVersion: candidateVersionId,
           failedCases: failedTraceIds.length,
+          currentScore: run.aggregate?.score ?? null,
         });
       } catch {
         // Notification failures must never fail the regression run

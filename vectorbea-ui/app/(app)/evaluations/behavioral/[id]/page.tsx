@@ -1530,11 +1530,14 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
 
   useEffect(() => { void load(); }, [load]);
 
-  // Poll every 4 seconds while any run is in "running" state
+  // Poll every 3 seconds while any run is queued or running; stop when all are terminal
   useEffect(() => {
-    const hasRunning = [...runs, ...arenaRuns].some((run) => run.status === "running");
-    if (!hasRunning) return;
-    const timer = setInterval(() => { void load(); }, 4000);
+    const activeStatuses = new Set(["queued", "running", "pending"]);
+    const terminalStatuses = new Set(["completed", "failed", "cancelled", "timed_out"]);
+    const hasActive = [...runs, ...arenaRuns].some((run) => activeStatuses.has(run.status));
+    const allTerminal = [...runs, ...arenaRuns].every((run) => terminalStatuses.has(run.status));
+    if (!hasActive || allTerminal) return;
+    const timer = setInterval(() => { void load(); }, 3000);
     return () => clearInterval(timer);
   }, [runs, arenaRuns, load]);
 
@@ -1764,12 +1767,42 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
               )}
             </div>
             {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
-            <div className="flex justify-end">
-              <Button onClick={() => void handleStart()} disabled={running} className="gap-2 bg-[#2563EB] text-white hover:bg-[#1D4ED8]">
-                {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
-                Start run
-              </Button>
-            </div>
+            {running ? (
+              <div className="rounded-xl border border-[#BFDBFE]/60 bg-[#EFF6FF] px-4 py-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#2563EB]" />
+                  <span className="text-sm font-semibold text-[#1D4ED8]">Starting evaluation…</span>
+                </div>
+                <div className="space-y-2 pl-6">
+                  {([
+                    "Preparing dataset items",
+                    "Creating evaluation run",
+                    "Queuing provider executions",
+                    "Scoring outputs with rubric",
+                    "Generating summary",
+                  ] as const).map((step, i) => (
+                    <div key={step} className="flex items-center gap-2 text-xs text-[#1D4ED8]">
+                      {i === 0 ? (
+                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      ) : (
+                        <div className="h-3 w-3 shrink-0 rounded-full border border-[#BFDBFE]" />
+                      )}
+                      {step}
+                    </div>
+                  ))}
+                </div>
+                <p className="pl-6 text-[11px] text-[#3B82F6]">
+                  You will be redirected to the run detail page automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="flex justify-end">
+                <Button onClick={() => void handleStart()} className="gap-2 bg-[#2563EB] text-white hover:bg-[#1D4ED8]">
+                  <FlaskConical className="h-4 w-4" />
+                  Start run
+                </Button>
+              </div>
+            )}
           </CardContent>
         )}
       </Card>
@@ -1801,13 +1834,13 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
                       <td className="py-2.5 text-[#374151]">{run.provider}</td>
                       <td className="py-2.5 text-[#374151]">{run.model}</td>
                       <td className="py-2.5">
-                        {run.status === "running" ? (
+                        {run.status === "running" || run.status === "queued" || run.status === "pending" ? (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-xs font-medium text-[#1D4ED8]">
                             <Loader2 className="h-3 w-3 animate-spin" />
-                            Running…
+                            {run.status === "queued" ? "Queued…" : run.status === "pending" ? "Pending…" : "Running…"}
                           </span>
                         ) : (
-                          <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#F3F4F6] text-[#374151]"}>
+                          <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" || run.status === "timed_out" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#F3F4F6] text-[#374151]"}>
                             {run.status}
                           </Badge>
                         )}

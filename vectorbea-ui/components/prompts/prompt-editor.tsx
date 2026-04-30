@@ -218,6 +218,14 @@ export function PromptEditor({
     versionId: string;
     evalRunId: string | null;
   } | null>(null);
+  const [gateCheck, setGateCheck] = useState<{
+    status: string;
+    decision: string;
+    reasons: string[];
+    checkedAt: string | null;
+    riskScore: number | null;
+    gates?: Array<{ name: string; status: string; score: number | null; runId: string | null; reason: string | null }>;
+  } | null | "loading">(null);
 
   // Keep local state in sync when the server component re-fetches after
   // router.refresh() (e.g., right after a save or publish completes).
@@ -312,6 +320,24 @@ export function PromptEditor({
 
     return () => { cancelled = true; };
   }, [prompt?.promptId, prompt.promptVersionId, activeWorkspaceId]);
+
+  // Fetch latest gate check for the selected version
+  useEffect(() => {
+    if (!prompt?.promptId || !activeWorkspaceId || !selectedVersionId) return;
+    setGateCheck("loading");
+    fetch(
+      `/api/prompts/${encodeURIComponent(prompt.promptId)}/gate-checks?workspaceId=${encodeURIComponent(activeWorkspaceId)}&promptVersionId=${encodeURIComponent(selectedVersionId)}`,
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: unknown) => {
+        if (data && typeof data === "object" && !("error" in (data as object))) {
+          setGateCheck(data as { status: string; decision: string; reasons: string[]; checkedAt: string | null; riskScore: number | null });
+        } else {
+          setGateCheck(null);
+        }
+      })
+      .catch(() => setGateCheck(null));
+  }, [prompt?.promptId, selectedVersionId, activeWorkspaceId]);
 
   const parsedParameters = useMemo(
     () => toPersistedParameters(modelParameters),
@@ -1163,6 +1189,161 @@ export function PromptEditor({
                     )}
                   </div>
                 </div>
+
+                {/* ── Safety Gate Panel ── */}
+                <div className="mt-6 rounded-xl border border-[#E7DED1] bg-white overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-[#E7DED1] px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-[#2563EB]" />
+                      <span className="text-sm font-semibold text-[#111111]">Safety Gate</span>
+                    </div>
+                    {gateCheck !== "loading" && gateCheck && (
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                        gateCheck.status === "passed"
+                          ? "border-[#6EE7B7]/50 bg-[#ECFDF5] text-[#065F46]"
+                          : gateCheck.status === "blocked"
+                          ? "border-[#FCA5A5]/50 bg-[#FEF2F2] text-[#991B1B]"
+                          : "border-[#FDE68A]/50 bg-[#FFFBEB] text-[#92400E]"
+                      }`}>
+                        {gateCheck.status === "passed" ? "All gates passed" : gateCheck.status === "blocked" ? "Blocked" : "Needs review"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="px-4 py-4">
+                    {gateCheck === "loading" ? (
+                      <div className="flex items-center gap-2 text-xs text-[#6B7280] py-1">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading gate status…
+                      </div>
+                    ) : !gateCheck ? (
+                      <div className="space-y-2">
+                        <p className="text-xs text-[#6B7280]">
+                          No gate check has been run for this version yet. Gate checks are performed automatically when you attempt to promote a version to candidate or active.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={rolloutSaving}
+                          onClick={() => {
+                            if (!prompt?.promptId || !activeWorkspaceId || !selectedVersionId) return;
+                            setGateCheck("loading");
+                            fetch(
+                              `/api/prompts/${encodeURIComponent(prompt.promptId)}/rollout?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+                              {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  promptVersionId: selectedVersionId,
+                                  rolloutStatus: "candidate",
+                                  rolloutPercentage: 0,
+                                  dryRun: true,
+                                }),
+                              },
+                            ).then(async (r) => {
+                              const d = await r.json() as { gate?: { status?: string; decision?: string; reasons?: string[]; checkedAt?: string; riskScore?: number | null } };
+                              if (d?.gate) setGateCheck({ status: d.gate.status ?? "unknown", decision: d.gate.decision ?? "", reasons: d.gate.reasons ?? [], checkedAt: d.gate.checkedAt ?? null, riskScore: d.gate.riskScore ?? null });
+                              else setGateCheck(null);
+                            }).catch(() => setGateCheck(null));
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#E7DED1] bg-[#F8F5EF] px-3 py-1.5 text-xs font-medium text-[#111111] hover:bg-[#EDE8E0] transition-colors disabled:opacity-50"
+                        >
+                          <ShieldCheck className="h-3 w-3" />
+                          Check gates now
+                        </button>
+                      </div>
+                    ) : (() => {
+                      const check = gateCheck as {
+                        status: string;
+                        decision: string;
+                        reasons: string[];
+                        checkedAt: string | null;
+                        riskScore: number | null;
+                        gates?: Array<{ name: string; status: string; score: number | null; runId: string | null; reason: string | null }>;
+                      };
+                      const gateRows = check.gates ?? [];
+
+                      return (
+                        <div className="space-y-3">
+                          {gateRows.length > 0 && (
+                            <div className="overflow-hidden rounded-lg border border-[#E7DED1]">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="border-b border-[#E7DED1] bg-[#F8F5EF]">
+                                    <th className="px-3 py-2 text-left font-medium text-[#6B7280]">Gate</th>
+                                    <th className="px-3 py-2 text-left font-medium text-[#6B7280]">Status</th>
+                                    <th className="px-3 py-2 text-right font-medium text-[#6B7280]">Score</th>
+                                    <th className="px-3 py-2 text-left font-medium text-[#6B7280]">Details</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {gateRows.map((gate, i) => {
+                                    const badgeCls =
+                                      gate.status === "passed"
+                                        ? "border-[#6EE7B7]/50 bg-[#ECFDF5] text-[#065F46]"
+                                        : gate.status === "failed"
+                                        ? "border-[#FCA5A5]/50 bg-[#FEF2F2] text-[#991B1B]"
+                                        : gate.status === "missing"
+                                        ? "border-[#FDE68A]/50 bg-[#FFFBEB] text-[#92400E]"
+                                        : gate.status === "not_required"
+                                        ? "border-[#E7DED1] bg-[#F8F5EF] text-[#6B7280]"
+                                        : "border-[#FDE68A]/50 bg-[#FFFBEB] text-[#78350F]";
+                                    const icon =
+                                      gate.status === "passed" ? <CheckCircle2 className="h-3 w-3" /> :
+                                      gate.status === "failed" ? <XCircle className="h-3 w-3" /> :
+                                      gate.status === "not_required" ? <Circle className="h-3 w-3" /> :
+                                      <AlertTriangle className="h-3 w-3" />;
+                                    return (
+                                      <tr key={i} className="border-b border-[#E7DED1] last:border-0">
+                                        <td className="px-3 py-2.5 font-medium text-[#111111]">
+                                          {gate.runId ? (
+                                            <a href={`/evaluations/${encodeURIComponent(gate.runId)}?org=${encodeURIComponent(activeWorkspaceId ?? "")}`} className="hover:underline text-[#2563EB]">
+                                              {gate.name}
+                                            </a>
+                                          ) : gate.name}
+                                        </td>
+                                        <td className="px-3 py-2.5">
+                                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium ${badgeCls}`}>
+                                            {icon}
+                                            {gate.status === "not_required" ? "Not required" :
+                                             gate.status === "needs_review" ? "Needs review" :
+                                             gate.status.charAt(0).toUpperCase() + gate.status.slice(1)}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-2.5 text-right tabular-nums text-[#111111]">
+                                          {gate.score !== null ? `${Math.round(gate.score * 100)}%` : "—"}
+                                        </td>
+                                        <td className="px-3 py-2.5 text-[#6B7280]">
+                                          {gate.reason ?? "—"}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {check.reasons.length > 0 && (
+                            <div className="rounded-lg border border-[#FDE68A]/50 bg-[#FFFBEB] px-3 py-2">
+                              <p className="text-xs font-medium text-[#92400E] mb-1">Issues preventing promotion:</p>
+                              <ul className="space-y-0.5">
+                                {check.reasons.map((r, i) => (
+                                  <li key={i} className="text-xs text-[#78350F] flex items-start gap-1.5">
+                                    <span className="mt-0.5 shrink-0">•</span>
+                                    {r}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {check.checkedAt && (
+                            <p className="text-[10px] text-[#6B7280]">Last checked {relativeTime(check.checkedAt)}</p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
               </>
             )}
           </TabsContent>
@@ -1367,24 +1548,36 @@ export function PromptEditor({
               </div>
             ) : autoEvalRun === null ? (
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                    <Circle className="h-2.5 w-2.5" />
-                    No evaluation yet
-                  </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-[#E7DED1] bg-[#F8F5EF] px-2.5 py-1 text-xs font-medium text-[#6B7280]">
+                  <Circle className="h-2.5 w-2.5" />
+                  Not evaluated yet
+                </span>
+                <div className="rounded-lg border border-[#E7DED1] bg-[#F8F5EF] px-3 py-3 space-y-2">
+                  <p className="text-xs font-medium text-[#111111]">Evaluation readiness</p>
+                  <p className="text-[11px] text-[#6B7280] leading-relaxed">
+                    Auto-eval triggers when this version is promoted to <strong className="text-[#111111]">candidate</strong>. Requirements:
+                  </p>
+                  <ul className="space-y-1">
+                    <li className="flex items-center gap-1.5 text-[11px] text-[#6B7280]">
+                      <CheckCircle2 className="h-3 w-3 text-[#065F46] shrink-0" />
+                      Version exists and is in draft or candidate state
+                    </li>
+                    <li className="flex items-center gap-1.5 text-[11px] text-[#6B7280]">
+                      <AlertTriangle className="h-3 w-3 text-[#92400E] shrink-0" />
+                      Baseline evaluation dataset linked to this prompt
+                    </li>
+                    <li className="flex items-center gap-1.5 text-[11px] text-[#6B7280]">
+                      <Circle className="h-3 w-3 text-[#6B7280] shrink-0" />
+                      Behavioral dataset + rubric (Pro/Enterprise — optional)
+                    </li>
+                  </ul>
                 </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  No evaluation has been run for this version. Auto-eval triggers
-                  when a version is promoted to{" "}
-                  <strong className="text-foreground">candidate</strong> status
-                  and a linked dataset exists.
-                </p>
                 <a
                   href={`/evaluations?org=${encodeURIComponent(activeWorkspaceId ?? "")}`}
-                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  className="inline-flex items-center gap-1.5 text-xs text-[#2563EB] hover:underline"
                 >
                   <Sparkles className="h-3 w-3" />
-                  Run an evaluation
+                  Run an evaluation manually
                 </a>
               </div>
             ) : (
@@ -1403,36 +1596,36 @@ export function PromptEditor({
                     ? {
                         label: status === "running" ? "Running" : "Queued",
                         icon: <Loader2 className="h-2.5 w-2.5 animate-spin" />,
-                        cls: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+                        cls: "border-[#BFDBFE]/60 bg-[#EFF6FF] text-[#1D4ED8]",
                       }
                     : status === "failed"
                       ? {
                           label: "Run failed",
                           icon: <XCircle className="h-2.5 w-2.5" />,
-                          cls: "border-red-500/40 bg-red-500/10 text-red-400",
+                          cls: "border-[#FCA5A5]/50 bg-[#FEF2F2] text-[#991B1B]",
                         }
                       : rec === "ready_for_rollout"
                         ? {
                             label: "Passed",
                             icon: <CheckCircle2 className="h-2.5 w-2.5" />,
-                            cls: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+                            cls: "border-[#6EE7B7]/50 bg-[#ECFDF5] text-[#065F46]",
                           }
                         : rec === "needs_improvement"
                           ? {
                               label: "Needs improvement",
                               icon: <AlertTriangle className="h-2.5 w-2.5" />,
-                              cls: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+                              cls: "border-[#FDE68A]/50 bg-[#FFFBEB] text-[#92400E]",
                             }
                           : rec === "blocked"
                             ? {
                                 label: "Blocked",
                                 icon: <XCircle className="h-2.5 w-2.5" />,
-                                cls: "border-red-500/40 bg-red-500/10 text-red-400",
+                                cls: "border-[#FCA5A5]/50 bg-[#FEF2F2] text-[#991B1B]",
                               }
                             : {
                                 label: rec?.replaceAll("_", " ") ?? "Unknown",
                                 icon: <Circle className="h-2.5 w-2.5" />,
-                                cls: "border-border bg-muted/60 text-muted-foreground",
+                                cls: "border-[#E7DED1] bg-[#F8F5EF] text-[#6B7280]",
                               };
 
                 const isStale =
@@ -1450,7 +1643,7 @@ export function PromptEditor({
                         {badge.label}
                       </span>
                       {isStale && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/8 px-2 py-0.5 text-[10px] text-amber-400">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#FDE68A]/50 bg-[#FFFBEB] px-2 py-0.5 text-[10px] text-[#92400E]">
                           <Clock3 className="h-2.5 w-2.5" />
                           Stale
                         </span>

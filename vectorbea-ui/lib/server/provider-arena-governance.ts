@@ -484,7 +484,7 @@ export async function evaluateRolloutGate(args: {
       .eq("id", args.promptVersionId)
       .maybeSingle(),
   ]);
-  const [arenaRes, behaviorRes, reviewsRes] = await Promise.all([
+  const [arenaRes, behaviorRes, behavioralDatasetsRes, reviewsRes] = await Promise.all([
     supabase
       .from("evaluation_runs")
       .select("id, summary, run_type, created_at")
@@ -494,23 +494,30 @@ export async function evaluateRolloutGate(args: {
       .eq("run_type", "provider_arena")
       .order("created_at", { ascending: false })
       .limit(1),
+    // Behavioral runs live in their own table
     supabase
-      .from("evaluation_runs")
-      .select("id, summary, run_type, created_at")
+      .from("behavioral_evaluation_runs")
+      .select("id, status, summary, dataset_id, rubric_id, created_at")
+      .eq("workspace_id", args.workspaceId)
+      .eq("prompt_version_id", args.promptVersionId)
+      .order("created_at", { ascending: false })
+      .limit(10),
+    // Check if behavioral datasets are linked for this prompt
+    supabase
+      .from("behavioral_datasets")
+      .select("id, name")
       .eq("workspace_id", args.workspaceId)
       .eq("prompt_id", args.promptId)
-      .eq("prompt_version_id", args.promptVersionId)
-      .eq("run_type", "behavioral_rubric")
-      .order("created_at", { ascending: false })
-      .limit(1),
+      .eq("is_archived", false)
+      .limit(20),
     supabase
       .from("human_review_items")
       .select("id,severity,status")
       .eq("workspace_id", args.workspaceId)
       .eq("status", "open"),
   ]);
-  if (arenaRes.error || behaviorRes.error || reviewsRes.error) {
-    throw new Error(arenaRes.error?.message ?? behaviorRes.error?.message ?? reviewsRes.error?.message ?? "Failed rollout gate checks");
+  if (arenaRes.error || reviewsRes.error) {
+    throw new Error(arenaRes.error?.message ?? reviewsRes.error?.message ?? "Failed rollout gate checks");
   }
 
   const reasons: string[] = [];
@@ -520,20 +527,62 @@ export async function evaluateRolloutGate(args: {
   let riskScore: number | null = null;
 
   const arena = (arenaRes.data ?? [])[0] as Record<string, unknown> | undefined;
-  const behavioral = (behaviorRes.data ?? [])[0] as Record<string, unknown> | undefined;
-  if (behavioral) evalIds.push(String(behavioral.id));
+  const behavioralRuns = (behaviorRes.data ?? []) as Array<Record<string, unknown>>;
+  const behavioralDatasets = (behavioralDatasetsRes.data ?? []) as Array<{ id: string; name: string }>;
   if (arena) evalIds.push(String(arena.id));
+  for (const br of behavioralRuns) evalIds.push(String(br.id));
 
-  // Behavioral eval is optional — only block if it exists and explicitly failed
-  if (behavioral) {
-    const behavioralSummary = asRecord(behavioral.summary);
-    const behavioralPassed = Boolean(behavioralSummary.passed);
-    if (!behavioralPassed) {
-      reasons.push("Behavioral evaluation did not pass");
-      decision = "needs_review";
-      status = "needs_review";
+  // Behavioral evaluation gate — only applies if behavioral datasets exist for this prompt
+  if (behavioralDatasets.length > 0) {
+    // For each behavioral dataset, find its most recent completed run for this version
+    for (const bDataset of behavioralDatasets) {
+      const latestRun = behavioralRuns
+        .filter((r) => String(r.dataset_id) === bDataset.id)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+
+      if (!latestRun) {
+        // Dataset linked but no run exists — missing gate
+        reasons.push(`Behavioral evaluation missing for dataset "${bDataset.name}"`);
+        if (status === "passed") status = "needs_review";
+        if (decision === "safe_to_rollout") decision = "needs_review";
+        continue;
+      }
+
+      const runStatus = String(latestRun.status);
+      if (runStatus === "failed" || runStatus === "cancelled" || runStatus === "timed_out") {
+        reasons.push(`Behavioral evaluation failed for dataset "${bDataset.name}"`);
+        status = "needs_review";
+        if (decision !== "do_not_rollout") decision = "needs_review";
+        continue;
+      }
+
+      if (runStatus !== "completed") {
+        // Still running or queued — treat as missing
+        reasons.push(`Behavioral evaluation still in progress for dataset "${bDataset.name}"`);
+        if (status === "passed") status = "needs_review";
+        if (decision === "safe_to_rollout") decision = "needs_review";
+        continue;
+      }
+
+      // Run completed — check score and hard failures
+      const summary = asRecord(latestRun.summary);
+      const score = asNumber(summary.score ?? summary.overall_score ?? summary.pass_rate);
+      const hardFailures = asNumber(summary.hard_failure_count) ?? 0;
+      const passThreshold = asNumber(summary.pass_threshold) ?? 0.7;
+
+      if (hardFailures > 0) {
+        reasons.push(`Behavioral evaluation has ${hardFailures} hard failure(s) for dataset "${bDataset.name}"`);
+        status = "blocked";
+        decision = "do_not_rollout";
+      } else if (score !== null && score < passThreshold) {
+        reasons.push(`Behavioral evaluation score ${Math.round(score * 100)}% is below threshold ${Math.round(passThreshold * 100)}% for dataset "${bDataset.name}"`);
+        status = "needs_review";
+        if (decision !== "do_not_rollout") decision = "needs_review";
+      }
+      // If score >= threshold and no hard failures: gate passes for this dataset
     }
   }
+  // No behavioral datasets → behavioral gate not required (passes silently)
 
   // Provider Arena run is optional — only factor in if a run exists
   if (arena) {

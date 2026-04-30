@@ -2026,6 +2026,16 @@ export async function createDatasetEvaluationRun(args: {
       recommendation,
       score: aggregateScore,
       runId: view.id,
+      runType: "dataset",
+      datasetName: dataset.name,
+      passRate: results.length > 0 ? succeeded / results.length : null,
+      totalCount: results.length,
+      failedCount: failed,
+      needsReviewCount: recommendation === "needs_review" || recommendation === "ready_with_caution" ? results.length - succeeded : 0,
+      hardFailureCount: criticalFailures,
+      averageConfidence: aggregateConfidence,
+      provider: results[0]?.provider ?? null,
+      model: results[0]?.model ?? null,
     });
   } catch { /* notification errors must never fail the main flow */ }
 

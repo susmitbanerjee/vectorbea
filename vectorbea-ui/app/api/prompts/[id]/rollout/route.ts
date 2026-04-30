@@ -3,6 +3,7 @@ import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { getPromptRolloutDistribution, updateVersionRollout } from "@/lib/server/rollout";
 import { evaluateRolloutGate } from "@/lib/server/provider-arena-governance";
+import { triggerAutoEvaluation } from "@/lib/server/auto-evaluations";
 import type { RolloutStatus } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,23 @@ export async function POST(
       rolloutStatus: body.rolloutStatus as RolloutStatus,
       rolloutPercentage: body.rolloutPercentage ?? 0,
     });
-    return NextResponse.json(result);
+
+    // When a version is first promoted to candidate, trigger auto-evaluation
+    // (fire-and-forget — don't block the rollout response)
+    if (body.rolloutStatus === "candidate") {
+      void triggerAutoEvaluation({
+        workspaceId,
+        promptId,
+        promptVersionId: body.promptVersionId,
+        trigger: "candidate_promoted",
+        force: false,
+        startedBy: auth.user.id,
+      }).catch((err: unknown) => {
+        console.warn("[rollout] Auto-eval trigger failed:", err instanceof Error ? err.message : err);
+      });
+    }
+
+    return NextResponse.json({ ...result, autoEvalTriggered: body.rolloutStatus === "candidate" });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
   }

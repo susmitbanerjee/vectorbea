@@ -614,6 +614,10 @@ export async function startBehavioralRubricRun(args: {
         versionTag: version.version_tag,
         reason: error instanceof Error ? error.message : "Behavioral run failed",
         runId: run.id,
+        runType: "behavioral_rubric",
+        provider: args.provider,
+        model: args.model,
+        startedBy: args.startedBy,
       });
     } catch {
       // Notification failures must not fail caller
@@ -974,6 +978,15 @@ async function executeBehavioralRun(args: {
       recommendation: passed ? "ready_for_rollout" : "needs_review",
       score: averageScore,
       runId: args.runId,
+      runType: "behavioral_rubric",
+      rubricName: args.rubric.name,
+      totalCount: results.length,
+      failedCount: results.filter((result) => result.status === "failed").length,
+      needsReviewCount: results.filter((result) => result.judge?.needsReview).length,
+      hardFailureCount: hardFailureCount,
+      averageConfidence: null,
+      provider: args.providerConfig.config.provider_type,
+      model: args.selectedModel,
     });
   } catch {
     // Notification failures must not fail the evaluation run
