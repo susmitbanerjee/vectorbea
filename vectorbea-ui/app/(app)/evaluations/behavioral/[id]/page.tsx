@@ -1532,8 +1532,8 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
 
   // Poll every 3 seconds while any run is queued or running; stop when all are terminal
   useEffect(() => {
-    const activeStatuses = new Set(["queued", "running", "pending"]);
-    const terminalStatuses = new Set(["completed", "failed", "cancelled", "timed_out"]);
+    const activeStatuses = new Set(["queued", "running"]);
+    const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
     const hasActive = [...runs, ...arenaRuns].some((run) => activeStatuses.has(run.status));
     const allTerminal = [...runs, ...arenaRuns].every((run) => terminalStatuses.has(run.status));
     if (!hasActive || allTerminal) return;
@@ -1834,13 +1834,13 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
                       <td className="py-2.5 text-[#374151]">{run.provider}</td>
                       <td className="py-2.5 text-[#374151]">{run.model}</td>
                       <td className="py-2.5">
-                        {run.status === "running" || run.status === "queued" || run.status === "pending" ? (
+                        {run.status === "running" || run.status === "queued" ? (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-xs font-medium text-[#1D4ED8]">
                             <Loader2 className="h-3 w-3 animate-spin" />
-                            {run.status === "queued" ? "Queued…" : run.status === "pending" ? "Pending…" : "Running…"}
+                            {run.status === "queued" ? "Queued…" : "Running…"}
                           </span>
                         ) : (
-                          <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" || run.status === "timed_out" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#F3F4F6] text-[#374151]"}>
+                          <Badge className={run.status === "completed" ? "bg-[#ECFDF5] text-[#065F46]" : run.status === "failed" || run.status === "cancelled" ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#F3F4F6] text-[#374151]"}>
                             {run.status}
                           </Badge>
                         )}
