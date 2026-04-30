@@ -315,7 +315,7 @@ export async function notifyEvaluationCompleted(args: {
   runId: string;
   // Rich context — optional for backwards compatibility
   datasetName?: string | null;
-  runType?: "baseline" | "behavioral" | "trace_set";
+  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset";
   passRate?: number | null;
   totalCount?: number;
   failedCount?: number;
@@ -367,7 +367,7 @@ export async function notifyEvaluationFailed(args: {
   reason: string;
   runId?: string;
   datasetName?: string | null;
-  runType?: "baseline" | "behavioral" | "trace_set";
+  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset";
   provider?: string | null;
   model?: string | null;
   startedBy?: string | null;
