@@ -2031,7 +2031,7 @@ export async function createDatasetEvaluationRun(args: {
       passRate: results.length > 0 ? succeeded / results.length : null,
       totalCount: results.length,
       failedCount: failed,
-      needsReviewCount: recommendation === "needs_review" || recommendation === "ready_with_caution" ? results.length - succeeded : 0,
+      needsReviewCount: recommendation === "needs_review" ? results.length - succeeded : 0,
       hardFailureCount: criticalFailures,
       averageConfidence: aggregateConfidence,
       provider: results[0]?.provider ?? null,
