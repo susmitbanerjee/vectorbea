@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
   const planTier = organizations[0]?.planTier ?? "free";
   if (planTier === "free") {
     return NextResponse.json(
-      { error: "Prompt evaluation is restricted to the Team plan." },
+      { error: "Prompt evaluation is available on Plus, Pro, and Enterprise." },
       { status: 403 },
     );
   }

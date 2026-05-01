@@ -5,7 +5,7 @@ import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { listProviderArenaRuns, startProviderArenaRun } from "@/lib/server/behavioral-evaluation-runs";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
-import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
+import { assertUsageAvailable } from "@/lib/server/usage-quotas";
 import { listBehavioralItems } from "@/lib/server/behavioral-datasets";
 
 export const dynamic = "force-dynamic";
@@ -57,8 +57,12 @@ export async function POST(request: NextRequest) {
 
     const datasetItems = await listBehavioralItems(body.datasetId.trim());
     const providerExecutions = Math.max(1, body.candidates.length * datasetItems.length);
-    // TODO: add dedicated usage dimensions for provider and judge executions
-    await assertQuotaAvailable(workspaceId, "evaluation_runs", Math.max(1, providerExecutions));
+    await assertUsageAvailable(workspaceId, {
+      provider_arena_runs: 1,
+      evaluation_executions: providerExecutions,
+      provider_executions: providerExecutions,
+      judge_executions: providerExecutions,
+    });
 
     const run = await startProviderArenaRun({
       workspaceId,

@@ -10,6 +10,7 @@ import { buildTraceMetadataV1, normalizeTraceMetadataV1 } from "@/lib/trace-meta
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { getEvaluationDataset, listDatasetItems } from "@/lib/server/evaluation-datasets";
 import { getFirstEnabledProvider, getProviderConfig, listEnabledProviders } from "@/lib/server/provider-keys";
+import { recordUsageEvent } from "@/lib/server/usage-quotas";
 
 // ── Multi-provider helper ─────────────────────────────────────────────────────
 
@@ -911,6 +912,20 @@ export async function createTraceSetEvaluationRun(args: {
     const { buildReviewQueueForRun } = await import("@/lib/server/provider-arena-governance");
     await buildReviewQueueForRun({ workspaceId: args.workspaceId, evaluationRunId: view.id });
   } catch { /* review queue population must never fail the main flow */ }
+
+  await recordUsageEvent({
+    workspaceId: args.workspaceId,
+    eventType: "TRACE_SET_EVALUATION_RUN",
+    sourceType: "evaluation_run",
+    sourceId: view.id,
+    metadata: {
+      candidatePromptVersionId: args.candidatePromptVersionId,
+      sourceTraceCount: args.sourceTraceIds.length,
+    },
+    meterDeltas: {
+      evaluation_executions: Math.max(view.aggregate.total, 0),
+    },
+  });
 
   return view;
 }
@@ -2044,6 +2059,21 @@ export async function createDatasetEvaluationRun(args: {
     const { buildReviewQueueForRun } = await import("@/lib/server/provider-arena-governance");
     await buildReviewQueueForRun({ workspaceId: args.workspaceId, evaluationRunId: view.id });
   } catch { /* review queue population must never fail the main flow */ }
+
+  await recordUsageEvent({
+    workspaceId: args.workspaceId,
+    eventType: "DATASET_EVALUATION_RUN",
+    sourceType: "evaluation_run",
+    sourceId: view.id,
+    metadata: {
+      datasetId: args.datasetId,
+      candidatePromptVersionId: args.candidatePromptVersionId,
+      selectedModelCount: args.selectedModels?.length ?? 1,
+    },
+    meterDeltas: {
+      evaluation_executions: Math.max(view.aggregate.total, 0),
+    },
+  });
 
   return view;
 }

@@ -10,8 +10,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const PLANS: Record<string, { name: string; basePrice: number; perSeat: boolean }> = {
-  developer: { name: "Developer", basePrice: 0, perSeat: false },
-  team: { name: "Team", basePrice: 19.99, perSeat: true },
+  free: { name: "Free", basePrice: 0, perSeat: false },
+  plus: { name: "Plus", basePrice: 29, perSeat: true },
+  pro: { name: "Pro", basePrice: 499, perSeat: false },
   enterprise: { name: "Enterprise", basePrice: 0, perSeat: false },
 };
 
@@ -24,8 +25,8 @@ const CYCLE_LABELS: Record<Cycle, string> = {
 
 export default function CheckoutForm() {
   const params = useSearchParams();
-  const planId = (params.get("plan") ?? "team").toLowerCase();
-  const plan = PLANS[planId] ?? PLANS.team;
+  const planId = (params.get("plan") ?? "plus").toLowerCase();
+  const plan = PLANS[planId] ?? PLANS.plus;
 
   const [seats, setSeats] = useState(3);
   const [cycle, setCycle] = useState<Cycle>("annual");
@@ -37,8 +38,9 @@ export default function CheckoutForm() {
   const [success, setSuccess] = useState(false);
 
   const subtotal = useMemo(() => {
-    if (planId === "developer") return 0;
+    if (planId === "free") return 0;
     if (planId === "enterprise") return 0;
+    if (planId === "pro") return plan.basePrice;
     return plan.basePrice * Math.max(1, seats);
   }, [planId, seats, plan.basePrice]);
 
@@ -47,7 +49,7 @@ export default function CheckoutForm() {
 
   const canSubmit =
     email.trim().length > 3 &&
-    (planId === "developer" || (card.replace(/\s/g, "").length >= 12 && name.trim() && zip.trim()));
+    (planId === "free" || (card.replace(/\s/g, "").length >= 12 && name.trim() && zip.trim()));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,7 +180,7 @@ export default function CheckoutForm() {
             </div>
           )}
 
-          {planId !== "developer" && (
+          {planId !== "free" && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-primary">Step 3</p>
               <h2 className="mt-1 text-xl font-semibold">Payment details</h2>
@@ -232,7 +234,7 @@ export default function CheckoutForm() {
           )}
 
           <Button type="submit" disabled={!canSubmit || submitting} className="h-12 w-full gap-2 text-sm">
-            {submitting ? "Processing…" : planId === "developer" ? "Activate free plan" : `Subscribe — $${total.toFixed(0)}`}
+            {submitting ? "Processing…" : planId === "free" ? "Activate free plan" : `Subscribe — $${total.toFixed(0)}`}
             {!submitting && <ArrowRight className="h-4 w-4" />}
           </Button>
         </form>

@@ -611,6 +611,27 @@ export default function EvaluationsPage() {
           </div>
         )}
 
+        {/* ── Provider Arena CTA ── */}
+        <Link href="/evaluations/provider-arena" className="block rounded-xl border border-[#E7DED1] bg-gradient-to-r from-[#EFF6FF] to-[#F0FDF4] p-4 hover:border-[#2563EB] hover:shadow-sm transition-all group">
+          <div className="flex items-center gap-4">
+            <div className="rounded-xl bg-[#2563EB] p-2.5 flex-shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                <path d="M14.5 17.5L3 6V3h3l11.5 11.5" /><path d="M13 19l6-6" /><path d="M16 16l4 4" /><path d="M19 21l2-2" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="font-bold text-[#111111] text-sm">Provider Arena</p>
+                <span className="rounded bg-[#EFF6FF] text-[#1D4ED8] text-[10px] font-semibold px-1.5 py-0.5">PRO</span>
+              </div>
+              <p className="text-xs text-[#6B7280]">Compare multiple providers on behavioral datasets. Choose the safest model for production based on quality, safety, cost, and risk.</p>
+            </div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-[#6B7280] group-hover:text-[#2563EB] flex-shrink-0">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </div>
+        </Link>
+
         {/* ── Evaluation runs list ── */}
         <Card>
           <CardHeader>

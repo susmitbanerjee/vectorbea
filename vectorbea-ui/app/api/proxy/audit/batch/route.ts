@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
 import { authenticateRuntimeApiKey } from "@/lib/server/runtime-api-key";
 import { enforceJsonBodySize } from "@/lib/server/security";
-import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
+import { assertQuotaAvailable, recordUsageEvent } from "@/lib/server/usage-quotas";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 
@@ -133,6 +134,21 @@ export async function POST(request: NextRequest) {
     if (insertError) {
       throw new Error(insertError.message);
     }
+
+    const requestFingerprint =
+      request.headers.get("x-request-id")?.trim() ||
+      createHash("sha256").update(JSON.stringify(rows)).digest("hex");
+    await recordUsageEvent({
+      workspaceId,
+      eventType: "TRACE_INGESTED",
+      sourceType: "audit_batch",
+      sourceId: requestFingerprint,
+      quantity: rows.length,
+      metadata: { batchSize: rows.length },
+      meterDeltas: {
+        traces: rows.length,
+      },
+    });
 
     return NextResponse.json({ inserted: rows.length }, { status: 201 });
   } catch (error) {

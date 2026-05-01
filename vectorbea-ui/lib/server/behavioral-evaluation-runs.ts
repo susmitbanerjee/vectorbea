@@ -22,6 +22,7 @@ import {
   getReviewQueueSummary,
   runPairwiseComparisons,
 } from "@/lib/server/provider-arena-governance";
+import { recordUsageEvent } from "@/lib/server/usage-quotas";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 type PromptVersionRow = {
@@ -565,7 +566,7 @@ export async function startBehavioralRubricRun(args: {
   runName?: string;
   startedBy: string;
 }) {
-  await assertFeatureAccess(args.workspaceId, "provider_arena");
+  await assertFeatureAccess(args.workspaceId, "behavioral_evaluations");
   const dataset = await getBehavioralDataset(args.workspaceId, args.datasetId);
   if (!dataset) throw new Error("Behavioral dataset not found");
   const rubric = await getRubricWithDetails(args.rubricId);
@@ -627,6 +628,24 @@ export async function startBehavioralRubricRun(args: {
 
   const view = await getBehavioralRunDetail(args.workspaceId, run.id);
   if (!view) throw new Error("Failed to load behavioral run after execution");
+  await recordUsageEvent({
+    workspaceId: args.workspaceId,
+    eventType: "BEHAVIORAL_EVALUATION_RUN",
+    sourceType: "evaluation_run",
+    sourceId: run.id,
+    metadata: {
+      datasetId: dataset.id,
+      rubricId: rubric.id,
+      promptVersionId: version.id,
+      provider: args.provider,
+      model: args.model,
+    },
+    meterDeltas: {
+      evaluation_executions: Math.max(view.aggregate.total, 0),
+      provider_executions: Math.max(view.aggregate.total, 0),
+      judge_executions: Math.max(view.aggregate.total, 0),
+    },
+  });
   return view;
 }
 
@@ -1689,6 +1708,57 @@ export async function startProviderArenaRun(args: {
 
   const view = await getProviderArenaRunDetail(args.workspaceId, run.id);
   if (!view) throw new Error("Failed to load provider arena run");
+  await recordUsageEvent({
+    workspaceId: args.workspaceId,
+    eventType: "PROVIDER_ARENA_RUN",
+    sourceType: "evaluation_run",
+    sourceId: run.id,
+    metadata: {
+      datasetId: dataset.id,
+      rubricId: rubric.id,
+      promptVersionId: version.id,
+      candidateCount: candidateRows.length,
+    },
+    meterDeltas: {
+      provider_arena_runs: 1,
+      evaluation_executions: Math.max(view.aggregate.total, 0),
+      provider_executions: Math.max(view.aggregate.total, 0),
+      judge_executions: Math.max(view.aggregate.total, 0),
+    },
+  });
+
+  // Fire-and-forget notification — never block the response
+  void (async () => {
+    try {
+      const { notifyEvaluationCompleted } = await import("@/lib/server/notifications");
+      const recommendedCandidate = reportPayload.recommended_candidate_id
+        ? candidateRows.find((candidate) => candidate.id === reportPayload.recommended_candidate_id)
+        : null;
+      const bestRanking = (reportPayload.provider_rankings[0] ?? null) as Record<string, unknown> | null;
+      await notifyEvaluationCompleted({
+        workspaceId: args.workspaceId,
+        promptName: getPromptName(version.prompts) ?? "Prompt",
+        versionTag: version.version_tag,
+        recommendation: reportPayload.rollout_recommendation,
+        score: reportPayload.decision_score,
+        runId: run.id,
+        runType: "provider_arena",
+        datasetName: dataset.name,
+        rubricName: rubric.name,
+        provider: recommendedCandidate?.provider ?? "arena",
+        model: recommendedCandidate?.model ?? "multi",
+        totalCount: results.length,
+        failedCount: results.filter((r) => r.status === "failed").length,
+        needsReviewCount: results.filter((r) => r.judge?.needsReview).length,
+        hardFailureCount: results.reduce((sum, r) => sum + (r.judge?.hardFailures.length ?? 0), 0),
+        passRate: bestRanking?.pass_rate != null ? Number(bestRanking.pass_rate) / 100 : null,
+        startedBy: args.startedBy,
+      });
+    } catch (notifyError) {
+      console.warn("[provider-arena] Notification failed:", notifyError instanceof Error ? notifyError.message : String(notifyError));
+    }
+  })();
+
   return view;
 }
 

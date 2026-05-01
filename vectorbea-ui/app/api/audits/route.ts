@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (planLimits.planTier === "free" && auditCount >= auditLimit) {
       return NextResponse.json(
         {
-          error: `Free plan monthly audit limit reached (${auditLimit} events). Please upgrade to the Team plan.`,
+          error: `Free plan monthly audit limit reached (${auditLimit} events). Please upgrade to Plus or Pro.`,
         },
         { status: 429 },
       );

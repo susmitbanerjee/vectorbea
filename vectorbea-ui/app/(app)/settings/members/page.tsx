@@ -187,7 +187,7 @@ export default function MembersPage() {
                           href="/settings/billing"
                           className="font-medium underline underline-offset-4"
                         >
-                          Upgrade Plan to add more developers
+                          Upgrade plan to add more seats
                         </a>
                       </p>
                     </div>

@@ -49,15 +49,25 @@ export async function POST(request: NextRequest) {
           avgLatencyMs: Math.round(metrics.avgLatencyMs),
         });
 
-        // Quota warning notification (>80% of monthly usage)
-        const { getWorkspaceUsage } = await import("@/lib/server/usage-quotas");
-        const usage = await getWorkspaceUsage(wsId);
-        for (const [type, used] of Object.entries(usage.usage)) {
-          const limit = usage.limits[type as keyof typeof usage.limits];
-          if (limit !== null && used / limit >= 0.8) {
-            const { notifyQuotaWarning } = await import("@/lib/server/notifications");
-            void notifyQuotaWarning({ workspaceId: wsId, usageType: type, used, limit });
-          }
+        const { formatUsageMeterLabel, listPendingQuotaAlerts, markQuotaAlertSent } = await import("@/lib/server/usage-quotas");
+        const pendingAlerts = await listPendingQuotaAlerts(wsId);
+        for (const alert of pendingAlerts) {
+          const { notifyQuotaWarning } = await import("@/lib/server/notifications");
+          await notifyQuotaWarning({
+            workspaceId: wsId,
+            usageType: formatUsageMeterLabel(alert.meter),
+            used: alert.used,
+            limit: alert.limit,
+          });
+          await markQuotaAlertSent({
+            workspaceId: wsId,
+            meter: alert.meter,
+            threshold: alert.threshold,
+            month: alert.month,
+            eventType: alert.eventType,
+            used: alert.used,
+            limit: alert.limit,
+          });
         }
       } catch (err) {
         errors.push(`workspace ${wsId}: ${err instanceof Error ? err.message : String(err)}`);

@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       (existingOrganizations[0]?.planTier ?? "free") === "free"
     ) {
       return NextResponse.json(
-        { error: "Free tier is limited to 1 Organization. Please upgrade to the Team plan." },
+        { error: "Free tier is limited to 1 organization. Please upgrade to Plus or Pro." },
         { status: 403 },
       );
     }

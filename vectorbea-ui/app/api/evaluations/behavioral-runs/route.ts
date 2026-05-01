@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { startBehavioralRubricRun, listBehavioralRuns } from "@/lib/server/behavioral-evaluation-runs";
-import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
+import { assertUsageAvailable } from "@/lib/server/usage-quotas";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
+import { listBehavioralItems } from "@/lib/server/behavioral-datasets";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -48,8 +49,6 @@ export async function POST(request: NextRequest) {
     if (!rate.allowed) {
       return NextResponse.json({ error: "Rate limit exceeded for behavioral evaluation creation." }, { status: 429 });
     }
-    await assertQuotaAvailable(workspaceId, "evaluation_runs", 1);
-
     const body = (await request.json().catch(() => ({}))) as {
       datasetId?: string;
       rubricId?: string;
@@ -73,6 +72,14 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    const datasetItems = await listBehavioralItems(body.datasetId.trim());
+    const estimatedExecutions = Math.max(datasetItems.length, 1);
+    await assertUsageAvailable(workspaceId, {
+      evaluation_executions: estimatedExecutions,
+      provider_executions: estimatedExecutions,
+      judge_executions: estimatedExecutions,
+    });
+
     const run = await startBehavioralRubricRun({
       workspaceId,
       datasetId: body.datasetId.trim(),

@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     if (planLimits.planTier === "free" && promptCount >= promptLimit) {
       return NextResponse.json(
         {
-          error: `Free plan limit reached (${promptLimit} prompts). Please upgrade to the Team plan.`,
+          error: `Free plan limit reached (${promptLimit} prompts). Please upgrade to the Plus or Pro plan.`,
         },
         { status: 429 },
       );

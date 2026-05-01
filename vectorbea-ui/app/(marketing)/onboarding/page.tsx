@@ -236,7 +236,7 @@ export default function OnboardingPage() {
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                       Upgrade path
                     </p>
-                    <p className="mt-2 text-lg font-semibold">Upgrade to Team anytime</p>
+                    <p className="mt-2 text-lg font-semibold">Upgrade to Plus anytime</p>
                   </div>
                 </div>
 
@@ -250,7 +250,7 @@ export default function OnboardingPage() {
                   <div className="flex items-start gap-3">
                     <Sparkles className="mt-0.5 h-4 w-4 text-primary" />
                     <p className="leading-6">
-                      Need multiple workspaces? Upgrade to Team from Settings whenever
+                      Need multiple workspaces? Upgrade to Plus from Settings whenever
                       you&apos;re ready.
                     </p>
                   </div>

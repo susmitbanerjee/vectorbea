@@ -10,6 +10,7 @@ import {
   Bell,
   CalendarClock,
   CreditCard,
+  Gauge,
   ArrowUpRight,
   BookOpen,
   Database,
@@ -24,6 +25,7 @@ import {
   Settings2,
   Sparkles,
   Star,
+  Swords,
   Users,
 } from "lucide-react";
 
@@ -51,11 +53,13 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true },
   { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true },
   { href: "/evaluations/behavioral", label: "Behavioral Datasets", icon: BookOpen, isSubItem: true },
+  { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true },
   { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true },
   { href: "/evaluations/compare", label: "Evaluation Comparison", icon: ArrowUpRight, isSubItem: true },
   { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
+  { href: "/settings/usage", label: "Usage", icon: Gauge },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
   { href: "/settings/members", label: "Members", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings2 },
@@ -229,7 +233,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                     ? "bg-[#7C3AED]/10 text-[#6D28D9]"
                     : "bg-[#E7DED1] text-[#78716C]",
             ].join(" ")}>
-              {planTier === "plus" ? "Plus" : planTier === "pro" ? "Pro" : planTier === "team" ? "Team" : "Enterprise"}
+              {planTier === "plus" || planTier === "team" ? "Plus" : planTier === "pro" ? "Pro" : "Enterprise"}
             </span>
           </div>
         )}

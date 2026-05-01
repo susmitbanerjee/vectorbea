@@ -2,6 +2,7 @@ import "server-only";
 
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import type { PlanTier } from "@/lib/api";
+import { normalizePlanTier } from "@/lib/server/plan-config";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -141,8 +142,8 @@ export async function syncSubscription(payload: SubscriptionSyncPayload): Promis
   // ── 2. Determine action ───────────────────────────────────────────────────
   const isActive = payload.status === "active" || payload.status === "trialing";
   const resolvedPlanTier: PlanTier = payload.targetPlanTier && payload.targetPlanTier !== "free"
-    ? payload.targetPlanTier
-    : "team";
+    ? normalizePlanTier(payload.targetPlanTier)
+    : "plus";
 
   const orgUpdate: Record<string, unknown> = {
     subscription_id:     payload.subscriptionId,

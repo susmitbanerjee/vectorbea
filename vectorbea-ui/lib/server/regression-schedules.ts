@@ -28,6 +28,11 @@ type RegressionScheduleRow = {
   run_history: unknown[] | null;
   created_by: string;
   created_at: string;
+  // Behavioral fields
+  behavioral_dataset_id: string | null;
+  behavioral_dataset_name: string | null;
+  rubric_id: string | null;
+  rubric_name: string | null;
 };
 
 function asRunLog(value: unknown): RegressionScheduleRunLog | null {
@@ -51,6 +56,15 @@ function asRunLog(value: unknown): RegressionScheduleRunLog | null {
     errorReason: typeof record.errorReason === "string" ? record.errorReason : typeof record.error_reason === "string" ? record.error_reason : null,
     startedAt: typeof record.startedAt === "string" ? record.startedAt : typeof record.started_at === "string" ? record.started_at : new Date().toISOString(),
     completedAt: typeof record.completedAt === "string" ? record.completedAt : typeof record.completed_at === "string" ? record.completed_at : null,
+    // Extended fields
+    baselineScore: typeof record.baselineScore === "number" ? record.baselineScore : null,
+    behavioralScore: typeof record.behavioralScore === "number" ? record.behavioralScore : null,
+    combinedScore: typeof record.combinedScore === "number" ? record.combinedScore : null,
+    failedCasesCount: typeof record.failedCasesCount === "number" ? record.failedCasesCount : 0,
+    hardFailuresCount: typeof record.hardFailuresCount === "number" ? record.hardFailuresCount : 0,
+    needsReviewCount: typeof record.needsReviewCount === "number" ? record.needsReviewCount : 0,
+    childEvaluationRunIds: Array.isArray(record.childEvaluationRunIds) ? record.childEvaluationRunIds.map(String) : [],
+    behavioralRunId: typeof record.behavioralRunId === "string" ? record.behavioralRunId : null,
   };
 }
 
@@ -73,6 +87,14 @@ function toStoredRunLog(log: RegressionScheduleRunLog) {
     errorReason: log.errorReason,
     startedAt: log.startedAt,
     completedAt: log.completedAt,
+    baselineScore: log.baselineScore,
+    behavioralScore: log.behavioralScore,
+    combinedScore: log.combinedScore,
+    failedCasesCount: log.failedCasesCount,
+    hardFailuresCount: log.hardFailuresCount,
+    needsReviewCount: log.needsReviewCount,
+    childEvaluationRunIds: log.childEvaluationRunIds,
+    behavioralRunId: log.behavioralRunId,
   };
 }
 
@@ -118,6 +140,10 @@ function toView(row: RegressionScheduleRow): RegressionSchedule {
     runHistory: asRunHistory(row.run_history),
     createdBy: row.created_by,
     createdAt: row.created_at,
+    behavioralDatasetId: row.behavioral_dataset_id ?? null,
+    behavioralDatasetName: row.behavioral_dataset_name ?? null,
+    rubricId: row.rubric_id ?? null,
+    rubricName: row.rubric_name ?? null,
   };
 }
 
@@ -137,19 +163,34 @@ export async function createRegressionSchedule(args: {
   workspaceId: string;
   name: string;
   /** ID of a baseline_dataset OR evaluation_dataset — we try both tables */
-  baselineDatasetId: string;
+  baselineDatasetId?: string | null;
   candidatePromptVersionStrategy: RegressionSchedule["candidatePromptVersionStrategy"];
   candidatePromptVersionId?: string | null;
   promptName?: string | null;
   cronExpression?: string | null;
   createdBy: string;
+  // Behavioral support
+  behavioralDatasetId?: string | null;
+  rubricId?: string | null;
 }): Promise<RegressionSchedule> {
   const supabase = createVectorBeaAdminClient();
-  // Determine if this is a baseline dataset or an evaluation dataset
-  const baselineDs = await getBaselineDataset(args.workspaceId, args.baselineDatasetId);
-  const evalDs = !baselineDs ? await getEvaluationDataset(args.workspaceId, args.baselineDatasetId) : null;
-  if (!baselineDs && !evalDs) throw new Error("Dataset not found. Select a valid dataset.");
-  const dataset = baselineDs ?? { id: evalDs!.id, name: evalDs!.name, promptName: evalDs!.promptName ?? null };
+
+  // Validate: must have at least one dataset
+  if (!args.baselineDatasetId && !args.behavioralDatasetId) {
+    throw new Error("At least one dataset (baseline or behavioral) is required.");
+  }
+
+  let baselineDs: Awaited<ReturnType<typeof getBaselineDataset>> = null;
+  let evalDs: Awaited<ReturnType<typeof getEvaluationDataset>> = null;
+  let datasetName: string | null = null;
+
+  if (args.baselineDatasetId) {
+    baselineDs = await getBaselineDataset(args.workspaceId, args.baselineDatasetId);
+    evalDs = !baselineDs ? await getEvaluationDataset(args.workspaceId, args.baselineDatasetId) : null;
+    if (!baselineDs && !evalDs) throw new Error("Baseline/evaluation dataset not found.");
+    datasetName = baselineDs?.name ?? evalDs?.name ?? null;
+  }
+
   const now = new Date().toISOString();
   const nextRunAt = computeNextRunAt(args.cronExpression, new Date(now));
   const { data, error } = await supabase
@@ -158,13 +199,12 @@ export async function createRegressionSchedule(args: {
       id: randomUUID(),
       workspace_id: args.workspaceId,
       name: args.name.trim(),
-      // Write to the correct FK column depending on dataset type
       baseline_dataset_id: baselineDs ? args.baselineDatasetId : null,
       evaluation_dataset_id: evalDs ? args.baselineDatasetId : null,
-      baseline_dataset_name: dataset.name,
+      baseline_dataset_name: datasetName,
       candidate_prompt_version_strategy: args.candidatePromptVersionStrategy,
       candidate_prompt_version_id: args.candidatePromptVersionId ?? null,
-      prompt_name: args.promptName ?? dataset.promptName ?? null,
+      prompt_name: args.promptName ?? baselineDs?.promptName ?? evalDs?.promptName ?? null,
       cron_expression: args.cronExpression ?? null,
       enabled: true,
       status: "idle",
@@ -176,6 +216,10 @@ export async function createRegressionSchedule(args: {
       run_history: [],
       created_by: args.createdBy,
       created_at: now,
+      behavioral_dataset_id: args.behavioralDatasetId ?? null,
+      behavioral_dataset_name: null, // will be resolved on run
+      rubric_id: args.rubricId ?? null,
+      rubric_name: null, // will be resolved on run
     })
     .select("*")
     .single();
@@ -207,9 +251,19 @@ export async function deleteRegressionSchedule(workspaceId: string, id: string):
 }
 
 /**
+ * Reset a schedule that got stuck in "running" state.
+ */
+export async function updateScheduleStatus(workspaceId: string, scheduleId: string, status: RegressionSchedule["status"]): Promise<void> {
+  const supabase = createVectorBeaAdminClient();
+  await supabase
+    .from("regression_schedules")
+    .update({ status })
+    .eq("workspace_id", workspaceId)
+    .eq("id", scheduleId);
+}
+
+/**
  * Resolve the candidate prompt version ID for a schedule.
- * Strategy "latest_published" fetches the currently published version for the prompt.
- * Strategy "specific_version" uses the pinned candidatePromptVersionId.
  */
 async function resolveCandidateVersionId(schedule: RegressionSchedule, workspaceId: string, datasetPromptName?: string | null): Promise<string> {
   const supabase = createVectorBeaAdminClient();
@@ -219,7 +273,6 @@ async function resolveCandidateVersionId(schedule: RegressionSchedule, workspace
     }
     return schedule.candidatePromptVersionId;
   }
-  // latest_published — find the most recently published version for this prompt
   const resolvedPromptName = schedule.promptName ?? datasetPromptName;
   if (!resolvedPromptName) throw new Error("No prompt name available. Set a prompt name on the schedule or ensure the dataset is linked to a prompt.");
   const { data, error } = await supabase
@@ -239,10 +292,11 @@ export async function runRegressionSchedule(args: {
   workspaceId: string;
   scheduleId: string;
   triggeredBy: string;
-}): Promise<{ evaluationRunId: string; runLog: RegressionScheduleRunLog }> {
+}): Promise<{ evaluationRunId: string | null; runLog: RegressionScheduleRunLog }> {
   const supabase = createVectorBeaAdminClient();
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
+
   const { data: scheduleData, error: fetchError } = await supabase
     .from("regression_schedules")
     .update({
@@ -260,6 +314,14 @@ export async function runRegressionSchedule(args: {
         errorReason: null,
         startedAt,
         completedAt: null,
+        baselineScore: null,
+        behavioralScore: null,
+        combinedScore: null,
+        failedCasesCount: 0,
+        hardFailuresCount: 0,
+        needsReviewCount: 0,
+        childEvaluationRunIds: [],
+        behavioralRunId: null,
       }),
     })
     .eq("workspace_id", args.workspaceId)
@@ -278,69 +340,139 @@ export async function runRegressionSchedule(args: {
   }
 
   try {
-    // Try baseline dataset first; if not found, try evaluation dataset
-    const baselineDataset = await getBaselineDataset(args.workspaceId, schedule.baselineDatasetId);
-    const evalDataset = !baselineDataset
-      ? await getEvaluationDataset(args.workspaceId, schedule.baselineDatasetId)
-      : null;
+    // ── 1. Baseline / evaluation dataset child run ─────────────────────────────
+    let baselineRun: Awaited<ReturnType<typeof createTraceSetEvaluationRun>> | null = null;
+    let baselineDs: Awaited<ReturnType<typeof getBaselineDataset>> = null;
+    let evalDs: Awaited<ReturnType<typeof getEvaluationDataset>> = null;
+    let datasetName: string | null = null;
+    let datasetPromptName: string | null = null;
+    let baselineScore: number | null = null;
+    let failedTraceIds: string[] = [];
+    const childEvaluationRunIds: string[] = [];
 
-    if (!baselineDataset && !evalDataset) throw new Error("Dataset not found.");
+    const hasBaselineDataset = Boolean(schedule.baselineDatasetId);
 
-    const datasetName = baselineDataset?.name ?? evalDataset?.name ?? "unknown";
-    const datasetPromptName = baselineDataset?.promptName ?? evalDataset?.promptName ?? null;
+    if (hasBaselineDataset) {
+      baselineDs = await getBaselineDataset(args.workspaceId, schedule.baselineDatasetId);
+      evalDs = !baselineDs ? await getEvaluationDataset(args.workspaceId, schedule.baselineDatasetId) : null;
+      if (!baselineDs && !evalDs) throw new Error("Baseline/evaluation dataset not found.");
+      datasetName = baselineDs?.name ?? evalDs?.name ?? "unknown";
+      datasetPromptName = baselineDs?.promptName ?? evalDs?.promptName ?? null;
+    }
 
+    // ── 2. Behavioral child run ────────────────────────────────────────────────
+    let behavioralRunId: string | null = null;
+    let behavioralScore: number | null = null;
+    let hardFailuresCount = 0;
+    let needsReviewCount = 0;
+
+    const hasBehavioralDataset = Boolean(schedule.behavioralDatasetId && schedule.rubricId);
+
+    // Resolve candidate version (needed for both)
     const candidateVersionId = await resolveCandidateVersionId(
       schedule, args.workspaceId,
       datasetPromptName,
     );
 
-    let run: Awaited<ReturnType<typeof createTraceSetEvaluationRun>>;
-    if (evalDataset) {
-      // New evaluation dataset — use dataset-based evaluation (calls LLM fresh)
-      run = await createDatasetEvaluationRun({
-        workspaceId: args.workspaceId,
-        datasetId: evalDataset.id,
-        candidatePromptVersionId: candidateVersionId,
-        triggeredBy: args.triggeredBy,
-      });
-    } else {
-      // Legacy baseline dataset — trace replay
-      if (!baselineDataset || baselineDataset.traceIds.length === 0)
-        throw new Error("Baseline dataset has no traces.");
-      run = await createTraceSetEvaluationRun({
-        workspaceId: args.workspaceId,
-        sourceTraceIds: baselineDataset.traceIds,
-        candidatePromptVersionId: candidateVersionId,
-        triggeredBy: args.triggeredBy,
-      });
+    // Run baseline child eval
+    if (hasBaselineDataset) {
+      if (evalDs) {
+        baselineRun = await createDatasetEvaluationRun({
+          workspaceId: args.workspaceId,
+          datasetId: evalDs.id,
+          candidatePromptVersionId: candidateVersionId,
+          triggeredBy: args.triggeredBy,
+        });
+      } else {
+        if (!baselineDs || baselineDs.traceIds.length === 0)
+          throw new Error("Baseline dataset has no traces.");
+        baselineRun = await createTraceSetEvaluationRun({
+          workspaceId: args.workspaceId,
+          sourceTraceIds: baselineDs.traceIds,
+          candidatePromptVersionId: candidateVersionId,
+          triggeredBy: args.triggeredBy,
+        });
+      }
+      childEvaluationRunIds.push(baselineRun.id);
+      failedTraceIds = baselineRun.results
+        .filter((result) => result.status === "error" || result.error)
+        .map((result) => result.sourceTraceId);
+      baselineScore = baselineRun.aggregate?.score ?? null;
     }
 
+    // Run behavioral child eval
+    if (hasBehavioralDataset) {
+      const { startBehavioralRubricRun } = await import("@/lib/server/behavioral-evaluation-runs");
+      const { listEnabledProviders } = await import("@/lib/server/provider-keys");
+      const providers = await listEnabledProviders(args.workspaceId);
+      if (providers.length === 0) throw new Error("No AI provider configured. Add a provider key to run behavioral evaluation.");
+      const provider = providers[0];
+      const behavioralView = await startBehavioralRubricRun({
+        workspaceId: args.workspaceId,
+        datasetId: schedule.behavioralDatasetId!,
+        rubricId: schedule.rubricId!,
+        promptVersionId: candidateVersionId,
+        provider: provider.provider_type,
+        model: provider.default_model ?? "gpt-4o-mini",
+        startedBy: args.triggeredBy,
+        runName: `Regression: ${schedule.name}`,
+      });
+      behavioralRunId = behavioralView.id;
+      behavioralScore = behavioralView.aggregate?.finalScore ?? null;
+      hardFailuresCount = behavioralView.aggregate?.hardFailureCount ?? 0;
+      needsReviewCount = behavioralView.aggregate?.needsReviewCount ?? 0;
+    }
+
+    // ── 3. Compute combined score ──────────────────────────────────────────────
+    let combinedScore: number | null = null;
+    if (baselineScore !== null && behavioralScore !== null) {
+      combinedScore = Number(((baselineScore * 0.5) + (behavioralScore * 0.5)).toFixed(2));
+    } else if (baselineScore !== null) {
+      combinedScore = baselineScore;
+    } else if (behavioralScore !== null) {
+      combinedScore = behavioralScore;
+    }
+
+    // ── 4. Determine status ────────────────────────────────────────────────────
+    const hasBehavioralFailure = hasBehavioralDataset && hardFailuresCount > 0;
+    const hasBaselineFailure = hasBaselineDataset && failedTraceIds.length > 0;
+    const runStatus: RegressionScheduleRunLog["status"] = (hasBehavioralFailure || hasBaselineFailure) ? "failed" : "completed";
+
     const now = new Date().toISOString();
-    const failedTraceIds = run.results
-      .filter((result) => result.status === "error" || result.error)
-      .map((result) => result.sourceTraceId);
     const runLog: RegressionScheduleRunLog = {
       runId,
-      status: failedTraceIds.length > 0 ? "failed" : "completed",
+      status: runStatus,
       scheduleId: args.scheduleId,
-      baselineDatasetId: baselineDataset?.id ?? evalDataset?.id ?? schedule.baselineDatasetId,
+      baselineDatasetId: baselineDs?.id ?? evalDs?.id ?? (hasBaselineDataset ? schedule.baselineDatasetId : null),
       baselineDatasetName: datasetName,
       promptVersionId: candidateVersionId,
-      evaluationRunId: run.id,
-      replayCount: run.results.length,
+      evaluationRunId: baselineRun?.id ?? null,
+      replayCount: baselineRun?.results.length ?? 0,
       failedTraceIds,
-      errorReason: failedTraceIds.length > 0 ? "One or more baseline traces failed replay or evaluation." : null,
+      errorReason: runStatus === "failed"
+        ? (hasBehavioralFailure ? "Behavioral evaluation detected hard failures." : "One or more baseline traces failed replay or evaluation.")
+        : null,
       startedAt,
       completedAt: now,
+      baselineScore,
+      behavioralScore,
+      combinedScore,
+      failedCasesCount: failedTraceIds.length + hardFailuresCount,
+      hardFailuresCount,
+      needsReviewCount,
+      childEvaluationRunIds,
+      behavioralRunId,
     };
+
+    const datasetNames = [datasetName, schedule.behavioralDatasetName].filter(Boolean).join(" + ");
     const history = [runLog, ...schedule.runHistory].slice(0, 20).map(toStoredRunLog);
     await supabase
       .from("regression_schedules")
       .update({
-        status: runLog.status === "failed" ? "failed" : "idle",
+        status: runStatus === "failed" ? "failed" : "idle",
         last_run_at: now,
-        last_run_evaluation_run_id: run.id,
-        last_run_recommendation: run.aggregate.recommendation,
+        last_run_evaluation_run_id: baselineRun?.id ?? null,
+        last_run_recommendation: baselineRun?.aggregate?.recommendation ?? null,
         next_run_at: computeNextRunAt(schedule.cronExpression, new Date(now)),
         last_run_log: toStoredRunLog(runLog),
         run_history: history,
@@ -356,18 +488,18 @@ export async function runRegressionSchedule(args: {
           scheduleName: schedule.name,
           promptName: schedule.promptName ?? datasetPromptName,
           reason: runLog.errorReason ?? "Regression run completed with failures.",
-          runId: run.id,
-          datasetName,
+          runId: baselineRun?.id ?? behavioralRunId,
+          datasetName: datasetNames || undefined,
           promptVersion: candidateVersionId,
-          failedCases: failedTraceIds.length,
-          currentScore: run.aggregate?.score ?? null,
+          failedCases: runLog.failedCasesCount,
+          currentScore: runLog.combinedScore ?? runLog.baselineScore ?? null,
         });
       } catch {
         // Notification failures must never fail the regression run
       }
     }
 
-    return { evaluationRunId: run.id, runLog };
+    return { evaluationRunId: baselineRun?.id ?? null, runLog };
   } catch (error) {
     const now = new Date().toISOString();
     const errorReason = error instanceof Error ? error.message : "Regression schedule failed.";
@@ -384,6 +516,14 @@ export async function runRegressionSchedule(args: {
       errorReason,
       startedAt,
       completedAt: now,
+      baselineScore: null,
+      behavioralScore: null,
+      combinedScore: null,
+      failedCasesCount: 0,
+      hardFailuresCount: 0,
+      needsReviewCount: 0,
+      childEvaluationRunIds: [],
+      behavioralRunId: null,
     };
     const history = [runLog, ...(schedule?.runHistory ?? [])].slice(0, 20).map(toStoredRunLog);
     await supabase
@@ -398,7 +538,6 @@ export async function runRegressionSchedule(args: {
       .eq("workspace_id", args.workspaceId)
       .eq("id", args.scheduleId);
 
-    // Await so notification completes before the serverless function exits
     try {
       const { notifyRegressionFailed } = await import("@/lib/server/notifications");
       await notifyRegressionFailed({
@@ -416,7 +555,9 @@ export async function runRegressionSchedule(args: {
 
 export async function listDueRegressionSchedules(now = new Date()): Promise<RegressionSchedule[]> {
   const supabase = createVectorBeaAdminClient();
-  const { data, error } = await supabase
+
+  // Schedules that are due
+  const { data: dueData, error: dueError } = await supabase
     .from("regression_schedules")
     .select("*")
     .eq("enabled", true)
@@ -425,13 +566,28 @@ export async function listDueRegressionSchedules(now = new Date()): Promise<Regr
     .lte("next_run_at", now.toISOString())
     .order("next_run_at", { ascending: true })
     .limit(25);
-  if (error) throw new Error(error.message);
-  return (data ?? []).map(toView);
+  if (dueError) throw new Error(dueError.message);
+
+  // Schedules stuck in "running" for >10 minutes
+  const stuckCutoff = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  const { data: stuckData } = await supabase
+    .from("regression_schedules")
+    .select("*")
+    .eq("enabled", true)
+    .eq("status", "running")
+    .lte("last_run_at", stuckCutoff)
+    .limit(10);
+
+  const all = [...(dueData ?? []), ...(stuckData ?? [])];
+  const seen = new Set<string>();
+  return all
+    .filter(row => { if (seen.has(row.id)) return false; seen.add(row.id); return true; })
+    .map(toView);
 }
 
 export async function runDueRegressionSchedules(triggeredBy = "system-scheduler") {
   const due = await listDueRegressionSchedules();
-  const results: Array<{ scheduleId: string; evaluationRunId?: string; error?: string }> = [];
+  const results: Array<{ scheduleId: string; evaluationRunId?: string | null; error?: string }> = [];
   for (const schedule of due) {
     try {
       const result = await runRegressionSchedule({

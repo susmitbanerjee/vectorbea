@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PlanTier } from "@/lib/api";
+import { getPlanDefinition, normalizePlanTier } from "@/lib/server/plan-config";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 type WorkspaceLimitRecord = {
@@ -27,18 +28,6 @@ export type WorkspacePlanLimits = {
   monthlyAuditLimit: number;
 };
 
-function normalizePlanTier(planTier?: PlanTier | null): PlanTier {
-  if (
-    planTier === "team" ||
-    planTier === "plus" ||
-    planTier === "pro" ||
-    planTier === "enterprise"
-  ) {
-    return planTier;
-  }
-  return "free";
-}
-
 export async function getWorkspacePlanLimits(
   workspaceId: string,
 ): Promise<WorkspacePlanLimits> {
@@ -63,11 +52,14 @@ export async function getWorkspacePlanLimits(
     throw new Error("Workspace organization could not be resolved");
   }
 
+  const normalizedPlan = normalizePlanTier(organization.plan_tier);
+  const plan = getPlanDefinition(normalizedPlan);
+
   return {
     organizationId: organization.id,
-    planTier: normalizePlanTier(organization.plan_tier),
-    maxSeats: Math.max(organization.max_seats ?? 1, 1),
-    maxPrompts: Math.max(organization.max_prompts ?? 5, 1),
+    planTier: normalizedPlan,
+    maxSeats: Math.max(organization.max_seats ?? plan.limits.users ?? 1, 1),
+    maxPrompts: Math.max(organization.max_prompts ?? plan.limits.prompts ?? 3, 1),
     monthlyAuditLimit: Math.max(organization.monthly_audit_limit ?? 100, 1),
   };
 }

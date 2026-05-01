@@ -10,7 +10,7 @@ import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
-import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
+import { assertUsageAvailable } from "@/lib/server/usage-quotas";
 
 export const dynamic = "force-dynamic";
 // Allow up to 5 minutes for long-running multi-item evaluations (LLM calls per item)
@@ -53,8 +53,6 @@ export async function POST(request: NextRequest) {
     if (!rate.allowed) {
       return NextResponse.json({ error: "Rate limit exceeded for evaluation creation." }, { status: 429 });
     }
-    await assertQuotaAvailable(workspaceId, "evaluation_runs", 1);
-
     const body = (await request.json().catch(() => ({}))) as {
       sourceTraceIds?: string[];
       candidatePromptVersionId?: string;
@@ -74,6 +72,15 @@ export async function POST(request: NextRequest) {
 
     // Dataset-based run path
     if (body.datasetId?.trim()) {
+      const supabase = createVectorBeaAdminClient();
+      const { count } = await supabase
+        .from("evaluation_dataset_items")
+        .select("id", { count: "exact", head: true })
+        .eq("dataset_id", body.datasetId.trim())
+        .eq("workspace_id", workspaceId);
+      await assertUsageAvailable(workspaceId, {
+        evaluation_executions: Math.max(count ?? 0, 1),
+      });
       return NextResponse.json(
         await createDatasetEvaluationRun({
           workspaceId,
@@ -93,6 +100,9 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    await assertUsageAvailable(workspaceId, {
+      evaluation_executions: Math.max(body.sourceTraceIds.length, 1),
+    });
 
     return NextResponse.json(
       await createTraceSetEvaluationRun({

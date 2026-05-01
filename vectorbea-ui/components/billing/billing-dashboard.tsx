@@ -1,65 +1,55 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import {
-  CreditCard,
-  ExternalLink,
-  FileText,
-  RefreshCw,
-  ShieldCheck,
-  Sparkles,
-  Users,
-} from "lucide-react";
+import { Activity, ArrowRight, Bell, CreditCard, Gauge, ShieldCheck, Swords, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
 import { useWorkspace } from "@/lib/workspace-context";
+import { cn } from "@/lib/utils";
 
-const FALLBACK_PORTAL_URL = process.env.NEXT_PUBLIC_BILLING_PORTAL_URL ?? "";
-const TEAM_PLAN_PRICE = 19.99;
-
-const PLAN_COPY: Record<string, string> = {
-  free: "Free includes 1 seat, 5 prompts, and 100 audit events every month.",
-  team: "Team unlocks more seats, more prompts, and higher monthly audit throughput.",
-  pro: "Pro keeps growing teams moving with additional usage headroom.",
-  enterprise: "Enterprise adds centralized governance and custom commercial support.",
-};
+type UsageMeter =
+  | "traces"
+  | "replay_runs"
+  | "evaluation_executions"
+  | "provider_executions"
+  | "judge_executions"
+  | "scheduled_regression_runs"
+  | "provider_arena_runs"
+  | "notification_emails";
 
 type BillingUsage = {
-  planTier: "free" | "team" | "pro" | "enterprise";
-  promptsUsed: number;
-  promptLimit: number;
-  auditsUsed: number;
-  auditLimit: number;
-  seatsUsed: number | null;
-  seatLimit: number;
-  usage?: {
-    runtime_traces?: number;
-    replay_runs?: number;
-    evaluation_runs?: number;
+  planTier: "free" | "plus" | "pro" | "enterprise";
+  planLabel: string;
+  resetAt: string;
+  promptUsage: { used: number; limit: number };
+  workspaceLimits: {
+    workspaces: number | null;
+    users: number | null;
+    prompts: number | null;
+    environments: number | null;
+    providerConnections: number | null;
+    retentionDays: number | null;
   };
-  usageLimits?: {
-    runtime_traces?: number | null;
-    replay_runs?: number | null;
-    evaluation_runs?: number | null;
+  currentCounts: {
+    seatsUsed: number | null;
+    providerConnections: number;
   };
-  features?: {
-    evaluations?: boolean;
-    rollout?: boolean;
-    alerts?: boolean;
-  };
-  billingSummary?: {
-    plan: "free" | "team" | "pro" | "enterprise";
+  usage: Record<UsageMeter, number>;
+  usageLimits: Record<UsageMeter, number | null>;
+  billingSummary: {
+    plan: "free" | "plus" | "pro" | "enterprise";
     planDisplayName: string;
     status: "free" | "active" | "active_without_subscription";
     billingInterval: "monthly" | null;
     pricePerSeat: number | null;
-    originalPricePerSeat: number | null;
+    annualPricePerSeat: number | null;
+    workspacePrice: number | null;
+    annualWorkspacePrice: number | null;
     currency: string | null;
     seatCount: number | null;
     canUpgrade: boolean;
@@ -72,7 +62,38 @@ type BillingUsage = {
   };
 };
 
-function UsageBar({
+function meterTone(used: number, limit: number | null) {
+  if (limit === null || limit <= 0) return "neutral";
+  const ratio = used / limit;
+  if (ratio >= 0.9) return "critical";
+  if (ratio >= 0.7) return "warning";
+  return "healthy";
+}
+
+function meterLabel(meter: UsageMeter) {
+  switch (meter) {
+    case "traces":
+      return "Traces";
+    case "evaluation_executions":
+      return "Evaluation executions";
+    case "provider_executions":
+      return "Provider executions";
+    case "judge_executions":
+      return "Judge executions";
+    case "scheduled_regression_runs":
+      return "Scheduled regressions";
+    case "provider_arena_runs":
+      return "Provider Arena runs";
+    case "notification_emails":
+      return "Notification emails";
+    case "replay_runs":
+      return "Replay runs";
+    default:
+      return meter;
+  }
+}
+
+function MeterCard({
   label,
   value,
   limit,
@@ -83,332 +104,254 @@ function UsageBar({
   limit: number | null;
   icon: React.ReactNode;
 }) {
-  const numericLimit = limit ?? Number.MAX_SAFE_INTEGER;
-  const percentage = limit === null ? 0 : Math.min((value / Math.max(numericLimit, 1)) * 100, 100);
-  const atLimit = limit !== null && value >= numericLimit;
+  const tone = meterTone(value, limit);
+  const pct = limit ? Math.min((value / Math.max(limit, 1)) * 100, 100) : 0;
+  const barClass =
+    tone === "critical"
+      ? "bg-red-600"
+      : tone === "warning"
+        ? "bg-amber-600"
+        : "bg-emerald-600";
 
   return (
-    <div className="space-y-3 rounded-2xl border border-border/60 bg-card/50 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            {icon}
+    <Card className="border-border/70 shadow-sm">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              {icon}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">{label}</p>
+              <p className="text-xs text-muted-foreground">
+                {limit === null ? `${value} used` : `${value} of ${limit} used`}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-medium">{label}</p>
-            <p className="text-xs text-muted-foreground">
-              {limit === null ? `${value} used` : `${value} / ${numericLimit} used`}
-            </p>
+          <Badge variant={tone === "critical" ? "destructive" : "outline"}>
+            {limit === null ? "Custom" : `${Math.round(pct)}%`}
+          </Badge>
+        </div>
+        <div className="space-y-2">
+          <div className="h-2.5 rounded-full bg-muted/70">
+            <div className={`h-full rounded-full transition-all ${barClass}`} style={{ width: `${limit ? pct : 0}%` }} />
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            {limit === null ? "Enterprise custom limit" : `${Math.max(limit - value, 0)} remaining this month`}
+          </p>
         </div>
-        <Badge variant={atLimit ? "destructive" : "outline"} className="tabular-nums">
-          {limit === null ? `${value}/unlimited` : `${value}/${numericLimit}`}
-        </Badge>
-      </div>
-      {limit !== null ? (
-        <div className="h-2.5 overflow-hidden rounded-full bg-muted/60">
-          <div
-            className={`h-full rounded-full transition-all ${atLimit ? "bg-destructive" : "bg-primary"}`}
-            style={{ width: `${percentage}%` }}
-          />
-        </div>
-      ) : (
-        <div className="h-2.5 rounded-full bg-muted/60" />
-      )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 export function BillingDashboard() {
-  const { activeOrganization, activeWorkspaceId, planTier, seatUsage } = useWorkspace();
-  const [seatCount, setSeatCount] = useState(String(Math.max(seatUsage.max, 1)));
-  const [isRedirectingToCheckout, setIsRedirectingToCheckout] = useState(false);
+  const { activeOrganization, activeWorkspaceId } = useWorkspace();
   const [usage, setUsage] = useState<BillingUsage | null>(null);
-  const [loadingUsage, setLoadingUsage] = useState(false);
-
-  const seatsUsed = seatUsage.used;
-  const maxSeats = seatUsage.max;
-  const effectivePlanTier = (usage?.planTier ?? planTier) as "free" | "team" | "pro" | "enterprise";
-  const planLabel = effectivePlanTier.charAt(0).toUpperCase() + effectivePlanTier.slice(1);
-  const portalUrl =
-    usage?.billingSummary?.portalUrl?.trim() ||
-    activeOrganization?.billingPortalUrl?.trim() ||
-    FALLBACK_PORTAL_URL;
-  const parsedSeatCount = Number.parseInt(seatCount, 10);
-  const billingWorkspaceId = activeWorkspaceId ?? activeOrganization?.workspaces?.[0]?.id ?? null;
-  const showUpgradeCta = Boolean(usage?.billingSummary?.canUpgrade ?? (effectivePlanTier === "free"));
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!billingWorkspaceId) {
-      setUsage(null);
-      return;
-    }
-
-    const targetWorkspaceId = billingWorkspaceId;
+    if (!activeWorkspaceId) return;
     let cancelled = false;
 
-    async function loadUsage() {
+    async function load() {
       try {
-        setLoadingUsage(true);
-        const response = await fetch(
-          `/api/billing/usage?workspaceId=${encodeURIComponent(targetWorkspaceId)}`,
-          { cache: "no-store" },
-        );
-
+        setLoading(true);
+        const workspaceId = activeWorkspaceId;
+        if (!workspaceId) return;
+        const response = await fetch(`/api/billing/usage?workspaceId=${encodeURIComponent(workspaceId)}`, {
+          cache: "no-store",
+        });
         const payload = (await response.json().catch(() => ({}))) as BillingUsage | { error?: string };
         if (!response.ok) {
-          throw new Error("error" in payload && payload.error ? payload.error : "Failed to load billing usage.");
+          throw new Error("error" in payload && payload.error ? payload.error : "Failed to load usage.");
         }
-
-        if (!cancelled) {
-          setUsage(payload as BillingUsage);
-          setSeatCount((current) => {
-            const parsed = Number.parseInt(current, 10);
-            if (Number.isFinite(parsed) && parsed > 0) return current;
-            return String(Math.max((payload as BillingUsage).seatLimit, 1));
-          });
-        }
+        if (!cancelled) setUsage(payload as BillingUsage);
       } catch (error) {
         if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Failed to load billing usage.");
+          toast.error(error instanceof Error ? error.message : "Failed to load usage.");
         }
       } finally {
-        if (!cancelled) {
-          setLoadingUsage(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }
 
-    void loadUsage();
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [billingWorkspaceId]);
+  }, [activeWorkspaceId]);
 
-  const effectiveUsage = useMemo(
-    () => ({
-      promptsUsed: usage?.promptsUsed ?? 0,
-      promptLimit: usage?.promptLimit ?? 5,
-      auditsUsed: usage?.auditsUsed ?? 0,
-      auditLimit: usage?.auditLimit ?? 100,
-    }),
-    [usage],
-  );
+  const upgradeHref = useMemo(() => {
+    if (!usage) return "/signup?plan=pro";
+    if (usage.planTier === "free" || usage.planTier === "plus") return "/signup?plan=pro";
+    return "/book-demo";
+  }, [usage]);
 
-  const handleUpgrade = async () => {
-    const targetWorkspaceId = billingWorkspaceId;
-    if (!targetWorkspaceId) {
-      toast.error("No active workspace is selected for billing.");
-      return;
-    }
-
-    if (!Number.isFinite(parsedSeatCount) || parsedSeatCount < 1) {
-      toast.error("Enter a valid number of seats.");
-      return;
-    }
-
-    setIsRedirectingToCheckout(true);
-    try {
-      const response = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quantity: parsedSeatCount, workspaceId: targetWorkspaceId }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (!response.ok || !payload.url) {
-        throw new Error(payload.error || "Failed to create Lemon Squeezy checkout.");
-      }
-      window.location.assign(payload.url);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create Lemon Squeezy checkout.");
-      setIsRedirectingToCheckout(false);
-    }
-  };
+  const meters: UsageMeter[] = [
+    "traces",
+    "evaluation_executions",
+    "provider_executions",
+    "judge_executions",
+    "scheduled_regression_runs",
+    "provider_arena_runs",
+  ];
 
   return (
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
       <AppHeader
-        title="Billing & plan"
-        subtitle={`Track usage and upgrade options for ${activeOrganization?.name ?? "your organization"}.`}
+        title="Usage and billing"
+        subtitle={`Monitor plan limits and upgrade paths for ${activeOrganization?.name ?? "your workspace"}.`}
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.85fr]">
-        <Card className="animate-slide-up">
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.9fr]">
+        <Card className="border-border/70 shadow-sm">
           <CardHeader>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                <Users className="h-5 w-5 text-primary" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Gauge className="h-5 w-5" />
               </div>
-              <div className="space-y-1">
-                <CardTitle className="text-base">Current Plan: {planLabel}</CardTitle>
-                <CardDescription>{PLAN_COPY[effectivePlanTier] ?? PLAN_COPY.free}</CardDescription>
+              <div>
+                <CardTitle className="text-base">Current plan</CardTitle>
+                <CardDescription>Server enforced quotas and feature access for this workspace.</CardDescription>
               </div>
-              <Badge variant={effectivePlanTier === "free" ? "outline" : "success"} className="ml-auto">
-                {planLabel}
+              <Badge className="ml-auto" variant={usage?.planTier === "enterprise" ? "outline" : "secondary"}>
+                {usage?.planLabel ?? "Loading"}
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="rounded-2xl border border-border/60 bg-card/50 p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seats used</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">
-                    {seatsUsed} / {maxSeats}
-                  </p>
-                </div>
-                <Badge variant={seatUsage.atLimit ? "destructive" : "outline"}>
-                  {seatUsage.remaining} remaining
-                </Badge>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Prompts</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">
+                  {usage?.promptUsage.used ?? 0}
+                  <span className="ml-1 text-sm font-medium text-muted-foreground">/ {usage?.promptUsage.limit ?? "—"}</span>
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Seats</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">
+                  {usage?.currentCounts.seatsUsed ?? 0}
+                  <span className="ml-1 text-sm font-medium text-muted-foreground">/ {usage?.workspaceLimits.users ?? "—"}</span>
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Provider connections</p>
+                <p className="mt-2 text-2xl font-semibold text-foreground">
+                  {usage?.currentCounts.providerConnections ?? 0}
+                  <span className="ml-1 text-sm font-medium text-muted-foreground">/ {usage?.workspaceLimits.providerConnections ?? "—"}</span>
+                </p>
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-2">
-              <UsageBar label="Prompts" value={effectiveUsage.promptsUsed} limit={effectiveUsage.promptLimit} icon={<FileText className="h-4 w-4" />} />
-              <UsageBar label="Audit events" value={effectiveUsage.auditsUsed} limit={effectiveUsage.auditLimit} icon={<ShieldCheck className="h-4 w-4" />} />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {meters.map((meter) => (
+                <MeterCard
+                  key={meter}
+                  label={meterLabel(meter)}
+                  value={usage?.usage[meter] ?? 0}
+                  limit={usage?.usageLimits[meter] ?? null}
+                  icon={
+                    meter === "traces" ? <Activity className="h-4 w-4" /> :
+                    meter === "evaluation_executions" ? <ShieldCheck className="h-4 w-4" /> :
+                    meter === "provider_executions" ? <Users className="h-4 w-4" /> :
+                    meter === "judge_executions" ? <Bell className="h-4 w-4" /> :
+                    meter === "provider_arena_runs" ? <Swords className="h-4 w-4" /> :
+                    <Gauge className="h-4 w-4" />
+                  }
+                />
+              ))}
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-3">
-              <UsageBar label="Runtime traces" value={usage?.usage?.runtime_traces ?? 0} limit={usage?.usageLimits?.runtime_traces ?? null} icon={<Sparkles className="h-4 w-4" />} />
-              <UsageBar label="Replay runs" value={usage?.usage?.replay_runs ?? 0} limit={usage?.usageLimits?.replay_runs ?? null} icon={<RefreshCw className="h-4 w-4" />} />
-              <UsageBar label="Evaluation runs" value={usage?.usage?.evaluation_runs ?? 0} limit={usage?.usageLimits?.evaluation_runs ?? null} icon={<ShieldCheck className="h-4 w-4" />} />
-            </div>
-
-            {loadingUsage ? (
-              <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
-                Loading current usage...
-              </div>
-            ) : null}
-
-            {effectivePlanTier === "free" ? (
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
-                Free plan workspaces default to 1 seat, 5 prompts, and 100 audit events each month.
-              </div>
-            ) : (
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                {usage?.billingSummary?.status === "active_without_subscription"
-                  ? "Team plan is active from workspace settings, but billing subscription metadata is not linked yet."
-                  : "Paid plan is active and enforced server-side."}
-              </div>
-            )}
-
-            <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-xs text-muted-foreground">
-              Feature access on this workspace:
-              <span className="ml-2 font-medium">Evaluations</span> {usage?.features?.evaluations ? "enabled" : "locked"} |
-              <span className="ml-2 font-medium">Rollout</span> {usage?.features?.rollout ? "enabled" : "locked"} |
-              <span className="ml-2 font-medium">Alerts</span> {usage?.features?.alerts ? "enabled" : "locked"}
+            <div className="rounded-2xl border border-border/70 bg-card/70 p-4 text-sm text-muted-foreground">
+              Monthly reset
+              <span className="ml-2 font-medium text-foreground">
+                {usage?.resetAt ? new Date(usage.resetAt).toLocaleDateString() : "—"}
+              </span>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="animate-slide-up stagger-1">
+        <Card className="border-border/70 shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-400/10">
-                <CreditCard className="h-5 w-5 text-amber-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <CreditCard className="h-5 w-5" />
               </div>
               <div>
-                <CardTitle className="text-base">Subscription</CardTitle>
-                <CardDescription>{PLAN_COPY[effectivePlanTier] ?? PLAN_COPY.free}</CardDescription>
+                <CardTitle className="text-base">Billing</CardTitle>
+                <CardDescription>Upgrade paths and billing controls.</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Current plan</p>
-                  <p className="mt-2 text-lg font-semibold">{planLabel}</p>
-                </div>
-                <Badge variant={effectivePlanTier === "free" ? "outline" : "success"}>{planLabel}</Badge>
+            <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Plan</p>
+              <p className="mt-2 text-xl font-semibold text-foreground">{usage?.billingSummary.planDisplayName ?? "—"}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {usage?.planTier === "free" && "Explore AI risk control"}
+                {usage?.planTier === "plus" && "Validate LLM features before production"}
+                {usage?.planTier === "pro" && "Control production LLM risk"}
+                {usage?.planTier === "enterprise" && "Govern AI behavior at scale"}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-card/70 p-4 text-sm">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Pricing</p>
+              <div className="mt-2 space-y-1 text-foreground">
+                {usage?.planTier === "plus" && (
+                  <>
+                    <p>$29 monthly</p>
+                    <p className="text-muted-foreground">$23 billed annually</p>
+                  </>
+                )}
+                {usage?.planTier === "pro" && (
+                  <>
+                    <p>$499 per workspace monthly</p>
+                    <p className="text-muted-foreground">$399 per workspace billed annually</p>
+                  </>
+                )}
+                {usage?.planTier === "enterprise" && <p>Custom pricing and governance controls</p>}
+                {usage?.planTier === "free" && <p>$0 with small monthly limits</p>}
               </div>
             </div>
 
-            {usage?.billingSummary?.billingInterval ? (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-sm">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Monthly billing</p>
-                <p className="mt-2 font-medium">
-                  {usage.billingSummary.pricePerSeat !== null ? `$${usage.billingSummary.pricePerSeat.toFixed(2)}` : "Custom"}
-                  {usage.billingSummary.billingInterval ? ` / seat / ${usage.billingSummary.billingInterval}` : ""}
-                </p>
-                {usage.billingSummary.originalPricePerSeat ? (
-                  <p className="text-xs text-muted-foreground">
-                    Early adopter price. Standard price ${usage.billingSummary.originalPricePerSeat.toFixed(2)}.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="mt-0.5 h-4 w-4 text-primary" />
-                <div>
-                  <p className="text-sm font-medium">Customer portal</p>
-                  <p className="text-xs text-muted-foreground">
-                    Update payment details, review invoices, and manage seats from your billing provider.
-                  </p>
-                </div>
-              </div>
+            <div className="rounded-2xl border border-border/70 bg-card/70 p-4 text-sm text-muted-foreground">
+              Retention
+              <span className="ml-2 font-medium text-foreground">
+                {usage?.workspaceLimits.retentionDays === null ? "Custom" : `${usage?.workspaceLimits.retentionDays ?? 0} days`}
+              </span>
             </div>
-
-            <TrustBar signals={coreTrustSignals} variant="compact" />
-
-            {showUpgradeCta ? (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4">
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-primary" />
-                      <p className="text-sm font-medium">Upgrade to Team Plan</p>
-                    </div>
-                    <p className="mt-2 text-2xl font-semibold tracking-tight">
-                      ${TEAM_PLAN_PRICE.toFixed(2)}
-                      <span className="ml-1 text-sm font-medium text-muted-foreground">/ month per seat</span>
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="seat-count" className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Number of seats
-                    </label>
-                    <Input id="seat-count" type="number" min={1} step={1} value={seatCount} onChange={(event) => setSeatCount(event.target.value)} />
-                  </div>
-                  <Button type="button" onClick={() => void handleUpgrade()} disabled={isRedirectingToCheckout || !billingWorkspaceId} className="w-full">
-                    {isRedirectingToCheckout ? "Redirecting to checkout..." : "Upgrade to Team Plan"}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-xs text-muted-foreground">
-                This workspace is already on a paid plan.
-                {usage?.billingSummary?.canCancel || usage?.billingSummary?.canDowngrade
-                  ? " Use billing portal actions for cancel or downgrade."
-                  : " Billing portal actions are unavailable until subscription metadata is linked."}
-              </div>
-            )}
 
             <div className="flex flex-wrap gap-3">
-              <Button
-                type="button"
-                onClick={() => {
-                  if (portalUrl) {
-                    window.location.assign(portalUrl);
-                  }
-                }}
-                disabled={!portalUrl}
-              >
-                Manage Subscription
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-              {!portalUrl ? (
-                <p className="text-xs text-muted-foreground">
-                  Billing portal URL is not configured for this environment.
-                </p>
+              {usage?.billingSummary.canManageBilling && usage.billingSummary.portalUrl ? (
+                <a
+                  href={usage.billingSummary.portalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cn(buttonVariants({ variant: "default" }))}
+                >
+                  Manage billing
+                </a>
+              ) : null}
+              {usage?.billingSummary.canUpgrade ? (
+                <Link
+                  href={upgradeHref}
+                  className={cn(buttonVariants({ variant: "outline" }))}
+                >
+                  {usage.planTier === "pro" ? "Talk to sales" : "Upgrade"}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
               ) : null}
             </div>
+
+            {loading ? (
+              <p className="text-sm text-muted-foreground">Loading current usage…</p>
+            ) : null}
           </CardContent>
         </Card>
       </div>
     </div>
   );
 }
-

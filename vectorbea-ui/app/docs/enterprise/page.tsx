@@ -122,7 +122,7 @@ export default function EnterprisePage() {
         <DocsTable
           headers={["Control", "Why it matters"]}
           rows={[
-            ["Per-seat Team plan", "Matches how engineering organizations allocate software access and procurement budgets"],
+            ["Per-seat Plus or Pro plans", "Matches how engineering organizations allocate software access and procurement budgets"],
             ["Workspace-aware growth", "Lets teams expand deployments without flattening every cost into infrastructure spend"],
             ["Organization visibility", "Gives platform owners a single place to review usage and capacity trends"],
           ]}

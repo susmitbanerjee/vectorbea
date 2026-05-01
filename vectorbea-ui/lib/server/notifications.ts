@@ -299,6 +299,26 @@ async function sendWithAudit(args: {
         console.error(`[notifications] email failed ${args.eventType} → ${recipient.email}: ${result.error}`);
       } else {
         console.log(`[notifications] email sent ${args.eventType} → ${recipient.email}`);
+        try {
+          const { recordUsageEvent } = await import("@/lib/server/usage-quotas");
+          await recordUsageEvent({
+            workspaceId: args.workspaceId,
+            eventType: "NOTIFICATION_EMAIL_SENT",
+            sourceType: "notification_delivery",
+            sourceId: `${args.eventType}:${args.eventId ?? "adhoc"}:${recipient.email}`,
+            meterDeltas: { notification_emails: 1 },
+            metadata: {
+              recipientEmail: recipient.email,
+              notificationEventType: args.eventType,
+            },
+          });
+        } catch (usageError) {
+          console.warn(
+            `[notifications] usage metering failed for ${args.eventType}: ${
+              usageError instanceof Error ? usageError.message : String(usageError)
+            }`,
+          );
+        }
       }
     }),
   );
@@ -315,7 +335,7 @@ export async function notifyEvaluationCompleted(args: {
   runId: string;
   // Rich context — optional for backwards compatibility
   datasetName?: string | null;
-  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset";
+  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset" | "provider_arena";
   passRate?: number | null;
   totalCount?: number;
   failedCount?: number;
@@ -367,7 +387,7 @@ export async function notifyEvaluationFailed(args: {
   reason: string;
   runId?: string;
   datasetName?: string | null;
-  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset";
+  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset" | "provider_arena";
   provider?: string | null;
   model?: string | null;
   startedBy?: string | null;

@@ -13,6 +13,7 @@ import {
   type SubscriptionStatus,
 } from "@/lib/server/billing-sync";
 import type { PlanTier } from "@/lib/api";
+import { normalizePlanTier } from "@/lib/server/plan-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +39,7 @@ function toNumber(value: string | undefined): number | null {
 function resolvePlanTier({
   productId,
   variantId,
-  fallback = "team",
+  fallback = "plus",
 }: {
   productId?: number | null;
   variantId?: number | null;
@@ -58,9 +59,9 @@ function resolvePlanTier({
     return "pro";
   }
   if ((teamVariant && variantId === teamVariant) || (teamProduct && productId === teamProduct)) {
-    return "team";
+    return "plus";
   }
-  return fallback;
+  return normalizePlanTier(fallback);
 }
 
 // ── HMAC verification (Lemon Squeezy) ────────────────────────────────────────
@@ -150,7 +151,7 @@ function extractLsPlanTier(payload: LsPayload): PlanTier {
   const attrs = payload.data?.attributes ?? {};
   const variantId = getNumber(attrs.variant_id);
   const productId = getNumber(attrs.product_id);
-  return resolvePlanTier({ variantId, productId, fallback: "team" });
+  return resolvePlanTier({ variantId, productId, fallback: "plus" });
 }
 
 // ── Stripe helpers ────────────────────────────────────────────────────────────
@@ -246,7 +247,7 @@ async function handleStripe(
       seatQuantity:     stripeSeatQuantity(sub),
       currentPeriodEnd: stripeCurrentPeriodEnd(sub),
       stripeCustomerId: stripeCustomerId(sub),
-      targetPlanTier: resolvePlanTier({ fallback: "team" }),
+      targetPlanTier: resolvePlanTier({ fallback: "plus" }),
     };
   }
 
@@ -263,7 +264,7 @@ async function handleStripe(
       seatQuantity:     1,
       currentPeriodEnd: stripeCurrentPeriodEnd(sub),
       stripeCustomerId: stripeCustomerId(sub),
-      targetPlanTier: resolvePlanTier({ fallback: "team" }),
+      targetPlanTier: resolvePlanTier({ fallback: "plus" }),
     };
   }
 
@@ -293,7 +294,7 @@ async function handleStripe(
         seatQuantity:     1,
         currentPeriodEnd: null,
         stripeCustomerId: custId,
-        targetPlanTier: resolvePlanTier({ fallback: "team" }),
+        targetPlanTier: resolvePlanTier({ fallback: "plus" }),
       };
     }
   }

@@ -636,6 +636,15 @@ export type RegressionScheduleRunLog = {
   errorReason: string | null;
   startedAt: string;
   completedAt: string | null;
+  // Extended fields
+  baselineScore: number | null;
+  behavioralScore: number | null;
+  combinedScore: number | null;
+  failedCasesCount: number;
+  hardFailuresCount: number;
+  needsReviewCount: number;
+  childEvaluationRunIds: string[];
+  behavioralRunId: string | null;
 };
 
 export type RegressionSchedule = {
@@ -658,6 +667,11 @@ export type RegressionSchedule = {
   runHistory: RegressionScheduleRunLog[];
   createdBy: string;
   createdAt: string;
+  // Behavioral dataset support
+  behavioralDatasetId: string | null;
+  behavioralDatasetName: string | null;
+  rubricId: string | null;
+  rubricName: string | null;
 };
 
 // ─── Rollout ────────────────────────────────────────────────────────────────────

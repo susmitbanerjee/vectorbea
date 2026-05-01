@@ -258,6 +258,7 @@ function fmtComparison(op: string): string {
 
 function fmtRunType(runType: string | null | undefined): string {
   if (runType === "behavioral" || runType === "behavioral_rubric") return "Behavioral rubric";
+  if (runType === "provider_arena") return "Provider Arena";
   if (runType === "baseline") return "Baseline";
   if (runType === "trace_set") return "Trace replay";
   if (runType === "dataset") return "Dataset";
@@ -310,7 +311,7 @@ export function evaluationCompletedEmail(args: {
   score: number | null;
   runUrl: string;
   datasetName?: string | null;
-  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset";
+  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset" | "provider_arena";
   passRate?: number | null;
   totalCount?: number;
   failedCount?: number;
@@ -327,7 +328,7 @@ export function evaluationCompletedEmail(args: {
   const isFailed    = verdict.includes("fail") || verdict.includes("block");
   const isReview    = verdict.includes("review") || verdict.includes("caution");
   const tone: StatusTone = isFailed ? "failure" : isReview ? "warning" : "success";
-  const isBehavioral = args.runType === "behavioral" || args.runType === "behavioral_rubric";
+  const isBehavioral = args.runType === "behavioral" || args.runType === "behavioral_rubric" || args.runType === "provider_arena";
 
   const subjectVerdict = isFailed ? "needs attention" : isReview ? "needs review" : "passed";
   const subject = `Evaluation ${subjectVerdict} — ${args.promptName} ${args.versionTag}`;
@@ -406,7 +407,7 @@ export function evaluationFailedEmail(args: {
   reason: string;
   runUrl: string;
   datasetName?: string | null;
-  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset";
+  runType?: "baseline" | "behavioral" | "behavioral_rubric" | "trace_set" | "dataset" | "provider_arena";
   provider?: string | null;
   model?: string | null;
   startedBy?: string | null;

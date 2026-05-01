@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PlanTier } from "@/lib/api";
+import { isFeatureEnabled, normalizePlanTier, type PlanFeature } from "@/lib/server/plan-config";
 import { getWorkspacePlanLimits } from "@/lib/server/workspace-limits";
 
 export type FeatureKey =
@@ -19,123 +20,29 @@ export type FeatureKey =
   | "evaluation_comparison"
   | "human_review_queue"
   | "rollout_decision_reports"
-  | "enterprise_rubric_locking";
+  | "enterprise_rubric_locking"
+  | "locked_rubrics"
+  | "sso";
 
-type FeaturePolicy = Record<PlanTier, boolean>;
-
-const FEATURE_POLICY: Record<FeatureKey, FeaturePolicy> = {
-  evaluations: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  scheduled_regressions: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  rollout: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  alerts: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  metrics_dashboard: {
-    free: true,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  enterprise_gateway: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: false,
-    enterprise: true,
-  },
-  slack_notifications: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  email_notifications: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  team_invitations: {
-    free: true,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  auto_evaluations: {
-    free: false,
-    team: true,
-    plus: true,
-    pro: true,
-    enterprise: true,
-  },
-  behavioral_evaluations: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: true,
-    enterprise: true,
-  },
-  provider_arena: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: true,
-    enterprise: true,
-  },
-  evaluation_comparison: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: true,
-    enterprise: true,
-  },
-  human_review_queue: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: true,
-    enterprise: true,
-  },
-  rollout_decision_reports: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: true,
-    enterprise: true,
-  },
-  enterprise_rubric_locking: {
-    free: false,
-    team: false,
-    plus: false,
-    pro: false,
-    enterprise: true,
-  },
+const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
+  evaluations: "evaluations",
+  scheduled_regressions: "scheduled_regressions",
+  rollout: "rollout_gates",
+  alerts: "email_notifications",
+  metrics_dashboard: null,
+  enterprise_gateway: "private_deployment",
+  slack_notifications: "slack_alerts",
+  email_notifications: "email_notifications",
+  team_invitations: null,
+  auto_evaluations: "scheduled_regressions",
+  behavioral_evaluations: "behavioral_evaluations",
+  provider_arena: "provider_arena",
+  evaluation_comparison: "multi_evaluation_comparison",
+  human_review_queue: "review_queue",
+  rollout_decision_reports: "production_decision_reports",
+  enterprise_rubric_locking: "locked_rubrics",
+  locked_rubrics: "locked_rubrics",
+  sso: "sso",
 };
 
 function labelFor(feature: FeatureKey) {
@@ -179,10 +86,12 @@ function labelFor(feature: FeatureKey) {
 
 export async function canUseFeature(workspaceId: string, feature: FeatureKey) {
   const limits = await getWorkspacePlanLimits(workspaceId);
-  const allowed = FEATURE_POLICY[feature][limits.planTier] ?? false;
+  const normalizedPlan = normalizePlanTier(limits.planTier);
+  const mappedFeature = FEATURE_MAP[feature];
+  const allowed = mappedFeature ? isFeatureEnabled(normalizedPlan, mappedFeature) : true;
   return {
     allowed,
-    planTier: limits.planTier,
+    planTier: normalizedPlan,
     reason: allowed ? null : `${labelFor(feature)} requires a higher plan`,
   };
 }
@@ -193,4 +102,48 @@ export async function assertFeatureAccess(workspaceId: string, feature: FeatureK
     throw new Error(`${labelFor(feature)} is not available on the ${result.planTier} plan.`);
   }
   return result;
+}
+
+export async function canUseBehavioralEvaluations(workspaceId: string) {
+  return canUseFeature(workspaceId, "behavioral_evaluations");
+}
+
+export async function canUseProviderArena(workspaceId: string) {
+  return canUseFeature(workspaceId, "provider_arena");
+}
+
+export async function canUseScheduledRegressions(workspaceId: string) {
+  return canUseFeature(workspaceId, "scheduled_regressions");
+}
+
+export async function canUseRolloutGates(workspaceId: string) {
+  return canUseFeature(workspaceId, "rollout");
+}
+
+export async function canUseSlackAlerts(workspaceId: string) {
+  return canUseFeature(workspaceId, "slack_notifications");
+}
+
+export async function canUseReviewQueue(workspaceId: string) {
+  return canUseFeature(workspaceId, "human_review_queue");
+}
+
+export async function canUseAuditTrail(workspaceId: string) {
+  return canUseFeature(workspaceId, "rollout_decision_reports");
+}
+
+export async function canUseMultiProviderComparison(workspaceId: string) {
+  return canUseFeature(workspaceId, "provider_arena");
+}
+
+export async function canUseMultiEvaluationComparison(workspaceId: string) {
+  return canUseFeature(workspaceId, "evaluation_comparison");
+}
+
+export async function canUseLockedRubrics(workspaceId: string) {
+  return canUseFeature(workspaceId, "locked_rubrics");
+}
+
+export async function canUseSSO(workspaceId: string) {
+  return canUseFeature(workspaceId, "sso");
 }

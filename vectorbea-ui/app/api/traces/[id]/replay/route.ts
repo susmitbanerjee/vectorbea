@@ -4,7 +4,7 @@ import { executeResolvedPrompt } from "@/lib/server/execution";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { getProviderConfig, listEnabledProviders } from "@/lib/server/provider-keys";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
-import { assertQuotaAvailable } from "@/lib/server/usage-quotas";
+import { assertQuotaAvailable, recordUsageEvent } from "@/lib/server/usage-quotas";
 import { isRuntimeTraceMetadata } from "@/lib/server/traces";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
@@ -261,6 +261,22 @@ export async function POST(
       .single();
 
     if (insertError) throw new Error(insertError.message);
+
+    await recordUsageEvent({
+      workspaceId,
+      eventType: "TRACE_REPLAY_RUN",
+      sourceType: "trace_replay",
+      sourceId: inserted.id,
+      metadata: {
+        replayedFrom: row.id,
+        providerOverride,
+        modelOverride,
+      },
+      meterDeltas: {
+        replay_runs: 1,
+        traces: 1,
+      },
+    });
 
     return NextResponse.json({
       traceId: inserted.id,
