@@ -672,6 +672,8 @@ export type RegressionSchedule = {
   behavioralDatasetName: string | null;
   rubricId: string | null;
   rubricName: string | null;
+  providerType: string | null;
+  providerModel: string | null;
 };
 
 // ─── Rollout ────────────────────────────────────────────────────────────────────

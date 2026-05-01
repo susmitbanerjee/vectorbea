@@ -65,6 +65,7 @@ export default function ScheduledRegressionsPage() {
   const [behavioralDatasets, setBehavioralDatasets] = useState<BehavioralDataset[]>([]);
   const [rubrics, setRubrics] = useState<EvaluationRubric[]>([]);
   const [prompts, setPrompts] = useState<PromptListItem[]>([]);
+  const [providers, setProviders] = useState<Array<{ providerType: string; displayName: string; defaultModel: string | null }>>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -75,20 +76,24 @@ export default function ScheduledRegressionsPage() {
   const [editForm, setEditForm] = useState({
     name: "",
     baselineDatasetId: "",
-    candidatePromptVersionStrategy: "latest_published",
+    candidatePromptVersionStrategy: "specific_version",
     candidatePromptVersionId: "",
     promptName: "",
     cronExpression: "",
+    providerType: "",
+    providerModel: "",
   });
   const [form, setForm] = useState({
     name: "",
     baselineDatasetId: "",
     behavioralDatasetId: "",
     rubricId: "",
-    candidatePromptVersionStrategy: "latest_published",
+    candidatePromptVersionStrategy: "specific_version",
     candidatePromptVersionId: "",
     promptName: "",
     cronExpression: "",
+    providerType: "",
+    providerModel: "",
   });
 
   const behavioralLocked = planTier === "free" || planTier === "plus";
@@ -99,15 +104,16 @@ export default function ScheduledRegressionsPage() {
       if (!activeWorkspaceId) return;
       setLoading(true); setError(null);
       try {
-        const [schedulesRes, baselineRes, evalRes, promptsRes, behavioralRes] = await Promise.all([
+        const [schedulesRes, baselineRes, evalRes, promptsRes, behavioralRes, providersRes] = await Promise.all([
           fetch(`/api/evaluations/regression-schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/baseline-datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/datasets?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/prompts?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
           fetch(`/api/evaluations/behavioral?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
+          fetch(`/api/evaluations/providers?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         ]);
-        const [schedulesJson, baselineJson, evalJson, promptsJson, behavioralJson] = await Promise.all([
-          schedulesRes.json(), baselineRes.json(), evalRes.json(), promptsRes.json(), behavioralRes.json(),
+        const [schedulesJson, baselineJson, evalJson, promptsJson, behavioralJson, providersJson] = await Promise.all([
+          schedulesRes.json(), baselineRes.json(), evalRes.json(), promptsRes.json(), behavioralRes.json(), providersRes.json(),
         ]);
         if (!schedulesRes.ok) throw new Error(schedulesJson.error ?? "Failed to load schedules");
         if (!cancelled) {
@@ -123,6 +129,7 @@ export default function ScheduledRegressionsPage() {
               ? (behavioralJson as BehavioralDataset[]).filter(d => !d.isArchived)
               : []
           );
+          setProviders(Array.isArray(providersJson) ? providersJson as Array<{ providerType: string; displayName: string; defaultModel: string | null }> : []);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
@@ -163,6 +170,8 @@ export default function ScheduledRegressionsPage() {
             : { baselineDatasetId: form.baselineDatasetId || undefined }),
           behavioralDatasetId: form.behavioralDatasetId || null,
           rubricId: form.rubricId || null,
+          providerType: form.providerType || null,
+          providerModel: form.providerModel.trim() || null,
           candidatePromptVersionStrategy: form.candidatePromptVersionStrategy,
           candidatePromptVersionId: form.candidatePromptVersionId.trim() || null,
           promptName: form.promptName.trim(),
@@ -172,7 +181,7 @@ export default function ScheduledRegressionsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to create");
       setSchedules(prev => [json as RegressionSchedule, ...prev]);
-      setForm({ name: "", baselineDatasetId: "", behavioralDatasetId: "", rubricId: "", candidatePromptVersionStrategy: "latest_published", candidatePromptVersionId: "", promptName: "", cronExpression: "" });
+      setForm({ name: "", baselineDatasetId: "", behavioralDatasetId: "", rubricId: "", candidatePromptVersionStrategy: "specific_version", candidatePromptVersionId: "", promptName: "", cronExpression: "", providerType: "", providerModel: "" });
       setShowForm(false);
       toast.success("Schedule created.");
     } catch (e) {
@@ -255,6 +264,8 @@ export default function ScheduledRegressionsPage() {
           candidatePromptVersionId: editForm.candidatePromptVersionId.trim() || null,
           promptName: editForm.promptName.trim() || null,
           cronExpression: editForm.cronExpression.trim() || null,
+          providerType: editForm.providerType || null,
+          providerModel: editForm.providerModel.trim() || null,
         }),
       });
       const json = await res.json();
@@ -391,7 +402,7 @@ export default function ScheduledRegressionsPage() {
   }
 
   function StrategyDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-    const labels: Record<string, string> = { latest_published: "Latest published", specific_version: "Specific version" };
+    const labels: Record<string, string> = { latest_published: "Latest published", specific_version: "Pinned version" };
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -405,8 +416,42 @@ export default function ScheduledRegressionsPage() {
         </DropdownMenuTrigger>
         <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
           <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+            <DropdownMenuPanelRadioItem value="specific_version">Pinned version</DropdownMenuPanelRadioItem>
             <DropdownMenuPanelRadioItem value="latest_published">Latest published</DropdownMenuPanelRadioItem>
-            <DropdownMenuPanelRadioItem value="specific_version">Specific version</DropdownMenuPanelRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuPanel>
+      </DropdownMenu>
+    );
+  }
+
+  function ProviderDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const selected = providers.find((item) => item.providerType === value);
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm font-medium text-[#111111] shadow-sm transition-colors hover:bg-[#F8F5EF]"
+          >
+            <span className="truncate text-left">
+              {selected ? selected.displayName || selected.providerType : <span className="text-[#6B7280]">Select provider…</span>}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-[#6B7280]" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+          <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+            {providers.length === 0 && (
+              <div className="px-3 py-2 text-xs text-[#6B7280]">No enabled providers found.</div>
+            )}
+            {providers.map((item) => (
+              <DropdownMenuPanelRadioItem key={item.providerType} value={item.providerType}>
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="truncate">{item.displayName || item.providerType}</span>
+                  <span className="shrink-0 text-[10px] text-[#6B7280]">{item.defaultModel ?? "no default model"}</span>
+                </span>
+              </DropdownMenuPanelRadioItem>
+            ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuPanel>
       </DropdownMenu>
@@ -622,6 +667,29 @@ export default function ScheduledRegressionsPage() {
                 <div className="space-y-1">
                   <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Candidate version strategy</label>
                   <StrategyDropdown value={form.candidatePromptVersionStrategy} onChange={v => setForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
+                  <p className="text-[11px] text-[#6B7280]">
+                    Pinned version keeps this schedule on one prompt version. Latest published follows future publishes automatically.
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Provider</label>
+                  <ProviderDropdown
+                    value={form.providerType}
+                    onChange={v => setForm((f) => ({
+                      ...f,
+                      providerType: v,
+                      providerModel: providers.find((item) => item.providerType === v)?.defaultModel ?? "",
+                    }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Model</label>
+                  <input
+                    className="w-full rounded-lg border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111]"
+                    value={form.providerModel}
+                    onChange={e => setForm(f => ({ ...f, providerModel: e.target.value }))}
+                    placeholder="Use provider default model"
+                  />
                 </div>
                 {form.candidatePromptVersionStrategy === "specific_version" && (
                   <div className="space-y-1 sm:col-span-2">
@@ -696,10 +764,28 @@ export default function ScheduledRegressionsPage() {
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Strategy</label>
                         <StrategyDropdown value={editForm.candidatePromptVersionStrategy} onChange={v => setEditForm(f => ({ ...f, candidatePromptVersionStrategy: v }))} />
+                        <p className="text-[11px] text-[#6B7280]">
+                          Pinned version prevents future publishes from changing this schedule automatically.
+                        </p>
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Prompt</label>
                         <PromptDropdown value={editForm.promptName} onChange={v => setEditForm(f => ({ ...f, promptName: v }))} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Provider</label>
+                        <ProviderDropdown
+                          value={editForm.providerType}
+                          onChange={v => setEditForm((f) => ({
+                            ...f,
+                            providerType: v,
+                            providerModel: providers.find((item) => item.providerType === v)?.defaultModel ?? "",
+                          }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-widest text-[#6B7280]">Model</label>
+                        <input className="w-full rounded-lg border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111]" value={editForm.providerModel} onChange={e => setEditForm(f => ({ ...f, providerModel: e.target.value }))} placeholder="Use provider default model" />
                       </div>
                       {editForm.candidatePromptVersionStrategy === "specific_version" && (
                         <div className="space-y-1 sm:col-span-2">
@@ -727,6 +813,7 @@ export default function ScheduledRegressionsPage() {
                       </Badge>
                       {schedule.promptName && <Badge variant="outline">{schedule.promptName}</Badge>}
                       <Badge variant="secondary">{schedule.candidatePromptVersionStrategy.replace("_", " ")}</Badge>
+                      {schedule.providerType && <Badge variant="outline">{schedule.providerType}{schedule.providerModel ? ` · ${schedule.providerModel}` : ""}</Badge>}
                       {schedule.behavioralDatasetId && (
                         <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusColors.running}`}>
                           behavioral
@@ -814,7 +901,16 @@ export default function ScheduledRegressionsPage() {
                       type="button"
                       onClick={() => {
                         setEditingId(schedule.id);
-                        setEditForm({ name: schedule.name, baselineDatasetId: schedule.baselineDatasetId, candidatePromptVersionStrategy: schedule.candidatePromptVersionStrategy, candidatePromptVersionId: schedule.candidatePromptVersionId ?? "", promptName: schedule.promptName ?? "", cronExpression: schedule.cronExpression ?? "" });
+                        setEditForm({
+                          name: schedule.name,
+                          baselineDatasetId: schedule.baselineDatasetId,
+                          candidatePromptVersionStrategy: schedule.candidatePromptVersionStrategy,
+                          candidatePromptVersionId: schedule.candidatePromptVersionId ?? "",
+                          promptName: schedule.promptName ?? "",
+                          cronExpression: schedule.cronExpression ?? "",
+                          providerType: schedule.providerType ?? "",
+                          providerModel: schedule.providerModel ?? "",
+                        });
                       }}
                       title="Edit"
                       className="rounded p-1.5 text-[#6B7280] hover:bg-[#F8F5EF] hover:text-[#111111] transition-colors"

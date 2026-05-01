@@ -1514,10 +1514,10 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
       setVersions(normalizedVersions);
 
       if (!rubricId && rubricRows[0]?.id) setRubricId(rubricRows[0].id);
-      if (!promptVersionId && normalizedVersions[0]?.id) {
+      if (!promptVersionId && normalizedVersions.length === 1 && normalizedVersions[0]?.id) {
         setPromptVersionId(normalizedVersions[0].id);
       }
-      if (!provider && providerRows[0]?.providerType) {
+      if (!provider && providerRows.length === 1 && providerRows[0]?.providerType) {
         setProvider(providerRows[0].providerType);
         setModel(providerRows[0].defaultModel ?? "");
       }

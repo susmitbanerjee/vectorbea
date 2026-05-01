@@ -33,6 +33,8 @@ export async function POST(request: NextRequest) {
       datasetId?: string;
       behavioralDatasetId?: string;
       rubricId?: string;
+      providerType?: string;
+      providerModel?: string;
       candidatePromptVersionStrategy?: string;
       candidatePromptVersionId?: string;
       promptName?: string;
@@ -53,6 +55,8 @@ export async function POST(request: NextRequest) {
       createdBy: auth.user.id,
       behavioralDatasetId: body.behavioralDatasetId ?? null,
       rubricId: body.rubricId ?? null,
+      providerType: body.providerType?.trim() || null,
+      providerModel: body.providerModel?.trim() || null,
     });
     return NextResponse.json(schedule, { status: 201 });
   } catch (error) {

@@ -33,6 +33,8 @@ type RegressionScheduleRow = {
   behavioral_dataset_name: string | null;
   rubric_id: string | null;
   rubric_name: string | null;
+  provider_type: string | null;
+  provider_model: string | null;
 };
 
 function asRunLog(value: unknown): RegressionScheduleRunLog | null {
@@ -119,6 +121,12 @@ function computeNextRunAt(cronExpression?: string | null, from = new Date()): st
   return null;
 }
 
+function defaultModelForProvider(providerType: string) {
+  if (providerType === "google" || providerType === "gemini") return "gemini-2.0-flash";
+  if (providerType === "anthropic") return "claude-3-5-sonnet-latest";
+  return "gpt-4o-mini";
+}
+
 function toView(row: RegressionScheduleRow): RegressionSchedule {
   return {
     id: row.id,
@@ -144,6 +152,8 @@ function toView(row: RegressionScheduleRow): RegressionSchedule {
     behavioralDatasetName: row.behavioral_dataset_name ?? null,
     rubricId: row.rubric_id ?? null,
     rubricName: row.rubric_name ?? null,
+    providerType: row.provider_type ?? null,
+    providerModel: row.provider_model ?? null,
   };
 }
 
@@ -172,6 +182,8 @@ export async function createRegressionSchedule(args: {
   // Behavioral support
   behavioralDatasetId?: string | null;
   rubricId?: string | null;
+  providerType?: string | null;
+  providerModel?: string | null;
 }): Promise<RegressionSchedule> {
   const supabase = createVectorBeaAdminClient();
 
@@ -220,6 +232,8 @@ export async function createRegressionSchedule(args: {
       behavioral_dataset_name: null, // will be resolved on run
       rubric_id: args.rubricId ?? null,
       rubric_name: null, // will be resolved on run
+      provider_type: args.providerType ?? null,
+      provider_model: args.providerModel ?? null,
     })
     .select("*")
     .single();
@@ -234,6 +248,86 @@ export async function toggleRegressionSchedule(workspaceId: string, id: string, 
     .update({ enabled, status: enabled ? "idle" : "disabled" })
     .eq("workspace_id", workspaceId)
     .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return toView(data as RegressionScheduleRow);
+}
+
+export async function updateRegressionSchedule(args: {
+  workspaceId: string;
+  id: string;
+  patch: {
+    name?: string;
+    baselineDatasetId?: string | null;
+    candidatePromptVersionStrategy?: RegressionSchedule["candidatePromptVersionStrategy"];
+    candidatePromptVersionId?: string | null;
+    promptName?: string | null;
+    cronExpression?: string | null;
+    providerType?: string | null;
+    providerModel?: string | null;
+  };
+}): Promise<RegressionSchedule> {
+  const supabase = createVectorBeaAdminClient();
+  const { data: existing, error: existingError } = await supabase
+    .from("regression_schedules")
+    .select("*")
+    .eq("workspace_id", args.workspaceId)
+    .eq("id", args.id)
+    .single();
+  if (existingError || !existing) throw new Error(existingError?.message ?? "Regression schedule not found.");
+
+  const existingRow = existing as RegressionScheduleRow;
+  const updatePayload: Record<string, unknown> = {};
+
+  if (typeof args.patch.name === "string" && args.patch.name.trim()) {
+    updatePayload.name = args.patch.name.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(args.patch, "baselineDatasetId")) {
+    let baselineDs: Awaited<ReturnType<typeof getBaselineDataset>> = null;
+    let evalDs: Awaited<ReturnType<typeof getEvaluationDataset>> = null;
+    let datasetName: string | null = null;
+    const datasetId = args.patch.baselineDatasetId;
+    if (datasetId) {
+      baselineDs = await getBaselineDataset(args.workspaceId, datasetId);
+      evalDs = !baselineDs ? await getEvaluationDataset(args.workspaceId, datasetId) : null;
+      if (!baselineDs && !evalDs) throw new Error("Baseline/evaluation dataset not found.");
+      datasetName = baselineDs?.name ?? evalDs?.name ?? null;
+    }
+    updatePayload.baseline_dataset_id = baselineDs ? datasetId : null;
+    updatePayload.evaluation_dataset_id = evalDs ? datasetId : null;
+    updatePayload.baseline_dataset_name = datasetName;
+  }
+
+  if (args.patch.candidatePromptVersionStrategy) {
+    updatePayload.candidate_prompt_version_strategy = args.patch.candidatePromptVersionStrategy;
+  }
+  if (Object.prototype.hasOwnProperty.call(args.patch, "candidatePromptVersionId")) {
+    updatePayload.candidate_prompt_version_id = args.patch.candidatePromptVersionId ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(args.patch, "promptName")) {
+    updatePayload.prompt_name = args.patch.promptName ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(args.patch, "cronExpression")) {
+    updatePayload.cron_expression = args.patch.cronExpression ?? null;
+    updatePayload.next_run_at = computeNextRunAt(
+      args.patch.cronExpression ?? existingRow.cron_expression,
+      new Date(),
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(args.patch, "providerType")) {
+    updatePayload.provider_type = args.patch.providerType ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(args.patch, "providerModel")) {
+    updatePayload.provider_model = args.patch.providerModel ?? null;
+  }
+
+  const { data, error } = await supabase
+    .from("regression_schedules")
+    .update(updatePayload)
+    .eq("workspace_id", args.workspaceId)
+    .eq("id", args.id)
     .select("*")
     .single();
   if (error) throw new Error(error.message);
@@ -286,6 +380,37 @@ async function resolveCandidateVersionId(schedule: RegressionSchedule, workspace
     .single();
   if (error || !data) throw new Error(`No published version found for prompt '${resolvedPromptName}'.`);
   return data.id;
+}
+
+async function resolveRegressionProvider(args: {
+  workspaceId: string;
+  schedule: RegressionSchedule;
+}) {
+  const { listEnabledProviders } = await import("@/lib/server/provider-keys");
+  const providers = await listEnabledProviders(args.workspaceId);
+  if (providers.length === 0) {
+    throw new Error("No AI provider configured. Add a provider key to run this regression.");
+  }
+
+  if (args.schedule.providerType) {
+    const matched = providers.find((provider) => provider.provider_type === args.schedule.providerType);
+    if (!matched) {
+      throw new Error(`Scheduled provider '${args.schedule.providerType}' is no longer enabled for this workspace.`);
+    }
+    return {
+      providerType: matched.provider_type,
+      model: args.schedule.providerModel ?? matched.default_model ?? defaultModelForProvider(matched.provider_type),
+    };
+  }
+
+  if (providers.length > 1) {
+    throw new Error("Multiple providers are enabled. Edit this schedule and choose an explicit provider before running regressions.");
+  }
+
+  return {
+    providerType: providers[0].provider_type,
+    model: providers[0].default_model ?? defaultModelForProvider(providers[0].provider_type),
+  };
 }
 
 export async function runRegressionSchedule(args: {
@@ -403,17 +528,14 @@ export async function runRegressionSchedule(args: {
     // Run behavioral child eval
     if (hasBehavioralDataset) {
       const { startBehavioralRubricRun } = await import("@/lib/server/behavioral-evaluation-runs");
-      const { listEnabledProviders } = await import("@/lib/server/provider-keys");
-      const providers = await listEnabledProviders(args.workspaceId);
-      if (providers.length === 0) throw new Error("No AI provider configured. Add a provider key to run behavioral evaluation.");
-      const provider = providers[0];
+      const providerSelection = await resolveRegressionProvider({ workspaceId: args.workspaceId, schedule });
       const behavioralView = await startBehavioralRubricRun({
         workspaceId: args.workspaceId,
         datasetId: schedule.behavioralDatasetId!,
         rubricId: schedule.rubricId!,
         promptVersionId: candidateVersionId,
-        provider: provider.provider_type,
-        model: provider.default_model ?? "gpt-4o-mini",
+        provider: providerSelection.providerType,
+        model: providerSelection.model,
         startedBy: args.triggeredBy,
         runName: `Regression: ${schedule.name}`,
       });

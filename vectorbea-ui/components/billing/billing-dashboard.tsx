@@ -9,6 +9,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PLANS, formatPrice } from "@/lib/pricing-data";
 import { useWorkspace } from "@/lib/workspace-context";
 import { cn } from "@/lib/utils";
 
@@ -145,7 +146,7 @@ function MeterCard({
   );
 }
 
-export function BillingDashboard() {
+export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing" }) {
   const { activeOrganization, activeWorkspaceId } = useWorkspace();
   const [usage, setUsage] = useState<BillingUsage | null>(null);
   const [loading, setLoading] = useState(false);
@@ -197,13 +198,22 @@ export function BillingDashboard() {
     "provider_arena_runs",
   ];
 
+  const highlightedPlans = useMemo(
+    () => PLANS.filter((plan) => plan.id !== "free"),
+    [],
+  );
+
+  const pageTitle = mode === "billing" ? "Billing" : "Usage";
+  const pageSubtitle =
+    mode === "billing"
+      ? `Review your current plan, upgrade options, and billing controls for ${activeOrganization?.name ?? "your workspace"}.`
+      : `Monitor quota usage and monthly limits for ${activeOrganization?.name ?? "your workspace"}.`;
+
   return (
     <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
-      <AppHeader
-        title="Usage and billing"
-        subtitle={`Monitor plan limits and upgrade paths for ${activeOrganization?.name ?? "your workspace"}.`}
-      />
+      <AppHeader title={pageTitle} subtitle={pageSubtitle} />
 
+      {mode === "usage" ? (
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.9fr]">
         <Card className="border-border/70 shadow-sm">
           <CardHeader>
@@ -352,6 +362,157 @@ export function BillingDashboard() {
           </CardContent>
         </Card>
       </div>
+      ) : (
+      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.35fr]">
+        <Card className="border-border/70 shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <CreditCard className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Current plan</CardTitle>
+                <CardDescription>Billing state, retention, and plan-level controls.</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Active plan</p>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">{usage?.billingSummary.planDisplayName ?? "—"}</p>
+                </div>
+                <Badge variant={usage?.planTier === "enterprise" ? "outline" : "secondary"}>
+                  {usage?.billingSummary.status === "active_without_subscription" ? "Manual plan" : usage?.billingSummary.status ?? "loading"}
+                </Badge>
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {usage?.planTier === "free" && "Explore AI risk control with small monthly limits."}
+                {usage?.planTier === "plus" && "Validate LLM features before production with paid workspace capacity."}
+                {usage?.planTier === "pro" && "Control production LLM risk with behavioral evaluations, regressions, and rollout safety."}
+                {usage?.planTier === "enterprise" && "Govern AI behavior at scale with advanced controls and custom commercial terms."}
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Billing</p>
+                <p className="mt-2 text-lg font-semibold text-foreground">
+                  {usage?.planTier === "free"
+                    ? "$0"
+                    : usage?.planTier === "plus"
+                      ? "$29 monthly"
+                      : usage?.planTier === "pro"
+                        ? "$499 workspace monthly"
+                        : "Custom"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {usage?.planTier === "plus" && "$23 per month billed annually"}
+                  {usage?.planTier === "pro" && "$399 per workspace billed annually"}
+                  {usage?.planTier === "enterprise" && "Private pricing, governance, and deployment options"}
+                  {usage?.planTier === "free" && "No card required"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace snapshot</p>
+                <div className="mt-2 space-y-1 text-sm text-foreground">
+                  <p>{usage?.currentCounts.seatsUsed ?? 0} seats in use</p>
+                  <p>{usage?.currentCounts.providerConnections ?? 0} provider connections</p>
+                  <p>{usage?.workspaceLimits.retentionDays === null ? "Custom retention" : `${usage?.workspaceLimits.retentionDays ?? 0} day retention`}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              {usage?.billingSummary.canManageBilling && usage.billingSummary.portalUrl ? (
+                <a
+                  href={usage.billingSummary.portalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cn(buttonVariants({ variant: "default" }))}
+                >
+                  Manage billing
+                </a>
+              ) : (
+                <Link href="/book-demo" className={cn(buttonVariants({ variant: "default" }))}>
+                  Talk to sales
+                </Link>
+              )}
+              <Link href="/settings/usage" className={cn(buttonVariants({ variant: "outline" }))}>
+                View usage
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+
+            {usage?.billingSummary.status === "active_without_subscription" ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                This workspace is on a paid plan in the database, but no live billing subscription is attached yet. Upgrade actions are still available below.
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-6">
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Upgrade options</CardTitle>
+              <CardDescription>Choose the plan that matches your current stage of LLM delivery.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 lg:grid-cols-3">
+              {highlightedPlans.map((plan) => {
+                const isCurrent = usage?.planTier === plan.id;
+                return (
+                  <div key={plan.id} className={cn(
+                    "rounded-2xl border p-4 shadow-sm",
+                    isCurrent ? "border-primary/40 bg-primary/5" : "border-border/70 bg-card/70",
+                  )}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{plan.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{plan.positioning}</p>
+                      </div>
+                      {isCurrent ? <Badge variant="secondary">Current</Badge> : null}
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-2xl font-semibold text-foreground">{formatPrice(plan, "monthly")}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {plan.id === "enterprise" ? "Custom contract" : `${plan.priceSuffix} · ${plan.billingNoteMonthly}`}
+                      </p>
+                    </div>
+                    <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
+                      {plan.compactFeatures.slice(0, 4).map((feature) => (
+                        <li key={feature}>{feature}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-5">
+                      <a
+                        href={isCurrent ? "/settings/usage" : plan.cta.href}
+                        className={cn(buttonVariants({ variant: isCurrent ? "outline" : "default" }), "w-full")}
+                      >
+                        {isCurrent ? "View usage" : plan.cta.label}
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Included this month</CardTitle>
+              <CardDescription>Billing stays plan-focused here, with a compact view of your highest-signal limits.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-3">
+              <MeterCard label="Traces" value={usage?.usage.traces ?? 0} limit={usage?.usageLimits.traces ?? null} icon={<Activity className="h-4 w-4" />} />
+              <MeterCard label="Evaluation executions" value={usage?.usage.evaluation_executions ?? 0} limit={usage?.usageLimits.evaluation_executions ?? null} icon={<ShieldCheck className="h-4 w-4" />} />
+              <MeterCard label="Provider Arena runs" value={usage?.usage.provider_arena_runs ?? 0} limit={usage?.usageLimits.provider_arena_runs ?? null} icon={<Swords className="h-4 w-4" />} />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+      )}
     </div>
   );
 }

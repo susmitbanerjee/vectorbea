@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
-import { toggleRegressionSchedule, deleteRegressionSchedule } from "@/lib/server/regression-schedules";
+import { deleteRegressionSchedule, toggleRegressionSchedule, updateRegressionSchedule } from "@/lib/server/regression-schedules";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
@@ -14,9 +14,34 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (auth.error) return auth.error;
     await assertFeatureAccess(workspaceId, "scheduled_regressions");
     const { id } = await params;
-    const body = await request.json().catch(() => ({})) as { enabled?: boolean };
-    if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "enabled boolean required" }, { status: 400 });
-    return NextResponse.json(await toggleRegressionSchedule(workspaceId, id, body.enabled));
+    const body = await request.json().catch(() => ({})) as {
+      enabled?: boolean;
+      name?: string;
+      baselineDatasetId?: string | null;
+      candidatePromptVersionStrategy?: "latest_published" | "specific_version";
+      candidatePromptVersionId?: string | null;
+      promptName?: string | null;
+      cronExpression?: string | null;
+      providerType?: string | null;
+      providerModel?: string | null;
+    };
+    if (typeof body.enabled === "boolean") {
+      return NextResponse.json(await toggleRegressionSchedule(workspaceId, id, body.enabled));
+    }
+    return NextResponse.json(await updateRegressionSchedule({
+      workspaceId,
+      id,
+      patch: {
+        name: body.name,
+        baselineDatasetId: body.baselineDatasetId,
+        candidatePromptVersionStrategy: body.candidatePromptVersionStrategy,
+        candidatePromptVersionId: body.candidatePromptVersionId,
+        promptName: body.promptName,
+        cronExpression: body.cronExpression,
+        providerType: body.providerType,
+        providerModel: body.providerModel,
+      },
+    }));
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to update regression schedule");
     return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });

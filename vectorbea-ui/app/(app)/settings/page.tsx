@@ -72,6 +72,12 @@ export default function SettingsPage() {
   const [providerForm, setProviderForm] = useState({ providerType: "openai", displayName: "", defaultModel: "", baseUrl: "", apiKey: "" });
   const [savingProvider, setSavingProvider] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
+  const providerModelPlaceholder =
+    providerForm.providerType === "google"
+      ? "e.g. gemini-2.0-flash"
+      : providerForm.providerType === "anthropic"
+        ? "e.g. claude-3-5-sonnet-latest"
+        : "e.g. gpt-4.1";
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -375,7 +381,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Default model</label>
-                    <Input placeholder="e.g. gpt-4.1" value={providerForm.defaultModel} onChange={e => setProviderForm(f => ({ ...f, defaultModel: e.target.value }))} className="text-sm" />
+                    <Input placeholder={providerModelPlaceholder} value={providerForm.defaultModel} onChange={e => setProviderForm(f => ({ ...f, defaultModel: e.target.value }))} className="text-sm" />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Base URL (optional)</label>

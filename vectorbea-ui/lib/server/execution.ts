@@ -225,6 +225,29 @@ function assertSafeProviderBaseUrl(url: string): void {
   }
 }
 
+function normalizeGeminiModel(model: string | null | undefined): string {
+  const trimmed = (model ?? "").trim().replace(/^models\//i, "");
+  if (!trimmed) return "gemini-2.0-flash";
+
+  const aliases: Record<string, string> = {
+    "gemini-flash-latest": "gemini-2.0-flash",
+    "gemini-pro-latest": "gemini-1.5-pro",
+  };
+
+  return aliases[trimmed] ?? trimmed;
+}
+
+function buildGeminiGenerateContentUrl(baseUrl: string | null | undefined, modelName: string): string {
+  const trimmedBase = (baseUrl ?? "https://generativelanguage.googleapis.com").trim().replace(/\/$/, "");
+  if (/\/v1beta\/models$/i.test(trimmedBase) || /\/v1\/models$/i.test(trimmedBase)) {
+    return `${trimmedBase}/${encodeURIComponent(modelName)}:generateContent`;
+  }
+  if (/\/v1beta$/i.test(trimmedBase) || /\/v1$/i.test(trimmedBase)) {
+    return `${trimmedBase}/models/${encodeURIComponent(modelName)}:generateContent`;
+  }
+  return `${trimmedBase}/v1beta/models/${encodeURIComponent(modelName)}:generateContent`;
+}
+
 async function executeOpenAI(args: {
   apiKey: string;
   baseUrl: string | null;
@@ -332,9 +355,8 @@ async function executeGemini(args: {
   userInput: string;
   timeoutMs: number;
 }): Promise<{ outputText: string; latencyMs: number; tokenCount: number; provider: string; model: string }> {
-  const modelName = args.model || "gemini-1.5-flash";
-  const base = (args.baseUrl ?? "https://generativelanguage.googleapis.com").replace(/\/$/, "");
-  const url = `${base}/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${args.apiKey}`;
+  const modelName = normalizeGeminiModel(args.model);
+  const url = buildGeminiGenerateContentUrl(args.baseUrl, modelName);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("Gemini timeout"), args.timeoutMs);
   const started = Date.now();
@@ -344,7 +366,10 @@ async function executeGemini(args: {
     parts.push({ text: args.userInput });
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-goog-api-key": args.apiKey,
+      },
       body: JSON.stringify({
         contents: [{ role: "user", parts }],
       }),
@@ -355,7 +380,7 @@ async function executeGemini(args: {
     if (!response.ok) {
       const errBody = await response.text().catch(() => "");
       throw new Error(
-        `Gemini returned ${response.status}: ${errBody.replace(/key=[^&\s"]+/gi, "key=REDACTED").slice(0, 200)}`,
+        `Gemini returned ${response.status} for model '${modelName}': ${errBody.replace(/AIza[0-9A-Za-z\-_]+/g, "REDACTED").slice(0, 240)}`,
       );
     }
     const body = (await response.json()) as {
