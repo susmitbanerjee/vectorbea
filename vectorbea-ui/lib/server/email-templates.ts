@@ -141,6 +141,11 @@ function layout(args: {
   const prefsLink = PREF_URL(args.workspaceId ?? "");
   const reason = args.reason ?? "You received this because notifications are enabled for this workspace";
 
+  // Inline SVG logo as base64 data URI — renders in all email clients without
+  // needing an external image request (Gmail, Outlook, Apple Mail all support this).
+  const LOGO_B64 = "PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZyBzdHJva2U9IiM3QzUyMDAiIHN0cm9rZS13aWR0aD0iMS42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPGVsbGlwc2UgY3g9IjcuNSIgY3k9IjgiIHJ4PSIzLjIiIHJ5PSIyLjIiIG9wYWNpdHk9IjAuNjUiIGZpbGw9IiNGOEQzNkEiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMTYuNSIgY3k9IjgiIHJ4PSIzLjIiIHJ5PSIyLjIiIG9wYWNpdHk9IjAuNjUiIGZpbGw9IiNGOEQzNkEiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMTIiIGN5PSIxNCIgcng9IjQuMiIgcnk9IjUuMiIgZmlsbD0iI0Y1Qjk0MiIgZmlsbC1vcGFjaXR5PSIwLjMyIiAvPgogICAgPHBhdGggZD0iTTguNCAxMi42aDcuMiIgLz4KICAgIDxwYXRoIGQ9Ik04LjEgMTUuMmg3LjgiIC8+CiAgICA8cGF0aCBkPSJNOC42IDE3LjhoNi44IiAvPgogICAgPHBhdGggZD0iTTEwLjQgOS4yIEw5LjIgNi40IiAvPgogICAgPHBhdGggZD0iTTEzLjYgOS4yIEwxNC44IDYuNCIgLz4KICAgIDxjaXJjbGUgY3g9IjkuMiIgY3k9IjYuMiIgcj0iMC42IiBmaWxsPSIjN0M1MjAwIiAvPgogICAgPGNpcmNsZSBjeD0iMTQuOCIgY3k9IjYuMiIgcj0iMC42IiBmaWxsPSIjN0M1MjAwIiAvPgogIDwvZz4KPC9zdmc+Cg==";
+  const LOGO_URI = `data:image/svg+xml;base64,${LOGO_B64}`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -148,8 +153,17 @@ function layout(args: {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <title>VectorBea notification</title>
+<!--[if !mso]><!-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<!--<![endif]-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  body, table, td, a { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif !important; }
+</style>
 </head>
-<body style="margin:0;padding:0;background:${T.page};font-family:Geist,Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:${T.page};font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;mso-hide:all;">${esc(preheader)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>` : ""}
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${T.page};padding:28px 12px;">
   <tr>
@@ -162,9 +176,8 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">
-                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textPrimary};display:inline-flex;align-items:center;gap:8px;">
-                    <img src="${APP_URL()}/icon.svg" width="18" height="18" alt="VectorBea logo" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;" />
-                    <span style="display:inline-block;vertical-align:middle;">VectorBea</span>
+                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textPrimary};">
+                    <img src="${LOGO_URI}" width="20" height="20" alt="VectorBea" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:6px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;letter-spacing:-0.02em;">VectorBea</span>
                   </a>
                 </td>
                 <td align="right" style="font-size:11px;font-weight:600;color:${T.textMuted};">${workspaceName}</td>

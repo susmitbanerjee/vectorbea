@@ -506,7 +506,7 @@ export default function TraceDetailsPage() {
   const [replayError, setReplayError] = useState<string | null>(null);
   const [replayProvider, setReplayProvider] = useState("same");
   const [replayModel, setReplayModel] = useState("");
-  const [configuredProviders, setConfiguredProviders] = useState<Array<{ provider_type: string; display_name: string }>>([]);
+  const [configuredProviders, setConfiguredProviders] = useState<Array<{ providerType: string; displayName: string; defaultModel: string | null }>>([]);
   const [flagOpen, setFlagOpen] = useState(false);
   const [flagReason, setFlagReason] = useState("");
   const [flagging, setFlagging] = useState(false);
@@ -722,9 +722,13 @@ export default function TraceDetailsPage() {
       .then((data: unknown) => {
         if (Array.isArray(data)) {
           setConfiguredProviders(
-            (data as Array<{ provider_type?: string; display_name?: string; enabled?: boolean }>)
+            (data as Array<{ providerType?: string; displayName?: string; enabled?: boolean; defaultModel?: string | null }>)
               .filter((p) => p.enabled !== false)
-              .map((p) => ({ provider_type: p.provider_type ?? "", display_name: p.display_name ?? p.provider_type ?? "" })),
+              .map((p) => ({
+                providerType: p.providerType ?? "",
+                displayName: p.displayName ?? p.providerType ?? "",
+                defaultModel: p.defaultModel ?? null,
+              })),
           );
         }
       })
@@ -834,29 +838,90 @@ export default function TraceDetailsPage() {
                       ? "Same executor/provider"
                       : replayProvider === "enterprise_gateway"
                         ? "Enterprise gateway"
-                        : configuredProviders.find((p) => p.provider_type === replayProvider)?.display_name ?? replayProvider}
+                        : configuredProviders.find((p) => p.providerType === replayProvider)?.displayName ?? replayProvider}
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuPanel className="min-w-[190px]">
-                <DropdownMenuRadioGroup value={replayProvider} onValueChange={setReplayProvider}>
+                <DropdownMenuRadioGroup value={replayProvider} onValueChange={(v) => {
+                  setReplayProvider(v);
+                  // Auto-fill the default model for the selected provider
+                  const prov = configuredProviders.find((p) => p.providerType === v);
+                  if (prov?.defaultModel) setReplayModel(prov.defaultModel);
+                  else if (v === "same") setReplayModel("");
+                }}>
                   <DropdownMenuPanelRadioItem value="same">Same executor/provider</DropdownMenuPanelRadioItem>
                   <DropdownMenuPanelRadioItem value="enterprise_gateway">Enterprise gateway</DropdownMenuPanelRadioItem>
                   {configuredProviders.map((p) => (
-                    <DropdownMenuPanelRadioItem key={p.provider_type} value={p.provider_type}>
-                      {p.display_name}
+                    <DropdownMenuPanelRadioItem key={p.providerType} value={p.providerType}>
+                      {p.displayName}
                     </DropdownMenuPanelRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuPanel>
             </DropdownMenu>
-            <Input
-              value={replayModel}
-              onChange={(event) => setReplayModel(event.target.value)}
-              placeholder="Replay model override"
-              className="h-9 w-40 border-[#D8CFC2] bg-card text-xs text-foreground"
-            />
+            {/* Model dropdown — options depend on the selected provider */}
+            {(() => {
+              // Per-provider model lists (curated common models)
+              const PROVIDER_MODELS: Record<string, string[]> = {
+                openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4.1", "gpt-4.1-mini", "o1", "o3-mini"],
+                anthropic: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-3-5", "claude-3-opus-20240229"],
+                google: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+                mistral: ["mistral-large-latest", "mistral-small-latest", "mistral-medium-latest"],
+                groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+                cohere: ["command-r-plus", "command-r"],
+                azure: ["gpt-4o", "gpt-4-turbo", "gpt-35-turbo"],
+              };
+              const selectedProvider = configuredProviders.find((p) => p.providerType === replayProvider);
+              const providerKey = (replayProvider ?? "").toLowerCase().replace(/-/g, "_").split("_")[0] ?? "";
+              const modelList: string[] = [
+                ...(selectedProvider?.defaultModel ? [selectedProvider.defaultModel] : []),
+                ...((PROVIDER_MODELS[providerKey] ?? PROVIDER_MODELS[replayProvider] ?? []).filter(
+                  (m) => m !== selectedProvider?.defaultModel,
+                )),
+              ];
+
+              if (replayProvider === "same" || modelList.length === 0) {
+                return (
+                  <Input
+                    value={replayModel}
+                    onChange={(event) => setReplayModel(event.target.value)}
+                    placeholder="Model override (optional)"
+                    className="h-9 w-44 border-[#D8CFC2] bg-card text-xs text-foreground"
+                  />
+                );
+              }
+
+              return (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-9 min-w-[160px] items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-[#F8F4EC] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="truncate">{replayModel || modelList[0] || "Select model"}</span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPanel className="min-w-[160px]">
+                    <DropdownMenuRadioGroup
+                      value={replayModel || modelList[0] || ""}
+                      onValueChange={(v) => setReplayModel(v)}
+                    >
+                      {modelList.map((m) => (
+                        <DropdownMenuPanelRadioItem key={m} value={m}>
+                          {m}
+                          {m === selectedProvider?.defaultModel && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
+                          )}
+                        </DropdownMenuPanelRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuPanel>
+                </DropdownMenu>
+              );
+            })()}
             <Button
               size="sm"
               variant="outline"
