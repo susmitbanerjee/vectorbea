@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { executeResolvedPrompt } from "@/lib/server/execution";
 import { getProviderConfig } from "@/lib/server/provider-keys";
 import { getRubricWithDetails } from "@/lib/server/rubrics";
+import { getApprovalRequirementForCapability } from "@/lib/server/governance";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { buildTraceMetadataV1 } from "@/lib/trace-metadata";
 
@@ -530,6 +531,16 @@ export async function evaluateRolloutGate(args: {
       .eq("id", args.promptVersionId)
       .maybeSingle(),
   ]);
+  const capabilityRes = await supabase
+    .from("ai_capabilities")
+    .select("id,risk_level")
+    .eq("workspace_id", args.workspaceId)
+    .eq("prompt_id", args.promptId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (capabilityRes.error && !isMissingRelationError(capabilityRes.error.message)) {
+    throw new Error(capabilityRes.error.message);
+  }
   const [arenaRes, behaviorRes, behavioralDatasetsRes, reviewsRes] = await Promise.all([
     supabase
       .from("evaluation_runs")
@@ -657,6 +668,24 @@ export async function evaluateRolloutGate(args: {
     reasons.push(`${openCriticalReviews.length} critical human review items are unresolved`);
     decision = "do_not_rollout";
     status = "blocked";
+  }
+
+  const capabilityId = capabilityRes.data?.id ? String(capabilityRes.data.id) : null;
+  if (capabilityId) {
+    const approval = await getApprovalRequirementForCapability({
+      workspaceId: args.workspaceId,
+      capabilityId,
+      capabilityVersionId: null,
+    });
+    if (approval.required) {
+      if (!approval.openRequest) {
+        reasons.push("High risk capability requires approval before rollout");
+      } else {
+        reasons.push("Approval is required before rollout can proceed");
+      }
+      if (status === "passed") status = "needs_review";
+      if (decision === "safe_to_rollout") decision = "needs_review";
+    }
   }
 
   const payload = {

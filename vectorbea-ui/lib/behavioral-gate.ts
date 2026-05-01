@@ -39,6 +39,26 @@ export function canUseAdvancedRoiReports(planTier: PlanTier | null | undefined):
   return planTier === "enterprise";
 }
 
+export function canUseIncidents(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "pro" || planTier === "enterprise";
+}
+
+export function canUseGovernanceDashboard(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "pro" || planTier === "enterprise";
+}
+
+export function canUseApprovalWorkflows(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "pro" || planTier === "enterprise";
+}
+
+export function canUsePolicyPacks(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "enterprise";
+}
+
+export function canUsePrivacyControls(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "pro" || planTier === "enterprise";
+}
+
 export const BEHAVIORAL_PLAN_REQUIREMENT = "Pro or Enterprise";
 export const PROVIDER_ARENA_PLAN_REQUIREMENT = "Pro or Enterprise";
 export const AI_CAPABILITIES_PLAN_REQUIREMENT = "Pro or Enterprise";

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { RedactionRule } from "@/lib/api";
 
 const PRIVATE_IPV4_PATTERNS = [
   /^10\./,
@@ -67,10 +68,83 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 const BEARER_RE = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
+const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const PHONE_RE = /\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g;
+const CREDIT_CARD_RE = /\b(?:\d[ -]*?){13,19}\b/g;
+const TOKEN_RE = /\b(?:AIza[0-9A-Za-z\-_]{20,}|sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+
+function applyBuiltInMask(text: string, pattern: string, replacement: string) {
+  switch (pattern) {
+    case "email":
+      return text.replace(EMAIL_RE, replacement);
+    case "phone":
+      return text.replace(PHONE_RE, replacement);
+    case "credit_card":
+    case "pan_like_number":
+      return text.replace(CREDIT_CARD_RE, replacement);
+    case "api_key":
+    case "authorization_header":
+    case "password":
+    case "secret":
+    case "token":
+      return text.replace(TOKEN_RE, replacement).replace(BEARER_RE, `Bearer ${replacement}`);
+    default:
+      return text;
+  }
+}
+
+export function createBuiltInRedactionRules(): RedactionRule[] {
+  const builtIns: Array<Pick<RedactionRule, "name" | "pattern" | "scope">> = [
+    { name: "Mask email", pattern: "email", scope: "all" },
+    { name: "Mask phone", pattern: "phone", scope: "all" },
+    { name: "Mask credit card", pattern: "credit_card", scope: "all" },
+    { name: "Mask auth header", pattern: "authorization_header", scope: "all" },
+    { name: "Mask API key", pattern: "api_key", scope: "all" },
+    { name: "Mask password", pattern: "password", scope: "all" },
+    { name: "Mask token", pattern: "token", scope: "all" },
+  ];
+  return builtIns.map((item, index) => ({
+    id: `built-in-${index + 1}`,
+    workspaceId: "system",
+    name: item.name,
+    ruleType: "built_in",
+    pattern: item.pattern,
+    replacement: "[REDACTED]",
+    enabled: true,
+    scope: item.scope,
+    createdBy: null,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  }));
+}
+
+export function redactStringWithRules(input: string | null | undefined, rules: RedactionRule[]) {
+  if (!input) return input ?? null;
+  let next = input.replace(BEARER_RE, "Bearer [REDACTED]");
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    if (rule.ruleType === "built_in") {
+      next = applyBuiltInMask(next, rule.pattern, rule.replacement || "[REDACTED]");
+      continue;
+    }
+    if (rule.ruleType === "regex") {
+      try {
+        next = next.replace(new RegExp(rule.pattern, "gi"), rule.replacement || "[REDACTED]");
+      } catch {
+        // Ignore invalid tenant-provided regex at write time.
+      }
+      continue;
+    }
+    if (rule.ruleType === "field_name") {
+      next = next.replace(new RegExp(String.raw`\b${rule.pattern}\b`, "gi"), rule.replacement || "[REDACTED]");
+    }
+  }
+  return next;
+}
 
 function redactValue(value: unknown): unknown {
   if (typeof value === "string") {
-    return value.replace(BEARER_RE, "Bearer [REDACTED]");
+    return redactStringWithRules(value, createBuiltInRedactionRules());
   }
   if (Array.isArray(value)) return value.map(redactValue);
   if (value !== null && typeof value === "object") return redactObject(value as Record<string, unknown>);
@@ -93,3 +167,39 @@ export function redactPayload(payload: Record<string, unknown>): Record<string, 
   return redactObject(payload);
 }
 
+export function redactObjectWithRules(
+  payload: Record<string, unknown>,
+  rules: RedactionRule[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(payload)) {
+    const normalized = key.toLowerCase().replaceAll("-", "_");
+    const fieldRule = rules.find(
+      (rule) => rule.enabled && rule.ruleType === "field_name" && rule.pattern.toLowerCase() === normalized,
+    );
+    if (SENSITIVE_KEYS.has(normalized) || fieldRule) {
+      out[key] = fieldRule?.replacement || "[REDACTED]";
+      continue;
+    }
+    if (typeof val === "string") {
+      out[key] = redactStringWithRules(val, rules);
+      continue;
+    }
+    if (Array.isArray(val)) {
+      out[key] = val.map((entry) => {
+        if (typeof entry === "string") return redactStringWithRules(entry, rules);
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          return redactObjectWithRules(entry as Record<string, unknown>, rules);
+        }
+        return entry;
+      });
+      continue;
+    }
+    if (val && typeof val === "object") {
+      out[key] = redactObjectWithRules(val as Record<string, unknown>, rules);
+      continue;
+    }
+    out[key] = val;
+  }
+  return out;
+}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import type { ReliabilityRuleType, ReliabilityRiskLevel } from "@/lib/api";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { writeAuditEvent } from "@/lib/server/audit-events";
 import { createRule, listRules } from "@/lib/server/reliability-rules";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -55,6 +56,17 @@ export async function POST(request: NextRequest) {
       enabled: body.enabled ?? true,
       config: body.config ?? {},
       createdBy: auth.user.id,
+    });
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType: "reliability_rule_created",
+      entityType: "reliability_rule",
+      entityId: rule.id,
+      entityName: rule.name,
+      metadata: { rule_type: rule.ruleType, severity: rule.severity, capability_id: rule.capabilityId },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
     });
     return NextResponse.json(rule, { status: 201 });
   } catch (error) {

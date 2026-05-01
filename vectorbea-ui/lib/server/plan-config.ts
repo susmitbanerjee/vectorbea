@@ -40,6 +40,10 @@ export type PlanFeature =
   | "production_decision_reports"
   | "roi_dashboard"
   | "advanced_roi_reports"
+  | "incidents"
+  | "approval_workflows"
+  | "policy_packs"
+  | "governance_dashboard"
   | "sso"
   | "advanced_rbac"
   | "locked_rubrics"
@@ -80,6 +84,10 @@ function featureSet(enabled: PlanFeature[]): Record<PlanFeature, boolean> {
     "production_decision_reports",
     "roi_dashboard",
     "advanced_roi_reports",
+    "incidents",
+    "approval_workflows",
+    "policy_packs",
+    "governance_dashboard",
     "sso",
     "advanced_rbac",
     "locked_rubrics",
@@ -198,6 +206,9 @@ export const PLAN_CONFIG: Record<CanonicalPlanTier, PlanDefinition> = {
       "multi_evaluation_comparison",
       "production_decision_reports",
       "roi_dashboard",
+      "incidents",
+      "approval_workflows",
+      "governance_dashboard",
     ]),
   },
   enterprise: {
@@ -243,6 +254,10 @@ export const PLAN_CONFIG: Record<CanonicalPlanTier, PlanDefinition> = {
       "production_decision_reports",
       "roi_dashboard",
       "advanced_roi_reports",
+      "incidents",
+      "approval_workflows",
+      "policy_packs",
+      "governance_dashboard",
       "sso",
       "advanced_rbac",
       "locked_rubrics",

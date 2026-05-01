@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { getCapability, updateCapability } from "@/lib/server/ai-capabilities";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
+import { writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,20 @@ export async function PATCH(
       description: body.description as string | null | undefined,
       riskLevel: body.riskLevel as "low" | "medium" | "high" | "critical" | undefined,
       status: body.status as "active" | "archived" | undefined,
+    });
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType: "capability_updated",
+      entityType: "capability",
+      entityId: cap.id,
+      entityName: cap.name,
+      metadata: {
+        risk_level: body.riskLevel ?? null,
+        status: body.status ?? null,
+      },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
     });
     return NextResponse.json(cap);
   } catch (error) {

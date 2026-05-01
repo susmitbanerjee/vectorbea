@@ -62,6 +62,13 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true, subItemGroup: "/reliability" },
   { href: "/evaluations/schedules", label: "Regression Suites", icon: CalendarClock, isSubItem: true, subItemGroup: "/reliability" },
   { href: "/evaluations/behavioral", label: "Behavior Checks", icon: ScrollText, isSubItem: true, subItemGroup: "/reliability" },
+  // —— Governance ————————————————————————————————————————————————————————————
+  { href: "/governance", label: "Governance", icon: ShieldCheck },
+  { href: "/governance", label: "Dashboard", icon: ShieldCheck, isSubItem: true, subItemGroup: "/governance" },
+  { href: "/incidents", label: "Incidents", icon: Bell, isSubItem: true, subItemGroup: "/governance" },
+  { href: "/governance/approvals", label: "Approvals", icon: Users, isSubItem: true, subItemGroup: "/governance" },
+  { href: "/governance/policy-packs", label: "Policy Packs", icon: ScrollText, isSubItem: true, subItemGroup: "/governance" },
+  { href: "/governance/reports", label: "Reports", icon: BookOpen, isSubItem: true, subItemGroup: "/governance" },
   // ── Evaluations (legacy — kept for direct dataset / compare access) ─────
   { href: "/evaluations", label: "Evaluations", icon: FlaskConical },
   { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true, subItemGroup: "/evaluations" },
@@ -75,6 +82,8 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings/usage", label: "Usage", icon: Gauge },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
+  { href: "/settings/privacy", label: "Privacy", icon: ShieldCheck },
+  { href: "/settings/audit", label: "Governance Audit", icon: Logs },
   { href: "/settings/members", label: "Members", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ];

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { writeAuditEvent } from "@/lib/server/audit-events";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { getRule, updateRule, deleteRule } from "@/lib/server/reliability-rules";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
@@ -45,6 +46,17 @@ export async function PATCH(
       enabled: body.enabled as boolean | undefined,
       config: body.config as Record<string, unknown> | undefined,
     });
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType: "reliability_rule_updated",
+      entityType: "reliability_rule",
+      entityId: rule.id,
+      entityName: rule.name,
+      metadata: { severity: rule.severity, enabled: rule.enabled },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
+    });
     return NextResponse.json(rule);
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to update rule");
@@ -63,7 +75,18 @@ export async function DELETE(
     if (auth.error) return auth.error;
     await assertFeatureAccess(workspaceId, "deterministic_rules");
     const { id } = await params;
+    const rule = await getRule(workspaceId, id);
     await deleteRule(workspaceId, id);
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType: "reliability_rule_deleted",
+      entityType: "reliability_rule",
+      entityId: id,
+      entityName: rule?.name ?? null,
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
+    });
     return NextResponse.json({ deleted: true });
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to delete rule");

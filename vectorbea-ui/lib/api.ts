@@ -1577,3 +1577,197 @@ export interface RoiReport {
   summary: RoiDashboardData;
   createdAt: string;
 }
+
+export type IncidentSeverity = "low" | "medium" | "high" | "critical";
+export type IncidentStatus = "open" | "investigating" | "fix_in_progress" | "verification_pending" | "resolved" | "dismissed";
+export type IncidentSourceType = "alert" | "trace" | "workflow_regression" | "safety_gate" | "manual" | "notification";
+export type FailureClusterType =
+  | "policy_violation"
+  | "wrong_tool_selected"
+  | "required_tool_skipped"
+  | "invalid_arguments"
+  | "unsafe_action"
+  | "hallucinated_response"
+  | "missing_context"
+  | "wrong_context"
+  | "format_violation"
+  | "provider_timeout"
+  | "agent_loop"
+  | "high_cost"
+  | "high_latency"
+  | "human_handoff_spike"
+  | "unknown";
+
+export interface GovernanceFailureCluster {
+  id: string;
+  workspaceId: string;
+  capabilityId: string | null;
+  name: string;
+  description: string | null;
+  clusterType: FailureClusterType;
+  severity: IncidentSeverity;
+  groupingKey: string;
+  affectedRunsCount: number;
+  affectedTracesCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  status: "open" | "monitoring" | "resolved" | "dismissed";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GovernanceFailureClusterItem {
+  id: string;
+  workspaceId: string;
+  clusterId: string;
+  sourceType: "trace" | "workflow_regression_case" | "reliability_rule_result" | "evaluation_run" | "alert_event";
+  sourceId: string;
+  summary: string | null;
+  createdAt: string;
+}
+
+export interface IncidentActivity {
+  id: string;
+  workspaceId: string;
+  incidentId: string;
+  actorUserId: string | null;
+  activityType: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface IncidentVerification {
+  id: string;
+  workspaceId: string;
+  incidentId: string;
+  regressionRunId: string;
+  capabilityVersionId: string | null;
+  status: "passed" | "failed" | "needs_review";
+  summary: string | null;
+  createdAt: string;
+}
+
+export interface AiIncident {
+  id: string;
+  workspaceId: string;
+  capabilityId: string | null;
+  capabilityVersionId: string | null;
+  title: string;
+  description: string | null;
+  severity: IncidentSeverity;
+  status: IncidentStatus;
+  sourceType: IncidentSourceType;
+  sourceId: string | null;
+  failureClusterId: string | null;
+  ownerUserId: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  capabilityName?: string | null;
+  capabilityVersionName?: string | null;
+}
+
+export interface IncidentDetailView extends AiIncident {
+  failureCluster: GovernanceFailureCluster | null;
+  activities: IncidentActivity[];
+  verifications: IncidentVerification[];
+  relatedTrace: WorkflowTrace | null;
+  relatedRegressionRun: WorkflowRegressionRunView | null;
+}
+
+export interface AuditEvent {
+  id: string;
+  workspaceId: string;
+  actorUserId: string | null;
+  eventType: string;
+  entityType: string;
+  entityId: string;
+  entityName: string | null;
+  metadata: Record<string, unknown>;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export type ApprovalRequestType = "rollout_approval" | "incident_resolution" | "policy_override" | "high_risk_action";
+export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface ApprovalRequest {
+  id: string;
+  workspaceId: string;
+  capabilityId: string | null;
+  capabilityVersionId: string | null;
+  requestType: ApprovalRequestType;
+  status: ApprovalRequestStatus;
+  requestedBy: string;
+  requiredApprovals: number;
+  approvedCount: number;
+  rejectedCount: number;
+  reason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface ApprovalDecision {
+  id: string;
+  workspaceId: string;
+  approvalRequestId: string;
+  reviewerUserId: string;
+  decision: "approved" | "rejected";
+  comment: string | null;
+  createdAt: string;
+}
+
+export interface PolicyPack {
+  id: string;
+  workspaceId: string | null;
+  name: string;
+  description: string | null;
+  sector: "retail" | "bfsi" | "healthcare" | "pharma" | "software" | "travel" | "insurance" | "general";
+  version: string;
+  rules: Array<Record<string, unknown>>;
+  enabled: boolean;
+  systemPack?: boolean;
+  createdAt: string;
+  appliedToCapabilityIds?: string[];
+}
+
+export interface RedactionRule {
+  id: string;
+  workspaceId: string;
+  name: string;
+  ruleType: "regex" | "field_name" | "built_in";
+  pattern: string;
+  replacement: string;
+  enabled: boolean;
+  scope: "traces" | "tool_arguments" | "tool_results" | "final_response" | "all";
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrivacySettings {
+  workspaceId: string;
+  enablePiiRedaction: boolean;
+  storeRawInputs: boolean;
+  storeRawOutputs: boolean;
+  storeToolArguments: boolean;
+  storeToolResults: boolean;
+  retentionDays: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GovernanceDashboardData {
+  openIncidents: AiIncident[];
+  pendingApprovals: ApprovalRequest[];
+  recentBlockedRollouts: AuditEvent[];
+  policyPacks: PolicyPack[];
+  auditActivity: AuditEvent[];
+  privacySettings: PrivacySettings | null;
+  highRiskCapabilities: AiCapability[];
+  criticalClusters: GovernanceFailureCluster[];
+}

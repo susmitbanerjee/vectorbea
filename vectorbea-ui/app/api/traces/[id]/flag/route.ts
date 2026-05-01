@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { createIncidentFromTrace, writeAuditEvent } from "@/lib/server/governance";
 
 /**
  * Required table schema for trace_issue_flags:
@@ -76,6 +77,27 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: authResult.user.id,
+      eventType: "trace_flagged",
+      entityType: "trace",
+      entityId: traceId,
+      metadata: { reason: body.reason?.trim() ?? null },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
+    });
+    try {
+      await createIncidentFromTrace({
+        workspaceId,
+        traceId,
+        createdBy: authResult.user.id,
+        title: body.reason?.trim() ? `Trace issue flagged: ${body.reason.trim()}` : null,
+        description: body.reason?.trim() ?? null,
+      });
+    } catch {
+      // Trace flags should still succeed even if incident creation fails.
+    }
     return NextResponse.json(data, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });

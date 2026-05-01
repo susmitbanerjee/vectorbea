@@ -4,6 +4,7 @@ import type { AiCapabilityType, BusinessDomain, ReliabilityRiskLevel } from "@/l
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { createCapability, listCapabilitiesIncludingPrompts } from "@/lib/server/ai-capabilities";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
+import { writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,17 @@ export async function POST(request: NextRequest) {
       ownerUserId: body.ownerUserId ?? null,
       promptId: body.promptId ?? null,
       createdBy: auth.user.id,
+    });
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType: "capability_created",
+      entityType: "capability",
+      entityId: cap.id,
+      entityName: cap.name,
+      metadata: { type: cap.type, business_domain: cap.businessDomain, risk_level: cap.riskLevel },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
     });
     return NextResponse.json(cap, { status: 201 });
   } catch (error) {

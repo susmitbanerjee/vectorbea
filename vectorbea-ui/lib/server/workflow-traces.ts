@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { WorkflowTrace, WorkflowStepTrace, WorkflowStepType } from "@/lib/api";
-import { redactPayload } from "@/lib/server/security";
+import { prepareTraceForStorage } from "@/lib/server/privacy-controls";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 // ─── Row types ────────────────────────────────────────────────────────────────
@@ -210,6 +210,17 @@ export async function createWorkflowTrace(args: {
   }>;
 }): Promise<WorkflowTrace> {
   const supabase = createVectorBeaAdminClient();
+  const privacyPrepared = await prepareTraceForStorage({
+    workspaceId: args.workspaceId,
+    userInput: args.userInput ?? null,
+    finalResponse: args.finalResponse ?? null,
+    steps: (args.steps ?? []).map((step) => ({
+      inputPayload: step.inputPayload ?? {},
+      outputPayload: step.outputPayload ?? {},
+      toolArguments: step.toolArguments ?? {},
+      toolResult: step.toolResult ?? {},
+    })),
+  });
 
   const { data: traceData, error: traceError } = await supabase
     .from("workflow_traces")
@@ -223,8 +234,8 @@ export async function createWorkflowTrace(args: {
       trace_id: args.traceId ?? null,
       provider: args.provider ?? null,
       model: args.model ?? null,
-      user_input: args.userInput ?? null,
-      final_response: args.finalResponse ?? null,
+      user_input: privacyPrepared.userInput,
+      final_response: privacyPrepared.finalResponse,
       final_action: args.finalAction ?? null,
       status: args.status ?? "completed",
       outcome_status: args.outcomeStatus ?? null,
@@ -248,27 +259,30 @@ export async function createWorkflowTrace(args: {
 
   let builtSteps: WorkflowStepTrace[] = [];
   if (args.steps && args.steps.length > 0) {
-    const stepInserts = args.steps.map((s) => ({
-      workspace_id: args.workspaceId,
-      workflow_trace_id: trace.id,
-      step_index: s.stepIndex,
-      step_type: s.stepType,
-      step_name: s.stepName,
-      provider: s.provider ?? null,
-      model: s.model ?? null,
-      tool_name: s.toolName ?? null,
-      mcp_server_name: s.mcpServerName ?? null,
-      input_payload: redactPayload(s.inputPayload ?? {}),
-      output_payload: redactPayload(s.outputPayload ?? {}),
-      tool_arguments: redactPayload(s.toolArguments ?? {}),
-      tool_result: redactPayload(s.toolResult ?? {}),
-      status: s.status ?? "completed",
-      latency_ms: s.latencyMs ?? null,
-      cost_estimate: s.costEstimate ?? null,
-      tokens_input: s.tokensInput ?? null,
-      tokens_output: s.tokensOutput ?? null,
-      error_message: s.errorMessage ?? null,
-    }));
+    const stepInserts = args.steps.map((s, index) => {
+      const prepared = privacyPrepared.steps[index] ?? {};
+      return {
+        workspace_id: args.workspaceId,
+        workflow_trace_id: trace.id,
+        step_index: s.stepIndex,
+        step_type: s.stepType,
+        step_name: s.stepName,
+        provider: s.provider ?? null,
+        model: s.model ?? null,
+        tool_name: s.toolName ?? null,
+        mcp_server_name: s.mcpServerName ?? null,
+        input_payload: prepared.inputPayload ?? {},
+        output_payload: prepared.outputPayload ?? {},
+        tool_arguments: prepared.toolArguments ?? {},
+        tool_result: prepared.toolResult ?? {},
+        status: s.status ?? "completed",
+        latency_ms: s.latencyMs ?? null,
+        cost_estimate: s.costEstimate ?? null,
+        tokens_input: s.tokensInput ?? null,
+        tokens_output: s.tokensOutput ?? null,
+        error_message: s.errorMessage ?? null,
+      };
+    });
     const { data: stepsData, error: stepsError } = await supabase
       .from("workflow_step_traces")
       .insert(stepInserts)

@@ -4,6 +4,7 @@ import type { CapabilityVersionStatus } from "@/lib/api";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { getVersion, updateVersionStatus } from "@/lib/server/ai-capabilities";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
+import { writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { autoTriggerRegressionSuitesForCandidate } from "@/lib/server/workflow-regressions";
 
@@ -42,6 +43,21 @@ export async function PATCH(
     const body = (await request.json().catch(() => ({}))) as { status?: CapabilityVersionStatus };
     if (!body.status) return NextResponse.json({ error: "status is required" }, { status: 400 });
     const version = await updateVersionStatus(workspaceId, versionId, body.status);
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType:
+        body.status === "candidate" ? "capability_version_promoted" :
+        body.status === "active" ? "capability_version_activated" :
+        body.status === "deprecated" ? "capability_version_deprecated" :
+        "capability_version_updated",
+      entityType: "capability_version",
+      entityId: version.id,
+      entityName: version.versionNumber,
+      metadata: { capability_id: version.capabilityId, status: version.status },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
+    });
     if (body.status === "candidate") {
       after(async () => {
         try {

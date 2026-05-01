@@ -28,7 +28,12 @@ export type FeatureKey =
   | "deterministic_rules"
   | "advanced_reliability_reports"
   | "roi_dashboard"
-  | "advanced_roi_reports";
+  | "advanced_roi_reports"
+  | "incidents"
+  | "approval_workflows"
+  | "policy_packs"
+  | "governance_dashboard"
+  | "privacy_controls";
 
 const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   evaluations: "evaluations",
@@ -55,6 +60,11 @@ const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   advanced_reliability_reports: "production_decision_reports",
   roi_dashboard: "roi_dashboard",
   advanced_roi_reports: "advanced_roi_reports",
+  incidents: "incidents",
+  approval_workflows: "approval_workflows",
+  policy_packs: "policy_packs",
+  governance_dashboard: "governance_dashboard",
+  privacy_controls: "pii_redaction",
 };
 
 function labelFor(feature: FeatureKey) {
@@ -103,6 +113,16 @@ function labelFor(feature: FeatureKey) {
       return "ROI dashboard";
     case "advanced_roi_reports":
       return "Advanced ROI reports";
+    case "incidents":
+      return "Incidents";
+    case "approval_workflows":
+      return "Approval workflows";
+    case "policy_packs":
+      return "Policy packs";
+    case "governance_dashboard":
+      return "Governance dashboard";
+    case "privacy_controls":
+      return "Privacy controls";
     default:
       return "Feature";
   }
@@ -194,4 +214,24 @@ export async function canUseRoiDashboardFeature(workspaceId: string) {
 
 export async function canUseAdvancedRoiReportsFeature(workspaceId: string) {
   return canUseFeature(workspaceId, "advanced_roi_reports");
+}
+
+export async function canUseIncidentsFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "incidents");
+}
+
+export async function canUseApprovalWorkflowsFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "approval_workflows");
+}
+
+export async function canUsePolicyPacksFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "policy_packs");
+}
+
+export async function canUseGovernanceDashboardFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "governance_dashboard");
+}
+
+export async function canUsePrivacyControlsFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "privacy_controls");
 }

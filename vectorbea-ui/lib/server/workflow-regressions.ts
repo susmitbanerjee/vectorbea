@@ -14,6 +14,7 @@ import type {
   WorkflowRegressionRunView,
   WorkflowTrace,
 } from "@/lib/api";
+import { writeAuditEvent } from "@/lib/server/audit-events";
 import { getCapability, getVersion } from "@/lib/server/ai-capabilities";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { runReliabilityChecks } from "@/lib/server/reliability-rules";
@@ -696,9 +697,19 @@ export async function createRegressionSuite(args: {
       created_by: args.createdBy,
     })
     .select("*")
-    .single();
+      .single();
   if (error) throw new Error(error.message);
-  return mapSuite(data as RegressionSuiteRow);
+  const suite = mapSuite(data as RegressionSuiteRow);
+  await writeAuditEvent({
+    workspaceId: args.workspaceId,
+    actorUserId: args.createdBy,
+    eventType: "regression_suite_created",
+    entityType: "regression_suite",
+    entityId: suite.id,
+    entityName: suite.name,
+    metadata: { capability_id: suite.capabilityId, suite_type: suite.suiteType },
+  });
+  return suite;
 }
 
 export async function updateRegressionSuite(args: {
@@ -783,9 +794,19 @@ export async function createRegressionCase(args: {
       created_by: args.createdBy,
     })
     .select("*")
-    .single();
+      .single();
   if (error) throw new Error(error.message);
-  return mapCase(data as RegressionCaseRow);
+  const regressionCase = mapCase(data as RegressionCaseRow);
+  await writeAuditEvent({
+    workspaceId: args.workspaceId,
+    actorUserId: args.createdBy,
+    eventType: "regression_case_created",
+    entityType: "regression_case",
+    entityId: regressionCase.id,
+    entityName: regressionCase.name,
+    metadata: { suite_id: args.suiteId, risk_level: regressionCase.riskLevel, source_trace_id: regressionCase.sourceTraceId },
+  });
+  return regressionCase;
 }
 
 export async function importRegressionCaseFromTrace(args: {
@@ -1163,9 +1184,19 @@ export async function startWorkflowRegressionRun(args: {
       },
     })
     .select("*")
-    .single();
+      .single();
   if (error) throw new Error(error.message);
-  return mapRun(data as WorkflowRegressionRunRow);
+  const run = mapRun(data as WorkflowRegressionRunRow);
+  await writeAuditEvent({
+    workspaceId: args.workspaceId,
+    actorUserId: args.startedBy,
+    eventType: "regression_run_started",
+    entityType: "workflow_regression_run",
+    entityId: run.id,
+    entityName: suite.name,
+    metadata: { suite_id: suite.id, capability_id: suite.capabilityId, capability_version_id: version.id, trigger_source: args.triggerSource ?? "manual" },
+  });
+  return run;
 }
 
 export async function processWorkflowRegressionRun(args: {
@@ -1241,6 +1272,20 @@ export async function processWorkflowRegressionRun(args: {
         critical_failures_count: detail.cases.filter((entry) => !entry.passed && entry.regressionCase?.riskLevel === "critical").length,
       })
       .eq("id", run.id);
+    await writeAuditEvent({
+      workspaceId: args.workspaceId,
+      actorUserId: run.startedBy,
+      eventType: "regression_run_completed",
+      entityType: "workflow_regression_run",
+      entityId: run.id,
+      entityName: suite.name,
+      metadata: {
+        capability_id: capability.id,
+        capability_version_id: version.id,
+        decision: safetyGate.decision,
+        overall_score: score.score,
+      },
+    });
   } catch (processError) {
     await supabase
       .from("workflow_regression_runs")

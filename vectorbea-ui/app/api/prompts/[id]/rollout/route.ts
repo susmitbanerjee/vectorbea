@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
+import { createApprovalRequest } from "@/lib/server/governance";
 import { getPromptRolloutDistribution, updateVersionRollout } from "@/lib/server/rollout";
 import { evaluateRolloutGate } from "@/lib/server/provider-arena-governance";
 import { triggerAutoEvaluation } from "@/lib/server/auto-evaluations";
+import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import type { RolloutStatus } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +69,30 @@ export async function POST(
         );
       }
       if (gate.status !== "passed") {
+        if (gate.status === "needs_review") {
+          try {
+            const supabase = createVectorBeaAdminClient();
+            const capabilityRes = await supabase
+              .from("ai_capabilities")
+              .select("id")
+              .eq("workspace_id", workspaceId)
+              .eq("prompt_id", promptId)
+              .eq("status", "active")
+              .maybeSingle();
+            if (!capabilityRes.error && capabilityRes.data?.id) {
+              await createApprovalRequest({
+                workspaceId,
+                capabilityId: String(capabilityRes.data.id),
+                capabilityVersionId: null,
+                requestType: "rollout_approval",
+                requestedBy: auth.user.id,
+                reason: Array.isArray(gate.reasons) ? gate.reasons.join("; ") : "Safety gate requires approval",
+              });
+            }
+          } catch {
+            // Approval request creation should not block the gate response.
+          }
+        }
         return NextResponse.json(
           {
             error: "Rollout blocked by safety gate",
