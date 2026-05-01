@@ -119,6 +119,15 @@ type ArenaReportRow = {
   updated_at: string;
 };
 
+function isMissingArenaGovernanceSchema(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return (
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find the table")
+  );
+}
+
 type JudgeExecutionRow = {
   id: string;
   evaluation_run_id: string;
@@ -1487,12 +1496,19 @@ export async function startProviderArenaRun(args: {
     }
   }
 
-  await runPairwiseComparisons({
-    workspaceId: args.workspaceId,
-    evaluationRunId: run.id,
-    rubricId: rubric.id,
-  });
-  const pairwiseRows = (await getPairwiseForRun(run.id)) as PairwiseRow[];
+  let governanceWarning: string | null = null;
+  let pairwiseRows: PairwiseRow[] = [];
+  try {
+    await runPairwiseComparisons({
+      workspaceId: args.workspaceId,
+      evaluationRunId: run.id,
+      rubricId: rubric.id,
+    });
+    pairwiseRows = (await getPairwiseForRun(run.id)) as PairwiseRow[];
+  } catch (error) {
+    if (!isMissingArenaGovernanceSchema(error)) throw error;
+    governanceWarning = "Provider Arena governance tables are missing. Apply the latest schema updates to enable pairwise comparison and review queue.";
+  }
   const executionCandidateMap = new Map<string, string>();
   for (const result of results) {
     const candidate = candidateRows.find(
@@ -1673,15 +1689,25 @@ export async function startProviderArenaRun(args: {
     },
   };
 
-  await supabase.from("arena_reports").upsert({
-    evaluation_run_id: run.id,
-    ...reportPayload,
-  }, { onConflict: "evaluation_run_id" });
+  try {
+    await supabase.from("arena_reports").upsert({
+      evaluation_run_id: run.id,
+      ...reportPayload,
+    }, { onConflict: "evaluation_run_id" });
+  } catch (error) {
+    if (!isMissingArenaGovernanceSchema(error)) throw error;
+    governanceWarning = governanceWarning ?? "Provider Arena report tables are missing. Apply the latest schema updates for full report persistence.";
+  }
 
-  await buildReviewQueueForRun({
-    workspaceId: args.workspaceId,
-    evaluationRunId: run.id,
-  });
+  try {
+    await buildReviewQueueForRun({
+      workspaceId: args.workspaceId,
+      evaluationRunId: run.id,
+    });
+  } catch (error) {
+    if (!isMissingArenaGovernanceSchema(error)) throw error;
+    governanceWarning = governanceWarning ?? "Provider Arena review queue tables are missing. Apply the latest schema updates for human review support.";
+  }
 
   await updateRun(run.id, {
     status: "completed",
@@ -1703,6 +1729,7 @@ export async function startProviderArenaRun(args: {
         estimated_provider_executions: datasetItems.length * candidateRows.length,
         estimated_judge_executions: datasetItems.length * candidateRows.length,
       },
+      governance_warning: governanceWarning,
     },
   });
 
@@ -1781,14 +1808,20 @@ async function listArenaRunRows(workspaceId: string) {
 async function getArenaReport(runId: string): Promise<ArenaReportRow | null> {
   const supabase = createVectorBeaAdminClient();
   const { data, error } = await supabase.from("arena_reports").select("*").eq("evaluation_run_id", runId).maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.message.toLowerCase().includes("does not exist")) return null;
+    throw new Error(error.message);
+  }
   return (data as ArenaReportRow | null) ?? null;
 }
 
 async function getProviderCandidates(runId: string): Promise<ProviderCandidateRow[]> {
   const supabase = createVectorBeaAdminClient();
   const { data, error } = await supabase.from("provider_candidates").select("*").eq("evaluation_run_id", runId).order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.message.toLowerCase().includes("does not exist")) return [];
+    throw new Error(error.message);
+  }
   return (data ?? []) as ProviderCandidateRow[];
 }
 
@@ -1803,15 +1836,22 @@ export async function getProviderArenaRunDetail(workspaceId: string, runId: stri
   await assertFeatureAccess(workspaceId, "behavioral_evaluations");
   const run = await getRunRow(workspaceId, runId);
   if (!run || run.run_type !== "provider_arena") return null;
-  const [base, candidates, report, pairwiseRows, reviewQueue] = await Promise.all([
+  const [base, candidates, report, pairwiseResult, reviewQueueResult] = await Promise.all([
     getBehavioralRunDetail(workspaceId, runId),
     getProviderCandidates(runId),
     getArenaReport(runId),
-    getPairwiseForRun(runId),
-    getReviewQueueSummary(workspaceId, runId),
+    getPairwiseForRun(runId).catch((error) => {
+      if (isMissingArenaGovernanceSchema(error)) return [];
+      throw error;
+    }),
+    getReviewQueueSummary(workspaceId, runId).catch((error) => {
+      if (isMissingArenaGovernanceSchema(error)) return null;
+      throw error;
+    }),
   ]);
   if (!base) return null;
-  const pairwise = (pairwiseRows as PairwiseRow[]) ?? [];
+  const pairwise = (pairwiseResult as PairwiseRow[]) ?? [];
+  const reviewQueue = reviewQueueResult ?? null;
   const executionToCandidate = new Map<string, string>();
   for (const result of base.results) {
     const candidate = candidates.find((row) => row.provider === result.provider && row.model === result.model);

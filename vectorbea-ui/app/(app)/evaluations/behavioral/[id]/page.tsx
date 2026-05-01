@@ -171,6 +171,50 @@ function modelOptionsForProvider(providerType: string, defaultModel?: string | n
   return Array.from(values);
 }
 
+function ArenaSelect({
+  value,
+  placeholder,
+  options,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  options: Array<{ value: string; label: string; meta?: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm font-medium text-[#111111] shadow-sm transition-colors hover:bg-[#F8F5EF]"
+        >
+          <span className="truncate text-left">
+            {value ? options.find((option) => option.value === value)?.label ?? value : placeholder}
+          </span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-[#6B7280]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          {options.map((option) => (
+            <DropdownMenuPanelRadioItem key={option.value} value={option.value}>
+              <span className="flex w-full items-center justify-between gap-2">
+                <span className="truncate">{option.label}</span>
+                {option.meta ? <span className="shrink-0 text-[10px] text-[#6B7280]">{option.meta}</span> : null}
+              </span>
+            </DropdownMenuPanelRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuPanel>
+    </DropdownMenu>
+  );
+}
+
+function versionLabel(version: { id: string; versionTag: string }) {
+  return version.versionTag?.trim() || version.id;
+}
+
 // ── Items tab ──────────────────────────────────────────────────────────────────
 
 function ItemsTab({
@@ -1699,17 +1743,28 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Rubric</label>
-                <select className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={rubricId} onChange={(e) => setRubricId(e.target.value)}>
-                  <option value="">Select rubric</option>
-                  {rubrics.map((rubric) => <option key={rubric.id} value={rubric.id}>{rubric.name}</option>)}
-                </select>
+                <ArenaSelect
+                  value={rubricId}
+                  placeholder="Select rubric"
+                  options={rubrics.map((rubric) => ({
+                    value: rubric.id,
+                    label: rubric.name,
+                    meta: `pass ≥${rubric.passThreshold}%`,
+                  }))}
+                  onChange={setRubricId}
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Prompt version</label>
-                <select className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={promptVersionId} onChange={(e) => setPromptVersionId(e.target.value)}>
-                  <option value="">Select prompt version</option>
-                  {versions.map((version) => <option key={version.id} value={version.id}>{version.versionTag}</option>)}
-                </select>
+                <ArenaSelect
+                  value={promptVersionId}
+                  placeholder="Select prompt version"
+                  options={versions.map((version) => ({
+                    value: version.id,
+                    label: version.versionTag,
+                  }))}
+                  onChange={setPromptVersionId}
+                />
               </div>
               {mode === "rubric_scoring" && (
               <div className="space-y-1">

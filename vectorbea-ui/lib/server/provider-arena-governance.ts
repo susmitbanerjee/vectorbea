@@ -38,6 +38,10 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function isMissingRelationError(message: string) {
+  return message.toLowerCase().includes("does not exist");
+}
+
 async function insertGovernanceAudit(args: {
   workspaceId: string;
   promptName: string;
@@ -161,7 +165,11 @@ export async function runPairwiseComparisons(args: { workspaceId: string; evalua
       .eq("evaluation_run_id", args.evaluationRunId),
   ]);
   if (execRes.error || !execRes.data?.length) return;
-  if (candidatesRes.error || !candidatesRes.data?.length) return;
+  if (candidatesRes.error) {
+    if (isMissingRelationError(candidatesRes.error.message)) return;
+    throw new Error(candidatesRes.error.message);
+  }
+  if (!candidatesRes.data?.length) return;
 
   const grouped = new Map<string, Array<Record<string, unknown>>>();
   for (const row of execRes.data) {
@@ -271,7 +279,10 @@ export async function runPairwiseComparisons(args: { workspaceId: string; evalua
     }
   }
   if (inserts.length > 0) {
-    await supabase.from("pairwise_comparisons").insert(inserts);
+    const insertRes = await supabase.from("pairwise_comparisons").insert(inserts);
+    if (insertRes.error && !isMissingRelationError(insertRes.error.message)) {
+      throw new Error(insertRes.error.message);
+    }
   }
   await insertGovernanceAudit({
     workspaceId: args.workspaceId,
@@ -294,7 +305,11 @@ export async function buildReviewQueueForRun(args: { workspaceId: string; evalua
       .select("id,dataset_item_id,result,confidence,needs_review_reason")
       .eq("evaluation_run_id", args.evaluationRunId),
   ]);
-  if (execRes.error || pairwiseRes.error) return;
+  if (execRes.error) return;
+  if (pairwiseRes.error) {
+    if (isMissingRelationError(pairwiseRes.error.message)) return;
+    throw new Error(pairwiseRes.error.message);
+  }
   const reviewRows: Array<Record<string, unknown>> = [];
   for (const row of execRes.data ?? []) {
     const confidence = asNumber(row.confidence) ?? 0;
@@ -325,7 +340,10 @@ export async function buildReviewQueueForRun(args: { workspaceId: string; evalua
     }
   }
   if (reviewRows.length > 0) {
-    await supabase.from("human_review_items").insert(reviewRows);
+    const insertRes = await supabase.from("human_review_items").insert(reviewRows);
+    if (insertRes.error && !isMissingRelationError(insertRes.error.message)) {
+      throw new Error(insertRes.error.message);
+    }
   }
   await insertGovernanceAudit({
     workspaceId: args.workspaceId,
@@ -344,7 +362,10 @@ export async function listReviewQueue(workspaceId: string) {
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(500);
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingRelationError(error.message)) return [];
+    throw new Error(error.message);
+  }
   return data ?? [];
 }
 
@@ -355,7 +376,10 @@ export async function getReviewQueueSummary(workspaceId: string, evaluationRunId
     .select("status,severity")
     .eq("workspace_id", workspaceId)
     .eq("evaluation_run_id", evaluationRunId);
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingRelationError(error.message)) return { open: 0, inReview: 0, criticalOpen: 0 };
+    throw new Error(error.message);
+  }
   const rows = data ?? [];
   const open = rows.filter((row) => String(row.status) === "open").length;
   const inReview = rows.filter((row) => String(row.status) === "in_review").length;
@@ -403,7 +427,10 @@ export async function getPairwiseForRun(evaluationRunId: string) {
     .select("*")
     .eq("evaluation_run_id", evaluationRunId)
     .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingRelationError(error.message)) return [];
+    throw new Error(error.message);
+  }
   return data ?? [];
 }
 
@@ -459,7 +486,26 @@ export async function computeEvaluationRunComparison(args: {
     .insert(payload)
     .select("*")
     .single();
-  if (insertError) throw new Error(insertError.message);
+  if (insertError) {
+    if (isMissingRelationError(insertError.message)) {
+      return {
+        id: null,
+        workspace_id: args.workspaceId,
+        created_by: args.createdBy,
+        run_ids: args.runIds,
+        summary,
+        score_delta: { absolute: scoreDelta },
+        pass_rate_delta: { absolute: passDelta },
+        failure_delta: { absolute: failDelta },
+        dimension_deltas: dimensionDeltas,
+        cost_delta: { absolute: Number(costDelta.toFixed(6)) },
+        latency_delta: { absolute: Number(latencyDelta.toFixed(2)) },
+        regression_cases: [],
+        improvement_cases: [],
+      };
+    }
+    throw new Error(insertError.message);
+  }
   return inserted;
 }
 
@@ -516,8 +562,11 @@ export async function evaluateRolloutGate(args: {
       .eq("workspace_id", args.workspaceId)
       .eq("status", "open"),
   ]);
-  if (arenaRes.error || reviewsRes.error) {
-    throw new Error(arenaRes.error?.message ?? reviewsRes.error?.message ?? "Failed rollout gate checks");
+  if (arenaRes.error && !isMissingRelationError(arenaRes.error.message)) {
+    throw new Error(arenaRes.error.message);
+  }
+  if (reviewsRes.error && !isMissingRelationError(reviewsRes.error.message)) {
+    throw new Error(reviewsRes.error.message);
   }
 
   const reasons: string[] = [];

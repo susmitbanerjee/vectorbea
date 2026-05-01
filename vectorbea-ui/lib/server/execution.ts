@@ -230,7 +230,9 @@ function normalizeGeminiModel(model: string | null | undefined): string {
   if (!trimmed) return "gemini-2.0-flash";
 
   const aliases: Record<string, string> = {
+    "gemini-flash": "gemini-2.0-flash",
     "gemini-flash-latest": "gemini-2.0-flash",
+    "gemini-pro": "gemini-1.5-pro",
     "gemini-pro-latest": "gemini-1.5-pro",
   };
 
