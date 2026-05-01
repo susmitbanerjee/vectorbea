@@ -1114,3 +1114,176 @@ export interface EvaluationComparisonReport {
   improvementCases: Array<Record<string, unknown>>;
   createdAt: string;
 }
+
+// ─── AI Capability / Reliability foundation types ─────────────────────────────
+
+export type AiCapabilityType =
+  | "prompt" | "skill" | "agent_workflow" | "rag_workflow" | "mcp_workflow"
+  | "content_generation" | "classification" | "extraction"
+  | "customer_support" | "internal_automation";
+
+export type BusinessDomain =
+  | "customer_support" | "finance" | "claims" | "refunds" | "healthcare_triage"
+  | "pharma_documentation" | "travel_booking" | "software_support"
+  | "content_generation" | "internal_automation" | "sales" | "operations" | "general";
+
+export type ReliabilityRiskLevel = "low" | "medium" | "high" | "critical";
+
+export type CapabilityStatus = "active" | "archived";
+
+export type CapabilityVersionStatus = "draft" | "candidate" | "active" | "deprecated";
+
+export interface AiCapability {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  type: AiCapabilityType;
+  businessDomain: BusinessDomain;
+  riskLevel: ReliabilityRiskLevel;
+  ownerUserId: string | null;
+  status: CapabilityStatus;
+  promptId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  // derived
+  activeVersion?: CapabilityVersion | null;
+  versionCount?: number;
+  lastCheckStatus?: "passed" | "failed" | "needs_review" | "unknown" | null;
+  lastCheckAt?: string | null;
+}
+
+export interface CapabilityVersion {
+  id: string;
+  workspaceId: string;
+  capabilityId: string;
+  versionNumber: string;
+  name: string | null;
+  status: CapabilityVersionStatus;
+  config: Record<string, unknown>;
+  promptVersionId: string | null;
+  skillDefinition: Record<string, unknown> | null;
+  workflowDefinition: Record<string, unknown> | null;
+  providerConfig: Record<string, unknown> | null;
+  toolPolicyId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  activatedAt: string | null;
+  deprecatedAt: string | null;
+}
+
+export type WorkflowStepType =
+  | "llm_call" | "tool_call" | "mcp_tool_call" | "rag_retrieval"
+  | "reranker" | "decision" | "human_handoff" | "final_response" | "system_event";
+
+export interface WorkflowStepTrace {
+  id: string;
+  workspaceId: string;
+  workflowTraceId: string;
+  stepIndex: number;
+  stepType: WorkflowStepType;
+  stepName: string;
+  provider: string | null;
+  model: string | null;
+  toolName: string | null;
+  mcpServerName: string | null;
+  inputPayload: Record<string, unknown>;
+  outputPayload: Record<string, unknown>;
+  toolArguments: Record<string, unknown>;
+  toolResult: Record<string, unknown>;
+  status: "running" | "completed" | "failed" | "skipped";
+  latencyMs: number | null;
+  costEstimate: number | null;
+  tokensInput: number | null;
+  tokensOutput: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface WorkflowTrace {
+  id: string;
+  workspaceId: string;
+  capabilityId: string | null;
+  capabilityVersionId: string | null;
+  promptId: string | null;
+  promptVersionId: string | null;
+  agentRunId: string | null;
+  traceId: string | null;
+  provider: string | null;
+  model: string | null;
+  userInput: string | null;
+  finalResponse: string | null;
+  finalAction: string | null;
+  status: "running" | "completed" | "failed" | "cancelled";
+  totalLatencyMs: number | null;
+  totalCostEstimate: number | null;
+  totalTokensInput: number | null;
+  totalTokensOutput: number | null;
+  errorMessage: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  steps?: WorkflowStepTrace[];
+  // derived
+  capabilityName?: string | null;
+}
+
+export type ReliabilityRuleType =
+  | "tool_sequence" | "tool_required" | "tool_forbidden"
+  | "argument_validation" | "schema_validation" | "regex_check"
+  | "cost_threshold" | "latency_threshold" | "max_tool_calls"
+  | "pii_detection" | "business_policy" | "human_handoff_required"
+  | "output_contains" | "output_not_contains"
+  | "tool_result_condition" | "final_action_condition";
+
+export interface ReliabilityRule {
+  id: string;
+  workspaceId: string;
+  capabilityId: string | null;
+  capabilityVersionId: string | null;
+  name: string;
+  description: string | null;
+  ruleType: ReliabilityRuleType;
+  severity: ReliabilityRiskLevel;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  // derived
+  plainEnglish?: string;
+}
+
+export type RuleResultStatus = "passed" | "failed" | "skipped" | "error";
+
+export interface ReliabilityRuleResult {
+  id: string;
+  workspaceId: string;
+  ruleId: string;
+  workflowTraceId: string | null;
+  evaluationRunId: string | null;
+  status: RuleResultStatus;
+  passed: boolean;
+  severity: ReliabilityRiskLevel;
+  message: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+  // derived
+  rule?: ReliabilityRule;
+}
+
+export interface ReliabilityCheckReport {
+  runId: string;
+  capabilityId: string | null;
+  workflowTraceId: string | null;
+  overallStatus: "passed" | "failed" | "needs_review" | "error";
+  passedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  criticalFailures: ReliabilityRuleResult[];
+  highFailures: ReliabilityRuleResult[];
+  allResults: ReliabilityRuleResult[];
+  createdAt: string;
+}

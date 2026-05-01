@@ -57,3 +57,39 @@ export function assertSafeGatewayUrl(value: string, allowPrivate = false) {
   return parsed;
 }
 
+// ─── Payload redaction ────────────────────────────────────────────────────────
+// Redact sensitive fields from JSON payloads before storing in workflow traces.
+
+const SENSITIVE_KEYS = new Set([
+  "authorization", "api_key", "apikey", "x_api_key", "x-api-key",
+  "password", "secret", "token", "bearer", "access_token", "refresh_token",
+  "private_key", "client_secret", "webhook_secret",
+]);
+
+const BEARER_RE = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
+
+function redactValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.replace(BEARER_RE, "Bearer [REDACTED]");
+  }
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value !== null && typeof value === "object") return redactObject(value as Record<string, unknown>);
+  return value;
+}
+
+function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (SENSITIVE_KEYS.has(key.toLowerCase().replaceAll("-", "_"))) {
+      out[key] = "[REDACTED]";
+    } else {
+      out[key] = redactValue(val);
+    }
+  }
+  return out;
+}
+
+export function redactPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return redactObject(payload);
+}
+

@@ -22,7 +22,11 @@ export type FeatureKey =
   | "rollout_decision_reports"
   | "enterprise_rubric_locking"
   | "locked_rubrics"
-  | "sso";
+  | "sso"
+  | "ai_capabilities"
+  | "workflow_reliability"
+  | "deterministic_rules"
+  | "advanced_reliability_reports";
 
 const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   evaluations: "evaluations",
@@ -43,6 +47,10 @@ const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   enterprise_rubric_locking: "locked_rubrics",
   locked_rubrics: "locked_rubrics",
   sso: "sso",
+  ai_capabilities: "behavioral_evaluations",
+  workflow_reliability: "behavioral_evaluations",
+  deterministic_rules: "behavioral_evaluations",
+  advanced_reliability_reports: "production_decision_reports",
 };
 
 function labelFor(feature: FeatureKey) {
@@ -79,6 +87,14 @@ function labelFor(feature: FeatureKey) {
       return "Rollout decision reports";
     case "enterprise_rubric_locking":
       return "Enterprise rubric locking";
+    case "ai_capabilities":
+      return "AI Capabilities";
+    case "workflow_reliability":
+      return "Workflow reliability";
+    case "deterministic_rules":
+      return "Deterministic rule engine";
+    case "advanced_reliability_reports":
+      return "Advanced reliability reports";
     default:
       return "Feature";
   }
@@ -146,4 +162,20 @@ export async function canUseLockedRubrics(workspaceId: string) {
 
 export async function canUseSSO(workspaceId: string) {
   return canUseFeature(workspaceId, "sso");
+}
+
+export async function canUseAICapabilitiesFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "ai_capabilities");
+}
+
+export async function canUseWorkflowReliabilityFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "workflow_reliability");
+}
+
+export async function canUseDeterministicRulesFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "deterministic_rules");
+}
+
+export async function canUseAdvancedReliabilityReportsFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "advanced_reliability_reports");
 }

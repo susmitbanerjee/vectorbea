@@ -13,6 +13,7 @@ import {
   Gauge,
   ArrowUpRight,
   BookOpen,
+  BotMessageSquare,
   Database,
   FlaskConical,
   GitBranch,
@@ -21,8 +22,10 @@ import {
   Loader2,
   LogOut,
   Logs,
+  ScrollText,
   Server,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Star,
   Swords,
@@ -42,6 +45,8 @@ const ALL_NAV_ITEMS: Array<{
   icon: typeof LayoutDashboard;
   minRole?: "admin" | "editor" | "viewer";
   isSubItem?: boolean;
+  /** Which top-level path prefix makes sub-items visible */
+  subItemGroup?: string;
 }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/metrics", label: "Metrics", icon: BarChart3 },
@@ -49,14 +54,22 @@ const ALL_NAV_ITEMS: Array<{
   { href: "/prompts", label: "Prompts", icon: Sparkles },
   { href: "/audit-logs", label: "Audit Logs", icon: Logs },
   { href: "/traces", label: "Traces", icon: GitBranch },
+  // ── Reliability ─────────────────────────────────────────────────────────
+  { href: "/reliability/capabilities", label: "Reliability", icon: ShieldCheck },
+  { href: "/reliability/capabilities", label: "AI Capabilities", icon: BotMessageSquare, isSubItem: true, subItemGroup: "/reliability" },
+  { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true, subItemGroup: "/reliability" },
+  { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true, subItemGroup: "/reliability" },
+  { href: "/evaluations/schedules", label: "Regression Suites", icon: CalendarClock, isSubItem: true, subItemGroup: "/reliability" },
+  { href: "/evaluations/behavioral", label: "Behavior Checks", icon: ScrollText, isSubItem: true, subItemGroup: "/reliability" },
+  // ── Evaluations (legacy — kept for direct dataset / compare access) ─────
   { href: "/evaluations", label: "Evaluations", icon: FlaskConical },
-  { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true },
-  { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true },
-  { href: "/evaluations/behavioral", label: "Behavioral Datasets", icon: BookOpen, isSubItem: true },
-  { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true },
-  { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true },
-  { href: "/evaluations/compare", label: "Evaluation Comparison", icon: ArrowUpRight, isSubItem: true },
-  { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true },
+  { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/evaluations/behavioral", label: "Behavioral Datasets", icon: BookOpen, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/evaluations/compare", label: "Evaluation Comparison", icon: ArrowUpRight, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true, subItemGroup: "/evaluations" },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
   { href: "/settings/usage", label: "Usage", icon: Gauge },
@@ -134,8 +147,11 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       {/* Nav */}
       <nav className="flex-1 px-3 pb-3">
         <div className="space-y-0.5">
-          {navigation.map((item) => {
-            if (item.isSubItem && !pathname.startsWith("/evaluations")) return null;
+          {navigation.map((item, idx) => {
+            if (item.isSubItem) {
+              const group = item.subItemGroup ?? "/evaluations";
+              if (!pathname.startsWith(group)) return null;
+            }
 
             const Icon = item.icon;
             const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
@@ -151,7 +167,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
             return (
               <Link
-                key={item.href}
+                key={`${item.href}-${item.subItemGroup ?? "root"}-${idx}`}
                 href={fullHref as Route}
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
