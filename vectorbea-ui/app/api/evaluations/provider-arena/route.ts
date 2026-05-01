@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 
 import type { ProviderArenaCandidateInput } from "@/lib/api";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
-import { listProviderArenaRuns, startProviderArenaRun } from "@/lib/server/behavioral-evaluation-runs";
+import { listProviderArenaRuns, processProviderArenaRun, startProviderArenaRun } from "@/lib/server/behavioral-evaluation-runs";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { assertUsageAvailable } from "@/lib/server/usage-quotas";
@@ -72,6 +72,18 @@ export async function POST(request: NextRequest) {
       runName: body.runName?.trim() || undefined,
       candidates: body.candidates,
       startedBy: auth.user.id,
+    });
+    after(async () => {
+      try {
+        await processProviderArenaRun({
+          workspaceId,
+          runId: run.id,
+          startedBy: auth.user.id,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Provider Arena run failed";
+        console.warn("[provider-arena] background run failed:", message);
+      }
     });
     return NextResponse.json(run, { status: 201 });
   } catch (error) {

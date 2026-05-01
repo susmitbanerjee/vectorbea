@@ -67,6 +67,133 @@ function fmtDate(iso: string | null | undefined): string {
 
 type Ranking = Record<string, unknown>;
 
+function buildFallbackArenaReport(run: BehavioralEvaluationRunView): NonNullable<BehavioralEvaluationRunView["arenaReport"]> | null {
+  const candidates = run.candidates ?? [];
+  if (!candidates.length || !run.results.length) return null;
+
+  const stats = new Map<string, {
+    candidate: NonNullable<BehavioralEvaluationRunView["candidates"]>[number];
+    scores: number[];
+    passCount: number;
+    hardFails: number;
+    reviewCount: number;
+    confidence: number[];
+    latencies: number[];
+    dimensions: Record<string, number[]>;
+  }>();
+
+  for (const candidate of candidates) {
+    stats.set(candidate.id, {
+      candidate,
+      scores: [],
+      passCount: 0,
+      hardFails: 0,
+      reviewCount: 0,
+      confidence: [],
+      latencies: [],
+      dimensions: {},
+    });
+  }
+
+  for (const result of run.results) {
+    const candidate = candidates.find((entry) => entry.provider === result.provider && entry.model === result.model);
+    if (!candidate) continue;
+    const bucket = stats.get(candidate.id);
+    if (!bucket) continue;
+    if (typeof result.judge?.overallScore === "number") bucket.scores.push(result.judge.overallScore);
+    if (result.judge?.pass) bucket.passCount += 1;
+    bucket.hardFails += result.judge?.hardFailures.length ?? 0;
+    if (result.judge?.needsReview) bucket.reviewCount += 1;
+    if (typeof result.judge?.confidence === "number") bucket.confidence.push(result.judge.confidence);
+    if (typeof result.latencyMs === "number") bucket.latencies.push(result.latencyMs);
+    for (const [dimension, score] of Object.entries(result.judge?.dimensionScores ?? {})) {
+      bucket.dimensions[dimension] = bucket.dimensions[dimension] ?? [];
+      bucket.dimensions[dimension]!.push(score);
+    }
+  }
+
+  const totalItems = new Set(run.results.map((result) => result.datasetItemId)).size || 1;
+  const rankings = Array.from(stats.values()).map((bucket) => {
+    const averageScore = bucket.scores.length ? bucket.scores.reduce((sum, value) => sum + value, 0) / bucket.scores.length : null;
+    const passRate = bucket.passCount / totalItems;
+    const hardFailureRate = bucket.hardFails / totalItems;
+    const needsReviewRate = bucket.reviewCount / totalItems;
+    const averageConfidence = bucket.confidence.length ? bucket.confidence.reduce((sum, value) => sum + value, 0) / bucket.confidence.length : null;
+    const sortedLatencies = [...bucket.latencies].sort((a, b) => a - b);
+    const p95Latency = sortedLatencies.length ? sortedLatencies[Math.min(sortedLatencies.length - 1, Math.floor(sortedLatencies.length * 0.95))] : null;
+    const dimensionAverages = Object.fromEntries(
+      Object.entries(bucket.dimensions).map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0) / values.length]),
+    );
+    const decisionScore = Math.max(
+      0,
+      Math.min(
+        100,
+        (averageScore ?? 0) * 0.7 + passRate * 20 + (averageConfidence ?? 0) * 10 - hardFailureRate * 25 - needsReviewRate * 10,
+      ),
+    );
+    const riskScore = Math.max(
+      0,
+      Math.min(100, hardFailureRate * 60 + needsReviewRate * 25 + (1 - (averageConfidence ?? 0.5)) * 25),
+    );
+    return {
+      rank: 0,
+      provider_candidate_id: bucket.candidate.id,
+      provider: bucket.candidate.provider,
+      model: bucket.candidate.model,
+      label: bucket.candidate.label,
+      decision_score: Number(decisionScore.toFixed(2)),
+      average_score: averageScore != null ? Number(averageScore.toFixed(2)) : null,
+      pass_rate: Number((passRate * 100).toFixed(2)),
+      hard_failure_rate: Number((hardFailureRate * 100).toFixed(2)),
+      needs_review_rate: Number((needsReviewRate * 100).toFixed(2)),
+      average_confidence: averageConfidence != null ? Number((averageConfidence * 100).toFixed(2)) : null,
+      average_latency_ms: bucket.latencies.length ? Number((bucket.latencies.reduce((sum, value) => sum + value, 0) / bucket.latencies.length).toFixed(2)) : null,
+      p95_latency_ms: p95Latency != null ? Number(p95Latency.toFixed(2)) : null,
+      estimated_cost_total: null,
+      risk_score: Number(riskScore.toFixed(2)),
+      dimension_averages: dimensionAverages,
+    };
+  }).sort((a, b) => Number(b.decision_score ?? 0) - Number(a.decision_score ?? 0)).map((entry, index) => ({
+    ...entry,
+    rank: index + 1,
+  }));
+
+  const recommended = rankings[0] ?? null;
+  const dimensionSummary = Object.fromEntries(
+    Array.from(new Set(rankings.flatMap((entry) => Object.keys((entry.dimension_averages as Record<string, number>) ?? {})))).map((dimension) => [
+      dimension,
+      rankings.map((entry) => ({
+        provider_candidate_id: entry.provider_candidate_id,
+        provider: entry.provider,
+        model: entry.model,
+        average: (entry.dimension_averages as Record<string, number>)[dimension] ?? null,
+      })),
+    ]),
+  );
+
+  return {
+    id: `fallback-${run.id}`,
+    recommendedCandidateId: typeof recommended?.provider_candidate_id === "string" ? recommended.provider_candidate_id : null,
+    rolloutRecommendation: recommended && Number(recommended.risk_score ?? 100) < 45 ? "rollout_with_caution" : "needs_review",
+    decisionScore: recommended?.decision_score != null ? Number(recommended.decision_score) : null,
+    riskScore: recommended?.risk_score != null ? Number(recommended.risk_score) : null,
+    summary: "Showing a live summary while the persisted arena report finishes syncing.",
+    providerRankings: rankings,
+    dimensionSummary,
+    failureClusters: [],
+    costSummary: {},
+    latencySummary: {
+      by_candidate: rankings.map((entry) => ({
+        provider_candidate_id: entry.provider_candidate_id,
+        provider: entry.provider,
+        model: entry.model,
+        average_latency_ms: entry.average_latency_ms,
+        p95_latency_ms: entry.p95_latency_ms,
+      })),
+    },
+  };
+}
+
 // ─── Recommendation styles ─────────────────────────────────────────────────
 
 const RECOMMENDATION_STYLES: Record<string, { bg: string; border: string; badge: string; label: string; icon: React.ElementType }> = {
@@ -510,7 +637,8 @@ function ProviderArenaReport({ run }: { run: BehavioralEvaluationRunView }) {
   const [casePage, setCasePage]         = useState(0);
   const CASES_PER_PAGE = 10;
 
-  const report  = run.arenaReport;
+  const persistedReport = run.arenaReport;
+  const report = useMemo(() => persistedReport ?? buildFallbackArenaReport(run), [persistedReport, run]);
   const candidates = run.candidates ?? [];
 
   const recStyle = RECOMMENDATION_STYLES[report?.rolloutRecommendation ?? "needs_review"] ?? RECOMMENDATION_STYLES.needs_review!;
@@ -666,7 +794,7 @@ function ProviderArenaReport({ run }: { run: BehavioralEvaluationRunView }) {
         ) : (
           <Card className="border-[#E7DED1] bg-white">
             <CardContent className="py-6 text-center text-sm text-[#6B7280]">
-              Arena report not yet available
+              Arena summary is still being prepared
             </CardContent>
           </Card>
         )}

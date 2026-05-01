@@ -1247,18 +1247,53 @@ export async function startProviderArenaRun(args: {
     startedBy: args.startedBy,
     runName: args.runName ?? null,
   });
-  await updateRun(run.id, { run_type: "provider_arena" });
-  const candidateRows = await insertProviderCandidates(run.id, args.candidates);
+  await updateRun(run.id, {
+    run_type: "provider_arena",
+    status: "queued",
+    summary: {
+      run_name: args.runName ?? null,
+      arena: {
+        candidate_count: args.candidates.length,
+      },
+    },
+  });
+  await insertProviderCandidates(run.id, args.candidates);
 
-  const datasetItems = await getDatasetItemsWithExpected(dataset.id);
-  const supabase = createVectorBeaAdminClient();
-  await updateRun(run.id, { status: "running", started_at: nowIso() });
+  const view = await getProviderArenaRunDetail(args.workspaceId, run.id);
+  if (!view) throw new Error("Failed to load provider arena run");
+  return view;
+}
 
-  const results: BehavioralEvaluationCaseResult[] = [];
-  const candidateStats = new Map<string, { scores: number[]; pass: number; hardFails: number; confidence: number[]; latencies: number[]; costs: number[]; needsReview: number; failedCases: number; riskFlags: number; dims: Record<string, number[]> }>();
-  for (const candidate of candidateRows) {
-    candidateStats.set(candidate.id, { scores: [], pass: 0, hardFails: 0, confidence: [], latencies: [], costs: [], needsReview: 0, failedCases: 0, riskFlags: 0, dims: {} });
+export async function processProviderArenaRun(args: {
+  workspaceId: string;
+  runId: string;
+  startedBy: string;
+}) {
+  await assertFeatureAccess(args.workspaceId, "behavioral_evaluations");
+  const run = await getRunRow(args.workspaceId, args.runId);
+  if (!run || run.run_type !== "provider_arena") {
+    throw new Error("Provider Arena run not found");
   }
+
+  const dataset = await getBehavioralDataset(args.workspaceId, run.dataset_id);
+  if (!dataset) throw new Error("Behavioral dataset not found");
+  const rubric = await getRubricWithDetails(run.rubric_id);
+  if (!rubric || rubric.datasetId !== dataset.id) throw new Error("Rubric not found for selected dataset");
+  const version = await loadPromptVersion(run.prompt_version_id);
+  if (version.prompt_id !== dataset.promptId) throw new Error("Prompt version does not match dataset prompt");
+  const candidateRows = await getProviderCandidates(run.id);
+  if (!candidateRows.length) throw new Error("Provider Arena run has no provider candidates");
+
+  try {
+    const datasetItems = await getDatasetItemsWithExpected(dataset.id);
+    const supabase = createVectorBeaAdminClient();
+    await updateRun(run.id, { status: "running", started_at: nowIso() });
+
+    const results: BehavioralEvaluationCaseResult[] = [];
+    const candidateStats = new Map<string, { scores: number[]; pass: number; hardFails: number; confidence: number[]; latencies: number[]; costs: number[]; needsReview: number; failedCases: number; riskFlags: number; dims: Record<string, number[]> }>();
+    for (const candidate of candidateRows) {
+      candidateStats.set(candidate.id, { scores: [], pass: 0, hardFails: 0, confidence: [], latencies: [], costs: [], needsReview: 0, failedCases: 0, riskFlags: 0, dims: {} });
+    }
 
   for (const item of datasetItems) {
     for (const candidate of candidateRows) {
@@ -1786,7 +1821,38 @@ export async function startProviderArenaRun(args: {
     }
   })();
 
-  return view;
+    return view;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Provider Arena run failed";
+    await updateRun(run.id, {
+      status: "failed",
+      completed_at: nowIso(),
+      summary: {
+        ...(asRecord(run.summary)),
+        error: message,
+      },
+    }).catch(() => undefined);
+    void (async () => {
+      try {
+        const { notifyEvaluationFailed } = await import("@/lib/server/notifications");
+        await notifyEvaluationFailed({
+          workspaceId: args.workspaceId,
+          promptName: getPromptName(version.prompts) ?? "Prompt",
+          versionTag: version.version_tag,
+          runId: run.id,
+          runType: "provider_arena",
+          datasetName: dataset.name,
+          provider: "arena",
+          model: "multi",
+          startedBy: args.startedBy,
+          reason: message,
+        });
+      } catch {
+        // Best effort only
+      }
+    })();
+    throw error;
+  }
 }
 
 async function listArenaRunRows(workspaceId: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -225,6 +225,18 @@ export default function ProviderArenaPage() {
     return () => { cancelled = true; };
   }, [activeWorkspaceId]);
 
+  const activeRuns = useMemo(
+    () => runs.filter((run) => run.status === "queued" || run.status === "running"),
+    [runs],
+  );
+  const completedRuns = useMemo(
+    () => runs.filter((run) => run.status === "completed"),
+    [runs],
+  );
+  const latestCompleted = completedRuns[0] ?? null;
+  const latestLeaderboard = ((latestCompleted?.arenaReport?.providerRankings ?? []) as Array<Record<string, unknown>>).slice(0, 4);
+  const leadingCandidate = latestLeaderboard[0] ?? null;
+
   if (!canUseProviderArena(planTier)) return <GateBanner />;
 
   return (
@@ -255,6 +267,98 @@ export default function ProviderArenaPage() {
             <span className="font-semibold text-[#111111]">How to start:</span> Open a behavioral dataset, select a rubric and prompt version, switch to <span className="font-medium">Provider Arena</span> mode, add two or more provider candidates, and run.
           </p>
         </div>
+
+        {latestCompleted && (
+          <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <Card className="border-[#E7DED1] bg-white">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-[#D97706]" />
+                  <CardTitle className="text-[#111111]">Workspace leader snapshot</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {leadingCandidate ? (
+                  <>
+                    <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Latest winning candidate</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-3">
+                        <div>
+                          <p className="text-lg font-bold text-[#111111]">
+                            {String(leadingCandidate.provider ?? "")} / {String(leadingCandidate.model ?? "")}
+                          </p>
+                          <p className="text-xs text-[#6B7280]">
+                            From {latestCompleted.datasetName ?? "dataset"} · {fmtDate(latestCompleted.completedAt)}
+                          </p>
+                        </div>
+                        {leadingCandidate.decision_score != null && (
+                          <Badge className="bg-[#ECFDF5] text-[#065F46]">
+                            {Math.round(Number(leadingCandidate.decision_score))}% decision score
+                          </Badge>
+                        )}
+                        {leadingCandidate.risk_score != null && (
+                          <Badge className="bg-[#FFFBEB] text-[#92400E]">
+                            {Math.round(Number(leadingCandidate.risk_score))}% risk
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-[#EFE7DA] text-xs text-[#6B7280]">
+                            <th className="py-2 text-left font-semibold">Rank</th>
+                            <th className="py-2 text-left font-semibold">Provider</th>
+                            <th className="py-2 text-right font-semibold">Decision</th>
+                            <th className="py-2 text-right font-semibold">Pass rate</th>
+                            <th className="py-2 text-right font-semibold">P95</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {latestLeaderboard.map((row, index) => (
+                            <tr key={String(row.provider_candidate_id ?? index)} className="border-b border-[#F1ECE3] last:border-0">
+                              <td className="py-2.5 font-medium text-[#111111]">{index + 1}</td>
+                              <td className="py-2.5 text-[#374151]">
+                                <div className="font-medium text-[#111111]">{String(row.provider ?? "")} / {String(row.model ?? "")}</div>
+                                {row.label ? <div className="text-xs text-[#6B7280]">{String(row.label)}</div> : null}
+                              </td>
+                              <td className={`py-2.5 text-right font-semibold ${scoreTone(row.decision_score != null ? Number(row.decision_score) : null)}`}>
+                                {row.decision_score != null ? `${Math.round(Number(row.decision_score))}%` : "—"}
+                              </td>
+                              <td className="py-2.5 text-right text-[#374151]">
+                                {row.pass_rate != null ? `${Math.round(Number(row.pass_rate))}%` : "—"}
+                              </td>
+                              <td className="py-2.5 text-right text-[#374151]">
+                                {row.p95_latency_ms != null ? `${Math.round(Number(row.p95_latency_ms))}ms` : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-[#6B7280]">Complete a Provider Arena run to see the current leading provider and model for this workspace.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+              <Card className="border-[#E7DED1] bg-white">
+                <CardContent className="pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Completed arena runs</p>
+                  <p className="mt-2 text-3xl font-bold text-[#111111]">{completedRuns.length}</p>
+                </CardContent>
+              </Card>
+              <Card className="border-[#E7DED1] bg-white">
+                <CardContent className="pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Active arena runs</p>
+                  <p className="mt-2 text-3xl font-bold text-[#111111]">{activeRuns.length}</p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -287,24 +391,20 @@ export default function ProviderArenaPage() {
         {!loading && runs.length > 0 && (
           <div className="space-y-3">
             {/* Active runs first */}
-            {runs.some((r) => r.status === "running" || r.status === "queued") && (
+            {activeRuns.length > 0 && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2 flex items-center gap-1.5">
                   <Loader2 className="h-3 w-3 animate-spin" />Active
                 </p>
-                {runs
-                  .filter((r) => r.status === "running" || r.status === "queued")
-                  .map((r) => <RunCard key={r.id} run={r} />)}
+                {activeRuns.map((r) => <RunCard key={r.id} run={r} />)}
               </div>
             )}
 
             {/* Completed */}
-            {runs.some((r) => r.status === "completed") && (
+            {completedRuns.length > 0 && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#6B7280] mb-2">Completed</p>
-                {runs
-                  .filter((r) => r.status === "completed")
-                  .map((r) => <RunCard key={r.id} run={r} />)}
+                {completedRuns.map((r) => <RunCard key={r.id} run={r} />)}
               </div>
             )}
 
