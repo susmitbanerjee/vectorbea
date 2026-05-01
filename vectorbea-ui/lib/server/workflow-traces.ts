@@ -21,8 +21,15 @@ type TraceRow = {
   final_response: string | null;
   final_action: string | null;
   status: string;
+  outcome_status: string | null;
+  outcome_reason: string | null;
+  final_business_outcome: string | null;
   total_latency_ms: number | null;
   total_cost_estimate: number | null;
+  model_cost: number | null;
+  tool_cost: number | null;
+  judge_cost: number | null;
+  retry_cost: number | null;
   total_tokens_input: number | null;
   total_tokens_output: number | null;
   error_message: string | null;
@@ -72,8 +79,15 @@ function mapTrace(row: TraceRow, steps?: WorkflowStepTrace[]): WorkflowTrace {
     finalResponse: row.final_response,
     finalAction: row.final_action,
     status: row.status as WorkflowTrace["status"],
+    outcomeStatus: row.outcome_status as WorkflowTrace["outcomeStatus"],
+    outcomeReason: row.outcome_reason,
+    finalBusinessOutcome: row.final_business_outcome,
     totalLatencyMs: row.total_latency_ms,
     totalCostEstimate: row.total_cost_estimate,
+    modelCost: row.model_cost,
+    toolCost: row.tool_cost,
+    judgeCost: row.judge_cost,
+    retryCost: row.retry_cost,
     totalTokensInput: row.total_tokens_input,
     totalTokensOutput: row.total_tokens_output,
     errorMessage: row.error_message,
@@ -162,8 +176,15 @@ export async function createWorkflowTrace(args: {
   finalResponse?: string | null;
   finalAction?: string | null;
   status?: WorkflowTrace["status"];
+  outcomeStatus?: WorkflowTrace["outcomeStatus"];
+  outcomeReason?: string | null;
+  finalBusinessOutcome?: string | null;
   totalLatencyMs?: number | null;
   totalCostEstimate?: number | null;
+  modelCost?: number | null;
+  toolCost?: number | null;
+  judgeCost?: number | null;
+  retryCost?: number | null;
   totalTokensInput?: number | null;
   totalTokensOutput?: number | null;
   errorMessage?: string | null;
@@ -206,8 +227,15 @@ export async function createWorkflowTrace(args: {
       final_response: args.finalResponse ?? null,
       final_action: args.finalAction ?? null,
       status: args.status ?? "completed",
+      outcome_status: args.outcomeStatus ?? null,
+      outcome_reason: args.outcomeReason ?? null,
+      final_business_outcome: args.finalBusinessOutcome ?? null,
       total_latency_ms: args.totalLatencyMs ?? null,
       total_cost_estimate: args.totalCostEstimate ?? null,
+      model_cost: args.modelCost ?? null,
+      tool_cost: args.toolCost ?? null,
+      judge_cost: args.judgeCost ?? null,
+      retry_cost: args.retryCost ?? null,
       total_tokens_input: args.totalTokensInput ?? null,
       total_tokens_output: args.totalTokensOutput ?? null,
       error_message: args.errorMessage ?? null,

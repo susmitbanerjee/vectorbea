@@ -38,6 +38,8 @@ export type PlanFeature =
   | "multi_provider_comparison"
   | "multi_evaluation_comparison"
   | "production_decision_reports"
+  | "roi_dashboard"
+  | "advanced_roi_reports"
   | "sso"
   | "advanced_rbac"
   | "locked_rubrics"
@@ -76,6 +78,8 @@ function featureSet(enabled: PlanFeature[]): Record<PlanFeature, boolean> {
     "multi_provider_comparison",
     "multi_evaluation_comparison",
     "production_decision_reports",
+    "roi_dashboard",
+    "advanced_roi_reports",
     "sso",
     "advanced_rbac",
     "locked_rubrics",
@@ -193,6 +197,7 @@ export const PLAN_CONFIG: Record<CanonicalPlanTier, PlanDefinition> = {
       "multi_provider_comparison",
       "multi_evaluation_comparison",
       "production_decision_reports",
+      "roi_dashboard",
     ]),
   },
   enterprise: {
@@ -236,6 +241,8 @@ export const PLAN_CONFIG: Record<CanonicalPlanTier, PlanDefinition> = {
       "multi_provider_comparison",
       "multi_evaluation_comparison",
       "production_decision_reports",
+      "roi_dashboard",
+      "advanced_roi_reports",
       "sso",
       "advanced_rbac",
       "locked_rubrics",

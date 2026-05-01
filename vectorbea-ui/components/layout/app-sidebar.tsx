@@ -57,6 +57,7 @@ const ALL_NAV_ITEMS: Array<{
   // ── Reliability ─────────────────────────────────────────────────────────
   { href: "/reliability/capabilities", label: "Reliability", icon: ShieldCheck },
   { href: "/reliability/capabilities", label: "AI Capabilities", icon: BotMessageSquare, isSubItem: true, subItemGroup: "/reliability" },
+  { href: "/reliability/roi", label: "Agent ROI", icon: Gauge, isSubItem: true, subItemGroup: "/reliability" },
   { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true, subItemGroup: "/reliability" },
   { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true, subItemGroup: "/reliability" },
   { href: "/evaluations/schedules", label: "Regression Suites", icon: CalendarClock, isSubItem: true, subItemGroup: "/reliability" },

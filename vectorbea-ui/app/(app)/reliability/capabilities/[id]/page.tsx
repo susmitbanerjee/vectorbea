@@ -27,6 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type {
   AiCapability,
+  CapabilityCostAnalytics,
   CapabilityVersion,
   CapabilityVersionStatus,
   ReliabilityCheckReport,
@@ -282,7 +283,7 @@ function AddRuleDialog({
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "versions" | "traces" | "rules" | "checks";
+type Tab = "overview" | "versions" | "traces" | "rules" | "checks" | "cost";
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -301,6 +302,8 @@ export default function CapabilityDetailPage() {
   const [selectedTrace, setTrace] = useState<WorkflowTrace | null>(null);
   const [checkReport, setReport]  = useState<ReliabilityCheckReport | null>(null);
   const [running, setRunning]     = useState(false);
+  const [costAnalytics, setCostAnalytics] = useState<CapabilityCostAnalytics | null>(null);
+  const [costLoading, setCostLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!activeWorkspaceId || !id) return;
@@ -323,6 +326,26 @@ export default function CapabilityDetailPage() {
   }, [activeWorkspaceId, id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || !id || tab !== "cost" || costAnalytics) return;
+    let cancelled = false;
+    setCostLoading(true);
+    fetch(`/api/reliability/capabilities/${encodeURIComponent(id)}/cost?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" })
+      .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
+      .then(({ ok, json }) => {
+        if (cancelled) return;
+        if (!ok) throw new Error(json.error ?? "Failed to load cost analytics");
+        setCostAnalytics(json as CapabilityCostAnalytics);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setCostLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeWorkspaceId, id, tab, costAnalytics]);
 
   async function runChecks(trace: WorkflowTrace) {
     if (!activeWorkspaceId || running) return;
@@ -351,6 +374,7 @@ export default function CapabilityDetailPage() {
     { key: "traces",    label: "Traces",    count: traces.length },
     { key: "rules",     label: "Rules",     count: rules.length },
     { key: "checks",    label: "Checks" },
+    { key: "cost",      label: "Cost" },
   ];
 
   return (
@@ -606,6 +630,64 @@ export default function CapabilityDetailPage() {
               </Card>
             )}
             {checkReport && <ReliabilityReport report={checkReport} />}
+          </div>
+        )}
+
+        {tab === "cost" && (
+          <div className="space-y-4">
+            {costLoading && (
+              <div className="flex items-center gap-2 text-sm text-[#6B7280]">
+                <Loader2 className="h-4 w-4 animate-spin" />Loading cost analytics…
+              </div>
+            )}
+            {!costLoading && costAnalytics && (
+              <>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <Card className="border-[#E7DED1] bg-white"><CardContent className="pt-4"><p className="text-xs text-[#6B7280]">Cost per run</p><p className="mt-2 text-2xl font-semibold text-[#111111]">{fmtCost(costAnalytics.averageCostPerRun)}</p></CardContent></Card>
+                  <Card className="border-[#E7DED1] bg-white"><CardContent className="pt-4"><p className="text-xs text-[#6B7280]">Cost per successful run</p><p className="mt-2 text-2xl font-semibold text-[#065F46]">{fmtCost(costAnalytics.costPerSuccessfulRun)}</p></CardContent></Card>
+                  <Card className="border-[#E7DED1] bg-white"><CardContent className="pt-4"><p className="text-xs text-[#6B7280]">Failure cost</p><p className="mt-2 text-2xl font-semibold text-[#991B1B]">{fmtCost(costAnalytics.totalFailureCost)}</p></CardContent></Card>
+                  <Card className="border-[#E7DED1] bg-white"><CardContent className="pt-4"><p className="text-xs text-[#6B7280]">Retry cost</p><p className="mt-2 text-2xl font-semibold text-[#92400E]">{fmtCost(costAnalytics.totalRetryCost)}</p></CardContent></Card>
+                </div>
+
+                <div className="grid gap-5 xl:grid-cols-2">
+                  <Card className="border-[#E7DED1] bg-white">
+                    <CardHeader className="pb-2"><CardTitle className="text-[#111111] text-sm">Provider and model cost</CardTitle></CardHeader>
+                    <CardContent className="space-y-2">
+                      {costAnalytics.costByProvider.map((entry) => (
+                        <div key={`${entry.provider}-${entry.model}`} className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium text-[#111111]">{entry.provider} · {entry.model}</p>
+                            <p className="text-sm font-semibold text-[#111111]">{fmtCost(entry.averageCost)}</p>
+                          </div>
+                          <p className="mt-1 text-xs text-[#6B7280]">{entry.runs} runs · {entry.successRate}% success · total {fmtCost(entry.totalCost)}</p>
+                        </div>
+                      ))}
+                      {costAnalytics.costByProvider.length === 0 && <p className="text-sm text-[#6B7280]">No provider cost breakdown yet.</p>}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-[#E7DED1] bg-white">
+                    <CardHeader className="pb-2"><CardTitle className="text-[#111111] text-sm">Step level cost breakdown</CardTitle></CardHeader>
+                    <CardContent className="space-y-2">
+                      {costAnalytics.stepCostBreakdown.slice(0, 8).map((step) => (
+                        <div key={`${step.stepName}-${step.stepType}`} className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium text-[#111111]">{step.stepName}</p>
+                            <p className="text-sm font-semibold text-[#111111]">{fmtCost(step.totalCost)}</p>
+                          </div>
+                          <p className="mt-1 text-xs text-[#6B7280]">{step.stepType} · avg {fmtCost(step.averageCost)} · {step.runs} runs</p>
+                        </div>
+                      ))}
+                      {costAnalytics.mostExpensiveTool && (
+                        <div className="rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-3 text-sm text-[#92400E]">
+                          Most expensive tool: <span className="font-semibold">{costAnalytics.mostExpensiveTool.toolName}</span> · total {fmtCost(costAnalytics.mostExpensiveTool.totalCost)}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

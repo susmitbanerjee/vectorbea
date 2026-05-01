@@ -26,7 +26,9 @@ export type FeatureKey =
   | "ai_capabilities"
   | "workflow_reliability"
   | "deterministic_rules"
-  | "advanced_reliability_reports";
+  | "advanced_reliability_reports"
+  | "roi_dashboard"
+  | "advanced_roi_reports";
 
 const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   evaluations: "evaluations",
@@ -51,6 +53,8 @@ const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   workflow_reliability: "behavioral_evaluations",
   deterministic_rules: "behavioral_evaluations",
   advanced_reliability_reports: "production_decision_reports",
+  roi_dashboard: "roi_dashboard",
+  advanced_roi_reports: "advanced_roi_reports",
 };
 
 function labelFor(feature: FeatureKey) {
@@ -95,6 +99,10 @@ function labelFor(feature: FeatureKey) {
       return "Deterministic rule engine";
     case "advanced_reliability_reports":
       return "Advanced reliability reports";
+    case "roi_dashboard":
+      return "ROI dashboard";
+    case "advanced_roi_reports":
+      return "Advanced ROI reports";
     default:
       return "Feature";
   }
@@ -178,4 +186,12 @@ export async function canUseDeterministicRulesFeature(workspaceId: string) {
 
 export async function canUseAdvancedReliabilityReportsFeature(workspaceId: string) {
   return canUseFeature(workspaceId, "advanced_reliability_reports");
+}
+
+export async function canUseRoiDashboardFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "roi_dashboard");
+}
+
+export async function canUseAdvancedRoiReportsFeature(workspaceId: string) {
+  return canUseFeature(workspaceId, "advanced_roi_reports");
 }

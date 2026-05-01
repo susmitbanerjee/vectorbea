@@ -1218,8 +1218,15 @@ export interface WorkflowTrace {
   finalResponse: string | null;
   finalAction: string | null;
   status: "running" | "completed" | "failed" | "cancelled";
+  outcomeStatus?: "success" | "failed" | "human_handoff" | "blocked" | "cancelled" | "timeout" | "partial_success" | null;
+  outcomeReason?: string | null;
+  finalBusinessOutcome?: string | null;
   totalLatencyMs: number | null;
   totalCostEstimate: number | null;
+  modelCost?: number | null;
+  toolCost?: number | null;
+  judgeCost?: number | null;
+  retryCost?: number | null;
   totalTokensInput: number | null;
   totalTokensOutput: number | null;
   errorMessage: string | null;
@@ -1421,5 +1428,152 @@ export interface CapabilityReliabilityScore {
   latencyCompliance: number | null;
   safetyCompliance: number | null;
   sourceRunId: string | null;
+  createdAt: string;
+}
+
+export interface ProviderPricingConfig {
+  id: string;
+  workspaceId: string | null;
+  provider: string;
+  model: string;
+  inputTokenPricePerMillion: number;
+  outputTokenPricePerMillion: number;
+  currency: string;
+  effectiveFrom: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationROISettings {
+  workspaceId: string;
+  averageManualResolutionMinutes: number;
+  averageAgentOperatorHourlyCost: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelRoutingRecommendation {
+  id: string;
+  workspaceId: string;
+  capabilityId: string | null;
+  recommendationType:
+    | "use_cheaper_model_for_low_risk"
+    | "escalate_high_risk_to_stronger_model"
+    | "reduce_retries"
+    | "add_tool_validation"
+    | "add_deterministic_rule"
+    | "change_provider"
+    | "add_human_handoff_earlier";
+  summary: string;
+  evidence: Record<string, unknown>;
+  estimatedSavings: number | null;
+  confidence: number | null;
+  status: "active" | "accepted" | "dismissed" | "archived";
+  createdAt: string;
+  capabilityName?: string | null;
+}
+
+export interface RoiProviderComparison {
+  provider: string;
+  model: string;
+  runs: number;
+  successRate: number;
+  humanHandoffRate: number;
+  failureRate: number;
+  averageWorkflowCost: number;
+  costPerSuccessfulWorkflow: number | null;
+  averageLatencyMs: number | null;
+  p95LatencyMs: number | null;
+  estimatedNetSavings: number;
+  recommendation: string | null;
+}
+
+export interface RoiFailureCostAttribution {
+  outcomeReason: string;
+  capabilityId: string | null;
+  capabilityName: string | null;
+  runs: number;
+  totalCost: number;
+  averageCostPerFailedRun: number;
+  recommendedFix: string;
+}
+
+export interface CapabilityCostAnalytics {
+  capabilityId: string;
+  capabilityName: string | null;
+  totalRuns: number;
+  successRate: number;
+  humanHandoffRate: number;
+  averageCostPerRun: number;
+  costPerSuccessfulRun: number | null;
+  costPerFailedRun: number | null;
+  totalFailureCost: number;
+  totalRetryCost: number;
+  averageLatencyMs: number | null;
+  p95LatencyMs: number | null;
+  costTrend: Array<{ date: string; totalCost: number; runs: number; successRate: number }>;
+  costByProvider: Array<{ provider: string; model: string; runs: number; totalCost: number; averageCost: number; successRate: number }>;
+  stepCostBreakdown: Array<{ stepName: string; stepType: string; totalCost: number; averageCost: number; runs: number }>;
+  mostExpensiveTool: { toolName: string; totalCost: number; averageCost: number } | null;
+  tokenUsageTrend: Array<{ date: string; inputTokens: number; outputTokens: number }>;
+}
+
+export interface RoiDashboardData {
+  workspaceId: string;
+  timeRange: { from: string | null; to: string | null };
+  filters: {
+    capabilityId?: string | null;
+    capabilityType?: string | null;
+    businessDomain?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    environment?: string | null;
+  };
+  assumptions: AutomationROISettings;
+  metrics: {
+    totalRuns: number;
+    successfulAutomations: number;
+    automationSuccessRate: number;
+    humanHandoffs: number;
+    humanHandoffRate: number;
+    failedWorkflows: number;
+    failureRate: number;
+    averageCostPerRun: number;
+    costPerSuccessfulWorkflow: number | null;
+    costPerFailedWorkflow: number | null;
+    averageLatencyMs: number | null;
+    p95LatencyMs: number | null;
+    manualHoursSaved: number;
+    estimatedLaborSavings: number;
+    netSavings: number;
+  };
+  trends: Array<{
+    date: string;
+    totalRuns: number;
+    successRate: number;
+    averageCostPerRun: number;
+    costPerSuccessfulWorkflow: number | null;
+  }>;
+  topCostLeaks: RoiFailureCostAttribution[];
+  topCapabilities: Array<{
+    capabilityId: string | null;
+    capabilityName: string | null;
+    runs: number;
+    totalCost: number;
+    failureCost: number;
+    successRate: number;
+    humanHandoffRate: number;
+  }>;
+  providerComparison: RoiProviderComparison[];
+  recommendations: ModelRoutingRecommendation[];
+}
+
+export interface RoiReport {
+  id: string;
+  workspaceId: string;
+  createdBy: string;
+  filters: Record<string, unknown>;
+  summary: RoiDashboardData;
   createdAt: string;
 }

@@ -31,6 +31,14 @@ export function canUseAdvancedReliabilityReports(planTier: PlanTier | null | und
   return planTier === "pro" || planTier === "enterprise";
 }
 
+export function canUseRoiDashboard(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "pro" || planTier === "enterprise";
+}
+
+export function canUseAdvancedRoiReports(planTier: PlanTier | null | undefined): boolean {
+  return planTier === "enterprise";
+}
+
 export const BEHAVIORAL_PLAN_REQUIREMENT = "Pro or Enterprise";
 export const PROVIDER_ARENA_PLAN_REQUIREMENT = "Pro or Enterprise";
 export const AI_CAPABILITIES_PLAN_REQUIREMENT = "Pro or Enterprise";
