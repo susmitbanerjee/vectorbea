@@ -134,6 +134,8 @@ export function ruleToPlainEnglish(rule: ReliabilityRule): string {
       return `Final action must be ${String(c.expected_action ?? "?")}`;
     case "business_policy":
       return String(c.description ?? rule.name);
+    case "business_outcome":
+      return `Workflow must achieve outcome ${String(c.expected_outcome ?? "?")}`;
     default:
       return rule.name;
   }
@@ -251,6 +253,32 @@ function evaluateRule(rule: ReliabilityRule, trace: WorkflowTrace): { passed: bo
 
   try {
     switch (rule.ruleType) {
+      case "business_outcome": {
+        const expectedOutcome = String(c.expected_outcome ?? "");
+        const evidence = (c.evidence ?? {}) as Record<string, unknown>;
+        const failures: string[] = [];
+        const actualTools = steps.map((s) => s.toolName).filter((name): name is string => Boolean(name));
+
+        const tool = typeof evidence.tool === "string" ? evidence.tool : null;
+        if (tool) {
+          const shouldCall = evidence.should_have_been_called === true;
+          const called = actualTools.includes(tool);
+          if (shouldCall !== called) {
+            failures.push(shouldCall ? `${tool} was expected but not called` : `${tool} was called but should not have been`);
+          }
+        }
+
+        const finalAction = typeof evidence.final_action === "string" ? evidence.final_action : null;
+        if (finalAction && trace.finalAction !== finalAction) {
+          failures.push(`Final action should be ${finalAction}`);
+        }
+
+        return {
+          passed: failures.length === 0,
+          message: failures.length === 0 ? `Outcome ${expectedOutcome || "check"} passed` : failures.join("; "),
+          details: { expected_outcome: expectedOutcome, evidence, failures },
+        };
+      }
       case "tool_required": {
         const required = String(c.required_tool ?? "");
         const called   = steps.some((s) => s.toolName === required);

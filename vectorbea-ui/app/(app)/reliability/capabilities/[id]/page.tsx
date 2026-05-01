@@ -78,7 +78,7 @@ const RULE_TYPES: ReliabilityRuleType[] = [
   "cost_threshold","latency_threshold","max_tool_calls",
   "output_contains","output_not_contains","regex_check","pii_detection",
   "human_handoff_required","final_action_condition","tool_result_condition",
-  "business_policy","schema_validation",
+  "business_policy","business_outcome","schema_validation",
 ];
 
 const RULE_TYPE_LABELS: Record<ReliabilityRuleType, string> = {
@@ -97,6 +97,7 @@ const RULE_TYPE_LABELS: Record<ReliabilityRuleType, string> = {
   final_action_condition: "Final action condition",
   tool_result_condition: "Tool result condition",
   business_policy: "Business policy",
+  business_outcome: "Business outcome",
   schema_validation: "Schema validation",
 };
 
@@ -381,9 +382,14 @@ export default function CapabilityDetailPage() {
                   <span><span className="font-medium text-[#374151]">Created</span> {fmtDate(cap.createdAt)}</span>
                 </div>
               </div>
-              <button type="button" onClick={() => void load()} className="flex items-center gap-1 text-xs text-[#6B7280] hover:text-[#2563EB]">
-                <RefreshCw className="h-3.5 w-3.5" />Refresh
-              </button>
+              <div className="flex items-center gap-2">
+                <Link href={`/reliability/capabilities/${id}/regression-suites`} className="inline-flex items-center gap-1 rounded-xl border border-[#D8CFC2] bg-white px-3 py-2 text-xs font-medium text-[#111111] hover:bg-[#F8F5EF]">
+                  <GitBranch className="h-3.5 w-3.5" />Regression suites
+                </Link>
+                <button type="button" onClick={() => void load()} className="flex items-center gap-1 text-xs text-[#6B7280] hover:text-[#2563EB]">
+                  <RefreshCw className="h-3.5 w-3.5" />Refresh
+                </button>
+              </div>
             </div>
           </CardContent>
         </Card>

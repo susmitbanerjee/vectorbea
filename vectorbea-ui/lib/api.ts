@@ -1235,7 +1235,7 @@ export type ReliabilityRuleType =
   | "argument_validation" | "schema_validation" | "regex_check"
   | "cost_threshold" | "latency_threshold" | "max_tool_calls"
   | "pii_detection" | "business_policy" | "human_handoff_required"
-  | "output_contains" | "output_not_contains"
+  | "output_contains" | "output_not_contains" | "business_outcome"
   | "tool_result_condition" | "final_action_condition";
 
 export interface ReliabilityRule {
@@ -1285,5 +1285,141 @@ export interface ReliabilityCheckReport {
   criticalFailures: ReliabilityRuleResult[];
   highFailures: ReliabilityRuleResult[];
   allResults: ReliabilityRuleResult[];
+  createdAt: string;
+}
+
+export type RegressionSuiteType =
+  | "deterministic_workflow"
+  | "tool_trajectory"
+  | "business_outcome"
+  | "mixed";
+
+export interface RegressionSuite {
+  id: string;
+  workspaceId: string;
+  capabilityId: string;
+  name: string;
+  description: string | null;
+  suiteType: RegressionSuiteType;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  caseCount?: number;
+  latestRun?: WorkflowRegressionRun | null;
+}
+
+export interface RegressionCase {
+  id: string;
+  workspaceId: string;
+  suiteId: string;
+  name: string;
+  description: string | null;
+  inputPayload: Record<string, unknown>;
+  expectedToolSequence: string[];
+  forbiddenTools: string[];
+  requiredTools: string[];
+  expectedOutcome: string | null;
+  expectedFinalAction: string | null;
+  rules: Record<string, unknown>;
+  tags: string[];
+  riskLevel: ReliabilityRiskLevel;
+  sourceTraceId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WorkflowRegressionRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+
+export interface WorkflowRegressionCaseResult {
+  id: string;
+  workspaceId: string;
+  regressionRunId: string;
+  regressionCaseId: string;
+  workflowTraceId: string | null;
+  status: "completed" | "failed" | "skipped" | "error";
+  passed: boolean;
+  score: number | null;
+  failureReasons: string[];
+  toolSequenceResult: Record<string, unknown>;
+  requiredToolsResult: Record<string, unknown>;
+  forbiddenToolsResult: Record<string, unknown>;
+  outcomeResult: Record<string, unknown>;
+  costResult: Record<string, unknown>;
+  latencyResult: Record<string, unknown>;
+  createdAt: string;
+  regressionCase?: RegressionCase;
+  workflowTrace?: WorkflowTrace | null;
+  trajectoryDiffId?: string | null;
+}
+
+export interface WorkflowRegressionRun {
+  id: string;
+  workspaceId: string;
+  suiteId: string;
+  capabilityId: string;
+  capabilityVersionId: string;
+  status: WorkflowRegressionRunStatus;
+  triggerSource: "manual" | "candidate_promotion" | "api" | "scheduled";
+  startedBy: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  summary: Record<string, unknown>;
+  overallScore: number | null;
+  passedCasesCount: number;
+  failedCasesCount: number;
+  criticalFailuresCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowRegressionRunView extends WorkflowRegressionRun {
+  suite: RegressionSuite | null;
+  capability: AiCapability | null;
+  capabilityVersion: CapabilityVersion | null;
+  cases: WorkflowRegressionCaseResult[];
+  skillCorrectnessScore: CapabilityReliabilityScore | null;
+  safetyGate: {
+    decision: "safe_to_rollout" | "needs_review" | "blocked";
+    reasons: string[];
+  };
+}
+
+export interface TrajectoryDiffResult {
+  id: string;
+  workspaceId: string;
+  leftTraceId: string;
+  rightTraceId: string;
+  summary: Record<string, unknown>;
+  toolSequenceDiff: Record<string, unknown>;
+  argumentDiff: Record<string, unknown>;
+  costDiff: Record<string, unknown>;
+  latencyDiff: Record<string, unknown>;
+  riskFlags: string[];
+  createdAt: string;
+}
+
+export interface CapabilityReliabilityScore {
+  id: string;
+  workspaceId: string;
+  capabilityId: string;
+  capabilityVersionId: string;
+  score: number;
+  workflowSuccessRate: number | null;
+  toolPathCompliance: number | null;
+  outcomeSuccessRate: number | null;
+  argumentValidity: number | null;
+  costCompliance: number | null;
+  latencyCompliance: number | null;
+  safetyCompliance: number | null;
+  sourceRunId: string | null;
   createdAt: string;
 }

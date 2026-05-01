@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 
 import type { CapabilityVersionStatus } from "@/lib/api";
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { getVersion, updateVersionStatus } from "@/lib/server/ai-capabilities";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
+import { autoTriggerRegressionSuitesForCandidate } from "@/lib/server/workflow-regressions";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,20 @@ export async function PATCH(
     const body = (await request.json().catch(() => ({}))) as { status?: CapabilityVersionStatus };
     if (!body.status) return NextResponse.json({ error: "status is required" }, { status: 400 });
     const version = await updateVersionStatus(workspaceId, versionId, body.status);
+    if (body.status === "candidate") {
+      after(async () => {
+        try {
+          await autoTriggerRegressionSuitesForCandidate({
+            workspaceId,
+            capabilityId: version.capabilityId,
+            capabilityVersionId: version.id,
+            startedBy: auth.user.id,
+          });
+        } catch (error) {
+          console.warn("[workflow-regression] candidate promotion trigger failed:", error instanceof Error ? error.message : String(error));
+        }
+      });
+    }
     return NextResponse.json(version);
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to update version");
