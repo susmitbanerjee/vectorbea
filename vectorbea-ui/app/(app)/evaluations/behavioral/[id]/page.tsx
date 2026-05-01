@@ -83,6 +83,13 @@ const SEVERITY_COLORS: Record<RubricSeverity, string> = {
   critical: "bg-[#FEF2F2] text-[#991B1B]",
 };
 
+const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
+  openai: ["gpt-4.1", "gpt-4o", "gpt-4o-mini"],
+  anthropic: ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
+  google: ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+  enterprise_gateway: [],
+};
+
 // Default dimension templates by prompt type
 const DEFAULT_DIMENSIONS: Record<BehavioralPromptType, Array<{ name: string; weight: number; description: string }>> = {
   customer_support: [
@@ -149,6 +156,19 @@ function weightColor(total: number): string {
   if (total === 100) return "text-[#065F46]";
   if (total > 100) return "text-red-600";
   return "text-[#B45309]";
+}
+
+function providerLabel(provider: { providerType: string; displayName?: string; defaultModel: string | null }) {
+  return provider.displayName?.trim() || provider.providerType;
+}
+
+function modelOptionsForProvider(providerType: string, defaultModel?: string | null, currentModel?: string) {
+  const preset = PROVIDER_MODEL_OPTIONS[providerType] ?? [];
+  const values = new Set<string>();
+  for (const model of preset) values.add(model);
+  if (defaultModel?.trim()) values.add(defaultModel.trim());
+  if (currentModel?.trim()) values.add(currentModel.trim());
+  return Array.from(values);
 }
 
 // ── Items tab ──────────────────────────────────────────────────────────────────
@@ -1448,7 +1468,7 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
   const [runs, setRuns] = useState<BehavioralEvaluationRunView[]>([]);
   const [arenaRuns, setArenaRuns] = useState<BehavioralEvaluationRunView[]>([]);
   const [rubrics, setRubrics] = useState<EvaluationRubric[]>([]);
-  const [providers, setProviders] = useState<Array<{ providerType: string; defaultModel: string | null }>>([]);
+  const [providers, setProviders] = useState<Array<{ providerType: string; displayName?: string; defaultModel: string | null }>>([]);
   const [versions, setVersions] = useState<Array<{ id: string; versionTag: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -1488,22 +1508,23 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
         BehavioralEvaluationRunView[] | { error?: string },
         BehavioralEvaluationRunView[] | { error?: string },
         EvaluationRubric[] | { error?: string },
-        Array<{ providerType: string; defaultModel: string | null }> | { error?: string },
+        Array<{ providerType: string; displayName?: string; defaultModel: string | null }> | { error?: string },
         Array<{ id?: string; promptVersionId?: string; versionTag?: string }> | { error?: string },
       ];
       if (!runsRes.ok) throw new Error((runsJson as { error?: string }).error ?? "Failed to load runs");
-      if (!arenaRes.ok) throw new Error((arenaJson as { error?: string }).error ?? "Failed to load provider arena runs");
       if (!rubricsRes.ok) throw new Error((rubricsJson as { error?: string }).error ?? "Failed to load rubrics");
       if (!providersRes.ok) throw new Error((providersJson as { error?: string }).error ?? "Failed to load providers");
       if (!versionsRes.ok) throw new Error((versionsJson as { error?: string }).error ?? "Failed to load prompt versions");
 
       const runRows = (runsJson as BehavioralEvaluationRunView[]).filter((run) => run.datasetId === dataset.id);
-      const arenaRows = (arenaJson as BehavioralEvaluationRunView[]).filter((run) => run.datasetId === dataset.id);
+      const arenaRows = arenaRes.ok
+        ? (arenaJson as BehavioralEvaluationRunView[]).filter((run) => run.datasetId === dataset.id)
+        : [];
       setRuns(runRows);
       setArenaRuns(arenaRows);
       const rubricRows = rubricsJson as EvaluationRubric[];
       setRubrics(rubricRows);
-      const providerRows = providersJson as Array<{ providerType: string; defaultModel: string | null }>;
+      const providerRows = providersJson as Array<{ providerType: string; displayName?: string; defaultModel: string | null }>;
       setProviders(providerRows);
       const normalizedVersions = ((versionsJson as Array<{ id?: string; promptVersionId?: string; versionTag?: string }>) ?? [])
         .map((entry) => ({
@@ -1520,6 +1541,9 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
       if (!provider && providerRows.length === 1 && providerRows[0]?.providerType) {
         setProvider(providerRows[0].providerType);
         setModel(providerRows[0].defaultModel ?? "");
+      }
+      if (!arenaRes.ok && (arenaJson as { error?: string }).error) {
+        setError((arenaJson as { error?: string }).error ?? "Failed to load provider arena runs");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load run setup");
@@ -1545,6 +1569,12 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
     const selected = providers.find((item) => item.providerType === provider);
     if (selected?.defaultModel) setModel(selected.defaultModel);
   }, [provider, providers]);
+
+  const updateArenaCandidate = useCallback((index: number, patch: Partial<ProviderArenaCandidateInput>) => {
+    setArenaCandidates((prev) => prev.map((entry, entryIndex) => (
+      entryIndex === index ? { ...entry, ...patch } : entry
+    )));
+  }, []);
 
   const handleStart = async () => {
     if (!rubricId || !promptVersionId) {
@@ -1684,16 +1714,54 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
               {mode === "rubric_scoring" && (
               <div className="space-y-1">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Provider</label>
-                <select className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={provider} onChange={(e) => setProvider(e.target.value)}>
-                  <option value="">Select provider</option>
-                  {providers.map((item) => <option key={item.providerType} value={item.providerType}>{item.providerType}</option>)}
-                </select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm font-medium text-[#111111] shadow-sm transition-colors hover:bg-[#F8F5EF]"
+                    >
+                      <span className="truncate text-left">
+                        {provider ? providerLabel(providers.find((item) => item.providerType === provider) ?? { providerType: provider, defaultModel: null }) : "Select provider"}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-[#6B7280]" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                    <DropdownMenuRadioGroup value={provider} onValueChange={setProvider}>
+                      {providers.map((item) => (
+                        <DropdownMenuPanelRadioItem key={item.providerType} value={item.providerType}>
+                          <span className="flex w-full items-center justify-between gap-2">
+                            <span className="truncate">{providerLabel(item)}</span>
+                            <span className="shrink-0 text-[10px] text-[#6B7280]">{item.defaultModel ?? "no default model"}</span>
+                          </span>
+                        </DropdownMenuPanelRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuPanel>
+                </DropdownMenu>
               </div>
               )}
               {mode === "rubric_scoring" && (
               <div className="space-y-1">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Model</label>
-                <input className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]" value={model} onChange={(e) => setModel(e.target.value)} placeholder="Use provider default model" />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm font-medium text-[#111111] shadow-sm transition-colors hover:bg-[#F8F5EF]"
+                    >
+                      <span className="truncate text-left">{model || "Use provider default model"}</span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-[#6B7280]" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                    <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                      {modelOptionsForProvider(provider, providers.find((item) => item.providerType === provider)?.defaultModel, model).map((option) => (
+                        <DropdownMenuPanelRadioItem key={option} value={option}>{option}</DropdownMenuPanelRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuPanel>
+                </DropdownMenu>
               </div>
               )}
               <div className="space-y-1 md:col-span-2">
@@ -1705,32 +1773,79 @@ function RunsTab({ dataset, workspaceId }: { dataset: BehavioralDataset; workspa
                   <label className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Provider candidates</label>
                   {arenaCandidates.map((candidate, index) => (
                     <div key={`candidate-${index}`} className="grid gap-2 md:grid-cols-4">
-                      <select
-                        className="h-10 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
-                        value={candidate.provider}
-                        onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, provider: event.target.value } : entry))}
-                      >
-                        <option value="">Provider</option>
-                        {providers.map((item) => <option key={item.providerType} value={item.providerType}>{item.providerType}</option>)}
-                      </select>
-                      <input
-                        className="h-10 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
-                        value={candidate.model}
-                        placeholder="Model"
-                        onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, model: event.target.value } : entry))}
-                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex h-10 items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm font-medium text-[#111111] shadow-sm transition-colors hover:bg-[#F8F5EF]"
+                          >
+                            <span className="truncate text-left">
+                              {candidate.provider
+                                ? providerLabel(providers.find((item) => item.providerType === candidate.provider) ?? { providerType: candidate.provider, defaultModel: null })
+                                : "Provider"}
+                            </span>
+                            <ChevronDown className="h-4 w-4 shrink-0 text-[#6B7280]" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                          <DropdownMenuRadioGroup
+                            value={candidate.provider}
+                            onValueChange={(value) => {
+                              const selected = providers.find((item) => item.providerType === value);
+                              updateArenaCandidate(index, {
+                                provider: value,
+                                model: selected?.defaultModel ?? modelOptionsForProvider(value)[0] ?? "",
+                              });
+                            }}
+                          >
+                            {providers.map((item) => (
+                              <DropdownMenuPanelRadioItem key={item.providerType} value={item.providerType}>
+                                <span className="flex w-full items-center justify-between gap-2">
+                                  <span className="truncate">{providerLabel(item)}</span>
+                                  <span className="shrink-0 text-[10px] text-[#6B7280]">{item.defaultModel ?? "no default model"}</span>
+                                </span>
+                              </DropdownMenuPanelRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuPanel>
+                      </DropdownMenu>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex h-10 items-center justify-between gap-3 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm font-medium text-[#111111] shadow-sm transition-colors hover:bg-[#F8F5EF]"
+                          >
+                            <span className="truncate text-left">{candidate.model || "Model"}</span>
+                            <ChevronDown className="h-4 w-4 shrink-0 text-[#6B7280]" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuPanel className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                          <DropdownMenuRadioGroup
+                            value={candidate.model}
+                            onValueChange={(value) => updateArenaCandidate(index, { model: value })}
+                          >
+                            {modelOptionsForProvider(
+                              candidate.provider,
+                              providers.find((item) => item.providerType === candidate.provider)?.defaultModel,
+                              candidate.model,
+                            ).map((option) => (
+                              <DropdownMenuPanelRadioItem key={option} value={option}>{option}</DropdownMenuPanelRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuPanel>
+                      </DropdownMenu>
                       <input
                         className="h-10 rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
                         value={candidate.label ?? ""}
                         placeholder="Label"
-                        onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, label: event.target.value } : entry))}
+                        onChange={(event) => updateArenaCandidate(index, { label: event.target.value })}
                       />
                       <div className="flex gap-2">
                         <input
                           className="h-10 w-full rounded-xl border border-[#D8CFC2] bg-white px-3 text-sm text-[#111111]"
                           value={candidate.temperature ?? ""}
                           placeholder="Temp"
-                          onChange={(event) => setArenaCandidates((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, temperature: event.target.value ? Number(event.target.value) : null } : entry))}
+                          onChange={(event) => updateArenaCandidate(index, { temperature: event.target.value ? Number(event.target.value) : null })}
                         />
                         <button
                           type="button"
