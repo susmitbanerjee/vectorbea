@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AiCapability, AiCapabilityType, BusinessDomain, ReliabilityRiskLevel } from "@/lib/api";
+import { Select } from "@/components/ui/select";
 import { useWorkspace } from "@/lib/workspace-context";
 import { canUseAICapabilities } from "@/lib/behavioral-gate";
 
@@ -180,34 +181,22 @@ function CreateCapabilityDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block mb-1 text-xs font-semibold text-[#374151]">Type *</label>
-              <select
-                className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111] focus:border-[#2563EB] focus:outline-none"
-                value={type}
-                onChange={(e) => setType(e.target.value as AiCapabilityType)}
-              >
+              <Select value={type} onChange={(e) => setType(e.target.value as AiCapabilityType)}>
                 {ALL_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="block mb-1 text-xs font-semibold text-[#374151]">Risk level</label>
-              <select
-                className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111] focus:border-[#2563EB] focus:outline-none"
-                value={riskLevel}
-                onChange={(e) => setRisk(e.target.value as ReliabilityRiskLevel)}
-              >
+              <Select value={riskLevel} onChange={(e) => setRisk(e.target.value as ReliabilityRiskLevel)}>
                 {ALL_RISKS.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
-              </select>
+              </Select>
             </div>
           </div>
           <div>
             <label className="block mb-1 text-xs font-semibold text-[#374151]">Business domain</label>
-            <select
-              className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111] focus:border-[#2563EB] focus:outline-none"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value as BusinessDomain)}
-            >
+            <Select value={domain} onChange={(e) => setDomain(e.target.value as BusinessDomain)}>
               {ALL_DOMAINS.map((d) => <option key={d} value={d}>{d.replaceAll("_", " ")}</option>)}
-            </select>
+            </Select>
           </div>
           {error && <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">{error}</div>}
           <div className="flex justify-end gap-2 pt-1">
@@ -321,14 +310,14 @@ export default function CapabilitiesPage() {
             <h2 className="text-base font-semibold text-[#111111]">Capabilities</h2>
             {caps.length > 0 && <Badge className="bg-[#EFF6FF] text-[#1D4ED8]">{caps.length}</Badge>}
             {/* Type filter */}
-            <select
-              className="rounded-xl border border-[#E7DED1] bg-white px-3 py-1.5 text-xs text-[#374151] focus:border-[#2563EB] focus:outline-none"
+            <Select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as AiCapabilityType | "all")}
+              className="text-xs"
             >
               <option value="all">All types</option>
               {ALL_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
-            </select>
+            </Select>
           </div>
           <button
             type="button"

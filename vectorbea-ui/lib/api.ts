@@ -1726,7 +1726,7 @@ export interface PolicyPack {
   workspaceId: string | null;
   name: string;
   description: string | null;
-  sector: "retail" | "bfsi" | "healthcare" | "pharma" | "software" | "travel" | "insurance" | "general";
+  sector: "retail" | "bfsi" | "healthcare" | "pharma" | "software" | "software_support" | "travel" | "insurance" | "general";
   version: string;
   rules: Array<Record<string, unknown>>;
   enabled: boolean;

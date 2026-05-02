@@ -6,29 +6,31 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
-  BarChart3,
+  Activity,
+  BadgeCheck,
   Bell,
-  CalendarClock,
-  CreditCard,
-  Gauge,
-  ArrowUpRight,
-  BookOpen,
+  BarChart3,
   BotMessageSquare,
-  Database,
-  FlaskConical,
-  GitBranch,
+  ClipboardCheck,
+  Columns3,
+  CreditCard,
+  FileText,
+  Gauge,
+  History,
+  Inbox,
   KeyRound,
+  Landmark,
   LayoutDashboard,
+  LockKeyhole,
   Loader2,
   LogOut,
-  Logs,
-  ScrollText,
+  Repeat2,
   Server,
   Settings2,
   ShieldCheck,
-  Sparkles,
+  ShieldAlert,
   Star,
-  Swords,
+  TriangleAlert,
   Users,
 } from "lucide-react";
 
@@ -39,53 +41,89 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
-const ALL_NAV_ITEMS: Array<{
+// ─── Route group matchers ─────────────────────────────────────────────────────
+
+function isDashboardRoute(p: string) {
+  return p === "/dashboard" || p.startsWith("/dashboard/");
+}
+function isEvaluationsRoute(p: string) {
+  return p === "/evaluations" || p.startsWith("/evaluations/");
+}
+function isReliabilityRoute(p: string) {
+  return p === "/reliability" || p.startsWith("/reliability/");
+}
+function isGovernanceRoute(p: string) {
+  return (
+    p === "/governance" ||
+    p.startsWith("/governance/") ||
+    p === "/incidents" ||
+    p.startsWith("/incidents/") ||
+    p === "/audit-logs" ||
+    p.startsWith("/audit-logs/")
+  );
+}
+function isSettingsRoute(p: string) {
+  return (
+    p === "/settings" ||
+    p.startsWith("/settings/") ||
+    p === "/api-keys" ||
+    p.startsWith("/api-keys/")
+  );
+}
+
+// ─── Navigation definition ────────────────────────────────────────────────────
+
+type NavItem = {
   href: Route;
   label: string;
-  icon: typeof LayoutDashboard;
-  minRole?: "admin" | "editor" | "viewer";
+  icon: React.ElementType;
+  minRole?: "admin" | "editor";
   isSubItem?: boolean;
-  /** Which top-level path prefix makes sub-items visible */
-  subItemGroup?: string;
-}> = [
+  /** Pathname prefix or custom fn that determines visibility of sub-items */
+  subItemGroup?: string | ((p: string) => boolean);
+};
+
+const NAV: NavItem[] = [
+  // ── Top level ──
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/dashboard/metrics", label: "Metrics", icon: BarChart3 },
-  { href: "/dashboard/infrastructure", label: "Infrastructure", icon: Server },
-  { href: "/prompts", label: "Prompts", icon: Sparkles },
-  { href: "/audit-logs", label: "Audit Logs", icon: Logs },
-  { href: "/traces", label: "Traces", icon: GitBranch },
-  // ── Reliability ─────────────────────────────────────────────────────────
+  { href: "/dashboard/metrics",         label: "Metrics",        icon: BarChart3,     isSubItem: true, subItemGroup: isDashboardRoute },
+  { href: "/dashboard/infrastructure",  label: "Infrastructure", icon: Server,        isSubItem: true, subItemGroup: isDashboardRoute },
+
+  { href: "/traces",   label: "Traces",   icon: Activity },
+  { href: "/prompts",  label: "Prompts",  icon: FileText },
+
+  // ── Evaluations ──
+  { href: "/evaluations",                label: "Evaluations",          icon: ClipboardCheck },
+  { href: "/evaluations/datasets",       label: "Baseline Datasets",    icon: Star,           isSubItem: true, subItemGroup: isEvaluationsRoute },
+  { href: "/evaluations/golden",         label: "Golden Traces",        icon: Star,           isSubItem: true, subItemGroup: isEvaluationsRoute },
+  { href: "/evaluations/behavioral",     label: "Behavior Checks",      icon: ClipboardCheck, isSubItem: true, subItemGroup: isEvaluationsRoute },
+  { href: "/evaluations/provider-arena", label: "Provider Arena",       icon: Columns3,       isSubItem: true, subItemGroup: isEvaluationsRoute },
+  { href: "/evaluations/review",         label: "Review Queue",         icon: Inbox,          isSubItem: true, subItemGroup: isEvaluationsRoute },
+  { href: "/evaluations/compare",        label: "Eval Comparison",      icon: BarChart3,      isSubItem: true, subItemGroup: isEvaluationsRoute },
+  { href: "/evaluations/schedules",      label: "Regression Suites",    icon: Repeat2,        isSubItem: true, subItemGroup: isEvaluationsRoute },
+
+  // ── Reliability ──
   { href: "/reliability/capabilities", label: "Reliability", icon: ShieldCheck },
-  { href: "/reliability/capabilities", label: "AI Capabilities", icon: BotMessageSquare, isSubItem: true, subItemGroup: "/reliability" },
-  { href: "/reliability/roi", label: "Agent ROI", icon: Gauge, isSubItem: true, subItemGroup: "/reliability" },
-  { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true, subItemGroup: "/reliability" },
-  { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true, subItemGroup: "/reliability" },
-  { href: "/evaluations/schedules", label: "Regression Suites", icon: CalendarClock, isSubItem: true, subItemGroup: "/reliability" },
-  { href: "/evaluations/behavioral", label: "Behavior Checks", icon: ScrollText, isSubItem: true, subItemGroup: "/reliability" },
-  // —— Governance ————————————————————————————————————————————————————————————
-  { href: "/governance", label: "Governance", icon: ShieldCheck },
-  { href: "/governance", label: "Dashboard", icon: ShieldCheck, isSubItem: true, subItemGroup: "/governance" },
-  { href: "/incidents", label: "Incidents", icon: Bell, isSubItem: true, subItemGroup: "/governance" },
-  { href: "/governance/approvals", label: "Approvals", icon: Users, isSubItem: true, subItemGroup: "/governance" },
-  { href: "/governance/policy-packs", label: "Policy Packs", icon: ScrollText, isSubItem: true, subItemGroup: "/governance" },
-  { href: "/governance/reports", label: "Reports", icon: BookOpen, isSubItem: true, subItemGroup: "/governance" },
-  // ── Evaluations (legacy — kept for direct dataset / compare access) ─────
-  { href: "/evaluations", label: "Evaluations", icon: FlaskConical },
-  { href: "/evaluations/datasets", label: "Baseline Datasets", icon: Database, isSubItem: true, subItemGroup: "/evaluations" },
-  { href: "/evaluations/golden", label: "Golden Traces", icon: Star, isSubItem: true, subItemGroup: "/evaluations" },
-  { href: "/evaluations/behavioral", label: "Behavioral Datasets", icon: BookOpen, isSubItem: true, subItemGroup: "/evaluations" },
-  { href: "/evaluations/provider-arena", label: "Provider Arena", icon: Swords, isSubItem: true, subItemGroup: "/evaluations" },
-  { href: "/evaluations/review", label: "Review Queue", icon: Users, isSubItem: true, subItemGroup: "/evaluations" },
-  { href: "/evaluations/compare", label: "Evaluation Comparison", icon: ArrowUpRight, isSubItem: true, subItemGroup: "/evaluations" },
-  { href: "/evaluations/schedules", label: "Scheduled Regressions", icon: CalendarClock, isSubItem: true, subItemGroup: "/evaluations" },
+  { href: "/reliability/capabilities", label: "AI Capabilities",  icon: BotMessageSquare, isSubItem: true, subItemGroup: isReliabilityRoute },
+
+  // ── Alerts ──
   { href: "/alerts", label: "Alerts", icon: Bell },
-  { href: "/api-keys", label: "API Keys", icon: KeyRound, minRole: "admin" },
-  { href: "/settings/usage", label: "Usage", icon: Gauge },
-  { href: "/settings/billing", label: "Billing", icon: CreditCard },
-  { href: "/settings/privacy", label: "Privacy", icon: ShieldCheck },
-  { href: "/settings/audit", label: "Governance Audit", icon: Logs },
-  { href: "/settings/members", label: "Members", icon: Users },
-  { href: "/settings", label: "Settings", icon: Settings2 },
+
+  // ── Governance ──
+  { href: "/governance",              label: "Governance",      icon: Landmark },
+  { href: "/incidents",               label: "Incidents",       icon: TriangleAlert,  isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/governance/policy-packs", label: "Policy Packs",    icon: ShieldAlert,    isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/audit-logs",              label: "Audit Log",       icon: History,        isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/governance/approvals",    label: "Approvals",       icon: BadgeCheck,     isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/settings/privacy",        label: "Privacy Controls",icon: LockKeyhole,    isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/governance/reports",      label: "Reports",         icon: Gauge,          isSubItem: true, subItemGroup: isGovernanceRoute },
+
+  // ── Settings ──
+  { href: "/settings",         label: "Settings",     icon: Settings2 },
+  { href: "/settings/usage",   label: "Usage",        icon: Gauge,       isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/billing", label: "Billing",      icon: CreditCard,  isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/members", label: "Members",      icon: Users,       isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/api-keys",         label: "API Keys",     icon: KeyRound,    isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
 type SidebarUser = { email: string | null; full_name: string | null; avatar_url: string | null } | null;
@@ -101,42 +139,30 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   const { activeWorkspaceId, planTier } = useWorkspace();
 
   const navigation = useMemo(() => {
-    return ALL_NAV_ITEMS.filter((item) => {
+    return NAV.filter((item) => {
       if (!item.minRole) return true;
       if (item.minRole === "admin") return isAdmin;
-      if (item.minRole === "editor") return isEditor;
+      if (item.minRole === "editor") return isEditor || isAdmin;
       return true;
     });
   }, [isAdmin, isEditor]);
 
-  // Clear pending indicator once navigation settles
-  useEffect(() => {
-    setPendingHref(null);
-  }, [pathname]);
+  useEffect(() => { setPendingHref(null); }, [pathname]);
 
   useEffect(() => {
     let cancelled = false;
-
-    async function loadWorkspaceSummary() {
-      if (!activeWorkspaceId) {
-        setWorkspaceSummary(summary);
-        return;
-      }
-
+    async function load() {
+      if (!activeWorkspaceId) { setWorkspaceSummary(summary); return; }
       try {
-        const response = await fetch(
-          `/api/dashboard/summary?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
-          { cache: "no-store" },
-        );
-        if (!response.ok) throw new Error("Failed to load workspace summary");
-        const nextSummary = (await response.json()) as DashboardSummary;
-        if (!cancelled) setWorkspaceSummary(nextSummary);
+        const res = await fetch(`/api/dashboard/summary?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed");
+        const data = (await res.json()) as DashboardSummary;
+        if (!cancelled) setWorkspaceSummary(data);
       } catch {
         if (!cancelled) setWorkspaceSummary(null);
       }
     }
-
-    void loadWorkspaceSummary();
+    void load();
     return () => { cancelled = true; };
   }, [activeWorkspaceId, summary]);
 
@@ -158,26 +184,36 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       <nav className="flex-1 px-3 pb-3">
         <div className="space-y-0.5">
           {navigation.map((item, idx) => {
+            // Determine if this sub-item should be shown
             if (item.isSubItem) {
-              const group = item.subItemGroup ?? "/evaluations";
-              if (!pathname.startsWith(group)) return null;
+              const sg = item.subItemGroup;
+              const visible = typeof sg === "function"
+                ? sg(pathname)
+                : typeof sg === "string"
+                  ? pathname.startsWith(sg)
+                  : false;
+              if (!visible) return null;
             }
 
             const Icon = item.icon;
             const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
+
+            // Active state: exact match or prefix (but don't match a shorter sibling that's also active)
             const active =
               pathname === item.href ||
               (pathname.startsWith(`${item.href}/`) &&
                 !navigation.some(
                   (other) =>
                     other.href !== item.href &&
-                    (pathname === other.href || pathname.startsWith(`${other.href}/`)),
+                    (pathname === other.href || pathname.startsWith(`${other.href}/`)) &&
+                    other.href.length > item.href.length,
                 ));
+
             const loading = isPending && pendingHref === fullHref;
 
             return (
               <Link
-                key={`${item.href}-${item.subItemGroup ?? "root"}-${idx}`}
+                key={`nav-${idx}`}
                 href={fullHref as Route}
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
@@ -187,7 +223,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 }}
                 className={cn(
                   "group relative flex w-full items-center gap-2.5 rounded-md text-left transition-all duration-150",
-                  item.isSubItem ? "pl-8 pr-3 py-2 text-[12px]" : "px-3 py-2 text-[13px]",
+                  item.isSubItem ? "pl-8 pr-3 py-1.5 text-[12px]" : "px-3 py-2 text-[13px]",
                   active
                     ? "bg-sidebar-active text-sidebar-fg font-semibold"
                     : "text-sidebar-muted font-normal hover:bg-sidebar-hover hover:text-sidebar-fg",
@@ -196,7 +232,8 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
               >
                 <Icon
                   className={cn(
-                    "h-[15px] w-[15px] shrink-0 transition-colors",
+                    "shrink-0 transition-colors",
+                    item.isSubItem ? "h-[13px] w-[13px]" : "h-[15px] w-[15px]",
                     active ? "text-sidebar-fg" : "text-sidebar-muted/80 group-hover:text-sidebar-fg",
                     loading && "opacity-0",
                   )}
@@ -204,27 +241,24 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 {loading && (
                   <Loader2 className={cn(
                     "absolute h-[14px] w-[14px] animate-spin text-primary",
-                    item.isSubItem ? "left-8" : "left-3"
+                    item.isSubItem ? "left-8" : "left-3",
                   )} />
                 )}
-                <span className="truncate flex-1">{item.label}</span>
+                <span className="flex-1 truncate">{item.label}</span>
               </Link>
             );
           })}
         </div>
 
-        {/* Divider before bottom links */}
+        {/* Divider before docs */}
         <div className="mb-2 mt-4 border-t border-sidebar-border" />
 
         <a
-          href="/docs/overview"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[13px] text-sidebar-muted transition-all duration-150 hover:bg-sidebar-hover hover:text-sidebar-fg"
+          href="/settings/sdk"
+          className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[12px] text-sidebar-muted transition-all duration-150 hover:bg-sidebar-hover hover:text-sidebar-fg"
         >
-          <BookOpen className="h-[15px] w-[15px] shrink-0" />
-          <span className="flex-1">Documentation</span>
-          <ArrowUpRight className="h-3 w-3 shrink-0 opacity-50" />
+          <FileText className="h-[13px] w-[13px] shrink-0" />
+          <span className="flex-1">SDK &amp; Ingest</span>
         </a>
       </nav>
 
@@ -255,11 +289,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 ? "bg-[#1E1B4B]/10 text-[#3730A3]"
                 : planTier === "pro"
                   ? "bg-[#2563EB]/10 text-[#1D4ED8]"
-                  : planTier === "plus"
-                    ? "bg-[#7C3AED]/10 text-[#6D28D9]"
-                    : "bg-[#E7DED1] text-[#78716C]",
+                  : "bg-[#7C3AED]/10 text-[#6D28D9]",
             ].join(" ")}>
-              {planTier === "plus" || planTier === "team" ? "Plus" : planTier === "pro" ? "Pro" : "Enterprise"}
+              {planTier === "pro" ? "Pro" : planTier === "enterprise" ? "Enterprise" : "Plus"}
             </span>
           </div>
         )}

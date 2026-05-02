@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, ChevronLeft, GitCompare, Loader2, Play, Plus, Wand2 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
+import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
@@ -264,9 +265,9 @@ export default function RegressionSuitesPage() {
               <CardContent className="space-y-3">
                 <input className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111]" placeholder="Retail refund workflow" value={suiteForm.name} onChange={(e) => setSuiteForm((prev) => ({ ...prev, name: e.target.value }))} />
                 <textarea className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111] resize-none" rows={3} placeholder="Deterministic suite for safe tool order and business outcomes" value={suiteForm.description} onChange={(e) => setSuiteForm((prev) => ({ ...prev, description: e.target.value }))} />
-                <select className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111]" value={suiteForm.suiteType} onChange={(e) => setSuiteForm((prev) => ({ ...prev, suiteType: e.target.value as RegressionSuiteType }))}>
+                <Select value={suiteForm.suiteType} onChange={(e) => setSuiteForm((prev) => ({ ...prev, suiteType: e.target.value as RegressionSuiteType }))}>
                   {Object.entries(SUITE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
+                </Select>
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-[#6B7280]">Sector templates</p>
                   <div className="flex flex-wrap gap-2">
@@ -314,14 +315,14 @@ export default function RegressionSuitesPage() {
                 <CardTitle className="text-sm text-[#111111]">Run suite</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr),minmax(0,1fr),auto]">
-                <select className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111]" value={selectedVersionId} onChange={(e) => setSelectedVersionId(e.target.value)}>
+                <Select value={selectedVersionId} onChange={(e) => setSelectedVersionId(e.target.value)}>
                   <option value="">Select capability version</option>
                   {versions.map((version) => (
                     <option key={version.id} value={version.id}>
                       v{version.versionNumber} · {version.name ?? version.status}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <div className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#374151]">
                   {activeVersion ? `Active version v${activeVersion.versionNumber}` : "No active version yet"}
                 </div>
@@ -343,9 +344,9 @@ export default function RegressionSuitesPage() {
                       <div className="rounded-2xl border border-[#E7DED1] bg-[#FBFAF7] p-4 space-y-3">
                         <div className="grid gap-3 md:grid-cols-2">
                           <input className="w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111]" placeholder="Case name" value={caseForm.name} onChange={(e) => setCaseForm((prev) => ({ ...prev, name: e.target.value }))} />
-                          <select className="w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111]" value={caseForm.riskLevel} onChange={(e) => setCaseForm((prev) => ({ ...prev, riskLevel: e.target.value as ReliabilityRiskLevel }))}>
+                          <Select value={caseForm.riskLevel} onChange={(e) => setCaseForm((prev) => ({ ...prev, riskLevel: e.target.value as ReliabilityRiskLevel }))}>
                             {(["low", "medium", "high", "critical"] as ReliabilityRiskLevel[]).map((risk) => <option key={risk} value={risk}>{risk}</option>)}
-                          </select>
+                          </Select>
                         </div>
                         <textarea className="w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] resize-none" rows={2} placeholder="Case description" value={caseForm.description} onChange={(e) => setCaseForm((prev) => ({ ...prev, description: e.target.value }))} />
                         <textarea className="w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 font-mono text-xs text-[#111111] resize-none" rows={3} placeholder='Input payload JSON, for example {"user_input":"Refund my order"}' value={caseForm.inputPayload} onChange={(e) => setCaseForm((prev) => ({ ...prev, inputPayload: e.target.value }))} />
@@ -392,14 +393,14 @@ export default function RegressionSuitesPage() {
                     <CardTitle className="text-sm text-[#111111]">Import from production trace</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <select className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111]" value={selectedTraceId} onChange={(e) => setSelectedTraceId(e.target.value)}>
+                    <Select value={selectedTraceId} onChange={(e) => setSelectedTraceId(e.target.value)}>
                       <option value="">Select workflow trace</option>
                       {traces.map((trace) => (
                         <option key={trace.id} value={trace.id}>
                           {trace.userInput?.slice(0, 60) || trace.id} · {fmtDate(trace.createdAt)}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     <button type="button" disabled={!selectedSuiteId || !selectedTraceId} onClick={() => void handleImportTrace()} className="inline-flex items-center gap-2 rounded-xl border border-[#D8CFC2] bg-white px-4 py-2 text-sm font-semibold text-[#111111] hover:bg-[#F8F5EF] disabled:opacity-50">
                       <Wand2 className="h-4 w-4" />Add from production trace
                     </button>

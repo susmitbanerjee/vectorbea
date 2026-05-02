@@ -62,7 +62,7 @@ const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   advanced_roi_reports: "advanced_roi_reports",
   incidents: "incidents",
   approval_workflows: "approval_workflows",
-  policy_packs: "policy_packs",
+  policy_packs: "behavioral_evaluations",
   governance_dashboard: "governance_dashboard",
   privacy_controls: "pii_redaction",
 };

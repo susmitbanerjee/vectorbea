@@ -52,7 +52,7 @@ export function canUseApprovalWorkflows(planTier: PlanTier | null | undefined): 
 }
 
 export function canUsePolicyPacks(planTier: PlanTier | null | undefined): boolean {
-  return planTier === "enterprise";
+  return planTier === "pro" || planTier === "enterprise";
 }
 
 export function canUsePrivacyControls(planTier: PlanTier | null | undefined): boolean {
