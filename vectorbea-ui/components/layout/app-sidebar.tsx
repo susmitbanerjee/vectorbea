@@ -12,11 +12,13 @@ import {
   BarChart3,
   BotMessageSquare,
   ClipboardCheck,
+  CircleDollarSign,
   Columns3,
   CreditCard,
   ExternalLink,
   FileText,
   Gauge,
+  GitCompare,
   History,
   Inbox,
   KeyRound,
@@ -31,6 +33,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Star,
+  TrendingUp,
   TriangleAlert,
   Users,
 } from "lucide-react";
@@ -59,16 +62,40 @@ function isGovernanceRoute(p: string) {
     p.startsWith("/governance/") ||
     p === "/incidents" ||
     p.startsWith("/incidents/") ||
+    p === "/privacy" ||
+    p.startsWith("/privacy/") ||
     p === "/settings/privacy" ||
     p.startsWith("/settings/privacy") ||
+    p === "/governance/audit" ||
+    p.startsWith("/governance/audit/") ||
     p === "/settings/audit" ||
     p.startsWith("/settings/audit")
   );
 }
+function isAnalyticsRoute(p: string) {
+  return (
+    p === "/analytics" ||
+    p.startsWith("/analytics/") ||
+    p === "/reliability/roi" ||
+    p.startsWith("/reliability/roi/") ||
+    p === "/reliability/costs" ||
+    p.startsWith("/reliability/costs/") ||
+    p === "/settings/usage" ||
+    p.startsWith("/settings/usage/")
+  );
+}
 function isSettingsRoute(p: string) {
   return (
-    p === "/settings" ||
-    p.startsWith("/settings/") ||
+    (
+      (
+        p === "/settings" ||
+        p.startsWith("/settings/")
+      ) &&
+      p !== "/settings/privacy" &&
+      !p.startsWith("/settings/privacy/") &&
+      p !== "/settings/usage" &&
+      !p.startsWith("/settings/usage/")
+    ) ||
     p === "/api-keys" ||
     p.startsWith("/api-keys/")
   );
@@ -109,6 +136,14 @@ const NAV: NavItem[] = [
   { href: "/reliability/capabilities", label: "Reliability", icon: ShieldCheck },
   { href: "/reliability/capabilities", label: "AI Capabilities",  icon: BotMessageSquare, isSubItem: true, subItemGroup: isReliabilityRoute },
 
+  // ── Analytics ──
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/analytics/cost-intelligence", label: "Cost Intelligence", icon: CircleDollarSign, isSubItem: true, subItemGroup: isAnalyticsRoute },
+  { href: "/analytics/roi", label: "ROI Dashboard", icon: TrendingUp, isSubItem: true, subItemGroup: isAnalyticsRoute },
+  { href: "/analytics/failure-costs", label: "Failure Cost Attribution", icon: TriangleAlert, isSubItem: true, subItemGroup: isAnalyticsRoute },
+  { href: "/analytics/provider-comparison", label: "Provider Cost Comparison", icon: GitCompare, isSubItem: true, subItemGroup: isAnalyticsRoute },
+  { href: "/analytics/usage", label: "Usage Analytics", icon: Gauge, isSubItem: true, subItemGroup: isAnalyticsRoute },
+
   // ── Alerts ──
   { href: "/alerts", label: "Alerts", icon: Bell },
 
@@ -116,14 +151,13 @@ const NAV: NavItem[] = [
   { href: "/governance",              label: "Governance",      icon: Landmark },
   { href: "/incidents",               label: "Incidents",       icon: TriangleAlert,  isSubItem: true, subItemGroup: isGovernanceRoute },
   { href: "/governance/policy-packs", label: "Policy Packs",    icon: ShieldAlert,    isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/settings/audit",          label: "Audit Log",       icon: History,        isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/governance/audit",        label: "Audit Log",       icon: History,        isSubItem: true, subItemGroup: isGovernanceRoute },
   { href: "/governance/approvals",    label: "Approvals",       icon: BadgeCheck,     isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/settings/privacy",        label: "Privacy Controls",icon: LockKeyhole,    isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/governance/reports",      label: "Reports",         icon: Gauge,          isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/governance/privacy",      label: "Privacy Controls",icon: LockKeyhole,    isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/governance/reports",      label: "Compliance Reports", icon: Gauge,       isSubItem: true, subItemGroup: isGovernanceRoute },
 
   // ── Settings ──
   { href: "/settings",         label: "Settings",     icon: Settings2 },
-  { href: "/settings/usage",   label: "Usage",        icon: Gauge,       isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/settings/billing", label: "Billing",      icon: CreditCard,  isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/settings/members", label: "Members",      icon: Users,       isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/settings/sdk",     label: "SDK Setup",    icon: FileText,    isSubItem: true, subItemGroup: isSettingsRoute },

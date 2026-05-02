@@ -41,6 +41,8 @@ export async function POST(
     const body = (await request.json().catch(() => ({}))) as {
       versionNumber?: string;
       name?: string | null;
+      description?: string | null;
+      baseVersionId?: string | null;
       status?: CapabilityVersionStatus;
       config?: Record<string, unknown>;
       promptVersionId?: string | null;
@@ -48,13 +50,14 @@ export async function POST(
       workflowDefinition?: Record<string, unknown> | null;
       providerConfig?: Record<string, unknown> | null;
     };
-    if (!body.versionNumber?.trim()) return NextResponse.json({ error: "versionNumber is required" }, { status: 400 });
 
     const version = await createVersion({
       workspaceId,
       capabilityId: id,
-      versionNumber: body.versionNumber.trim(),
+      versionNumber: body.versionNumber?.trim(),
       name: body.name ?? null,
+      description: body.description ?? null,
+      baseVersionId: body.baseVersionId ?? null,
       status: body.status ?? "draft",
       config: body.config ?? {},
       promptVersionId: body.promptVersionId ?? null,

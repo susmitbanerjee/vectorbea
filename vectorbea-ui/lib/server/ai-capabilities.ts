@@ -246,10 +246,12 @@ export async function getVersion(workspaceId: string, versionId: string): Promis
 export async function createVersion(args: {
   workspaceId: string;
   capabilityId: string;
-  versionNumber: string;
+  versionNumber?: string;
   name?: string | null;
   status?: CapabilityVersionStatus;
   config?: Record<string, unknown>;
+  description?: string | null;
+  baseVersionId?: string | null;
   promptVersionId?: string | null;
   skillDefinition?: Record<string, unknown> | null;
   workflowDefinition?: Record<string, unknown> | null;
@@ -257,19 +259,65 @@ export async function createVersion(args: {
   createdBy: string;
 }): Promise<CapabilityVersion> {
   const supabase = createVectorBeaAdminClient();
+  const { data: capability, error: capabilityError } = await supabase
+    .from("ai_capabilities")
+    .select("id, workspace_id, type, prompt_id")
+    .eq("workspace_id", args.workspaceId)
+    .eq("id", args.capabilityId)
+    .maybeSingle();
+
+  if (capabilityError) throw new Error(capabilityError.message);
+  if (!capability) throw new Error("Capability not found");
+
+  let baseVersion: VersionRow | null = null;
+  if (args.baseVersionId) {
+    const { data: base, error: baseError } = await supabase
+      .from("capability_versions")
+      .select("*")
+      .eq("workspace_id", args.workspaceId)
+      .eq("capability_id", args.capabilityId)
+      .eq("id", args.baseVersionId)
+      .maybeSingle();
+    if (baseError) throw new Error(baseError.message);
+    if (!base) throw new Error("Base version not found");
+    baseVersion = base as VersionRow;
+  }
+
+  const nextVersionNumber = args.versionNumber?.trim()
+    ? args.versionNumber.trim()
+    : await (async () => {
+        const { data: versionRows, error: versionError } = await supabase
+          .from("capability_versions")
+          .select("version_number")
+          .eq("workspace_id", args.workspaceId)
+          .eq("capability_id", args.capabilityId);
+        if (versionError) throw new Error(versionError.message);
+        const max = (versionRows ?? []).reduce((highest, row) => {
+          const raw = String((row as { version_number?: string }).version_number ?? "");
+          const numeric = Number.parseInt(raw.replace(/^v/i, ""), 10);
+          return Number.isFinite(numeric) ? Math.max(highest, numeric) : highest;
+        }, 0);
+        return `v${max + 1}`;
+      })();
+
+  const mergedConfig = {
+    ...(baseVersion?.config ?? {}),
+    ...(args.config ?? {}),
+  };
+
   const { data, error } = await supabase
     .from("capability_versions")
     .insert({
       workspace_id: args.workspaceId,
       capability_id: args.capabilityId,
-      version_number: args.versionNumber,
+      version_number: nextVersionNumber,
       name: args.name ?? null,
       status: args.status ?? "draft",
-      config: args.config ?? {},
-      prompt_version_id: args.promptVersionId ?? null,
-      skill_definition: args.skillDefinition ?? null,
-      workflow_definition: args.workflowDefinition ?? null,
-      provider_config: args.providerConfig ?? null,
+      config: mergedConfig,
+      prompt_version_id: args.promptVersionId ?? baseVersion?.prompt_version_id ?? null,
+      skill_definition: args.skillDefinition ?? baseVersion?.skill_definition ?? null,
+      workflow_definition: args.workflowDefinition ?? baseVersion?.workflow_definition ?? null,
+      provider_config: args.providerConfig ?? baseVersion?.provider_config ?? null,
       created_by: args.createdBy,
     })
     .select("*")

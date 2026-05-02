@@ -285,6 +285,137 @@ function AddRuleDialog({
 
 type Tab = "overview" | "versions" | "traces" | "rules" | "checks" | "cost";
 
+function Toast({ message, type, onDismiss }: { message: string; type: "success" | "error"; onDismiss: () => void }) {
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg text-sm font-medium ${
+      type === "success" ? "border-[#A7F3D0] bg-[#ECFDF5] text-[#065F46]" : "border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]"
+    }`}>
+      {type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+      {message}
+      <button type="button" onClick={onDismiss} className="ml-2 opacity-70 hover:opacity-100">
+        <XCircle className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function CreateVersionDialog({
+  open,
+  onClose,
+  capabilityId,
+  workspaceId,
+  versions,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  capabilityId: string;
+  workspaceId: string | null;
+  versions: CapabilityVersion[];
+  onCreated: (version: CapabilityVersion) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [baseVersionId, setBaseVersionId] = useState("");
+  const [status, setStatus] = useState<CapabilityVersionStatus>("draft");
+  const [providerConfigText, setProviderConfigText] = useState("{}");
+  const [configText, setConfigText] = useState("{}");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleCreate() {
+    if (!workspaceId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reliability/capabilities/${encodeURIComponent(capabilityId)}/versions?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim() || null,
+          description: description.trim() || null,
+          baseVersionId: baseVersionId || null,
+          status,
+          config: configText.trim() ? JSON.parse(configText) : {},
+          providerConfig: providerConfigText.trim() ? JSON.parse(providerConfigText) : {},
+        }),
+      });
+      const json = await res.json() as CapabilityVersion & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to create version");
+      onCreated(json);
+      setName("");
+      setDescription("");
+      setBaseVersionId("");
+      setStatus("draft");
+      setProviderConfigText("{}");
+      setConfigText("{}");
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create version");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="max-w-xl border-[#E7DED1] bg-white">
+        <DialogHeader>
+          <DialogTitle className="text-[#111111]">Create version</DialogTitle>
+          <DialogDescription className="text-[#6B7280]">
+            Create a new draft version. The next version number is assigned on the server.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div>
+            <label className="block mb-1 text-xs font-semibold text-[#374151]">Version name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111] focus:border-[#2563EB] focus:outline-none" placeholder="Candidate refund workflow" />
+          </div>
+          <div>
+            <label className="block mb-1 text-xs font-semibold text-[#374151]">Description</label>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-[#111111] focus:border-[#2563EB] focus:outline-none resize-none" placeholder="What changed in this version" />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="block mb-1 text-xs font-semibold text-[#374151]">Base from existing version</label>
+              <select value={baseVersionId} onChange={(e) => setBaseVersionId(e.target.value)} className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-xs text-[#111111]">
+                <option value="">Start fresh</option>
+                {versions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.versionNumber} {version.name ? `· ${version.name}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block mb-1 text-xs font-semibold text-[#374151]">Status</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value as CapabilityVersionStatus)} className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-xs text-[#111111]">
+                <option value="draft">Draft</option>
+                <option value="candidate">Candidate</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block mb-1 text-xs font-semibold text-[#374151]">Config JSON</label>
+            <textarea value={configText} onChange={(e) => setConfigText(e.target.value)} rows={4} className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 font-mono text-xs text-[#111111] focus:border-[#2563EB] focus:outline-none resize-none" />
+          </div>
+          <div>
+            <label className="block mb-1 text-xs font-semibold text-[#374151]">Provider config JSON</label>
+            <textarea value={providerConfigText} onChange={(e) => setProviderConfigText(e.target.value)} rows={4} className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 font-mono text-xs text-[#111111] focus:border-[#2563EB] focus:outline-none resize-none" />
+          </div>
+          {error && <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">{error}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="rounded-xl border border-[#E7DED1] px-4 py-2 text-sm text-[#374151] hover:bg-[#F8F5EF]">Cancel</button>
+            <button type="button" disabled={saving} onClick={() => void handleCreate()} className="inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-50">
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Create version
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CapabilityDetailPage() {
@@ -299,6 +430,8 @@ export default function CapabilityDetailPage() {
   const [error, setError]         = useState<string | null>(null);
   const [tab, setTab]             = useState<Tab>("overview");
   const [showAddRule, setAddRule] = useState(false);
+  const [showCreateVersion, setShowCreateVersion] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [selectedTrace, setTrace] = useState<WorkflowTrace | null>(null);
   const [checkReport, setReport]  = useState<ReliabilityCheckReport | null>(null);
   const [running, setRunning]     = useState(false);
@@ -482,10 +615,32 @@ export default function CapabilityDetailPage() {
           <Card className="border-[#E7DED1] bg-white">
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-[#111111]">Versions</CardTitle>
+              <button
+                type="button"
+                onClick={() => setShowCreateVersion(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
+              >
+                <Plus className="h-4 w-4" />
+                Create version
+              </button>
             </CardHeader>
             <CardContent>
               {versions.length === 0 ? (
-                <p className="text-sm text-[#6B7280]">No versions yet. Create one via the API: POST /api/reliability/capabilities/{"{id}"}/versions</p>
+                <div className="rounded-2xl border border-dashed border-[#D8CFC2] bg-[#FBFAF7] px-5 py-8 text-center">
+                  <GitBranch className="mx-auto mb-3 h-8 w-8 text-[#C7BAA8]" />
+                  <p className="text-sm font-medium text-[#374151]">No versions yet</p>
+                  <p className="mt-1 text-xs text-[#6B7280]">
+                    Create a draft version to start testing workflow changes, regression safety, and rollout readiness.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateVersion(true)}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create first version
+                  </button>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -494,6 +649,7 @@ export default function CapabilityDetailPage() {
                         <th className="py-2 text-left font-semibold">Version</th>
                         <th className="py-2 text-left font-semibold">Name</th>
                         <th className="py-2 text-left font-semibold">Status</th>
+                        <th className="py-2 text-left font-semibold">Created by</th>
                         <th className="py-2 text-left font-semibold">Created</th>
                         <th className="py-2 text-left font-semibold">Activated</th>
                       </tr>
@@ -504,6 +660,7 @@ export default function CapabilityDetailPage() {
                           <td className="py-2.5 font-mono text-[#111111] font-semibold">{v.versionNumber}</td>
                           <td className="py-2.5 text-[#374151]">{v.name ?? "—"}</td>
                           <td className="py-2.5"><Badge className={VER_STYLE[v.status]}>{v.status}</Badge></td>
+                          <td className="py-2.5 text-[#6B7280] text-xs">{v.createdBy || "—"}</td>
                           <td className="py-2.5 text-[#6B7280] text-xs">{fmtDate(v.createdAt)}</td>
                           <td className="py-2.5 text-[#6B7280] text-xs">{fmtDate(v.activatedAt)}</td>
                         </tr>
@@ -698,6 +855,18 @@ export default function CapabilityDetailPage() {
         capabilityId={id}
         onCreated={(rule) => setRules((prev) => [rule, ...prev])}
       />
+      <CreateVersionDialog
+        open={showCreateVersion}
+        onClose={() => setShowCreateVersion(false)}
+        capabilityId={id}
+        workspaceId={activeWorkspaceId}
+        versions={versions}
+        onCreated={(version) => {
+          setVersions((prev) => [version, ...prev]);
+          setToast({ message: "Version created", type: "success" });
+        }}
+      />
+      {toast ? <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} /> : null}
     </div>
   );
 }
