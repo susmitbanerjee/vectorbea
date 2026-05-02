@@ -32,6 +32,7 @@ import {
   Settings2,
   ShieldCheck,
   ShieldAlert,
+  Sparkles,
   Star,
   TrendingUp,
   TriangleAlert,
@@ -55,6 +56,15 @@ function isEvaluationsRoute(p: string) {
 }
 function isReliabilityRoute(p: string) {
   return p === "/reliability" || p.startsWith("/reliability/");
+}
+function isWorkflowRoute(p: string) {
+  return (
+    p === "/workflows" ||
+    p.startsWith("/workflows/") ||
+    p === "/onboarding/workflow-discovery" ||
+    p.startsWith("/onboarding/workflow-discovery/") ||
+    (p.startsWith("/traces/") && p.endsWith("/graph"))
+  );
 }
 function isGovernanceRoute(p: string) {
   return (
@@ -121,6 +131,8 @@ const NAV: NavItem[] = [
 
   { href: "/traces",   label: "Traces",   icon: Activity },
   { href: "/prompts",  label: "Prompts",  icon: FileText },
+  { href: "/workflows", label: "Workflows", icon: GitCompare },
+  { href: "/onboarding/workflow-discovery", label: "Discovery Wizard", icon: Sparkles, isSubItem: true, subItemGroup: isWorkflowRoute },
 
   // ── Evaluations ──
   { href: "/evaluations",                label: "Evaluations",          icon: ClipboardCheck },

@@ -101,7 +101,15 @@ interface IngestPayload {
   environment?: string;
   user_id?: string;
   session_id?: string;
+  source?: "sdk" | "sidecar" | "opentelemetry" | "direct_api" | "proxy";
+  metadata?: Record<string, unknown>;
   events: IngestEvent[];
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 // ─── Event → workflow step mapper ────────────────────────────────────────────
@@ -273,12 +281,26 @@ export async function POST(request: NextRequest) {
       totalLatencyMs,
       steps,
       metadata: {
-        ingestSource: "sdk",
+        ingestSource: body.source ?? "sdk",
         environment: environment ?? null,
         userId: user_id,
         sessionId: session_id,
         errorCount: errorEvents.length,
         externalTraceId: body.trace_id,
+        capabilityName:
+          asString(startEvent?.metadata?.capability_name)
+          ?? asString(startEvent?.metadata?.capabilityName)
+          ?? asString(startEvent?.metadata?.agent_name)
+          ?? asString(startEvent?.metadata?.agentName)
+          ?? asString(startEvent?.metadata?.workflow_name)
+          ?? asString(startEvent?.metadata?.workflowName),
+        serviceName:
+          asString(startEvent?.metadata?.service_name)
+          ?? asString(startEvent?.metadata?.serviceName)
+          ?? asString(body.metadata?.service_name)
+          ?? asString(body.metadata?.serviceName),
+        rawEvents: events,
+        ...body.metadata,
       },
     });
 

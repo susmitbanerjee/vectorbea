@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { WorkflowTrace, WorkflowStepTrace, WorkflowStepType } from "@/lib/api";
+import { recordWorkflowDiscoveryFromTrace } from "@/lib/server/workflow-discovery";
 import { prepareTraceForStorage } from "@/lib/server/privacy-controls";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
@@ -291,5 +292,13 @@ export async function createWorkflowTrace(args: {
     builtSteps = (stepsData ?? []).map((row) => mapStep(row as StepRow));
   }
 
-  return mapTrace(trace, builtSteps);
+  const mappedTrace = mapTrace(trace, builtSteps);
+
+  try {
+    await recordWorkflowDiscoveryFromTrace(mappedTrace);
+  } catch (error) {
+    console.warn("[workflow-discovery] failed to process trace", error instanceof Error ? error.message : String(error));
+  }
+
+  return mappedTrace;
 }

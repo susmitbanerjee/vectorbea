@@ -1237,6 +1237,133 @@ export interface WorkflowTrace {
   capabilityName?: string | null;
 }
 
+export type DiscoverySource = "sdk" | "sidecar" | "opentelemetry" | "direct_api" | "proxy";
+export type DiscoveryStatus = "detecting" | "ready_for_review" | "confirmed" | "ignored";
+export type DiscoveryRecordStatus = "new" | "matched" | "confirmed" | "ignored" | "merged";
+
+export interface WorkflowGraphNode {
+  id: string;
+  parentId: string | null;
+  type: "agent" | "llm_call" | "tool_call" | "mcp_tool_call" | "rag_retrieval" | "reranker" | "decision" | "human_handoff" | "final_response" | "error";
+  name: string;
+  status: "running" | "completed" | "failed" | "skipped";
+  latencyMs: number | null;
+  costEstimate: number | null;
+  provider: string | null;
+  model: string | null;
+  toolName: string | null;
+  mcpServerName: string | null;
+  error: string | null;
+  inputPreview: string | null;
+  outputPreview: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WorkflowGraphEdge {
+  id: string;
+  from: string;
+  to: string;
+  reason: "parent_span" | "step_order" | "timestamp_order";
+}
+
+export interface SuggestedDeterministicRule {
+  id: string;
+  ruleType: "tool_sequence" | "tool_required" | "max_tool_calls" | "cost_threshold" | "latency_threshold";
+  summary: string;
+  whySuggested: string;
+  observedTraceCount: number;
+  severitySuggestion: "low" | "medium" | "high" | "critical";
+  config: Record<string, unknown>;
+}
+
+export interface DiscoverySession {
+  id: string;
+  workspaceId: string;
+  status: DiscoveryStatus;
+  source: DiscoverySource;
+  environment: string | null;
+  startedBy: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscoveredCapability {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  suggestedName: string;
+  suggestedType: AiCapabilityType;
+  serviceName: string | null;
+  environment: string | null;
+  confidence: number;
+  matchedCapabilityId: string | null;
+  status: DiscoveryRecordStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscoveredTool {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  toolName: string;
+  mcpServerName: string | null;
+  argumentSchema: Record<string, unknown>;
+  resultSchema: Record<string, unknown>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  seenCount: number;
+  status: DiscoveryRecordStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolRegistryEntry {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  mcpServerName: string | null;
+  argumentSchema: Record<string, unknown>;
+  resultSchema: Record<string, unknown>;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  createdFromDiscoveryId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscoveredWorkflow {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  name: string;
+  capabilityName: string | null;
+  traceId: string | null;
+  workflowShapeHash: string;
+  graphNodes: WorkflowGraphNode[];
+  graphEdges: WorkflowGraphEdge[];
+  suggestedRules: SuggestedDeterministicRule[];
+  latencyMs: number | null;
+  costEstimate: number | null;
+  status: DiscoveryRecordStatus;
+  sourceBadge: DiscoverySource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscoveryReview {
+  session: DiscoverySession;
+  capabilities: DiscoveredCapability[];
+  tools: DiscoveredTool[];
+  workflows: DiscoveredWorkflow[];
+  toolRegistry: ToolRegistryEntry[];
+  existingCapabilities: AiCapability[];
+}
+
 export type ReliabilityRuleType =
   | "tool_sequence" | "tool_required" | "tool_forbidden"
   | "argument_validation" | "schema_validation" | "regex_check"

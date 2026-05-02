@@ -476,6 +476,12 @@ export default function SdkPage() {
               >
                 View migration notes
               </Link>
+              <Link
+                href="/onboarding/workflow-discovery"
+                className="text-[11px] font-medium text-[#1D4ED8] hover:text-[#1E3A8A]"
+              >
+                Open workflow discovery wizard
+              </Link>
             </div>
           </div>
         </div>

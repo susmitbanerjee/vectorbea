@@ -56,7 +56,11 @@ export async function POST(request: NextRequest) {
       totalTokensInput:     (body.totalTokensInput as number | null) ?? null,
       totalTokensOutput:    (body.totalTokensOutput as number | null) ?? null,
       errorMessage:         (body.errorMessage as string | null) ?? null,
-      metadata:             (body.metadata as Record<string, unknown>) ?? {},
+      metadata:             {
+        ingestSource: "direct_api",
+        rawEvents: body.rawEvents ?? null,
+        ...((body.metadata as Record<string, unknown>) ?? {}),
+      },
       steps:                Array.isArray(body.steps) ? (body.steps as Parameters<typeof createWorkflowTrace>[0]["steps"]) : undefined,
     });
     return NextResponse.json(trace, { status: 201 });
