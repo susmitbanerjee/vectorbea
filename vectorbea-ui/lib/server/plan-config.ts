@@ -208,6 +208,7 @@ export const PLAN_CONFIG: Record<CanonicalPlanTier, PlanDefinition> = {
       "roi_dashboard",
       "incidents",
       "approval_workflows",
+      "policy_packs",
       "governance_dashboard",
     ]),
   },

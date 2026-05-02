@@ -76,6 +76,7 @@ export default function PolicyPacksPage() {
   const [packs, setPacks] = useState<PolicyPack[]>([]);
   const [capabilities, setCapabilities] = useState<AiCapability[]>([]);
   const [selectedCapabilityId, setSelectedCapabilityId] = useState("");
+  const [canApply, setCanApply] = useState(false);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,10 +94,11 @@ export default function PolicyPacksPage() {
     ]).then(([packsRes, capsRes]) => {
       if (cancelled) return;
       if (!packsRes.ok) throw new Error((packsRes.j as { error?: string }).error ?? "Failed to load policy packs");
-      if (!capsRes.ok) throw new Error((capsRes.j as { error?: string }).error ?? "Failed to load capabilities");
-      const loadedPacks = packsRes.j as PolicyPack[];
+      const policyPayload = packsRes.j as { items?: PolicyPack[]; canApply?: boolean };
+      const loadedPacks = Array.isArray(policyPayload.items) ? policyPayload.items : [];
       setPacks(loadedPacks);
-      setCapabilities(capsRes.j as AiCapability[]);
+      setCanApply(Boolean(policyPayload.canApply));
+      setCapabilities(capsRes.ok && Array.isArray(capsRes.j) ? capsRes.j as AiCapability[] : []);
       // Collect already-applied pack IDs for the selected capability
       const applied = new Set<string>();
       if (selectedCapabilityId) {
@@ -114,10 +116,10 @@ export default function PolicyPacksPage() {
   }
 
   useEffect(() => {
-    if (!activeWorkspaceId || !canUsePolicyPacks(planTier)) { setLoading(false); return; }
+    if (!activeWorkspaceId) { setLoading(false); return; }
     return loadData(activeWorkspaceId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkspaceId, planTier]);
+  }, [activeWorkspaceId]);
 
   // Recompute applied set when capability selection changes
   useEffect(() => {
@@ -149,12 +151,25 @@ export default function PolicyPacksPage() {
     }
   }
 
-  if (!canUsePolicyPacks(planTier)) return <GateBanner />;
-
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader title="Policy Packs" subtitle="Sector compliance templates for your AI capabilities" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
+        {!canUsePolicyPacks(planTier) && (
+          <div className="rounded-2xl border border-[#D8CFC2] bg-white p-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-[#111111]">Policy Packs are available on Pro</p>
+                <p className="text-xs text-[#6B7280]">
+                  Preview system packs now, then upgrade to apply them to capabilities and enforce sector-specific governance rules.
+                </p>
+              </div>
+              <Link href="/settings/billing" className="inline-flex items-center justify-center rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
+                Upgrade to Pro
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -274,7 +289,7 @@ export default function PolicyPacksPage() {
                     {/* Apply CTA */}
                     <button
                       type="button"
-                      disabled={!selectedCapabilityId || workingId === pack.id || isApplied}
+                      disabled={!canApply || !selectedCapabilityId || workingId === pack.id || isApplied}
                       onClick={() => void applyPack(pack.id)}
                       className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -284,7 +299,10 @@ export default function PolicyPacksPage() {
                           ? <><CheckCircle2 className="h-3.5 w-3.5" />Applied</>
                           : "Apply to capability"}
                     </button>
-                    {!selectedCapabilityId && (
+                    {!canApply && (
+                      <p className="text-center text-[11px] text-[#9CA3AF]">Upgrade to Pro to apply policy packs</p>
+                    )}
+                    {canApply && !selectedCapabilityId && (
                       <p className="text-center text-[11px] text-[#9CA3AF]">Select a capability above to apply this pack</p>
                     )}
                   </CardContent>

@@ -241,7 +241,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
                     {alternateLabel}
                   </Link>
                 </p>
-                <Link href="/docs/security" className="hover:text-[#111827]">
+                <Link href="/docs/security" target="_blank" rel="noopener noreferrer" className="hover:text-[#111827]">
                   Privacy
                 </Link>
               </div>

@@ -4,7 +4,7 @@
  * SDK-facing ingestion endpoint. Accepts a batched agent-run event payload from
  * the VectorBea SDK, a sidecar, or any OpenTelemetry-compatible emitter.
  *
- * Authentication: workspace ingest token (x-vectorbea-token header) OR
+ * Authentication: workspace ingest token (x-vectorbea-ingest-token or x-vectorbea-token) OR
  *                 standard session cookie for first-party callers.
  *
  * The endpoint is intentionally lightweight — it validates, redacts, and
@@ -15,10 +15,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { WorkflowStepType } from "@/lib/api";
+import { authenticateIngestToken } from "@/lib/server/ingest-tokens";
 import { createWorkflowTrace } from "@/lib/server/workflow-traces";
 import { redactPayload } from "@/lib/server/security";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 type TraceStep = {
   stepIndex: number;
@@ -102,26 +102,6 @@ interface IngestPayload {
   user_id?: string;
   session_id?: string;
   events: IngestEvent[];
-}
-
-// ─── Token auth helper ────────────────────────────────────────────────────────
-
-async function resolveWorkspaceFromToken(
-  token: string,
-  workspaceId: string,
-): Promise<boolean> {
-  const supabase = createVectorBeaAdminClient();
-  // ingest_tokens table: id, workspace_id, token_hash, revoked
-  // We store SHA-256 of the raw token (hashed at creation time).
-  // For now we do a plaintext lookup — a future migration can add hashing.
-  const { data } = await supabase
-    .from("ingest_tokens")
-    .select("workspace_id, revoked")
-    .eq("token", token)
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (!data || data.revoked) return false;
-  return true;
 }
 
 // ─── Event → workflow step mapper ────────────────────────────────────────────
@@ -213,25 +193,51 @@ export async function POST(request: NextRequest) {
 
     const { workspace_id, capability_id, capability_version_id, environment, events, user_id, session_id } = body;
 
-    if (!workspace_id?.trim()) {
-      return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
-    }
     if (!Array.isArray(events) || events.length === 0) {
       return NextResponse.json({ error: "events must be a non-empty array" }, { status: 400 });
     }
 
-    // Auth: accept either session cookie OR ingest token header
-    const ingestToken = request.headers.get("x-vectorbea-token");
-    if (ingestToken) {
-      const valid = await resolveWorkspaceFromToken(ingestToken, workspace_id).catch(() => false);
-      if (!valid) {
-        return NextResponse.json({ error: "Invalid or revoked ingest token" }, { status: 401 });
+    // ── Authentication ─────────────────────────────────────────────────────────
+    // Priority 1: ingest token (Authorization: Bearer or x-vectorbea-ingest-token)
+    // Priority 2: session cookie (UI-initiated test sends only, no ingest token present)
+    // Rule: if a token header IS supplied but invalid → always reject (never fall through)
+
+    let resolvedWorkspaceId: string;
+
+    let tokenAuth: Awaited<ReturnType<typeof authenticateIngestToken>> | null = null;
+    try {
+      tokenAuth = await authenticateIngestToken(
+        request.headers.get("authorization"),
+        request.headers.get("x-vectorbea-ingest-token"),
+        request.headers.get("x-vectorbea-token"),
+      );
+    } catch (authErr) {
+      // Token was supplied but failed validation — hard reject, no fallback
+      const err = authErr as { status?: number; message?: string };
+      console.warn("[ingest/traces] Token auth failed:", err.message ?? "unknown");
+      return NextResponse.json(
+        { error: err.message ?? "Invalid ingest token" },
+        { status: err.status ?? 401 },
+      );
+    }
+
+    if (tokenAuth) {
+      // Token auth succeeded
+      resolvedWorkspaceId = tokenAuth.workspaceId;
+      // Reject if token workspace doesn't match payload workspace_id (if provided)
+      if (workspace_id?.trim() && workspace_id.trim() !== resolvedWorkspaceId) {
+        console.warn("[ingest/traces] Workspace mismatch: token=%s payload=%s", resolvedWorkspaceId, workspace_id);
+        return NextResponse.json({ error: "Workspace mismatch" }, { status: 403 });
       }
     } else {
-      // Fall back to session-cookie auth (first-party / test callers)
+      // No ingest token — fall back to session cookie (UI / dev testing only)
+      if (!workspace_id?.trim()) {
+        return NextResponse.json({ error: "workspace_id is required" }, { status: 400 });
+      }
       const { assertWorkspaceMember } = await import("@/lib/server/assert-workspace-member");
-      const auth = await assertWorkspaceMember(request, workspace_id);
+      const auth = await assertWorkspaceMember(request, workspace_id.trim());
       if (auth.error) return auth.error;
+      resolvedWorkspaceId = workspace_id.trim();
     }
 
     // Extract root-trace metadata from events
@@ -258,7 +264,7 @@ export async function POST(request: NextRequest) {
       .filter((s): s is TraceStep => s !== null);
 
     const trace = await createWorkflowTrace({
-      workspaceId: workspace_id,
+      workspaceId: resolvedWorkspaceId,
       capabilityId: capability_id ?? null,
       capabilityVersionId: capability_version_id ?? null,
       userInput: userInput ?? null,

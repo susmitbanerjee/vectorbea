@@ -465,7 +465,7 @@ export default function PricingPage() {
           </Link>
           <div className="flex flex-wrap gap-5 text-[13px] text-[#6B7280]">
             <Link href="/"        className="hover:text-[#111111]">Home</Link>
-            <Link href="/docs"    className="hover:text-[#111111]">Docs</Link>
+              <Link href="/docs" target="_blank" rel="noopener noreferrer" className="hover:text-[#111111]">Docs</Link>
             <Link href="/pricing" className="font-medium text-[#111111]">Pricing</Link>
             <Link href="/book-demo" className="hover:text-[#111111]">Book demo</Link>
           </div>

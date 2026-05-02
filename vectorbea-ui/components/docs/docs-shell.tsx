@@ -115,6 +115,7 @@ const DOCS_NAV: NavItem[] = [
   { section: "Platform",        href: "/docs/architecture" as Route, title: "Architecture", icon: Boxes   },
   {                              href: "/docs/integrations" as Route, title: "Integrations", icon: PlugZap },
   {                              href: "/docs/kubernetes"   as Route, title: "Kubernetes",   icon: Container },
+  {                              href: "/docs/sdk-and-ingestion" as Route, title: "SDK and Ingestion", icon: PlugZap },
 
   // Features
   { section: "Features",        href: "/docs/overview"             as Route, title: "Overview",            icon: Layers      },
@@ -128,8 +129,10 @@ const DOCS_NAV: NavItem[] = [
   {                              href: "/docs/scheduled-execution"  as Route, title: "Scheduled Execution", icon: Terminal    },
 
   // Enterprise
-  { section: "Enterprise",      href: "/docs/enterprise"   as Route, title: "Enterprise",  icon: Building2  },
+  { section: "Enterprise",      href: "/docs/governance"   as Route, title: "Governance",  icon: Shield      },
+  {                              href: "/docs/enterprise"   as Route, title: "Enterprise",  icon: Building2  },
   {                              href: "/docs/security"     as Route, title: "Security",    icon: LockKeyhole },
+  {                              href: "/docs/operations-and-migrations" as Route, title: "Operations and Migrations", icon: Terminal },
 ];
 
 // Group nav items by section
@@ -306,10 +309,20 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Production",           href: "#production" },
   ],
   "/docs/sdk/kotlin": [
-    { label: "Install",              href: "#install" },
-    { label: "Fetch your prompt",    href: "#fetch" },
-    { label: "Report LLM telemetry", href: "#telemetry" },
-    { label: "Production",           href: "#production" },
+      { label: "Install",              href: "#install" },
+      { label: "Fetch your prompt",    href: "#fetch" },
+      { label: "Report LLM telemetry", href: "#telemetry" },
+      { label: "Production",           href: "#production" },
+    ],
+  "/docs/sdk-and-ingestion": [
+    { label: "What this covers", href: "#what-it-does" },
+    { label: "Trace model", href: "#capture-model" },
+    { label: "Proxy vs SDK", href: "#proxy-vs-sdk" },
+    { label: "Token format", href: "#token-format" },
+    { label: "Authentication", href: "#authentication" },
+    { label: "SDK config", href: "#sdk-config" },
+    { label: "OTEL mapping", href: "#otel" },
+    { label: "Redaction and fail open", href: "#redaction-and-fail-open" },
   ],
   "/docs/sdk/go": [
     { label: "Overview", href: "#overview" },
@@ -412,13 +425,25 @@ const TOC_BY_PATH: Record<string, Array<{ label: string; href: string }>> = {
     { label: "Connections",            href: "#connections" },
   ],
   "/docs/scheduled-execution": [
-    { label: "Design",                 href: "#design" },
-    { label: "API endpoints",          href: "#endpoints" },
-    { label: "GitHub Actions",         href: "#github-actions" },
-    { label: "Kubernetes CronJob",     href: "#kubernetes-cronjob" },
-    { label: "Alert evaluation",       href: "#alert-evaluation" },
-    { label: "Connections",            href: "#connections" },
-  ],
+      { label: "Design",                 href: "#design" },
+      { label: "API endpoints",          href: "#endpoints" },
+      { label: "GitHub Actions",         href: "#github-actions" },
+      { label: "Kubernetes CronJob",     href: "#kubernetes-cronjob" },
+      { label: "Alert evaluation",       href: "#alert-evaluation" },
+      { label: "Connections",            href: "#connections" },
+    ],
+  "/docs/governance": [
+      { label: "Governance scope", href: "#governance-scope" },
+      { label: "Policy Pack plan behavior", href: "#policy-packs" },
+      { label: "Sector packs", href: "#sector-packs" },
+    ],
+  "/docs/operations-and-migrations": [
+      { label: "Required migrations", href: "#required-migrations" },
+      { label: "Verification checklist", href: "#verification-checklist" },
+      { label: "Policy Pack gating", href: "#policy-pack-gating" },
+      { label: "Deployment guidance", href: "#deployment-guidance" },
+      { label: "Rollback note", href: "#rollback-note" },
+    ],
 };
 
 function TableOfContents({ pathname }: { pathname: string }) {
@@ -454,29 +479,34 @@ const TITLE_BY_PATH: Record<string, string> = {
   "/docs/sdk/nodejs":    "Node.js SDK",
   "/docs/sdk/java":      "Java SDK",
   "/docs/sdk/kotlin":    "Kotlin SDK",
-  "/docs/sdk/go":        "Go SDK",
-  "/docs/sdk/rust":      "Rust SDK",
-  "/docs/architecture":  "Architecture",
-  "/docs/integrations":  "Integrations",
-  "/docs/kubernetes":    "Kubernetes",
-  "/docs/enterprise":            "Enterprise",
-  "/docs/security":              "Security",
+    "/docs/sdk/go":        "Go SDK",
+    "/docs/sdk/rust":      "Rust SDK",
+    "/docs/sdk-and-ingestion": "SDK and Ingestion",
+    "/docs/architecture":  "Architecture",
+    "/docs/integrations":  "Integrations",
+    "/docs/kubernetes":    "Kubernetes",
+    "/docs/governance":            "Governance",
+    "/docs/enterprise":            "Enterprise",
+    "/docs/security":              "Security",
   "/docs/overview":              "Overview",
   "/docs/metrics":               "Metrics & Observability",
   "/docs/evaluations":           "Evaluations",
   "/docs/baseline-datasets":     "Baseline Datasets",
   "/docs/golden-traces":         "Golden Traces",
   "/docs/regression":            "Regression",
-  "/docs/rollout":               "Rollout & Promotion",
-  "/docs/blocked-rollout":       "Blocked vs Full Rollout",
-  "/docs/scheduled-execution":   "Scheduled Execution",
-};
+    "/docs/rollout":               "Rollout & Promotion",
+    "/docs/blocked-rollout":       "Blocked vs Full Rollout",
+    "/docs/scheduled-execution":   "Scheduled Execution",
+    "/docs/operations-and-migrations": "Operations and Migrations",
+  };
 
 function Breadcrumb({ pathname }: { pathname: string }) {
   const title = TITLE_BY_PATH[pathname] ?? "Docs";
   const isSdk = pathname.startsWith("/docs/sdk/");
   const featurePaths = ["/docs/overview", "/docs/metrics", "/docs/evaluations", "/docs/baseline-datasets", "/docs/golden-traces", "/docs/regression", "/docs/rollout", "/docs/blocked-rollout", "/docs/scheduled-execution", "/docs/tracking-model"];
+  const enterprisePaths = ["/docs/governance", "/docs/enterprise", "/docs/security", "/docs/operations-and-migrations"];
   const isFeature = featurePaths.some((p) => pathname === p);
+  const isEnterprise = enterprisePaths.some((p) => pathname === p);
   return (
     <nav className="mb-7 flex items-center gap-1 text-[12px] text-muted-foreground">
       <Link href="/" className="transition-colors hover:text-foreground">
@@ -492,12 +522,18 @@ function Breadcrumb({ pathname }: { pathname: string }) {
           <span className="text-muted-foreground">SDKs</span>
         </>
       )}
-      {isFeature && (
-        <>
-          <ChevronRight size={11} className="text-border" />
-          <span className="text-muted-foreground">Features</span>
-        </>
-      )}
+        {isFeature && (
+          <>
+            <ChevronRight size={11} className="text-border" />
+            <span className="text-muted-foreground">Features</span>
+          </>
+        )}
+        {isEnterprise && (
+          <>
+            <ChevronRight size={11} className="text-border" />
+            <span className="text-muted-foreground">Enterprise</span>
+          </>
+        )}
       {pathname !== "/docs" && (
         <>
           <ChevronRight size={11} className="text-border" />

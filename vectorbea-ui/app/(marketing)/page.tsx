@@ -390,15 +390,20 @@ export default async function MarketingPage() {
           </Link>
 
           <nav className="hidden items-center gap-6 text-sm text-[#374151] lg:flex">
-            {topNav.map((item) => (
-              <Link
-                key={item}
-                href={item === "Docs" ? "/docs" : item === "Pricing" ? "/pricing" : "#"}
-                className="transition-colors hover:text-[#111827]"
-              >
-                {item}
-              </Link>
-            ))}
+            {topNav.map((item) => {
+              const isDocs = item === "Docs";
+              return (
+                <Link
+                  key={item}
+                  href={isDocs ? "/docs" : item === "Pricing" ? "/pricing" : "#"}
+                  target={isDocs ? "_blank" : undefined}
+                  rel={isDocs ? "noopener noreferrer" : undefined}
+                  className="transition-colors hover:text-[#111827]"
+                >
+                  {item}
+                </Link>
+              );
+            })}
           </nav>
 
           <div className="flex items-center gap-2 md:gap-3">

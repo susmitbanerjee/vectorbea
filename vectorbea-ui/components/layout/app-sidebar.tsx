@@ -58,8 +58,10 @@ function isGovernanceRoute(p: string) {
     p.startsWith("/governance/") ||
     p === "/incidents" ||
     p.startsWith("/incidents/") ||
-    p === "/audit-logs" ||
-    p.startsWith("/audit-logs/")
+    p === "/settings/privacy" ||
+    p.startsWith("/settings/privacy") ||
+    p === "/settings/audit" ||
+    p.startsWith("/settings/audit")
   );
 }
 function isSettingsRoute(p: string) {
@@ -113,7 +115,7 @@ const NAV: NavItem[] = [
   { href: "/governance",              label: "Governance",      icon: Landmark },
   { href: "/incidents",               label: "Incidents",       icon: TriangleAlert,  isSubItem: true, subItemGroup: isGovernanceRoute },
   { href: "/governance/policy-packs", label: "Policy Packs",    icon: ShieldAlert,    isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/audit-logs",              label: "Audit Log",       icon: History,        isSubItem: true, subItemGroup: isGovernanceRoute },
+  { href: "/settings/audit",          label: "Audit Log",       icon: History,        isSubItem: true, subItemGroup: isGovernanceRoute },
   { href: "/governance/approvals",    label: "Approvals",       icon: BadgeCheck,     isSubItem: true, subItemGroup: isGovernanceRoute },
   { href: "/settings/privacy",        label: "Privacy Controls",icon: LockKeyhole,    isSubItem: true, subItemGroup: isGovernanceRoute },
   { href: "/governance/reports",      label: "Reports",         icon: Gauge,          isSubItem: true, subItemGroup: isGovernanceRoute },
