@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   Columns3,
   CreditCard,
+  ExternalLink,
   FileText,
   Gauge,
   History,
@@ -125,6 +126,7 @@ const NAV: NavItem[] = [
   { href: "/settings/usage",   label: "Usage",        icon: Gauge,       isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/settings/billing", label: "Billing",      icon: CreditCard,  isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/settings/members", label: "Members",      icon: Users,       isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/sdk",     label: "SDK Setup",    icon: FileText,    isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/api-keys",         label: "API Keys",     icon: KeyRound,    isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
@@ -256,11 +258,13 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         <div className="mb-2 mt-4 border-t border-sidebar-border" />
 
         <a
-          href="/settings/sdk"
+          href="/docs"
+          target="_blank"
+          rel="noopener noreferrer"
           className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[12px] text-sidebar-muted transition-all duration-150 hover:bg-sidebar-hover hover:text-sidebar-fg"
         >
-          <FileText className="h-[13px] w-[13px] shrink-0" />
-          <span className="flex-1">SDK &amp; Ingest</span>
+          <ExternalLink className="h-[13px] w-[13px] shrink-0" />
+          <span className="flex-1">Documentation</span>
         </a>
       </nav>
 
