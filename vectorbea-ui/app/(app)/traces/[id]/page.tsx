@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1078,8 +1079,17 @@ export default function TraceDetailsPage() {
           <Card className="rounded-2xl border border-border bg-card">
             <CardContent className="p-4">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8A7F72]">Execution Graph</p>
+                    <p className="mt-1 text-xs text-[#6B7280]">Use the dedicated execution graph to inspect one actual run with step-level tool, model, cost, and outcome details.</p>
+                  </div>
+                  <Link href={`/traces/${trace.id}/graph`} className="rounded-xl bg-[#2563EB] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1D4ED8]">
+                    Open Execution Graph
+                  </Link>
+                </div>
                 <TabsList className="mb-3 grid w-full grid-cols-3 bg-muted/40 p-1 md:grid-cols-6">
-                  <TabsTrigger value="waterfall">TraceLoop</TabsTrigger>
+                  <TabsTrigger value="waterfall">Timeline</TabsTrigger>
                   <TabsTrigger value="spans">Spans</TabsTrigger>
                   <TabsTrigger value="prompt">Prompt</TabsTrigger>
                   <TabsTrigger value="inputs">Inputs</TabsTrigger>
@@ -1572,4 +1582,3 @@ function OutputBlock({
     </div>
   );
 }
-

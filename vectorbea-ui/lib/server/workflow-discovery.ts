@@ -7,8 +7,11 @@ import type {
   AiCapabilityType,
   CapabilityVersion,
   DiscoveredCapability,
+  DiscoveryMcpServerSummary,
   DiscoveredTool,
   DiscoveredWorkflow,
+  DiscoveryModelSummary,
+  DiscoveryWorkflowOutputSummary,
   DiscoveryReview,
   DiscoverySession,
   DiscoverySource,
@@ -21,7 +24,7 @@ import type {
 } from "@/lib/api";
 import { createCapability, createVersion, listCapabilities } from "@/lib/server/ai-capabilities";
 import { writeAuditEvent } from "@/lib/server/audit-events";
-import { createRegressionCase, createRegressionSuite } from "@/lib/server/workflow-regressions";
+import { createRegressionCase, createRegressionSuite, getRegressionSuite } from "@/lib/server/workflow-regressions";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 type DiscoverySessionRow = {
@@ -133,6 +136,10 @@ function shortPreview(value: unknown) {
   } catch {
     return String(value).slice(0, 220);
   }
+}
+
+function lower(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function inferSchemaFromValue(value: unknown): Record<string, unknown> {
@@ -266,6 +273,7 @@ function buildGraph(trace: WorkflowTrace) {
       }
       return false;
     });
+    const eventMeta = asRecord(event?.metadata);
     const spanId = asString(event?.span_id);
     const parentSpanId = asString(event?.parent_span_id);
     const nodeId = spanId ?? `step:${trace.id}:${step.stepIndex}`;
@@ -274,7 +282,9 @@ function buildGraph(trace: WorkflowTrace) {
     nodes.push({
       id: nodeId,
       parentId: parentSpanId,
-      type: step.stepType as WorkflowGraphNode["type"],
+      type: step.stepType === "system_event"
+        ? (step.errorMessage ? "error" : "agent")
+        : (step.stepType as WorkflowGraphNode["type"]),
       name: step.toolName ?? step.stepName,
       status: step.status,
       latencyMs: step.latencyMs,
@@ -289,6 +299,21 @@ function buildGraph(trace: WorkflowTrace) {
       metadata: {
         tokensInput: step.tokensInput,
         tokensOutput: step.tokensOutput,
+        spanId,
+        parentSpanId,
+        inputPayload: step.inputPayload,
+        outputPayload: step.outputPayload,
+        toolArguments: step.toolArguments,
+        toolResult: step.toolResult,
+        promptVersion: asString(event?.prompt_version) ?? asString(eventMeta.prompt_version),
+        temperature: eventMeta.temperature ?? null,
+        maxTokens: eventMeta.max_tokens ?? eventMeta.maxTokens ?? null,
+        query: step.stepType === "rag_retrieval" ? step.inputPayload?.query ?? null : null,
+        retrievedDocumentCount: step.stepType === "rag_retrieval" ? asArray(step.outputPayload?.documents).length : null,
+        selectedContext: step.stepType === "rag_retrieval" ? step.outputPayload?.selectedContext ?? null : null,
+        rerankerScore: step.outputPayload?.rerankerScore ?? null,
+        rawInputDisabled: eventMeta.raw_input_disabled === true,
+        rawOutputDisabled: eventMeta.raw_output_disabled === true,
       },
     });
 
@@ -324,6 +349,10 @@ function buildGraph(trace: WorkflowTrace) {
       metadata: {
         finalAction: trace.finalAction,
         finalBusinessOutcome: trace.finalBusinessOutcome,
+        outcomeStatus: trace.outcomeStatus,
+        outcomeReason: trace.outcomeReason,
+        finalResponse: trace.finalResponse,
+        rawOutputDisabled: trace.metadata.raw_output_disabled === true,
       },
     });
     edges.push({
@@ -405,6 +434,103 @@ function buildSuggestedRules(trace: WorkflowTrace, steps: WorkflowStepTrace[]): 
   }
 
   return suggestions;
+}
+
+function summarizeModels(workflows: DiscoveredWorkflow[]): DiscoveryModelSummary[] {
+  const buckets = new Map<string, {
+    provider: string | null;
+    model: string | null;
+    seenCount: number;
+    latencyTotal: number;
+    latencySamples: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCost: number;
+    hasCost: boolean;
+  }>();
+
+  for (const workflow of workflows) {
+    for (const node of workflow.graphNodes) {
+      if (node.type !== "llm_call") continue;
+      const metadata = asRecord(node.metadata);
+      const key = `${lower(node.provider)}::${lower(node.model)}`;
+      const current = buckets.get(key) ?? {
+        provider: node.provider ?? null,
+        model: node.model ?? null,
+        seenCount: 0,
+        latencyTotal: 0,
+        latencySamples: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCost: 0,
+        hasCost: false,
+      };
+      current.seenCount += 1;
+      if (node.latencyMs != null) {
+        current.latencyTotal += node.latencyMs;
+        current.latencySamples += 1;
+      }
+      current.inputTokens += Number(metadata.tokensInput ?? 0);
+      current.outputTokens += Number(metadata.tokensOutput ?? 0);
+      if (node.costEstimate != null) {
+        current.estimatedCost += node.costEstimate;
+        current.hasCost = true;
+      }
+      buckets.set(key, current);
+    }
+  }
+
+  return Array.from(buckets.values())
+    .map((entry) => ({
+      provider: entry.provider,
+      model: entry.model,
+      seenCount: entry.seenCount,
+      averageLatencyMs: entry.latencySamples > 0 ? Math.round(entry.latencyTotal / entry.latencySamples) : null,
+      inputTokens: entry.inputTokens,
+      outputTokens: entry.outputTokens,
+      estimatedCost: entry.hasCost ? Number(entry.estimatedCost.toFixed(6)) : null,
+    }))
+    .sort((left, right) => right.seenCount - left.seenCount);
+}
+
+function summarizeMcpServers(tools: DiscoveredTool[]): DiscoveryMcpServerSummary[] {
+  const buckets = new Map<string, DiscoveryMcpServerSummary>();
+  for (const tool of tools) {
+    if (!tool.mcpServerName) continue;
+    const existing = buckets.get(tool.mcpServerName) ?? {
+      serverName: tool.mcpServerName,
+      toolsDetected: [],
+      seenCount: 0,
+      lastSeenAt: null,
+    };
+    existing.seenCount += tool.seenCount;
+    existing.toolsDetected = Array.from(new Set([...existing.toolsDetected, tool.toolName])).sort();
+    existing.lastSeenAt = !existing.lastSeenAt || existing.lastSeenAt < tool.lastSeenAt ? tool.lastSeenAt : existing.lastSeenAt;
+    buckets.set(tool.mcpServerName, existing);
+  }
+  return Array.from(buckets.values()).sort((left, right) => right.seenCount - left.seenCount);
+}
+
+function summarizeWorkflowOutput(workflow: DiscoveredWorkflow | undefined): DiscoveryWorkflowOutputSummary | null {
+  if (!workflow) return null;
+  const finalNode = [...workflow.graphNodes].reverse().find((node) => node.type === "final_response" || node.type === "human_handoff");
+  if (!finalNode) {
+    return {
+      finalAction: null,
+      outcomeStatus: null,
+      outcomeReason: null,
+      finalResponsePreview: null,
+      outputCaptureDisabled: false,
+    };
+  }
+  const metadata = asRecord(finalNode.metadata);
+  return {
+    finalAction: asString(metadata.finalAction) ?? finalNode.name ?? null,
+    outcomeStatus: asString(metadata.outcomeStatus),
+    outcomeReason: asString(metadata.outcomeReason),
+    finalResponsePreview: asString(metadata.finalResponse) ?? finalNode.outputPreview ?? null,
+    outputCaptureDisabled: metadata.rawOutputDisabled === true,
+  };
 }
 
 function mapSession(row: DiscoverySessionRow): DiscoverySession {
@@ -766,14 +892,19 @@ export async function getDiscoveryReview(workspaceId: string, sessionId: string)
   if (registryRes.error) throw new Error(registryRes.error.message);
 
   const existingCapabilities = await listCapabilities(workspaceId);
+  const tools = (toolsRes.data ?? []).map((row) => mapTool(row as DiscoveredToolRow));
+  const workflows = (workflowsRes.data ?? []).map((row) => mapWorkflow(row as DiscoveredWorkflowRow));
 
   return {
     session: mapSession(sessionRes.data as DiscoverySessionRow),
     capabilities: (capabilitiesRes.data ?? []).map((row) => mapCapability(row as DiscoveredCapabilityRow)),
-    tools: (toolsRes.data ?? []).map((row) => mapTool(row as DiscoveredToolRow)),
-    workflows: (workflowsRes.data ?? []).map((row) => mapWorkflow(row as DiscoveredWorkflowRow)),
+    tools,
+    workflows,
     toolRegistry: (registryRes.data ?? []).map((row) => mapRegistry(row as ToolRegistryRow)),
     existingCapabilities,
+    models: summarizeModels(workflows),
+    mcpServers: summarizeMcpServers(tools),
+    workflowOutput: summarizeWorkflowOutput(workflows[0]),
   };
 }
 
@@ -861,11 +992,6 @@ export async function confirmDiscoveredCapability(args: {
     })
     .eq("id", discovered.id);
 
-  await supabase
-    .from("discovery_sessions")
-    .update({ status: "confirmed" })
-    .eq("id", args.sessionId);
-
   await writeAuditEvent({
     workspaceId: args.workspaceId,
     actorUserId: args.userId,
@@ -880,7 +1006,8 @@ export async function confirmDiscoveredCapability(args: {
     },
   });
 
-  return { capability, version };
+  const refreshedReview = await getDiscoveryReview(args.workspaceId, args.sessionId);
+  return { capability, version, review: refreshedReview };
 }
 
 export async function confirmDiscoveredTools(args: {
@@ -895,6 +1022,7 @@ export async function confirmDiscoveredTools(args: {
   const review = await getDiscoveryReview(args.workspaceId, args.sessionId);
   if (!review) throw new Error("Discovery session not found.");
 
+  const confirmed: DiscoveredTool[] = [];
   const created: ToolRegistryEntry[] = [];
   for (const toolId of args.toolIds) {
     const discovered = review.tools.find((item) => item.id === toolId);
@@ -905,19 +1033,34 @@ export async function confirmDiscoveredTools(args: {
         .from("discovered_tools")
         .update({ status: "merged" })
         .eq("id", toolId);
+      confirmed.push({ ...discovered, status: "merged" });
       continue;
     }
 
     const name = args.renameMap?.[toolId]?.trim() || discovered.toolName;
     const existing = review.toolRegistry.find((entry) =>
-      entry.name.trim().toLowerCase() === name.trim().toLowerCase() &&
+      lower(entry.name) === lower(name) &&
       (entry.mcpServerName ?? null) === (discovered.mcpServerName ?? null),
     );
     if (existing) {
+      const updateExisting = await supabase
+        .from("tool_registry")
+        .update({
+          argument_schema: mergeSchemas(existing.argumentSchema, discovered.argumentSchema),
+          result_schema: mergeSchemas(existing.resultSchema, discovered.resultSchema),
+          last_seen_at: discovered.lastSeenAt,
+          description: existing.description ?? "Discovered automatically from workflow traces.",
+        })
+        .eq("id", existing.id)
+        .select("*")
+        .single();
+      if (updateExisting.error) throw new Error(updateExisting.error.message);
       await supabase
         .from("discovered_tools")
-        .update({ status: "merged" })
+        .update({ status: "confirmed" })
         .eq("id", toolId);
+      created.push(mapRegistry(updateExisting.data as ToolRegistryRow));
+      confirmed.push({ ...discovered, status: "confirmed" });
       continue;
     }
 
@@ -944,11 +1087,12 @@ export async function confirmDiscoveredTools(args: {
       .eq("id", discovered.id);
 
     created.push(mapRegistry(inserted.data as ToolRegistryRow));
+    confirmed.push({ ...discovered, status: "confirmed" });
 
     await writeAuditEvent({
       workspaceId: args.workspaceId,
       actorUserId: args.userId,
-      eventType: "policy_pack_updated",
+      eventType: "tool_registry_created",
       entityType: "tool_registry",
       entityId: inserted.data.id,
       entityName: name,
@@ -960,7 +1104,12 @@ export async function confirmDiscoveredTools(args: {
     });
   }
 
-  return created;
+  const updatedReview = await getDiscoveryReview(args.workspaceId, args.sessionId);
+  return {
+    confirmedTools: confirmed,
+    toolRegistryEntries: created,
+    review: updatedReview,
+  };
 }
 
 export async function ignoreDiscoverySession(args: {
@@ -976,6 +1125,36 @@ export async function ignoreDiscoverySession(args: {
   if (error) throw new Error(error.message);
 }
 
+export async function confirmDiscoveredWorkflow(args: {
+  workspaceId: string;
+  sessionId: string;
+  discoveredWorkflowId: string;
+  userId: string;
+}) {
+  const supabase = createVectorBeaAdminClient();
+  const { error } = await supabase
+    .from("discovered_workflows")
+    .update({ status: "confirmed" })
+    .eq("workspace_id", args.workspaceId)
+    .eq("session_id", args.sessionId)
+    .eq("id", args.discoveredWorkflowId);
+  if (error) throw new Error(error.message);
+
+  await writeAuditEvent({
+    workspaceId: args.workspaceId,
+    actorUserId: args.userId,
+    eventType: "workflow_map_confirmed",
+    entityType: "discovered_workflow",
+    entityId: args.discoveredWorkflowId,
+    entityName: "Workflow map",
+    metadata: { discoverySessionId: args.sessionId },
+  });
+
+  return {
+    review: await getDiscoveryReview(args.workspaceId, args.sessionId),
+  };
+}
+
 export async function createRegressionSuiteFromTrace(args: {
   workspaceId: string;
   traceId: string;
@@ -989,24 +1168,60 @@ export async function createRegressionSuiteFromTrace(args: {
   const capabilityId = args.capabilityId ?? trace.capabilityId;
   if (!capabilityId) throw new Error("Trace is not linked to a capability yet.");
 
-  const suite = await createRegressionSuite({
+  const suiteName = `${inferCapabilityName(trace)} regression suite`;
+  const caseName = `Trace ${trace.id.slice(0, 8)} baseline`;
+  const existingCaseLookup = await supabase
+    .from("regression_cases")
+    .select("id, suite_id, name")
+    .eq("workspace_id", args.workspaceId)
+    .eq("source_trace_id", trace.id)
+    .eq("name", caseName)
+    .limit(1)
+    .maybeSingle();
+  if (existingCaseLookup.error) throw new Error(existingCaseLookup.error.message);
+
+  if (existingCaseLookup.data) {
+    const existingSuiteLookup = await getRegressionSuite(args.workspaceId, existingCaseLookup.data.suite_id);
+    if (!existingSuiteLookup) throw new Error("Existing regression suite could not be loaded.");
+    return {
+      suite: existingSuiteLookup,
+      caseId: existingCaseLookup.data.id,
+      capabilityId,
+      created: false,
+    };
+  }
+
+  const existingSuiteLookup = await supabase
+    .from("regression_suites")
+    .select("*")
+    .eq("workspace_id", args.workspaceId)
+    .eq("capability_id", capabilityId)
+    .eq("name", suiteName)
+    .limit(1)
+    .maybeSingle();
+  if (existingSuiteLookup.error) throw new Error(existingSuiteLookup.error.message);
+
+  const suite = existingSuiteLookup.data
+    ? await getRegressionSuite(args.workspaceId, existingSuiteLookup.data.id)
+    : await createRegressionSuite({
     workspaceId: args.workspaceId,
     capabilityId,
-    name: `${inferCapabilityName(trace)} regression suite`,
+    name: suiteName,
     description: `Created from workflow trace ${trace.id}.`,
     suiteType: "deterministic_workflow",
     enabled: true,
     createdBy: args.userId,
   });
+  if (!suite) throw new Error("Regression suite could not be loaded.");
 
   const toolSequence = (trace.steps ?? [])
     .filter((step) => step.toolName)
     .map((step) => step.toolName as string);
 
-  await createRegressionCase({
+  const regressionCase = await createRegressionCase({
     workspaceId: args.workspaceId,
     suiteId: suite.id,
-    name: `Trace ${trace.id.slice(0, 8)} baseline`,
+    name: caseName,
     description: "Generated automatically from a discovered workflow trace.",
     inputPayload: {
       userInput: trace.userInput,
@@ -1047,5 +1262,10 @@ export async function createRegressionSuiteFromTrace(args: {
       .eq("id", discoveredWorkflow.id);
   }
 
-  return suite;
+  return {
+    suite,
+    caseId: regressionCase.id,
+    capabilityId,
+    created: true,
+  };
 }

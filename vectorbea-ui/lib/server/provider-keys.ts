@@ -68,3 +68,30 @@ export async function listEnabledProviders(workspaceId: string): Promise<Provide
     .order("created_at", { ascending: false });
   return (data ?? []) as ProviderConfigRow[];
 }
+
+export async function resolveProviderConnection(
+  workspaceId: string,
+  preferredProvider?: string | null,
+): Promise<{
+  provider: string;
+  model: string | null;
+  baseUrl: string | null;
+  apiKey: string;
+  configId: string;
+}> {
+  const providerConfig = preferredProvider
+    ? await getProviderConfig(workspaceId, preferredProvider)
+    : await getFirstEnabledProvider(workspaceId);
+
+  if (!providerConfig) {
+    throw new Error("No enabled provider connection is configured for this workspace.");
+  }
+
+  return {
+    provider: providerConfig.config.provider_type,
+    model: providerConfig.config.default_model,
+    baseUrl: providerConfig.config.base_url,
+    apiKey: providerConfig.apiKey,
+    configId: providerConfig.config.id,
+  };
+}

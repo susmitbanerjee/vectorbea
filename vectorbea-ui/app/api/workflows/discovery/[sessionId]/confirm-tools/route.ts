@@ -32,7 +32,7 @@ export async function POST(
       mergeMap: body.mergeMap,
       userId: auth.user.id,
     });
-    return NextResponse.json({ items: result });
+    return NextResponse.json(result);
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to confirm discovered tools");
     return NextResponse.json({ error: safe.message }, { status: safe.status });

@@ -1244,7 +1244,7 @@ export type DiscoveryRecordStatus = "new" | "matched" | "confirmed" | "ignored" 
 export interface WorkflowGraphNode {
   id: string;
   parentId: string | null;
-  type: "agent" | "llm_call" | "tool_call" | "mcp_tool_call" | "rag_retrieval" | "reranker" | "decision" | "human_handoff" | "final_response" | "error";
+  type: "start" | "end" | "agent" | "planner" | "llm_call" | "tool_call" | "mcp_tool_call" | "rag_retrieval" | "reranker" | "decision" | "human_handoff" | "final_response" | "error";
   name: string;
   status: "running" | "completed" | "failed" | "skipped";
   latencyMs: number | null;
@@ -1264,6 +1264,8 @@ export interface WorkflowGraphEdge {
   from: string;
   to: string;
   reason: "parent_span" | "step_order" | "timestamp_order";
+  label?: string | null;
+  condition?: Record<string, unknown> | null;
 }
 
 export interface SuggestedDeterministicRule {
@@ -1355,6 +1357,31 @@ export interface DiscoveredWorkflow {
   updatedAt: string;
 }
 
+export interface DiscoveryModelSummary {
+  provider: string | null;
+  model: string | null;
+  seenCount: number;
+  averageLatencyMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCost: number | null;
+}
+
+export interface DiscoveryMcpServerSummary {
+  serverName: string;
+  toolsDetected: string[];
+  seenCount: number;
+  lastSeenAt: string | null;
+}
+
+export interface DiscoveryWorkflowOutputSummary {
+  finalAction: string | null;
+  outcomeStatus: string | null;
+  outcomeReason: string | null;
+  finalResponsePreview: string | null;
+  outputCaptureDisabled: boolean;
+}
+
 export interface DiscoveryReview {
   session: DiscoverySession;
   capabilities: DiscoveredCapability[];
@@ -1362,6 +1389,9 @@ export interface DiscoveryReview {
   workflows: DiscoveredWorkflow[];
   toolRegistry: ToolRegistryEntry[];
   existingCapabilities: AiCapability[];
+  models: DiscoveryModelSummary[];
+  mcpServers: DiscoveryMcpServerSummary[];
+  workflowOutput: DiscoveryWorkflowOutputSummary | null;
 }
 
 export type ReliabilityRuleType =

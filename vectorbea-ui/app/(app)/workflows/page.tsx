@@ -65,7 +65,7 @@ export default function WorkflowsPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Workflows" subtitle="Auto-discovered workflow shapes and review-ready traces" />
+      <AppHeader title="Workflows" subtitle="Auto-discovered workflow maps and execution-ready trace review" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         <div className="flex flex-wrap gap-3">
           <Link href="/onboarding/workflow-discovery" className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
@@ -125,11 +125,11 @@ export default function WorkflowsPage() {
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Link href={`/workflows/${workflow.id}`} className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
-                    Open workflow graph
+                    Open workflow map
                   </Link>
                   {workflow.traceId ? (
                     <Link href={`/traces/${workflow.traceId}/graph`} className="rounded-xl border border-[#D8CFC2] bg-white px-4 py-2 text-sm font-semibold text-[#111111] hover:bg-[#F8F5EF]">
-                      Open trace graph
+                      Open execution graph
                     </Link>
                   ) : null}
                 </div>

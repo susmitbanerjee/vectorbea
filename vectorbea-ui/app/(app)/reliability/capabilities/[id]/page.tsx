@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
+import { WorkflowMapView } from "@/components/workflows/workflow-map-view";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,12 +31,14 @@ import type {
   CapabilityCostAnalytics,
   CapabilityVersion,
   CapabilityVersionStatus,
+  DiscoveredWorkflow,
   ReliabilityCheckReport,
   ReliabilityRule,
   ReliabilityRuleType,
   ReliabilityRiskLevel,
   WorkflowTrace,
 } from "@/lib/api";
+import { buildWorkflowMap } from "@/lib/workflow-graphs";
 import { useWorkspace } from "@/lib/workspace-context";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -283,7 +286,7 @@ function AddRuleDialog({
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "versions" | "traces" | "rules" | "checks" | "cost";
+type Tab = "overview" | "workflowMap" | "versions" | "traces" | "rules" | "regressionSuites" | "safetyGates" | "cost";
 
 function Toast({ message, type, onDismiss }: { message: string; type: "success" | "error"; onDismiss: () => void }) {
   return (
@@ -426,6 +429,7 @@ export default function CapabilityDetailPage() {
   const [versions, setVersions]   = useState<CapabilityVersion[]>([]);
   const [traces, setTraces]       = useState<WorkflowTrace[]>([]);
   const [rules, setRules]         = useState<ReliabilityRule[]>([]);
+  const [workflowMap, setWorkflowMap] = useState<DiscoveredWorkflow | null>(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
   const [tab, setTab]             = useState<Tab>("overview");
@@ -442,18 +446,27 @@ export default function CapabilityDetailPage() {
     if (!activeWorkspaceId || !id) return;
     setLoading(true); setError(null);
     try {
-      const [capRes, versionRes, tracesRes, rulesRes] = await Promise.all([
+      const [capRes, versionRes, tracesRes, rulesRes, workflowsRes] = await Promise.all([
         fetch(`/api/reliability/capabilities/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         fetch(`/api/reliability/capabilities/${encodeURIComponent(id)}/versions?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
         fetch(`/api/reliability/traces?workspaceId=${encodeURIComponent(activeWorkspaceId)}&capabilityId=${encodeURIComponent(id)}&limit=20`, { cache: "no-store" }),
         fetch(`/api/reliability/rules?workspaceId=${encodeURIComponent(activeWorkspaceId)}&capabilityId=${encodeURIComponent(id)}`, { cache: "no-store" }),
+        fetch(`/api/workflows?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" }),
       ]);
-      const [capJson, verJson, tracesJson, rulesJson] = await Promise.all([capRes.json(), versionRes.json(), tracesRes.json(), rulesRes.json()]);
+      const [capJson, verJson, tracesJson, rulesJson, workflowsJson] = await Promise.all([capRes.json(), versionRes.json(), tracesRes.json(), rulesRes.json(), workflowsRes.json()]);
       if (!capRes.ok) throw new Error(capJson.error ?? "Not found");
-      setCap(capJson as AiCapability);
+      const capability = capJson as AiCapability;
+      setCap(capability);
       setVersions(Array.isArray(verJson) ? verJson as CapabilityVersion[] : []);
       setTraces(Array.isArray(tracesJson) ? tracesJson as WorkflowTrace[] : []);
       setRules(Array.isArray(rulesJson) ? rulesJson as ReliabilityRule[] : []);
+      const discoveredItems = Array.isArray((workflowsJson as { items?: unknown[] })?.items)
+        ? ((workflowsJson as { items: DiscoveredWorkflow[] }).items)
+        : [];
+      const matchingWorkflow = discoveredItems.find((workflow) =>
+        workflow.capabilityName?.trim().toLowerCase() === capability.name.trim().toLowerCase(),
+      ) ?? null;
+      setWorkflowMap(matchingWorkflow);
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to load"); }
     finally { setLoading(false); }
   }, [activeWorkspaceId, id]);
@@ -492,7 +505,7 @@ export default function CapabilityDetailPage() {
       const json = await res.json() as ReliabilityCheckReport & { error?: string };
       if (!res.ok) throw new Error(json.error ?? "Failed");
       setReport(json);
-      setTab("checks");
+      setTab("safetyGates");
     } catch (e) {
       console.error(e);
     } finally { setRunning(false); }
@@ -501,12 +514,16 @@ export default function CapabilityDetailPage() {
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center gap-2 text-sm text-[#6B7280]"><Loader2 className="h-4 w-4 animate-spin" />Loading…</div>;
   if (error || !cap) return <div className="px-4 py-8"><div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm text-[#991B1B]">{error ?? "Capability not found"}</div></div>;
 
+  const workflowMapGraph = workflowMap ? buildWorkflowMap(workflowMap) : null;
+
   const tabItems: Array<{ key: Tab; label: string; count?: number }> = [
     { key: "overview",  label: "Overview" },
+    { key: "workflowMap", label: "Workflow Map" },
     { key: "versions",  label: "Versions",  count: versions.length },
     { key: "traces",    label: "Traces",    count: traces.length },
     { key: "rules",     label: "Rules",     count: rules.length },
-    { key: "checks",    label: "Checks" },
+    { key: "regressionSuites", label: "Regression Suites" },
+    { key: "safetyGates", label: "Safety Gates" },
     { key: "cost",      label: "Cost" },
   ];
 
@@ -610,6 +627,37 @@ export default function CapabilityDetailPage() {
           </div>
         )}
 
+        {tab === "workflowMap" && (
+          workflowMap ? (
+            <div className="space-y-4">
+              <WorkflowMapView
+                nodes={workflowMapGraph?.nodes ?? []}
+                edges={workflowMapGraph?.edges ?? []}
+                sourceBadge={workflowMap.sourceBadge}
+                discoveredBanner="This workflow map was discovered from production traces. Confirm it when you are ready to treat it as the expected blueprint."
+              />
+              <div className="flex flex-wrap gap-3">
+                <Link href={`/workflows/${workflowMap.id}`} className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
+                  Open workflow space
+                </Link>
+                {workflowMap.traceId ? (
+                  <Link href={`/traces/${workflowMap.traceId}/graph`} className="rounded-xl border border-[#D8CFC2] bg-white px-4 py-2 text-sm font-semibold text-[#111111] hover:bg-[#F8F5EF]">
+                    Open sample execution graph
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <Card className="border-[#E7DED1] bg-white">
+              <CardContent className="py-12 text-center">
+                <Bot className="mx-auto mb-3 h-8 w-8 text-[#D8CFC2]" />
+                <p className="text-sm font-semibold text-[#111111]">No workflow map discovered yet</p>
+                <p className="mt-2 text-sm text-[#6B7280]">Send a trace with SDK, sidecar, or OpenTelemetry to discover the structural workflow map for this capability.</p>
+              </CardContent>
+            </Card>
+          )
+        )}
+
         {/* ── Versions tab ── */}
         {tab === "versions" && (
           <Card className="border-[#E7DED1] bg-white">
@@ -693,6 +741,7 @@ export default function CapabilityDetailPage() {
                         <th className="py-2 text-right font-semibold">Latency</th>
                         <th className="py-2 text-right font-semibold">Cost</th>
                         <th className="py-2 text-left font-semibold">Created</th>
+                        <th className="py-2 text-left font-semibold">Execution graph</th>
                         <th className="py-2 text-right font-semibold">Run checks</th>
                       </tr>
                     </thead>
@@ -706,6 +755,11 @@ export default function CapabilityDetailPage() {
                           <td className="py-2.5 text-right text-[#374151] text-xs">{fmtMs(t.totalLatencyMs)}</td>
                           <td className="py-2.5 text-right text-[#374151] text-xs">{fmtCost(t.totalCostEstimate)}</td>
                           <td className="py-2.5 text-[#6B7280] text-xs">{fmtDate(t.createdAt)}</td>
+                          <td className="py-2.5 text-xs">
+                            <Link href={`/traces/${t.id}/graph`} className="text-[#2563EB] hover:text-[#1D4ED8]">
+                              Open graph
+                            </Link>
+                          </td>
                           <td className="py-2.5 text-right">
                             <button
                               type="button"
@@ -775,14 +829,27 @@ export default function CapabilityDetailPage() {
         )}
 
         {/* ── Checks tab ── */}
-        {tab === "checks" && (
+        {tab === "regressionSuites" && (
+          <Card className="border-[#E7DED1] bg-white">
+            <CardContent className="py-10 text-center">
+              <GitBranch className="mx-auto mb-2 h-8 w-8 text-[#D8CFC2]" />
+              <p className="text-sm font-medium text-[#374151] mb-1">Regression suites live in their own workspace</p>
+              <p className="text-xs text-[#6B7280] mb-3">Open the regression suite workspace to run deterministic workflow tests against this capability.</p>
+              <Link href={`/reliability/capabilities/${id}/regression-suites`} className="inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
+                <GitBranch className="h-4 w-4" />Open regression suites
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
+        {tab === "safetyGates" && (
           <div className="space-y-4">
             {!checkReport && (
               <Card className="border-[#E7DED1] bg-white">
                 <CardContent className="py-10 text-center">
                   <Shield className="h-8 w-8 text-[#D8CFC2] mx-auto mb-2" />
-                  <p className="text-sm font-medium text-[#374151] mb-1">No check report yet</p>
-                  <p className="text-xs text-[#6B7280]">Go to the Traces tab and click Run on a trace to generate a reliability check report.</p>
+                  <p className="text-sm font-medium text-[#374151] mb-1">No safety gate report yet</p>
+                  <p className="text-xs text-[#6B7280]">Go to the Traces tab and click Run on a trace to generate a reliability and safety gate report.</p>
                 </CardContent>
               </Card>
             )}

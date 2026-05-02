@@ -15,13 +15,13 @@ export async function POST(
     if (auth.error) return auth.error;
     const body = (await request.json().catch(() => ({}))) as { capabilityId?: string | null };
     const { traceId } = await params;
-    const suite = await createRegressionSuiteFromTrace({
+    const result = await createRegressionSuiteFromTrace({
       workspaceId,
       traceId,
       capabilityId: body.capabilityId?.trim() || null,
       userId: auth.user.id,
     });
-    return NextResponse.json(suite, { status: 201 });
+    return NextResponse.json(result, { status: result.created ? 201 : 200 });
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to create regression suite from trace");
     return NextResponse.json({ error: safe.message }, { status: safe.status });

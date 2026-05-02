@@ -6,10 +6,11 @@ import { useParams } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
-import { WorkflowGraphView } from "@/components/workflows/workflow-graph-view";
+import { WorkflowMapView } from "@/components/workflows/workflow-map-view";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DiscoveredWorkflow } from "@/lib/api";
+import { buildWorkflowMap } from "@/lib/workflow-graphs";
 import { useWorkspace } from "@/lib/workspace-context";
 
 export default function WorkflowDetailPage() {
@@ -19,6 +20,7 @@ export default function WorkflowDetailPage() {
   const workflowId = typeof params?.id === "string" ? params.id : "";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const workflowMap = workflow ? buildWorkflowMap(workflow) : null;
 
   useEffect(() => {
     if (!activeWorkspaceId || !workflowId) return;
@@ -41,7 +43,7 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Workflow graph" subtitle="Review the detected graph before confirming capabilities, tools, and rules" />
+      <AppHeader title="Workflow Map" subtitle="Review the discovered workflow blueprint before confirming capabilities, tools, and rules" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         {loading ? <div className="flex items-center gap-2 text-sm text-[#6B7280]"><Loader2 className="h-4 w-4 animate-spin" />Loading workflow graph…</div> : null}
         {error ? <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm text-[#991B1B]">{error}</div> : null}
@@ -52,7 +54,7 @@ export default function WorkflowDetailPage() {
               <CardHeader className="pb-2">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <CardTitle className="text-sm text-[#111111]">{workflow.name}</CardTitle>
+                <CardTitle className="text-sm text-[#111111]">{workflow.name}</CardTitle>
                     <p className="mt-1 text-xs text-[#6B7280]">{workflow.capabilityName ?? "Discovered workflow"} · shape {workflow.workflowShapeHash.slice(0, 12)}…</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -64,7 +66,7 @@ export default function WorkflowDetailPage() {
               <CardContent className="flex flex-wrap gap-3">
                 {workflow.traceId ? (
                   <Link href={`/traces/${workflow.traceId}/graph`} className="rounded-xl border border-[#D8CFC2] bg-white px-4 py-2 text-sm font-semibold text-[#111111] hover:bg-[#F8F5EF]">
-                    Open trace graph
+                    Open execution graph
                   </Link>
                 ) : null}
                 <Link href="/onboarding/workflow-discovery" className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
@@ -73,10 +75,11 @@ export default function WorkflowDetailPage() {
               </CardContent>
             </Card>
 
-            <WorkflowGraphView
-              nodes={workflow.graphNodes}
-              edges={workflow.graphEdges}
+            <WorkflowMapView
+              nodes={workflowMap?.nodes ?? []}
+              edges={workflowMap?.edges ?? []}
               sourceBadge={workflow.sourceBadge}
+              discoveredBanner="This workflow map was discovered from production traces and shows the recurring structural path."
             />
 
             <Card className="border-[#E7DED1] bg-white">
