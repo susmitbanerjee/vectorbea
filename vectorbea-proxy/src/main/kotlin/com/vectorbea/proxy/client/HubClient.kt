@@ -3,6 +3,7 @@ package com.vectorbea.proxy.client
 import com.vectorbea.proxy.config.AppConfig
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.model.PromptPayload
+import com.vectorbea.proxy.model.WorkflowTraceBatchForwardRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.defaultRequest
@@ -122,6 +123,23 @@ class HubClient(private val config: AppConfig) {
             } else {
                 error("Hub rejected audit batch with ${response.status.value}: $sanitizedBody")
             }
+        }
+    }
+
+    suspend fun forwardWorkflowBatch(batch: WorkflowTraceBatchForwardRequest) {
+        val response = client.post(config.ingestUrl) {
+            header(HttpHeaders.Authorization, "Bearer ${config.ingestToken}")
+            setBody(
+                TextContent(
+                    json.encodeToString(WorkflowTraceBatchForwardRequest.serializer(), batch),
+                    ContentType.Application.Json,
+                ),
+            )
+        }
+
+        if (!response.status.isSuccess()) {
+            val sanitizedBody = sanitizeErrorBody(response.bodyAsText())
+            error("Workflow ingest rejected with ${response.status.value}: $sanitizedBody")
         }
     }
 

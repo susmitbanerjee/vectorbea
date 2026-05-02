@@ -6,8 +6,11 @@ import com.vectorbea.proxy.model.AuditAcceptedResponse
 import com.vectorbea.proxy.model.AuditEvent
 import com.vectorbea.proxy.model.PromptPayload
 import com.vectorbea.proxy.model.TraceMetadataBuilder
+import com.vectorbea.proxy.model.WorkflowIngestAcceptedResponse
+import com.vectorbea.proxy.model.WorkflowTraceEnvelope
 import com.vectorbea.proxy.service.AuditDispatcher
 import com.vectorbea.proxy.service.PromptService
+import com.vectorbea.proxy.service.WorkflowTelemetryDispatcher
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -20,11 +23,16 @@ class PublicHttpServer(
     private val port: Int,
     private val promptService: PromptService,
     private val auditDispatcher: AuditDispatcher,
+    private val workflowDispatcher: WorkflowTelemetryDispatcher,
     private val json: Json,
 ) {
     private val server = HttpServer.create(InetSocketAddress("0.0.0.0", port), 0).apply {
         createContext("/v1/prompts") { exchange -> handlePrompt(exchange) }
         createContext("/v1/audit") { exchange -> handleAudit(exchange) }
+        createContext("/v1/traces") { exchange -> handleWorkflowTrace(exchange) }
+        createContext("/v1/events") { exchange -> handleWorkflowTrace(exchange) }
+        createContext("/health") { exchange -> handleHealth(exchange) }
+        createContext("/metrics") { exchange -> handleMetrics(exchange) }
         executor = Executors.newFixedThreadPool(4)
     }
 
@@ -96,6 +104,64 @@ class PublicHttpServer(
                 """{"error":${json.encodeToString(String.serializer(), error.message ?: "internal server error")}}""",
             )
         }
+    }
+
+    private fun handleWorkflowTrace(exchange: HttpExchange) {
+        if (exchange.requestMethod != "POST") {
+            respond(exchange, 405, """{"error":"method not allowed"}""")
+            return
+        }
+
+        runCatching {
+            val body = exchange.requestBody.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            val trace = json.decodeFromString(WorkflowTraceEnvelope.serializer(), body)
+            workflowDispatcher.tryEnqueue(trace)
+        }.onSuccess { accepted ->
+            val response = if (accepted) {
+                WorkflowIngestAcceptedResponse(accepted = true, queued = true)
+            } else {
+                WorkflowIngestAcceptedResponse(
+                    accepted = false,
+                    queued = false,
+                    dropped = true,
+                    message = "Local sidecar queue is full",
+                )
+            }
+            respondJson(
+                exchange,
+                if (accepted) 202 else 503,
+                WorkflowIngestAcceptedResponse.serializer(),
+                response,
+            )
+        }.onFailure { error ->
+            respond(
+                exchange,
+                500,
+                """{"error":${json.encodeToString(String.serializer(), error.message ?: "internal server error")}}""",
+            )
+        }
+    }
+
+    private fun handleHealth(exchange: HttpExchange) {
+        if (exchange.requestMethod != "GET") {
+            respond(exchange, 405, """{"error":"method not allowed"}""")
+            return
+        }
+
+        respondJson(exchange, 200, com.vectorbea.proxy.model.WorkflowTelemetryHealth.serializer(), workflowDispatcher.snapshot())
+    }
+
+    private fun handleMetrics(exchange: HttpExchange) {
+        if (exchange.requestMethod != "GET") {
+            respond(exchange, 405, """{"error":"method not allowed"}""")
+            return
+        }
+
+        val body = workflowDispatcher.prometheusMetrics()
+        val bytes = body.toByteArray(StandardCharsets.UTF_8)
+        exchange.responseHeaders.add("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        exchange.sendResponseHeaders(200, bytes.size.toLong())
+        exchange.responseBody.use { output -> output.write(bytes) }
     }
 
     private fun <T> respondJson(

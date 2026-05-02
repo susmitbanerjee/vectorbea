@@ -17,6 +17,9 @@ service VectorBeaDataPlane {
   // into the in-memory channel — the AuditDispatcher batches and POSTs to the
   // hub asynchronously.
   rpc LogAudit(LogAuditRequest) returns (LogAuditResponse);
+
+  // Enqueue workflow telemetry for asynchronous forwarding to the backend.
+  rpc LogWorkflowEvents(LogWorkflowEventsRequest) returns (LogWorkflowEventsResponse);
 }
 
 message GetPromptRequest {
@@ -50,4 +53,58 @@ message LogAuditRequest {
 
 message LogAuditResponse {
   bool accepted = 1;
+}
+
+message LogWorkflowEventsRequest {
+  string trace_id = 1;
+  string workspace_id = 2;
+  string capability_id = 3;
+  string capability_version_id = 4;
+  string capability_name = 5;
+  string capability_version = 6;
+  string environment = 7;
+  string service_name = 8;
+  string source = 9;
+  string metadata_json = 10;
+  repeated WorkflowEvent events = 11;
+}
+
+message WorkflowEvent {
+  string type = 1;
+  string span_id = 2;
+  string parent_span_id = 3;
+  string timestamp = 4;
+  string provider = 5;
+  string model = 6;
+  string prompt_version = 7;
+  string prompt_name = 8;
+  string tool_name = 9;
+  string mcp_server_name = 10;
+  string status = 11;
+  double latency_ms = 12;
+  double cost_estimate = 13;
+  int32 tokens_input = 14;
+  int32 tokens_output = 15;
+  string error_message = 16;
+  string final_response = 17;
+  string final_action = 18;
+  string outcome_status = 19;
+  string outcome_reason = 20;
+  string input_json = 21;
+  string output_json = 22;
+  string response_json = 23;
+  string result_json = 24;
+  string arguments_json = 25;
+  string query = 26;
+  string documents_json = 27;
+  string scores_json = 28;
+  string selected_context = 29;
+  string metadata_json = 30;
+}
+
+message LogWorkflowEventsResponse {
+  bool accepted = 1;
+  bool queued = 2;
+  bool dropped = 3;
+  string message = 4;
 }

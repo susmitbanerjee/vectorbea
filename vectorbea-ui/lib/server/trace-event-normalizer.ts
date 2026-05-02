@@ -56,6 +56,8 @@ export interface RawTraceEvent {
   latency_ms?: number;
   cost_estimate?: number;
   tokens?: { prompt?: number; completion?: number; total?: number };
+  tokens_input?: number;
+  tokens_output?: number;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -212,6 +214,7 @@ function normalizeTokens(event: RawTraceEvent) {
   const meta = getMeta(event);
   const tokens = asObject(event.tokens) ?? {};
   const input = Number(
+    event.tokens_input ??
     tokens.prompt ??
     meta.prompt_tokens ??
     meta["gen_ai.usage.input_tokens"] ??
@@ -220,6 +223,7 @@ function normalizeTokens(event: RawTraceEvent) {
     0,
   );
   const output = Number(
+    event.tokens_output ??
     tokens.completion ??
     meta.completion_tokens ??
     meta["gen_ai.usage.output_tokens"] ??

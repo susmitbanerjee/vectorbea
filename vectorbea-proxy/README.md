@@ -1,83 +1,85 @@
-# vectorbea-proxy
+# VectorBea Sidecar Proxy
 
-Local proxy sidecar for `vectorbea`.
+The existing `vectorbea-proxy` project is VectorBea's enterprise production ingestion layer.
 
-## Environment
+It is:
+
+- Kotlin based
+- GraalVM native-image ready
+- published as a multi-arch Docker image for `linux/amd64` and `linux/arm64`
+- capable of local localhost and UDS ingestion
+- responsible for batching, retry, redaction, and fail-open transport
+
+It is not a second ingestion system and it does not replace the VectorBea backend.
+
+## Recommended production architecture
+
+```text
+SDK or OpenTelemetry
+  -> local HTTP or UDS
+VectorBea Sidecar
+  -> batched forward with ingest token
+VectorBea backend
+  -> execution graph, workflow map, regression, safety gates, governance, ROI
+```
+
+## Integration modes
+
+- Direct API: quick testing only
+- SDK: semantic workflow instrumentation
+- Sidecar: recommended enterprise production path
+- OpenTelemetry: standard traces, ideally forwarded through the Sidecar
+
+## Local ingestion
+
+The sidecar supports local workflow telemetry ingestion over:
+
+- `POST /v1/traces`
+- `POST /v1/events`
+- gRPC over the configured Unix domain socket
+
+It also exposes:
+
+- `GET /health`
+- `GET /metrics`
+
+## Key environment variables
+
+Required for workflow forwarding:
 
 - `VECTORBEA_HUB_URL`
 - `VECTORBEA_KEY`
+- `VECTORBEA_INGEST_URL`
+- `VECTORBEA_INGEST_TOKEN`
+- `VECTORBEA_SERVICE_NAME`
 
-The proxy binds to the Unix domain socket:
+Common production settings:
 
-- `/tmp/vectorbea.sock`
+- `VECTORBEA_SOCKET_PATH=/var/run/vectorbea/vectorbea.sock`
+- `VECTORBEA_LOCAL_HTTP_PORT=8080`
+- `VECTORBEA_REDACT_SECRETS=true`
+- `VECTORBEA_BATCH_SIZE=50`
+- `VECTORBEA_FLUSH_INTERVAL_MS=5000`
+- `VECTORBEA_MAX_QUEUE_SIZE=10000`
+- `VECTORBEA_FAIL_OPEN=true`
 
-## Run on the JVM
+## Health response
 
-```powershell
-gradle.bat run
-```
+`GET /health` reports:
 
-## Build a native binary
+- sidecar version
+- queue size
+- last flush timestamp
+- last backend status
+- events received, forwarded, failed, dropped
+- redaction count
 
-```powershell
-gradle.bat nativeCompile
-```
+## Docker image
 
-The native binary will be written to:
+Published image:
 
-```text
-build/native/nativeCompile/vectorbea-proxy
-```
+- `vectorbea/vectorbea-proxy:latest`
 
-## Run the hardened native container
+See the main deployment guide for Docker Compose and Kubernetes sidecar examples:
 
-The default Docker tags now point at the GraalVM native-image build, so
-customers can keep pulling the same tag names without changing their setup.
-
-```powershell
-docker run --rm -p 8080:8080 `
-  -e VECTORBEA_HUB_URL="https://dev.vectorbea.com" `
-  -e VECTORBEA_KEY="vb_your_workspace_api_key" `
-  -e VECTORBEA_HTTP_PORT="8080" `
-  vectorbea/vectorbea-proxy:dev
-```
-
-Production/stable tag:
-
-```text
-vectorbea/vectorbea-proxy:latest
-```
-
-JVM compatibility fallback tags remain available if needed:
-
-```text
-vectorbea/vectorbea-proxy:dev-jvm
-vectorbea/vectorbea-proxy:latest-jvm
-```
-
-## API
-
-### `GET /v1/prompts/{name}`
-
-- Checks the in-memory `ConcurrentHashMap` cache first
-- On miss, fetches from `${VECTORBEA_HUB_URL}/api/prompts/{name}`
-- Stores the result locally and returns JSON
-
-### `POST /v1/audit`
-
-- Returns `202 Accepted` immediately
-- Enqueues the payload for background flushes
-
-Example payload:
-
-```json
-{
-  "promptVersionId": "33333333-3333-3333-3333-333333333333",
-  "latencyMs": 128,
-  "tokenCount": 512,
-  "metadata": {
-    "model": "gpt-4.1-mini",
-    "agent": "local-sidecar"
-  }
-}
-```
+- [Deployment Guide](../docs/DEPLOYMENT.md)

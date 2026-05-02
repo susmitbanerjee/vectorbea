@@ -450,7 +450,7 @@ export default function SdkPage() {
         <div className="rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-5 py-4 flex gap-4 items-start">
           <Zap className="h-5 w-5 text-[#2563EB] shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-[#1E3A8A] text-sm mb-1">Three ways to send traces</p>
+            <p className="font-semibold text-[#1E3A8A] text-sm mb-1">Four integration modes</p>
             <ol className="list-decimal list-inside space-y-1 text-xs text-[#1E40AF]">
               <li><span className="font-medium">SDK instrumentation</span> — wrap agent calls in Python/TypeScript</li>
               <li><span className="font-medium">Proxy / sidecar</span> — route LLM traffic through VectorBea&apos;s proxy; tool calls via SDK</li>
@@ -635,6 +635,26 @@ trace.finish(final_response=reply, outcome_status="success")`} />
         </Section>
 
         {/* ── Proxy vs SDK ─────────────────────────────────────────────────── */}
+        <Section title="Sidecar — recommended for enterprise production" icon={Layers} badge="Recommended" defaultOpen>
+          <div className="rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] p-4">
+            <p className="text-sm font-semibold text-[#1E3A8A]">Use the sidecar as the production ingestion layer</p>
+            <p className="mt-1 text-xs text-[#1E40AF]">
+              Your application or SDK emits semantic workflow events locally to the VectorBea sidecar over localhost or a shared Unix domain socket.
+              The sidecar batches, redacts, buffers, and retries before forwarding telemetry to VectorBea with an ingest token.
+            </p>
+          </div>
+          <CodeBlock lang="text" code={`App or SDK
+  ↓ local HTTP or UDS
+VectorBea Sidecar
+  ↓ batched forward with ingest token
+VectorBea backend
+  ↓
+workflow map, execution graph, regression, safety gates, governance, ROI`} />
+          <p className="text-xs text-[#6B7280]">
+            Direct API is best for quick testing. For production agent workloads, prefer SDK plus Sidecar or OpenTelemetry plus Sidecar.
+          </p>
+        </Section>
+
         <Section title="Proxy vs SDK responsibilities" icon={Activity} defaultOpen={false}>
           <div className="grid gap-3 md:grid-cols-2">
             {[

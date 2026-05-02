@@ -17,6 +17,7 @@ import com.vectorbea.proxy.service.PromptService
 import com.vectorbea.proxy.service.SharedRulesStore
 import com.vectorbea.proxy.service.SyncDispatcher
 import com.vectorbea.proxy.service.TelemetryDispatcher
+import com.vectorbea.proxy.service.WorkflowTelemetryDispatcher
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -59,10 +60,12 @@ fun main() {
     val promptService = PromptService(promptCache, authCache, config.apiKey, hubClient, sharedRulesStore)
     val auditDispatcher = AuditDispatcher(config, hubClient)
     val telemetryDispatcher = TelemetryDispatcher(config)
+    val workflowTelemetryDispatcher = WorkflowTelemetryDispatcher(config, hubClient, json)
     val syncDispatcher = SyncDispatcher(config, hubClient, promptService)
 
     auditDispatcher.start()
     telemetryDispatcher.start()
+    workflowTelemetryDispatcher.start()
     syncDispatcher.start()
 
     runBlocking {
@@ -73,17 +76,19 @@ fun main() {
         port = config.httpPort,
         promptService = promptService,
         auditDispatcher = auditDispatcher,
+        workflowDispatcher = workflowTelemetryDispatcher,
         json = json,
     )
     httpServer.start()
 
-    val restServer = startRestSocketServer(config, promptService, auditDispatcher, json)
+    val restServer = startRestSocketServer(config, promptService, auditDispatcher, workflowTelemetryDispatcher, json)
 
     val grpcService = VectorBeaGrpcService(
         promptService = promptService,
         auditDispatcher = auditDispatcher,
         json = json,
         telemetryDispatcher = telemetryDispatcher,
+        workflowTelemetryDispatcher = workflowTelemetryDispatcher,
     )
     val grpcServer = config.grpcSocketPath?.let { socketPath ->
         GrpcServer(socketPath, grpcService).also { it.start() }
@@ -95,6 +100,7 @@ fun main() {
         restServer?.stop(1_000, 5_000)
         auditDispatcher.stop()
         telemetryDispatcher.stop()
+        workflowTelemetryDispatcher.stop()
         syncDispatcher.stop()
     })
 
@@ -120,6 +126,7 @@ private fun startRestSocketServer(
     config: AppConfig,
     promptService: PromptService,
     auditDispatcher: AuditDispatcher,
+    workflowTelemetryDispatcher: WorkflowTelemetryDispatcher,
     json: Json,
 ): EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? {
     val socketPath = config.restSocketPath ?: return null
@@ -128,7 +135,7 @@ private fun startRestSocketServer(
     return embeddedServer(CIO, configure = {
         unixConnector(socketPath)
     }) {
-        vectorbeaModule(promptService, auditDispatcher, json)
+        vectorbeaModule(promptService, auditDispatcher, workflowTelemetryDispatcher, json)
     }.also { it.start(wait = false) }
 }
 
@@ -151,6 +158,7 @@ private suspend fun warmup(hubClient: HubClient, promptCache: PromptCache) {
 private fun Application.vectorbeaModule(
     promptService: PromptService,
     auditDispatcher: AuditDispatcher,
+    workflowTelemetryDispatcher: WorkflowTelemetryDispatcher,
     json: Json,
 ) {
     install(StatusPages) {
@@ -206,6 +214,36 @@ private fun Application.vectorbeaModule(
                 json.encodeToString(AuditAcceptedResponse.serializer(), AuditAcceptedResponse(accepted = true)),
                 ContentType.Application.Json,
                 HttpStatusCode.Accepted,
+            )
+        }
+
+        post("/v1/traces") {
+            val bodyText = call.receiveText()
+            val trace = json.decodeFromString(com.vectorbea.proxy.model.WorkflowTraceEnvelope.serializer(), bodyText)
+            val accepted = workflowTelemetryDispatcher.tryEnqueue(trace)
+            call.respondText(
+                json.encodeToString(
+                    com.vectorbea.proxy.model.WorkflowIngestAcceptedResponse.serializer(),
+                    com.vectorbea.proxy.model.WorkflowIngestAcceptedResponse(
+                        accepted = accepted,
+                        queued = accepted,
+                        dropped = !accepted,
+                        message = if (accepted) null else "Local sidecar queue is full",
+                    ),
+                ),
+                ContentType.Application.Json,
+                if (accepted) HttpStatusCode.Accepted else HttpStatusCode.ServiceUnavailable,
+            )
+        }
+
+        get("/health") {
+            call.respondText(
+                json.encodeToString(
+                    com.vectorbea.proxy.model.WorkflowTelemetryHealth.serializer(),
+                    workflowTelemetryDispatcher.snapshot(),
+                ),
+                ContentType.Application.Json,
+                HttpStatusCode.OK,
             )
         }
     }

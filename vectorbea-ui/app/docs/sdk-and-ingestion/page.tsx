@@ -23,9 +23,31 @@ export default function SdkAndIngestionDocsPage() {
   return (
     <DocsPage
       eyebrow="SDK and Ingestion"
-      title="Instrument agents, tools, and MCP workflows without replacing the rest of your docs"
-      lede="VectorBea ingestion is one part of the platform documentation. Use it to understand how traces enter the system, how SDK and proxy capture differ, how tokens authenticate writes, and how redaction keeps sensitive data out of stored traces"
+      title="Instrument agents, tools, and MCP workflows with the right production transport"
+      lede="VectorBea supports Direct API, SDK, Sidecar, and OpenTelemetry integration modes. For enterprise production workloads, the recommended path is SDK or OpenTelemetry emitting semantic workflow events locally into the VectorBea sidecar, which batches, redacts, buffers, and forwards telemetry to the backend"
     >
+      <DocsSection
+        id="integration-modes"
+        title="Integration modes"
+        description="Use the direct API for quick testing, and move to Sidecar for production-grade transport."
+      >
+        <DocsTable
+          headers={["Mode", "Best for", "Recommendation"]}
+          rows={[
+            ["Direct API", "Quick local testing and one-off debugging", "Testing only"],
+            ["SDK", "Capturing agent, tool, MCP, and business outcome semantics", "Use with Sidecar in production"],
+            ["Sidecar", "Enterprise production ingestion with local transport, buffering, retry, and redaction", "Recommended"],
+            ["OpenTelemetry", "Teams already emitting standard traces", "Use with Sidecar when possible"],
+          ]}
+        />
+        <DocsCallout title="Recommended enterprise path">
+          SDK or OpenTelemetry emits semantic agent workflow events locally.
+          The VectorBea sidecar receives them over localhost or UDS, batches and
+          redacts them, forwards them with an ingest token, and the backend turns
+          them into execution graphs, workflow maps, regressions, governance, and ROI.
+        </DocsCallout>
+      </DocsSection>
+
       <DocsSection
         id="what-it-does"
         title="What this section covers"
@@ -37,8 +59,8 @@ export default function SdkAndIngestionDocsPage() {
             description="Capture agent runs, tool calls, MCP calls, handoffs, and workflow outcomes directly from your service code"
           />
           <DocsCard
-            title="Proxy and sidecar ingestion"
-            description="Capture model traffic, prompt versions, timing, and cost without pushing model execution into the hosted control plane"
+            title="Sidecar based ingestion"
+            description="Capture workflow telemetry locally through the VectorBea sidecar without sending production agent traffic directly from the app to the hosted backend"
           />
           <DocsCard
             title="Trace schema"
@@ -84,10 +106,79 @@ export default function SdkAndIngestionDocsPage() {
           />
         </DocsCardGrid>
         <DocsCallout title="Recommended production pattern">
-          Use proxy plus SDK together when you want both model telemetry and
-          workflow correctness. That gives the cleanest picture of cost,
-          reliability, and risk without forcing the app into a single tracing path
+          Use SDK plus Sidecar together when you want both semantic workflow
+          correctness and production-safe transport. Sidecar is the preferred
+          enterprise path because it handles local ingestion, batching, retry,
+          redaction, and fail-open behavior without making your application call
+          the VectorBea cloud directly on every workflow step
         </DocsCallout>
+      </DocsSection>
+
+      <DocsSection
+        id="sidecar"
+        title="Sidecar as the enterprise production path"
+        description="The existing Kotlin GraalVM sidecar is the recommended enterprise ingestion layer for production agent workloads."
+      >
+        <DocsCardGrid>
+          <DocsCard
+            title="Why use Sidecar"
+            description="Low latency local ingestion, batching, retry, buffering, redaction, fail-open behavior, and production-safe backend forwarding through an ingest token"
+          />
+          <DocsCard
+            title="Where it runs"
+            description="Next to your agent service in Docker or Kubernetes, communicating locally over localhost or a shared Unix domain socket"
+          />
+        </DocsCardGrid>
+        <CodeBlock
+          code={`App or SDK
+  ↓ local HTTP or UDS
+VectorBea Sidecar
+  ↓ batched forward with ingest token
+VectorBea Backend
+  ↓
+workflow map, execution graph, regression, safety gates, governance, ROI`}
+        />
+        <CodeBlock
+          code={`VECTORBEA_INGEST_URL=https://your-vectorbea-domain/api/ingest/traces
+VECTORBEA_INGEST_TOKEN=your_generated_ingest_token
+VECTORBEA_SERVICE_NAME=refund-agent
+VECTORBEA_ENVIRONMENT=production
+VECTORBEA_SOCKET_PATH=/var/run/vectorbea/vectorbea.sock
+VECTORBEA_LOCAL_HTTP_PORT=8686`}
+        />
+      </DocsSection>
+
+      <DocsSection
+        id="kubernetes"
+        title="Kubernetes sidecar pattern"
+        description="Run the sidecar in the same pod as the agent service and share a socket volume when you want UDS transport."
+      >
+        <CodeBlock
+          code={`volumes:
+  - name: vectorbea-socket
+    emptyDir: {}
+
+containers:
+  - name: app
+    volumeMounts:
+      - name: vectorbea-socket
+        mountPath: /var/run/vectorbea
+
+  - name: vectorbea-sidecar
+    image: vectorbea/vectorbea-proxy:latest
+    env:
+      - name: VECTORBEA_INGEST_URL
+        value: https://your-vectorbea-domain/api/ingest/traces
+      - name: VECTORBEA_INGEST_TOKEN
+        valueFrom: ...
+      - name: VECTORBEA_SERVICE_NAME
+        value: refund-agent
+      - name: VECTORBEA_SOCKET_PATH
+        value: /var/run/vectorbea/vectorbea.sock
+    volumeMounts:
+      - name: vectorbea-socket
+        mountPath: /var/run/vectorbea`}
+        />
       </DocsSection>
 
       <DocsSection
