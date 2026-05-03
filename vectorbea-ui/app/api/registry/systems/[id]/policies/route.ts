@@ -24,10 +24,10 @@ export async function GET(
     const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
       .from("capability_policy_pack_assignments")
-      .select("id, policy_pack_id, status, applied_by, created_at")
+      .select("id, policy_pack_id, status, enabled, applied_by, applied_at")
       .eq("workspace_id", workspaceId)
       .eq("capability_id", id)
-      .order("created_at", { ascending: false });
+      .order("applied_at", { ascending: false });
     if (error) {
       if (error.message.includes("does not exist")) return NextResponse.json([]);
       throw new Error(error.message);
@@ -49,9 +49,9 @@ export async function GET(
         policyPackId: row.policy_pack_id,
         policyPackName: pack?.name ?? null,
         policyPackSector: pack?.sector ?? null,
-        status: row.status ?? "active",
+        status: row.status ?? (row.enabled === false ? "disabled" : "active"),
         appliedBy: row.applied_by,
-        appliedAt: row.created_at,
+        appliedAt: row.applied_at,
       };
     });
     return NextResponse.json(enriched);
@@ -104,7 +104,7 @@ export async function DELETE(
     const supabase = createVectorBeaAdminClient();
     const { error } = await supabase
       .from("capability_policy_pack_assignments")
-      .update({ status: "disabled" })
+      .update({ status: "disabled", enabled: false })
       .eq("workspace_id", workspaceId)
       .eq("capability_id", id)
       .eq("policy_pack_id", policyPackId);

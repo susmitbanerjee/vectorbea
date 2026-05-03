@@ -967,6 +967,56 @@ export async function listPolicyPacks(workspaceId: string) {
   }));
 }
 
+export async function createCustomPolicyPack(args: {
+  workspaceId: string;
+  actorUserId: string;
+  name: string;
+  description?: string | null;
+  sector?: PolicyPack["sector"];
+  rules?: Array<Record<string, unknown>>;
+  requiredEvidence?: PolicyPack["requiredEvidence"];
+  approvalRequirements?: PolicyPack["approvalRequirements"];
+}) {
+  const supabase = createVectorBeaAdminClient();
+  const name = args.name.trim();
+  if (!name) throw new Error("Policy name is required");
+
+  const { data, error } = await supabase
+    .from("policy_packs")
+    .insert({
+      workspace_id: args.workspaceId,
+      name,
+      description: args.description?.trim() || null,
+      sector: args.sector ?? "general",
+      version: "1.0.0",
+      rules: args.rules ?? [],
+      required_evidence: args.requiredEvidence ?? [],
+      approval_requirements: args.approvalRequirements ?? {},
+      enabled: true,
+      system_pack: false,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const pack = mapPolicyPack(data as PolicyPackRow);
+
+  await writeAuditEvent({
+    workspaceId: args.workspaceId,
+    actorUserId: args.actorUserId,
+    eventType: "policy_pack_created",
+    entityType: "policy_pack",
+    entityId: pack.id,
+    entityName: pack.name,
+    metadata: {
+      sector: pack.sector,
+      required_evidence_count: pack.requiredEvidence.length,
+      system_pack: false,
+    },
+  });
+
+  return pack;
+}
+
 export async function applyPolicyPackToCapability(args: {
   workspaceId: string;
   capabilityId: string;
@@ -1004,7 +1054,9 @@ export async function applyPolicyPackToCapability(args: {
     capability_id: args.capabilityId,
     policy_pack_id: args.policyPackId,
     applied_by: args.actorUserId,
+    applied_at: new Date().toISOString(),
     enabled: true,
+    status: "active",
   }, { onConflict: "capability_id,policy_pack_id" });
   if (assignRes.error) throw new Error(assignRes.error.message);
 

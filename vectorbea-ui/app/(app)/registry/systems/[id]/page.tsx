@@ -216,6 +216,12 @@ function ApplyPolicyDialog({
   const [packs, setPacks]   = useState<(PolicyPack & { appliedToCapabilityIds?: string[] })[]>([]);
   const [loading, setLoad]  = useState(true);
   const [selectedId, setSel] = useState<string>("");
+  const [mode, setMode] = useState<"existing" | "custom">("existing");
+  const [customName, setCustomName] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
+  const [customSector, setCustomSector] = useState<PolicyPack["sector"]>("general");
+  const [customEvidence, setCustomEvidence] = useState<EvidenceType[]>(["deterministic_check", "workflow_regression"]);
+  const [requiresApproval, setRequiresApproval] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState<string | null>(null);
 
@@ -228,6 +234,12 @@ function ApplyPolicyDialog({
       .catch(() => {})
       .finally(() => setLoad(false));
   }, [open, activeWorkspaceId]);
+
+  function toggleEvidence(type: EvidenceType) {
+    setCustomEvidence((current) =>
+      current.includes(type) ? current.filter((item) => item !== type) : [...current, type],
+    );
+  }
 
   async function handleApply() {
     if (!selectedId || !activeWorkspaceId) return;
@@ -250,32 +262,150 @@ function ApplyPolicyDialog({
     }
   }
 
+  async function handleCreateAndApply() {
+    if (!activeWorkspaceId || !customName.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const createRes = await fetch(`/api/policies/packs?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: customName.trim(),
+          description: customDescription.trim() || null,
+          sector: customSector,
+          requiresApproval,
+          requiredEvidence: customEvidence.map((evidenceType) => ({
+            evidenceType,
+            label: EVIDENCE_TYPE_LABELS[evidenceType],
+            required: true,
+            blocking: true,
+          })),
+        }),
+      });
+      const created = (await createRes.json()) as PolicyPack & { error?: string };
+      if (!createRes.ok) throw new Error(created.error ?? "Failed to create custom policy");
+
+      const applyRes = await fetch(`/api/registry/systems/${systemId}/policies?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policyPackId: created.id }),
+      });
+      const applied = (await applyRes.json()) as { error?: string };
+      if (!applyRes.ok) throw new Error(applied.error ?? "Custom policy was created but could not be applied");
+
+      onApplied();
+      onClose();
+      setMode("existing");
+      setCustomName("");
+      setCustomDescription("");
+      setCustomSector("general");
+      setCustomEvidence(["deterministic_check", "workflow_regression"]);
+      setRequiresApproval(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create custom policy");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-sm border-[#E7DED1] bg-white">
+      <DialogContent className="max-w-2xl border-[#E7DED1] bg-white">
         <DialogHeader>
-          <DialogTitle className="text-[#111111]">Apply Policy Pack</DialogTitle>
-          <DialogDescription className="text-[#6B7280]">Select a policy pack to apply to this AI system.</DialogDescription>
+          <DialogTitle className="text-[#111111]">Apply Policy</DialogTitle>
+          <DialogDescription className="text-[#6B7280]">Apply an existing policy pack or create a workspace custom policy for this AI system.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[#E7DED1] bg-[#FAF7F0] p-1">
+            <button
+              type="button"
+              onClick={() => setMode("existing")}
+              className={`rounded-xl px-3 py-2 text-xs font-semibold ${mode === "existing" ? "bg-white text-[#111111] shadow-sm" : "text-[#6B7280]"}`}
+            >
+              Existing pack
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("custom")}
+              className={`rounded-xl px-3 py-2 text-xs font-semibold ${mode === "custom" ? "bg-white text-[#111111] shadow-sm" : "text-[#6B7280]"}`}
+            >
+              Create custom policy
+            </button>
+          </div>
           {loading && <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-[#6B7280]" /></div>}
-          {!loading && (
+          {!loading && mode === "existing" && (
             <Select value={selectedId} onChange={(e) => setSel(e.target.value)}>
               <option value="">Select a policy pack…</option>
               {packs.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sector})</option>)}
             </Select>
+          )}
+          {mode === "custom" && (
+            <div className="space-y-3 rounded-2xl border border-[#E7DED1] bg-[#FAF7F0] p-4">
+              <label className="block text-xs font-semibold text-[#374151]">
+                Policy name
+                <input
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Refund Agent Production Policy"
+                  className="mt-1 w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
+                />
+              </label>
+              <label className="block text-xs font-semibold text-[#374151]">
+                Sector
+                <Select className="mt-1" value={customSector} onChange={(e) => setCustomSector(e.target.value as PolicyPack["sector"])}>
+                  {["general", "retail", "bfsi", "healthcare", "pharma", "software", "software_support", "travel", "insurance"].map((sector) => (
+                    <option key={sector} value={sector}>{sector.replaceAll("_", " ")}</option>
+                  ))}
+                </Select>
+              </label>
+              <label className="block text-xs font-semibold text-[#374151]">
+                Description
+                <textarea
+                  value={customDescription}
+                  onChange={(e) => setCustomDescription(e.target.value)}
+                  placeholder="Describe the control objective, rollout expectations, or regulated use case."
+                  className="mt-1 min-h-20 w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
+                />
+              </label>
+              <div>
+                <p className="text-xs font-semibold text-[#374151]">Required evidence</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {(Object.keys(EVIDENCE_TYPE_LABELS) as EvidenceType[]).map((type) => (
+                    <label key={type} className="flex items-center gap-2 rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-xs text-[#374151]">
+                      <input
+                        type="checkbox"
+                        checked={customEvidence.includes(type)}
+                        onChange={() => toggleEvidence(type)}
+                        className="h-3.5 w-3.5 accent-[#2563EB]"
+                      />
+                      {EVIDENCE_TYPE_LABELS[type]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <label className="flex items-center gap-2 rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-xs text-[#374151]">
+                <input
+                  type="checkbox"
+                  checked={requiresApproval}
+                  onChange={(e) => setRequiresApproval(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-[#2563EB]"
+                />
+                Require approval when the release gate needs review
+              </label>
+            </div>
           )}
           {error && <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">{error}</div>}
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="rounded-xl border border-[#E7DED1] px-4 py-2 text-sm text-[#374151] hover:bg-[#F8F5EF]">Cancel</button>
             <button
               type="button"
-              disabled={!selectedId || saving}
-              onClick={handleApply}
+              disabled={(mode === "existing" ? !selectedId : !customName.trim()) || saving}
+              onClick={mode === "existing" ? handleApply : handleCreateAndApply}
               className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-50 flex items-center gap-1.5"
             >
               {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Apply policy
+              {mode === "existing" ? "Apply policy" : "Create and apply"}
             </button>
           </div>
         </div>
@@ -509,7 +639,7 @@ function PoliciesTab({
           onClick={onApplyPolicy}
           className="flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-3 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
         >
-          <Scale className="h-3.5 w-3.5" /> Apply policy pack
+          <Scale className="h-3.5 w-3.5" /> Apply or create policy
         </button>
       </div>
 
@@ -518,7 +648,7 @@ function PoliciesTab({
           <Scale className="h-8 w-8 text-[#D1C9BD]" />
           <div>
             <p className="font-medium text-[#111111] text-sm">No policies applied</p>
-            <p className="text-xs text-[#6B7280] mt-1">Apply a policy pack to define governance rules and required evidence.</p>
+            <p className="text-xs text-[#6B7280] mt-1">Apply a policy pack or create a custom policy to define governance rules and required evidence.</p>
           </div>
         </div>
       )}
