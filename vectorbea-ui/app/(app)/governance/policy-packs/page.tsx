@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
+import { CheckCircle2, Loader2, Plus, RefreshCw, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import type { AiCapability, PolicyPack } from "@/lib/api";
+import type { AiCapability, EvidenceType, PolicyPack } from "@/lib/api";
 import { canUsePolicyPacks } from "@/lib/behavioral-gate";
 import { useWorkspace } from "@/lib/workspace-context";
 
@@ -79,6 +79,11 @@ export default function PolicyPacksPage() {
   const [canApply, setCanApply] = useState(false);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
+  const [customSector, setCustomSector] = useState<PolicyPack["sector"]>("general");
   const [error, setError] = useState<string | null>(null);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
 
@@ -151,6 +156,41 @@ export default function PolicyPacksPage() {
     }
   }
 
+  async function createCustomPolicy() {
+    if (!activeWorkspaceId || !customName.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const requiredEvidence: Array<{ evidenceType: EvidenceType; label: string; required: boolean; blocking: boolean }> = [
+        { evidenceType: "deterministic_check", label: "Deterministic Output Check", required: true, blocking: true },
+        { evidenceType: "workflow_regression", label: "Workflow Regression Evidence", required: true, blocking: true },
+        { evidenceType: "human_approval", label: "Human Release Approval", required: true, blocking: true },
+      ];
+      const res = await fetch(`/api/policies/packs?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: customName.trim(),
+          description: customDescription.trim() || null,
+          sector: customSector,
+          requiresApproval: true,
+          requiredEvidence,
+        }),
+      });
+      const json = (await res.json()) as PolicyPack & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to create custom policy");
+      setPacks((prev) => [json, ...prev]);
+      setCustomName("");
+      setCustomDescription("");
+      setCustomSector("general");
+      setShowCreate(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create custom policy");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader title="Policies" subtitle="Apply sector compliance templates to your AI systems" />
@@ -169,6 +209,61 @@ export default function PolicyPacksPage() {
               </Link>
             </div>
           </div>
+        )}
+
+        {canApply && (
+          <Card className="border-[#E7DED1] bg-white">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-sm text-[#111111]">Workspace custom policies</CardTitle>
+                  <p className="mt-1 text-xs text-[#6B7280]">Create a policy template with real required evidence. Evidence starts missing until a validator receives real source data.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreate((value) => !value)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1D4ED8]"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Create Custom Policy
+                </button>
+              </div>
+            </CardHeader>
+            {showCreate && (
+              <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                <input
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Policy name"
+                  className="rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
+                />
+                <Select value={customSector} onChange={(e) => setCustomSector(e.target.value as PolicyPack["sector"])}>
+                  {["general", "retail", "bfsi", "healthcare", "pharma", "software", "software_support", "travel", "insurance"].map((sector) => (
+                    <option key={sector} value={sector}>{sector.replaceAll("_", " ")}</option>
+                  ))}
+                </Select>
+                <textarea
+                  value={customDescription}
+                  onChange={(e) => setCustomDescription(e.target.value)}
+                  placeholder="Description"
+                  className="min-h-20 rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB] md:col-span-2"
+                />
+                <div className="rounded-xl border border-[#E7DED1] bg-[#FAF7F0] px-3 py-2 text-xs text-[#6B7280] md:col-span-2">
+                  Default evidence template: deterministic output check, workflow regression evidence, and human release approval.
+                </div>
+                <div className="flex justify-end md:col-span-2">
+                  <button
+                    type="button"
+                    disabled={!customName.trim() || creating}
+                    onClick={createCustomPolicy}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                  >
+                    {creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Create policy
+                  </button>
+                </div>
+              </CardContent>
+            )}
+          </Card>
         )}
 
         {/* Error */}

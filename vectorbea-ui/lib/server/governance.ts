@@ -812,11 +812,14 @@ export async function verifyIncidentWithRegression(args: {
   return mapIncidentVerification(data as IncidentVerificationRow);
 }
 
-export async function listAuditEvents(workspaceId: string, opts?: { eventType?: string; entityType?: string; limit?: number }) {
+export async function listAuditEvents(workspaceId: string, opts?: { eventType?: string; entityType?: string; aiSystemId?: string; limit?: number }) {
   const supabase = createVectorBeaAdminClient();
   let query = supabase.from("audit_events").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(opts?.limit ?? 200);
   if (opts?.eventType) query = query.eq("event_type", opts.eventType);
   if (opts?.entityType) query = query.eq("entity_type", opts.entityType);
+  if (opts?.aiSystemId) {
+    query = query.or(`entity_id.eq.${opts.aiSystemId},metadata->>ai_system_id.eq.${opts.aiSystemId},metadata->>capability_id.eq.${opts.aiSystemId}`);
+  }
   const { data, error } = await query;
   if (error) {
     if (error.message.toLowerCase().includes("does not exist")) return [];
@@ -1060,6 +1063,39 @@ export async function applyPolicyPackToCapability(args: {
   }, { onConflict: "capability_id,policy_pack_id" });
   if (assignRes.error) throw new Error(assignRes.error.message);
 
+  let generatedEvidence = 0;
+  for (const req of pack.requiredEvidence) {
+    const evidenceType = String(req.evidenceType ?? "").trim();
+    if (!evidenceType) continue;
+    const existing = await supabase
+      .from("ai_system_required_evidence")
+      .select("id")
+      .eq("workspace_id", args.workspaceId)
+      .eq("ai_system_id", args.capabilityId)
+      .eq("policy_pack_id", args.policyPackId)
+      .eq("evidence_type", evidenceType)
+      .maybeSingle();
+    if (existing.error && !existing.error.message.toLowerCase().includes("does not exist")) {
+      throw new Error(existing.error.message);
+    }
+    if (existing.data) continue;
+    const inserted = await supabase.from("ai_system_required_evidence").insert({
+      workspace_id: args.workspaceId,
+      ai_system_id: args.capabilityId,
+      policy_pack_id: args.policyPackId,
+      evidence_type: evidenceType,
+      label: req.label ?? evidenceType.replaceAll("_", " "),
+      description: (req as { description?: string }).description ?? null,
+      required: req.required !== false,
+      blocking: req.blocking !== false,
+      threshold: (req as { threshold?: number }).threshold ?? null,
+    });
+    if (inserted.error && !inserted.error.message.toLowerCase().includes("does not exist")) {
+      throw new Error(inserted.error.message);
+    }
+    if (!inserted.error) generatedEvidence += 1;
+  }
+
   await writeAuditEvent({
     workspaceId: args.workspaceId,
     actorUserId: args.actorUserId,
@@ -1067,8 +1103,19 @@ export async function applyPolicyPackToCapability(args: {
     entityType: "policy_pack",
     entityId: args.policyPackId,
     entityName: pack.name,
-    metadata: { capability_id: args.capabilityId, generated_rules: pack.rules.length, existing_suites: existingRules.length },
+    metadata: { ai_system_id: args.capabilityId, capability_id: args.capabilityId, generated_rules: pack.rules.length, generated_required_evidence: generatedEvidence, existing_suites: existingRules.length },
   });
+  if (generatedEvidence > 0) {
+    await writeAuditEvent({
+      workspaceId: args.workspaceId,
+      actorUserId: args.actorUserId,
+      eventType: "required_evidence_generated",
+      entityType: "ai_system",
+      entityId: args.capabilityId,
+      entityName: capability.name,
+      metadata: { ai_system_id: args.capabilityId, policy_pack_id: args.policyPackId, generated_required_evidence: generatedEvidence },
+    });
+  }
   return pack;
 }
 

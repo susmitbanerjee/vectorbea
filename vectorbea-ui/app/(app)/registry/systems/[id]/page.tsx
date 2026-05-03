@@ -794,6 +794,7 @@ function RequiredEvidenceTab({
         const latestRun = latestRunByType.get(e.evidenceType as EvidenceType);
         const runStatus = latestRun?.status;
         const isRunning = starting === e.evidenceType || runStatus === "running" || runStatus === "queued";
+        const canRunFromUi = e.evidenceType === "human_approval";
 
         let statusIcon: React.ReactNode;
         let statusBadge: React.ReactNode = null;
@@ -838,6 +839,11 @@ function RequiredEvidenceTab({
                 {latestRun?.resultSummary && runStatus !== "failed" && (
                   <p className="text-xs text-[#065F46] mt-1">↳ {latestRun.resultSummary}</p>
                 )}
+                {!canRunFromUi && !latestRun && (
+                  <p className="text-xs text-[#92400E] mt-1">
+                    Connect CI/CD, SDK, sidecar, OpenTelemetry, RAG, MCP, workflow, prompt, or provider evidence to run this validator.
+                  </p>
+                )}
               </div>
               <div className="flex gap-2 flex-shrink-0">
                 {latestRun && (
@@ -850,11 +856,12 @@ function RequiredEvidenceTab({
                 )}
                 <button
                   onClick={() => runCheck(e.evidenceType as EvidenceType, e.blocking, e.policyPackId)}
-                  disabled={isRunning}
+                  disabled={isRunning || !canRunFromUi}
+                  title={canRunFromUi ? undefined : "This check requires real evidence from an upload, API run, CI/CD, SDK, sidecar, OpenTelemetry, RAG, MCP, workflow, prompt, or provider test source."}
                   className="flex items-center gap-1 rounded-lg bg-[#2563EB] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
                 >
                   {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-                  {latestRun ? "Re-run" : "Run check"}
+                  {canRunFromUi ? (latestRun ? "Re-run" : "Run check") : "Needs source"}
                 </button>
               </div>
             </div>
@@ -1003,7 +1010,7 @@ export default function SystemDetailPage() {
   const loadAudit = useCallback(() => {
     if (!id || !activeWorkspaceId) return;
     setAuditLoad(true);
-    fetch(`/api/governance/audit?workspaceId=${encodeURIComponent(activeWorkspaceId)}&entityType=ai_system`)
+    fetch(`/api/governance/audit?workspaceId=${encodeURIComponent(activeWorkspaceId)}&aiSystemId=${encodeURIComponent(id)}`)
       .then((r) => r.json())
       .then((data: unknown) => { if (Array.isArray(data)) setAuditEvents(data as AuditEvent[]); })
       .catch(() => setAuditError("Failed to load audit events"))

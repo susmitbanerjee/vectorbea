@@ -38,6 +38,14 @@ export interface DashboardSummary {
   auditsThisMonth: number;
   averageLatencyMs: number;
   activeAgents: number;
+  totalAiSystems?: number;
+  highRiskSystems?: number;
+  systemsMissingEvidence?: number;
+  blockedReleases?: number;
+  pendingApprovals?: number;
+  openIncidents?: number;
+  failedEvidenceRuns?: number;
+  systemsWithoutPolicy?: number;
 }
 
 export interface DailyRequestPoint {
@@ -1206,6 +1214,10 @@ export interface RequiredEvidence {
   required: boolean;
   blocking: boolean;
   threshold: number | null;
+  status?: "missing" | "pending" | "passed" | "failed" | "needs_review" | "not_applicable";
+  latestEvidenceRunId?: string | null;
+  latestEvidenceRunStatus?: EvidenceRunStatus | null;
+  latestEvidenceRunAt?: string | null;
   createdAt: string;
 }
 

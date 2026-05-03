@@ -9,6 +9,7 @@ import type {
   ReleaseGateStatus,
 } from "@/lib/api";
 import { writeAuditEvent } from "@/lib/server/audit-events";
+import { validateEvidenceRun } from "@/lib/server/evidence-validators";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 // ─── Row type ─────────────────────────────────────────────────────────────────
@@ -166,6 +167,7 @@ export async function createEvidenceRun(args: {
   policyPackId?: string | null;
   underlyingRunId?: string | null;
   underlyingRunType?: string | null;
+  resultMetadata?: Record<string, unknown>;
   startedBy: string;
 }): Promise<CapabilityEvidenceRun> {
   const supabase = createVectorBeaAdminClient();
@@ -234,6 +236,7 @@ export async function createEvidenceRun(args: {
       policy_pack_id: args.policyPackId ?? null,
       underlying_run_id: underlyingRunId,
       underlying_run_type: underlyingRunType,
+      result_metadata: args.resultMetadata ?? {},
       started_by: args.startedBy,
       started_at: new Date().toISOString(),
     })
@@ -255,6 +258,69 @@ export async function createEvidenceRun(args: {
   });
 
   return mapRun(data as EvidenceRunRow);
+}
+
+export async function createValidatedEvidenceRun(args: {
+  workspaceId: string;
+  aiSystemId: string;
+  aiSystemVersionId?: string | null;
+  evidenceType: EvidenceType;
+  blocking?: boolean;
+  policyPackId?: string | null;
+  sourceType: string;
+  sourceId?: string | null;
+  validatorType?: string | null;
+  inputPayload?: Record<string, unknown> | null;
+  outputPayload?: Record<string, unknown> | null;
+  validatorConfig?: Record<string, unknown> | null;
+  startedBy: string;
+}): Promise<CapabilityEvidenceRun> {
+  const validation = validateEvidenceRun({
+    evidenceType: args.evidenceType,
+    validatorType: args.validatorType,
+    inputPayload: args.inputPayload ?? null,
+    outputPayload: args.outputPayload ?? null,
+    validatorConfig: args.validatorConfig ?? null,
+    sourceType: args.sourceType,
+    sourceId: args.sourceId ?? null,
+  });
+  const run = await createEvidenceRun({
+    workspaceId: args.workspaceId,
+    aiSystemId: args.aiSystemId,
+    aiSystemVersionId: args.aiSystemVersionId ?? null,
+    evidenceType: args.evidenceType,
+    blocking: args.blocking ?? true,
+    policyPackId: args.policyPackId ?? null,
+    underlyingRunId: args.sourceId ?? null,
+    underlyingRunType: args.sourceType,
+    startedBy: args.startedBy,
+    resultMetadata: {
+      source_type: args.sourceType,
+      source_id: args.sourceId ?? null,
+      validator_type: args.validatorType ?? args.validatorConfig?.validatorType ?? args.evidenceType,
+      input_payload: args.inputPayload ?? null,
+      output_payload: args.outputPayload ?? null,
+      validator_config: args.validatorConfig ?? {},
+      validation_details: validation.details,
+    },
+  });
+
+  return updateEvidenceRunStatus(args.workspaceId, run.id, validation.status, {
+    resultScore: validation.score,
+    resultSummary: validation.reason,
+    failureReason: validation.status === "failed" ? validation.reason : null,
+    resultMetadata: {
+      ...run.resultMetadata,
+      source_type: args.sourceType,
+      source_id: args.sourceId ?? null,
+      validator_type: args.validatorType ?? args.validatorConfig?.validatorType ?? args.evidenceType,
+      input_payload: args.inputPayload ?? null,
+      output_payload: args.outputPayload ?? null,
+      validator_config: args.validatorConfig ?? {},
+      validation_details: validation.details,
+      passed: validation.passed,
+    },
+  });
 }
 
 export async function updateEvidenceRunStatus(
@@ -335,13 +401,18 @@ export async function computeReleaseGate(
   const riskLevel = system?.risk_level ?? "medium";
 
   // 3. Get required evidence from policy assignments
-  const [assignmentsRes, evidenceRunsRes, incidentsRes, approvalRes] = await Promise.all([
+  const [assignmentsRes, requiredEvidenceRes, evidenceRunsRes, incidentsRes, approvalRes] = await Promise.all([
     supabase
       .from("capability_policy_pack_assignments")
       .select("policy_pack_id")
       .eq("workspace_id", workspaceId)
       .eq("capability_id", aiSystemId)
       .eq("status", "active"),
+    supabase
+      .from("ai_system_required_evidence")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("ai_system_id", aiSystemId),
     supabase
       .from("capability_evidence_runs")
       .select("*")
@@ -377,7 +448,18 @@ export async function computeReleaseGate(
     policyPackName: string;
   }> = [];
 
-  if (packIds.length > 0) {
+  for (const row of requiredEvidenceRes.data ?? []) {
+    requiredEvidenceItems.push({
+      evidenceType: row.evidence_type as EvidenceType,
+      label: row.label ?? String(row.evidence_type).replaceAll("_", " "),
+      blocking: row.blocking !== false,
+      required: row.required !== false,
+      policyPackId: row.policy_pack_id ? String(row.policy_pack_id) : "",
+      policyPackName: "Required evidence",
+    });
+  }
+
+  if (packIds.length > 0 && requiredEvidenceItems.length === 0) {
     const { data: packs } = await supabase
       .from("policy_packs")
       .select("id, name, required_evidence, approval_requirements")
@@ -444,7 +526,7 @@ export async function computeReleaseGate(
       label: "Policy assigned",
       evidenceType: "policy_check" as EvidenceType,
       status: "missing",
-      blocking: false,
+      blocking: true,
       detail: "No policy pack assigned to this AI system",
       evidenceRunId: null,
       approvalRequestId: null,

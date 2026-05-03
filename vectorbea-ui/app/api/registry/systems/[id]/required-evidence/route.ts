@@ -20,7 +20,7 @@ export async function GET(
 
     // Derive required evidence: combine rows from ai_system_required_evidence table
     // plus synthesize from assigned policy packs' requiredEvidence JSON
-    const [directRes, assignmentsRes] = await Promise.all([
+    const [directRes, assignmentsRes, runsRes] = await Promise.all([
       supabase
         .from("ai_system_required_evidence")
         .select("*")
@@ -33,13 +33,39 @@ export async function GET(
         .eq("workspace_id", workspaceId)
         .eq("capability_id", id)
         .eq("status", "active"),
+      supabase
+        .from("capability_evidence_runs")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("ai_system_id", id)
+        .order("created_at", { ascending: false }),
     ]);
 
     if (directRes.error && !directRes.error.message.includes("does not exist")) {
       throw new Error(directRes.error.message);
     }
 
-    const directItems = (directRes.data ?? []).map((row: Record<string, unknown>) => ({
+    const latestRunByTypeAndPack = new Map<string, Record<string, unknown>>();
+    for (const run of runsRes.data ?? []) {
+      const key = `${run.evidence_type}:${run.policy_pack_id ?? ""}`;
+      if (!latestRunByTypeAndPack.has(key)) latestRunByTypeAndPack.set(key, run as Record<string, unknown>);
+      const typeKey = `${run.evidence_type}:`;
+      if (!latestRunByTypeAndPack.has(typeKey)) latestRunByTypeAndPack.set(typeKey, run as Record<string, unknown>);
+    }
+
+    const withRunStatus = (item: Record<string, unknown>): Record<string, unknown> => {
+      const run = latestRunByTypeAndPack.get(`${item.evidenceType}:${item.policyPackId ?? ""}`)
+        ?? latestRunByTypeAndPack.get(`${item.evidenceType}:`);
+      return {
+        ...item,
+        status: run?.status ?? "missing",
+        latestEvidenceRunId: run?.id ?? null,
+        latestEvidenceRunStatus: run?.status ?? null,
+        latestEvidenceRunAt: run?.completed_at ?? run?.created_at ?? null,
+      };
+    };
+
+    const directItems: Array<Record<string, unknown>> = (directRes.data ?? []).map((row: Record<string, unknown>) => withRunStatus({
       id: row.id,
       workspaceId,
       aiSystemId: id,
@@ -56,7 +82,7 @@ export async function GET(
 
     // Synthesize from policy packs
     const packIds = (assignmentsRes.data ?? []).map((r) => String(r.policy_pack_id));
-    let policyItems: typeof directItems = [];
+    let policyItems: Array<Record<string, unknown>> = [];
     if (packIds.length > 0) {
       const { data: packs } = await supabase
         .from("policy_packs")
@@ -70,7 +96,7 @@ export async function GET(
             (d) => d.policyPackId === String(pack.id) && d.evidenceType === req.evidenceType,
           );
           if (!alreadyCovered) {
-            policyItems.push({
+            policyItems.push(withRunStatus({
               id: `synth:${pack.id}:${req.evidenceType}`,
               workspaceId,
               aiSystemId: id,
@@ -83,7 +109,7 @@ export async function GET(
               blocking: req.blocking !== false,
               threshold: (req.threshold as number | null) ?? null,
               createdAt: new Date().toISOString(),
-            });
+            }));
           }
         }
       }

@@ -4,14 +4,14 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useT
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
+  AlertTriangle,
   ClipboardList,
-  Bot,
   CheckCircle2,
   FileText,
   Layers,
   RefreshCw,
   Tag,
-  Zap,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -218,8 +218,8 @@ export function DashboardOverview({
             >
               Export JSON
             </a>
-            <a href={workspaceId ? `/prompts?org=${workspaceId}` : "/prompts"} className={cn(buttonVariants())}>
-              Publish prompt
+            <a href={workspaceId ? `/registry/systems?org=${workspaceId}` : "/registry/systems"} className={cn(buttonVariants())}>
+              Register AI system
             </a>
           </>
         }
@@ -229,27 +229,26 @@ export function DashboardOverview({
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label="API calls (24h)"
-            value={dashboardSummary.totalApiCallsLast24h}
+            value={dashboardSummary.totalAiSystems ?? 0}
             icon={<Activity className="h-5 w-5" />}
             staggerIndex={0}
           />
           <MetricCard
-            label="Audits this month"
-            value={dashboardSummary.auditsThisMonth}
+            label="Missing evidence"
+            value={dashboardSummary.systemsMissingEvidence ?? 0}
             icon={<ClipboardList className="h-5 w-5" />}
             staggerIndex={1}
           />
           <MetricCard
-            label="Avg latency"
-            value={dashboardSummary.averageLatencyMs}
-            suffix=" ms"
-            icon={<Zap className="h-5 w-5" />}
+            label="Blocked releases"
+            value={dashboardSummary.blockedReleases ?? 0}
+            icon={<ShieldAlert className="h-5 w-5" />}
             staggerIndex={2}
           />
           <MetricCard
-            label="Active sidecars"
-            value={dashboardSummary.activeAgents}
-            icon={<Bot className="h-5 w-5" />}
+            label="Open incidents"
+            value={dashboardSummary.openIncidents ?? 0}
+            icon={<AlertTriangle className="h-5 w-5" />}
             staggerIndex={3}
           />
         </section>

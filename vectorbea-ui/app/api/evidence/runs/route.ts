@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import type { EvidenceRunStatus, EvidenceType } from "@/lib/api";
 import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
-import { createEvidenceRun, listEvidenceRuns, updateEvidenceRunStatus } from "@/lib/server/evidence-runs";
+import { createEvidenceRun, createValidatedEvidenceRun, listEvidenceRuns } from "@/lib/server/evidence-runs";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 
 export const dynamic = "force-dynamic";
@@ -49,12 +49,28 @@ export async function POST(request: NextRequest) {
       evidenceType?: EvidenceType;
       blocking?: boolean;
       policyPackId?: string | null;
+      sourceType?: string;
+      sourceId?: string | null;
+      validatorType?: string | null;
+      inputPayload?: Record<string, unknown> | null;
+      outputPayload?: Record<string, unknown> | null;
+      validatorConfig?: Record<string, unknown> | null;
     };
 
     if (!body.aiSystemId) return NextResponse.json({ error: "aiSystemId is required" }, { status: 400 });
     if (!body.evidenceType) return NextResponse.json({ error: "evidenceType is required" }, { status: 400 });
 
-    let run = await createEvidenceRun({
+    if (body.evidenceType !== "human_approval" && !body.sourceType && !body.sourceId && !body.inputPayload && !body.outputPayload) {
+      return NextResponse.json(
+        {
+          error:
+            "Missing evidence source. Provide sourceType plus real input/output payload or a source reference from CI, SDK, sidecar, OpenTelemetry, RAG, MCP, workflow, prompt, or provider test evidence.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const run = body.evidenceType === "human_approval" ? await createEvidenceRun({
       workspaceId,
       aiSystemId: body.aiSystemId,
       aiSystemVersionId: body.aiSystemVersionId ?? null,
@@ -62,19 +78,21 @@ export async function POST(request: NextRequest) {
       blocking: body.blocking ?? true,
       policyPackId: body.policyPackId ?? null,
       startedBy: auth.user.id,
+    }) : await createValidatedEvidenceRun({
+      workspaceId,
+      aiSystemId: body.aiSystemId,
+      aiSystemVersionId: body.aiSystemVersionId ?? null,
+      evidenceType: body.evidenceType,
+      blocking: body.blocking ?? true,
+      policyPackId: body.policyPackId ?? null,
+      sourceType: body.sourceType ?? "direct_api",
+      sourceId: body.sourceId ?? null,
+      validatorType: body.validatorType ?? null,
+      inputPayload: body.inputPayload ?? null,
+      outputPayload: body.outputPayload ?? null,
+      validatorConfig: body.validatorConfig ?? null,
+      startedBy: auth.user.id,
     });
-
-    if (body.evidenceType !== "human_approval") {
-      run = await updateEvidenceRunStatus(workspaceId, run.id, "passed", {
-        resultScore: 1,
-        resultSummary: "Required evidence check completed for release governance.",
-        resultMetadata: {
-          execution_mode: "mvp_control_check",
-          ai_system_id: body.aiSystemId,
-          ai_system_version_id: body.aiSystemVersionId ?? null,
-        },
-      });
-    }
 
     return NextResponse.json(run, { status: 201 });
   } catch (error) {

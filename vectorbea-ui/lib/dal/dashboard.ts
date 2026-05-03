@@ -2,6 +2,7 @@ import "server-only";
 
 import type { AuditLogView, DashboardSummary } from "@/lib/api";
 import { resolveAuditProxyLatencyMs, resolveAuditLlmLatencyMs } from "@/lib/server/audit-latency";
+import { computeReleaseGate } from "@/lib/server/evidence-runs";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
@@ -48,57 +49,75 @@ export async function getDashboardSummaryForWorkspace(
   _auditLogs?: AuditLogView[],
 ): Promise<DashboardSummary> {
   const supabase = createVectorBeaAdminClient();
-  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-  const monthStartIso = monthStart.toISOString();
-
-  const [{ data: auditData24h }, { data: auditDataMonth }, { data: agentData, error }] =
+  const [{ data: systems }, { data: assignments }, { data: requiredEvidence }, { data: evidenceRuns }, { data: approvals }, { data: incidents }, { data: versions, error }] =
     await Promise.all([
       supabase
-        .from("audit_logs")
-        .select("proxy_latency_ms, metadata")
-        .eq("workspace_id", workspaceId)
-        .gte("created_at", since24h),
+        .from("ai_capabilities")
+        .select("id, risk_level, owner_user_id")
+        .eq("workspace_id", workspaceId),
       supabase
-        .from("audit_logs")
-        .select("metadata")
+        .from("capability_policy_pack_assignments")
+        .select("capability_id")
         .eq("workspace_id", workspaceId)
-        .gte("created_at", monthStartIso),
+        .eq("status", "active"),
       supabase
-        .from("deployment_agents")
-        .select("id, last_heartbeat")
+        .from("ai_system_required_evidence")
+        .select("ai_system_id, evidence_type, blocking")
+        .eq("workspace_id", workspaceId),
+      supabase
+        .from("capability_evidence_runs")
+        .select("ai_system_id, evidence_type, status, created_at")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("approval_requests")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .eq("status", "pending"),
+      supabase
+        .from("ai_incidents")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .in("status", ["open", "investigating", "fix_in_progress", "verification_pending"]),
+      supabase
+        .from("capability_versions")
+        .select("id")
         .eq("workspace_id", workspaceId),
     ]);
 
   if (error) {
-    throw new Error(`Failed to load deployment agents: ${error.message}`);
+    throw new Error(`Failed to load governance dashboard: ${error.message}`);
   }
 
-  const runtimeRows24h = (auditData24h ?? []).filter(
-    (row) => resolveUseType((row.metadata as Record<string, unknown>) ?? {}) === "runtime",
-  );
-  const auditRowsMonth = (auditDataMonth ?? []).filter(
-    (row) => resolveUseType((row.metadata as Record<string, unknown>) ?? {}) === "audit",
-  );
-  const averageLatencyMs =
-    runtimeRows24h.length > 0
-      ? Math.round(
-          runtimeRows24h.reduce((sum, row) => sum + resolveAuditProxyLatencyMs(row.proxy_latency_ms, row.metadata), 0) /
-            runtimeRows24h.length,
-        )
-      : 0;
-
-  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-  const activeAgents = (agentData ?? []).filter(
-    (agent) => agent.last_heartbeat && agent.last_heartbeat >= twoMinutesAgo,
-  ).length;
+  const assignedSystemIds = new Set((assignments ?? []).map((row) => String(row.capability_id)));
+  const latestRunBySystemType = new Map<string, string>();
+  for (const run of evidenceRuns ?? []) {
+    const key = `${run.ai_system_id}:${run.evidence_type}`;
+    if (!latestRunBySystemType.has(key)) latestRunBySystemType.set(key, String(run.status));
+  }
+  const systemsMissingEvidence = new Set<string>();
+  for (const req of requiredEvidence ?? []) {
+    const status = latestRunBySystemType.get(`${req.ai_system_id}:${req.evidence_type}`);
+    if (!status || status === "queued" || status === "running") systemsMissingEvidence.add(String(req.ai_system_id));
+  }
+  let blockedReleases = 0;
+  for (const version of versions ?? []) {
+    const gate = await computeReleaseGate(workspaceId, String(version.id)).catch(() => null);
+    if (gate?.decision === "blocked" || gate?.decision === "missing_evidence") blockedReleases += 1;
+  }
 
   return {
-    totalApiCallsLast24h: runtimeRows24h.length,
-    auditsThisMonth: auditRowsMonth.length,
-    averageLatencyMs,
-    activeAgents,
+    totalApiCallsLast24h: 0,
+    auditsThisMonth: 0,
+    averageLatencyMs: 0,
+    activeAgents: 0,
+    totalAiSystems: systems?.length ?? 0,
+    highRiskSystems: (systems ?? []).filter((system) => ["high", "critical"].includes(String(system.risk_level))).length,
+    systemsMissingEvidence: systemsMissingEvidence.size,
+    blockedReleases,
+    pendingApprovals: approvals?.length ?? 0,
+    openIncidents: incidents?.length ?? 0,
+    failedEvidenceRuns: (evidenceRuns ?? []).filter((run) => run.status === "failed").length,
+    systemsWithoutPolicy: (systems ?? []).filter((system) => !assignedSystemIds.has(String(system.id))).length,
   };
 }

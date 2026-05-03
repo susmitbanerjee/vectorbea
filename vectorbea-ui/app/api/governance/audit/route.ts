@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
     await assertFeatureAccess(workspaceId, "governance_dashboard");
     const eventType = request.nextUrl.searchParams.get("eventType")?.trim() || undefined;
     const entityType = request.nextUrl.searchParams.get("entityType")?.trim() || undefined;
-    return NextResponse.json(await listAuditEvents(workspaceId, { eventType, entityType }));
+    const aiSystemId = request.nextUrl.searchParams.get("aiSystemId")?.trim() || undefined;
+    return NextResponse.json(await listAuditEvents(workspaceId, { eventType, entityType, aiSystemId }));
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to load audit events");
     return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
