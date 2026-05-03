@@ -4,8 +4,10 @@ import type {
   AiCapability,
   AiCapabilityType,
   BusinessDomain,
+  CapabilityStatus,
   CapabilityVersion,
   CapabilityVersionStatus,
+  DataSensitivity,
   ReliabilityRiskLevel,
 } from "@/lib/api";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
@@ -20,6 +22,7 @@ type CapabilityRow = {
   type: string;
   business_domain: string;
   risk_level: string;
+  data_sensitivity: string | null;
   owner_user_id: string | null;
   status: string;
   prompt_id: string | null;
@@ -60,8 +63,9 @@ function mapCapability(row: CapabilityRow): AiCapability {
     type: row.type as AiCapabilityType,
     businessDomain: row.business_domain as BusinessDomain,
     riskLevel: row.risk_level as ReliabilityRiskLevel,
+    dataSensitivity: (row.data_sensitivity ?? "internal") as DataSensitivity,
     ownerUserId: row.owner_user_id,
-    status: row.status as "active" | "archived",
+    status: row.status as CapabilityStatus,
     promptId: row.prompt_id,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -100,7 +104,7 @@ export async function listCapabilities(workspaceId: string): Promise<AiCapabilit
     .from("ai_capabilities")
     .select("*")
     .eq("workspace_id", workspaceId)
-    .eq("status", "active")
+    .neq("status", "archived")
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) {
@@ -110,6 +114,23 @@ export async function listCapabilities(workspaceId: string): Promise<AiCapabilit
   const rows = (data ?? []) as CapabilityRow[];
 
   // Enrich with active version counts
+  // Bulk-fetch policy assignments for all capabilities in one query
+  const capabilityIds = rows.map((r) => r.id);
+  const assignmentsRes = capabilityIds.length > 0
+    ? await supabase
+        .from("capability_policy_pack_assignments")
+        .select("capability_id,policy_pack_id")
+        .eq("workspace_id", workspaceId)
+        .eq("status", "active")
+        .in("capability_id", capabilityIds)
+    : { data: [], error: null };
+
+  const policyMap = new Map<string, string[]>();
+  for (const row of assignmentsRes.data ?? []) {
+    const key = String(row.capability_id);
+    policyMap.set(key, [...(policyMap.get(key) ?? []), String(row.policy_pack_id)]);
+  }
+
   const enriched = await Promise.all(
     rows.map(async (row) => {
       const cap = mapCapability(row);
@@ -119,6 +140,9 @@ export async function listCapabilities(workspaceId: string): Promise<AiCapabilit
       ]);
       cap.versionCount = versionsRes.count ?? 0;
       cap.activeVersion = activeRes.data ? mapVersion(activeRes.data as VersionRow) : null;
+      const packIds = policyMap.get(row.id) ?? [];
+      cap.assignedPolicyPackIds = packIds;
+      cap.policyStatus = packIds.length === 0 ? "no_policy" : "assigned";
       return cap;
     }),
   );
@@ -137,12 +161,16 @@ export async function getCapability(workspaceId: string, id: string): Promise<Ai
   if (!data) return null;
   const cap = mapCapability(data as CapabilityRow);
 
-  const [versionsRes, activeRes] = await Promise.all([
+  const [versionsRes, activeRes, assignmentsRes] = await Promise.all([
     supabase.from("capability_versions").select("id", { count: "exact", head: true }).eq("capability_id", id),
     supabase.from("capability_versions").select("*").eq("capability_id", id).eq("status", "active").maybeSingle(),
+    supabase.from("capability_policy_pack_assignments").select("policy_pack_id").eq("capability_id", id).eq("workspace_id", workspaceId).eq("status", "active"),
   ]);
   cap.versionCount = versionsRes.count ?? 0;
   cap.activeVersion = activeRes.data ? mapVersion(activeRes.data as VersionRow) : null;
+  const packIds = (assignmentsRes.data ?? []).map((r) => String(r.policy_pack_id));
+  cap.assignedPolicyPackIds = packIds;
+  cap.policyStatus = packIds.length === 0 ? "no_policy" : "assigned";
   return cap;
 }
 
@@ -153,6 +181,7 @@ export async function createCapability(args: {
   type: AiCapabilityType;
   businessDomain: BusinessDomain;
   riskLevel: ReliabilityRiskLevel;
+  dataSensitivity?: DataSensitivity;
   ownerUserId?: string | null;
   promptId?: string | null;
   createdBy: string;
@@ -167,8 +196,10 @@ export async function createCapability(args: {
       type: args.type,
       business_domain: args.businessDomain,
       risk_level: args.riskLevel,
+      data_sensitivity: args.dataSensitivity ?? "internal",
       owner_user_id: args.ownerUserId ?? null,
       prompt_id: args.promptId ?? null,
+      status: "draft",
       created_by: args.createdBy,
     })
     .select("*")
@@ -186,8 +217,9 @@ export async function updateCapability(
     type: AiCapabilityType;
     businessDomain: BusinessDomain;
     riskLevel: ReliabilityRiskLevel;
+    dataSensitivity: DataSensitivity;
     ownerUserId: string | null;
-    status: "active" | "archived";
+    status: CapabilityStatus;
   }>,
 ): Promise<AiCapability> {
   const supabase = createVectorBeaAdminClient();
@@ -197,6 +229,7 @@ export async function updateCapability(
   if (patch.type !== undefined) dbPatch.type = patch.type;
   if (patch.businessDomain !== undefined) dbPatch.business_domain = patch.businessDomain;
   if (patch.riskLevel !== undefined) dbPatch.risk_level = patch.riskLevel;
+  if (patch.dataSensitivity !== undefined) dbPatch.data_sensitivity = patch.dataSensitivity;
   if (patch.ownerUserId !== undefined) dbPatch.owner_user_id = patch.ownerUserId;
   if (patch.status !== undefined) {
     dbPatch.status = patch.status;
@@ -375,8 +408,9 @@ export async function listCapabilitiesIncludingPrompts(workspaceId: string): Pro
       type: "prompt" as AiCapabilityType,
       businessDomain: "general" as BusinessDomain,
       riskLevel: "medium" as ReliabilityRiskLevel,
+      dataSensitivity: "internal" as import("@/lib/api").DataSensitivity,
       ownerUserId: null,
-      status: "active" as const,
+      status: "active" as import("@/lib/api").CapabilityStatus,
       promptId: row.id,
       createdBy: row.created_by,
       createdAt: row.created_at,
@@ -384,6 +418,8 @@ export async function listCapabilitiesIncludingPrompts(workspaceId: string): Pro
       archivedAt: null,
       versionCount: 0,
       activeVersion: null,
+      assignedPolicyPackIds: [],
+      policyStatus: "no_policy" as import("@/lib/api").PolicyStatus,
     }));
 
   return [...nativeCaps, ...syntheticCaps];

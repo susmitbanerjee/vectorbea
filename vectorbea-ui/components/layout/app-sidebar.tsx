@@ -9,16 +9,15 @@ import {
   Activity,
   BadgeCheck,
   Bell,
-  BarChart3,
-  BotMessageSquare,
-  ClipboardCheck,
-  CircleDollarSign,
+  Bot,
+  ClipboardList,
   Columns3,
   CreditCard,
   ExternalLink,
+  FileBarChart2,
   FileText,
-  Gauge,
-  GitCompare,
+  FlaskConical,
+  GitMerge,
   History,
   Inbox,
   KeyRound,
@@ -27,14 +26,11 @@ import {
   LockKeyhole,
   Loader2,
   LogOut,
+  Plug,
   Repeat2,
-  Server,
+  Scale,
   Settings2,
-  ShieldCheck,
-  ShieldAlert,
-  Sparkles,
   Star,
-  TrendingUp,
   TriangleAlert,
   Users,
 } from "lucide-react";
@@ -48,66 +44,60 @@ import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
 // ─── Route group matchers ─────────────────────────────────────────────────────
 
-function isDashboardRoute(p: string) {
-  return p === "/dashboard" || p.startsWith("/dashboard/");
-}
-function isEvaluationsRoute(p: string) {
-  return p === "/evaluations" || p.startsWith("/evaluations/");
-}
-function isReliabilityRoute(p: string) {
-  return p === "/reliability" || p.startsWith("/reliability/");
-}
-function isWorkflowRoute(p: string) {
+function isRegistryRoute(p: string) {
   return (
-    p === "/workflows" ||
-    p.startsWith("/workflows/") ||
-    p === "/onboarding/workflow-discovery" ||
-    p.startsWith("/onboarding/workflow-discovery/") ||
-    (p.startsWith("/traces/") && p.endsWith("/graph"))
+    p === "/registry" || p.startsWith("/registry/") ||
+    p === "/reliability" || p.startsWith("/reliability/") ||
+    p === "/prompts" || p.startsWith("/prompts/")
   );
 }
-function isGovernanceRoute(p: string) {
+function isEvidenceRoute(p: string) {
   return (
-    p === "/governance" ||
-    p.startsWith("/governance/") ||
-    p === "/incidents" ||
-    p.startsWith("/incidents/") ||
-    p === "/privacy" ||
-    p.startsWith("/privacy/") ||
-    p === "/settings/privacy" ||
-    p.startsWith("/settings/privacy") ||
-    p === "/governance/audit" ||
-    p.startsWith("/governance/audit/") ||
-    p === "/settings/audit" ||
-    p.startsWith("/settings/audit")
+    p === "/evidence" || p.startsWith("/evidence/") ||
+    p === "/evaluations" || p.startsWith("/evaluations/")
   );
 }
-function isAnalyticsRoute(p: string) {
+function isReleaseGatesRoute(p: string) {
+  return p === "/release-gates" || p.startsWith("/release-gates/");
+}
+function isPoliciesRoute(p: string) {
   return (
-    p === "/analytics" ||
-    p.startsWith("/analytics/") ||
-    p === "/reliability/roi" ||
-    p.startsWith("/reliability/roi/") ||
-    p === "/reliability/costs" ||
-    p.startsWith("/reliability/costs/") ||
-    p === "/settings/usage" ||
-    p.startsWith("/settings/usage/")
+    p === "/policies" || p.startsWith("/policies/") ||
+    p === "/governance/policy-packs" || p.startsWith("/governance/policy-packs/")
+  );
+}
+function isApprovalsRoute(p: string) {
+  return (
+    p === "/approvals" || p.startsWith("/approvals/") ||
+    p === "/governance/approvals" || p.startsWith("/governance/approvals/")
+  );
+}
+function isAuditRoute(p: string) {
+  return (
+    p === "/audit" || p.startsWith("/audit/") ||
+    p === "/governance/audit" || p.startsWith("/governance/audit/") ||
+    p === "/audit-logs" || p.startsWith("/audit-logs/") ||
+    p === "/settings/audit" || p.startsWith("/settings/audit/")
+  );
+}
+function isReportsRoute(p: string) {
+  return (
+    p === "/reports" || p.startsWith("/reports/") ||
+    p === "/governance/reports" || p.startsWith("/governance/reports/")
+  );
+}
+function isIntegrationsRoute(p: string) {
+  return (
+    p === "/integrations" || p.startsWith("/integrations/") ||
+    p === "/traces" || p.startsWith("/traces/") ||
+    p === "/workflows" || p.startsWith("/workflows/") ||
+    p === "/onboarding/workflow-discovery" || p.startsWith("/onboarding/workflow-discovery/")
   );
 }
 function isSettingsRoute(p: string) {
   return (
-    (
-      (
-        p === "/settings" ||
-        p.startsWith("/settings/")
-      ) &&
-      p !== "/settings/privacy" &&
-      !p.startsWith("/settings/privacy/") &&
-      p !== "/settings/usage" &&
-      !p.startsWith("/settings/usage/")
-    ) ||
-    p === "/api-keys" ||
-    p.startsWith("/api-keys/")
+    (p === "/settings" || p.startsWith("/settings/")) ||
+    p === "/api-keys" || p.startsWith("/api-keys/")
   );
 }
 
@@ -124,56 +114,154 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  // ── Top level ──
+  // ── Dashboard ──
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/dashboard/metrics",         label: "Metrics",        icon: BarChart3,     isSubItem: true, subItemGroup: isDashboardRoute },
-  { href: "/dashboard/infrastructure",  label: "Infrastructure", icon: Server,        isSubItem: true, subItemGroup: isDashboardRoute },
 
-  { href: "/traces",   label: "Traces",   icon: Activity },
-  { href: "/prompts",  label: "Prompts",  icon: FileText },
-  { href: "/workflows", label: "Workflows", icon: GitCompare },
-  { href: "/onboarding/workflow-discovery", label: "Discovery Wizard", icon: Sparkles, isSubItem: true, subItemGroup: isWorkflowRoute },
+  // ── AI Registry ──
+  { href: "/registry/systems", label: "AI Registry", icon: Bot },
+  {
+    href: "/registry/systems",
+    label: "AI Systems",
+    icon: Bot,
+    isSubItem: true,
+    subItemGroup: isRegistryRoute,
+  },
+  {
+    href: "/prompts",
+    label: "AI System Versions",
+    icon: FileText,
+    isSubItem: true,
+    subItemGroup: isRegistryRoute,
+  },
 
-  // ── Evaluations ──
-  { href: "/evaluations",                label: "Evaluations",          icon: ClipboardCheck },
-  { href: "/evaluations/datasets",       label: "Baseline Datasets",    icon: Star,           isSubItem: true, subItemGroup: isEvaluationsRoute },
-  { href: "/evaluations/golden",         label: "Golden Traces",        icon: Star,           isSubItem: true, subItemGroup: isEvaluationsRoute },
-  { href: "/evaluations/behavioral",     label: "Behavior Checks",      icon: ClipboardCheck, isSubItem: true, subItemGroup: isEvaluationsRoute },
-  { href: "/evaluations/provider-arena", label: "Provider Arena",       icon: Columns3,       isSubItem: true, subItemGroup: isEvaluationsRoute },
-  { href: "/evaluations/review",         label: "Review Queue",         icon: Inbox,          isSubItem: true, subItemGroup: isEvaluationsRoute },
-  { href: "/evaluations/compare",        label: "Eval Comparison",      icon: BarChart3,      isSubItem: true, subItemGroup: isEvaluationsRoute },
-  { href: "/evaluations/schedules",      label: "Regression Suites",    icon: Repeat2,        isSubItem: true, subItemGroup: isEvaluationsRoute },
+  // ── Evaluation Evidence ──
+  { href: "/evaluations", label: "Evaluation Evidence", icon: FlaskConical },
+  {
+    href: "/evaluations/datasets",
+    label: "Deterministic Test Sets",
+    icon: Star,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
+  {
+    href: "/evaluations/behavioral",
+    label: "Behavioral Evidence",
+    icon: ClipboardList,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
+  {
+    href: "/evaluations/provider-arena",
+    label: "Provider Comparison",
+    icon: Columns3,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
+  {
+    href: "/evaluations/review",
+    label: "Review Queue",
+    icon: Inbox,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
+  {
+    href: "/evaluations/schedules",
+    label: "Regression Evidence",
+    icon: Repeat2,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
+  {
+    href: "/evaluations/compare",
+    label: "Evidence Comparison",
+    icon: FileBarChart2,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
 
-  // ── Reliability ──
-  { href: "/reliability/capabilities", label: "Reliability", icon: ShieldCheck },
-  { href: "/reliability/capabilities", label: "AI Capabilities",  icon: BotMessageSquare, isSubItem: true, subItemGroup: isReliabilityRoute },
+  // ── Release Gates ──
+  { href: "/release-gates", label: "Release Gates", icon: GitMerge },
 
-  // ── Analytics ──
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/analytics/cost-intelligence", label: "Cost Intelligence", icon: CircleDollarSign, isSubItem: true, subItemGroup: isAnalyticsRoute },
-  { href: "/analytics/roi", label: "ROI Dashboard", icon: TrendingUp, isSubItem: true, subItemGroup: isAnalyticsRoute },
-  { href: "/analytics/failure-costs", label: "Failure Cost Attribution", icon: TriangleAlert, isSubItem: true, subItemGroup: isAnalyticsRoute },
-  { href: "/analytics/provider-comparison", label: "Provider Cost Comparison", icon: GitCompare, isSubItem: true, subItemGroup: isAnalyticsRoute },
-  { href: "/analytics/usage", label: "Usage Analytics", icon: Gauge, isSubItem: true, subItemGroup: isAnalyticsRoute },
+  // ── Policies ──
+  { href: "/governance/policy-packs", label: "Policies", icon: Scale },
+
+  // ── Approvals ──
+  { href: "/governance/approvals", label: "Approvals", icon: BadgeCheck },
+
+  // ── Audit ──
+  { href: "/governance/audit", label: "Audit", icon: History },
+
+  // ── Incidents ──
+  { href: "/incidents", label: "Incidents", icon: TriangleAlert },
+
+  // ── Reports ──
+  { href: "/governance/reports", label: "Reports", icon: FileBarChart2 },
 
   // ── Alerts ──
   { href: "/alerts", label: "Alerts", icon: Bell },
 
-  // ── Governance ──
-  { href: "/governance",              label: "Governance",      icon: Landmark },
-  { href: "/incidents",               label: "Incidents",       icon: TriangleAlert,  isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/governance/policy-packs", label: "Policy Packs",    icon: ShieldAlert,    isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/governance/audit",        label: "Audit Log",       icon: History,        isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/governance/approvals",    label: "Approvals",       icon: BadgeCheck,     isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/governance/privacy",      label: "Privacy Controls",icon: LockKeyhole,    isSubItem: true, subItemGroup: isGovernanceRoute },
-  { href: "/governance/reports",      label: "Compliance Reports", icon: Gauge,       isSubItem: true, subItemGroup: isGovernanceRoute },
+  // ── Integrations ──
+  { href: "/integrations", label: "Integrations", icon: Plug },
+  {
+    href: "/settings/sdk",
+    label: "SDK & Ingest Tokens",
+    icon: FileText,
+    isSubItem: true,
+    subItemGroup: isIntegrationsRoute,
+  },
+  {
+    href: "/traces",
+    label: "Execution Traces",
+    icon: Activity,
+    isSubItem: true,
+    subItemGroup: isIntegrationsRoute,
+  },
+  {
+    href: "/workflows",
+    label: "Workflow Blueprints",
+    icon: Landmark,
+    isSubItem: true,
+    subItemGroup: isIntegrationsRoute,
+  },
 
   // ── Settings ──
-  { href: "/settings",         label: "Settings",     icon: Settings2 },
-  { href: "/settings/billing", label: "Billing",      icon: CreditCard,  isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/members", label: "Members",      icon: Users,       isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/sdk",     label: "SDK Setup",    icon: FileText,    isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/api-keys",         label: "API Keys",     icon: KeyRound,    isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
+  { href: "/settings", label: "Settings", icon: Settings2 },
+  {
+    href: "/settings/billing",
+    label: "Billing",
+    icon: CreditCard,
+    isSubItem: true,
+    subItemGroup: isSettingsRoute,
+  },
+  {
+    href: "/settings/members",
+    label: "Members",
+    icon: Users,
+    isSubItem: true,
+    subItemGroup: isSettingsRoute,
+  },
+  {
+    href: "/settings/usage",
+    label: "Usage",
+    icon: FileBarChart2,
+    isSubItem: true,
+    subItemGroup: isSettingsRoute,
+  },
+  {
+    href: "/api-keys",
+    label: "API Keys",
+    icon: KeyRound,
+    isSubItem: true,
+    subItemGroup: isSettingsRoute,
+    minRole: "admin",
+  },
+  {
+    href: "/governance/privacy",
+    label: "Privacy Controls",
+    icon: LockKeyhole,
+    isSubItem: true,
+    subItemGroup: isSettingsRoute,
+  },
 ];
 
 type SidebarUser = { email: string | null; full_name: string | null; avatar_url: string | null } | null;
@@ -204,7 +292,10 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
     async function load() {
       if (!activeWorkspaceId) { setWorkspaceSummary(summary); return; }
       try {
-        const res = await fetch(`/api/dashboard/summary?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, { cache: "no-store" });
+        const res = await fetch(
+          `/api/dashboard/summary?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+          { cache: "no-store" },
+        );
         if (!res.ok) throw new Error("Failed");
         const data = (await res.json()) as DashboardSummary;
         if (!cancelled) setWorkspaceSummary(data);
@@ -237,18 +328,19 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             // Determine if this sub-item should be shown
             if (item.isSubItem) {
               const sg = item.subItemGroup;
-              const visible = typeof sg === "function"
-                ? sg(pathname)
-                : typeof sg === "string"
-                  ? pathname.startsWith(sg)
-                  : false;
+              const visible =
+                typeof sg === "function"
+                  ? sg(pathname)
+                  : typeof sg === "string"
+                    ? pathname.startsWith(sg)
+                    : false;
               if (!visible) return null;
             }
 
             const Icon = item.icon;
             const fullHref = `${item.href}${currentQuery ? `?${currentQuery}` : ""}`;
 
-            // Active state: exact match or prefix (but don't match a shorter sibling that's also active)
+            // Active state: exact match or prefix
             const active =
               pathname === item.href ||
               (pathname.startsWith(`${item.href}/`) &&
@@ -289,10 +381,12 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   )}
                 />
                 {loading && (
-                  <Loader2 className={cn(
-                    "absolute h-[14px] w-[14px] animate-spin text-primary",
-                    item.isSubItem ? "left-8" : "left-3",
-                  )} />
+                  <Loader2
+                    className={cn(
+                      "absolute h-[14px] w-[14px] animate-spin text-primary",
+                      item.isSubItem ? "left-8" : "left-3",
+                    )}
+                  />
                 )}
                 <span className="flex-1 truncate">{item.label}</span>
               </Link>
@@ -314,9 +408,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         </a>
       </nav>
 
-      {/* Bottom: sidecar status + user */}
+      {/* Bottom: evidence source status + user */}
       <div className="space-y-2 border-t border-sidebar-border px-3 py-3">
-        {/* Sidecar pill */}
+        {/* Evidence source pill */}
         <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
           <span className={cn("live-dot h-1.5 w-1.5", !workspaceSummary && "!bg-red-500")} />
           <div className="flex-1 min-w-0">
@@ -324,10 +418,15 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
               {workspaceSummary ? `${workspaceSummary.averageLatencyMs} ms` : "—"}
             </p>
             <p className="text-[10px] text-sidebar-muted">
-              {workspaceSummary ? `${workspaceSummary.activeAgents} sidecars live` : "No sidecar connected"}
+              {workspaceSummary
+                ? `${workspaceSummary.activeAgents} evidence source${workspaceSummary.activeAgents === 1 ? "" : "s"} active`
+                : "No evidence sources connected"}
             </p>
           </div>
-          <Badge variant={workspaceSummary ? "success" : "destructive"} className="text-[10px] px-1.5 py-0.5 shrink-0">
+          <Badge
+            variant={workspaceSummary ? "success" : "destructive"}
+            className="text-[10px] px-1.5 py-0.5 shrink-0"
+          >
             {workspaceSummary ? "Live" : "Off"}
           </Badge>
         </div>
@@ -335,14 +434,16 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         {/* Plan badge */}
         {planTier && planTier !== "free" && (
           <div className="px-2 pb-0.5">
-            <span className={[
-              "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-              planTier === "enterprise"
-                ? "bg-[#1E1B4B]/10 text-[#3730A3]"
-                : planTier === "pro"
-                  ? "bg-[#2563EB]/10 text-[#1D4ED8]"
-                  : "bg-[#7C3AED]/10 text-[#6D28D9]",
-            ].join(" ")}>
+            <span
+              className={[
+                "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                planTier === "enterprise"
+                  ? "bg-[#1E1B4B]/10 text-[#3730A3]"
+                  : planTier === "pro"
+                    ? "bg-[#2563EB]/10 text-[#1D4ED8]"
+                    : "bg-[#7C3AED]/10 text-[#6D28D9]",
+              ].join(" ")}
+            >
               {planTier === "pro" ? "Pro" : planTier === "enterprise" ? "Enterprise" : "Plus"}
             </span>
           </div>
@@ -374,7 +475,11 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             </div>
             <button
               type="button"
-              onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
+              onClick={() =>
+                void fetch("/api/auth/session", { method: "DELETE" }).then(() =>
+                  window.location.assign("/login"),
+                )
+              }
               title="Sign out"
               className="shrink-0 rounded p-1 text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-fg"
             >

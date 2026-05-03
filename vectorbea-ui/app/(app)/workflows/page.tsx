@@ -46,7 +46,7 @@ export default function WorkflowsPage() {
   if (!canUseWorkflowReliability(planTier)) {
     return (
       <div className="min-h-screen bg-[#F8F5EF]">
-        <AppHeader title="Workflows" subtitle="Auto-discovered workflow space" />
+        <AppHeader title="Workflow Blueprints" subtitle="AI workflow execution graphs as evidence sources" />
         <div className="mx-auto flex max-w-lg flex-col items-center gap-6 px-4 py-16 text-center">
           <div className="rounded-full bg-[#EFF6FF] p-5"><Sparkles className="h-10 w-10 text-[#2563EB]" /></div>
           <div>
@@ -65,7 +65,7 @@ export default function WorkflowsPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Workflows" subtitle="Auto-discovered workflow maps and execution-ready trace review" />
+      <AppHeader title="Workflow Blueprints" subtitle="Auto-discovered workflow maps and execution evidence" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         <div className="flex flex-wrap gap-3">
           <Link href="/onboarding/workflow-discovery" className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]">

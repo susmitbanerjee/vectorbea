@@ -35,7 +35,7 @@ const SECTOR_COLOR: Record<string, string> = {
 function GateBanner() {
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Policy Packs" subtitle="Sector templates for regulated AI workflows" />
+      <AppHeader title="Policies" subtitle="Sector policy templates for regulated AI systems" />
       <div className="flex flex-col items-center text-center gap-6 max-w-lg mx-auto px-4 py-16">
         <div className="rounded-full bg-[#EFF6FF] p-5">
           <ShieldAlert className="h-10 w-10 text-[#2563EB]" />
@@ -153,7 +153,7 @@ export default function PolicyPacksPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Policy Packs" subtitle="Sector compliance templates for your AI capabilities" />
+      <AppHeader title="Policies" subtitle="Apply sector compliance templates to your AI systems" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         {!canUsePolicyPacks(planTier) && (
           <div className="rounded-2xl border border-[#D8CFC2] bg-white p-5">

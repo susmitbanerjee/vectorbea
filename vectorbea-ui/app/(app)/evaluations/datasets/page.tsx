@@ -345,8 +345,8 @@ export default function EvaluationDatasetsPage() {
   return (
     <div className="min-h-screen">
       <AppHeader
-        title="Evaluation Datasets"
-        subtitle="Create and manage test datasets for prompt evaluation — manual cases, imports, runtime traces, or golden traces."
+        title="Deterministic Test Sets"
+        subtitle="Create and manage test cases for evidence checks — manual cases, imports, runtime traces, or golden traces."
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">

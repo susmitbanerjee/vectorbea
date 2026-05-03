@@ -227,8 +227,8 @@ export default function EvaluationsPage() {
   return (
     <div className="min-h-screen">
       <AppHeader
-        title="Evaluations"
-        subtitle="Score prompt behavior, detect regressions, and gate rollouts — before bad outputs reach production."
+        title="Evaluation Evidence"
+        subtitle="Run evidence checks, score prompt behavior, detect regressions, and generate audit-ready proof for release decisions."
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
@@ -242,8 +242,8 @@ export default function EvaluationsPage() {
           {/* ── Create run form ── */}
           <Card>
             <CardHeader>
-              <CardTitle>Create evaluation run</CardTitle>
-              <CardDescription>Choose a candidate prompt version and a trace source or evaluation dataset.</CardDescription>
+              <CardTitle>Run Evidence Check</CardTitle>
+              <CardDescription>Choose a candidate prompt version and a trace source or deterministic test set.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Prompt */}
@@ -501,7 +501,7 @@ export default function EvaluationsPage() {
                 disabled={!canCreateRun || creating}
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-                {traceSource === "dataset" ? "Run dataset evaluation" : "Run trace-set evaluation"}
+                {traceSource === "dataset" ? "Run Dataset Evidence Check" : "Run Evidence Check"}
               </Button>
             </CardContent>
           </Card>
@@ -635,8 +635,8 @@ export default function EvaluationsPage() {
         {/* ── Evaluation runs list ── */}
         <Card>
           <CardHeader>
-            <CardTitle>Evaluation runs</CardTitle>
-            <CardDescription>Evaluation runs with scoring, review state, and rollout recommendation.</CardDescription>
+            <CardTitle>Evidence Runs</CardTitle>
+            <CardDescription>Evidence runs with scoring, review state, and release gate recommendation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex flex-wrap gap-2 pb-2">

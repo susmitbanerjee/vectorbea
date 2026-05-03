@@ -140,6 +140,8 @@ type PolicyPackRow = {
   sector: string;
   version: string;
   rules: Array<Record<string, unknown>> | null;
+  required_evidence: Array<Record<string, unknown>> | null;
+  approval_requirements: Record<string, unknown> | null;
   enabled: boolean;
   system_pack: boolean | null;
   created_at: string;
@@ -324,6 +326,8 @@ function mapPolicyPack(row: PolicyPackRow): PolicyPack {
     sector: row.sector as PolicyPack["sector"],
     version: row.version,
     rules: row.rules ?? [],
+    requiredEvidence: (row.required_evidence ?? []) as PolicyPack["requiredEvidence"],
+    approvalRequirements: (row.approval_requirements ?? {}) as PolicyPack["approvalRequirements"],
     enabled: row.enabled,
     systemPack: row.system_pack ?? false,
     createdAt: row.created_at,

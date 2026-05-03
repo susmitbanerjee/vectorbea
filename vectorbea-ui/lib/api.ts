@@ -1120,7 +1120,7 @@ export interface EvaluationComparisonReport {
 export type AiCapabilityType =
   | "prompt" | "skill" | "agent_workflow" | "rag_workflow" | "mcp_workflow"
   | "content_generation" | "classification" | "extraction"
-  | "customer_support" | "internal_automation";
+  | "customer_support" | "internal_automation" | "custom";
 
 export type BusinessDomain =
   | "customer_support" | "finance" | "claims" | "refunds" | "healthcare_triage"
@@ -1129,9 +1129,24 @@ export type BusinessDomain =
 
 export type ReliabilityRiskLevel = "low" | "medium" | "high" | "critical";
 
-export type CapabilityStatus = "active" | "archived";
+export type DataSensitivity = "public" | "internal" | "confidential" | "restricted" | "regulated";
 
-export type CapabilityVersionStatus = "draft" | "candidate" | "active" | "deprecated";
+export type CapabilityStatus = "draft" | "active" | "blocked" | "under_review" | "archived";
+
+export type CapabilityVersionStatus = "draft" | "candidate" | "approved" | "active" | "blocked" | "deprecated";
+
+export type PolicyStatus =
+  | "no_policy"
+  | "assigned"
+  | "satisfied"
+  | "incomplete"
+  | "violation";
+
+export type EvidenceType =
+  | "prompt_check" | "deterministic_check" | "behavioral_check"
+  | "rag_grounding_check" | "mcp_tool_policy_check"
+  | "workflow_regression" | "provider_comparison"
+  | "human_approval" | "privacy_check" | "security_check";
 
 export interface AiCapability {
   id: string;
@@ -1141,6 +1156,7 @@ export interface AiCapability {
   type: AiCapabilityType;
   businessDomain: BusinessDomain;
   riskLevel: ReliabilityRiskLevel;
+  dataSensitivity: DataSensitivity;
   ownerUserId: string | null;
   status: CapabilityStatus;
   promptId: string | null;
@@ -1153,6 +1169,9 @@ export interface AiCapability {
   versionCount?: number;
   lastCheckStatus?: "passed" | "failed" | "needs_review" | "unknown" | null;
   lastCheckAt?: string | null;
+  // governance derived
+  policyStatus?: PolicyStatus;
+  assignedPolicyPackIds?: string[];
 }
 
 export interface CapabilityVersion {
@@ -1173,6 +1192,33 @@ export interface CapabilityVersion {
   updatedAt: string;
   activatedAt: string | null;
   deprecatedAt: string | null;
+}
+
+export interface RequiredEvidence {
+  id: string;
+  workspaceId: string;
+  aiSystemId: string;
+  policyPackId: string | null;
+  policyPackName?: string | null;
+  evidenceType: EvidenceType;
+  label: string;
+  description: string | null;
+  required: boolean;
+  blocking: boolean;
+  threshold: number | null;
+  createdAt: string;
+}
+
+export interface PolicyAssignment {
+  id: string;
+  workspaceId: string;
+  aiSystemId: string;
+  policyPackId: string;
+  policyPackName: string;
+  policyPackSector: string;
+  status: "active" | "disabled";
+  appliedBy: string | null;
+  appliedAt: string;
 }
 
 export type WorkflowStepType =
@@ -1886,6 +1932,17 @@ export interface PolicyPack {
   sector: "retail" | "bfsi" | "healthcare" | "pharma" | "software" | "software_support" | "travel" | "insurance" | "general";
   version: string;
   rules: Array<Record<string, unknown>>;
+  requiredEvidence: Array<{
+    evidenceType: EvidenceType;
+    label: string;
+    required: boolean;
+    blocking: boolean;
+  }>;
+  approvalRequirements: {
+    requiresApproval?: boolean;
+    approvalThreshold?: string;
+    approvers?: string[];
+  };
   enabled: boolean;
   systemPack?: boolean;
   createdAt: string;

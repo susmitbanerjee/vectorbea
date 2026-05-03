@@ -66,7 +66,7 @@ export default function ApprovalsPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Approvals" subtitle="High risk rollouts and governance decisions" />
+      <AppHeader title="Approvals" subtitle="Human governance decisions for AI system releases" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         {!canUseApprovalWorkflows(planTier) && <div className="rounded-xl border border-[#E7DED1] bg-white px-4 py-4 text-sm text-[#6B7280]">Approval workflows are available on Pro and Enterprise.</div>}
         {loading && <div className="flex items-center gap-2 text-sm text-[#6B7280]"><Loader2 className="h-4 w-4 animate-spin" />Loading approval requests…</div>}

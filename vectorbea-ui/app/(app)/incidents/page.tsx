@@ -46,7 +46,7 @@ export default function IncidentsPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Incidents" subtitle="Operational failures, investigation, and fix verification" />
+      <AppHeader title="Incidents" subtitle="Governance issue tracking — policy violations, evidence failures, and release blocks" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         {loading && <div className="flex items-center gap-2 text-sm text-[#6B7280]"><Loader2 className="h-4 w-4 animate-spin" />Loading incidents…</div>}
         {error && <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm text-[#991B1B]">{error}</div>}

@@ -40,7 +40,7 @@ export default function ReviewQueuePage() {
 
   return (
     <div className="min-h-screen bg-[#FBFAF7]">
-      <AppHeader title="Review queue" subtitle="Human review for uncertain or high risk evaluation cases" />
+      <AppHeader title="Review Queue" subtitle="Human review of uncertain or high-risk evidence cases" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
         <Card className="border-[#E7DED1] bg-white">
           <CardHeader className="pb-2">

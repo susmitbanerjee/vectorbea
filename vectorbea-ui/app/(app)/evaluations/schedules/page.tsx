@@ -578,7 +578,7 @@ export default function ScheduledRegressionsPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="Scheduled Regressions" subtitle="Automatically run evaluation runs against baselines on a schedule." />
+      <AppHeader title="Regression Evidence" subtitle="Automatically run evidence checks against baselines on a schedule." />
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
         {/* CI callout */}
         <Card className="border-[#A7F3D0] bg-[#ECFDF5]">

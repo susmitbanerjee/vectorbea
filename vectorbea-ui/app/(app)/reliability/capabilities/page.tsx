@@ -40,6 +40,7 @@ const TYPE_LABELS: Record<AiCapabilityType, string> = {
   extraction:           "Extraction",
   customer_support:     "Customer support",
   internal_automation:  "Internal automation",
+  custom:               "Custom",
 };
 
 const TYPE_ICONS: Partial<Record<AiCapabilityType, React.ElementType>> = {
@@ -89,14 +90,14 @@ const ALL_RISKS: ReliabilityRiskLevel[] = ["low","medium","high","critical"];
 function GateBanner() {
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="AI Capabilities" subtitle="Pro feature" />
+      <AppHeader title="AI Registry" subtitle="Pro feature" />
       <div className="px-4 py-12 md:px-6 xl:px-8 flex flex-col items-center text-center max-w-lg mx-auto gap-6">
         <div className="rounded-full bg-[#EFF6FF] p-5"><Bot className="h-10 w-10 text-[#2563EB]" /></div>
         <div>
-          <h2 className="text-2xl font-bold text-[#111111] mb-3">AI Capabilities — available on Pro</h2>
+          <h2 className="text-2xl font-bold text-[#111111] mb-3">AI Registry — available on Pro</h2>
           <p className="text-sm text-[#6B7280] leading-relaxed">
-            Register prompts, skills, agents, RAG workflows, and MCP workflows as versioned AI capabilities.
-            Run deterministic reliability checks, capture workflow traces, and ensure safe rollout.
+            Register prompts, skills, agents, RAG workflows, and MCP workflows as versioned AI systems.
+            Apply governance policies, collect evaluation evidence, and gate releases by risk level.
           </p>
         </div>
         <Link href="/settings/billing" className="rounded-xl bg-[#2563EB] px-6 py-3 text-sm font-semibold text-white hover:bg-[#1D4ED8]">
@@ -300,7 +301,7 @@ export default function CapabilitiesPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="AI Capabilities" subtitle="Prompts, skills, agents, and workflows" />
+      <AppHeader title="AI Registry" subtitle="Register and govern prompts, skills, agents, RAG workflows, and MCP workflows" />
       <div className="px-4 py-6 md:px-6 xl:px-8 space-y-5">
 
         {/* Header bar */}

@@ -55,8 +55,8 @@ const stageConfig: Record<RolloutStage, StageConfig> = {
     iconTone: "text-blue-700",
   },
   full: {
-    label: "Full rollout",
-    shortLabel: "Full",
+    label: "Released",
+    shortLabel: "Released",
     badgeVariant: "success",
     icon: CheckCircle2,
     tone: "text-emerald-700",
@@ -64,8 +64,8 @@ const stageConfig: Record<RolloutStage, StageConfig> = {
     iconTone: "text-emerald-700",
   },
   "rolled-back": {
-    label: "Rolled back",
-    shortLabel: "Rollback",
+    label: "Reverted",
+    shortLabel: "Reverted",
     badgeVariant: "destructive",
     icon: Undo2,
     tone: "text-red-700",

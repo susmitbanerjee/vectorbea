@@ -65,9 +65,11 @@ const RISK_STYLE: Record<string, string> = {
   high: "bg-[#FFF7ED] text-[#C2410C]", critical: "bg-[#FEF2F2] text-[#991B1B]",
 };
 const VER_STYLE: Record<CapabilityVersionStatus, string> = {
-  draft: "bg-[#F3F4F6] text-[#374151]",
-  candidate: "bg-[#EFF6FF] text-[#1D4ED8]",
-  active: "bg-[#ECFDF5] text-[#065F46]",
+  draft:      "bg-[#F3F4F6] text-[#374151]",
+  candidate:  "bg-[#EFF6FF] text-[#1D4ED8]",
+  approved:   "bg-[#F0FDF4] text-[#15803D]",
+  active:     "bg-[#ECFDF5] text-[#065F46]",
+  blocked:    "bg-[#FEF2F2] text-[#991B1B]",
   deprecated: "bg-[#F3F4F6] text-[#6B7280]",
 };
 const CHECK_STYLE: Record<string, string> = {

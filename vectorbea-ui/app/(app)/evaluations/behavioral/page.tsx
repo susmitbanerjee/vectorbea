@@ -269,8 +269,8 @@ export default function BehavioralDatasetsPage() {
   return (
     <div className="min-h-screen bg-[#FBFAF7]">
       <AppHeader
-        title="Behavioral Datasets"
-        subtitle="Evaluate prompts using rubrics, not reference answers — for customer support, RAG, summaries, and more."
+        title="Behavioral Evidence Checks"
+        subtitle="Evaluate AI system behavior using rubrics for customer support, RAG, summaries, and regulated workflows."
       />
 
       <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">

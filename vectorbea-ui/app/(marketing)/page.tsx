@@ -22,78 +22,78 @@ import { PLANS } from "@/lib/pricing-data";
 const topNav = ["Platform", "Solutions", "Customers", "Pricing", "Docs"];
 
 const trustRows = [
-  "Built for teams shipping production AI",
-  "Visibility control and confidence in one system",
-  "From prompt changes to rollout safety",
+  "Built for enterprise AI governance and compliance",
+  "Evaluations as evidence, not just scoring",
+  "From AI system registration to audited release proof",
 ];
 
 const painCards = [
-  "Prompt changes break production silently",
-  "Regression detection stays manual for too long",
-  "Tracing without context leaves teams guessing",
-  "Output changes are hard to explain across releases",
-  "Risky rollouts move without clear safety gates",
-  "Provider switches happen without solid evidence",
+  "AI systems go to production without governance proof",
+  "Evaluations produce scores but no audit trail",
+  "Policy violations surface after the incident",
+  "Release decisions happen without evidence sign-off",
+  "Compliance audits require manual evidence assembly",
+  "Provider switches happen without safety evidence",
 ];
 
 const pillars = [
-  { title: "Tracing", body: "Replay exactly what happened across prompt input model and output", icon: Eye },
-  { title: "Evaluations", body: "Inspect score logic checks and confidence with full context", icon: BarChart3 },
-  { title: "Regressions", body: "Detect quality drops early with baseline and golden trace sets", icon: AlertTriangle },
-  { title: "Rollout control", body: "Gate releases and split traffic with clear approval rules", icon: SlidersHorizontal },
-  { title: "Alerts", body: "Catch drift in latency errors and quality signals before impact grows", icon: Siren },
+  { title: "AI Registry", body: "Register AI systems with risk level, owner, domain, provider, and version lifecycle", icon: Eye },
+  { title: "Evaluation Evidence", body: "Run checks on prompts, behavior, and workflows — evidence stored for audit", icon: BarChart3 },
+  { title: "Release Gates", body: "Block releases automatically when evidence fails or approvals are missing", icon: SlidersHorizontal },
+  { title: "Policy Packs", body: "Apply sector-specific policies to AI systems across retail, BFSI, healthcare, and more", icon: AlertTriangle },
+  { title: "Audit Proof", body: "Generate audit-ready evidence reports for any AI system release decision", icon: Siren },
 ];
 
 const workflows = [
-  "Draft prompt",
-  "Test candidate",
-  "Run evaluations",
+  "Register AI system",
+  "Apply policy pack",
+  "Run evidence check",
   "Detect regressions",
-  "Approve rollout",
-  "Monitor production",
-  "Alert on drift",
+  "Human approval",
+  "Gate released",
+  "Audit proof generated",
 ];
 
 const useCases = [
-  { title: "For AI engineers", body: "Trace failures faster and inspect model behavior with clarity" },
-  { title: "For platform teams", body: "Set rollout guardrails and keep production stable" },
-  { title: "For product teams", body: "Ship changes with confidence and measurable quality signals" },
-  { title: "For enterprises", body: "Bring governance to production AI across teams and environments" },
+  { title: "For AI engineers", body: "Link evidence runs to system versions and prove behavior before release" },
+  { title: "For platform teams", body: "Set release gates with policy requirements and approval sign-off" },
+  { title: "For compliance teams", body: "Collect audit-ready evidence for every AI system decision" },
+  { title: "For enterprises", body: "Govern AI behavior at scale across domains, teams, and environments" },
 ];
 
 const compareRows = [
-  ["Runtime tracing", "Basic", "Partial", "Manual", "Complete"],
-  ["Explainable evaluations", "No", "No", "Custom", "Yes"],
-  ["Regression scheduling", "No", "No", "Script heavy", "Yes"],
-  ["Rollout gating", "No", "No", "Manual", "Yes"],
-  ["Provider comparison", "No", "No", "Manual", "Yes"],
-  ["Production alerts", "No", "Partial", "Custom", "Yes"],
+  ["AI system registry", "No", "No", "Manual", "Yes"],
+  ["Evaluation evidence store", "No", "Partial", "Custom", "Yes"],
+  ["Release gates", "No", "No", "Script heavy", "Yes"],
+  ["Policy packs", "No", "No", "Manual", "Yes"],
+  ["Human approval workflows", "No", "No", "Manual", "Yes"],
+  ["Audit-ready reports", "No", "Partial", "Custom", "Yes"],
 ];
 
 const faq = [
   {
-    q: "What does VectorBea monitor",
-    a: "VectorBea tracks runtime traces evaluations regressions rollout decisions and production quality signals",
+    q: "What does VectorBea govern",
+    a: "VectorBea governs AI system releases — registry, policies, evaluation evidence, release gates, human approvals, and audit proof",
   },
   {
-    q: "How do evaluations work",
-    a: "You run candidate prompt versions on baseline traces then review scores checks confidence and evidence",
+    q: "How do evidence checks work",
+    a: "You run candidate versions against deterministic test sets or behavioral rubrics. Evidence is stored and linked to the release gate decision",
   },
   {
-    q: "Can we compare providers",
-    a: "Yes you can compare providers side by side for quality latency and operational fit",
+    q: "Can we block releases automatically",
+    a: "Yes — release gates block candidate versions automatically when evidence fails, policies are not met, or approvals are missing",
   },
   {
-    q: "Can we block risky rollouts",
-    a: "Yes rollout gates can block candidate versions when checks fail or confidence is low",
+    q: "Is this an observability platform",
+    a: "No. VectorBea does not replace Grafana, Datadog, or LangSmith. Traces and spans become governance evidence — inputs for release decisions",
   },
   {
     q: "Does VectorBea work with existing stacks",
-    a: "VectorBea sits above your model stack and helps teams ship safer production AI behavior",
+    a: "Yes — connect via SDK, REST API, OpenTelemetry, or sidecar agent. Evidence flows in from wherever your AI systems run",
   },
   {
     q: "Is there a free plan",
-    a: "Yes you can start free then scale with team and enterprise options",
+    a: "Yes you can start free then scale with Pro and Enterprise options",
   },
 ];
 
@@ -424,13 +424,13 @@ export default async function MarketingPage() {
         <section className="mx-auto grid w-full max-w-[1280px] gap-10 px-4 pb-16 pt-16 md:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center xl:px-8">
           <div className="space-y-6">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2563EB]">
-              AI risk control for production LLMs
+              Enterprise AI Governance &amp; Evaluation Evidence
             </p>
             <h1 className="text-balance text-4xl font-semibold leading-tight tracking-tight md:text-6xl">
-              Catch bad LLM behavior before users do
+              Govern AI releases with executable evidence
             </h1>
             <p className="max-w-2xl text-base leading-7 text-[#374151] md:text-lg">
-              VectorBea helps teams trace evaluate compare and safely roll out LLM changes in production
+              Register AI systems, apply policies, collect evaluation evidence, approve releases, and generate audit-ready proof across prompts, skills, RAG, MCP, and agent workflows.
             </p>
             <div className="flex flex-wrap gap-3 pt-2">
               <Link href="/signup" className={cn(buttonVariants({ size: "lg" }), "gap-2")}>

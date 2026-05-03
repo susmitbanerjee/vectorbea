@@ -199,7 +199,7 @@ export function DashboardOverview({
     <div className="min-h-screen">
       <AppHeader
         title="Dashboard"
-        subtitle="Sidecar requests, latency, and prompt usage for this workspace."
+        subtitle="Governance overview — pending approvals, blocked releases, open incidents, and evidence status."
         actions={
           <>
             <Button

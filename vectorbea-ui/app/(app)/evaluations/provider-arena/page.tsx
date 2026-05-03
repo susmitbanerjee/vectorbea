@@ -70,8 +70,8 @@ function GateBanner() {
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader
-        title="Provider Arena"
-        subtitle="Compare providers on behavioral datasets"
+        title="Provider Comparison"
+        subtitle="Compare AI providers on behavioral evidence datasets"
       />
       <div className="px-4 py-12 md:px-6 xl:px-8 flex flex-col items-center text-center max-w-lg mx-auto gap-6">
         <div className="rounded-full bg-[#EFF6FF] p-5">
@@ -242,8 +242,8 @@ export default function ProviderArenaPage() {
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader
-        title="Provider Arena"
-        subtitle="Compare providers on behavioral datasets"
+        title="Provider Comparison"
+        subtitle="Compare AI providers on behavioral evidence datasets"
       />
       <div className="px-4 py-6 md:px-6 xl:px-8 space-y-5">
         {/* Top action bar */}

@@ -443,7 +443,7 @@ export default function SdkPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="SDK &amp; Ingest" subtitle="Connect your AI agents, tools, and MCP workflows to VectorBea" />
+      <AppHeader title="SDK &amp; Ingest Tokens" subtitle="Connect evidence sources — API, SDK, sidecar, or OpenTelemetry" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8 max-w-5xl">
 
         {/* Quick-start callout */}
