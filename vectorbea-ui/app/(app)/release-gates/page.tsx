@@ -227,7 +227,7 @@ export default function ReleaseGatesPage() {
                 </p>
               </div>
               <div className="flex gap-3">
-                <Link href="/reliability/capabilities" className={buttonVariants({ size: "sm" })}>
+                <Link href="/registry/systems" className={buttonVariants({ size: "sm" })}>
                   Go to AI Registry
                 </Link>
                 <Link href="/governance/policy-packs" className={buttonVariants({ variant: "outline", size: "sm" })}>
@@ -298,10 +298,10 @@ export default function ReleaseGatesPage() {
 
                         {/* Actions */}
                         <Link
-                          href={`/reliability/capabilities/${gate.id}` as Route}
+                          href={`/registry/systems/${gate.id}` as Route}
                           className="shrink-0 flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         >
-                          View <ChevronRight className="h-3 w-3" />
+                          System <ChevronRight className="h-3 w-3" />
                         </Link>
                       </div>
                     </CardContent>
@@ -327,9 +327,9 @@ export default function ReleaseGatesPage() {
                   <Scale className="mr-1.5 h-3.5 w-3.5" />
                   Manage Policies
                 </Link>
-                <Link href="/evaluations" className={buttonVariants({ size: "sm" })}>
+                <Link href="/evidence/runs" className={buttonVariants({ size: "sm" })}>
                   <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
-                  Run Evidence Check
+                  View Evidence Runs
                 </Link>
               </div>
             </div>

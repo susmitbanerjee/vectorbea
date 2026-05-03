@@ -1221,6 +1221,62 @@ export interface PolicyAssignment {
   appliedAt: string;
 }
 
+// ─── Evidence Runs ────────────────────────────────────────────────────────────
+
+export type EvidenceRunStatus =
+  | "queued" | "running" | "passed" | "failed"
+  | "needs_review" | "cancelled" | "timed_out";
+
+export type ReleaseGateStatus =
+  | "safe_to_release" | "needs_review" | "blocked" | "missing_evidence";
+
+export interface CapabilityEvidenceRun {
+  id: string;
+  workspaceId: string;
+  aiSystemId: string;
+  aiSystemVersionId: string | null;
+  evidenceType: EvidenceType;
+  status: EvidenceRunStatus;
+  blocking: boolean;
+  policyPackId: string | null;
+  underlyingRunId: string | null;
+  underlyingRunType: string | null;
+  resultScore: number | null;
+  resultSummary: string | null;
+  failureReason: string | null;
+  resultMetadata: Record<string, unknown>;
+  startedBy: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // enriched
+  aiSystemName?: string | null;
+  aiSystemVersionNumber?: string | null;
+  policyPackName?: string | null;
+}
+
+export interface ReleaseGateCheck {
+  label: string;
+  evidenceType: EvidenceType | "incident_check" | "policy_check";
+  status: "pass" | "fail" | "missing" | "pending";
+  blocking: boolean;
+  detail: string | null;
+  evidenceRunId: string | null;
+  approvalRequestId: string | null;
+}
+
+export interface ReleaseGateResult {
+  versionId: string;
+  aiSystemId: string;
+  decision: ReleaseGateStatus;
+  reasons: string[];
+  checks: ReleaseGateCheck[];
+  evaluatedAt: string;
+}
+
+// ─── Workflow step (unchanged position) ───────────────────────────────────────
+
 export type WorkflowStepType =
   | "llm_call" | "tool_call" | "mcp_tool_call" | "rag_retrieval"
   | "reranker" | "decision" | "human_handoff" | "final_response" | "system_event";

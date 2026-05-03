@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -27,11 +26,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select } from "@/components/ui/select";
 import type {
   AiCapability,
-  AiIncident,
   AuditEvent,
+  CapabilityEvidenceRun,
   CapabilityVersion,
   CapabilityVersionStatus,
   DataSensitivity,
+  EvidenceType,
   PolicyPack,
   PolicyStatus,
   ReliabilityRiskLevel,
@@ -344,15 +344,32 @@ function VersionsTab({
   const { activeWorkspaceId } = useWorkspace();
   const [promoting, setPromoting] = useState<string | null>(null);
 
-  async function promote(versionId: string, status: CapabilityVersionStatus) {
+  const [gateErrors, setGateErrors] = useState<Record<string, string>>({});
+
+  async function promote(vid: string, status: CapabilityVersionStatus) {
     if (!activeWorkspaceId) return;
-    setPromoting(versionId);
+    setPromoting(vid);
     try {
-      await fetch(`/api/registry/systems/${systemId}/versions/${versionId}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
+      // For activation: use gate-checked endpoint
+      if (status === "active") {
+        const res = await fetch(
+          `/api/registry/systems/${systemId}/versions/${vid}/activate?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+          { method: "POST" },
+        );
+        const json = (await res.json()) as { error?: string; decision?: string; reasons?: string[] };
+        if (!res.ok) {
+          const reason = json.reasons?.join("; ") ?? json.error ?? "Gate check failed";
+          setGateErrors((prev) => ({ ...prev, [vid]: reason }));
+          return;
+        }
+        setGateErrors((prev) => { const next = { ...prev }; delete next[vid]; return next; });
+      } else {
+        await fetch(`/api/registry/systems/${systemId}/versions/${vid}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+      }
       onRefresh();
     } finally {
       setPromoting(null);
@@ -369,7 +386,7 @@ function VersionsTab({
   const nextLabel = (current: CapabilityVersionStatus): string => {
     if (current === "draft") return "Promote to candidate";
     if (current === "candidate") return "Mark approved";
-    if (current === "approved") return "Activate";
+    if (current === "approved") return "Activate (gate check)";
     return "";
   };
 
@@ -410,8 +427,21 @@ function VersionsTab({
                   {v.activatedAt && <span className="text-[#065F46]">Activated {fmtDate(v.activatedAt)}</span>}
                   {v.deprecatedAt && <span className="text-[#9CA3AF]">Deprecated {fmtDate(v.deprecatedAt)}</span>}
                 </div>
+                {gateErrors[v.id] && (
+                  <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">
+                    <XCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{gateErrors[v.id]}</span>
+                    <Link href={`/release-gates/${v.id}` as Route} className="ml-1 underline flex-shrink-0">View gate</Link>
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex flex-wrap gap-2 flex-shrink-0">
+                <Link
+                  href={`/release-gates/${v.id}` as Route}
+                  className="flex items-center gap-1 rounded-lg border border-[#E7DED1] px-3 py-1.5 text-xs text-[#6B7280] hover:bg-[#F8F5EF]"
+                >
+                  <Shield className="h-3 w-3" /> Release Gate
+                </Link>
                 {next && (
                   <button
                     onClick={() => promote(v.id, next)}
@@ -518,17 +548,86 @@ function PoliciesTab({
   );
 }
 
+const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  prompt_check:         "Prompt Check",
+  deterministic_check:  "Deterministic Check",
+  behavioral_check:     "Behavioral Check",
+  rag_grounding_check:  "RAG Grounding Check",
+  mcp_tool_policy_check:"MCP Tool Policy Check",
+  workflow_regression:  "Workflow Regression",
+  provider_comparison:  "Provider Comparison",
+  human_approval:       "Human Approval",
+  privacy_check:        "Privacy Check",
+  security_check:       "Security Check",
+};
+
+const EVIDENCE_RUN_STATUS_STYLE: Record<string, string> = {
+  passed:       "bg-[#ECFDF5] text-[#065F46]",
+  failed:       "bg-[#FEF2F2] text-[#991B1B]",
+  needs_review: "bg-[#FFFBEB] text-[#92400E]",
+  running:      "bg-[#EFF6FF] text-[#1D4ED8]",
+  queued:       "bg-[#F3F4F6] text-[#374151]",
+  cancelled:    "bg-[#F3F4F6] text-[#9CA3AF]",
+  timed_out:    "bg-[#FFF7ED] text-[#C2410C]",
+};
+
 function RequiredEvidenceTab({
+  systemId,
+  versionId,
   evidence,
   loading,
   error,
 }: {
+  systemId: string;
+  versionId: string | null;
   evidence: RequiredEvidence[];
   loading: boolean;
   error: string | null;
 }) {
+  const { activeWorkspaceId } = useWorkspace();
+  const [runs, setRuns]         = useState<CapabilityEvidenceRun[]>([]);
+  const [runsLoading, setRL]    = useState(false);
+  const [starting, setStarting] = useState<string | null>(null);
+  const [startError, setSE]     = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || !versionId) return;
+    setRL(true);
+    fetch(`/api/evidence/runs?workspaceId=${encodeURIComponent(activeWorkspaceId)}&versionId=${encodeURIComponent(versionId)}`)
+      .then((r) => r.json())
+      .then((data: unknown) => { if (Array.isArray(data)) setRuns(data as CapabilityEvidenceRun[]); })
+      .catch(() => {})
+      .finally(() => setRL(false));
+  }, [activeWorkspaceId, versionId]);
+
+  async function runCheck(evidenceType: EvidenceType, blocking: boolean, policyPackId: string | null) {
+    if (!activeWorkspaceId) return;
+    setStarting(evidenceType);
+    setSE(null);
+    try {
+      const res = await fetch(`/api/evidence/runs?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiSystemId: systemId, aiSystemVersionId: versionId, evidenceType, blocking, policyPackId }),
+      });
+      const json = (await res.json()) as CapabilityEvidenceRun & { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to start");
+      setRuns((prev) => [json, ...prev]);
+    } catch (e) {
+      setSE(e instanceof Error ? e.message : "Failed to start evidence run");
+    } finally {
+      setStarting(null);
+    }
+  }
+
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-[#6B7280]" /></div>;
   if (error) return <div className="flex items-center gap-2 py-8 text-sm text-[#991B1B]"><AlertTriangle className="h-4 w-4" />{error}</div>;
+
+  // Build a latest-run map per evidence type
+  const latestRunByType = new Map<EvidenceType, CapabilityEvidenceRun>();
+  for (const run of runs) {
+    if (!latestRunByType.has(run.evidenceType)) latestRunByType.set(run.evidenceType, run);
+  }
 
   if (evidence.length === 0) {
     return (
@@ -536,36 +635,126 @@ function RequiredEvidenceTab({
         <FileText className="h-8 w-8 text-[#D1C9BD]" />
         <div>
           <p className="font-medium text-[#111111] text-sm">No required evidence</p>
-          <p className="text-xs text-[#6B7280] mt-1">Apply a policy pack to generate required evidence checks.</p>
+          <p className="text-xs text-[#6B7280] mt-1">Apply a policy pack from the Policies tab to generate evidence requirements.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!versionId) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <GitBranch className="h-8 w-8 text-[#D1C9BD]" />
+        <div>
+          <p className="font-medium text-[#111111] text-sm">No version selected</p>
+          <p className="text-xs text-[#6B7280] mt-1">Create a version in the Versions tab to run evidence checks.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
-      {evidence.map((e) => (
-        <div key={e.id} className="flex items-start gap-3 rounded-xl border border-[#E7DED1] bg-white p-4">
-          <div className={`mt-0.5 flex-shrink-0 rounded-full p-1 ${e.blocking ? "bg-[#FEF2F2]" : "bg-[#FFFBEB]"}`}>
-            {e.blocking
-              ? <Shield className="h-3.5 w-3.5 text-[#991B1B]" />
-              : <CheckCircle2 className="h-3.5 w-3.5 text-[#92400E]" />
-            }
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="font-medium text-[#111111] text-sm">{e.label}</p>
-              {e.blocking && <Badge className="bg-[#FEF2F2] text-[#991B1B] text-[10px] font-normal">blocking</Badge>}
-              {!e.required && <Badge className="bg-[#F3F4F6] text-[#6B7280] text-[10px] font-normal">optional</Badge>}
+    <div className="space-y-3">
+      {startError && (
+        <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">{startError}</div>
+      )}
+
+      {/* Checklist */}
+      {evidence.map((e) => {
+        const latestRun = latestRunByType.get(e.evidenceType as EvidenceType);
+        const runStatus = latestRun?.status;
+        const isRunning = starting === e.evidenceType || runStatus === "running" || runStatus === "queued";
+
+        let statusIcon: React.ReactNode;
+        let statusBadge: React.ReactNode = null;
+
+        if (!latestRun) {
+          statusIcon = <Shield className="h-4 w-4 text-[#9CA3AF]" />;
+        } else if (runStatus === "passed") {
+          statusIcon = <CheckCircle2 className="h-4 w-4 text-[#065F46]" />;
+          statusBadge = <Badge className="bg-[#ECFDF5] text-[#065F46] text-[10px] font-normal">Passed</Badge>;
+        } else if (runStatus === "failed") {
+          statusIcon = <XCircle className="h-4 w-4 text-[#991B1B]" />;
+          statusBadge = <Badge className="bg-[#FEF2F2] text-[#991B1B] text-[10px] font-normal">Failed</Badge>;
+        } else if (runStatus === "needs_review") {
+          statusIcon = <AlertTriangle className="h-4 w-4 text-[#92400E]" />;
+          statusBadge = <Badge className="bg-[#FFFBEB] text-[#92400E] text-[10px] font-normal">Needs Review</Badge>;
+        } else if (runStatus === "running" || runStatus === "queued") {
+          statusIcon = <Loader2 className="h-4 w-4 text-[#1D4ED8] animate-spin" />;
+          statusBadge = <Badge className="bg-[#EFF6FF] text-[#1D4ED8] text-[10px] font-normal">{runStatus === "running" ? "Running" : "Queued"}</Badge>;
+        } else {
+          statusIcon = <Shield className="h-4 w-4 text-[#9CA3AF]" />;
+        }
+
+        return (
+          <div key={e.id} className="rounded-xl border border-[#E7DED1] bg-white p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0">{statusIcon}</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center flex-wrap gap-2">
+                  <p className="font-medium text-[#111111] text-sm">{e.label}</p>
+                  {statusBadge}
+                  {e.blocking && <Badge className="bg-[#FEF2F2] text-[#991B1B] text-[10px] font-normal">blocking</Badge>}
+                  {!e.required && <Badge className="bg-[#F3F4F6] text-[#6B7280] text-[10px] font-normal">optional</Badge>}
+                </div>
+                <p className="text-[10px] text-[#9CA3AF] mt-0.5">
+                  {EVIDENCE_TYPE_LABELS[e.evidenceType as EvidenceType] ?? e.evidenceType}
+                  {e.policyPackName && <> · from {e.policyPackName}</>}
+                </p>
+                {e.description && <p className="text-xs text-[#6B7280] mt-1">{e.description}</p>}
+                {latestRun?.failureReason && (
+                  <p className="text-xs text-[#991B1B] mt-1">↳ {latestRun.failureReason}</p>
+                )}
+                {latestRun?.resultSummary && runStatus !== "failed" && (
+                  <p className="text-xs text-[#065F46] mt-1">↳ {latestRun.resultSummary}</p>
+                )}
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                {latestRun && (
+                  <Link
+                    href={`/evidence/runs/${latestRun.id}` as Route}
+                    className="rounded-lg border border-[#E7DED1] px-2.5 py-1.5 text-xs text-[#6B7280] hover:bg-[#F8F5EF]"
+                  >
+                    View run
+                  </Link>
+                )}
+                <button
+                  onClick={() => runCheck(e.evidenceType as EvidenceType, e.blocking, e.policyPackId)}
+                  disabled={isRunning}
+                  className="flex items-center gap-1 rounded-lg bg-[#2563EB] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                >
+                  {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                  {latestRun ? "Re-run" : "Run check"}
+                </button>
+              </div>
             </div>
-            <p className="text-[10px] text-[#9CA3AF] mt-0.5">
-              {e.evidenceType.replaceAll("_", " ")}
-              {e.policyPackName && <> · from {e.policyPackName}</>}
-            </p>
-            {e.description && <p className="text-xs text-[#6B7280] mt-1">{e.description}</p>}
+          </div>
+        );
+      })}
+
+      {/* All runs history */}
+      {runs.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[10px] text-[#9CA3AF] uppercase tracking-wide font-semibold mb-2">All evidence runs for this version</p>
+          <div className="rounded-xl border border-[#E7DED1] bg-white overflow-hidden">
+            {runs.map((run) => (
+              <Link
+                key={run.id}
+                href={`/evidence/runs/${run.id}` as Route}
+                className="group flex items-center gap-3 px-4 py-2.5 border-b border-[#F1ECE3] last:border-0 hover:bg-[#FBFAF7]"
+              >
+                <Badge className={`${EVIDENCE_RUN_STATUS_STYLE[run.status] ?? "bg-[#F3F4F6]"} text-[10px] font-normal w-20 justify-center`}>
+                  {run.status}
+                </Badge>
+                <span className="text-xs text-[#374151] flex-1">{EVIDENCE_TYPE_LABELS[run.evidenceType] ?? run.evidenceType}</span>
+                {run.resultScore != null && <span className="text-xs text-[#374151]">{Math.round(run.resultScore * 100)}%</span>}
+                <span className="text-[10px] text-[#9CA3AF]">{run.completedAt ? new Date(run.completedAt).toLocaleDateString() : "—"}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-[#D1C9BD] group-hover:text-[#2563EB]" />
+              </Link>
+            ))}
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -779,6 +968,8 @@ export default function SystemDetailPage() {
           )}
           {activeTab === "Required Evidence" && (
             <RequiredEvidenceTab
+              systemId={id}
+              versionId={system.activeVersion?.id ?? versions[0]?.id ?? null}
               evidence={evidence}
               loading={evidLoad}
               error={evidError}

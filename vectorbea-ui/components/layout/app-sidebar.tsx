@@ -54,7 +54,8 @@ function isRegistryRoute(p: string) {
 function isEvidenceRoute(p: string) {
   return (
     p === "/evidence" || p.startsWith("/evidence/") ||
-    p === "/evaluations" || p.startsWith("/evaluations/")
+    p === "/evaluations" || p.startsWith("/evaluations/") ||
+    p === "/evidence/runs" || p.startsWith("/evidence/runs/")
   );
 }
 function isReleaseGatesRoute(p: string) {
@@ -135,7 +136,14 @@ const NAV: NavItem[] = [
   },
 
   // ── Evaluation Evidence ──
-  { href: "/evaluations", label: "Evaluation Evidence", icon: FlaskConical },
+  { href: "/evidence/runs", label: "Evaluation Evidence", icon: FlaskConical },
+  {
+    href: "/evidence/runs",
+    label: "Evidence Runs",
+    icon: ClipboardList,
+    isSubItem: true,
+    subItemGroup: isEvidenceRoute,
+  },
   {
     href: "/evaluations/datasets",
     label: "Deterministic Test Sets",
