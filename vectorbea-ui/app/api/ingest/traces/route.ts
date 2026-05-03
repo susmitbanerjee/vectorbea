@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { authenticateIngestToken } from "@/lib/server/ingest-tokens";
+import { recordEvidenceSourceEvent, resolveAiSystem, touchIntegrationConnection, upsertDiscoveredAiSystem } from "@/lib/server/integrations";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { buildNormalizedTraceEnvelope, type RawTraceEvent } from "@/lib/server/trace-event-normalizer";
 import { createWorkflowTrace } from "@/lib/server/workflow-traces";
@@ -180,6 +181,89 @@ export async function POST(request: NextRequest) {
         },
       });
       traceIds.push(trace.id);
+
+      // ── Evidence pipeline: record event + resolve/discover AI system ──────
+      // Fire-and-forget: do not block trace ingestion on pipeline failures
+      const ingestSourceType = (traceBody.source ?? batchDefaults?.source ?? "sdk") as "sidecar" | "opentelemetry" | "sdk" | "direct_api";
+      void (async () => {
+        try {
+          const capName =
+            asString(startEvent?.metadata?.capability_name)
+            ?? asString(startEvent?.metadata?.capabilityName)
+            ?? asString(startEvent?.metadata?.agent_name)
+            ?? asString(startEvent?.metadata?.agentName)
+            ?? asString(startEvent?.metadata?.workflow_name)
+            ?? asString(startEvent?.metadata?.workflowName);
+          const svcName =
+            asString(startEvent?.metadata?.service_name)
+            ?? asString(startEvent?.metadata?.serviceName)
+            ?? asString(metadata.service_name)
+            ?? asString(metadata.serviceName)
+            ?? batchDefaults?.serviceName
+            ?? null;
+
+          // Resolve AI system
+          const resolved = capability_id
+            ? { id: capability_id, name: capName ?? "unknown" }
+            : await resolveAiSystem(resolvedWorkspaceId, {
+                capabilityId: capability_id ?? null,
+                aiSystemName: capName,
+                serviceName: svcName,
+              });
+
+          let resolvedAiSystemId = resolved?.id ?? null;
+
+          // Discover if unresolved
+          if (!resolvedAiSystemId) {
+            const candidateName = capName ?? svcName;
+            if (candidateName) {
+              const discovered = await upsertDiscoveredAiSystem({
+                workspaceId: resolvedWorkspaceId,
+                suggestedName: candidateName,
+                sourceType: ingestSourceType,
+                serviceName: svcName,
+                provider: normalized.provider ?? null,
+                model: normalized.model ?? null,
+                environment: traceBody.environment ?? batchDefaults?.environment ?? null,
+              });
+              resolvedAiSystemId = discovered.linkedAiSystemId;
+            }
+          }
+
+          // Determine event_type from normalized steps
+          const hasMcp = normalized.steps.some((s) => s.mcpServerName);
+          const hasRag = normalized.steps.some((s) => s.stepType === "rag_retrieval");
+          const eventType = hasMcp ? "mcp_tool_call" : hasRag ? "rag_retrieval" : "agent_run";
+
+          await recordEvidenceSourceEvent({
+            workspaceId: resolvedWorkspaceId,
+            sourceType: ingestSourceType,
+            sourceId: trace.id,
+            aiSystemId: resolvedAiSystemId,
+            aiSystemVersionId: capability_version_id ?? null,
+            eventType,
+            payload: { trace_id: trace.id, source: ingestSourceType },
+            normalizedPayload: {
+              ai_system_id: resolvedAiSystemId,
+              provider: normalized.provider,
+              model: normalized.model,
+              outcome_status: normalized.outcomeStatus,
+              steps_count: normalized.steps.length,
+              has_mcp: hasMcp,
+              has_rag: hasRag,
+            },
+          });
+
+          // Update integration connection health
+          await touchIntegrationConnection({
+            workspaceId: resolvedWorkspaceId,
+            integrationType: ingestSourceType,
+            success: true,
+          });
+        } catch (pipelineErr) {
+          console.warn("[ingest/traces] Pipeline hook failed (non-blocking):", pipelineErr);
+        }
+      })();
     }
 
     return NextResponse.json(
