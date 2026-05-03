@@ -29,7 +29,34 @@ import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
  */
 export type AssertResult =
   | { error: NextResponse; user?: never }
-  | { error: null; user: { id: string; email?: string | null } };
+  | { error: null; user: { id: string; email?: string | null; role: WorkspaceRole } };
+
+export type WorkspaceRole = "viewer" | "editor" | "admin";
+
+const ROLE_LEVEL: Record<WorkspaceRole, number> = {
+  viewer: 0,
+  editor: 1,
+  admin: 2,
+};
+
+function normalizeRole(role: unknown): WorkspaceRole {
+  return role === "admin" || role === "editor" || role === "viewer" ? role : "viewer";
+}
+
+export function hasWorkspaceRole(role: WorkspaceRole, required: WorkspaceRole) {
+  return ROLE_LEVEL[role] >= ROLE_LEVEL[required];
+}
+
+export function requireWorkspaceRole(
+  role: WorkspaceRole,
+  required: WorkspaceRole,
+  message = "You do not have permission to perform this action.",
+) {
+  if (!hasWorkspaceRole(role, required)) {
+    return NextResponse.json({ error: message }, { status: 403 });
+  }
+  return null;
+}
 
 export async function assertWorkspaceMember(
   request: NextRequest,
@@ -100,5 +127,5 @@ export async function assertWorkspaceMember(
     };
   }
 
-  return { error: null, user };
+  return { error: null, user: { ...user, role: normalizeRole(membership.role) } };
 }

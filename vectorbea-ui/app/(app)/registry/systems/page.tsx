@@ -470,7 +470,7 @@ export default function RegistrySystemsPage() {
               </div>
               <div>
                 <p className="font-semibold text-[#111111]">No AI systems registered yet</p>
-                <p className="text-sm text-[#6B7280] mt-1">Register your first AI system to start governing releases.</p>
+                <p className="text-sm text-[#6B7280] mt-1">Register your first AI system to start applying policies and collecting release evidence.</p>
               </div>
               <button
                 onClick={() => setCreate(true)}

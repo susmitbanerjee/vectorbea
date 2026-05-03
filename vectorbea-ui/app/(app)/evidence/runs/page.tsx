@@ -172,7 +172,7 @@ export default function EvidenceRunsPage() {
               <div>
                 <p className="font-semibold text-[#111111]">No evidence runs yet</p>
                 <p className="text-sm text-[#6B7280] mt-1">
-                  Run evidence checks from an AI System&apos;s Required Evidence tab.
+                  No evidence has been collected for this version yet. Run required checks from an AI System&apos;s Required Evidence tab.
                 </p>
               </div>
               <Link

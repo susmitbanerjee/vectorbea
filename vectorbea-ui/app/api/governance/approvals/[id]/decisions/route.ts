@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { submitApprovalDecision } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -13,6 +13,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "admin", "Only workspace admins can approve or reject releases.");
+    if (roleError) return roleError;
     await assertFeatureAccess(workspaceId, "approval_workflows");
     const { id } = await params;
     const body = (await request.json().catch(() => ({}))) as { decision?: "approved" | "rejected"; comment?: string | null };

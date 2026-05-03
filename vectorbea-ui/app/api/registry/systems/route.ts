@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { AiCapabilityType, BusinessDomain, DataSensitivity, ReliabilityRiskLevel } from "@/lib/api";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { createCapability, listCapabilitiesIncludingPrompts } from "@/lib/server/ai-capabilities";
 import { writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
+import { getWorkspacePlanLimits } from "@/lib/server/workspace-limits";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) return NextResponse.json([]);
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "editor", "Viewers cannot register AI systems.");
+    if (roleError) return roleError;
     const systems = await listCapabilitiesIncludingPrompts(workspaceId);
     return NextResponse.json(systems);
   } catch (error) {
@@ -42,6 +45,26 @@ export async function POST(request: NextRequest) {
 
     if (!body.name?.trim()) return NextResponse.json({ error: "name is required" }, { status: 400 });
     if (!body.type) return NextResponse.json({ error: "type is required" }, { status: 400 });
+
+    const [limits, currentSystems] = await Promise.all([
+      getWorkspacePlanLimits(workspaceId),
+      listCapabilitiesIncludingPrompts(workspaceId),
+    ]);
+    const aiSystemLimit =
+      limits.planTier === "free" ? 1 :
+      limits.planTier === "plus" ? 5 :
+      null;
+    if (aiSystemLimit != null && currentSystems.length >= aiSystemLimit) {
+      return NextResponse.json(
+        {
+          error:
+            limits.planTier === "free"
+              ? "Free workspaces can register one AI system. Upgrade to Plus or Pro to add more."
+              : "Plus workspaces have reached the AI system limit. Upgrade to Pro for production governance.",
+        },
+        { status: 403 },
+      );
+    }
 
     const system = await createCapability({
       workspaceId,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { IncidentSeverity, IncidentSourceType } from "@/lib/api";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { createIncident, createIncidentFromTrace, listIncidents } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) return NextResponse.json([]);
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "editor", "Viewers cannot create incidents.");
+    if (roleError) return roleError;
     await assertFeatureAccess(workspaceId, "incidents");
     const status = request.nextUrl.searchParams.get("status")?.trim() || undefined;
     const severity = request.nextUrl.searchParams.get("severity")?.trim() || undefined;

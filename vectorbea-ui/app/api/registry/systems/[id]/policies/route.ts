@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
+import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { applyPolicyPackToCapability, listPolicyPacks, writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
@@ -16,6 +17,9 @@ export async function GET(
     if (!workspaceId) return NextResponse.json([]);
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "admin", "Only workspace admins can apply policy packs.");
+    if (roleError) return roleError;
+    await assertFeatureAccess(workspaceId, "policy_packs");
     const { id } = await params;
     const supabase = createVectorBeaAdminClient();
     const { data, error } = await supabase
@@ -66,6 +70,9 @@ export async function POST(
     if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "admin", "Only workspace admins can remove policy packs.");
+    if (roleError) return roleError;
+    await assertFeatureAccess(workspaceId, "policy_packs");
     const { id } = await params;
     const body = (await request.json().catch(() => ({}))) as { policyPackId?: string };
     if (!body.policyPackId) return NextResponse.json({ error: "policyPackId is required" }, { status: 400 });

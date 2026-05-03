@@ -16,7 +16,7 @@ export function canUseProviderArena(planTier: PlanTier | null | undefined): bool
 }
 
 export function canUseAICapabilities(planTier: PlanTier | null | undefined): boolean {
-  return planTier === "pro" || planTier === "enterprise";
+  return planTier === "free" || planTier === "plus" || planTier === "pro" || planTier === "enterprise";
 }
 
 export function canUseWorkflowReliability(planTier: PlanTier | null | undefined): boolean {

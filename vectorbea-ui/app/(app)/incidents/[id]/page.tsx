@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Loader2, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { IncidentDetailView, RegressionSuite, WorkflowRegressionRun } from "@/lib/api";
+import type { IncidentDetailView, IncidentStatus, RegressionSuite, WorkflowRegressionRun } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 
 export default function IncidentDetailPage() {
@@ -21,6 +21,9 @@ export default function IncidentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newStatus, setNewStatus] = useState<IncidentStatus | "">("");
+  const [statusNote, setStatusNote] = useState("");
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   useEffect(() => {
     if (!activeWorkspaceId || !id) return;
@@ -72,6 +75,33 @@ export default function IncidentDetailPage() {
       setError(e instanceof Error ? e.message : "Failed to create regression case");
     } finally {
       setWorking(false);
+    }
+  }
+
+  const ALL_STATUSES: IncidentStatus[] = ["open", "investigating", "fix_in_progress", "verification_pending", "resolved", "dismissed"];
+
+  async function updateStatus() {
+    if (!activeWorkspaceId || !newStatus || !id) return;
+    setUpdatingStatus(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/incidents/${encodeURIComponent(id)}?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus, description: statusNote.trim() || undefined }),
+        },
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error((json as { error?: string }).error ?? "Failed to update");
+      setIncident((prev) => prev ? { ...prev, ...(json as Partial<IncidentDetailView>) } : prev);
+      setNewStatus("");
+      setStatusNote("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update status");
+    } finally {
+      setUpdatingStatus(false);
     }
   }
 
@@ -127,6 +157,31 @@ export default function IncidentDetailPage() {
           </Card>
 
           <div className="space-y-5">
+            {/* Update status */}
+            {!["resolved", "dismissed"].includes(incident.status) && (
+              <Card className="border-[#E7DED1] bg-white">
+                <CardHeader className="pb-2"><CardTitle className="text-sm text-[#111111] flex items-center gap-2"><RefreshCw className="h-4 w-4 text-[#6B7280]" />Update status</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <select value={newStatus} onChange={(e) => setNewStatus(e.target.value as IncidentStatus | "")} className="w-full rounded-xl border border-[#D8CFC2] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111]">
+                    <option value="">Select new status…</option>
+                    {ALL_STATUSES.filter((s) => s !== incident.status).map((s) => (
+                      <option key={s} value={s}>{s.replaceAll("_", " ")}</option>
+                    ))}
+                  </select>
+                  <textarea
+                    rows={2}
+                    placeholder="Note (optional)…"
+                    value={statusNote}
+                    onChange={(e) => setStatusNote(e.target.value)}
+                    className="w-full rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111] focus:border-[#2563EB] focus:outline-none resize-none"
+                  />
+                  <button type="button" disabled={!newStatus || updatingStatus} onClick={() => void updateStatus()} className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-50">
+                    {updatingStatus && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Update status
+                  </button>
+                </CardContent>
+              </Card>
+            )}
             <Card className="border-[#E7DED1] bg-white">
               <CardHeader className="pb-2"><CardTitle className="text-sm text-[#111111] flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-[#2563EB]" />Add to regression suite</CardTitle></CardHeader>
               <CardContent className="space-y-3">

@@ -210,6 +210,7 @@ export const PLAN_CONFIG: Record<CanonicalPlanTier, PlanDefinition> = {
       "approval_workflows",
       "policy_packs",
       "governance_dashboard",
+      "pii_redaction",
     ]),
   },
   enterprise: {

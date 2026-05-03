@@ -1,338 +1,192 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Route } from "next";
 import Link from "next/link";
+import type { Route } from "next";
 import {
-  BadgeCheck,
-  Bot,
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
-  ClipboardList,
-  FileBarChart2,
   GitMerge,
   Loader2,
-  Scale,
   ShieldX,
-  TriangleAlert,
   XCircle,
 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { AiCapability } from "@/lib/api";
-import { useWorkspace } from "@/lib/workspace-context";
+import { Card, CardContent } from "@/components/ui/card";
+import type { ReleaseGateCheck, ReleaseGateStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/lib/workspace-context";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type GateStatus = "approved" | "blocked" | "needs_review" | "missing_evidence" | "unknown";
-
-type ReleaseGate = {
-  id: string;
+type GateRow = {
+  versionId: string;
+  aiSystemId: string;
   systemName: string;
   systemType: string;
+  versionNumber: string;
+  versionStatus: string;
   environment: string;
   riskLevel: string;
-  status: GateStatus;
-  checks: {
-    label: string;
-    status: "pass" | "fail" | "missing" | "pending";
-    detail?: string;
-  }[];
-  lastUpdated: string;
+  decision: ReleaseGateStatus;
+  checks: ReleaseGateCheck[];
+  reasons: string[];
+  evaluatedAt: string;
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const DECISION_CONFIG: Record<ReleaseGateStatus, { label: string; color: string; icon: typeof CheckCircle2 }> = {
+  safe_to_release: { label: "Safe", color: "bg-[#ECFDF5] text-[#065F46]", icon: CheckCircle2 },
+  blocked: { label: "Blocked", color: "bg-[#FEF2F2] text-[#991B1B]", icon: XCircle },
+  needs_review: { label: "Needs Review", color: "bg-[#FFFBEB] text-[#92400E]", icon: AlertTriangle },
+  missing_evidence: { label: "Missing Evidence", color: "bg-[#FFF7ED] text-[#C2410C]", icon: ShieldX },
+};
 
-function gateStatusConfig(status: GateStatus) {
-  switch (status) {
-    case "approved":
-      return { label: "Approved", color: "bg-[#ECFDF5] text-[#065F46]", icon: CheckCircle2 };
-    case "blocked":
-      return { label: "Blocked", color: "bg-[#FEF2F2] text-[#991B1B]", icon: XCircle };
-    case "needs_review":
-      return { label: "Needs Review", color: "bg-[#FFFBEB] text-[#92400E]", icon: TriangleAlert };
-    case "missing_evidence":
-      return { label: "Missing Evidence", color: "bg-[#FFF7ED] text-[#C2410C]", icon: ShieldX };
-    default:
-      return { label: "Unknown", color: "bg-muted text-muted-foreground", icon: GitMerge };
-  }
+function checkStatusIcon(status: ReleaseGateCheck["status"]) {
+  if (status === "pass") return <CheckCircle2 className="h-3.5 w-3.5 text-[#065F46]" />;
+  if (status === "fail") return <XCircle className="h-3.5 w-3.5 text-[#991B1B]" />;
+  if (status === "pending") return <AlertTriangle className="h-3.5 w-3.5 text-[#92400E]" />;
+  return <ShieldX className="h-3.5 w-3.5 text-[#C2410C]" />;
 }
-
-function checkStatusIcon(status: "pass" | "fail" | "missing" | "pending") {
-  switch (status) {
-    case "pass":
-      return <CheckCircle2 className="h-3.5 w-3.5 text-[#065F46]" />;
-    case "fail":
-      return <XCircle className="h-3.5 w-3.5 text-[#991B1B]" />;
-    case "missing":
-      return <ShieldX className="h-3.5 w-3.5 text-[#C2410C]" />;
-    case "pending":
-      return <TriangleAlert className="h-3.5 w-3.5 text-[#92400E]" />;
-  }
-}
-
-// ─── Build gates from AI systems ─────────────────────────────────────────────
-
-function buildGatesFromCapabilities(caps: AiCapability[]): ReleaseGate[] {
-  return caps.map((cap) => {
-    const hasEvidence = cap.lastCheckStatus != null;
-    const evidencePassed = cap.lastCheckStatus === "passed";
-    const hasPolicy = (cap as any).policy_pack_id != null;
-    const riskLevel = cap.riskLevel ?? "medium";
-
-    const status: GateStatus =
-      !hasEvidence
-        ? "missing_evidence"
-        : evidencePassed && hasPolicy
-          ? "approved"
-          : !evidencePassed
-            ? "blocked"
-            : "needs_review";
-
-    return {
-      id: cap.id,
-      systemName: cap.name,
-      systemType: cap.type ?? "prompt",
-      environment: (cap as any).environment ?? "production",
-      riskLevel,
-      status,
-      checks: [
-        {
-          label: "Policy applied",
-          status: hasPolicy ? "pass" : "missing",
-          detail: hasPolicy ? undefined : "No policy pack applied",
-        },
-        {
-          label: "Behavioral evidence",
-          status: hasEvidence ? (evidencePassed ? "pass" : "fail") : "missing",
-          detail: hasEvidence
-            ? evidencePassed ? "All checks passed" : "One or more checks failed"
-            : "No evidence run found",
-        },
-        {
-          label: "Regression evidence",
-          status: "missing",
-          detail: "No regression suite linked",
-        },
-        {
-          label: "Human approval",
-          status: "pending",
-          detail: "Awaiting reviewer",
-        },
-      ],
-      lastUpdated: cap.updatedAt ?? cap.createdAt ?? new Date().toISOString(),
-    };
-  });
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ReleaseGatesPage() {
   const { activeWorkspaceId } = useWorkspace();
-  const [gates, setGates] = useState<ReleaseGate[]>([]);
+  const [gates, setGates] = useState<GateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<GateStatus | "all">("all");
+  const [filter, setFilter] = useState<ReleaseGateStatus | "all">("all");
 
   useEffect(() => {
-    if (!activeWorkspaceId) return;
+    if (!activeWorkspaceId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
-    fetch(`/api/reliability/capabilities?workspaceId=${encodeURIComponent(activeWorkspaceId)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-      .then((data: AiCapability[]) => {
-        setGates(buildGatesFromCapabilities(data));
+    fetch(`/api/release-gates?workspaceId=${encodeURIComponent(activeWorkspaceId)}`)
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data?.error ?? "Failed to load release gates");
+        setGates(Array.isArray(data) ? data : []);
       })
-      .catch((err: unknown) => {
-        setError(typeof err === "string" ? err : "Failed to load release gates");
-      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load release gates"))
       .finally(() => setLoading(false));
   }, [activeWorkspaceId]);
 
-  const counts = {
-    all: gates.length,
-    approved: gates.filter((g) => g.status === "approved").length,
-    blocked: gates.filter((g) => g.status === "blocked").length,
-    needs_review: gates.filter((g) => g.status === "needs_review").length,
-    missing_evidence: gates.filter((g) => g.status === "missing_evidence").length,
-    unknown: 0,
-  };
-
-  const visible = filter === "all" ? gates : gates.filter((g) => g.status === filter);
+  const visible = filter === "all" ? gates : gates.filter((gate) => gate.decision === filter);
+  const count = (decision: ReleaseGateStatus) => gates.filter((gate) => gate.decision === decision).length;
 
   return (
-    <div className="flex flex-col">
+    <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader
         title="Release Gates"
-        subtitle="Governance decisions for each AI system version before it goes live"
+        subtitle="Evidence-backed release decisions for AI system versions"
       />
 
-      <div className="flex-1 space-y-6 p-6">
-        {/* Summary strip */}
+      <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {(
-            [
-              { key: "approved", label: "Approved", icon: CheckCircle2, color: "text-[#065F46]", bg: "bg-[#ECFDF5]" },
-              { key: "blocked", label: "Blocked", icon: XCircle, color: "text-[#991B1B]", bg: "bg-[#FEF2F2]" },
-              { key: "needs_review", label: "Needs Review", icon: TriangleAlert, color: "text-[#92400E]", bg: "bg-[#FFFBEB]" },
-              { key: "missing_evidence", label: "Missing Evidence", icon: ShieldX, color: "text-[#C2410C]", bg: "bg-[#FFF7ED]" },
-            ] as const
-          ).map(({ key, label, icon: Icon, color, bg }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(filter === key ? "all" : key)}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-all hover:shadow-sm",
-                filter === key && "ring-2 ring-primary",
-              )}
-            >
-              <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", bg)}>
-                <Icon className={cn("h-4 w-4", color)} />
-              </div>
-              <div>
-                <p className="text-xl font-bold text-foreground">{loading ? "—" : counts[key]}</p>
-                <p className="text-[11px] text-muted-foreground">{label}</p>
-              </div>
-            </button>
-          ))}
+          {(["safe_to_release", "blocked", "needs_review", "missing_evidence"] as ReleaseGateStatus[]).map((decision) => {
+            const cfg = DECISION_CONFIG[decision];
+            const Icon = cfg.icon;
+            return (
+              <button
+                key={decision}
+                type="button"
+                onClick={() => setFilter(filter === decision ? "all" : decision)}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border border-[#E7DED1] bg-white px-4 py-3 text-left transition-all hover:border-[#2563EB]/40",
+                  filter === decision && "ring-2 ring-[#2563EB]",
+                )}
+              >
+                <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg", cfg.color.split(" ")[0])}>
+                  <Icon className={cn("h-4 w-4", cfg.color.split(" ")[1])} />
+                </span>
+                <span>
+                  <span className="block text-xl font-bold text-[#111111]">{loading ? "-" : count(decision)}</span>
+                  <span className="block text-[11px] text-[#6B7280]">{cfg.label}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Gates table */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <div className="flex items-center justify-center gap-2 py-20 text-sm text-[#6B7280]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading release gates...
           </div>
         ) : error ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
-            <p className="text-sm text-destructive">{error}</p>
+          <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-6 text-center">
+            <p className="text-sm text-[#991B1B]">{error}</p>
             <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>
               Retry
             </Button>
           </div>
         ) : gates.length === 0 ? (
-          <Card className="border-dashed">
+          <Card className="border-dashed border-[#E7DED1] bg-white">
             <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                <GitMerge className="h-7 w-7 text-muted-foreground" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#EFF6FF]">
+                <GitMerge className="h-7 w-7 text-[#2563EB]" />
               </div>
               <div>
-                <h3 className="text-base font-semibold text-foreground">No AI systems registered yet</h3>
-                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Register your first AI system in the AI Registry to see its release gate status here.
+                <h3 className="text-base font-semibold text-[#111111]">No versions ready for gate evaluation</h3>
+                <p className="mt-1 max-w-sm text-sm text-[#6B7280]">
+                  Create an AI System version, apply a policy pack, and run required evidence to evaluate its release gate.
                 </p>
               </div>
-              <div className="flex gap-3">
-                <Link href="/registry/systems" className={buttonVariants({ size: "sm" })}>
-                  Go to AI Registry
-                </Link>
-                <Link href="/governance/policy-packs" className={buttonVariants({ variant: "outline", size: "sm" })}>
-                  Configure Policies
-                </Link>
-              </div>
+              <Link href="/registry/systems" className={buttonVariants({ size: "sm" })}>
+                Go to AI Registry
+              </Link>
             </CardContent>
           </Card>
+        ) : visible.length === 0 ? (
+          <p className="py-8 text-center text-sm text-[#6B7280]">
+            No versions match this gate filter.
+          </p>
         ) : (
           <div className="space-y-3">
-            {visible.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No AI systems match this filter.{" "}
-                <button
-                  type="button"
-                  className="text-primary underline underline-offset-2"
-                  onClick={() => setFilter("all")}
-                >
-                  Show all
-                </button>
-              </p>
-            ) : (
-              visible.map((gate) => {
-                const cfg = gateStatusConfig(gate.status);
-                const StatusIcon = cfg.icon;
-                return (
-                  <Card key={gate.id} className="transition-shadow hover:shadow-sm">
-                    <CardContent className="p-4">
-                      <div className="flex items-start gap-4">
-                        {/* Status icon */}
-                        <div
-                          className={cn(
-                            "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-                            cfg.color.includes("065F46") ? "bg-[#ECFDF5]" :
-                            cfg.color.includes("991B1B") ? "bg-[#FEF2F2]" :
-                            cfg.color.includes("92400E") ? "bg-[#FFFBEB]" :
-                            "bg-[#FFF7ED]",
-                          )}
-                        >
-                          <StatusIcon className={cn("h-4.5 w-4.5", cfg.color.split(" ")[1])} />
-                        </div>
-
-                        {/* System info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-sm font-semibold text-foreground">{gate.systemName}</h3>
-                            <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", cfg.color)}>
-                              {cfg.label}
-                            </span>
-                            <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground capitalize">
-                              {gate.environment}
-                            </span>
-                            <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground capitalize">
-                              {gate.riskLevel} risk
-                            </span>
-                          </div>
-
-                          {/* Check rows */}
-                          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-4">
-                            {gate.checks.map((check) => (
-                              <div key={check.label} className="flex items-center gap-1.5">
-                                {checkStatusIcon(check.status)}
-                                <span className="text-[11px] text-muted-foreground truncate">{check.label}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <Link
-                          href={`/registry/systems/${gate.id}` as Route}
-                          className="shrink-0 flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        >
-                          System <ChevronRight className="h-3 w-3" />
-                        </Link>
+            {visible.map((gate) => {
+              const cfg = DECISION_CONFIG[gate.decision];
+              const Icon = cfg.icon;
+              return (
+                <Card key={gate.versionId} className="border-[#E7DED1] bg-white transition-shadow hover:shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-4">
+                      <div className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", cfg.color.split(" ")[0])}>
+                        <Icon className={cn("h-4 w-4", cfg.color.split(" ")[1])} />
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* Bottom CTA strip */}
-        {gates.length > 0 && !loading && (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <Scale className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  Gate decisions are driven by policy compliance, evidence runs, and human approvals.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Link href="/governance/policy-packs" className={buttonVariants({ variant: "outline", size: "sm" })}>
-                  <Scale className="mr-1.5 h-3.5 w-3.5" />
-                  Manage Policies
-                </Link>
-                <Link href="/evidence/runs" className={buttonVariants({ size: "sm" })}>
-                  <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
-                  View Evidence Runs
-                </Link>
-              </div>
-            </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-semibold text-[#111111]">{gate.systemName}</h3>
+                          <Badge className={`${cfg.color} text-[10px] font-normal`}>{cfg.label}</Badge>
+                          <Badge className="bg-[#F3F4F6] text-[#374151] text-[10px] font-normal">{gate.versionNumber}</Badge>
+                          <Badge className="bg-[#F3F4F6] text-[#374151] text-[10px] font-normal">{gate.versionStatus}</Badge>
+                          <Badge className="bg-[#FFF7ED] text-[#C2410C] text-[10px] font-normal">{gate.riskLevel} risk</Badge>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          {gate.checks.slice(0, 4).map((check) => (
+                            <div key={`${gate.versionId}-${check.label}`} className="flex items-center gap-1.5">
+                              {checkStatusIcon(check.status)}
+                              <span className="truncate text-[11px] text-[#6B7280]">{check.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {gate.reasons.length > 0 && (
+                          <p className="mt-2 text-xs text-[#92400E]">{gate.reasons[0]}</p>
+                        )}
+                      </div>
+                      <Link
+                        href={`/release-gates/${gate.versionId}` as Route}
+                        className="flex shrink-0 items-center gap-1 rounded-lg border border-[#E7DED1] bg-white px-3 py-1.5 text-xs text-[#374151] hover:bg-[#F8F5EF]"
+                      >
+                        View gate <ChevronRight className="h-3 w-3" />
+                      </Link>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { writeAuditEvent } from "@/lib/server/audit-events";
 import { computeReleaseGate } from "@/lib/server/evidence-runs";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
@@ -32,6 +33,22 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
 
     const gate = await computeReleaseGate(workspaceId, versionId);
+    await writeAuditEvent({
+      workspaceId,
+      actorUserId: auth.user.id,
+      eventType: "release_gate_evaluated",
+      entityType: "capability_version",
+      entityId: versionId,
+      metadata: {
+        decision: gate.decision,
+        ai_system_id: gate.aiSystemId,
+        reasons: gate.reasons,
+      },
+      ipAddress: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent"),
+    }).catch((error) => {
+      console.error("[release-gate] audit write failed:", error);
+    });
 
     return NextResponse.json({ ...gate, version: verData ?? null });
   } catch (error) {

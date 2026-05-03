@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { CapabilityVersionStatus } from "@/lib/api";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { updateVersionStatus } from "@/lib/server/ai-capabilities";
 import { writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -20,6 +20,15 @@ export async function PATCH(
     const { versionId } = await params;
     const body = (await request.json().catch(() => ({}))) as { status?: CapabilityVersionStatus };
     if (!body.status) return NextResponse.json({ error: "status is required" }, { status: 400 });
+    const requiredRole = body.status === "approved" || body.status === "active" || body.status === "deprecated" ? "admin" : "editor";
+    const roleError = requireWorkspaceRole(
+      auth.user.role,
+      requiredRole,
+      body.status === "approved" || body.status === "active"
+        ? "Only workspace admins can approve or activate versions."
+        : "Viewers cannot update versions.",
+    );
+    if (roleError) return roleError;
 
     const version = await updateVersionStatus(workspaceId, versionId, body.status);
 

@@ -54,7 +54,7 @@ const FEATURE_MAP: Record<FeatureKey, PlanFeature | null> = {
   enterprise_rubric_locking: "locked_rubrics",
   locked_rubrics: "locked_rubrics",
   sso: "sso",
-  ai_capabilities: "behavioral_evaluations",
+  ai_capabilities: null,
   workflow_reliability: "behavioral_evaluations",
   deterministic_rules: "behavioral_evaluations",
   advanced_reliability_reports: "production_decision_reports",

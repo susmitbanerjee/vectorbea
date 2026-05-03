@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { activateVersionWithGateCheck } from "@/lib/server/evidence-runs";
 import { writeAuditEvent } from "@/lib/server/audit-events";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -16,6 +16,8 @@ export async function POST(
     if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "admin", "Only workspace admins can activate versions.");
+    if (roleError) return roleError;
     const { versionId } = await params;
 
     const result = await activateVersionWithGateCheck({

@@ -8,10 +8,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 import {
   Activity,
   BadgeCheck,
-  Bell,
   Bot,
   ClipboardList,
-  Columns3,
   CreditCard,
   ExternalLink,
   FileBarChart2,
@@ -19,18 +17,14 @@ import {
   FlaskConical,
   GitMerge,
   History,
-  Inbox,
   KeyRound,
-  Landmark,
   LayoutDashboard,
   LockKeyhole,
   Loader2,
   LogOut,
   Plug,
-  Repeat2,
   Scale,
   Settings2,
-  Star,
   TriangleAlert,
   Users,
 } from "lucide-react";
@@ -46,16 +40,13 @@ import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
 function isRegistryRoute(p: string) {
   return (
-    p === "/registry" || p.startsWith("/registry/") ||
-    p === "/reliability" || p.startsWith("/reliability/") ||
-    p === "/prompts" || p.startsWith("/prompts/")
+    p === "/registry" || p.startsWith("/registry/")
   );
 }
 function isEvidenceRoute(p: string) {
   return (
     p === "/evidence" || p.startsWith("/evidence/") ||
-    p === "/evaluations" || p.startsWith("/evaluations/") ||
-    p === "/evidence/runs" || p.startsWith("/evidence/runs/")
+    p === "/evaluations/datasets" || p.startsWith("/evaluations/datasets/")
   );
 }
 function isReleaseGatesRoute(p: string) {
@@ -90,14 +81,13 @@ function isReportsRoute(p: string) {
 function isIntegrationsRoute(p: string) {
   return (
     p === "/integrations" || p.startsWith("/integrations/") ||
-    p === "/traces" || p.startsWith("/traces/") ||
-    p === "/workflows" || p.startsWith("/workflows/") ||
-    p === "/onboarding/workflow-discovery" || p.startsWith("/onboarding/workflow-discovery/")
+    p === "/settings/sdk" || p.startsWith("/settings/sdk")
   );
 }
 function isSettingsRoute(p: string) {
   return (
     (p === "/settings" || p.startsWith("/settings/")) ||
+    p === "/governance/privacy" || p.startsWith("/governance/privacy/") ||
     p === "/api-keys" || p.startsWith("/api-keys/")
   );
 }
@@ -127,14 +117,6 @@ const NAV: NavItem[] = [
     isSubItem: true,
     subItemGroup: isRegistryRoute,
   },
-  {
-    href: "/prompts",
-    label: "AI System Versions",
-    icon: FileText,
-    isSubItem: true,
-    subItemGroup: isRegistryRoute,
-  },
-
   // ── Evaluation Evidence ──
   { href: "/evidence/runs", label: "Evaluation Evidence", icon: FlaskConical },
   {
@@ -146,43 +128,8 @@ const NAV: NavItem[] = [
   },
   {
     href: "/evaluations/datasets",
-    label: "Deterministic Test Sets",
-    icon: Star,
-    isSubItem: true,
-    subItemGroup: isEvidenceRoute,
-  },
-  {
-    href: "/evaluations/behavioral",
-    label: "Behavioral Evidence",
+    label: "Evidence Datasets",
     icon: ClipboardList,
-    isSubItem: true,
-    subItemGroup: isEvidenceRoute,
-  },
-  {
-    href: "/evaluations/provider-arena",
-    label: "Provider Comparison",
-    icon: Columns3,
-    isSubItem: true,
-    subItemGroup: isEvidenceRoute,
-  },
-  {
-    href: "/evaluations/review",
-    label: "Review Queue",
-    icon: Inbox,
-    isSubItem: true,
-    subItemGroup: isEvidenceRoute,
-  },
-  {
-    href: "/evaluations/schedules",
-    label: "Regression Evidence",
-    icon: Repeat2,
-    isSubItem: true,
-    subItemGroup: isEvidenceRoute,
-  },
-  {
-    href: "/evaluations/compare",
-    label: "Evidence Comparison",
-    icon: FileBarChart2,
     isSubItem: true,
     subItemGroup: isEvidenceRoute,
   },
@@ -205,29 +152,12 @@ const NAV: NavItem[] = [
   // ── Reports ──
   { href: "/governance/reports", label: "Reports", icon: FileBarChart2 },
 
-  // ── Alerts ──
-  { href: "/alerts", label: "Alerts", icon: Bell },
-
   // ── Integrations ──
   { href: "/integrations", label: "Integrations", icon: Plug },
   {
     href: "/settings/sdk",
-    label: "SDK & Ingest Tokens",
+    label: "SDK, Sidecar & OTel",
     icon: FileText,
-    isSubItem: true,
-    subItemGroup: isIntegrationsRoute,
-  },
-  {
-    href: "/traces",
-    label: "Execution Traces",
-    icon: Activity,
-    isSubItem: true,
-    subItemGroup: isIntegrationsRoute,
-  },
-  {
-    href: "/workflows",
-    label: "Workflow Blueprints",
-    icon: Landmark,
     isSubItem: true,
     subItemGroup: isIntegrationsRoute,
   },
@@ -269,6 +199,14 @@ const NAV: NavItem[] = [
     icon: LockKeyhole,
     isSubItem: true,
     subItemGroup: isSettingsRoute,
+  },
+  {
+    href: "/settings/production-readiness",
+    label: "Production Checklist",
+    icon: Activity,
+    isSubItem: true,
+    subItemGroup: isSettingsRoute,
+    minRole: "admin",
   },
 ];
 

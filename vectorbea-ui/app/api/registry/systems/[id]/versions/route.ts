@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { CapabilityVersionStatus } from "@/lib/api";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { createVersion, listVersions } from "@/lib/server/ai-capabilities";
 import { writeAuditEvent } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -17,6 +17,8 @@ export async function GET(
     if (!workspaceId) return NextResponse.json([]);
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "editor", "Viewers cannot create AI system versions.");
+    if (roleError) return roleError;
     const { id } = await params;
     return NextResponse.json(await listVersions(workspaceId, id));
   } catch (error) {

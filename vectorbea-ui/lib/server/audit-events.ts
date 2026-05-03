@@ -26,6 +26,6 @@ export async function writeAuditEvent(args: {
     user_agent: args.userAgent ?? null,
   });
   if (error && !error.message.toLowerCase().includes("does not exist")) {
-    throw new Error(error.message);
+    console.error("[audit] failed to write audit event:", error.message);
   }
 }

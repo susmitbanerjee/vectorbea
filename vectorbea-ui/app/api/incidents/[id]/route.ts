@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { IncidentStatus } from "@/lib/api";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 import { assertFeatureAccess } from "@/lib/server/feature-gates";
 import { getIncidentDetail, updateIncidentStatus } from "@/lib/server/governance";
 import { toSafeApiError } from "@/lib/server/safe-api-errors";
@@ -14,6 +14,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
+    const roleError = requireWorkspaceRole(auth.user.role, "editor", "Viewers cannot update incidents.");
+    if (roleError) return roleError;
     await assertFeatureAccess(workspaceId, "incidents");
     const { id } = await params;
     const incident = await getIncidentDetail(workspaceId, id);
