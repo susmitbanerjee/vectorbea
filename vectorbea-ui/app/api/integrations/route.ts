@@ -9,10 +9,12 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const workspaceId = request.nextUrl.searchParams.get("workspaceId")?.trim();
-    if (!workspaceId) return NextResponse.json([]);
+    if (!workspaceId) return NextResponse.json({ connections: [] });
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
-    return NextResponse.json(await listIntegrations(workspaceId));
+    const typeParam = request.nextUrl.searchParams.get("type")?.trim() as IntegrationType | undefined;
+    const connections = await listIntegrations(workspaceId, typeParam ? { integrationType: typeParam } : undefined);
+    return NextResponse.json({ connections });
   } catch (error) {
     const safe = toSafeApiError(error, "Failed to load integrations");
     return NextResponse.json({ error: safe.message }, { status: safe.status });

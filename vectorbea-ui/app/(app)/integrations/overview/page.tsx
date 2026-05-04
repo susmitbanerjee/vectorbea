@@ -136,7 +136,10 @@ export default function IntegrationsOverviewPage() {
       .then(([statsData, connsData, coverageData]: [unknown, unknown, unknown]) => {
         if ((statsData as { error?: string }).error) throw new Error((statsData as { error: string }).error);
         setStats(statsData as OverviewStats);
-        setConns(Array.isArray(connsData) ? connsData as IntegrationConnection[] : []);
+        const connsArray = Array.isArray((connsData as { connections?: unknown }).connections)
+          ? (connsData as { connections: IntegrationConnection[] }).connections
+          : Array.isArray(connsData) ? connsData as IntegrationConnection[] : [];
+        setConns(connsArray);
         setCoverage(Array.isArray(coverageData) ? coverageData as CoverageEntry[] : []);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load"))

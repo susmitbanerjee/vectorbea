@@ -133,13 +133,20 @@ function mapDiscovered(row: Record<string, unknown>): DiscoveredAiSystem {
 
 // ─── Integration CRUD ─────────────────────────────────────────────────────────
 
-export async function listIntegrations(workspaceId: string): Promise<IntegrationConnection[]> {
+export async function listIntegrations(
+  workspaceId: string,
+  filters?: { integrationType?: IntegrationType },
+): Promise<IntegrationConnection[]> {
   const supabase = createVectorBeaAdminClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("integration_connections")
     .select("*")
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
+  if (filters?.integrationType) {
+    query = query.eq("integration_type", filters.integrationType);
+  }
+  const { data, error } = await query;
   if (error) {
     if (error.message.toLowerCase().includes("does not exist")) return [];
     throw new Error(error.message);
@@ -642,6 +649,24 @@ export async function getIntegrationOverviewStats(workspaceId: string) {
 
 // ─── Update connection health from ingest ─────────────────────────────────────
 
+// Human-readable default names for auto-discovered connections
+const INTEGRATION_DEFAULT_NAMES: Record<IntegrationType, string> = {
+  sidecar:               "VectorBea Proxy (auto-discovered)",
+  opentelemetry:         "OpenTelemetry (auto-discovered)",
+  sdk:                   "SDK (auto-discovered)",
+  direct_api:            "Direct API (auto-discovered)",
+  llm_provider:          "LLM Provider (auto-discovered)",
+  mcp_server:            "MCP Server (auto-discovered)",
+  rag_pipeline:          "RAG Pipeline (auto-discovered)",
+  classification_system: "Classification System (auto-discovered)",
+  extraction_system:     "Extraction System (auto-discovered)",
+  skill_runtime:         "Skill Runtime (auto-discovered)",
+  ci_cd:                 "CI/CD (auto-discovered)",
+  manual_upload:         "Manual Upload (auto-discovered)",
+  langgraph:             "LangGraph (auto-discovered)",
+  custom_webhook:        "Custom Webhook (auto-discovered)",
+};
+
 export async function touchIntegrationConnection(args: {
   workspaceId: string;
   integrationType: IntegrationType;
@@ -651,13 +676,12 @@ export async function touchIntegrationConnection(args: {
   const supabase = createVectorBeaAdminClient();
   const now = new Date().toISOString();
 
-  // Find or create a connection for this type
+  // Look for any existing row for this workspace + type (any status)
   const { data: existing } = await supabase
     .from("integration_connections")
     .select("id, status")
     .eq("workspace_id", args.workspaceId)
     .eq("integration_type", args.integrationType)
-    .eq("status", "connected")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -672,14 +696,18 @@ export async function touchIntegrationConnection(args: {
     };
     if (args.success) patch.last_success_at = now;
     else { patch.last_error_at = now; patch.last_error_message = args.errorMessage ?? null; }
-    await supabase.from("integration_connections").update(patch).eq("id", row.id);
+    const { error } = await supabase
+      .from("integration_connections")
+      .update(patch)
+      .eq("id", row.id as string);
+    if (error) console.error("[touchIntegrationConnection] update failed:", error.message);
   } else {
-    // No connection row yet — auto-create one on first successful ingest.
-    // This means the dashboard shows the integration as soon as data arrives,
-    // without requiring manual configuration.
+    // No connection row yet — auto-create on first ingest so the dashboard
+    // shows the connection without requiring manual configuration.
     const insert: Record<string, unknown> = {
       workspace_id: args.workspaceId,
       integration_type: args.integrationType,
+      name: INTEGRATION_DEFAULT_NAMES[args.integrationType] ?? args.integrationType,
       status: "connected",
       health_status: args.success ? "healthy" : "degraded",
       last_seen_at: now,
@@ -688,6 +716,8 @@ export async function touchIntegrationConnection(args: {
     };
     if (args.success) insert.last_success_at = now;
     else { insert.last_error_at = now; insert.last_error_message = args.errorMessage ?? null; }
-    await supabase.from("integration_connections").insert(insert);
+    const { error } = await supabase.from("integration_connections").insert(insert);
+    if (error) console.error("[touchIntegrationConnection] insert failed:", error.message);
+    else console.log(`[touchIntegrationConnection] auto-created ${args.integrationType} connection for workspace ${args.workspaceId}`);
   }
 }
