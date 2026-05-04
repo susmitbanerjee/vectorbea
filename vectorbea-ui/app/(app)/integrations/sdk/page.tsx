@@ -52,7 +52,7 @@ vectorbea.init(
     environment="production",  # optional
 )
 
-# Wrap your agent function
+# ── Option A: decorator (wraps the whole function automatically) ──────────────
 @vectorbea.trace(capability_name="my-agent")
 def run_agent(user_input: str) -> str:
     # Your existing agent code — unchanged
@@ -62,7 +62,12 @@ def run_agent(user_input: str) -> str:
     )
     return response.choices[0].message.content
 
-# Or use the context manager for manual control
+# Call it normally — governance is recorded automatically
+result = run_agent("What is the capital of France?")
+
+# ── Option B: context manager (explicit control) ──────────────────────────────
+user_query = "What is the capital of France?"
+
 with vectorbea.run(capability_name="my-agent", user_input=user_query) as run:
     result = my_agent_logic(user_query)
     run.set_outcome("success", response=result)`;
