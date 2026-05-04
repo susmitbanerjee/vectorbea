@@ -493,18 +493,27 @@ export async function registerDiscoveredSystem(args: {
   const row = disc as Record<string, unknown>;
   const name = args.name ?? String(row.suggested_name);
 
+  // Map discovered source_type to a valid ai_capabilities.type value
+  const sourceType = String(row.source_type ?? "");
+  const capType = (
+    sourceType === "classification" ? "classification"
+    : sourceType === "extraction" ? "extraction"
+    : sourceType === "rag_pipeline" ? "rag_workflow"
+    : sourceType === "mcp_server" ? "mcp_workflow"
+    : "agent_workflow"
+  ) satisfies "classification" | "extraction" | "rag_workflow" | "mcp_workflow" | "agent_workflow";
+
   const { data: cap, error: capErr } = await supabase
     .from("ai_capabilities")
     .insert({
       workspace_id: args.workspaceId,
       name,
-      description: args.description?.trim() || `Auto-registered from discovered AI activity (${String(row.source_type)})`,
-      type: "agent",
+      description: args.description?.trim() || `Auto-registered from discovered AI activity (${sourceType})`,
+      type: capType,
       business_domain: "general",
       risk_level: args.riskLevel ?? "medium",
-      data_sensitivity: "internal",
-      status: "draft",
-      created_by: args.actorUserId ?? null,
+      status: "active",
+      created_by: args.actorUserId,  // uuid — caller must supply a valid user id
     })
     .select("id, name")
     .single();
