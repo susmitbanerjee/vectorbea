@@ -121,17 +121,10 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   // ── Dashboard ──
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
 
   // ── AI Registry ──
-  { href: "/registry/systems", label: "AI Registry", icon: Bot },
-  {
-    href: "/registry/systems",
-    label: "AI Systems",
-    icon: Bot,
-    isSubItem: true,
-    subItemGroup: isRegistryRoute,
-  },
+  { href: "/registry/systems", label: "AI Systems", icon: Bot },
   // ── Evaluation Evidence ──
   { href: "/evidence/runs", label: "Evaluation Evidence", icon: FlaskConical },
   {
