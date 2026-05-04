@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   PieChart,
@@ -27,6 +26,7 @@ import {
 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
+import { useWorkspace } from "@/lib/workspace-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -404,8 +404,8 @@ function EmptyState() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const searchParams = useSearchParams();
-  const workspaceId = searchParams.get("org") ?? undefined;
+  const { activeWorkspace } = useWorkspace();
+  const workspaceId = activeWorkspace?.id;
 
   const [timeRange, setTimeRange] = useState("7d");
   const [data, setData] = useState<GovernanceDashboardData | null>(null);
@@ -414,11 +414,12 @@ export default function DashboardPage() {
   const [lastRefresh, setLastRefresh] = useState(Date.now());
 
   const fetchData = useCallback(async () => {
+    if (!workspaceId) return;
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (workspaceId) params.set("workspaceId", workspaceId);
+      params.set("workspaceId", workspaceId);
       params.set("time_range", timeRange);
       const res = await fetch(`/api/dashboard/governance?${params}`);
       if (!res.ok) {
