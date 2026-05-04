@@ -673,7 +673,21 @@ export async function touchIntegrationConnection(args: {
     if (args.success) patch.last_success_at = now;
     else { patch.last_error_at = now; patch.last_error_message = args.errorMessage ?? null; }
     await supabase.from("integration_connections").update(patch).eq("id", row.id);
+  } else {
+    // No connection row yet — auto-create one on first successful ingest.
+    // This means the dashboard shows the integration as soon as data arrives,
+    // without requiring manual configuration.
+    const insert: Record<string, unknown> = {
+      workspace_id: args.workspaceId,
+      integration_type: args.integrationType,
+      status: "connected",
+      health_status: args.success ? "healthy" : "degraded",
+      last_seen_at: now,
+      created_at: now,
+      updated_at: now,
+    };
+    if (args.success) insert.last_success_at = now;
+    else { insert.last_error_at = now; insert.last_error_message = args.errorMessage ?? null; }
+    await supabase.from("integration_connections").insert(insert);
   }
-  // If no existing connected connection, don't create one automatically from ingest
-  // (user must explicitly configure in the UI)
 }
