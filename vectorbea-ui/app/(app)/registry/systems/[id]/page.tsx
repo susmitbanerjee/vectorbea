@@ -341,58 +341,116 @@ function ApplyPolicyDialog({
             </Select>
           )}
           {mode === "custom" && (
-            <div className="space-y-3 rounded-2xl border border-[#E7DED1] bg-[#FAF7F0] p-4">
-              <label className="block text-xs font-semibold text-[#374151]">
-                Policy name
-                <input
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder="Refund Agent Production Policy"
-                  className="mt-1 w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
-                />
-              </label>
-              <label className="block text-xs font-semibold text-[#374151]">
-                Sector
-                <Select className="mt-1" value={customSector} onChange={(e) => setCustomSector(e.target.value as PolicyPack["sector"])}>
-                  {["general", "retail", "bfsi", "healthcare", "pharma", "software", "software_support", "travel", "insurance"].map((sector) => (
-                    <option key={sector} value={sector}>{sector.replaceAll("_", " ")}</option>
-                  ))}
-                </Select>
-              </label>
-              <label className="block text-xs font-semibold text-[#374151]">
-                Description
-                <textarea
-                  value={customDescription}
-                  onChange={(e) => setCustomDescription(e.target.value)}
-                  placeholder="Describe the control objective, rollout expectations, or regulated use case."
-                  className="mt-1 min-h-20 w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
-                />
-              </label>
-              <div>
-                <p className="text-xs font-semibold text-[#374151]">Required evidence</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {(Object.keys(EVIDENCE_TYPE_LABELS) as EvidenceType[]).map((type) => (
-                    <label key={type} className="flex items-center gap-2 rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-xs text-[#374151]">
-                      <input
-                        type="checkbox"
-                        checked={customEvidence.includes(type)}
-                        onChange={() => toggleEvidence(type)}
-                        className="h-3.5 w-3.5 accent-[#2563EB]"
-                      />
-                      {EVIDENCE_TYPE_LABELS[type]}
-                    </label>
-                  ))}
-                </div>
+            <div className="space-y-4">
+              {/* Explainer */}
+              <div className="rounded-xl border border-[#DBEAFE] bg-[#EFF6FF] px-4 py-3 text-xs text-[#1D4ED8] leading-relaxed">
+                <p className="font-semibold mb-1">How custom policies work</p>
+                <p>
+                  A custom policy defines what evidence must be collected before this AI system can pass its release gate.
+                  Each evidence type you select becomes a required check. Checks are automatically verified when real data
+                  arrives from your connected integrations — you do not run them manually (except Human Approval).
+                </p>
               </div>
-              <label className="flex items-center gap-2 rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-xs text-[#374151]">
-                <input
-                  type="checkbox"
-                  checked={requiresApproval}
-                  onChange={(e) => setRequiresApproval(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-[#2563EB]"
-                />
-                Require approval when the release gate needs review
-              </label>
+
+              <div className="space-y-3 rounded-2xl border border-[#E7DED1] bg-[#FAF7F0] p-4">
+                <label className="block text-xs font-semibold text-[#374151]">
+                  Policy name
+                  <input
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="e.g. Refund Agent Production Policy"
+                    className="mt-1 w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-[#374151]">
+                  Sector
+                  <Select className="mt-1" value={customSector} onChange={(e) => setCustomSector(e.target.value as PolicyPack["sector"])}>
+                    {["general", "retail", "bfsi", "healthcare", "pharma", "software", "software_support", "travel", "insurance"].map((sector) => (
+                      <option key={sector} value={sector}>{sector.replaceAll("_", " ")}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block text-xs font-semibold text-[#374151]">
+                  Description
+                  <textarea
+                    value={customDescription}
+                    onChange={(e) => setCustomDescription(e.target.value)}
+                    placeholder="Describe the control objective — e.g. 'All customer-facing refund decisions must pass deterministic checks and be approved before each release.'"
+                    className="mt-1 min-h-[72px] w-full rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB]"
+                  />
+                </label>
+
+                {/* Evidence picker with descriptions */}
+                <div>
+                  <p className="text-xs font-semibold text-[#374151] mb-1">Required evidence checks</p>
+                  <p className="text-[11px] text-[#6B7280] mb-2">
+                    Select the checks that must pass before a release gate can be approved. Each check is verified automatically by the indicated integration.
+                  </p>
+                  <div className="space-y-2">
+                    {(Object.keys(EVIDENCE_TYPE_LABELS) as EvidenceType[]).map((type) => {
+                      const m = EVIDENCE_TYPE_META[type];
+                      const checked = customEvidence.includes(type);
+                      return (
+                        <label
+                          key={type}
+                          className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 cursor-pointer transition-colors ${
+                            checked
+                              ? "border-[#2563EB] bg-[#EFF6FF]"
+                              : "border-[#E7DED1] bg-white hover:bg-[#FAFAF7]"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleEvidence(type)}
+                            className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[#2563EB]"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[#111111]">{EVIDENCE_TYPE_LABELS[type]}</p>
+                            <p className="text-[11px] text-[#6B7280] mt-0.5 leading-snug">{m.what}</p>
+                            <p className="text-[10px] text-[#9CA3AF] mt-1">
+                              Verified via:{" "}
+                              <span className="font-medium text-[#6B7280]">{m.integrationLabel}</span>
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 rounded-xl border border-[#E7DED1] bg-white px-3 py-2 text-xs text-[#374151]">
+                  <input
+                    type="checkbox"
+                    checked={requiresApproval}
+                    onChange={(e) => setRequiresApproval(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#2563EB]"
+                  />
+                  Require a manual approval step before the release gate can pass
+                </label>
+
+                {customEvidence.length > 0 && (
+                  <div className="rounded-xl border border-[#E7DED1] bg-white px-3 py-2.5">
+                    <p className="text-[11px] font-semibold text-[#374151] mb-1">Summary — {customEvidence.length} check{customEvidence.length !== 1 ? "s" : ""} selected</p>
+                    <ul className="space-y-1">
+                      {customEvidence.map((type) => (
+                        <li key={type} className="flex items-center gap-2 text-[11px] text-[#6B7280]">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#2563EB] flex-shrink-0" />
+                          <span className="font-medium text-[#374151]">{EVIDENCE_TYPE_LABELS[type]}</span>
+                          <span>— via {EVIDENCE_TYPE_META[type].integrationLabel}</span>
+                        </li>
+                      ))}
+                      {requiresApproval && (
+                        <li className="flex items-center gap-2 text-[11px] text-[#6B7280]">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#7C3AED] flex-shrink-0" />
+                          <span className="font-medium text-[#374151]">Human Approval</span>
+                          <span>— manual review required</span>
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {error && <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">{error}</div>}
@@ -691,6 +749,86 @@ const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
   security_check:       "Security Check",
 };
 
+// Per evidence type: what it checks, how to pass it, which integration sends it
+const EVIDENCE_TYPE_META: Record<EvidenceType, {
+  what: string;
+  howToPass: string;
+  integration: string;
+  integrationHref: string;
+  integrationLabel: string;
+}> = {
+  prompt_check: {
+    what: "Validates that prompt templates meet policy constraints — no banned instructions, no PII leakage patterns.",
+    howToPass: "Run your AI system via the VectorBea SDK or sidecar proxy. Each traced call automatically submits prompt evidence.",
+    integration: "sdk",
+    integrationHref: "/integrations/sdk",
+    integrationLabel: "SDK integration",
+  },
+  deterministic_check: {
+    what: "Verifies that identical inputs always produce the same output within an acceptable variance threshold.",
+    howToPass: "Use the SDK `run()` context manager or CI/CD integration to submit paired input/output traces. The validator checks consistency across runs.",
+    integration: "ci_cd",
+    integrationHref: "/integrations/ci-cd",
+    integrationLabel: "CI/CD integration",
+  },
+  behavioral_check: {
+    what: "Tests the AI system against a curated dataset of expected input/output pairs to detect regressions.",
+    howToPass: "Connect via SDK or OpenTelemetry and run your system against a test dataset. Evidence is submitted automatically from traced runs.",
+    integration: "opentelemetry",
+    integrationHref: "/integrations/opentelemetry",
+    integrationLabel: "OpenTelemetry integration",
+  },
+  rag_grounding_check: {
+    what: "Confirms that all generated answers are grounded in retrieved context — no hallucinated facts.",
+    howToPass: "Instrument your RAG pipeline with the VectorBea SDK or connect via the RAG pipeline integration. Each retrieval + generation pair is checked.",
+    integration: "rag_pipeline",
+    integrationHref: "/integrations/rag",
+    integrationLabel: "RAG pipeline integration",
+  },
+  mcp_tool_policy_check: {
+    what: "Audits MCP tool calls to ensure only approved tools are invoked and no sensitive arguments are passed.",
+    howToPass: "Wrap your MCP client with `vectorbea.wrap_mcp_client()` from the Python SDK, or connect the MCP server integration. Tool calls are logged automatically.",
+    integration: "mcp_server",
+    integrationHref: "/integrations/mcp",
+    integrationLabel: "MCP server integration",
+  },
+  workflow_regression: {
+    what: "Runs your AI workflow end-to-end against a baseline and flags any change in outputs, latency, or cost.",
+    howToPass: "Add the VectorBea CI/CD step to your pipeline. Each deployment triggers a workflow run that is compared to the last passing baseline.",
+    integration: "ci_cd",
+    integrationHref: "/integrations/ci-cd",
+    integrationLabel: "CI/CD integration",
+  },
+  provider_comparison: {
+    what: "Compares responses across different LLM providers or model versions to surface quality regressions.",
+    howToPass: "Connect at least one LLM provider integration and run your system via the SDK. The validator compares provider outputs automatically.",
+    integration: "llm_provider",
+    integrationHref: "/integrations/llm-providers",
+    integrationLabel: "LLM provider integration",
+  },
+  human_approval: {
+    what: "Requires a team member to manually review and approve the AI system before it can pass a release gate.",
+    howToPass: "Click 'Run check' on this card — it creates a pending approval request. A workspace admin or editor must then approve it in the Approvals section.",
+    integration: "manual_upload",
+    integrationHref: "/governance/approvals",
+    integrationLabel: "View pending approvals",
+  },
+  privacy_check: {
+    what: "Scans AI inputs and outputs for PII, sensitive data patterns, and privacy policy violations.",
+    howToPass: "Route traffic through the VectorBea sidecar proxy — it redacts and audits PII automatically. Alternatively use the SDK with privacy checks enabled.",
+    integration: "sidecar",
+    integrationHref: "/integrations/sidecar",
+    integrationLabel: "Sidecar proxy integration",
+  },
+  security_check: {
+    what: "Tests for prompt injection, jailbreak attempts, and other adversarial inputs in your AI system.",
+    howToPass: "Connect via SDK or sidecar. The validator runs a set of adversarial test inputs against your system and checks that guardrails hold.",
+    integration: "sidecar",
+    integrationHref: "/integrations/sidecar",
+    integrationLabel: "Sidecar proxy integration",
+  },
+};
+
 const EVIDENCE_RUN_STATUS_STYLE: Record<string, string> = {
   passed:       "bg-[#ECFDF5] text-[#065F46]",
   failed:       "bg-[#FEF2F2] text-[#991B1B]",
@@ -817,9 +955,12 @@ function RequiredEvidenceTab({
           statusIcon = <Shield className="h-4 w-4 text-[#9CA3AF]" />;
         }
 
+        const meta = EVIDENCE_TYPE_META[e.evidenceType as EvidenceType];
+
         return (
-          <div key={e.id} className="rounded-xl border border-[#E7DED1] bg-white p-4">
-            <div className="flex items-start gap-3">
+          <div key={e.id} className="rounded-xl border border-[#E7DED1] bg-white overflow-hidden">
+            {/* Header row */}
+            <div className="flex items-start gap-3 p-4">
               <div className="mt-0.5 flex-shrink-0">{statusIcon}</div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center flex-wrap gap-2">
@@ -832,17 +973,18 @@ function RequiredEvidenceTab({
                   {EVIDENCE_TYPE_LABELS[e.evidenceType as EvidenceType] ?? e.evidenceType}
                   {e.policyPackName && <> · from {e.policyPackName}</>}
                 </p>
-                {e.description && <p className="text-xs text-[#6B7280] mt-1">{e.description}</p>}
+                {/* What this check validates */}
+                {meta && (
+                  <p className="text-xs text-[#6B7280] mt-1 leading-relaxed">{meta.what}</p>
+                )}
+                {e.description && !meta && (
+                  <p className="text-xs text-[#6B7280] mt-1">{e.description}</p>
+                )}
                 {latestRun?.failureReason && (
                   <p className="text-xs text-[#991B1B] mt-1">↳ {latestRun.failureReason}</p>
                 )}
                 {latestRun?.resultSummary && runStatus !== "failed" && (
                   <p className="text-xs text-[#065F46] mt-1">↳ {latestRun.resultSummary}</p>
-                )}
-                {!canRunFromUi && !latestRun && (
-                  <p className="text-xs text-[#92400E] mt-1">
-                    Connect CI/CD, SDK, sidecar, OpenTelemetry, RAG, MCP, workflow, prompt, or provider evidence to run this validator.
-                  </p>
                 )}
               </div>
               <div className="flex gap-2 flex-shrink-0">
@@ -857,14 +999,58 @@ function RequiredEvidenceTab({
                 <button
                   onClick={() => runCheck(e.evidenceType as EvidenceType, e.blocking, e.policyPackId)}
                   disabled={isRunning || !canRunFromUi}
-                  title={canRunFromUi ? undefined : "This check requires real evidence from an upload, API run, CI/CD, SDK, sidecar, OpenTelemetry, RAG, MCP, workflow, prompt, or provider test source."}
                   className="flex items-center gap-1 rounded-lg bg-[#2563EB] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
                 >
                   {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-                  {canRunFromUi ? (latestRun ? "Re-run" : "Run check") : "Needs source"}
+                  {canRunFromUi ? (latestRun ? "Re-run" : "Run check") : "Run check"}
                 </button>
               </div>
             </div>
+
+            {/* How-to-pass guidance — always shown when no passing run yet */}
+            {meta && !latestRun && (
+              <div className="border-t border-[#F1ECE3] bg-[#FAFAF7] px-4 py-3 flex items-start gap-3">
+                <div className="mt-0.5 h-4 w-4 flex-shrink-0 rounded-full bg-[#FEF3C7] flex items-center justify-center">
+                  <span className="text-[9px] font-bold text-[#92400E]">?</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold text-[#374151] mb-0.5">How to pass this check</p>
+                  <p className="text-[11px] text-[#6B7280] leading-relaxed">{meta.howToPass}</p>
+                  <Link
+                    href={meta.integrationHref as Route}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-[#2563EB] hover:underline"
+                  >
+                    Set up {meta.integrationLabel} →
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            {/* Passed state — show last passed date */}
+            {latestRun && runStatus === "passed" && latestRun.completedAt && (
+              <div className="border-t border-[#F1ECE3] bg-[#F0FDF4] px-4 py-2 flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 text-[#16A34A] flex-shrink-0" />
+                <p className="text-[11px] text-[#15803D]">
+                  Passed on {new Date(latestRun.completedAt).toLocaleDateString("en-US", { dateStyle: "medium" })}
+                  {latestRun.resultScore != null && <> · Score: {Math.round(latestRun.resultScore * 100)}%</>}
+                </p>
+              </div>
+            )}
+
+            {/* Failed state — show what failed */}
+            {latestRun && runStatus === "failed" && (
+              <div className="border-t border-[#FEE2E2] bg-[#FEF2F2] px-4 py-2 flex items-start gap-2">
+                <XCircle className="h-3.5 w-3.5 text-[#DC2626] flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[11px] text-[#991B1B] font-medium">Check failed — re-run after fixing the issue</p>
+                  {meta && (
+                    <Link href={meta.integrationHref as Route} className="text-[11px] text-[#991B1B] underline">
+                      Review {meta.integrationLabel}
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

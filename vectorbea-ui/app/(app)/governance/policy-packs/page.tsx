@@ -217,7 +217,7 @@ export default function PolicyPacksPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <CardTitle className="text-sm text-[#111111]">Workspace custom policies</CardTitle>
-                  <p className="mt-1 text-xs text-[#6B7280]">Create a policy template with real required evidence. Evidence starts missing until a validator receives real source data.</p>
+                  <p className="mt-1 text-xs text-[#6B7280]">Define which evidence checks an AI system must pass before its release gate can approve. Each check is satisfied automatically when real data arrives from a connected integration.</p>
                 </div>
                 <button
                   type="button"
@@ -247,8 +247,16 @@ export default function PolicyPacksPage() {
                   placeholder="Description"
                   className="min-h-20 rounded-xl border border-[#E7DED1] bg-[#FBFAF7] px-3 py-2 text-sm text-[#111111] outline-none focus:border-[#2563EB] md:col-span-2"
                 />
-                <div className="rounded-xl border border-[#E7DED1] bg-[#FAF7F0] px-3 py-2 text-xs text-[#6B7280] md:col-span-2">
-                  Default evidence template: deterministic output check, workflow regression evidence, and human release approval.
+                <div className="rounded-xl border border-[#DBEAFE] bg-[#EFF6FF] px-3 py-3 text-xs text-[#1D4ED8] md:col-span-2 leading-relaxed">
+                  <p className="font-semibold mb-1">What gets created</p>
+                  <p>
+                    This policy will require three evidence checks before any release gate can pass:
+                    a <strong>Deterministic Output Check</strong> (verified via CI/CD integration),
+                    a <strong>Workflow Regression</strong> check (verified via CI/CD), and a
+                    <strong> Human Release Approval</strong> (manual — triggered from the AI system page).
+                    All three are blocking — none can be skipped. You can customise evidence requirements
+                    per AI system by applying the policy there and editing from the Required Evidence tab.
+                  </p>
                 </div>
                 <div className="flex justify-end md:col-span-2">
                   <button
