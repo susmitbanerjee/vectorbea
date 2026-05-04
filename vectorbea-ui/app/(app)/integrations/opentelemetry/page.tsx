@@ -39,8 +39,6 @@ export default function OpenTelemetryIntegrationPage() {
   const workspaceId = activeWorkspace?.id ?? "";
   const host = typeof window !== "undefined" ? window.location.origin : "https://your-vectorbea-instance.com";
 
-  const otlpEndpoint = `${host}/api/ingest/otel`;
-
   const collectorYaml = `receivers:
   otlp:
     protocols:
@@ -64,9 +62,10 @@ processors:
 exporters:
   otlphttp/vectorbea:
     endpoint: "${host}/api/ingest/otel"
+    encoding: json                          # REQUIRED — protobuf not supported
     headers:
       x-vectorbea-ingest-token: "<YOUR_INGEST_TOKEN>"
-    compression: gzip
+    compression: none                       # Disable gzip when using JSON encoding
 
   # Keep your existing exporter
   otlp/existing:
@@ -156,27 +155,26 @@ with tracer.start_as_current_span("agent-run") as span:
             <CardTitle className="text-base font-semibold">OTLP endpoint</CardTitle>
           </CardHeader>
           <CardContent className="p-6 space-y-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <p className="text-xs font-medium text-gray-500 mb-1">HTTP/Protobuf</p>
-                <div className="flex items-center gap-2 rounded-lg border border-[#E7DED1] bg-[#F8F5EF] px-3 py-2 font-mono text-xs">
-                  <span className="flex-1 truncate">{host}/api/ingest/otel/v1/traces</span>
-                  <button onClick={() => void navigator.clipboard.writeText(`${host}/api/ingest/otel/v1/traces`)}><Copy className="h-3 w-3 text-gray-400" /></button>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 mb-1">gRPC (via collector)</p>
-                <div className="flex items-center gap-2 rounded-lg border border-[#E7DED1] bg-[#F8F5EF] px-3 py-2 font-mono text-xs">
-                  <span className="flex-1 truncate">{host.replace("https://", "").replace("http://", "")}:4317</span>
-                  <button onClick={() => void navigator.clipboard.writeText(otlpEndpoint)}><Copy className="h-3 w-3 text-gray-400" /></button>
-                </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">HTTP/JSON endpoint</p>
+              <div className="flex items-center gap-2 rounded-lg border border-[#E7DED1] bg-[#F8F5EF] px-3 py-2 font-mono text-xs">
+                <span className="flex-1 truncate">{host}/api/ingest/otel/v1/traces</span>
+                <button onClick={() => void navigator.clipboard.writeText(`${host}/api/ingest/otel/v1/traces`)}><Copy className="h-3 w-3 text-gray-400" /></button>
               </div>
             </div>
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
               <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-amber-800">
-                All requests require the header <code className="rounded bg-amber-100 px-1">x-vectorbea-ingest-token: &lt;YOUR_TOKEN&gt;</code> or <code className="rounded bg-amber-100 px-1">Authorization: Bearer &lt;TOKEN&gt;</code>. Manage tokens in <a href="/settings/sdk" className="underline">SDK settings</a>.
-              </p>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-amber-900">HTTP/JSON only — protobuf not supported</p>
+                <p className="text-xs text-amber-800">
+                  Set <code className="rounded bg-amber-100 px-1">OTEL_EXPORTER_OTLP_PROTOCOL=http/json</code> in your SDK or collector config.
+                  Protobuf (<code className="rounded bg-amber-100 px-1">application/x-protobuf</code>) will be rejected with HTTP 415.
+                </p>
+                <p className="text-xs text-amber-800 mt-1">
+                  All requests require <code className="rounded bg-amber-100 px-1">x-vectorbea-ingest-token: &lt;TOKEN&gt;</code> or <code className="rounded bg-amber-100 px-1">Authorization: Bearer &lt;TOKEN&gt;</code>.
+                  Manage tokens in <a href="/settings/sdk" className="underline">SDK settings</a>.
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>

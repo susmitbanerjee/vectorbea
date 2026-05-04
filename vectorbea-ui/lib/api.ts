@@ -1290,7 +1290,9 @@ export interface ReleaseGateResult {
 // ─── Workflow step (unchanged position) ───────────────────────────────────────
 
 export type WorkflowStepType =
-  | "llm_call" | "tool_call" | "mcp_tool_call" | "rag_retrieval"
+  | "llm_call" | "tool_call" | "mcp_tool_call"
+  | "retrieval" | "rag_retrieval"
+  | "classification" | "extraction" | "skill_execution"
   | "reranker" | "decision" | "human_handoff" | "final_response" | "system_event";
 
 export interface WorkflowStepTrace {

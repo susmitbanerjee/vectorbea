@@ -124,15 +124,14 @@ export default function SidecarIntegrationPage() {
 
   const dockerCompose = `version: "3.8"
 services:
-  vectorbea-sidecar:
-    image: vectorbea/sidecar:latest
+  vectorbea-proxy:
+    image: vectorbea/vectorbea-proxy:latest
     environment:
+      VECTORBEA_KEY: ${token}
       VECTORBEA_INGEST_URL: ${host}/api/ingest/traces
-      VECTORBEA_INGEST_TOKEN: ${token}
       VECTORBEA_WORKSPACE_ID: ${workspaceId || "<YOUR_WORKSPACE_ID>"}
-      SIDECAR_PORT: "4318"
     ports:
-      - "4318:4318"
+      - "8080:8080"
     restart: unless-stopped`;
 
   const k8sYaml = `apiVersion: apps/v1
@@ -151,21 +150,22 @@ spec:
     spec:
       containers:
         - name: sidecar
-          image: vectorbea/sidecar:latest
+          image: vectorbea/vectorbea-proxy:latest
           env:
-            - name: VECTORBEA_INGEST_URL
-              value: "${host}/api/ingest/traces"
-            - name: VECTORBEA_INGEST_TOKEN
+            - name: VECTORBEA_KEY
               valueFrom:
                 secretKeyRef:
                   name: vectorbea-secrets
                   key: ingest-token
+            - name: VECTORBEA_INGEST_URL
+              value: "${host}/api/ingest/traces"
             - name: VECTORBEA_WORKSPACE_ID
               value: "${workspaceId || "<YOUR_WORKSPACE_ID>"}"
           ports:
-            - containerPort: 4318`;
+            - containerPort: 8080`;
 
-  const curlTest = `curl -X POST ${host}/api/ingest/traces \\
+  const curlTest = `# Test the proxy is reachable (replace localhost with your host if remote)
+curl -X POST http://localhost:8080/api/ingest/traces \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -183,8 +183,8 @@ spec:
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader
-        title="Sidecar Integration"
-        subtitle="Deploy the VectorBea sidecar to capture AI evidence at the infrastructure layer"
+        title="Proxy / Sidecar Integration"
+        subtitle="Deploy the VectorBea proxy (vectorbea/vectorbea-proxy) to capture AI evidence at the infrastructure layer"
         actions={
           <Button variant="outline" size="sm" onClick={() => void load()} className="gap-2 border-[#E7DED1]">
             <RefreshCw className="h-4 w-4" />

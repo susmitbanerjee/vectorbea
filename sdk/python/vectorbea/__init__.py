@@ -26,6 +26,19 @@ from vectorbea.models import Prompt, PromptTemplate  # PromptTemplate = backward
 from vectorbea.trace_metadata import TRACE_METADATA_SCHEMA_VERSION, build_trace_metadata_v1
 
 # ---------------------------------------------------------------------------
+# Governance instrumentation API
+# ---------------------------------------------------------------------------
+from vectorbea.governance import (
+    Run,
+    Step,
+    current_run,
+    init,
+    run,
+    trace,
+    wrap_mcp_client,
+)
+
+# ---------------------------------------------------------------------------
 # Deprecated alias — will be removed in v1.0
 # ---------------------------------------------------------------------------
 VectorBea = VectorBeaClient
@@ -42,6 +55,14 @@ __all__ = [
     "NotFoundError",
     "VectorBeaConnectionError",
     "VectorBeaTimeoutError",
+    # Governance instrumentation
+    "init",
+    "run",
+    "trace",
+    "current_run",
+    "wrap_mcp_client",
+    "Run",
+    "Step",
     # Deprecated
     "VectorBea",
     "PromptTemplate",
@@ -49,4 +70,4 @@ __all__ = [
     "build_trace_metadata_v1",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

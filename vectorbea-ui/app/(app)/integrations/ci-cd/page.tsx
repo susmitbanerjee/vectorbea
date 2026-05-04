@@ -110,18 +110,16 @@ jobs:
 
       - name: Report evidence to VectorBea
         if: always()
+        env:
+          STATUS: \${{ steps.tests.outcome == 'success' && 'passed' || 'failed' }}
+          BRANCH: \${{ github.ref_name }}
+          COMMIT: \${{ github.sha }}
+          RUN_URL: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}
         run: |
           curl -X POST "${webhookUrl}" \\
             -H "x-vectorbea-ingest-token: \${{ secrets.VECTORBEA_INGEST_TOKEN }}" \\
             -H "Content-Type: application/json" \\
-            -d '{
-              "ai_system_name": "my-agent",
-              "evidence_type": "workflow_regression",
-              "status": "\${{ steps.tests.outcome == \\'success\\' && \\'passed\\' || \\'failed\\' }}",
-              "branch": "\${{ github.ref_name }}",
-              "commit_sha": "\${{ github.sha }}",
-              "run_url": "\${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}"
-            }'`;
+            -d "{\\"ai_system_name\\": \\"my-agent\\", \\"evidence_type\\": \\"workflow_regression\\", \\"status\\": \\"$STATUS\\", \\"branch\\": \\"$BRANCH\\", \\"commit_sha\\": \\"$COMMIT\\", \\"run_url\\": \\"$RUN_URL\\"}"`;
 
   const gitlabCiYaml = `stages:
   - test

@@ -71,18 +71,22 @@ export default function McpIntegrationPage() {
   }
 
   const sdkExample = `import vectorbea
+from mcp import ClientSession  # your MCP client
 
 vectorbea.init(
     ingest_token="<YOUR_TOKEN>",
     workspace_id="${workspaceId || "<WORKSPACE_ID>"}",
 )
 
-# MCP tool calls are automatically captured when you use
-# the VectorBea SDK alongside an MCP client
+# Wrap your MCP client — this adds governance instrumentation
+# to every tool call made through the session
+mcp_session = ClientSession(...)
+traced_session = vectorbea.wrap_mcp_client(mcp_session, server_name="my-mcp-server")
+
 @vectorbea.trace(capability_name="mcp-agent")
 def run_with_mcp(query: str):
-    # Your MCP client calls are detected automatically
-    result = mcp_client.call_tool("my-tool", {"input": query})
+    # Tool calls through traced_session are now recorded as evidence steps
+    result = traced_session.call_tool("my-tool", {"input": query})
     return result`;
 
   const otelExample = `# When emitting OpenTelemetry spans, tag MCP calls with:
@@ -115,12 +119,12 @@ span.set_attribute("mcp.tool_arguments", '{"key": "value"}')`;
               <div>
                 <h3 className="font-semibold text-[#111111]">MCP tool calls as governance evidence</h3>
                 <p className="mt-1 text-sm text-gray-600">
-                  VectorBea automatically detects MCP tool calls within agent traces. When an agent calls
-                  an MCP server tool, VectorBea records the server name, tool name, arguments, result, and
-                  latency — creating a tool-call audit trail for governance.
+                  Wrap your MCP client session with <code className="rounded bg-gray-100 px-1 text-xs">vectorbea.wrap_mcp_client()</code> to
+                  record every tool call as a governance evidence step. VectorBea captures the server name,
+                  tool name, arguments, result, and latency — creating a per-tool audit trail.
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-3 text-sm text-gray-600">
-                  <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> Auto-detected from SDK</span>
+                  <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> Explicit wrap_mcp_client()</span>
                   <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> OTel attribute mapping</span>
                   <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> Per-tool audit trail</span>
                 </div>
@@ -135,8 +139,9 @@ span.set_attribute("mcp.tool_arguments", '{"key": "value"}')`;
           </CardHeader>
           <CardContent className="p-6 space-y-3">
             <p className="text-sm text-gray-600">
-              The VectorBea SDK automatically captures MCP calls when used with any MCP client.
-              No additional configuration required:
+              Use <code className="rounded bg-gray-100 px-1 text-xs">{"vectorbea.wrap_mcp_client(session, server_name=\"...\")"}</code> to
+              instrument any MCP client session. The wrapper records each <code className="rounded bg-gray-100 px-1 text-xs">call_tool</code> invocation
+              as an <code className="rounded bg-gray-100 px-1 text-xs">mcp_tool_call</code> evidence step:
             </p>
             <CodeBlock code={sdkExample} language="python" />
           </CardContent>
