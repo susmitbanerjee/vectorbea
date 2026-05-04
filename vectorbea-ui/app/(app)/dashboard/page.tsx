@@ -323,15 +323,17 @@ function DonutChart({
 }) {
   if (!data.length) return <NoData />;
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <PieChart>
+    <ResponsiveContainer width="100%" height={260}>
+      <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
         <Pie
           data={data}
           dataKey={dataKey}
           nameKey={nameKey}
-          innerRadius={50}
-          outerRadius={80}
+          innerRadius={55}
+          outerRadius={85}
           paddingAngle={2}
+          cx="50%"
+          cy="45%"
         >
           {data.map((entry, i) => (
             <Cell
@@ -342,8 +344,14 @@ function DonutChart({
         </Pie>
         <Tooltip formatter={(v: unknown) => [String(v), ""]} />
         <Legend
+          layout="horizontal"
+          verticalAlign="bottom"
+          align="center"
+          iconSize={8}
+          iconType="circle"
+          wrapperStyle={{ paddingTop: 12, fontSize: 11, lineHeight: "20px" }}
           formatter={(value) => (
-            <span className="text-xs text-gray-700">{capitalize(value)}</span>
+            <span style={{ color: "#374151", marginRight: 8 }}>{capitalize(value)}</span>
           )}
         />
       </PieChart>
@@ -548,7 +556,7 @@ export default function DashboardPage() {
           {/* ── 2. Governance Readiness ──────────────────────────────── */}
           <Section title="Governance Readiness">
             <div className="flex flex-col gap-6 md:flex-row">
-              <div className="md:w-80">
+              <div className="md:w-96">
                 <DonutChart
                   data={data.governance_readiness}
                   colorMap={READINESS_COLORS}
