@@ -49,24 +49,46 @@ function RegisterModal({ system, onClose, onDone, workspaceId }: RegisterModalPr
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ id: string; name: string } | null>(null);
 
   async function submit() {
     if (!name.trim()) { setErr("Name is required"); return; }
     setSubmitting(true);
+    setErr(null);
     try {
       const res = await fetch(`/api/integrations/discovered-systems/${system.id}?workspaceId=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "register", name: name.trim(), description: description.trim() || undefined }),
       });
-      const d = await res.json() as { error?: string };
+      const d = await res.json() as { error?: string; id?: string; name?: string };
       if (!res.ok) throw new Error(d.error ?? "Failed");
+      setCreated({ id: d.id ?? "", name: d.name ?? name.trim() });
       onDone();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (created) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="w-full max-w-md rounded-xl border border-[#E7DED1] bg-white p-6 shadow-xl text-center">
+          <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-[#111111] mb-1">AI system registered</h2>
+          <p className="text-sm text-gray-500 mb-4"><strong>{created.name}</strong> has been added to your AI system registry.</p>
+          <div className="flex gap-2 justify-center">
+            <Button variant="outline" onClick={onClose} className="border-[#E7DED1]">Close</Button>
+            <a href={`/registry/systems/${created.id}`}
+              className="inline-flex items-center gap-2 rounded-md bg-[#111111] px-4 py-2 text-sm font-medium text-white hover:bg-black">
+              View AI system
+            </a>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -104,9 +126,13 @@ function LinkModal({ system, onClose, onDone, workspaceId }: RegisterModalProps)
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/capabilities?workspaceId=${workspaceId}&limit=100`)
+    fetch(`/api/registry/systems?workspaceId=${workspaceId}`)
       .then(r => r.json())
-      .then((d: { capabilities?: Array<{ id: string; name: string }> }) => setSystems(d.capabilities ?? []))
+      .then((d: unknown) => {
+        // Response is a plain array of AI system objects
+        const arr = Array.isArray(d) ? d as Array<{ id: string; name: string }> : [];
+        setSystems(arr.map(s => ({ id: s.id, name: s.name })));
+      })
       .catch(() => null);
   }, [workspaceId]);
 

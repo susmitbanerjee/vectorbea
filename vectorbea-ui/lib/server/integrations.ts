@@ -480,6 +480,7 @@ export async function registerDiscoveredSystem(args: {
   actorUserId?: string | null;
   riskLevel?: string;
   name?: string;
+  description?: string;
 }): Promise<{ id: string; name: string }> {
   const supabase = createVectorBeaAdminClient();
   const { data: disc } = await supabase
@@ -497,7 +498,7 @@ export async function registerDiscoveredSystem(args: {
     .insert({
       workspace_id: args.workspaceId,
       name,
-      description: `Auto-registered from discovered AI activity (${String(row.source_type)})`,
+      description: args.description?.trim() || `Auto-registered from discovered AI activity (${String(row.source_type)})`,
       type: "agent",
       business_domain: "general",
       risk_level: args.riskLevel ?? "medium",
