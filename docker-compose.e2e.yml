@@ -1,4 +1,0 @@
-# Legacy local E2E stack retired.
-# The control plane now runs remotely on Vercel + Supabase, so customer-like
-# local testing should use docker-compose.dev.yml instead.
-services: {}

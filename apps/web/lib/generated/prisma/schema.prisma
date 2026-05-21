@@ -1,0 +1,371 @@
+// Vectorbea Agent Scheduler — Prisma Schema
+// PostgreSQL + Prisma ORM
+//
+// Prisma client is generated into apps/web/lib/generated/prisma so the
+// Next.js app can import it from "@/lib/generated/prisma".
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../apps/web/lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum JobStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum TriggerType {
+  MANUAL
+  CRON
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  WAITING_FOR_APPROVAL
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  TIMEOUT
+}
+
+enum TriggerSource {
+  MANUAL
+  SCHEDULE
+  RETRY
+}
+
+enum StepType {
+  LLM_CALL
+  TOOL_CALL
+  HTTP_CALL
+  APPROVAL_GATE
+  SYSTEM
+  ERROR
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Organization
+// Multi-tenant root. Every other entity is scoped to an Organization.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users            User[]
+  agentJobs        AgentJob[]
+  agentRuns        AgentRun[]
+  agentRunSteps    AgentRunStep[]
+  approvalRequests ApprovalRequest[]
+  budgetPolicies   BudgetPolicy[]
+  auditLogs        AuditLog[]
+
+  @@map("organizations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User
+// Scoped to an Organization. Auth is handled by Supabase; this record stores
+// profile + role data that Supabase doesn't own.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  email          String
+  name           String?
+  role           UserRole @default(MEMBER)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdJobs       AgentJob[]        @relation("JobCreatedBy")
+  approvalDecisions ApprovalRequest[] @relation("ApprovalDecidedBy")
+  auditLogs         AuditLog[]        @relation("AuditActor")
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AgentJob
+// A named, configured job definition. Separates "what to run" from "when it ran".
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgentJob {
+  id             String      @id @default(cuid())
+  organizationId String      @map("organization_id")
+  name           String
+  description    String?
+  status         JobStatus   @default(ACTIVE)
+  triggerType    TriggerType @map("trigger_type")
+
+  // Schedule — only relevant when triggerType = CRON
+  cronExpression String? @map("cron_expression")
+  timezone       String  @default("UTC")
+
+  // Endpoint the worker calls when executing this job
+  endpointUrl String     @map("endpoint_url")
+  httpMethod  HttpMethod @default(POST) @map("http_method")
+  headersJson Json?      @map("headers_json")
+
+  // Execution limits
+  maxDurationSeconds  Int @default(300) @map("max_duration_seconds")
+  maxRetries          Int @default(3) @map("max_retries")
+  retryBackoffSeconds Int @default(60) @map("retry_backoff_seconds")
+
+  // Approval gates
+  requireApprovalBeforeRun            Boolean @default(false) @map("require_approval_before_run")
+  requireApprovalBeforeExternalAction Boolean @default(false) @map("require_approval_before_external_action")
+
+  createdByUserId String   @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User          @relation("JobCreatedBy", fields: [createdByUserId], references: [id])
+  runs         AgentRun[]
+  budgetPolicy BudgetPolicy?
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  // Partial index: only index rows that have a cron expression (scheduling hot path)
+  @@index([cronExpression], map: "idx_agent_jobs_cron_expression")
+  @@map("agent_jobs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AgentRun
+// A single execution of an AgentJob. Each retry creates a new run with an
+// incremented attemptNumber. idempotencyKey prevents duplicate executions.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgentRun {
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  agentJobId     String        @map("agent_job_id")
+  status         RunStatus     @default(QUEUED)
+  triggerSource  TriggerSource @map("trigger_source")
+
+  // Timing
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  durationMs Int?      @map("duration_ms")
+
+  // Attempt tracking — retries increment this counter
+  attemptNumber  Int    @default(1) @map("attempt_number")
+  idempotencyKey String @map("idempotency_key")
+
+  // Payload
+  inputJson    Json?   @map("input_json")
+  outputJson   Json?   @map("output_json")
+  errorMessage String? @map("error_message")
+
+  // Cost tracking
+  totalTokens      Int?     @map("total_tokens")
+  estimatedCostUsd Decimal? @map("estimated_cost_usd") @db.Decimal(12, 6)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentJob         AgentJob          @relation(fields: [agentJobId], references: [id], onDelete: Cascade)
+  steps            AgentRunStep[]
+  approvalRequests ApprovalRequest[]
+
+  @@unique([agentJobId, idempotencyKey])
+  @@index([organizationId])
+  @@index([agentJobId])
+  @@index([organizationId, status])
+  @@index([createdAt])
+  @@map("agent_runs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AgentRunStep
+// Individual steps within a run (LLM calls, tool calls, approval gates, etc.).
+// Enables fine-grained observability and per-step cost attribution.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgentRunStep {
+  id             String     @id @default(cuid())
+  organizationId String     @map("organization_id")
+  agentRunId     String     @map("agent_run_id")
+  stepIndex      Int        @map("step_index")
+  stepType       StepType   @map("step_type")
+  name           String
+  status         StepStatus @default(PENDING)
+
+  // Payload
+  inputJson    Json?   @map("input_json")
+  outputJson   Json?   @map("output_json")
+  errorMessage String? @map("error_message")
+
+  // Cost
+  tokensUsed       Int?     @map("tokens_used")
+  estimatedCostUsd Decimal? @map("estimated_cost_usd") @db.Decimal(12, 6)
+
+  // Timing
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentRun         AgentRun          @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  approvalRequests ApprovalRequest[]
+
+  @@unique([agentRunId, stepIndex])
+  @@index([agentRunId])
+  @@index([organizationId])
+  @@map("agent_run_steps")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ApprovalRequest
+// Created when a run (or step) requires human sign-off before proceeding.
+// A run in WAITING_FOR_APPROVAL state polls for its open approval request.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ApprovalRequest {
+  id             String         @id @default(cuid())
+  organizationId String         @map("organization_id")
+  agentRunId     String         @map("agent_run_id")
+  agentRunStepId String?        @map("agent_run_step_id")
+  status         ApprovalStatus @default(PENDING)
+
+  title   String
+  message String
+
+  // True when triggered automatically by the system (e.g. external action gate)
+  // False when a human operator created it manually
+  requestedBySystem Boolean  @default(true) @map("requested_by_system")
+  requestedAt       DateTime @default(now()) @map("requested_at")
+
+  // Decision
+  decidedAt       DateTime? @map("decided_at")
+  decidedByUserId String?   @map("decided_by_user_id")
+  decisionReason  String?   @map("decision_reason")
+
+  // Relations
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentRun     AgentRun      @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  agentRunStep AgentRunStep? @relation(fields: [agentRunStepId], references: [id], onDelete: SetNull)
+  decidedBy    User?         @relation("ApprovalDecidedBy", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([agentRunId])
+  @@index([organizationId, status])
+  @@map("approval_requests")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BudgetPolicy
+// Per-job cost controls. The worker enforces these before and during execution.
+// One-to-one with AgentJob.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BudgetPolicy {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  agentJobId     String @unique @map("agent_job_id")
+
+  maxTokensPerRun  Int?     @map("max_tokens_per_run")
+  maxCostUsdPerRun Decimal? @map("max_cost_usd_per_run") @db.Decimal(12, 6)
+  maxRunsPerDay    Int?     @map("max_runs_per_day")
+  maxRunsPerMonth  Int?     @map("max_runs_per_month")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentJob     AgentJob     @relation(fields: [agentJobId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("budget_policies")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AuditLog
+// Immutable append-only record of all significant actions in the system.
+// actorUserId is null for system-initiated actions (scheduler, worker).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  actorUserId    String? @map("actor_user_id")
+
+  // What was acted on
+  entityType String @map("entity_type")
+  entityId   String @map("entity_id")
+
+  // What happened (e.g. "job.created", "run.started", "approval.rejected")
+  action String
+
+  // Arbitrary context — keep it small, store IDs not full objects
+  metadataJson Json? @map("metadata_json")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}

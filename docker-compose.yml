@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vectorbea
+      POSTGRES_PASSWORD: vectorbea
+      POSTGRES_DB: vectorbea
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vectorbea"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (BullMQ queue backend) ──────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Web (Next.js control plane) ───────────────────────────────────
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - ./apps/web/.env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+
+  # ── Worker (BullMQ scheduler process) ────────────────────────────
+  worker:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - ./apps/web/.env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
