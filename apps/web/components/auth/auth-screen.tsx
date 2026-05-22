@@ -21,12 +21,15 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 type Mode = "signin" | "signup";
 type Provider = "github" | "google" | "azure" | "sso";
 
-const benefitItems = [
-  "See regressions clearly",
-  "Debug AI issues faster",
-  "Roll out safely with confidence",
-  "Compare providers with clear evidence",
+const signinBenefits = [
+  "Temporal-like run history for every agent job",
+  "Approval gates before risky AI actions",
+  "Retry failed executions safely with full context",
+  "Token and cost budget visibility per run",
+  "Audit trail for every agent action and decision",
 ];
+
+const signupBenefits = signinBenefits;
 
 function mapError(value: string | null): string | null {
   if (!value) return null;
@@ -125,17 +128,21 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
 
             <div className="my-auto max-w-xl space-y-8">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2563EB]">
-                AI risk control for production LLMs
+                Production control plane for AI agent jobs
               </p>
-              <h1 className="text-balance text-5xl font-semibold leading-[1.08] tracking-tight text-[#111827]">
-                {mode === "signin" ? "Welcome back" : "Start using VectorBea"}
+              <h1 className="text-balance text-4xl font-semibold leading-[1.1] tracking-tight text-[#111827]">
+                {mode === "signin"
+                  ? "Operate AI agent jobs with confidence."
+                  : "Start running AI jobs safely."}
               </h1>
               <p className="text-base leading-7 text-[#374151]">
-                Access tracing evaluations rollouts and alerts in one place
+                {mode === "signin"
+                  ? "Schedule, approve, retry, and inspect long-running AI automations from one production control plane."
+                  : "Create your workspace and monitor scheduled AI automations with approvals, retries, and audit logs."}
               </p>
 
               <ul className="space-y-3">
-                {benefitItems.map((item) => (
+                {(mode === "signin" ? signinBenefits : signupBenefits).map((item) => (
                   <li key={item} className="flex items-start gap-3">
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF]">
                       <Check className="h-3.5 w-3.5 text-[#2563EB]" />
@@ -144,6 +151,34 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
                   </li>
                 ))}
               </ul>
+
+              {/* Mock timeline preview */}
+              <div className="rounded-xl border border-[#E5E0D8] bg-white/70 p-4 shadow-sm">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-[#6B7280]">
+                  Example run — CRM Enrichment Agent
+                </p>
+                <div className="space-y-2">
+                  {[
+                    { type: "RUN_STARTED", label: "Run started", color: "bg-blue-500", time: "09:00:01" },
+                    { type: "LLM_CALL_COMPLETED", label: "LLM call completed · 6,200 tokens", color: "bg-purple-500", time: "09:01:17" },
+                    { type: "APPROVAL_REQUESTED", label: "Approval requested — CRM update", color: "bg-amber-500", time: "09:01:40" },
+                    { type: "APPROVAL_APPROVED", label: "Approved by Demo Owner", color: "bg-emerald-500", time: "09:03:18" },
+                    { type: "RUN_SUCCEEDED", label: "Run succeeded · 12 records updated", color: "bg-emerald-500", time: "09:04:08" },
+                  ].map((e, i, arr) => (
+                    <div key={e.type} className="flex items-center gap-3">
+                      <div className="flex flex-col items-center">
+                        <span className={`h-2 w-2 rounded-full ${e.color}`} />
+                        {i < arr.length - 1 && <div className="h-4 w-px bg-[#E5E0D8]" />}
+                      </div>
+                      <span className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-medium ${e.color.replace("bg-", "text-").replace("-500", "-700")} bg-current/10`}>
+                        {e.type}
+                      </span>
+                      <span className="flex-1 truncate text-[11px] text-[#374151]">{e.label}</span>
+                      <span className="font-mono text-[10px] text-[#6B7280]">{e.time}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -161,12 +196,12 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
             <article className="rounded-2xl border border-[#E5E0D8] bg-white p-7 shadow-[0_12px_24px_rgba(17,24,39,0.06)] sm:p-8">
               <div className="space-y-2">
                 <h2 className="text-2xl font-semibold tracking-tight text-[#111827]">
-                  {mode === "signin" ? "Sign in to VectorBea" : "Create your account"}
+                  {mode === "signin" ? "Sign in to Vectorbea" : "Create your workspace"}
                 </h2>
                 <p className="text-sm leading-6 text-[#4B5563]">
                   {mode === "signin"
-                    ? "Control production AI with confidence"
-                    : "Trace evaluate and safely ship production LLM changes"}
+                    ? "Your production AI operations control plane"
+                    : "Built for engineering teams shipping AI automations into production"}
                 </p>
               </div>
 

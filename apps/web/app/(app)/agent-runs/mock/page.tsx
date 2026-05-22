@@ -3,143 +3,87 @@
 /**
  * /agent-runs/mock
  *
- * ⚠️  MOCK PAGE — uses static demo data from @/mocks/agent-run.mock.ts
+ * Pre-production Agent Run Detail demo.
+ * Uses fully-detailed static mock data — NO live API calls.
  *
- * This page exists to demo the full Agent Run detail experience without
- * a live database or running worker. It shows two scenarios:
+ * Scenario A: Customer Renewal Intelligence (SUCCEEDED, multi-agent, approval gate)
+ * Scenario B: Payment Recovery Agent (FAILED, retries exhausted)
  *
- *   Tab 1 — "Successful + Approval"
- *     CRM Enrichment Agent: trigger → analyze → prepare payload →
- *     pause for approval → approved → update CRM → succeed
- *
- *   Tab 2 — "Failed run"
- *     Same job: trigger → analyze → call CRM API → HTTP 429 rate limit → fail
- *
- * TODO: When real API is ready, replace `successRunMock` / `failedRunMock`
- * with a fetch to GET /api/agent-runs/:id and remove the mock badge from RunHeader.
- * See apps/web/app/api/agent-runs/[id]/route.ts for the response shape.
+ * To connect to real data: replace getMockScenario() with a fetch to
+ * GET /api/agent-runs/:id, then map the response to AgentRunUiModel.
  */
 
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RunHeader } from "@/components/agent-runs/RunHeader";
-import { RunSummaryCards } from "@/components/agent-runs/RunSummaryCards";
-import { RunTimeline } from "@/components/agent-runs/RunTimeline";
-import { JsonViewer } from "@/components/agent-runs/JsonViewer";
-import { ApprovalDetailsCard } from "@/components/agent-runs/ApprovalDetailsCard";
-import { AuditTrailTable } from "@/components/agent-runs/AuditTrailTable";
-import { successRunMock, failedRunMock } from "@/mocks/agent-run.mock";
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RunHeaderV2 } from "@/components/agent-runs/v2/RunHeader";
+import { RunSummaryCards } from "@/components/agent-runs/v2/RunSummaryCards";
+import { RunDetailTabsV2 } from "@/components/agent-runs/v2/RunDetailTabsV2";
+import { getMockScenario, type MockScenario } from "@/mocks/preproduction-agent-run.mock";
 
 export default function MockAgentRunPage() {
-  const [scenario, setScenario] = useState<"success" | "failed">("success");
-
-  const run = scenario === "success" ? successRunMock : failedRunMock;
+  const [scenario, setScenario] = useState<MockScenario>("success");
+  const model = getMockScenario(scenario);
 
   function handleRetry() {
     toast.info("Retry is mocked — no real API call made.", {
-      description: "Connect to POST /api/agent-runs/:id/retry to enable this.",
+      description: "Connect to POST /api/agent-runs/:id/retry to enable.",
     });
   }
 
   return (
-    <div className="min-h-full p-6 lg:p-8">
-      <div className="mx-auto max-w-5xl space-y-6">
-
-        {/* ── Scenario toggle ─────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+    <div className="min-h-full">
+      {/* Scenario picker */}
+      <div className="border-b border-border/50 bg-muted/20 px-6 py-3 lg:px-8">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
               Mock scenario
             </p>
             <p className="text-xs text-muted-foreground">
-              Showing static demo data. Toggle to preview both states.
+              Static demo data. Toggle to preview both execution states.
             </p>
           </div>
-          <Tabs value={scenario} onValueChange={(v) => setScenario(v as typeof scenario)}>
-            <TabsList>
-              <TabsTrigger value="success" className="gap-1.5 text-xs">
+          <Tabs value={scenario} onValueChange={v => setScenario(v as MockScenario)}>
+            <TabsList className="h-8">
+              <TabsTrigger value="success" className="gap-1.5 text-xs px-3">
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                Succeeded + Approval
+                Succeeded (multi-agent + approval)
               </TabsTrigger>
-              <TabsTrigger value="failed" className="gap-1.5 text-xs">
+              <TabsTrigger value="failed" className="gap-1.5 text-xs px-3">
                 <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                Failed run
+                Failed (retries exhausted)
               </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
+      </div>
 
-        {/* ── Run header ───────────────────────────────────────────────────── */}
-        <RunHeader run={run} onRetry={handleRetry} isMock />
+      {/* Main content */}
+      <div className="px-6 pb-12 pt-6 lg:px-8">
+        <div className="mx-auto max-w-5xl space-y-6">
+          <RunHeaderV2 model={model} isMock onRetry={handleRetry} />
+          <RunSummaryCards model={model} />
+          <RunDetailTabsV2 model={model} />
 
-        {/* ── Summary cards ────────────────────────────────────────────────── */}
-        <RunSummaryCards run={run} />
-
-        {/* ── Timeline ─────────────────────────────────────────────────────── */}
-        <RunTimeline steps={run.steps} />
-
-        {/* ── Run output ───────────────────────────────────────────────────── */}
-        {run.outputJson ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Run output</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <JsonViewer
-                label="Output JSON"
-                value={run.outputJson}
-                defaultOpen
-              />
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>Run output</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <span>No output available — run ended before completion.</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── Approval details ─────────────────────────────────────────────── */}
-        {run.approvals.length > 0 && (
-          <ApprovalDetailsCard approvals={run.approvals} />
-        )}
-
-        {/* ── Audit trail ──────────────────────────────────────────────────── */}
-        <AuditTrailTable entries={run.auditTrail} />
-
-        {/* ── Dev note ─────────────────────────────────────────────────────── */}
-        <div className="rounded-lg border border-dashed border-border bg-muted/20 px-5 py-4">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Developer note
-          </p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            This page uses static mock data from{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">apps/web/mocks/agent-run.mock.ts</code>.
-            To connect to the real API, fetch from{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GET /api/agent-runs/:id</code>{" "}
-            (see{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-              apps/web/app/(app)/agent-runs/[id]/page.tsx
-            </code>
-            {" "}for the live implementation). The{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">MockRun</code> type mirrors the{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">AgentRun</code> API shape.
-          </p>
+          <div className="rounded-xl border border-dashed border-border/50 bg-muted/10 px-5 py-4">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+              Developer note
+            </p>
+            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+              Static mock data from{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                apps/web/mocks/preproduction-agent-run.mock.ts
+              </code>
+              . Connect real data via{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">GET /api/agent-runs/:id</code>{" "}
+              → map to{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">AgentRunUiModel</code>.
+            </p>
+          </div>
         </div>
-
       </div>
     </div>
   );

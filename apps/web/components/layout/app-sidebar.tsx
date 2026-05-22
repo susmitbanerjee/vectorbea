@@ -16,6 +16,7 @@ import {
   History,
   KeyRound,
   LayoutDashboard,
+  List,
   Loader2,
   LogOut,
   Settings2,
@@ -55,6 +56,9 @@ const NAV: NavItem[] = [
 
   // ── Agent Jobs ──
   { href: "/agent-jobs", label: "Agent Jobs", icon: BriefcaseBusiness },
+
+  // ── Runs ──
+  { href: "/agent-runs", label: "Runs", icon: List },
 
   // ── Approvals ──
   { href: "/approvals", label: "Approvals", icon: CheckCircle2 },
@@ -157,7 +161,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-background shadow-xs">
             <Logo />
           </div>
-          <span className="text-[13px] font-semibold tracking-tight text-sidebar-fg">Vectorbea</span>
+          <span className="text-[13px] font-semibold tracking-tight text-sidebar-fg">Vectorbee</span>
         </div>
         <WorkspaceSwitcher />
       </div>
