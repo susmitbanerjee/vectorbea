@@ -56,12 +56,29 @@ export async function GET() {
   }
 
   // ── Env vars ─────────────────────────────────────────────────────────────
-  checks.env_database_url = {
-    ok: !!process.env.DATABASE_URL,
-    detail: process.env.DATABASE_URL
-      ? `set (starts with: ${process.env.DATABASE_URL.slice(0, 20)}...)`
-      : "DATABASE_URL not set",
-  };
+  const dbUrl = process.env.DATABASE_URL;
+  let dbUrlDetail = "DATABASE_URL not set";
+  if (dbUrl) {
+    try {
+      const u = new URL(dbUrl);
+      dbUrlDetail = `user="${u.username}" host="${u.hostname}" port="${u.port || "5432"}"`;
+    } catch {
+      dbUrlDetail = `set but unparseable: ${dbUrl.slice(0, 40)}`;
+    }
+  }
+  checks.env_database_url = { ok: !!dbUrl, detail: dbUrlDetail };
+
+  const directUrl = process.env.DIRECT_URL;
+  let directUrlDetail = "DIRECT_URL not set";
+  if (directUrl) {
+    try {
+      const u = new URL(directUrl);
+      directUrlDetail = `user="${u.username}" host="${u.hostname}" port="${u.port || "5432"}"`;
+    } catch {
+      directUrlDetail = `set but unparseable`;
+    }
+  }
+  checks.env_direct_url = { ok: !!directUrl, detail: directUrlDetail };
   checks.env_supabase = {
     ok: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
     detail: process.env.NEXT_PUBLIC_SUPABASE_URL
