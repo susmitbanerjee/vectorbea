@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronRight, Clock, User, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,12 +28,26 @@ interface Step {
   finishedAt: string | null;
 }
 
+interface ApprovalRecord {
+  id: string;
+  title: string;
+  message: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+  requestedBySystem: boolean;
+  requestedAt: string;
+  decidedAt: string | null;
+  decisionReason: string | null;
+  agentRunStepId: string | null;
+  decidedBy: { id: string; name: string | null; email: string } | null;
+}
+
 interface AgentRun {
   id: string;
   status: string;
   triggerSource: string;
   attemptNumber: number;
   idempotencyKey: string;
+  originalRunId: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
@@ -45,6 +59,7 @@ interface AgentRun {
   createdAt: string;
   agentJob: { id: string; name: string };
   steps: Step[];
+  approvalRequests: ApprovalRecord[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -214,6 +229,8 @@ export default function AgentRunDetailPage() {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
+  const [forcePausedPending, setForcePausedPending] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -231,15 +248,33 @@ export default function AgentRunDetailPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  async function handleRetry() {
+  async function handleRetry(forcePaused = false) {
     setActing(true);
+    setRetryWarnings([]);
+    setForcePausedPending(false);
     try {
-      const res = await fetch(`/api/agent-runs/${id}/retry`, { method: "POST" });
+      const res = await fetch(`/api/agent-runs/${id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forcePaused }),
+      });
+
       if (!res.ok) {
-        const b = (await res.json()) as { error?: string };
-        throw new Error(b.error);
+        const b = (await res.json()) as { error?: string; code?: string };
+        // If job is paused, offer to force-retry
+        if (b.code === "JOB_PAUSED") {
+          setForcePausedPending(true);
+          toast.warning("Job is paused. Click 'Retry anyway' to proceed.", {
+            duration: 8000,
+          });
+          return;
+        }
+        throw new Error(b.error ?? "Failed to retry");
       }
-      toast.success("Run queued for retry.");
+
+      const data = (await res.json()) as { run: { id: string }; warnings: string[] };
+      if (data.warnings.length > 0) setRetryWarnings(data.warnings);
+      toast.success(`Retry queued (attempt #${run?.attemptNumber != null ? run.attemptNumber + 1 : "?"}).`);
       void load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to retry.");
@@ -284,6 +319,7 @@ export default function AgentRunDetailPage() {
 
   const canRetry = ["FAILED", "TIMEOUT", "CANCELLED"].includes(run.status);
   const canCancel = ["QUEUED", "RUNNING", "WAITING_FOR_APPROVAL"].includes(run.status);
+  const isRetry = run.triggerSource === "RETRY" && run.originalRunId != null;
 
   return (
     <div className="space-y-5 p-8">
@@ -297,24 +333,69 @@ export default function AgentRunDetailPage() {
           {run.agentJob.name}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-xl font-semibold">Run Detail</h1>
               <RunStatusBadge status={run.status as never} />
+              {run.attemptNumber > 1 && (
+                <span className="inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                  Attempt #{run.attemptNumber}
+                </span>
+              )}
             </div>
-            <p className="mt-0.5 text-sm text-muted-foreground font-mono">{run.id}</p>
+            <p className="text-sm text-muted-foreground font-mono">{run.id}</p>
+            {isRetry && (
+              <p className="text-xs text-muted-foreground">
+                Retry of{" "}
+                <Link
+                  href={`/agent-runs/${run.originalRunId}`}
+                  className="font-mono text-foreground hover:underline"
+                >
+                  {run.originalRunId?.slice(0, 14)}…
+                </Link>
+              </p>
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {canCancel && (
               <Button variant="outline" size="sm" onClick={() => void handleCancel()} disabled={acting}>
                 Cancel
               </Button>
             )}
-            {canRetry && (
-              <Button size="sm" onClick={() => void handleRetry()} disabled={acting}>
-                Retry
+            {canRetry && !forcePausedPending && (
+              <Button size="sm" onClick={() => void handleRetry(false)} disabled={acting}>
+                {acting ? "Retrying…" : "Retry Run"}
               </Button>
             )}
+            {canRetry && forcePausedPending && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setForcePausedPending(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => void handleRetry(true)}
+                  disabled={acting}
+                >
+                  Retry anyway (job paused)
+                </Button>
+              </>
+            )}
+            {/* Replay from checkpoint — placeholder for future implementation */}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled
+              title="Checkpoint-based replay is not yet implemented"
+              className="cursor-not-allowed opacity-40"
+            >
+              Replay from step…
+            </Button>
             {run.status === "WAITING_FOR_APPROVAL" && (
               <Link
                 href="/approvals"
@@ -326,6 +407,15 @@ export default function AgentRunDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Retry warnings (e.g. job is paused) */}
+      {retryWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-300 space-y-1">
+          {retryWarnings.map((w, i) => (
+            <p key={i}><strong>Warning:</strong> {w}</p>
+          ))}
+        </div>
+      )}
 
       {/* Error banner */}
       {run.errorMessage && (
@@ -360,6 +450,83 @@ export default function AgentRunDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Approval history */}
+      {run.approvalRequests.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Approval Requests</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {run.approvalRequests.map((ap) => (
+              <div
+                key={ap.id}
+                className={`rounded-lg border p-4 space-y-2 ${
+                  ap.status === "PENDING"
+                    ? "border-amber-500/20 bg-amber-500/[0.03]"
+                    : ap.status === "APPROVED"
+                      ? "border-emerald-500/20 bg-emerald-500/[0.03]"
+                      : "border-red-500/20 bg-red-500/[0.03]"
+                }`}
+              >
+                {/* Title row */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{ap.title}</span>
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                    ap.status === "PENDING"
+                      ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                      : ap.status === "APPROVED"
+                        ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                        : "bg-red-500/10 text-red-600 border-red-500/20"
+                  }`}>
+                    {ap.status === "PENDING" && <Clock className="h-3 w-3" />}
+                    {ap.status === "APPROVED" && <CheckCircle className="h-3 w-3" />}
+                    {ap.status === "REJECTED" && <XCircle className="h-3 w-3" />}
+                    {ap.status.charAt(0) + ap.status.slice(1).toLowerCase()}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Requested {fmt(ap.requestedAt)}
+                  </span>
+                </div>
+
+                {/* Message */}
+                <p className="text-sm text-muted-foreground leading-relaxed">{ap.message}</p>
+
+                {/* Decision */}
+                {ap.decidedAt && (
+                  <div className="flex items-start gap-2 pt-1">
+                    <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <div className="text-xs">
+                      <span className="font-medium">
+                        {ap.status === "APPROVED" ? "Approved" : "Rejected"} by{" "}
+                        {ap.decidedBy?.name ?? ap.decidedBy?.email ?? "Unknown"}
+                      </span>
+                      <span className="text-muted-foreground"> · {fmt(ap.decidedAt)}</span>
+                      {ap.decisionReason && (
+                        <p className="mt-0.5 text-muted-foreground">
+                          &ldquo;{ap.decisionReason}&rdquo;
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending CTA */}
+                {ap.status === "PENDING" && (
+                  <div className="pt-1">
+                    <Link
+                      href="/approvals"
+                      className="inline-flex h-7 items-center rounded-md bg-primary/[0.08] border border-primary/20 px-3 text-xs font-medium text-primary hover:bg-primary/[0.14]"
+                    >
+                      Review in Approvals →
+                    </Link>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Output JSON */}
       {Boolean(run.outputJson) && (

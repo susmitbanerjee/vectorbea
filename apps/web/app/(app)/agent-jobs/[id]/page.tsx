@@ -71,10 +71,19 @@ interface Stats {
   successRate: number | null;
 }
 
+interface BudgetUsage {
+  runsToday: number;
+  runsThisMonth: number;
+  tokensToday: number | null;
+  costTodayUsd: number | null;
+  costThisMonthUsd: number | null;
+}
+
 interface JobDetail {
   job: AgentJob;
   recentRuns: AgentRun[];
   stats: Stats;
+  budgetUsage: BudgetUsage;
 }
 
 interface AuditLog {
@@ -135,6 +144,59 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="flex items-start justify-between gap-4 py-2 text-sm first:pt-0 last:pb-0 border-b border-border last:border-0">
       <span className="text-muted-foreground shrink-0">{label}</span>
       <span className="font-medium text-right">{value}</span>
+    </div>
+  );
+}
+
+// ─── Budget progress bar ─────────────────────────────────────────────────────
+
+function BudgetBar({
+  label,
+  used,
+  limit,
+  format,
+}: {
+  label: string;
+  used: number | null;
+  limit: number | null;
+  format?: (n: number) => string;
+}) {
+  const fmt = format ?? ((n: number) => n.toLocaleString());
+  if (limit == null) {
+    return (
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">{label}</span>
+          <span className="font-medium">{used != null ? fmt(used) : "—"} <span className="text-muted-foreground font-normal">/ no limit</span></span>
+        </div>
+      </div>
+    );
+  }
+
+  const pct = used != null ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const color =
+    pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500";
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-medium">
+          {used != null ? fmt(used) : "—"}
+          <span className="text-muted-foreground font-normal"> / {fmt(limit)}</span>
+          {used != null && (
+            <span className={`ml-1.5 ${pct >= 100 ? "text-red-500" : pct >= 80 ? "text-amber-500" : "text-emerald-600"}`}>
+              ({pct}%)
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${color}`}
+          style={{ width: `${used != null ? pct : 0}%` }}
+        />
+      </div>
     </div>
   );
 }
@@ -226,7 +288,7 @@ export default function AgentJobDetailPage() {
     );
   }
 
-  const { job, recentRuns, stats } = detail;
+  const { job, recentRuns, stats, budgetUsage } = detail;
 
   return (
     <div className="space-y-5 p-8">
@@ -351,23 +413,65 @@ export default function AgentJobDetailPage() {
           />
         </Section>
 
-        {/* Budget */}
+        {/* Budget — always show if policy exists, with live usage */}
         {job.budgetPolicy && (
-          <Section icon={Wallet} title="Budget Policy">
-            <Row
-              label="Max tokens/run"
-              value={job.budgetPolicy.maxTokensPerRun?.toLocaleString() ?? "—"}
-            />
-            <Row
-              label="Max cost/run"
-              value={
-                job.budgetPolicy.maxCostUsdPerRun
-                  ? `$${Number(job.budgetPolicy.maxCostUsdPerRun).toFixed(2)}`
-                  : "—"
-              }
-            />
-            <Row label="Max runs/day" value={job.budgetPolicy.maxRunsPerDay ?? "—"} />
-            <Row label="Max runs/month" value={job.budgetPolicy.maxRunsPerMonth ?? "—"} />
+          <Section icon={Wallet} title="Budget &amp; Usage">
+            <div className="space-y-4">
+              {/* Run count limits with progress bars */}
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Run Counts</p>
+                <BudgetBar
+                  label="Runs today"
+                  used={budgetUsage.runsToday}
+                  limit={job.budgetPolicy.maxRunsPerDay}
+                />
+                <BudgetBar
+                  label="Runs this month"
+                  used={budgetUsage.runsThisMonth}
+                  limit={job.budgetPolicy.maxRunsPerMonth}
+                />
+              </div>
+
+              {/* Cost limits with progress bars */}
+              <div className="space-y-3 pt-2 border-t border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Cost</p>
+                <BudgetBar
+                  label="Cost today"
+                  used={budgetUsage.costTodayUsd}
+                  limit={null}
+                  format={(n) => `$${n.toFixed(2)}`}
+                />
+                <BudgetBar
+                  label="Cost this month"
+                  used={budgetUsage.costThisMonthUsd}
+                  limit={null}
+                  format={(n) => `$${n.toFixed(2)}`}
+                />
+              </div>
+
+              {/* Per-run limits (static config) */}
+              <div className="space-y-0 pt-2 border-t border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Per-Run Limits</p>
+                <Row
+                  label="Max tokens/run"
+                  value={job.budgetPolicy.maxTokensPerRun
+                    ? `${job.budgetPolicy.maxTokensPerRun.toLocaleString()} tokens`
+                    : "—"}
+                />
+                <Row
+                  label="Max cost/run"
+                  value={job.budgetPolicy.maxCostUsdPerRun
+                    ? `$${Number(job.budgetPolicy.maxCostUsdPerRun).toFixed(2)}`
+                    : "—"}
+                />
+                {budgetUsage.tokensToday != null && (
+                  <Row
+                    label="Tokens today"
+                    value={budgetUsage.tokensToday.toLocaleString()}
+                  />
+                )}
+              </div>
+            </div>
           </Section>
         )}
       </div>

@@ -1744,11 +1744,13 @@ export namespace Prisma {
    */
 
   export type AgentRunCountOutputType = {
+    retries: number
     steps: number
     approvalRequests: number
   }
 
   export type AgentRunCountOutputTypeSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    retries?: boolean | AgentRunCountOutputTypeCountRetriesArgs
     steps?: boolean | AgentRunCountOutputTypeCountStepsArgs
     approvalRequests?: boolean | AgentRunCountOutputTypeCountApprovalRequestsArgs
   }
@@ -1762,6 +1764,13 @@ export namespace Prisma {
      * Select specific fields to fetch from the AgentRunCountOutputType
      */
     select?: AgentRunCountOutputTypeSelect<ExtArgs> | null
+  }
+
+  /**
+   * AgentRunCountOutputType without action
+   */
+  export type AgentRunCountOutputTypeCountRetriesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: AgentRunWhereInput
   }
 
   /**
@@ -5164,6 +5173,7 @@ export namespace Prisma {
     durationMs: number | null
     attemptNumber: number | null
     idempotencyKey: string | null
+    originalRunId: string | null
     errorMessage: string | null
     totalTokens: number | null
     estimatedCostUsd: Decimal | null
@@ -5182,6 +5192,7 @@ export namespace Prisma {
     durationMs: number | null
     attemptNumber: number | null
     idempotencyKey: string | null
+    originalRunId: string | null
     errorMessage: string | null
     totalTokens: number | null
     estimatedCostUsd: Decimal | null
@@ -5200,6 +5211,7 @@ export namespace Prisma {
     durationMs: number
     attemptNumber: number
     idempotencyKey: number
+    originalRunId: number
     inputJson: number
     outputJson: number
     errorMessage: number
@@ -5236,6 +5248,7 @@ export namespace Prisma {
     durationMs?: true
     attemptNumber?: true
     idempotencyKey?: true
+    originalRunId?: true
     errorMessage?: true
     totalTokens?: true
     estimatedCostUsd?: true
@@ -5254,6 +5267,7 @@ export namespace Prisma {
     durationMs?: true
     attemptNumber?: true
     idempotencyKey?: true
+    originalRunId?: true
     errorMessage?: true
     totalTokens?: true
     estimatedCostUsd?: true
@@ -5272,6 +5286,7 @@ export namespace Prisma {
     durationMs?: true
     attemptNumber?: true
     idempotencyKey?: true
+    originalRunId?: true
     inputJson?: true
     outputJson?: true
     errorMessage?: true
@@ -5379,6 +5394,7 @@ export namespace Prisma {
     durationMs: number | null
     attemptNumber: number
     idempotencyKey: string
+    originalRunId: string | null
     inputJson: JsonValue | null
     outputJson: JsonValue | null
     errorMessage: string | null
@@ -5418,6 +5434,7 @@ export namespace Prisma {
     durationMs?: boolean
     attemptNumber?: boolean
     idempotencyKey?: boolean
+    originalRunId?: boolean
     inputJson?: boolean
     outputJson?: boolean
     errorMessage?: boolean
@@ -5427,6 +5444,8 @@ export namespace Prisma {
     updatedAt?: boolean
     organization?: boolean | OrganizationDefaultArgs<ExtArgs>
     agentJob?: boolean | AgentJobDefaultArgs<ExtArgs>
+    originalRun?: boolean | AgentRun$originalRunArgs<ExtArgs>
+    retries?: boolean | AgentRun$retriesArgs<ExtArgs>
     steps?: boolean | AgentRun$stepsArgs<ExtArgs>
     approvalRequests?: boolean | AgentRun$approvalRequestsArgs<ExtArgs>
     _count?: boolean | AgentRunCountOutputTypeDefaultArgs<ExtArgs>
@@ -5443,6 +5462,7 @@ export namespace Prisma {
     durationMs?: boolean
     attemptNumber?: boolean
     idempotencyKey?: boolean
+    originalRunId?: boolean
     inputJson?: boolean
     outputJson?: boolean
     errorMessage?: boolean
@@ -5452,6 +5472,7 @@ export namespace Prisma {
     updatedAt?: boolean
     organization?: boolean | OrganizationDefaultArgs<ExtArgs>
     agentJob?: boolean | AgentJobDefaultArgs<ExtArgs>
+    originalRun?: boolean | AgentRun$originalRunArgs<ExtArgs>
   }, ExtArgs["result"]["agentRun"]>
 
   export type AgentRunSelectScalar = {
@@ -5465,6 +5486,7 @@ export namespace Prisma {
     durationMs?: boolean
     attemptNumber?: boolean
     idempotencyKey?: boolean
+    originalRunId?: boolean
     inputJson?: boolean
     outputJson?: boolean
     errorMessage?: boolean
@@ -5477,6 +5499,8 @@ export namespace Prisma {
   export type AgentRunInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     organization?: boolean | OrganizationDefaultArgs<ExtArgs>
     agentJob?: boolean | AgentJobDefaultArgs<ExtArgs>
+    originalRun?: boolean | AgentRun$originalRunArgs<ExtArgs>
+    retries?: boolean | AgentRun$retriesArgs<ExtArgs>
     steps?: boolean | AgentRun$stepsArgs<ExtArgs>
     approvalRequests?: boolean | AgentRun$approvalRequestsArgs<ExtArgs>
     _count?: boolean | AgentRunCountOutputTypeDefaultArgs<ExtArgs>
@@ -5484,6 +5508,7 @@ export namespace Prisma {
   export type AgentRunIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     organization?: boolean | OrganizationDefaultArgs<ExtArgs>
     agentJob?: boolean | AgentJobDefaultArgs<ExtArgs>
+    originalRun?: boolean | AgentRun$originalRunArgs<ExtArgs>
   }
 
   export type $AgentRunPayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
@@ -5491,6 +5516,8 @@ export namespace Prisma {
     objects: {
       organization: Prisma.$OrganizationPayload<ExtArgs>
       agentJob: Prisma.$AgentJobPayload<ExtArgs>
+      originalRun: Prisma.$AgentRunPayload<ExtArgs> | null
+      retries: Prisma.$AgentRunPayload<ExtArgs>[]
       steps: Prisma.$AgentRunStepPayload<ExtArgs>[]
       approvalRequests: Prisma.$ApprovalRequestPayload<ExtArgs>[]
     }
@@ -5505,6 +5532,7 @@ export namespace Prisma {
       durationMs: number | null
       attemptNumber: number
       idempotencyKey: string
+      originalRunId: string | null
       inputJson: Prisma.JsonValue | null
       outputJson: Prisma.JsonValue | null
       errorMessage: string | null
@@ -5878,6 +5906,8 @@ export namespace Prisma {
     readonly [Symbol.toStringTag]: "PrismaPromise"
     organization<T extends OrganizationDefaultArgs<ExtArgs> = {}>(args?: Subset<T, OrganizationDefaultArgs<ExtArgs>>): Prisma__OrganizationClient<$Result.GetResult<Prisma.$OrganizationPayload<ExtArgs>, T, "findUniqueOrThrow"> | Null, Null, ExtArgs>
     agentJob<T extends AgentJobDefaultArgs<ExtArgs> = {}>(args?: Subset<T, AgentJobDefaultArgs<ExtArgs>>): Prisma__AgentJobClient<$Result.GetResult<Prisma.$AgentJobPayload<ExtArgs>, T, "findUniqueOrThrow"> | Null, Null, ExtArgs>
+    originalRun<T extends AgentRun$originalRunArgs<ExtArgs> = {}>(args?: Subset<T, AgentRun$originalRunArgs<ExtArgs>>): Prisma__AgentRunClient<$Result.GetResult<Prisma.$AgentRunPayload<ExtArgs>, T, "findUniqueOrThrow"> | null, null, ExtArgs>
+    retries<T extends AgentRun$retriesArgs<ExtArgs> = {}>(args?: Subset<T, AgentRun$retriesArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$AgentRunPayload<ExtArgs>, T, "findMany"> | Null>
     steps<T extends AgentRun$stepsArgs<ExtArgs> = {}>(args?: Subset<T, AgentRun$stepsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$AgentRunStepPayload<ExtArgs>, T, "findMany"> | Null>
     approvalRequests<T extends AgentRun$approvalRequestsArgs<ExtArgs> = {}>(args?: Subset<T, AgentRun$approvalRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$ApprovalRequestPayload<ExtArgs>, T, "findMany"> | Null>
     /**
@@ -5919,6 +5949,7 @@ export namespace Prisma {
     readonly durationMs: FieldRef<"AgentRun", 'Int'>
     readonly attemptNumber: FieldRef<"AgentRun", 'Int'>
     readonly idempotencyKey: FieldRef<"AgentRun", 'String'>
+    readonly originalRunId: FieldRef<"AgentRun", 'String'>
     readonly inputJson: FieldRef<"AgentRun", 'Json'>
     readonly outputJson: FieldRef<"AgentRun", 'Json'>
     readonly errorMessage: FieldRef<"AgentRun", 'String'>
@@ -6241,6 +6272,41 @@ export namespace Prisma {
      * Filter which AgentRuns to delete
      */
     where?: AgentRunWhereInput
+  }
+
+  /**
+   * AgentRun.originalRun
+   */
+  export type AgentRun$originalRunArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the AgentRun
+     */
+    select?: AgentRunSelect<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: AgentRunInclude<ExtArgs> | null
+    where?: AgentRunWhereInput
+  }
+
+  /**
+   * AgentRun.retries
+   */
+  export type AgentRun$retriesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the AgentRun
+     */
+    select?: AgentRunSelect<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: AgentRunInclude<ExtArgs> | null
+    where?: AgentRunWhereInput
+    orderBy?: AgentRunOrderByWithRelationInput | AgentRunOrderByWithRelationInput[]
+    cursor?: AgentRunWhereUniqueInput
+    take?: number
+    skip?: number
+    distinct?: AgentRunScalarFieldEnum | AgentRunScalarFieldEnum[]
   }
 
   /**
@@ -10575,6 +10641,7 @@ export namespace Prisma {
     durationMs: 'durationMs',
     attemptNumber: 'attemptNumber',
     idempotencyKey: 'idempotencyKey',
+    originalRunId: 'originalRunId',
     inputJson: 'inputJson',
     outputJson: 'outputJson',
     errorMessage: 'errorMessage',
@@ -11212,6 +11279,7 @@ export namespace Prisma {
     durationMs?: IntNullableFilter<"AgentRun"> | number | null
     attemptNumber?: IntFilter<"AgentRun"> | number
     idempotencyKey?: StringFilter<"AgentRun"> | string
+    originalRunId?: StringNullableFilter<"AgentRun"> | string | null
     inputJson?: JsonNullableFilter<"AgentRun">
     outputJson?: JsonNullableFilter<"AgentRun">
     errorMessage?: StringNullableFilter<"AgentRun"> | string | null
@@ -11221,6 +11289,8 @@ export namespace Prisma {
     updatedAt?: DateTimeFilter<"AgentRun"> | Date | string
     organization?: XOR<OrganizationRelationFilter, OrganizationWhereInput>
     agentJob?: XOR<AgentJobRelationFilter, AgentJobWhereInput>
+    originalRun?: XOR<AgentRunNullableRelationFilter, AgentRunWhereInput> | null
+    retries?: AgentRunListRelationFilter
     steps?: AgentRunStepListRelationFilter
     approvalRequests?: ApprovalRequestListRelationFilter
   }
@@ -11236,6 +11306,7 @@ export namespace Prisma {
     durationMs?: SortOrderInput | SortOrder
     attemptNumber?: SortOrder
     idempotencyKey?: SortOrder
+    originalRunId?: SortOrderInput | SortOrder
     inputJson?: SortOrderInput | SortOrder
     outputJson?: SortOrderInput | SortOrder
     errorMessage?: SortOrderInput | SortOrder
@@ -11245,6 +11316,8 @@ export namespace Prisma {
     updatedAt?: SortOrder
     organization?: OrganizationOrderByWithRelationInput
     agentJob?: AgentJobOrderByWithRelationInput
+    originalRun?: AgentRunOrderByWithRelationInput
+    retries?: AgentRunOrderByRelationAggregateInput
     steps?: AgentRunStepOrderByRelationAggregateInput
     approvalRequests?: ApprovalRequestOrderByRelationAggregateInput
   }
@@ -11264,6 +11337,7 @@ export namespace Prisma {
     durationMs?: IntNullableFilter<"AgentRun"> | number | null
     attemptNumber?: IntFilter<"AgentRun"> | number
     idempotencyKey?: StringFilter<"AgentRun"> | string
+    originalRunId?: StringNullableFilter<"AgentRun"> | string | null
     inputJson?: JsonNullableFilter<"AgentRun">
     outputJson?: JsonNullableFilter<"AgentRun">
     errorMessage?: StringNullableFilter<"AgentRun"> | string | null
@@ -11273,6 +11347,8 @@ export namespace Prisma {
     updatedAt?: DateTimeFilter<"AgentRun"> | Date | string
     organization?: XOR<OrganizationRelationFilter, OrganizationWhereInput>
     agentJob?: XOR<AgentJobRelationFilter, AgentJobWhereInput>
+    originalRun?: XOR<AgentRunNullableRelationFilter, AgentRunWhereInput> | null
+    retries?: AgentRunListRelationFilter
     steps?: AgentRunStepListRelationFilter
     approvalRequests?: ApprovalRequestListRelationFilter
   }, "id" | "agentJobId_idempotencyKey">
@@ -11288,6 +11364,7 @@ export namespace Prisma {
     durationMs?: SortOrderInput | SortOrder
     attemptNumber?: SortOrder
     idempotencyKey?: SortOrder
+    originalRunId?: SortOrderInput | SortOrder
     inputJson?: SortOrderInput | SortOrder
     outputJson?: SortOrderInput | SortOrder
     errorMessage?: SortOrderInput | SortOrder
@@ -11316,6 +11393,7 @@ export namespace Prisma {
     durationMs?: IntNullableWithAggregatesFilter<"AgentRun"> | number | null
     attemptNumber?: IntWithAggregatesFilter<"AgentRun"> | number
     idempotencyKey?: StringWithAggregatesFilter<"AgentRun"> | string
+    originalRunId?: StringNullableWithAggregatesFilter<"AgentRun"> | string | null
     inputJson?: JsonNullableWithAggregatesFilter<"AgentRun">
     outputJson?: JsonNullableWithAggregatesFilter<"AgentRun">
     errorMessage?: StringNullableWithAggregatesFilter<"AgentRun"> | string | null
@@ -12034,6 +12112,8 @@ export namespace Prisma {
     updatedAt?: Date | string
     organization: OrganizationCreateNestedOneWithoutAgentRunsInput
     agentJob: AgentJobCreateNestedOneWithoutRunsInput
+    originalRun?: AgentRunCreateNestedOneWithoutRetriesInput
+    retries?: AgentRunCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepCreateNestedManyWithoutAgentRunInput
     approvalRequests?: ApprovalRequestCreateNestedManyWithoutAgentRunInput
   }
@@ -12049,6 +12129,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -12056,6 +12137,7 @@ export namespace Prisma {
     estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
+    retries?: AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput
     approvalRequests?: ApprovalRequestUncheckedCreateNestedManyWithoutAgentRunInput
   }
@@ -12078,6 +12160,8 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     organization?: OrganizationUpdateOneRequiredWithoutAgentRunsNestedInput
     agentJob?: AgentJobUpdateOneRequiredWithoutRunsNestedInput
+    originalRun?: AgentRunUpdateOneWithoutRetriesNestedInput
+    retries?: AgentRunUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUpdateManyWithoutAgentRunNestedInput
     approvalRequests?: ApprovalRequestUpdateManyWithoutAgentRunNestedInput
   }
@@ -12093,6 +12177,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -12100,6 +12185,7 @@ export namespace Prisma {
     estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    retries?: AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput
     approvalRequests?: ApprovalRequestUncheckedUpdateManyWithoutAgentRunNestedInput
   }
@@ -12115,6 +12201,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -12153,6 +12240,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -13071,6 +13159,11 @@ export namespace Prisma {
     isNot?: AgentJobWhereInput
   }
 
+  export type AgentRunNullableRelationFilter = {
+    is?: AgentRunWhereInput | null
+    isNot?: AgentRunWhereInput | null
+  }
+
   export type AgentRunAgentJobIdIdempotencyKeyCompoundUniqueInput = {
     agentJobId: string
     idempotencyKey: string
@@ -13087,6 +13180,7 @@ export namespace Prisma {
     durationMs?: SortOrder
     attemptNumber?: SortOrder
     idempotencyKey?: SortOrder
+    originalRunId?: SortOrder
     inputJson?: SortOrder
     outputJson?: SortOrder
     errorMessage?: SortOrder
@@ -13114,6 +13208,7 @@ export namespace Prisma {
     durationMs?: SortOrder
     attemptNumber?: SortOrder
     idempotencyKey?: SortOrder
+    originalRunId?: SortOrder
     errorMessage?: SortOrder
     totalTokens?: SortOrder
     estimatedCostUsd?: SortOrder
@@ -13132,6 +13227,7 @@ export namespace Prisma {
     durationMs?: SortOrder
     attemptNumber?: SortOrder
     idempotencyKey?: SortOrder
+    originalRunId?: SortOrder
     errorMessage?: SortOrder
     totalTokens?: SortOrder
     estimatedCostUsd?: SortOrder
@@ -14059,6 +14155,19 @@ export namespace Prisma {
     connect?: AgentJobWhereUniqueInput
   }
 
+  export type AgentRunCreateNestedOneWithoutRetriesInput = {
+    create?: XOR<AgentRunCreateWithoutRetriesInput, AgentRunUncheckedCreateWithoutRetriesInput>
+    connectOrCreate?: AgentRunCreateOrConnectWithoutRetriesInput
+    connect?: AgentRunWhereUniqueInput
+  }
+
+  export type AgentRunCreateNestedManyWithoutOriginalRunInput = {
+    create?: XOR<AgentRunCreateWithoutOriginalRunInput, AgentRunUncheckedCreateWithoutOriginalRunInput> | AgentRunCreateWithoutOriginalRunInput[] | AgentRunUncheckedCreateWithoutOriginalRunInput[]
+    connectOrCreate?: AgentRunCreateOrConnectWithoutOriginalRunInput | AgentRunCreateOrConnectWithoutOriginalRunInput[]
+    createMany?: AgentRunCreateManyOriginalRunInputEnvelope
+    connect?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+  }
+
   export type AgentRunStepCreateNestedManyWithoutAgentRunInput = {
     create?: XOR<AgentRunStepCreateWithoutAgentRunInput, AgentRunStepUncheckedCreateWithoutAgentRunInput> | AgentRunStepCreateWithoutAgentRunInput[] | AgentRunStepUncheckedCreateWithoutAgentRunInput[]
     connectOrCreate?: AgentRunStepCreateOrConnectWithoutAgentRunInput | AgentRunStepCreateOrConnectWithoutAgentRunInput[]
@@ -14071,6 +14180,13 @@ export namespace Prisma {
     connectOrCreate?: ApprovalRequestCreateOrConnectWithoutAgentRunInput | ApprovalRequestCreateOrConnectWithoutAgentRunInput[]
     createMany?: ApprovalRequestCreateManyAgentRunInputEnvelope
     connect?: ApprovalRequestWhereUniqueInput | ApprovalRequestWhereUniqueInput[]
+  }
+
+  export type AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput = {
+    create?: XOR<AgentRunCreateWithoutOriginalRunInput, AgentRunUncheckedCreateWithoutOriginalRunInput> | AgentRunCreateWithoutOriginalRunInput[] | AgentRunUncheckedCreateWithoutOriginalRunInput[]
+    connectOrCreate?: AgentRunCreateOrConnectWithoutOriginalRunInput | AgentRunCreateOrConnectWithoutOriginalRunInput[]
+    createMany?: AgentRunCreateManyOriginalRunInputEnvelope
+    connect?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
   }
 
   export type AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput = {
@@ -14131,6 +14247,30 @@ export namespace Prisma {
     update?: XOR<XOR<AgentJobUpdateToOneWithWhereWithoutRunsInput, AgentJobUpdateWithoutRunsInput>, AgentJobUncheckedUpdateWithoutRunsInput>
   }
 
+  export type AgentRunUpdateOneWithoutRetriesNestedInput = {
+    create?: XOR<AgentRunCreateWithoutRetriesInput, AgentRunUncheckedCreateWithoutRetriesInput>
+    connectOrCreate?: AgentRunCreateOrConnectWithoutRetriesInput
+    upsert?: AgentRunUpsertWithoutRetriesInput
+    disconnect?: AgentRunWhereInput | boolean
+    delete?: AgentRunWhereInput | boolean
+    connect?: AgentRunWhereUniqueInput
+    update?: XOR<XOR<AgentRunUpdateToOneWithWhereWithoutRetriesInput, AgentRunUpdateWithoutRetriesInput>, AgentRunUncheckedUpdateWithoutRetriesInput>
+  }
+
+  export type AgentRunUpdateManyWithoutOriginalRunNestedInput = {
+    create?: XOR<AgentRunCreateWithoutOriginalRunInput, AgentRunUncheckedCreateWithoutOriginalRunInput> | AgentRunCreateWithoutOriginalRunInput[] | AgentRunUncheckedCreateWithoutOriginalRunInput[]
+    connectOrCreate?: AgentRunCreateOrConnectWithoutOriginalRunInput | AgentRunCreateOrConnectWithoutOriginalRunInput[]
+    upsert?: AgentRunUpsertWithWhereUniqueWithoutOriginalRunInput | AgentRunUpsertWithWhereUniqueWithoutOriginalRunInput[]
+    createMany?: AgentRunCreateManyOriginalRunInputEnvelope
+    set?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    disconnect?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    delete?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    connect?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    update?: AgentRunUpdateWithWhereUniqueWithoutOriginalRunInput | AgentRunUpdateWithWhereUniqueWithoutOriginalRunInput[]
+    updateMany?: AgentRunUpdateManyWithWhereWithoutOriginalRunInput | AgentRunUpdateManyWithWhereWithoutOriginalRunInput[]
+    deleteMany?: AgentRunScalarWhereInput | AgentRunScalarWhereInput[]
+  }
+
   export type AgentRunStepUpdateManyWithoutAgentRunNestedInput = {
     create?: XOR<AgentRunStepCreateWithoutAgentRunInput, AgentRunStepUncheckedCreateWithoutAgentRunInput> | AgentRunStepCreateWithoutAgentRunInput[] | AgentRunStepUncheckedCreateWithoutAgentRunInput[]
     connectOrCreate?: AgentRunStepCreateOrConnectWithoutAgentRunInput | AgentRunStepCreateOrConnectWithoutAgentRunInput[]
@@ -14157,6 +14297,20 @@ export namespace Prisma {
     update?: ApprovalRequestUpdateWithWhereUniqueWithoutAgentRunInput | ApprovalRequestUpdateWithWhereUniqueWithoutAgentRunInput[]
     updateMany?: ApprovalRequestUpdateManyWithWhereWithoutAgentRunInput | ApprovalRequestUpdateManyWithWhereWithoutAgentRunInput[]
     deleteMany?: ApprovalRequestScalarWhereInput | ApprovalRequestScalarWhereInput[]
+  }
+
+  export type AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput = {
+    create?: XOR<AgentRunCreateWithoutOriginalRunInput, AgentRunUncheckedCreateWithoutOriginalRunInput> | AgentRunCreateWithoutOriginalRunInput[] | AgentRunUncheckedCreateWithoutOriginalRunInput[]
+    connectOrCreate?: AgentRunCreateOrConnectWithoutOriginalRunInput | AgentRunCreateOrConnectWithoutOriginalRunInput[]
+    upsert?: AgentRunUpsertWithWhereUniqueWithoutOriginalRunInput | AgentRunUpsertWithWhereUniqueWithoutOriginalRunInput[]
+    createMany?: AgentRunCreateManyOriginalRunInputEnvelope
+    set?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    disconnect?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    delete?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    connect?: AgentRunWhereUniqueInput | AgentRunWhereUniqueInput[]
+    update?: AgentRunUpdateWithWhereUniqueWithoutOriginalRunInput | AgentRunUpdateWithWhereUniqueWithoutOriginalRunInput[]
+    updateMany?: AgentRunUpdateManyWithWhereWithoutOriginalRunInput | AgentRunUpdateManyWithWhereWithoutOriginalRunInput[]
+    deleteMany?: AgentRunScalarWhereInput | AgentRunScalarWhereInput[]
   }
 
   export type AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput = {
@@ -14897,6 +15051,8 @@ export namespace Prisma {
     createdAt?: Date | string
     updatedAt?: Date | string
     agentJob: AgentJobCreateNestedOneWithoutRunsInput
+    originalRun?: AgentRunCreateNestedOneWithoutRetriesInput
+    retries?: AgentRunCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepCreateNestedManyWithoutAgentRunInput
     approvalRequests?: ApprovalRequestCreateNestedManyWithoutAgentRunInput
   }
@@ -14911,6 +15067,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -14918,6 +15075,7 @@ export namespace Prisma {
     estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
+    retries?: AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput
     approvalRequests?: ApprovalRequestUncheckedCreateNestedManyWithoutAgentRunInput
   }
@@ -15178,6 +15336,7 @@ export namespace Prisma {
     durationMs?: IntNullableFilter<"AgentRun"> | number | null
     attemptNumber?: IntFilter<"AgentRun"> | number
     idempotencyKey?: StringFilter<"AgentRun"> | string
+    originalRunId?: StringNullableFilter<"AgentRun"> | string | null
     inputJson?: JsonNullableFilter<"AgentRun">
     outputJson?: JsonNullableFilter<"AgentRun">
     errorMessage?: StringNullableFilter<"AgentRun"> | string | null
@@ -15642,6 +15801,8 @@ export namespace Prisma {
     createdAt?: Date | string
     updatedAt?: Date | string
     organization: OrganizationCreateNestedOneWithoutAgentRunsInput
+    originalRun?: AgentRunCreateNestedOneWithoutRetriesInput
+    retries?: AgentRunCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepCreateNestedManyWithoutAgentRunInput
     approvalRequests?: ApprovalRequestCreateNestedManyWithoutAgentRunInput
   }
@@ -15656,6 +15817,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -15663,6 +15825,7 @@ export namespace Prisma {
     estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
+    retries?: AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput
     approvalRequests?: ApprovalRequestUncheckedCreateNestedManyWithoutAgentRunInput
   }
@@ -15911,6 +16074,113 @@ export namespace Prisma {
     create: XOR<AgentJobCreateWithoutRunsInput, AgentJobUncheckedCreateWithoutRunsInput>
   }
 
+  export type AgentRunCreateWithoutRetriesInput = {
+    id?: string
+    status?: $Enums.RunStatus
+    triggerSource: $Enums.TriggerSource
+    startedAt?: Date | string | null
+    finishedAt?: Date | string | null
+    durationMs?: number | null
+    attemptNumber?: number
+    idempotencyKey: string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: string | null
+    totalTokens?: number | null
+    estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    organization: OrganizationCreateNestedOneWithoutAgentRunsInput
+    agentJob: AgentJobCreateNestedOneWithoutRunsInput
+    originalRun?: AgentRunCreateNestedOneWithoutRetriesInput
+    steps?: AgentRunStepCreateNestedManyWithoutAgentRunInput
+    approvalRequests?: ApprovalRequestCreateNestedManyWithoutAgentRunInput
+  }
+
+  export type AgentRunUncheckedCreateWithoutRetriesInput = {
+    id?: string
+    organizationId: string
+    agentJobId: string
+    status?: $Enums.RunStatus
+    triggerSource: $Enums.TriggerSource
+    startedAt?: Date | string | null
+    finishedAt?: Date | string | null
+    durationMs?: number | null
+    attemptNumber?: number
+    idempotencyKey: string
+    originalRunId?: string | null
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: string | null
+    totalTokens?: number | null
+    estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    steps?: AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput
+    approvalRequests?: ApprovalRequestUncheckedCreateNestedManyWithoutAgentRunInput
+  }
+
+  export type AgentRunCreateOrConnectWithoutRetriesInput = {
+    where: AgentRunWhereUniqueInput
+    create: XOR<AgentRunCreateWithoutRetriesInput, AgentRunUncheckedCreateWithoutRetriesInput>
+  }
+
+  export type AgentRunCreateWithoutOriginalRunInput = {
+    id?: string
+    status?: $Enums.RunStatus
+    triggerSource: $Enums.TriggerSource
+    startedAt?: Date | string | null
+    finishedAt?: Date | string | null
+    durationMs?: number | null
+    attemptNumber?: number
+    idempotencyKey: string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: string | null
+    totalTokens?: number | null
+    estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    organization: OrganizationCreateNestedOneWithoutAgentRunsInput
+    agentJob: AgentJobCreateNestedOneWithoutRunsInput
+    retries?: AgentRunCreateNestedManyWithoutOriginalRunInput
+    steps?: AgentRunStepCreateNestedManyWithoutAgentRunInput
+    approvalRequests?: ApprovalRequestCreateNestedManyWithoutAgentRunInput
+  }
+
+  export type AgentRunUncheckedCreateWithoutOriginalRunInput = {
+    id?: string
+    organizationId: string
+    agentJobId: string
+    status?: $Enums.RunStatus
+    triggerSource: $Enums.TriggerSource
+    startedAt?: Date | string | null
+    finishedAt?: Date | string | null
+    durationMs?: number | null
+    attemptNumber?: number
+    idempotencyKey: string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: string | null
+    totalTokens?: number | null
+    estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    retries?: AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput
+    steps?: AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput
+    approvalRequests?: ApprovalRequestUncheckedCreateNestedManyWithoutAgentRunInput
+  }
+
+  export type AgentRunCreateOrConnectWithoutOriginalRunInput = {
+    where: AgentRunWhereUniqueInput
+    create: XOR<AgentRunCreateWithoutOriginalRunInput, AgentRunUncheckedCreateWithoutOriginalRunInput>
+  }
+
+  export type AgentRunCreateManyOriginalRunInputEnvelope = {
+    data: AgentRunCreateManyOriginalRunInput | AgentRunCreateManyOriginalRunInput[]
+    skipDuplicates?: boolean
+  }
+
   export type AgentRunStepCreateWithoutAgentRunInput = {
     id?: string
     stepIndex: number
@@ -16091,6 +16361,79 @@ export namespace Prisma {
     budgetPolicy?: BudgetPolicyUncheckedUpdateOneWithoutAgentJobNestedInput
   }
 
+  export type AgentRunUpsertWithoutRetriesInput = {
+    update: XOR<AgentRunUpdateWithoutRetriesInput, AgentRunUncheckedUpdateWithoutRetriesInput>
+    create: XOR<AgentRunCreateWithoutRetriesInput, AgentRunUncheckedCreateWithoutRetriesInput>
+    where?: AgentRunWhereInput
+  }
+
+  export type AgentRunUpdateToOneWithWhereWithoutRetriesInput = {
+    where?: AgentRunWhereInput
+    data: XOR<AgentRunUpdateWithoutRetriesInput, AgentRunUncheckedUpdateWithoutRetriesInput>
+  }
+
+  export type AgentRunUpdateWithoutRetriesInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    status?: EnumRunStatusFieldUpdateOperationsInput | $Enums.RunStatus
+    triggerSource?: EnumTriggerSourceFieldUpdateOperationsInput | $Enums.TriggerSource
+    startedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    finishedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    durationMs?: NullableIntFieldUpdateOperationsInput | number | null
+    attemptNumber?: IntFieldUpdateOperationsInput | number
+    idempotencyKey?: StringFieldUpdateOperationsInput | string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
+    totalTokens?: NullableIntFieldUpdateOperationsInput | number | null
+    estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    organization?: OrganizationUpdateOneRequiredWithoutAgentRunsNestedInput
+    agentJob?: AgentJobUpdateOneRequiredWithoutRunsNestedInput
+    originalRun?: AgentRunUpdateOneWithoutRetriesNestedInput
+    steps?: AgentRunStepUpdateManyWithoutAgentRunNestedInput
+    approvalRequests?: ApprovalRequestUpdateManyWithoutAgentRunNestedInput
+  }
+
+  export type AgentRunUncheckedUpdateWithoutRetriesInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    organizationId?: StringFieldUpdateOperationsInput | string
+    agentJobId?: StringFieldUpdateOperationsInput | string
+    status?: EnumRunStatusFieldUpdateOperationsInput | $Enums.RunStatus
+    triggerSource?: EnumTriggerSourceFieldUpdateOperationsInput | $Enums.TriggerSource
+    startedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    finishedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    durationMs?: NullableIntFieldUpdateOperationsInput | number | null
+    attemptNumber?: IntFieldUpdateOperationsInput | number
+    idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
+    totalTokens?: NullableIntFieldUpdateOperationsInput | number | null
+    estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    steps?: AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput
+    approvalRequests?: ApprovalRequestUncheckedUpdateManyWithoutAgentRunNestedInput
+  }
+
+  export type AgentRunUpsertWithWhereUniqueWithoutOriginalRunInput = {
+    where: AgentRunWhereUniqueInput
+    update: XOR<AgentRunUpdateWithoutOriginalRunInput, AgentRunUncheckedUpdateWithoutOriginalRunInput>
+    create: XOR<AgentRunCreateWithoutOriginalRunInput, AgentRunUncheckedCreateWithoutOriginalRunInput>
+  }
+
+  export type AgentRunUpdateWithWhereUniqueWithoutOriginalRunInput = {
+    where: AgentRunWhereUniqueInput
+    data: XOR<AgentRunUpdateWithoutOriginalRunInput, AgentRunUncheckedUpdateWithoutOriginalRunInput>
+  }
+
+  export type AgentRunUpdateManyWithWhereWithoutOriginalRunInput = {
+    where: AgentRunScalarWhereInput
+    data: XOR<AgentRunUpdateManyMutationInput, AgentRunUncheckedUpdateManyWithoutOriginalRunInput>
+  }
+
   export type AgentRunStepUpsertWithWhereUniqueWithoutAgentRunInput = {
     where: AgentRunStepWhereUniqueInput
     update: XOR<AgentRunStepUpdateWithoutAgentRunInput, AgentRunStepUncheckedUpdateWithoutAgentRunInput>
@@ -16174,6 +16517,8 @@ export namespace Prisma {
     updatedAt?: Date | string
     organization: OrganizationCreateNestedOneWithoutAgentRunsInput
     agentJob: AgentJobCreateNestedOneWithoutRunsInput
+    originalRun?: AgentRunCreateNestedOneWithoutRetriesInput
+    retries?: AgentRunCreateNestedManyWithoutOriginalRunInput
     approvalRequests?: ApprovalRequestCreateNestedManyWithoutAgentRunInput
   }
 
@@ -16188,6 +16533,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -16195,6 +16541,7 @@ export namespace Prisma {
     estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
+    retries?: AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput
     approvalRequests?: ApprovalRequestUncheckedCreateNestedManyWithoutAgentRunInput
   }
 
@@ -16309,6 +16656,8 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     organization?: OrganizationUpdateOneRequiredWithoutAgentRunsNestedInput
     agentJob?: AgentJobUpdateOneRequiredWithoutRunsNestedInput
+    originalRun?: AgentRunUpdateOneWithoutRetriesNestedInput
+    retries?: AgentRunUpdateManyWithoutOriginalRunNestedInput
     approvalRequests?: ApprovalRequestUpdateManyWithoutAgentRunNestedInput
   }
 
@@ -16323,6 +16672,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -16330,6 +16680,7 @@ export namespace Prisma {
     estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    retries?: AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput
     approvalRequests?: ApprovalRequestUncheckedUpdateManyWithoutAgentRunNestedInput
   }
 
@@ -16400,6 +16751,8 @@ export namespace Prisma {
     updatedAt?: Date | string
     organization: OrganizationCreateNestedOneWithoutAgentRunsInput
     agentJob: AgentJobCreateNestedOneWithoutRunsInput
+    originalRun?: AgentRunCreateNestedOneWithoutRetriesInput
+    retries?: AgentRunCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepCreateNestedManyWithoutAgentRunInput
   }
 
@@ -16414,6 +16767,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -16421,6 +16775,7 @@ export namespace Prisma {
     estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
+    retries?: AgentRunUncheckedCreateNestedManyWithoutOriginalRunInput
     steps?: AgentRunStepUncheckedCreateNestedManyWithoutAgentRunInput
   }
 
@@ -16567,6 +16922,8 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     organization?: OrganizationUpdateOneRequiredWithoutAgentRunsNestedInput
     agentJob?: AgentJobUpdateOneRequiredWithoutRunsNestedInput
+    originalRun?: AgentRunUpdateOneWithoutRetriesNestedInput
+    retries?: AgentRunUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUpdateManyWithoutAgentRunNestedInput
   }
 
@@ -16581,6 +16938,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -16588,6 +16946,7 @@ export namespace Prisma {
     estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    retries?: AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput
   }
 
@@ -17029,6 +17388,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -17207,6 +17567,8 @@ export namespace Prisma {
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     agentJob?: AgentJobUpdateOneRequiredWithoutRunsNestedInput
+    originalRun?: AgentRunUpdateOneWithoutRetriesNestedInput
+    retries?: AgentRunUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUpdateManyWithoutAgentRunNestedInput
     approvalRequests?: ApprovalRequestUpdateManyWithoutAgentRunNestedInput
   }
@@ -17221,6 +17583,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -17228,6 +17591,7 @@ export namespace Prisma {
     estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    retries?: AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput
     approvalRequests?: ApprovalRequestUncheckedUpdateManyWithoutAgentRunNestedInput
   }
@@ -17242,6 +17606,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -17603,6 +17968,7 @@ export namespace Prisma {
     durationMs?: number | null
     attemptNumber?: number
     idempotencyKey: string
+    originalRunId?: string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: string | null
@@ -17629,6 +17995,8 @@ export namespace Prisma {
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     organization?: OrganizationUpdateOneRequiredWithoutAgentRunsNestedInput
+    originalRun?: AgentRunUpdateOneWithoutRetriesNestedInput
+    retries?: AgentRunUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUpdateManyWithoutAgentRunNestedInput
     approvalRequests?: ApprovalRequestUpdateManyWithoutAgentRunNestedInput
   }
@@ -17643,6 +18011,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -17650,6 +18019,7 @@ export namespace Prisma {
     estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    retries?: AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput
     steps?: AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput
     approvalRequests?: ApprovalRequestUncheckedUpdateManyWithoutAgentRunNestedInput
   }
@@ -17664,6 +18034,7 @@ export namespace Prisma {
     durationMs?: NullableIntFieldUpdateOperationsInput | number | null
     attemptNumber?: IntFieldUpdateOperationsInput | number
     idempotencyKey?: StringFieldUpdateOperationsInput | string
+    originalRunId?: NullableStringFieldUpdateOperationsInput | string | null
     inputJson?: NullableJsonNullValueInput | InputJsonValue
     outputJson?: NullableJsonNullValueInput | InputJsonValue
     errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
@@ -17671,6 +18042,26 @@ export namespace Prisma {
     estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+  }
+
+  export type AgentRunCreateManyOriginalRunInput = {
+    id?: string
+    organizationId: string
+    agentJobId: string
+    status?: $Enums.RunStatus
+    triggerSource: $Enums.TriggerSource
+    startedAt?: Date | string | null
+    finishedAt?: Date | string | null
+    durationMs?: number | null
+    attemptNumber?: number
+    idempotencyKey: string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: string | null
+    totalTokens?: number | null
+    estimatedCostUsd?: Decimal | DecimalJsLike | number | string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
   }
 
   export type AgentRunStepCreateManyAgentRunInput = {
@@ -17702,6 +18093,72 @@ export namespace Prisma {
     decidedAt?: Date | string | null
     decidedByUserId?: string | null
     decisionReason?: string | null
+  }
+
+  export type AgentRunUpdateWithoutOriginalRunInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    status?: EnumRunStatusFieldUpdateOperationsInput | $Enums.RunStatus
+    triggerSource?: EnumTriggerSourceFieldUpdateOperationsInput | $Enums.TriggerSource
+    startedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    finishedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    durationMs?: NullableIntFieldUpdateOperationsInput | number | null
+    attemptNumber?: IntFieldUpdateOperationsInput | number
+    idempotencyKey?: StringFieldUpdateOperationsInput | string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
+    totalTokens?: NullableIntFieldUpdateOperationsInput | number | null
+    estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    organization?: OrganizationUpdateOneRequiredWithoutAgentRunsNestedInput
+    agentJob?: AgentJobUpdateOneRequiredWithoutRunsNestedInput
+    retries?: AgentRunUpdateManyWithoutOriginalRunNestedInput
+    steps?: AgentRunStepUpdateManyWithoutAgentRunNestedInput
+    approvalRequests?: ApprovalRequestUpdateManyWithoutAgentRunNestedInput
+  }
+
+  export type AgentRunUncheckedUpdateWithoutOriginalRunInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    organizationId?: StringFieldUpdateOperationsInput | string
+    agentJobId?: StringFieldUpdateOperationsInput | string
+    status?: EnumRunStatusFieldUpdateOperationsInput | $Enums.RunStatus
+    triggerSource?: EnumTriggerSourceFieldUpdateOperationsInput | $Enums.TriggerSource
+    startedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    finishedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    durationMs?: NullableIntFieldUpdateOperationsInput | number | null
+    attemptNumber?: IntFieldUpdateOperationsInput | number
+    idempotencyKey?: StringFieldUpdateOperationsInput | string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
+    totalTokens?: NullableIntFieldUpdateOperationsInput | number | null
+    estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    retries?: AgentRunUncheckedUpdateManyWithoutOriginalRunNestedInput
+    steps?: AgentRunStepUncheckedUpdateManyWithoutAgentRunNestedInput
+    approvalRequests?: ApprovalRequestUncheckedUpdateManyWithoutAgentRunNestedInput
+  }
+
+  export type AgentRunUncheckedUpdateManyWithoutOriginalRunInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    organizationId?: StringFieldUpdateOperationsInput | string
+    agentJobId?: StringFieldUpdateOperationsInput | string
+    status?: EnumRunStatusFieldUpdateOperationsInput | $Enums.RunStatus
+    triggerSource?: EnumTriggerSourceFieldUpdateOperationsInput | $Enums.TriggerSource
+    startedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    finishedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    durationMs?: NullableIntFieldUpdateOperationsInput | number | null
+    attemptNumber?: IntFieldUpdateOperationsInput | number
+    idempotencyKey?: StringFieldUpdateOperationsInput | string
+    inputJson?: NullableJsonNullValueInput | InputJsonValue
+    outputJson?: NullableJsonNullValueInput | InputJsonValue
+    errorMessage?: NullableStringFieldUpdateOperationsInput | string | null
+    totalTokens?: NullableIntFieldUpdateOperationsInput | number | null
+    estimatedCostUsd?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
   export type AgentRunStepUpdateWithoutAgentRunInput = {

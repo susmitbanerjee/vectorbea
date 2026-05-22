@@ -8,21 +8,32 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=apps/web\" \"npm run dev --workspace=apps/worker\"",
+    "dev": "concurrently --names web,worker --prefix-colors cyan,yellow \"npm run dev --workspace=apps/web\" \"npm run dev --workspace=apps/worker\"",
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:worker": "npm run dev --workspace=apps/worker",
     "worker:start": "npm run start --workspace=apps/worker",
-    "build": "npm run build --workspace=packages/shared && npm run build --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio --schema prisma/schema.prisma",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:reset": "prisma migrate reset --schema prisma/schema.prisma --force"
+  },
+  "prisma": {
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"

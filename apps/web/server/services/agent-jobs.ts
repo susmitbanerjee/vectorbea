@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@/lib/generated/prisma";
 
 import { db } from "@/server/db";
+import { getBudgetUsage } from "@/server/services/budget-policy";
 import type {
   CreateAgentJobInput,
   ListAgentJobsQuery,
@@ -138,6 +139,8 @@ export async function getAgentJob(organizationId: string, jobId: string) {
     db.agentRun.count({ where: { agentJobId: jobId, organizationId } }),
   ]);
 
+  const budgetUsage = await getBudgetUsage(jobId, organizationId);
+
   return {
     job,
     recentRuns,
@@ -147,6 +150,7 @@ export async function getAgentJob(organizationId: string, jobId: string) {
       failureCount,
       successRate: totalRuns > 0 ? Math.round((successCount / totalRuns) * 100) : null,
     },
+    budgetUsage,
   };
 }
 

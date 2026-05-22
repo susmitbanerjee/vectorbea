@@ -8,8 +8,15 @@ export const runtime = "nodejs";
 /**
  * Health / diagnostic endpoint — no authentication required.
  *
- * Visit /api/health to get a JSON report of what's working and what isn't.
+ * GET /api/health
+ *
+ * Returns a JSON report of infrastructure connectivity and seed data status.
  * This is the first thing to check when API routes return errors.
+ *
+ * Response shape:
+ *   { status: "ok" | "degraded", checks: { [name]: { ok, detail? } }, hint }
+ *
+ * HTTP 200 when all checks pass, 503 when any check fails.
  */
 export async function GET() {
   const checks: Record<string, { ok: boolean; detail?: string }> = {};
@@ -25,20 +32,43 @@ export async function GET() {
     };
   }
 
+  // ── Redis connectivity ──────────────────────────────────────────────────
+  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+  try {
+    // Dynamically import ioredis to avoid bundler issues
+    const { default: IORedis } = await import("ioredis");
+    const redis = new IORedis(redisUrl, {
+      maxRetriesPerRequest: 1,
+      connectTimeout: 3000,
+      lazyConnect: true,
+    });
+    await redis.connect();
+    await redis.ping();
+    await redis.quit();
+    checks.redis = { ok: true };
+  } catch (err) {
+    checks.redis = {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+
   // ── Seed org ────────────────────────────────────────────────────────────
   if (checks.database.ok) {
     try {
       const org = await db.organization.findFirst({ where: { slug: "acme-corp" } });
       checks.seed_org = {
         ok: !!org,
-        detail: org ? `id=${org.id}` : "No organization with slug 'acme-corp' found. Run the seed SQL.",
+        detail: org
+          ? `id=${org.id}`
+          : "No organization with slug 'acme-corp' found. Run: npm run db:seed",
       };
 
       if (org) {
         const user = await db.user.findFirst({ where: { organizationId: org.id, role: "OWNER" } });
         checks.seed_user = {
           ok: !!user,
-          detail: user ? `id=${user.id}` : "No OWNER user found in acme-corp. Check seed SQL.",
+          detail: user ? `id=${user.id}` : "No OWNER user found in acme-corp. Run: npm run db:seed",
         };
 
         const jobCount = await db.agentJob.count({ where: { organizationId: org.id } });
@@ -68,22 +98,28 @@ export async function GET() {
   }
   checks.env_database_url = { ok: !!dbUrl, detail: dbUrlDetail };
 
-  const directUrl = process.env.DIRECT_URL;
-  let directUrlDetail = "DIRECT_URL not set";
-  if (directUrl) {
-    try {
-      const u = new URL(directUrl);
-      directUrlDetail = `user="${u.username}" host="${u.hostname}" port="${u.port || "5432"}"`;
-    } catch {
-      directUrlDetail = `set but unparseable`;
-    }
-  }
-  checks.env_direct_url = { ok: !!directUrl, detail: directUrlDetail };
-  checks.env_supabase = {
-    ok: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-    detail: process.env.NEXT_PUBLIC_SUPABASE_URL
-      ? `set: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`
-      : "NEXT_PUBLIC_SUPABASE_URL not set (open/mock mode active)",
+  checks.env_redis_url = {
+    ok: !!process.env.REDIS_URL,
+    detail: process.env.REDIS_URL
+      ? `set: ${redisUrl}`
+      : "REDIS_URL not set (using default redis://localhost:6379)",
+  };
+
+  checks.env_app_url = {
+    ok: !!process.env.NEXT_PUBLIC_APP_URL,
+    detail: process.env.NEXT_PUBLIC_APP_URL ?? "NEXT_PUBLIC_APP_URL not set",
+  };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const isOpenMode =
+    !supabaseUrl ||
+    supabaseUrl === "https://placeholder.supabase.co" ||
+    supabaseUrl.includes("placeholder");
+  checks.auth_mode = {
+    ok: true, // both modes are valid
+    detail: isOpenMode
+      ? "open/mock-session mode (no Supabase auth)"
+      : `supabase auth: ${supabaseUrl}`,
   };
 
   const allOk = Object.values(checks).every((c) => c.ok);
@@ -94,7 +130,7 @@ export async function GET() {
       checks,
       hint: allOk
         ? "All checks passed. API routes should work correctly."
-        : "One or more checks failed. Fix the issues above, then retry.",
+        : "One or more checks failed. See checks above and fix before retrying.",
     },
     { status: allOk ? 200 : 503 },
   );

@@ -173,6 +173,7 @@ exports.Prisma.AgentRunScalarFieldEnum = {
   durationMs: 'durationMs',
   attemptNumber: 'attemptNumber',
   idempotencyKey: 'idempotencyKey',
+  originalRunId: 'originalRunId',
   inputJson: 'inputJson',
   outputJson: 'outputJson',
   errorMessage: 'errorMessage',

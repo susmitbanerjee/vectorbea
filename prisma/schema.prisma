@@ -206,6 +206,9 @@ model AgentRun {
   attemptNumber  Int    @default(1)    @map("attempt_number")
   idempotencyKey String @map("idempotency_key")
 
+  // Retry chain — points to the first run in this retry chain
+  originalRunId String? @map("original_run_id")
+
   // Payload
   inputJson  Json?   @map("input_json")
   outputJson Json?   @map("output_json")
@@ -221,6 +224,8 @@ model AgentRun {
   // Relations
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   agentJob         AgentJob          @relation(fields: [agentJobId], references: [id], onDelete: Cascade)
+  originalRun      AgentRun?         @relation("RunRetries", fields: [originalRunId], references: [id], onDelete: SetNull)
+  retries          AgentRun[]        @relation("RunRetries")
   steps            AgentRunStep[]
   approvalRequests ApprovalRequest[]
 
@@ -228,6 +233,7 @@ model AgentRun {
   @@index([organizationId])
   @@index([agentJobId])
   @@index([organizationId, status])
+  @@index([originalRunId])
   @@index([createdAt])
   @@map("agent_runs")
 }

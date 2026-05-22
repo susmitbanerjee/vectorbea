@@ -1,7 +1,25 @@
 version: "3.9"
 
+# =============================================================================
+# Vectorbea Agent Scheduler — Docker Compose
+#
+# Typical local dev workflow (run apps natively for hot-reload):
+#   cp .env.example .env          # first time only
+#   docker compose up postgres redis -d
+#   npm run db:migrate
+#   npm run db:seed
+#   npm run dev                   # starts web + worker with hot-reload
+#
+# Full-stack Docker mode (production-like, no hot-reload):
+#   cp .env.example .env          # first time only
+#   docker compose up -d          # starts all four services
+#   # web → http://localhost:3000
+#
+# The .env file at the repo root is used by all services.
+# =============================================================================
+
 services:
-  # ── PostgreSQL ────────────────────────────────────────────────────
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -14,12 +32,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vectorbea"]
+      test: ["CMD-SHELL", "pg_isready -U vectorbea -d vectorbea"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
-  # ── Redis (BullMQ queue backend) ──────────────────────────────────
+  # ── Redis (BullMQ queue backend) ────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -31,9 +50,12 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
-  # ── Web (Next.js control plane) ───────────────────────────────────
+  # ── Web (Next.js control plane) ─────────────────────────────────────────────
+  # Builds a production-like Next.js image. For hot-reload dev, run:
+  #   npm run dev:web
   web:
     build:
       context: ./apps/web
@@ -41,34 +63,42 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      - NODE_ENV=development
-      - DATABASE_URL=postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
-      - REDIS_URL=redis://redis:6379
     env_file:
-      - ./apps/web/.env.local
+      - .env
+    environment:
+      # Override DB/Redis URLs to use Docker service names (not localhost)
+      DATABASE_URL: postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
+      DIRECT_URL: postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./apps/web:/app
-      - /app/node_modules
-      - /app/.next
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  # ── Worker (BullMQ scheduler process) ────────────────────────────
+  # ── Worker (BullMQ scheduler + executor) ────────────────────────────────────
+  # For hot-reload dev, run:
+  #   npm run dev:worker
   worker:
     build:
       context: ./apps/worker
       dockerfile: Dockerfile
     restart: unless-stopped
-    environment:
-      - NODE_ENV=development
-      - DATABASE_URL=postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
-      - REDIS_URL=redis://redis:6379
     env_file:
-      - ./apps/web/.env.local
+      - .env
+    environment:
+      # Override DB/Redis URLs to use Docker service names (not localhost)
+      DATABASE_URL: postgresql://vectorbea:vectorbea@postgres:5432/vectorbea
+      REDIS_URL: redis://redis:6379
+      APP_URL: http://web:3000
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
