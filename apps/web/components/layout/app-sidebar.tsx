@@ -9,6 +9,7 @@ import {
   Activity,
   Bell,
   BriefcaseBusiness,
+  CalendarClock,
   CheckCircle2,
   CreditCard,
   ExternalLink,
@@ -19,6 +20,8 @@ import {
   List,
   Loader2,
   LogOut,
+  Package,
+  Server,
   Settings2,
   Users,
 } from "lucide-react";
@@ -60,6 +63,9 @@ const NAV: NavItem[] = [
   // ── Runs ──
   { href: "/agent-runs", label: "Runs", icon: List },
 
+  // ── Schedules ──
+  { href: "/schedules" as never, label: "Schedules", icon: CalendarClock },
+
   // ── Approvals ──
   { href: "/approvals", label: "Approvals", icon: CheckCircle2 },
 
@@ -68,6 +74,12 @@ const NAV: NavItem[] = [
 
   // ── Audit Logs ──
   { href: "/audit-logs", label: "Audit Logs", icon: History },
+
+  // ── Workers ──
+  { href: "/workers" as never, label: "Workers", icon: Server },
+
+  // ── Artifacts ──
+  { href: "/artifacts" as never, label: "Artifacts", icon: Package },
 
   // ── Settings ──
   { href: "/settings", label: "Settings", icon: Settings2 },

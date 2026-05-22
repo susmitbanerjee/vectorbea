@@ -250,25 +250,42 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[18px] font-semibold tracking-tight">Overview</h1>
+          <h1 className="text-[18px] font-semibold tracking-tight">Agent Operations</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Production control plane · refreshed{" "}
-            {refreshedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            Monitor scheduled AI jobs, active runs, approvals, retries, and failures.{" "}
+            <span className="text-muted-foreground/60">
+              Refreshed {refreshedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </span>
           </p>
         </div>
-        <button
-          type="button"
-          onClick={fetchData}
-          disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-        >
-          {loading ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3 w-3" />
-          )}
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href={"/agent-runs/mock" as never}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Zap className="h-3 w-3" />
+            View demo run
+          </Link>
+          <Link
+            href={"/agent-jobs/new" as never}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
+          >
+            <Play className="h-3 w-3" />
+            Create Job
+          </Link>
+          <button
+            type="button"
+            onClick={fetchData}
+            disabled={loading}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Metrics grid */}
