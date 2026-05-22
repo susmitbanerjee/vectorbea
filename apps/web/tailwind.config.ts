@@ -49,14 +49,14 @@ const config: Config = {
           4: "hsl(var(--chart-4))",
           5: "hsl(var(--chart-5))",
         },
-        // Sidebar design tokens — Vercel-style neutral light
+        // Sidebar design tokens — dark infra-SaaS
         sidebar: {
-          DEFAULT:    "#FBFAF7",
-          fg:         "#111111",
-          muted:      "#1F2937",
-          border:     "#E7DED1",
-          active:     "#EDE7DC",
-          hover:      "#F1ECE3",
+          DEFAULT:    "#050812",
+          fg:         "#F8FAFC",
+          muted:      "#64748B",
+          border:     "#111D2C",
+          active:     "#111D2C",
+          hover:      "#0D1626",
         },
       },
       borderRadius: {
@@ -67,21 +67,21 @@ const config: Config = {
         sm:    "0.375rem",
       },
       boxShadow: {
-        // Warm elevation system
-        xs:    "0 1px 2px rgba(17,24,39,0.05)",
-        sm:    "0 1px 3px rgba(17,24,39,0.07), 0 1px 2px rgba(17,24,39,0.04)",
-        md:    "0 4px 8px -1px rgba(17,24,39,0.07), 0 2px 4px -1px rgba(17,24,39,0.04)",
-        lg:    "0 10px 18px -3px rgba(17,24,39,0.08), 0 4px 6px -2px rgba(17,24,39,0.04)",
-        xl:    "0 20px 28px -5px rgba(17,24,39,0.08), 0 8px 12px -6px rgba(17,24,39,0.04)",
-        // Card-specific warm shadow
-        card:  "0 0 0 1px #E7DED1, 0 2px 8px rgba(17,24,39,0.06)",
-        "card-hover": "0 0 0 1px #D8CFC2, 0 4px 16px rgba(17,24,39,0.09)",
-        panel: "0 0 0 1px #E7DED1, 0 8px 32px rgba(17,24,39,0.07)",
-        // Blue glow for primary actions
-        glow:     "0 0 24px rgba(37,99,235,0.18), 0 0 8px rgba(37,99,235,0.12)",
-        "glow-sm": "0 0 12px rgba(37,99,235,0.14)",
+        // Dark elevation system
+        xs:    "0 1px 2px rgba(0,0,0,0.25)",
+        sm:    "0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2)",
+        md:    "0 4px 8px -1px rgba(0,0,0,0.35), 0 2px 4px -1px rgba(0,0,0,0.25)",
+        lg:    "0 10px 18px -3px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.3)",
+        xl:    "0 20px 28px -5px rgba(0,0,0,0.45), 0 8px 12px -6px rgba(0,0,0,0.3)",
+        // Card-specific dark shadow
+        card:  "0 0 0 1px rgba(148,163,184,0.1), 0 2px 8px rgba(0,0,0,0.3)",
+        "card-hover": "0 0 0 1px rgba(148,163,184,0.2), 0 4px 16px rgba(0,0,0,0.4)",
+        panel: "0 0 0 1px rgba(148,163,184,0.1), 0 8px 32px rgba(0,0,0,0.35)",
+        // Sky-blue glow for primary actions
+        glow:     "0 0 24px rgba(56,189,248,0.2), 0 0 8px rgba(56,189,248,0.1)",
+        "glow-sm": "0 0 12px rgba(56,189,248,0.15)",
         // Sidebar elevation
-        sidebar: "1px 0 0 rgba(15,23,42,0.04)",
+        sidebar: "1px 0 0 rgba(148,163,184,0.08)",
       },
       backgroundImage: {
         "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.10), transparent 65%)",

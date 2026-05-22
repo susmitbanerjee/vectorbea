@@ -58,6 +58,8 @@ export type TimelineEventType =
   // Agent lifecycle
   | "AGENT_SELECTED"
   | "AGENT_STARTED"
+  | "AGENT_PLAN_CREATED"
+  | "AGENT_HANDOFF"
   | "AGENT_COMPLETED"
   | "AGENT_FAILED"
   // Steps
@@ -68,6 +70,7 @@ export type TimelineEventType =
   | "LLM_CALL_STARTED"
   | "LLM_CALL_COMPLETED"
   | "LLM_CALL_FAILED"
+  | "LLM_OUTPUT_VALIDATED"
   // Tools
   | "TOOL_CALL_STARTED"
   | "TOOL_CALL_COMPLETED"
@@ -114,6 +117,7 @@ export interface RunTimelineEventUi {
   tokensUsed?: number;
   estimatedCostUsd?: number;
   artifactName?: string;
+  handoffTo?: string;       // AGENT_HANDOFF: name of receiving agent
   approval?: {
     id: string;
     title: string;

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, Check, Loader2 } from "lucide-react";
+import { ArrowRight, Check, Loader2, Shield, Zap, GitBranch, Clock } from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
 import {
@@ -21,22 +21,33 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 type Mode = "signin" | "signup";
 type Provider = "github" | "google" | "azure" | "sso";
 
-const signinBenefits = [
-  "Temporal-like run history for every agent job",
-  "Approval gates before risky AI actions",
-  "Retry failed executions safely with full context",
+const benefits = [
+  "Durable execution timeline for every agent run",
+  "Approval gates before high-risk agent actions",
+  "Retry and failure recovery with full context",
   "Token and cost budget visibility per run",
-  "Audit trail for every agent action and decision",
+  "Complete audit trail for every agent decision",
 ];
-
-const signupBenefits = signinBenefits;
 
 function mapError(value: string | null): string | null {
   if (!value) return null;
-  if (value === "oauth" || value === "callback_failed") return "Sign in failed please try again";
-  if (value === "session_expired") return "Session expired please sign in again";
+  if (value === "oauth" || value === "callback_failed") return "Sign in failed — please try again";
+  if (value === "session_expired") return "Session expired — please sign in again";
   return value;
 }
+
+// ─── Mock timeline events for the auth preview ────────────────────────────────
+
+const PREVIEW_EVENTS = [
+  { type: "RUN_STARTED",        label: "Run started",                       dot: "bg-blue-500",    time: "09:00:01" },
+  { type: "AGENT_STARTED",      label: "Orchestrator Agent started",        dot: "bg-violet-500",  time: "09:00:02" },
+  { type: "HTTP_CALL_COMPLETED",label: "Usage API returned 128 customers",  dot: "bg-teal-500",    time: "09:00:41" },
+  { type: "LLM_CALL_COMPLETED", label: "Risk model · 6,200 tokens",        dot: "bg-purple-500",  time: "09:01:17" },
+  { type: "APPROVAL_REQUESTED", label: "Approval gate · CRM update",       dot: "bg-amber-500",   time: "09:01:40" },
+  { type: "APPROVAL_APPROVED",  label: "Approved by Demo Owner",            dot: "bg-emerald-500", time: "09:03:18" },
+  { type: "ARTIFACT_CREATED",   label: "risk_report.json generated",       dot: "bg-indigo-500",  time: "09:04:02" },
+  { type: "RUN_SUCCEEDED",      label: "Run succeeded · $0.061 · 2m 38s",  dot: "bg-emerald-500", time: "09:04:08" },
+];
 
 export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
   const searchParams = useSearchParams();
@@ -61,9 +72,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
       }
     }
     void hydrateSession();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [next]);
 
   const callbackNext = next || searchParams.get("next") || undefined;
@@ -94,10 +103,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
 
   async function startSso() {
     const domain = workEmail.trim().toLowerCase().split("@")[1]?.trim();
-    if (!domain) {
-      setError("Enter a valid work email");
-      return;
-    }
+    if (!domain) { setError("Enter a valid work email"); return; }
     setLoading("sso");
     setError(null);
     try {
@@ -114,113 +120,147 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F5EF] text-[#111827]">
-      <div className="grid min-h-screen lg:grid-cols-[1fr_520px]">
-        <section className="relative hidden border-r border-[#E5E0D8] bg-[#FBF8F1] lg:flex">
-          <div className="absolute inset-0 surface-grid opacity-40" />
-          <div className="relative flex h-full w-full flex-col px-12 py-10 xl:px-16 xl:py-14">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="grid min-h-screen lg:grid-cols-[1fr_480px]">
+
+        {/* ── Left panel — dark infra preview ───────────────────────────── */}
+        <section className="relative hidden border-r border-border bg-[#050812] lg:flex">
+          {/* Subtle grid */}
+          <div className="absolute inset-0 opacity-30"
+            style={{
+              backgroundImage: "linear-gradient(rgba(56,189,248,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,0.04) 1px, transparent 1px)",
+              backgroundSize: "32px 32px",
+            }}
+          />
+          {/* Glow */}
+          <div className="pointer-events-none absolute left-0 top-0 h-[40%] w-[60%] rounded-full bg-sky-500/5 blur-[80px]" />
+
+          <div className="relative flex h-full w-full flex-col px-10 py-10 xl:px-14 xl:py-12">
+            {/* Logo */}
             <Link href="/" className="inline-flex w-fit items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E0D8] bg-white">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card shadow-sm">
                 <BeeLogo className="h-4 w-4" />
               </span>
-              <span className="text-sm font-semibold tracking-tight text-[#111827]">Vectorbee</span>
+              <span className="text-sm font-semibold tracking-tight text-foreground">Vectorbee</span>
             </Link>
 
-            <div className="my-auto max-w-xl space-y-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#2563EB]">
+            <div className="my-auto max-w-lg space-y-8">
+              {/* Tag */}
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/80">
                 Production control plane for AI agent jobs
               </p>
-              <h1 className="text-balance text-4xl font-semibold leading-[1.1] tracking-tight text-[#111827]">
+
+              {/* Headline */}
+              <h1 className="text-balance text-[2.25rem] font-semibold leading-[1.1] tracking-tight text-foreground">
                 {mode === "signin"
                   ? "Operate AI agent jobs with confidence."
                   : "Start running AI jobs safely."}
               </h1>
-              <p className="text-base leading-7 text-[#374151]">
+
+              <p className="text-[0.9375rem] leading-7 text-muted-foreground">
                 {mode === "signin"
-                  ? "Schedule, approve, retry, and inspect long-running AI automations from one production control plane."
-                  : "Create your workspace and monitor scheduled AI automations with approvals, retries, and audit logs."}
+                  ? "Schedule, inspect, retry, and approve long-running AI agent jobs — with complete execution traceability."
+                  : "Create your workspace and monitor AI agent automations with approvals, retries, budgets, and audit logs."}
               </p>
 
-              <ul className="space-y-3">
-                {(mode === "signin" ? signinBenefits : signupBenefits).map((item) => (
-                  <li key={item} className="flex items-start gap-3">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF]">
-                      <Check className="h-3.5 w-3.5 text-[#2563EB]" />
+              {/* Benefit list */}
+              <ul className="space-y-2.5">
+                {benefits.map((item) => (
+                  <li key={item} className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                      <Check className="h-2.5 w-2.5 text-primary" />
                     </span>
-                    <span className="text-sm leading-6 text-[#4B5563]">{item}</span>
+                    <span className="text-sm leading-6 text-muted-foreground">{item}</span>
                   </li>
                 ))}
               </ul>
 
-              {/* Mock timeline preview */}
-              <div className="rounded-xl border border-[#E5E0D8] bg-white/70 p-4 shadow-sm">
-                <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-[#6B7280]">
-                  Example run — CRM Enrichment Agent
-                </p>
-                <div className="space-y-2">
-                  {[
-                    { type: "RUN_STARTED", label: "Run started", color: "bg-blue-500", time: "09:00:01" },
-                    { type: "LLM_CALL_COMPLETED", label: "LLM call completed · 6,200 tokens", color: "bg-purple-500", time: "09:01:17" },
-                    { type: "APPROVAL_REQUESTED", label: "Approval requested — CRM update", color: "bg-amber-500", time: "09:01:40" },
-                    { type: "APPROVAL_APPROVED", label: "Approved by Demo Owner", color: "bg-emerald-500", time: "09:03:18" },
-                    { type: "RUN_SUCCEEDED", label: "Run succeeded · 12 records updated", color: "bg-emerald-500", time: "09:04:08" },
-                  ].map((e, i, arr) => (
-                    <div key={e.type} className="flex items-center gap-3">
+              {/* Execution timeline preview */}
+              <div className="rounded-xl border border-border bg-card/60 p-4 backdrop-blur-sm">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                    Customer Renewal Intelligence · Run #47
+                  </p>
+                  <span className="inline-flex items-center gap-1.5 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    SUCCEEDED
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {PREVIEW_EVENTS.map((e, i) => (
+                    <div key={e.type} className="flex items-center gap-2.5">
                       <div className="flex flex-col items-center">
-                        <span className={`h-2 w-2 rounded-full ${e.color}`} />
-                        {i < arr.length - 1 && <div className="h-4 w-px bg-[#E5E0D8]" />}
+                        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", e.dot)} />
+                        {i < PREVIEW_EVENTS.length - 1 && <div className="mt-1 h-3 w-px bg-border/60" />}
                       </div>
-                      <span className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-medium ${e.color.replace("bg-", "text-").replace("-500", "-700")} bg-current/10`}>
-                        {e.type}
-                      </span>
-                      <span className="flex-1 truncate text-[11px] text-[#374151]">{e.label}</span>
-                      <span className="font-mono text-[10px] text-[#6B7280]">{e.time}</span>
+                      <span className="min-w-[96px] font-mono text-[9px] text-muted-foreground/50">{e.type}</span>
+                      <span className="flex-1 truncate text-[11px] text-muted-foreground">{e.label}</span>
+                      <span className="font-mono text-[9px] text-muted-foreground/40">{e.time}</span>
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Stat strip */}
+              <div className="flex items-center gap-6 border-t border-border/50 pt-5">
+                {[
+                  { icon: Zap, label: "12,480 tokens" },
+                  { icon: Clock, label: "2m 38s duration" },
+                  { icon: Shield, label: "1 approval gate" },
+                  { icon: GitBranch, label: "5 agents" },
+                ].map(({ icon: Icon, label }) => (
+                  <div key={label} className="flex items-center gap-1.5">
+                    <Icon className="h-3 w-3 text-muted-foreground/40" />
+                    <span className="text-[11px] text-muted-foreground/60">{label}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         </section>
 
-        <section className="flex min-h-screen items-center justify-center px-6 py-10 sm:px-10">
-          <div className="w-full max-w-md space-y-7">
+        {/* ── Right panel — auth form ────────────────────────────────────── */}
+        <section className="flex min-h-screen items-center justify-center bg-background px-6 py-10 sm:px-10">
+          <div className="w-full max-w-md space-y-6">
+            {/* Mobile logo + theme toggle */}
             <div className="flex items-center justify-between lg:justify-end">
               <Link href="/" className="inline-flex items-center gap-2 lg:hidden">
                 <BeeLogo className="h-7 w-7" />
-                <span className="text-sm font-semibold text-[#111827]">Vectorbee</span>
+                <span className="text-sm font-semibold text-foreground">Vectorbee</span>
               </Link>
               <ThemeToggle />
             </div>
 
-            <article className="rounded-2xl border border-[#E5E0D8] bg-white p-7 shadow-[0_12px_24px_rgba(17,24,39,0.06)] sm:p-8">
-              <div className="space-y-2">
-                <h2 className="text-2xl font-semibold tracking-tight text-[#111827]">
+            {/* Form card */}
+            <article className="rounded-2xl border border-border bg-card p-7 shadow-panel sm:p-8">
+              <div className="space-y-1.5">
+                <h2 className="text-[1.375rem] font-semibold tracking-tight text-foreground">
                   {mode === "signin" ? "Sign in to Vectorbee" : "Create your workspace"}
                 </h2>
-                <p className="text-sm leading-6 text-[#4B5563]">
+                <p className="text-sm text-muted-foreground">
                   {mode === "signin"
                     ? "Your production AI operations control plane"
-                    : "Built for engineering teams shipping AI automations into production"}
+                    : "Built for teams shipping AI agent jobs into production"}
                 </p>
               </div>
 
-              {error ? (
-                <div className="mt-4 rounded-lg border border-[#F4C7C7] bg-[#FFF3F3] px-3 py-2 text-sm text-[#B91C1C]">
+              {error && (
+                <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-red-400">
                   {error}
                 </div>
-              ) : null}
+              )}
 
+              {/* SSO / Email */}
               <div className="mt-6 space-y-3">
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Work email</span>
+                  <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Work email</span>
                   <Input
                     type="email"
                     value={workEmail}
                     onChange={(e) => setWorkEmail(e.target.value)}
-                    placeholder="name at company"
+                    placeholder="name@company.com"
                     disabled={disabled}
-                    className="h-10 rounded-lg border-[#D8CFC2] bg-white text-[#111827] placeholder:text-[#9CA3AF] focus-visible:border-[#2563EB] focus-visible:ring-[rgba(37,99,235,0.22)]"
+                    className="h-10 rounded-lg border-border bg-muted/30 text-foreground placeholder:text-muted-foreground/40 focus-visible:border-primary focus-visible:ring-primary/20"
                     onKeyDown={(e) => e.key === "Enter" && void startSso()}
                   />
                 </label>
@@ -229,54 +269,36 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
                   variant="outline"
                   disabled={disabled}
                   onClick={() => void startSso()}
-                  className="h-10 w-full justify-between rounded-lg border-[#D8CFC2] bg-white text-[#111827] hover:bg-[#F8F5EF]"
+                  className="h-10 w-full justify-between rounded-lg border-border bg-muted/20 text-foreground hover:bg-muted/40"
                 >
                   <span className="inline-flex items-center gap-2">
-                    <EnterpriseSsoMark className="h-4 w-4 text-[#4B5563]" />
+                    <EnterpriseSsoMark className="h-4 w-4 text-muted-foreground" />
                     Continue with SSO
                   </span>
-                  {loading === "sso" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4 text-[#6B7280]" />}
+                  {loading === "sso" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4 text-muted-foreground" />}
                 </Button>
               </div>
 
               <div className="my-5 flex items-center gap-3">
-                <span className="h-px flex-1 bg-[#EDE6DA]" />
-                <span className="text-xs font-medium text-[#6B7280]">Or continue with</span>
-                <span className="h-px flex-1 bg-[#EDE6DA]" />
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs text-muted-foreground">Or continue with</span>
+                <span className="h-px flex-1 bg-border" />
               </div>
 
               <div className="space-y-2.5">
-                <ProviderButton
-                  icon={<GitHubMark className="h-[18px] w-[18px]" />}
-                  label="GitHub"
-                  loading={loading === "github"}
-                  disabled={disabled}
-                  onClick={() => void startOAuth("github")}
-                />
-                <ProviderButton
-                  icon={<GoogleMark className="h-[18px] w-[18px]" />}
-                  label="Google"
-                  loading={loading === "google"}
-                  disabled={disabled}
-                  onClick={() => void startOAuth("google")}
-                />
-                <ProviderButton
-                  icon={<MicrosoftMark className="h-[18px] w-[18px]" />}
-                  label="Microsoft"
-                  loading={loading === "azure"}
-                  disabled={disabled}
-                  onClick={() => void startOAuth("azure")}
-                />
+                <ProviderButton icon={<GitHubMark className="h-[18px] w-[18px]" />} label="GitHub" loading={loading === "github"} disabled={disabled} onClick={() => void startOAuth("github")} />
+                <ProviderButton icon={<GoogleMark className="h-[18px] w-[18px]" />} label="Google" loading={loading === "google"} disabled={disabled} onClick={() => void startOAuth("google")} />
+                <ProviderButton icon={<MicrosoftMark className="h-[18px] w-[18px]" />} label="Microsoft" loading={loading === "azure"} disabled={disabled} onClick={() => void startOAuth("azure")} />
               </div>
 
-              <div className="mt-6 flex items-center justify-between text-xs text-[#6B7280]">
+              <div className="mt-6 flex items-center justify-between text-xs text-muted-foreground">
                 <p>
-                  {mode === "signin" ? "No account" : "Already have an account"}{" "}
-                  <Link href={alternateHref} className="font-semibold text-[#2563EB] hover:text-[#1D4ED8]">
+                  {mode === "signin" ? "No account? " : "Already have an account? "}
+                  <Link href={alternateHref} className="font-semibold text-primary hover:text-primary/80">
                     {alternateLabel}
                   </Link>
                 </p>
-                <Link href={"/docs/security" as never} target="_blank" rel="noopener noreferrer" className="hover:text-[#111827]">
+                <Link href={"/docs/security" as never} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
                   Privacy
                 </Link>
               </div>
@@ -288,18 +310,10 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
   );
 }
 
-function ProviderButton({
-  icon,
-  label,
-  loading,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  loading: boolean;
-  disabled: boolean;
-  onClick: () => void;
+// ─── Provider button ──────────────────────────────────────────────────────────
+
+function ProviderButton({ icon, label, loading, disabled, onClick }: {
+  icon: React.ReactNode; label: string; loading: boolean; disabled: boolean; onClick: () => void;
 }) {
   return (
     <button
@@ -307,17 +321,17 @@ function ProviderButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-10 w-full items-center justify-between rounded-lg border border-[#D8CFC2] bg-white px-3.5 text-sm font-medium text-[#111827]",
-        "transition-colors hover:bg-[#F8F5EF]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]/20",
+        "flex h-10 w-full items-center justify-between rounded-lg border border-border bg-muted/20 px-3.5 text-sm font-medium text-foreground",
+        "transition-colors hover:bg-muted/40",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:opacity-50",
       )}
     >
       <span className="inline-flex items-center gap-2.5">
-        {loading ? <Loader2 className="h-4 w-4 animate-spin text-[#4B5563]" /> : icon}
+        {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : icon}
         Continue with {label}
       </span>
-      <ArrowRight className="h-3.5 w-3.5 text-[#6B7280]" />
+      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
     </button>
   );
 }

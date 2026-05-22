@@ -2,7 +2,7 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Bot, Clock, FileCode2, History, List, ScrollText, ShieldCheck, Zap,
+  Bot, Clock, FileCode2, GitBranch, History, List, ScrollText, ShieldCheck, Zap,
 } from "lucide-react";
 import type { AgentRunUiModel } from "@/types/agent-run-ui";
 import { RunExecutionTimeline } from "./RunExecutionTimeline";
@@ -13,6 +13,7 @@ import { OutputTab } from "./tabs/OutputTab";
 import { ArtifactsTab } from "./tabs/ArtifactsTab";
 import { AuditTab } from "./tabs/AuditTab";
 import { RawTab } from "./tabs/RawTab";
+import { FlowTab } from "./tabs/FlowTab";
 
 interface RunDetailTabsV2Props {
   model: AgentRunUiModel;
@@ -38,6 +39,9 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
                 {errorCount}✗
               </span>
             )}
+          </TabTrigger>
+          <TabTrigger value="flow" icon={<GitBranch className="h-3.5 w-3.5" />} label="Flow">
+            <span className="ml-1 text-[10px] text-muted-foreground">{agents.length}</span>
           </TabTrigger>
           <TabTrigger value="agents" icon={<Bot className="h-3.5 w-3.5" />} label="Agents">
             <span className="ml-1 text-[10px] text-muted-foreground">{agents.length}</span>
@@ -68,6 +72,10 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
       <div className="pt-5">
         <TabsContent value="timeline" className="mt-0">
           <RunExecutionTimeline events={timelineEvents} />
+        </TabsContent>
+
+        <TabsContent value="flow" className="mt-0">
+          <FlowTab agents={agents} timelineEvents={timelineEvents} />
         </TabsContent>
 
         <TabsContent value="agents" className="mt-0">

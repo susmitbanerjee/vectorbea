@@ -3,62 +3,69 @@
 @tailwind utilities;
 
 @layer base {
-  /* ── Warm light mode — Claude/Linear-inspired premium palette ──────────────
-     App bg:   #F8F5EF  (warm cream)
-     Page bg:  #FBF8F1  (slightly warmer)
-     Card:     #FFFFFF  → optional warm #FFFCF7
-     Border:   #E7DED1  (warm sand border)
-     Text:     #111111 / #4B5563 / #6B7280
-     Primary:  #2563EB (blue accent, restrained)
+  /* ── Dark infra-SaaS theme — Temporal/Vercel/Linear-inspired ─────────────
+     App bg:   #070A12  (deep slate)
+     Sidebar:  #050812  (deeper)
+     Card:     #101827  (elevated surface)
+     Border:   #1E2D45 (subtle slate border)
+     Text:     #F8FAFC / #CBD5E1 / #64748B
+     Primary:  #38BDF8 (sky-blue accent)
   ──────────────────────────────────────────────────────────────────────── */
   :root {
-    --background:         40 33% 95%;         /* #F8F5EF */
-    --foreground:         0 0% 7%;         /* #111111 near-black */
-    --card:               0 0% 100%;       /* #FFFFFF */
-    --card-foreground:    0 0% 7%;
-    --popover:            0 0% 100%;
-    --popover-foreground: 0 0% 7%;
+    --background:         222 47% 5%;          /* #070A12 deep slate */
+    --foreground:         210 40% 98%;         /* #F8FAFC near-white */
+    --card:               222 42% 9%;          /* #101827 card surface */
+    --card-foreground:    210 40% 98%;
+    --popover:            222 42% 9%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary:            221 83% 53%;     /* #2563EB blue */
-    --primary-foreground: 0 0% 100%;
+    --primary:            199 89% 60%;         /* #38BDF8 sky-400 */
+    --primary-foreground: 222 47% 5%;
 
-    --secondary:          42 30% 97%;          /* #FBFAF7 */
-    --secondary-foreground: 0 0% 7%;
+    --secondary:          217 33% 17%;         /* #1E293B slate-800 */
+    --secondary-foreground: 210 40% 98%;
 
-    --muted:              42 24% 95%;          /* #F1ECE3-ish */
-    --muted-foreground:   220 8% 46%;      /* #6B7280 */
+    --muted:              215 30% 13%;         /* #111D2C hover surface */
+    --muted-foreground:   215 20% 50%;         /* #64748B slate-500 */
 
-    --accent:             42 24% 95%;          /* warm hover */
-    --accent-foreground:  0 0% 7%;
+    --accent:             215 30% 15%;         /* hover state */
+    --accent-foreground:  210 40% 98%;
 
-    --border:             35 31% 89%;       /* #E7DED1 */
-    --input:              35 31% 89%;
-    --ring:               221 83% 53%;
+    --border:             215 28% 16%;         /* #1A2640 subtle border */
+    --input:              215 28% 16%;
+    --ring:               199 89% 60%;
 
     /* Brand aliases */
-    --brand:              221 83% 53%;
-    --brand-foreground:   0 0% 100%;
-    --brand-muted:        213 94% 68%;     /* #60A5FA */
+    --brand:              199 89% 60%;         /* sky-400 primary */
+    --brand-foreground:   222 47% 5%;
+    --brand-muted:        199 89% 48%;         /* sky-500 */
 
-    /* Status — semantic, high-contrast on light bg */
-    --success:            142 76% 36%;     /* #15803D */
+    /* Status — semantic, high-contrast on dark bg */
+    --success:            160 84% 39%;         /* #10B981 emerald-500 */
     --success-foreground: 0 0% 100%;
-    --warning:            32 81% 37%;      /* #B45309 */
-    --warning-foreground: 0 0% 100%;
-    --destructive:        0 73% 41%;       /* #B91C1C */
+    --warning:            38 92% 50%;          /* #F59E0B amber-400 */
+    --warning-foreground: 222 47% 5%;
+    --destructive:        0 84% 60%;           /* #EF4444 red-500 */
     --destructive-foreground: 0 0% 100%;
-    --info:               221 83% 53%;
+    --info:               199 89% 60%;
+
+    /* Sidebar specific tokens */
+    --sidebar-bg:         222 52% 4%;          /* #050812 darkest */
+    --sidebar-fg:         210 40% 98%;
+    --sidebar-muted:      215 20% 50%;
+    --sidebar-border:     215 28% 12%;
+    --sidebar-active-bg:  215 30% 13%;
+    --sidebar-hover-bg:   215 30% 10%;
 
     /* Charts */
-    --chart-1: 221 83% 53%;
-    --chart-2: 197 71% 52%;
-    --chart-3: 142 76% 36%;
-    --chart-4: 32 81% 37%;
-    --chart-5: 220 9% 46%;
+    --chart-1: 199 89% 60%;
+    --chart-2: 160 84% 39%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 215 20% 50%;
   }
 
-  /* Dark block kept for sidebar/code via [data-theme="dark"] on sub-elements.
-     The root ThemeProvider forces "light" so .dark never activates globally. */
+  /* .dark mirrors :root — kept for future theme toggle support */
 
   /* ── Base resets ─────────────────────────────────────────────────────── */
   * {
@@ -127,7 +134,7 @@
   h1, h2, h3, h4, h5 {
     letter-spacing: -0.02em;
     font-weight: 600;
-    color: #111111;
+    color: hsl(var(--foreground));
   }
 }
 

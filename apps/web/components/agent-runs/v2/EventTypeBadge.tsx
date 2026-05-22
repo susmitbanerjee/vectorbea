@@ -1,11 +1,13 @@
 import {
   AlertTriangle,
+  ArrowRight,
   Bot,
   CheckCircle2,
   CircleDot,
   Clock,
   FileCode2,
   Globe,
+  ListChecks,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -46,6 +48,8 @@ const EVENT_CONFIG: Partial<Record<TimelineEventType, EventConfig>> = {
   POLICY_CHECK_FAILED: { icon: <ShieldX className="h-3 w-3" />, label: "Policy ✗", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10", border: "border-red-500/25", dot: "bg-red-500" },
   AGENT_SELECTED: { icon: <Bot className="h-3 w-3" />, label: "Agent Selected", color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/25", dot: "bg-violet-500" },
   AGENT_STARTED: { icon: <Bot className="h-3 w-3" />, label: "Agent Started", color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/25", dot: "bg-violet-500" },
+  AGENT_PLAN_CREATED: { icon: <ListChecks className="h-3 w-3" />, label: "Plan Created", color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/25", dot: "bg-violet-400" },
+  AGENT_HANDOFF: { icon: <ArrowRight className="h-3 w-3" />, label: "Handoff →", color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/25", dot: "bg-cyan-500" },
   AGENT_COMPLETED: { icon: <Bot className="h-3 w-3" />, label: "Agent Done", color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/25", dot: "bg-violet-400" },
   AGENT_FAILED: { icon: <Bot className="h-3 w-3" />, label: "Agent Failed", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10", border: "border-red-500/25", dot: "bg-red-500" },
   STEP_STARTED: { icon: <Play className="h-3 w-3" />, label: "Step", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/25", dot: "bg-blue-400" },
@@ -54,6 +58,7 @@ const EVENT_CONFIG: Partial<Record<TimelineEventType, EventConfig>> = {
   LLM_CALL_STARTED: { icon: <Sparkles className="h-3 w-3" />, label: "LLM Call", color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/25", dot: "bg-purple-500" },
   LLM_CALL_COMPLETED: { icon: <Sparkles className="h-3 w-3" />, label: "LLM ✓", color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/25", dot: "bg-purple-500" },
   LLM_CALL_FAILED: { icon: <Sparkles className="h-3 w-3" />, label: "LLM ✗", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10", border: "border-red-500/25", dot: "bg-red-500" },
+  LLM_OUTPUT_VALIDATED: { icon: <CheckCircle2 className="h-3 w-3" />, label: "LLM Valid ✓", color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/25", dot: "bg-purple-400" },
   TOOL_CALL_STARTED: { icon: <Wrench className="h-3 w-3" />, label: "Tool Call", color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/25", dot: "bg-cyan-500" },
   TOOL_CALL_COMPLETED: { icon: <Wrench className="h-3 w-3" />, label: "Tool ✓", color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/25", dot: "bg-cyan-500" },
   TOOL_CALL_FAILED: { icon: <Wrench className="h-3 w-3" />, label: "Tool ✗", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10", border: "border-red-500/25", dot: "bg-red-500" },
@@ -86,7 +91,7 @@ export function getEventConfig(type: TimelineEventType): EventConfig {
 // Compact system events that should render smaller
 const COMPACT_TYPES: TimelineEventType[] = [
   "RUN_CREATED", "RUN_QUEUED", "BUDGET_CHECK_PASSED", "POLICY_CHECK_PASSED",
-  "RUN_RESUMED", "AGENT_SELECTED",
+  "RUN_RESUMED", "AGENT_SELECTED", "AGENT_HANDOFF", "LLM_OUTPUT_VALIDATED",
 ];
 export function isCompactEvent(type: TimelineEventType): boolean {
   return COMPACT_TYPES.includes(type);
