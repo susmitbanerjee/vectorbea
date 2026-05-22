@@ -123,7 +123,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
               <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E0D8] bg-white">
                 <BeeLogo className="h-4 w-4" />
               </span>
-              <span className="text-sm font-semibold tracking-tight text-[#111827]">VectorBea</span>
+              <span className="text-sm font-semibold tracking-tight text-[#111827]">Vectorbee</span>
             </Link>
 
             <div className="my-auto max-w-xl space-y-8">
@@ -188,7 +188,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
             <div className="flex items-center justify-between lg:justify-end">
               <Link href="/" className="inline-flex items-center gap-2 lg:hidden">
                 <BeeLogo className="h-7 w-7" />
-                <span className="text-sm font-semibold text-[#111827]">VectorBea</span>
+                <span className="text-sm font-semibold text-[#111827]">Vectorbee</span>
               </Link>
               <ThemeToggle />
             </div>
@@ -196,7 +196,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
             <article className="rounded-2xl border border-[#E5E0D8] bg-white p-7 shadow-[0_12px_24px_rgba(17,24,39,0.06)] sm:p-8">
               <div className="space-y-2">
                 <h2 className="text-2xl font-semibold tracking-tight text-[#111827]">
-                  {mode === "signin" ? "Sign in to Vectorbea" : "Create your workspace"}
+                  {mode === "signin" ? "Sign in to Vectorbee" : "Create your workspace"}
                 </h2>
                 <p className="text-sm leading-6 text-[#4B5563]">
                   {mode === "signin"

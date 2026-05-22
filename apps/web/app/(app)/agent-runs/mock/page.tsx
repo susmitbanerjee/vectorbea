@@ -14,7 +14,8 @@
  */
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,6 +34,8 @@ export default function MockAgentRunPage() {
     });
   }
 
+  const defaultTab = scenario === "waiting" ? "approvals" : "timeline";
+
   return (
     <div className="min-h-full">
       {/* Scenario picker */}
@@ -43,18 +46,22 @@ export default function MockAgentRunPage() {
               Mock scenario
             </p>
             <p className="text-xs text-muted-foreground">
-              Static demo data. Toggle to preview both execution states.
+              Static demo data — no API calls. Toggle to preview all execution states.
             </p>
           </div>
           <Tabs value={scenario} onValueChange={v => setScenario(v as MockScenario)}>
             <TabsList className="h-8">
               <TabsTrigger value="success" className="gap-1.5 text-xs px-3">
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                Succeeded (multi-agent + approval)
+                Succeeded
               </TabsTrigger>
               <TabsTrigger value="failed" className="gap-1.5 text-xs px-3">
                 <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                Failed (retries exhausted)
+                Failed
+              </TabsTrigger>
+              <TabsTrigger value="waiting" className="gap-1.5 text-xs px-3">
+                <ShieldCheck className="h-3.5 w-3.5 text-amber-500" />
+                Waiting Approval
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -64,9 +71,9 @@ export default function MockAgentRunPage() {
       {/* Main content */}
       <div className="px-6 pb-12 pt-6 lg:px-8">
         <div className="mx-auto max-w-5xl space-y-6">
-          <RunHeaderV2 model={model} isMock onRetry={handleRetry} />
+          <RunHeaderV2 model={model} isMock onRetry={scenario !== "waiting" ? handleRetry : undefined} />
           <RunSummaryCards model={model} />
-          <RunDetailTabsV2 model={model} />
+          <RunDetailTabsV2 key={scenario} model={model} defaultTab={defaultTab} />
 
           <div className="rounded-xl border border-dashed border-border/50 bg-muted/10 px-5 py-4">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
@@ -79,8 +86,12 @@ export default function MockAgentRunPage() {
               </code>
               . Connect real data via{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">GET /api/agent-runs/:id</code>{" "}
-              → map to{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">AgentRunUiModel</code>.
+              → map with{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">mapApiRunToUiModel()</code>.
+              Direct links:{" "}
+              <Link href="/agent-runs/mock-failed" className="text-primary hover:underline">mock-failed</Link>
+              {" · "}
+              <Link href="/agent-runs/mock-waiting-approval" className="text-primary hover:underline">mock-waiting-approval</Link>
             </p>
           </div>
         </div>

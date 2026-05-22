@@ -348,19 +348,20 @@ export default function AgentJobDetailPage() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "Total Runs", value: stats.totalRuns },
-          { label: "Succeeded", value: stats.successCount },
-          { label: "Failed", value: stats.failureCount },
+          { label: "Total Runs", value: stats.totalRuns, mono: false },
+          { label: "Succeeded", value: stats.successCount, mono: false },
+          { label: "Failed", value: stats.failureCount, mono: false },
           {
             label: "Success Rate",
             value: stats.successRate !== null ? `${stats.successRate}%` : "—",
+            mono: false,
           },
         ].map(({ label, value }) => (
-          <Card key={label} className="p-4">
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="mt-1 text-xl font-semibold">{value}</p>
+          <Card key={label} className="p-4 space-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{label}</p>
+            <p className="text-[22px] font-semibold tracking-tight leading-none">{value}</p>
           </Card>
         ))}
       </div>
@@ -478,10 +479,13 @@ export default function AgentJobDetailPage() {
 
       {/* Recent runs */}
       <Card>
-        <CardHeader>
-          <CardTitle>Recent Runs</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between px-5 pb-0 pt-4">
+          <CardTitle className="text-[13px] font-semibold">Recent Runs</CardTitle>
+          <Link href={`/agent-runs?jobId=${id}`} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+            View all →
+          </Link>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 pt-3">
           {recentRuns.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
               No runs yet. Use &ldquo;Run now&rdquo; to trigger the first execution.
@@ -490,28 +494,31 @@ export default function AgentJobDetailPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/40">
-                    {["Status", "Trigger", "Attempt", "Started", "Duration", ""].map((h) => (
-                      <th key={h} className="px-5 py-3 text-left text-xs font-medium text-muted-foreground">
+                  <tr className="border-b border-border">
+                    {["Status", "Trigger", "Attempt", "Started", "Duration", "Cost", ""].map((h) => (
+                      <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-border/60">
                   {recentRuns.map((run) => (
-                    <tr key={run.id} className="transition-colors hover:bg-muted/30">
+                    <tr key={run.id} className="group transition-colors hover:bg-muted/20">
                       <td className="px-5 py-3">
                         <RunStatusBadge status={run.status as never} />
                       </td>
                       <td className="px-5 py-3">
                         <TriggerBadge source={run.triggerSource as never} />
                       </td>
-                      <td className="px-5 py-3 text-muted-foreground">#{run.attemptNumber}</td>
-                      <td className="px-5 py-3 text-muted-foreground">{fmt(run.startedAt ?? run.createdAt)}</td>
-                      <td className="px-5 py-3 text-muted-foreground">{fmtDur(run.durationMs)}</td>
+                      <td className="px-5 py-3 font-mono text-[12px] text-muted-foreground">#{run.attemptNumber}</td>
+                      <td className="px-5 py-3 text-[12px] text-muted-foreground">{fmt(run.startedAt ?? run.createdAt)}</td>
+                      <td className="px-5 py-3 font-mono text-[12px] text-muted-foreground">{fmtDur(run.durationMs)}</td>
+                      <td className="px-5 py-3 font-mono text-[12px] text-muted-foreground">
+                        {run.estimatedCostUsd ? `$${run.estimatedCostUsd.toFixed(4)}` : "—"}
+                      </td>
                       <td className="px-5 py-3">
-                        <Link href={`/agent-runs/${run.id}`} className="text-xs text-muted-foreground hover:text-foreground">
+                        <Link href={`/agent-runs/${run.id}`} className="text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground transition-all">
                           View →
                         </Link>
                       </td>

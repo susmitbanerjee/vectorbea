@@ -1,107 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Clock, Key, RefreshCw } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button, buttonVariants } from "@/components/ui/button";
-import { RunStatusBadge, TriggerBadge } from "@/components/scheduler/status-badge";
-import { RunDetailTabs } from "@/components/agent-runs/RunDetailTabs";
-import { buildRunTimelineEvents } from "@/lib/run-timeline";
-import { cn } from "@/lib/utils";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Step {
-  id: string;
-  stepIndex: number;
-  stepType: string;
-  name: string;
-  status: string;
-  inputJson: unknown;
-  outputJson: unknown;
-  errorMessage: string | null;
-  tokensUsed: number | null;
-  estimatedCostUsd: number | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-}
-
-interface ApprovalRecord {
-  id: string;
-  title: string;
-  message: string;
-  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
-  requestedBySystem: boolean;
-  requestedAt: string;
-  decidedAt: string | null;
-  decisionReason: string | null;
-  agentRunStepId: string | null;
-  decidedBy: { id: string; name: string | null; email: string } | null;
-}
-
-interface AgentRun {
-  id: string;
-  status: string;
-  triggerSource: string;
-  attemptNumber: number;
-  idempotencyKey: string;
-  originalRunId: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  durationMs: number | null;
-  totalTokens: number | null;
-  estimatedCostUsd: number | null;
-  inputJson: unknown;
-  outputJson: unknown;
-  errorMessage: string | null;
-  createdAt: string;
-  agentJob: { id: string; name: string };
-  steps: Step[];
-  approvalRequests: ApprovalRecord[];
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function fmtDur(ms: number | null) {
-  if (!ms) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return `${m}m ${s}s`;
-}
-
-function fmtTs(ts: string | null) {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { RunHeaderV2 } from "@/components/agent-runs/v2/RunHeader";
+import { RunSummaryCards } from "@/components/agent-runs/v2/RunSummaryCards";
+import { RunDetailTabsV2 } from "@/components/agent-runs/v2/RunDetailTabsV2";
+import { mapApiRunToUiModel, type ApiAgentRun } from "@/lib/api-run-to-ui-model";
+import type { AgentRunUiModel } from "@/types/agent-run-ui";
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function AgentRunDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [run, setRun] = useState<AgentRun | null>(null);
+  const [model, setModel] = useState<AgentRunUiModel | null>(null);
+  const [rawRun, setRawRun] = useState<ApiAgentRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
-  const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
   const [forcePausedPending, setForcePausedPending] = useState(false);
+  const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/agent-runs/${id}`);
       if (!res.ok) throw new Error("Not found");
-      const data = (await res.json()) as { run: AgentRun };
-      setRun(data.run);
+      const data = (await res.json()) as { run: ApiAgentRun };
+      setRawRun(data.run);
+      setModel(mapApiRunToUiModel(data.run));
     } catch {
       toast.error("Failed to load run details.");
     } finally {
@@ -111,7 +39,17 @@ export default function AgentRunDetailPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Auto-refresh while run is live
+  useEffect(() => {
+    if (!model) return;
+    const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
+    if (!live) return;
+    const interval = setInterval(() => void load(), 5000);
+    return () => clearInterval(interval);
+  }, [model, load]);
+
   async function handleRetry(forcePaused = false) {
+    if (!rawRun) return;
     setActing(true);
     setRetryWarnings([]);
     setForcePausedPending(false);
@@ -121,20 +59,18 @@ export default function AgentRunDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ forcePaused }),
       });
-
       if (!res.ok) {
         const b = (await res.json()) as { error?: string; code?: string };
         if (b.code === "JOB_PAUSED") {
           setForcePausedPending(true);
-          toast.warning("Job is paused. Click 'Retry anyway' to proceed.", { duration: 8000 });
+          toast.warning("Job is paused. Confirm retry to proceed.", { duration: 8000 });
           return;
         }
         throw new Error(b.error ?? "Failed to retry");
       }
-
-      const data = (await res.json()) as { run: { id: string }; warnings: string[] };
-      if (data.warnings.length > 0) setRetryWarnings(data.warnings);
-      toast.success(`Retry queued (attempt #${run?.attemptNumber != null ? run.attemptNumber + 1 : "?"}).`);
+      const data = (await res.json()) as { run: { id: string }; warnings?: string[] };
+      if (data.warnings?.length) setRetryWarnings(data.warnings);
+      toast.success(`Retry queued (attempt #${(rawRun.attemptNumber ?? 0) + 1}).`);
       void load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to retry.");
@@ -160,177 +96,91 @@ export default function AgentRunDetailPage() {
     }
   }
 
-  // ── Loading skeleton ──────────────────────────────────────────────────────
-
-  if (loading) {
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (loading && !model) {
     return (
-      <div className="space-y-4 p-6 lg:p-8">
-        <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-        <div className="h-10 w-64 animate-pulse rounded bg-muted" />
-        <div className="h-16 animate-pulse rounded-lg bg-muted" />
-        <div className="h-[60vh] animate-pulse rounded-lg bg-muted" />
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
+        <p className="text-sm">Loading run…</p>
       </div>
     );
   }
 
-  if (!run) {
+  if (!model) {
     return (
-      <div className="flex h-64 items-center justify-center p-8 text-sm text-muted-foreground">
-        Run not found.
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 text-muted-foreground">
+        <p className="text-sm font-medium">Run not found</p>
+        <p className="text-xs">It may have been deleted, or the ID is incorrect.</p>
       </div>
     );
   }
 
-  const canRetry = ["FAILED", "TIMEOUT", "CANCELLED"].includes(run.status);
-  const canCancel = ["QUEUED", "RUNNING", "WAITING_FOR_APPROVAL"].includes(run.status);
-  const isRetry = run.triggerSource === "RETRY" && run.originalRunId != null;
-
-  // Build timeline events from live API data
-  const timelineEvents = buildRunTimelineEvents(run);
+  // Build an augmented model for force-paused state
+  const displayModel: AgentRunUiModel = forcePausedPending
+    ? {
+        ...model,
+        run: {
+          ...model.run,
+          errorMessage:
+            (model.run.errorMessage ? model.run.errorMessage + " · " : "") +
+            "Job is paused — confirm retry to proceed",
+        },
+      }
+    : model;
 
   return (
-    <div className="min-h-full p-6 lg:p-8">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className="min-h-full p-6 pb-16 lg:p-8">
+      <div className="mx-auto max-w-5xl space-y-6">
 
-        {/* ── Breadcrumb ───────────────────────────────────────────────── */}
-        <Link
-          href={`/agent-jobs/${run.agentJob.id}`}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {run.agentJob.name}
-        </Link>
-
-        {/* ── Title row ────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-xl font-semibold tracking-tight">
-                {run.agentJob.name} — Run
-              </h1>
-              <RunStatusBadge status={run.status as never} />
-              {run.attemptNumber > 1 && (
-                <span className="inline-flex items-center rounded-md border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  Attempt #{run.attemptNumber}
-                </span>
-              )}
-            </div>
-            <p className="font-mono text-xs text-muted-foreground">{run.id}</p>
-            {isRetry && (
-              <p className="text-xs text-muted-foreground">
-                Retry of{" "}
-                <Link
-                  href={`/agent-runs/${run.originalRunId}`}
-                  className="font-mono text-foreground hover:underline"
-                >
-                  {run.originalRunId?.slice(0, 14)}…
-                </Link>
-              </p>
-            )}
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            {canCancel && (
-              <Button variant="outline" size="sm" onClick={() => void handleCancel()} disabled={acting}>
-                Cancel
-              </Button>
-            )}
-            {canRetry && !forcePausedPending && (
-              <Button size="sm" onClick={() => void handleRetry(false)} disabled={acting} className="gap-1.5">
-                <RefreshCw className="h-3.5 w-3.5" />
-                {acting ? "Retrying…" : "Retry Run"}
-              </Button>
-            )}
-            {canRetry && forcePausedPending && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => setForcePausedPending(false)}>
-                  Cancel
-                </Button>
-                <Button size="sm" variant="destructive" onClick={() => void handleRetry(true)} disabled={acting}>
-                  Retry anyway (job paused)
-                </Button>
-              </>
-            )}
-            {run.status === "WAITING_FOR_APPROVAL" && (
-              <Link
-                href="/approvals"
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
-              >
-                Review approval →
-              </Link>
-            )}
-          </div>
-        </div>
-
-        {/* ── Retry warnings ───────────────────────────────────────────── */}
+        {/* ── Retry warnings ──────────────────────────────────────────────── */}
         {retryWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-300 space-y-1">
             {retryWarnings.map((w, i) => (
-              <p key={i}><strong>Warning:</strong> {w}</p>
+              <p key={i}><span className="font-semibold">Warning:</span> {w}</p>
             ))}
           </div>
         )}
 
-        {/* ── Error banner ─────────────────────────────────────────────── */}
-        {run.errorMessage && (
-          <div className="rounded-lg border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-600 dark:text-red-400">
-            <span className="font-semibold">Error: </span>
-            {run.errorMessage}
+        {/* ── Force-paused retry confirmation ─────────────────────────────── */}
+        {forcePausedPending && (
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              The parent job is paused. Retry anyway?
+            </p>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setForcePausedPending(false)}
+                className="rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] font-medium hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={acting}
+                onClick={() => void handleRetry(true)}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {acting ? "Retrying…" : "Retry anyway"}
+              </button>
+            </div>
           </div>
         )}
 
-        {/* ── Metadata strip ───────────────────────────────────────────── */}
-        <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs">
-          <MetaItem label="Trigger">
-            <TriggerBadge source={run.triggerSource as never} />
-          </MetaItem>
-          <MetaItem icon={<Clock className="h-3.5 w-3.5" />} label="Started">
-            {fmtTs(run.startedAt)}
-          </MetaItem>
-          {run.finishedAt && (
-            <MetaItem icon={<Clock className="h-3.5 w-3.5" />} label="Finished">
-              {fmtTs(run.finishedAt)}
-            </MetaItem>
-          )}
-          <MetaItem icon={<Clock className="h-3.5 w-3.5" />} label="Duration">
-            {fmtDur(run.durationMs)}
-          </MetaItem>
-          {run.totalTokens != null && (
-            <MetaItem label="Tokens">{run.totalTokens.toLocaleString()}</MetaItem>
-          )}
-          {run.estimatedCostUsd != null && (
-            <MetaItem label="Est. cost">${run.estimatedCostUsd.toFixed(4)}</MetaItem>
-          )}
-          <MetaItem icon={<Key className="h-3 w-3" />} label="Idempotency key">
-            <code className="font-mono text-[10px]">{run.idempotencyKey}</code>
-          </MetaItem>
-        </div>
+        {/* ── Header: breadcrumb, title, status, actions, metadata strip ─── */}
+        <RunHeaderV2
+          model={displayModel}
+          onRetry={!forcePausedPending ? () => void handleRetry(false) : undefined}
+          onCancel={handleCancel}
+        />
 
-        {/* ── Tabbed detail view ───────────────────────────────────────── */}
-        <RunDetailTabs run={run} timelineEvents={timelineEvents} />
+        {/* ── Summary stat cards ──────────────────────────────────────────── */}
+        <RunSummaryCards model={model} />
+
+        {/* ── Main tabbed detail view ─────────────────────────────────────── */}
+        <RunDetailTabsV2 model={model} />
 
       </div>
-    </div>
-  );
-}
-
-// ─── MetaItem helper ─────────────────────────────────────────────────────────
-
-function MetaItem({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {icon && <span className="text-muted-foreground">{icon}</span>}
-      <span className="text-muted-foreground">{label}:</span>
-      <span className="font-medium text-foreground">{children}</span>
     </div>
   );
 }

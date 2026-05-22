@@ -1172,10 +1172,141 @@ export const scenarioBMock: AgentRunUiModel = {
   },
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCENARIO C — Contract Compliance Review (WAITING_FOR_APPROVAL)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const scenarioCMock: AgentRunUiModel = {
+  run: {
+    id: "run_ccr_2026052210000001",
+    jobId: "job_contract_compliance",
+    jobName: "Contract Compliance Review",
+    title: "Contract Compliance Review Run",
+    status: "WAITING_FOR_APPROVAL",
+    triggerSource: "MANUAL",
+    attemptNumber: 1,
+    environment: "Production",
+    idempotencyKey: "idem_ccr_2026052210_manual",
+    startedAt: "2026-05-22T10:00:01.000Z",
+    totalTokens: 4820,
+    estimatedCostUsd: 0.024,
+    currentAgent: "Legal Review Agent",
+    currentStep: "approval-gate:legal-send",
+    errorMessage: undefined,
+  },
+  agents: [
+    {
+      id: "agent-orch-c",
+      name: "Orchestrator Agent",
+      role: "Coordinates the compliance review pipeline",
+      status: "SUCCEEDED",
+      startedAt: "2026-05-22T10:00:02.000Z",
+      finishedAt: "2026-05-22T10:00:09.000Z",
+      durationMs: 7000,
+      stepsCount: 2,
+      tokensUsed: 640,
+      estimatedCostUsd: 0.003,
+      toolsUsed: ["plan_execution"],
+      outputSummary: "Created 3-agent compliance review pipeline.",
+    },
+    {
+      id: "agent-doc-c",
+      name: "Document Analysis Agent",
+      role: "Extracts clauses and flags compliance issues",
+      status: "SUCCEEDED",
+      startedAt: "2026-05-22T10:00:10.000Z",
+      finishedAt: "2026-05-22T10:01:22.000Z",
+      durationMs: 72000,
+      stepsCount: 4,
+      tokensUsed: 3840,
+      estimatedCostUsd: 0.019,
+      toolsUsed: ["pdf_extract", "clause_classifier"],
+      outputSummary: "Analyzed 3 contracts. Found 7 non-standard clauses requiring review.",
+    },
+    {
+      id: "agent-legal-c",
+      name: "Legal Review Agent",
+      role: "Prepares redlines and sends for approval before external send",
+      status: "WAITING",
+      startedAt: "2026-05-22T10:01:23.000Z",
+      stepsCount: 2,
+      tokensUsed: 340,
+      estimatedCostUsd: 0.002,
+      toolsUsed: ["redline_generator"],
+      outputSummary: "Waiting for human approval before sending redlines to counterparty.",
+    },
+  ],
+  timelineEvents: [
+    { id: "c-ev-01", sequence: 1, type: "RUN_CREATED",         status: "SUCCEEDED", source: "API",       title: "Run created",                    summary: "Triggered manually via dashboard",                   timestamp: "2026-05-22T10:00:00.800Z" },
+    { id: "c-ev-02", sequence: 2, type: "RUN_QUEUED",          status: "SUCCEEDED", source: "SCHEDULER", title: "Run queued",                      summary: "Placed in BullMQ worker queue",                      timestamp: "2026-05-22T10:00:00.900Z" },
+    { id: "c-ev-03", sequence: 3, type: "BUDGET_CHECK_PASSED", status: "SUCCEEDED", source: "SYSTEM",    title: "Budget check passed",              summary: "Within $50/month org limit",                         timestamp: "2026-05-22T10:00:01.000Z" },
+    { id: "c-ev-04", sequence: 4, type: "POLICY_CHECK_PASSED", status: "SUCCEEDED", source: "SYSTEM",    title: "Policy check passed",              summary: "All pre-run gates satisfied",                        timestamp: "2026-05-22T10:00:01.100Z" },
+    { id: "c-ev-05", sequence: 5, type: "RUN_STARTED",         status: "SUCCEEDED", source: "WORKER",    title: "Run started",                     summary: "Worker picked up execution (attempt #1)",            timestamp: "2026-05-22T10:00:01.200Z", startedAt: "2026-05-22T10:00:01.200Z" },
+    { id: "c-ev-06", sequence: 6, type: "AGENT_SELECTED",      status: "SUCCEEDED", source: "ORCHESTRATOR", title: "Orchestrator Agent selected",  summary: "Assigned to coordinate compliance pipeline",         timestamp: "2026-05-22T10:00:02.000Z" },
+    { id: "c-ev-07", sequence: 7, type: "AGENT_STARTED",       status: "SUCCEEDED", source: "WORKER",    title: "Orchestrator Agent started",       summary: "Building execution plan",                            timestamp: "2026-05-22T10:00:02.100Z", agentName: "Orchestrator Agent" },
+    { id: "c-ev-08", sequence: 8, type: "LLM_CALL_STARTED",    status: "SUCCEEDED", source: "LLM",       title: "LLM call started",                summary: "Planning pipeline structure",                        timestamp: "2026-05-22T10:00:02.500Z", agentName: "Orchestrator Agent", modelName: "gpt-4.1-mini" },
+    { id: "c-ev-09", sequence: 9, type: "LLM_CALL_COMPLETED",  status: "SUCCEEDED", source: "LLM",       title: "LLM call completed",              summary: "Plan: Document Analysis → Legal Review → Send",      timestamp: "2026-05-22T10:00:06.000Z", agentName: "Orchestrator Agent", modelName: "gpt-4.1-mini", tokensUsed: 640, estimatedCostUsd: 0.003, durationMs: 3500 },
+    { id: "c-ev-10", sequence: 10, type: "AGENT_COMPLETED",    status: "SUCCEEDED", source: "WORKER",    title: "Orchestrator Agent completed",     summary: "Pipeline plan created with 3 agents",                timestamp: "2026-05-22T10:00:09.000Z", agentName: "Orchestrator Agent", durationMs: 7000 },
+    { id: "c-ev-11", sequence: 11, type: "AGENT_SELECTED",     status: "SUCCEEDED", source: "ORCHESTRATOR", title: "Document Analysis Agent selected", summary: "Assigned to extract and classify contract clauses", timestamp: "2026-05-22T10:00:10.000Z" },
+    { id: "c-ev-12", sequence: 12, type: "AGENT_STARTED",      status: "SUCCEEDED", source: "WORKER",    title: "Document Analysis Agent started",  summary: "Processing 3 contract PDFs",                         timestamp: "2026-05-22T10:00:10.100Z", agentName: "Document Analysis Agent" },
+    { id: "c-ev-13", sequence: 13, type: "TOOL_CALL_STARTED",  status: "SUCCEEDED", source: "TOOL",      title: "pdf_extract",                     summary: "Extracting text from 3 contracts",                   timestamp: "2026-05-22T10:00:11.000Z", agentName: "Document Analysis Agent", toolName: "pdf_extract" },
+    { id: "c-ev-14", sequence: 14, type: "TOOL_CALL_COMPLETED",status: "SUCCEEDED", source: "TOOL",      title: "pdf_extract completed",           summary: "Extracted 47,200 words across 3 documents",          timestamp: "2026-05-22T10:00:19.000Z", agentName: "Document Analysis Agent", toolName: "pdf_extract", durationMs: 8000 },
+    { id: "c-ev-15", sequence: 15, type: "LLM_CALL_STARTED",   status: "SUCCEEDED", source: "LLM",       title: "LLM call started",                summary: "Classifying clauses against compliance checklist",   timestamp: "2026-05-22T10:00:20.000Z", agentName: "Document Analysis Agent", modelName: "gpt-4.1" },
+    { id: "c-ev-16", sequence: 16, type: "LLM_CALL_COMPLETED", status: "SUCCEEDED", source: "LLM",       title: "LLM call completed",              summary: "Identified 7 non-standard clauses in contract A, B", timestamp: "2026-05-22T10:01:05.000Z", agentName: "Document Analysis Agent", modelName: "gpt-4.1", tokensUsed: 3840, estimatedCostUsd: 0.019, durationMs: 45000 },
+    { id: "c-ev-17", sequence: 17, type: "ARTIFACT_CREATED",   status: "SUCCEEDED", source: "AGENT",     title: "Artifact created: clause_analysis.json", summary: "Clause-level compliance flags for review",      timestamp: "2026-05-22T10:01:18.000Z", agentName: "Document Analysis Agent", artifactName: "clause_analysis.json" },
+    { id: "c-ev-18", sequence: 18, type: "AGENT_COMPLETED",    status: "SUCCEEDED", source: "WORKER",    title: "Document Analysis Agent completed", summary: "7 non-standard clauses flagged across 3 contracts", timestamp: "2026-05-22T10:01:22.000Z", agentName: "Document Analysis Agent", durationMs: 72000 },
+    { id: "c-ev-19", sequence: 19, type: "AGENT_SELECTED",     status: "SUCCEEDED", source: "ORCHESTRATOR", title: "Legal Review Agent selected",   summary: "Assigned to prepare redlines for flagged clauses",   timestamp: "2026-05-22T10:01:23.000Z" },
+    { id: "c-ev-20", sequence: 20, type: "AGENT_STARTED",      status: "RUNNING",   source: "WORKER",    title: "Legal Review Agent started",       summary: "Generating redlines for 7 flagged clauses",          timestamp: "2026-05-22T10:01:23.100Z", agentName: "Legal Review Agent" },
+    { id: "c-ev-21", sequence: 21, type: "TOOL_CALL_STARTED",  status: "SUCCEEDED", source: "TOOL",      title: "redline_generator",               summary: "Generating tracked-change redlines",                 timestamp: "2026-05-22T10:01:24.000Z", agentName: "Legal Review Agent", toolName: "redline_generator" },
+    { id: "c-ev-22", sequence: 22, type: "TOOL_CALL_COMPLETED",status: "SUCCEEDED", source: "TOOL",      title: "redline_generator completed",     summary: "3 redlined contracts ready for counterparty",        timestamp: "2026-05-22T10:01:55.000Z", agentName: "Legal Review Agent", toolName: "redline_generator", durationMs: 31000 },
+    { id: "c-ev-23", sequence: 23, type: "APPROVAL_REQUESTED", status: "WAITING",   source: "SYSTEM",    title: "Approval requested — Send redlines to counterparty", summary: "Agent wants to email redlined contracts to Acme Corp legal team. Review before sending.", timestamp: "2026-05-22T10:02:01.000Z", agentName: "Legal Review Agent",
+      approval: { id: "appr-ccr-001", title: "Send redlines to Acme Corp", message: "Legal Review Agent has prepared 3 redlined contracts for Acme Corp's legal team (legal@acmecorp.com). The documents contain 7 proposed clause changes. Approving will trigger an email with the attached documents. This action cannot be undone.", status: "PENDING" },
+      metadataJson: { recipient: "legal@acmecorp.com", attachments: ["contract_a_redlined.docx", "contract_b_redlined.docx", "contract_c_redlined.docx"], clauseChanges: 7 },
+    },
+  ],
+  steps: [
+    { id: "step-c-01", index: 1, agentName: "Orchestrator Agent",      type: "LLM_CALL",     name: "Plan pipeline",                status: "SUCCEEDED", startedAt: "2026-05-22T10:00:02.500Z", finishedAt: "2026-05-22T10:00:06.000Z", durationMs: 3500,  tokensUsed: 640,  estimatedCostUsd: 0.003 },
+    { id: "step-c-02", index: 2, agentName: "Document Analysis Agent", type: "TOOL_CALL",    name: "pdf_extract",                  status: "SUCCEEDED", startedAt: "2026-05-22T10:00:11.000Z", finishedAt: "2026-05-22T10:00:19.000Z", durationMs: 8000  },
+    { id: "step-c-03", index: 3, agentName: "Document Analysis Agent", type: "LLM_CALL",     name: "Classify compliance clauses",  status: "SUCCEEDED", startedAt: "2026-05-22T10:00:20.000Z", finishedAt: "2026-05-22T10:01:05.000Z", durationMs: 45000, tokensUsed: 3840, estimatedCostUsd: 0.019 },
+    { id: "step-c-04", index: 4, agentName: "Legal Review Agent",      type: "TOOL_CALL",    name: "redline_generator",            status: "SUCCEEDED", startedAt: "2026-05-22T10:01:24.000Z", finishedAt: "2026-05-22T10:01:55.000Z", durationMs: 31000 },
+    { id: "step-c-05", index: 5, agentName: "Legal Review Agent",      type: "APPROVAL_GATE",name: "Send redlines to counterparty", status: "WAITING",  startedAt: "2026-05-22T10:02:01.000Z" },
+  ],
+  approvals: [
+    {
+      id: "appr-ccr-001",
+      title: "Send redlines to Acme Corp",
+      message: "Legal Review Agent has prepared 3 redlined contracts for Acme Corp's legal team (legal@acmecorp.com). The documents contain 7 proposed clause changes. Approving will trigger an email with the attached documents. This action cannot be undone.",
+      status: "PENDING",
+      relatedAgent: "Legal Review Agent",
+      relatedStep: "Send redlines to counterparty",
+      requestedAt: "2026-05-22T10:02:01.000Z",
+      payloadPreview: {
+        action: "send_email",
+        to: "legal@acmecorp.com",
+        subject: "Contract Redlines — Vectorbee Review",
+        attachments: ["contract_a_redlined.docx", "contract_b_redlined.docx", "contract_c_redlined.docx"],
+        clauseChanges: 7,
+        contractCount: 3,
+      },
+    },
+  ],
+  artifacts: [
+    { id: "art-c-01", name: "clause_analysis.json",      type: "json",     createdByAgent: "Document Analysis Agent", createdAt: "2026-05-22T10:01:18.000Z", sizeLabel: "14.2 KB", preview: { flaggedClauses: 7, contracts: ["Contract_A.pdf","Contract_B.pdf","Contract_C.pdf"], topIssues: ["Non-standard liability cap","Missing governing law clause","Unusual IP assignment"] } },
+    { id: "art-c-02", name: "compliance_checklist.json", type: "json",     createdByAgent: "Orchestrator Agent",      createdAt: "2026-05-22T10:00:09.000Z", sizeLabel: "3.8 KB",  preview: { checklistVersion: "2026-Q2", clauses: 24, highRisk: 3, mediumRisk: 4 } },
+  ],
+  auditLogs: [
+    { id: "cal-01", time: "2026-05-22T10:00:00.800Z", action: "RUN_CREATED",          actor: "demo-owner@vectorbee.com", entity: "run_ccr_2026052210000001", details: "Manual trigger from dashboard" },
+    { id: "cal-02", time: "2026-05-22T10:00:01.200Z", action: "RUN_STARTED",          actor: "worker-01",               entity: "run_ccr_2026052210000001", details: "Worker started execution" },
+    { id: "cal-03", time: "2026-05-22T10:02:01.000Z", action: "APPROVAL_REQUESTED",   actor: "Legal Review Agent",      entity: "appr-ccr-001",             details: "Send redlines to Acme Corp legal team" },
+  ],
+};
+
 // ─── Export helper ────────────────────────────────────────────────────────────
 
-export type MockScenario = "success" | "failed";
+export type MockScenario = "success" | "failed" | "waiting";
 
 export function getMockScenario(scenario: MockScenario): AgentRunUiModel {
-  return scenario === "success" ? scenarioAMock : scenarioBMock;
+  if (scenario === "success") return scenarioAMock;
+  if (scenario === "failed")  return scenarioBMock;
+  return scenarioCMock;
 }

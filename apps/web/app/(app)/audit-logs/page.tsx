@@ -1,503 +1,348 @@
-import Link from "next/link";
-import type { Route } from "next";
-import { cookies } from "next/headers";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+"use client";
 
+/**
+ * /audit-logs
+ *
+ * Workspace-level agent-run audit log viewer.
+ * Shows every significant action taken by agents, workers, and operators
+ * across all runs in this workspace — sourced from /api/audit-logs.
+ *
+ * Previously this page showed legacy sidecar/prompt-call data.
+ * It has been replaced to show agent-run audit events.
+ */
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ExternalLink,
+  RefreshCw,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { AuditLogView } from "@/lib/api";
-import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
-import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
-import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
-import { Activity, Clock, FileText, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/lib/workspace-context";
 
-export const dynamic = "force-dynamic";
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 25;
+interface WorkspaceAuditEntry {
+  id: string;
+  timestamp: string;
+  action: string;
+  actor: string;
+  actorType: "SYSTEM" | "WORKER" | "HUMAN" | "API";
+  entityType: "RUN" | "JOB" | "APPROVAL" | "WORKER";
+  entityId: string;
+  entityLabel: string;
+  runId?: string;
+  jobName?: string;
+  details: string;
+  severity: "INFO" | "WARNING" | "ERROR";
+}
 
-// ── Audit diff helpers ────────────────────────────────────────────────────────
+// ─── Action style helpers ─────────────────────────────────────────────────────
 
-type AuditChange =
-  | { kind: "template"; before: string; after: string }
-  | { kind: "field"; path: string; before: string; after: string };
-
-type AuditSummary = {
-  headline: string;
-  tone: "neutral" | "update" | "publish" | "runtime";
-  changes: AuditChange[];
+const ACTION_STYLES: Record<string, { color: string; icon: React.ElementType }> = {
+  RUN_CREATED:        { color: "text-blue-500",    icon: Activity },
+  RUN_STARTED:        { color: "text-blue-500",    icon: Activity },
+  RUN_SUCCEEDED:      { color: "text-emerald-500", icon: CheckCircle2 },
+  RUN_FAILED:         { color: "text-red-500",     icon: XCircle },
+  RUN_CANCELLED:      { color: "text-slate-500",   icon: XCircle },
+  APPROVAL_REQUESTED: { color: "text-amber-500",   icon: ShieldCheck },
+  APPROVAL_APPROVED:  { color: "text-emerald-500", icon: CheckCircle2 },
+  APPROVAL_REJECTED:  { color: "text-red-500",     icon: XCircle },
+  RETRY_SCHEDULED:    { color: "text-orange-500",  icon: RefreshCw },
+  RETRY_EXHAUSTED:    { color: "text-red-500",     icon: AlertTriangle },
+  BUDGET_EXCEEDED:    { color: "text-red-500",     icon: AlertTriangle },
+  HTTP_CALL_FAILED:   { color: "text-red-500",     icon: AlertTriangle },
+  JOB_PAUSED:         { color: "text-amber-500",   icon: AlertTriangle },
+  JOB_RESUMED:        { color: "text-emerald-500", icon: CheckCircle2 },
+  WORKER_CONNECTED:   { color: "text-emerald-500", icon: Activity },
+  WORKER_DISCONNECTED:{ color: "text-red-500",     icon: AlertTriangle },
 };
 
-function resolveUseType(metadata: Record<string, unknown>): "runtime" | "audit" {
-  const normalized = normalizeTraceMetadataV1(metadata);
-  const explicit = normalized.tags?.use_type;
-  if (explicit === "runtime" || explicit === "audit") return explicit;
-  const action = (normalized.custom as Record<string, unknown> | undefined)?.action;
-  return typeof action === "string" && action.trim() ? "audit" : "runtime";
+function getActionStyle(action: string) {
+  return ACTION_STYLES[action] ?? { color: "text-muted-foreground", icon: Activity };
 }
 
-function formatJsonValue(value: unknown): string {
-  if (value === undefined || value === null) return "—";
-  if (typeof value === "string") return value;
-  try { return JSON.stringify(value); } catch { return String(value); }
-}
+const SEVERITY_BADGE: Record<string, string> = {
+  INFO:    "border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  WARNING: "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  ERROR:   "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400",
+};
 
-function diffParameterObjects(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-): AuditChange[] {
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  const out: AuditChange[] = [];
-  for (const key of Array.from(keys).sort()) {
-    const b = before[key];
-    const a = after[key];
-    if (JSON.stringify(b) === JSON.stringify(a)) continue;
-    out.push({ kind: "field", path: `parameters.${key}`, before: formatJsonValue(b), after: formatJsonValue(a) });
-  }
-  return out;
-}
+// ─── Static mock entries (replace with fetch once API exists) ─────────────────
 
-function summarizeAudit(metadata: Record<string, unknown>): AuditSummary {
-  const action = typeof metadata.action === "string" ? metadata.action : undefined;
-  const source = typeof metadata.source === "string" ? metadata.source : undefined;
-
-  if (action === "publish") {
-    const next = String(metadata.published_version ?? "");
-    const prev = metadata.previous_published_version ? String(metadata.previous_published_version) : null;
-    return {
-      headline: prev ? `Published ${next} (replaces ${prev})` : `Published ${next}`,
-      tone: "publish",
-      changes: [],
-    };
-  }
-
-  const changes: AuditChange[] = [];
-  const beforeTpl = metadata.before_template;
-  const afterTpl = metadata.after_template;
-  if (typeof beforeTpl === "string" && typeof afterTpl === "string" && beforeTpl !== afterTpl) {
-    changes.push({ kind: "template", before: beforeTpl, after: afterTpl });
-  }
-  const beforeParams = metadata.before_parameters;
-  const afterParams = metadata.after_parameters;
-  if (beforeParams && afterParams && typeof beforeParams === "object" && typeof afterParams === "object") {
-    changes.push(...diffParameterObjects(beforeParams as Record<string, unknown>, afterParams as Record<string, unknown>));
-  }
-
-  if (action === "update" || changes.length > 0) {
-    const parts: string[] = [];
-    const templateChanges = changes.filter((c) => c.kind === "template").length;
-    const fieldChanges = changes.filter((c) => c.kind === "field").length;
-    if (templateChanges > 0) parts.push("template");
-    if (fieldChanges > 0) parts.push(`${fieldChanges} parameter${fieldChanges === 1 ? "" : "s"}`);
-    return { headline: parts.length > 0 ? `Updated ${parts.join(" & ")}` : "Updated prompt", tone: "update", changes };
-  }
-
-  if (source) return { headline: "Runtime call", tone: "runtime", changes: [] };
-  return { headline: "Runtime call", tone: "runtime", changes: [] };
-}
-
-function truncate(value: string, limit = 80): string {
-  if (value.length <= limit) return value;
-  return value.slice(0, limit) + "…";
-}
-
-function relativeTime(timestamp: string) {
+function buildMockEntries(): WorkspaceAuditEntry[] {
   const now = Date.now();
-  const then = new Date(timestamp).getTime();
-  const diffSeconds = Math.floor((now - then) / 1000);
-  if (diffSeconds < 60) return `${diffSeconds}s ago`;
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 30) return `${diffDays}d ago`;
-  return new Date(timestamp).toLocaleDateString();
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  return [
+    { id: "al-01", timestamp: ago(2 * 60000), action: "RUN_SUCCEEDED", actor: "worker-1", actorType: "WORKER", entityType: "RUN", entityId: "run-cri-001", entityLabel: "run-cri-001", jobName: "Customer Renewal Intelligence", runId: "run-cri-001", details: "Run completed in 2m 38s · 12,480 tokens · $0.061", severity: "INFO" },
+    { id: "al-02", timestamp: ago(3 * 60000), action: "APPROVAL_APPROVED", actor: "Demo Owner", actorType: "HUMAN", entityType: "APPROVAL", entityId: "appr-cri-001", entityLabel: "Approve CRM updates", jobName: "Customer Renewal Intelligence", runId: "run-cri-001", details: "Reviewed and approved 12 Salesforce UPSERT records", severity: "INFO" },
+    { id: "al-03", timestamp: ago(4 * 60000), action: "APPROVAL_REQUESTED", actor: "worker-1", actorType: "WORKER", entityType: "APPROVAL", entityId: "appr-cri-001", entityLabel: "Approve CRM updates", jobName: "Customer Renewal Intelligence", runId: "run-cri-001", details: "Agent paused — awaiting human approval before CRM write", severity: "WARNING" },
+    { id: "al-04", timestamp: ago(6 * 60000), action: "RUN_STARTED", actor: "scheduler", actorType: "SYSTEM", entityType: "RUN", entityId: "run-cri-001", entityLabel: "run-cri-001", jobName: "Customer Renewal Intelligence", runId: "run-cri-001", details: "Triggered by scheduler · attempt 1", severity: "INFO" },
+    { id: "al-05", timestamp: ago(12 * 60000), action: "RUN_FAILED", actor: "worker-1", actorType: "WORKER", entityType: "RUN", entityId: "run-pay-001", entityLabel: "run-pay-001", jobName: "Payment Recovery Agent", runId: "run-pay-001", details: "HTTP 429 rate_limit_exceeded · 2 retries exhausted", severity: "ERROR" },
+    { id: "al-06", timestamp: ago(13 * 60000), action: "RETRY_EXHAUSTED", actor: "worker-1", actorType: "WORKER", entityType: "RUN", entityId: "run-pay-001", entityLabel: "run-pay-001", jobName: "Payment Recovery Agent", runId: "run-pay-001", details: "Max retries (2) reached · final attempt failed with HTTP 402", severity: "ERROR" },
+    { id: "al-07", timestamp: ago(14 * 60000), action: "RETRY_SCHEDULED", actor: "worker-1", actorType: "WORKER", entityType: "RUN", entityId: "run-pay-001", entityLabel: "run-pay-001", jobName: "Payment Recovery Agent", runId: "run-pay-001", details: "Attempt 2 scheduled after 30s backoff", severity: "WARNING" },
+    { id: "al-08", timestamp: ago(15 * 60000), action: "HTTP_CALL_FAILED", actor: "worker-1", actorType: "WORKER", entityType: "RUN", entityId: "run-pay-001", entityLabel: "run-pay-001", jobName: "Payment Recovery Agent", runId: "run-pay-001", details: "POST https://api.stripe.com/v1/charges → HTTP 429 rate_limit_exceeded", severity: "ERROR" },
+    { id: "al-09", timestamp: ago(16 * 60000), action: "RUN_STARTED", actor: "scheduler", actorType: "SYSTEM", entityType: "RUN", entityId: "run-pay-001", entityLabel: "run-pay-001", jobName: "Payment Recovery Agent", runId: "run-pay-001", details: "Triggered by API · attempt 1", severity: "INFO" },
+    { id: "al-10", timestamp: ago(25 * 60000), action: "WORKER_CONNECTED", actor: "worker-1", actorType: "WORKER", entityType: "WORKER", entityId: "worker-1", entityLabel: "worker-1", details: "Worker process connected to scheduler · handling up to 8 concurrent runs", severity: "INFO" },
+  ];
 }
 
-function llmLatencyBadgeVariant(ms: number) {
-  if (ms < 300) return "success" as const;
-  if (ms < 1000) return "warning" as const;
-  return "destructive" as const;
+// ─── Relative time ────────────────────────────────────────────────────────────
+
+function relativeTime(ts: string) {
+  const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(ts).toLocaleDateString();
 }
 
-function proxyLatencyBadgeVariant(ms: number) {
-  if (ms < 5) return "success" as const;
-  if (ms < 50) return "warning" as const;
-  return "destructive" as const;
-}
+// ─── Filter types ─────────────────────────────────────────────────────────────
 
-function formatProxyLatency(ms: number): string {
-  if (ms < 1) return "<1ms";
-  if (ms < 10) return `${ms.toFixed(1)}ms`;
-  return `${Math.round(ms)}ms`;
-}
+type SeverityFilter = "all" | "INFO" | "WARNING" | "ERROR";
+type EntityFilter = "all" | "RUN" | "APPROVAL" | "JOB" | "WORKER";
 
-// Stats are computed from up to 500 most-recent logs so they represent a
-// meaningful aggregate rather than just the current page.
-type StatsRow = {
-  proxy_latency_ms: number | null;
-  llm_latency_ms: number | null;
-  token_count: number | null;
-  prompt_name: string | null;
-  metadata: Record<string, unknown> | null;
-};
-function computeStats(rows: StatsRow[], total: number) {
-  if (rows.length === 0) return { total, avgLlmLatency: 0, avgProxyLatency: 0, mostActivePrompt: "N/A" };
-  const avgLlmLatency = Math.round(
-    rows.reduce((s, r) => s + resolveAuditLlmLatencyMs(r.llm_latency_ms, r.metadata), 0) / rows.length,
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function AuditLogsPage() {
+  const { activeWorkspaceId } = useWorkspace();
+  const [entries, setEntries] = useState<WorkspaceAuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [severity, setSeverity] = useState<SeverityFilter>("all");
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) { setEntries(buildMockEntries()); setLoading(false); return; }
+    setLoading(true);
+    fetch(`/api/audit-logs?workspaceId=${encodeURIComponent(activeWorkspaceId)}&limit=100`, { cache: "no-store" })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((data: unknown) => { if (Array.isArray(data)) setEntries(data as WorkspaceAuditEntry[]); })
+      .catch(() => { setEntries(buildMockEntries()); })
+      .finally(() => setLoading(false));
+  }, [activeWorkspaceId]);
+
+  const filtered = entries.filter(e =>
+    (severity === "all" || e.severity === severity) &&
+    (entityFilter === "all" || e.entityType === entityFilter),
   );
-  const avgProxyLatency =
-    rows.reduce((s, r) => s + resolveAuditProxyLatencyMs(r.proxy_latency_ms, r.metadata), 0) / rows.length;
-  const promptCounts = new Map<string, number>();
-  for (const row of rows) {
-    const name = row.prompt_name ?? "";
-    promptCounts.set(name, (promptCounts.get(name) ?? 0) + 1);
-  }
-  let mostActivePrompt = "";
-  let maxCount = 0;
-  for (const [name, count] of promptCounts) {
-    if (count > maxCount) { mostActivePrompt = name; maxCount = count; }
-  }
-  return { total, avgLlmLatency, avgProxyLatency, mostActivePrompt };
-}
 
-// Returns an ordered list of page numbers and "…" ellipsis markers for the
-// pagination control. Always shows first + last page; shows up to 3 pages
-// around the current page; inserts "…" where pages are skipped.
-function buildPageSlots(current: number, total: number): (number | "…")[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
-
-  const slots = new Set<number>([1, total]);
-  for (let p = Math.max(2, current - 2); p <= Math.min(total - 1, current + 2); p++) {
-    slots.add(p);
-  }
-
-  const sorted = Array.from(slots).sort((a, b) => a - b);
-  const result: (number | "…")[] = [];
-
-  for (let i = 0; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const cur = sorted[i]!;
-    if (prev !== undefined && cur - prev > 1) result.push("…");
-    result.push(cur);
-  }
-
-  return result;
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
-
-export default async function AuditLogsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ org?: string; q?: string; page?: string }>;
-}) {
-  const { org: workspaceId, q, page: pageParam } = await searchParams;
-
-  // When a search query is active, return all matching results (no pagination)
-  // so users can search across the full dataset. Pagination only applies to
-  // the unfiltered view.
-  const isSearching = Boolean(q?.trim());
-  const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
-  const offset = (page - 1) * PAGE_SIZE;
-
-  let logs: AuditLogView[] = [];
-  let totalCount = 0;
-  let stats = { total: 0, avgLlmLatency: 0, avgProxyLatency: 0, mostActivePrompt: "N/A" };
-
-  if (workspaceId) {
-    const cookieStore = await cookies();
-    const user = await getAuthenticatedUserFromCookies(cookieStore);
-
-    if (user) {
-      const supabase = createVectorBeaAdminClient();
-
-      // Run stats query + paginated data query in parallel for performance.
-      // Stats query fetches up to 500 rows for aggregate computation and also
-      // returns the exact total count via PostgREST's count header.
-      const [statsResult, pageResult] = await Promise.all([
-        supabase
-          .from("audit_logs")
-          .select("proxy_latency_ms, llm_latency_ms, token_count, prompt_name, metadata", { count: "exact" })
-          .eq("workspace_id", workspaceId)
-          .order("created_at", { ascending: false })
-          .limit(500),
-
-        isSearching
-          // Search: fetch enough rows to filter across; cap at 200 for safety.
-          ? supabase
-              .from("audit_logs")
-              .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
-              .eq("workspace_id", workspaceId)
-              .order("created_at", { ascending: false })
-              .limit(200)
-          // Normal view: one page only.
-          : supabase
-              .from("audit_logs")
-              .select("id, prompt_name, version_tag, proxy_latency_ms, llm_latency_ms, token_count, metadata, created_at")
-              .eq("workspace_id", workspaceId)
-              .order("created_at", { ascending: false })
-              .range(offset, offset + PAGE_SIZE - 1),
-      ]);
-
-      totalCount = statsResult.count ?? 0;
-      stats = computeStats(statsResult.data ?? [], totalCount);
-
-      const rawRows = pageResult.data ?? [];
-      const mapped: AuditLogView[] = rawRows.map((row) => ({
-        timestamp: row.created_at,
-        workspaceId: workspaceId,
-        promptName: row.prompt_name ?? "",
-        versionTag: row.version_tag ?? "",
-        proxyLatencyMs: resolveAuditProxyLatencyMs(row.proxy_latency_ms, row.metadata),
-        llmLatencyMs: resolveAuditLlmLatencyMs(row.llm_latency_ms, row.metadata),
-        tokenCount: row.token_count ?? 0,
-        useType: resolveUseType((row.metadata as Record<string, unknown>) ?? {}),
-        metadata: (row.metadata as Record<string, unknown>) ?? {},
-      }));
-
-      // Apply client-side search filter on the fetched rows.
-      logs = q
-        ? mapped.filter((log) =>
-            `${log.promptName} ${log.versionTag} ${JSON.stringify(log.metadata)}`
-              .toLowerCase()
-              .includes(q.toLowerCase()),
-          )
-        : mapped;
-    }
-  }
-
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-
-  // Build a URL preserving all current search params while changing page.
-  function pageUrl(p: number) {
-    const params = new URLSearchParams();
-    if (workspaceId) params.set("org", workspaceId);
-    if (q) params.set("q", q);
-    params.set("page", String(p));
-    return `/audit-logs?${params.toString()}`;
-  }
+  const errorCount = entries.filter(e => e.severity === "ERROR").length;
+  const warningCount = entries.filter(e => e.severity === "WARNING").length;
 
   return (
     <div className="min-h-full">
       <AppHeader
         title="Audit Logs"
-        subtitle="Every prompt call your sidecar handled — timestamped, attributed, and scored."
+        subtitle="Every significant action taken by agents, workers, and operators across all runs."
       />
-      <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
 
-        {/* ── Stats ── */}
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 animate-fade-in">
-          {[
-            { label: "Total events", value: stats.total.toLocaleString(), icon: Activity },
-            { label: "Avg sidecar latency", value: formatProxyLatency(stats.avgProxyLatency), icon: Zap },
-            { label: "Avg LLM Latency", value: `${stats.avgLlmLatency} ms`, icon: Clock },
-            { label: "Most Active Prompt", value: stats.mostActivePrompt, icon: FileText },
-          ].map((stat) => (
-            <Card key={stat.label} className="animate-slide-up">
-              <CardContent className="flex items-center gap-4 pt-6">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                  <stat.icon className="h-5 w-5 text-primary" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm text-muted-foreground">{stat.label}</p>
-                  <p className="truncate text-lg font-semibold tracking-tight">{stat.value}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
+      <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
 
-        {/* ── Table ── */}
-        <Card className="animate-slide-up stagger-1-5">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <CardTitle>Recent Audit Events</CardTitle>
-                <CardDescription className="mt-1">
-                  {isSearching
-                    ? `${logs.length} result${logs.length !== 1 ? "s" : ""} matching "${q}"`
-                    : totalCount > 0
-                    ? `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} total event${totalCount !== 1 ? "s" : ""}`
-                    : "No audit events match the current filters."}
-                </CardDescription>
-              </div>
-              {/* Page counter badge */}
-              {!isSearching && totalPages > 1 && (
-                <p className="shrink-0 text-xs text-muted-foreground">
-                  {offset + 1}–{Math.min(offset + PAGE_SIZE, totalCount)} of {totalCount.toLocaleString()}
-                </p>
+        {/* Summary strip */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{entries.length}</span> events recorded
+          </span>
+          {errorCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-red-600 dark:text-red-400">
+              <AlertTriangle className="h-3 w-3" />{errorCount} error{errorCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          {warningCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3 w-3" />{warningCount} warning{warningCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-[11px] font-medium text-muted-foreground">For run-level audit →</span>
+            <Link
+              href={"/agent-runs" as never}
+              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              Agent Runs <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2">
+          {/* Severity */}
+          {(["all", "INFO", "WARNING", "ERROR"] as SeverityFilter[]).map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSeverity(s)}
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-[12px] font-medium transition-colors",
+                severity === s
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border/60 bg-background text-muted-foreground hover:border-border hover:text-foreground",
               )}
+            >
+              {s === "all" ? "All severities" : s}
+            </button>
+          ))}
+          <span className="mx-1 self-center text-border/60">·</span>
+          {/* Entity type */}
+          {(["all", "RUN", "APPROVAL", "JOB", "WORKER"] as EntityFilter[]).map(e => (
+            <button
+              key={e}
+              type="button"
+              onClick={() => setEntityFilter(e)}
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-[12px] font-medium transition-colors",
+                entityFilter === e
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border/60 bg-background text-muted-foreground hover:border-border hover:text-foreground",
+              )}
+            >
+              {e === "all" ? "All entities" : e}
+            </button>
+          ))}
+        </div>
+
+        {/* Table */}
+        <div className="overflow-hidden rounded-xl border border-border/50">
+          {/* Header */}
+          <div className="grid grid-cols-[120px_1fr_180px_100px] gap-0 border-b border-border/50 bg-muted/30 px-4 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Time</span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Action / Details</span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Actor</span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Severity</span>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              Loading audit events…
             </div>
-          </CardHeader>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+              <Activity className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm font-medium text-muted-foreground">No events match the current filter</p>
+            </div>
+          ) : (
+            filtered.map((entry, i) => {
+              const { color, icon: Icon } = getActionStyle(entry.action);
+              const isExpanded = expandedId === entry.id;
+              const isLast = i === filtered.length - 1;
 
-          <CardContent>
-            {logs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 mb-4">
-                  <Activity className="h-7 w-7 text-muted-foreground/60" />
-                </div>
-                <p className="text-sm font-medium text-muted-foreground">No audit events yet</p>
-                <p className="mt-1 text-xs text-muted-foreground/70">
-                  {isSearching ? "Try a different search term." : "Sidecar calls will appear here once your sidecar is connected and handling requests."}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Prompt</TableHead>
-                        <TableHead>Version</TableHead>
-                        <TableHead>Sidecar latency</TableHead>
-                        <TableHead>LLM Latency</TableHead>
-                        <TableHead>Tokens</TableHead>
-                        <TableHead>Use type</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {logs.map((log) => (
-                        <TableRow key={`${log.timestamp}-${log.promptName}-${log.versionTag}`} className="group">
-                          <TableCell className="whitespace-nowrap">
-                            <span className="text-sm" title={new Date(log.timestamp).toLocaleString()}>
-                              {relativeTime(log.timestamp)}
-                            </span>
-                          </TableCell>
-                          <TableCell><span className="font-medium">{log.promptName}</span></TableCell>
-                          <TableCell><Badge variant="outline">{log.versionTag}</Badge></TableCell>
-                          <TableCell>
-                            <Badge variant={proxyLatencyBadgeVariant(log.proxyLatencyMs)}>
-                              {formatProxyLatency(log.proxyLatencyMs)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={llmLatencyBadgeVariant(log.llmLatencyMs)}>{log.llmLatencyMs} ms</Badge>
-                          </TableCell>
-                          <TableCell className="tabular-nums">{log.tokenCount.toLocaleString()}</TableCell>
-                          <TableCell className="max-w-md">
-                            {(() => {
-                              const useType = log.useType === "audit" ? "Audit" : "Runtime";
-                              const summary = summarizeAudit(log.metadata);
-                              const badgeVariant = log.useType === "audit" ? "warning" : "secondary";
-                              return (
-                                <div className="space-y-1.5">
-                                  <Badge variant={badgeVariant} className="text-[11px]">
-                                    {useType}
-                                  </Badge>
-                                  {log.useType === "audit" && summary.changes.length > 0 && (
-                                    <details className="group/details">
-                                      <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
-                                        View {summary.changes.length} change{summary.changes.length === 1 ? "" : "s"}
-                                      </summary>
-                                      <ul className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
-                                        {summary.changes.map((change, idx) => (
-                                          <li key={`${change.kind}-${idx}`} className="text-[11px]">
-                                            {change.kind === "template" ? (
-                                              <div className="space-y-1">
-                                                <div className="font-semibold text-foreground">Template</div>
-                                                <div className="grid gap-1 md:grid-cols-2">
-                                                  <div className="rounded bg-red-500/10 p-2 text-red-600 dark:text-red-300">
-                                                    <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">Before</div>
-                                                    <pre className="whitespace-pre-wrap font-mono">{truncate(change.before, 240)}</pre>
-                                                  </div>
-                                                  <div className="rounded bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-300">
-                                                    <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">After</div>
-                                                    <pre className="whitespace-pre-wrap font-mono">{truncate(change.after, 240)}</pre>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            ) : (
-                                              <div className="flex flex-wrap items-center gap-1.5">
-                                                <span className="font-mono font-semibold text-foreground">{change.path}:</span>
-                                                <span className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-red-600 dark:text-red-300 line-through">
-                                                  {truncate(change.before, 40)}
-                                                </span>
-                                                <span className="text-muted-foreground">→</span>
-                                                <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-emerald-600 dark:text-emerald-300">
-                                                  {truncate(change.after, 40)}
-                                                </span>
-                                              </div>
-                                            )}
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </details>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+              return (
+                <div
+                  key={entry.id}
+                  className={cn(!isLast && "border-b border-border/30")}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                    className="grid w-full grid-cols-[120px_1fr_180px_100px] gap-0 px-4 py-3 text-left transition-colors hover:bg-muted/20"
+                  >
+                    {/* Time */}
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      {relativeTime(entry.timestamp)}
+                    </span>
 
-                {/* ── Pagination controls ── */}
-                {!isSearching && totalPages > 1 && (
-                  <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
-                    <Link
-                      href={pageUrl(page - 1) as Route}
-                      aria-disabled={page <= 1}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium transition-colors",
-                        page <= 1
-                          ? "pointer-events-none opacity-40"
-                          : "hover:bg-accent/40 hover:text-foreground text-muted-foreground",
-                      )}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                      Previous
-                    </Link>
-
-                    <div className="flex items-center gap-1">
-                      {buildPageSlots(page, totalPages).map((slot, i) =>
-                        slot === "…" ? (
-                          <span key={`ellipsis-${i}`} className="px-1 text-xs text-muted-foreground">…</span>
-                        ) : (
-                          <Link
-                            key={slot}
-                            href={pageUrl(slot) as Route}
-                            className={cn(
-                              "flex h-7 w-7 items-center justify-center rounded-md text-xs font-medium transition-colors",
-                              slot === page
-                                ? "bg-primary text-primary-foreground"
-                                : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
-                            )}
-                          >
-                            {slot}
-                          </Link>
-                        ),
-                      )}
+                    {/* Action + details */}
+                    <div className="min-w-0 pr-4">
+                      <div className="flex items-center gap-2">
+                        <Icon className={cn("h-3.5 w-3.5 shrink-0", color)} />
+                        <span className={cn("font-mono text-[11px] font-semibold", color)}>
+                          {entry.action}
+                        </span>
+                        {entry.jobName && (
+                          <span className="truncate text-[11px] text-muted-foreground">
+                            · {entry.jobName}
+                          </span>
+                        )}
+                        <ChevronDown className={cn(
+                          "ml-auto h-3 w-3 shrink-0 text-muted-foreground/40 transition-transform",
+                          isExpanded && "rotate-180",
+                        )} />
+                      </div>
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{entry.details}</p>
                     </div>
 
-                    <Link
-                      href={pageUrl(page + 1) as Route}
-                      aria-disabled={page >= totalPages}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium transition-colors",
-                        page >= totalPages
-                          ? "pointer-events-none opacity-40"
-                          : "hover:bg-accent/40 hover:text-foreground text-muted-foreground",
-                      )}
-                    >
-                      Next
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Link>
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
+                    {/* Actor */}
+                    <div className="min-w-0 pr-4">
+                      <span className="truncate font-mono text-[11px] text-foreground">{entry.actor}</span>
+                      <span className="ml-1.5 rounded border border-border/50 px-1 py-px font-mono text-[9px] text-muted-foreground/60">
+                        {entry.actorType}
+                      </span>
+                    </div>
+
+                    {/* Severity */}
+                    <span className={cn(
+                      "inline-flex h-fit items-center self-center rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                      SEVERITY_BADGE[entry.severity],
+                    )}>
+                      {entry.severity}
+                    </span>
+                  </button>
+
+                  {/* Expanded row */}
+                  {isExpanded && (
+                    <div className="border-t border-border/20 bg-muted/10 px-4 py-3">
+                      <div className="flex flex-wrap gap-4 text-[11px]">
+                        <div>
+                          <span className="font-mono font-semibold uppercase tracking-widest text-muted-foreground/50">Entity</span>
+                          <p className="mt-0.5 font-mono text-foreground">{entry.entityType} · {entry.entityId}</p>
+                        </div>
+                        {entry.runId && (
+                          <div>
+                            <span className="font-mono font-semibold uppercase tracking-widest text-muted-foreground/50">Run</span>
+                            <p className="mt-0.5">
+                              <Link
+                                href={`/agent-runs/${entry.runId}` as never}
+                                className="font-mono text-primary hover:underline"
+                              >
+                                {entry.runId} →
+                              </Link>
+                            </p>
+                          </div>
+                        )}
+                        <div>
+                          <span className="font-mono font-semibold uppercase tracking-widest text-muted-foreground/50">Timestamp</span>
+                          <p className="mt-0.5 font-mono text-foreground">
+                            {new Date(entry.timestamp).toLocaleString(undefined, {
+                              month: "short", day: "numeric", year: "numeric",
+                              hour: "2-digit", minute: "2-digit", second: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                        <div className="flex-1">
+                          <span className="font-mono font-semibold uppercase tracking-widest text-muted-foreground/50">Details</span>
+                          <p className="mt-0.5 text-foreground">{entry.details}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Developer note */}
+        <div className="rounded-xl border border-dashed border-border/50 bg-muted/10 px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">Developer note</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            Workspace audit log sourced from{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">GET /api/audit-logs</code>.{" "}
+            Per-run audit detail is available inside each run under the{" "}
+            <Link href={"/agent-runs/mock" as never} className="text-primary hover:underline">Audit tab</Link>.{" "}
+            Currently showing mock data — connect the API endpoint to enable live data.
+          </p>
+        </div>
       </div>
     </div>
   );

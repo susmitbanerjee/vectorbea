@@ -212,13 +212,13 @@ export default function SettingsPage() {
   const confirmReset = () => {
     setResetOpen(false);
     toast.success("Workspace reset request submitted.", {
-      description: "Prompts and versions will be removed. Audit logs are retained for compliance.",
+      description: "Agent jobs and run history will be removed. Audit logs are retained for compliance.",
     });
   };
 
   const confirmRotateKey = () => {
     setRotateKeyOpen(false);
-    toast.success("Sidecar token rotation request submitted.");
+    toast.success("Worker token rotation request submitted.");
   };
 
   return (
@@ -299,9 +299,9 @@ export default function SettingsPage() {
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
               <div className="space-y-0.5">
-                <p className="text-sm font-medium">Rotate sidecar token</p>
+                <p className="text-sm font-medium">Rotate worker token</p>
                 <p className="text-xs text-muted-foreground">
-                  Regenerates deployment credentials for this workspace.
+                  Regenerates the worker authentication secret for this workspace.
                 </p>
               </div>
               <Dialog open={rotateKeyOpen} onOpenChange={setRotateKeyOpen}>
@@ -313,9 +313,9 @@ export default function SettingsPage() {
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Rotate sidecar token?</DialogTitle>
+                    <DialogTitle>Rotate worker token?</DialogTitle>
                     <DialogDescription>
-                      Existing running sidecars will need the new token after rotation.
+                      Connected workers will need the new token to continue processing runs.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="mt-4 flex justify-end gap-2">
@@ -441,7 +441,7 @@ export default function SettingsPage() {
               <div>
                 <p className="text-sm font-medium">Reset workspace</p>
                 <p className="text-xs text-muted-foreground">
-                  Remove all prompts and prompt versions from this workspace.
+                  Remove all agent jobs and run history from this workspace.
                 </p>
               </div>
               <Dialog open={resetOpen} onOpenChange={setResetOpen}>
@@ -455,7 +455,7 @@ export default function SettingsPage() {
                   <DialogHeader>
                     <DialogTitle>Reset workspace?</DialogTitle>
                     <DialogDescription>
-                      This permanently deletes prompts and versions. Audit logs are not deleted.
+                      This permanently deletes all agent jobs, run history, and artifacts. Audit logs are not deleted.
                       This action cannot be undone.
                     </DialogDescription>
                   </DialogHeader>
@@ -480,7 +480,7 @@ export default function SettingsPage() {
               <MessageSquare className="h-4 w-4 text-primary" />
               Slack integration
             </CardTitle>
-            <CardDescription>Receive alerts, evaluation results, and rollout events in Slack.</CardDescription>
+            <CardDescription>Receive run failure alerts, approval requests, and budget warnings in Slack.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Status */}
@@ -544,10 +544,10 @@ export default function SettingsPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notify on</p>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {[
-                    { key: "alerts", label: "Alerts triggered" },
-                    { key: "regressions", label: "Regression failures" },
-                    { key: "evaluations", label: "Evaluation complete" },
-                    { key: "rollout", label: "Rollout events" },
+                    { key: "run_failed", label: "Run failed" },
+                    { key: "approval_requested", label: "Approval requested" },
+                    { key: "budget_exceeded", label: "Budget exceeded" },
+                    { key: "retry_exhausted", label: "Retries exhausted" },
                     { key: "quota", label: "Quota warnings" },
                   ].map(({ key, label }) => {
                     const enabled = slackConfig.events?.[key] ?? false;
@@ -611,10 +611,10 @@ export default function SettingsPage() {
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email me when</p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {[
-                  { key: "alerts", label: "Alert triggered" },
-                  { key: "regressions", label: "Regression failed" },
-                  { key: "evaluations", label: "Evaluation complete" },
-                  { key: "rollout", label: "Rollout blocked / promoted" },
+                  { key: "run_failed", label: "Run failed" },
+                  { key: "approval_requested", label: "Approval requested" },
+                  { key: "budget_exceeded", label: "Budget exceeded" },
+                  { key: "retry_exhausted", label: "Retries exhausted" },
                   { key: "quota", label: "Quota nearing limit" },
                 ].map(({ key, label }) => {
                   const enabled = notifPrefs?.events?.[key] ?? true;

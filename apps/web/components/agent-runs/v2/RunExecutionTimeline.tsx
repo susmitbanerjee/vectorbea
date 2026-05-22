@@ -9,11 +9,12 @@ import { RunTimelineEventCard } from "./RunTimelineEventCard";
 
 // ─── Filter groups ─────────────────────────────────────────────────────────────
 
-type FilterGroup = "all" | "agents" | "llm" | "tools" | "http" | "approvals" | "artifacts" | "errors";
+type FilterGroup = "all" | "agents" | "steps" | "llm" | "tools" | "http" | "approvals" | "artifacts" | "errors";
 
 const FILTER_CONFIG: Record<FilterGroup, { label: string; types?: TimelineEventType[] }> = {
   all: { label: "All" },
   agents: { label: "Agents", types: ["AGENT_SELECTED", "AGENT_STARTED", "AGENT_COMPLETED", "AGENT_FAILED"] },
+  steps: { label: "Steps", types: ["STEP_STARTED", "STEP_COMPLETED", "STEP_FAILED"] },
   llm: { label: "LLM", types: ["LLM_CALL_STARTED", "LLM_CALL_COMPLETED", "LLM_CALL_FAILED"] },
   tools: { label: "Tools", types: ["TOOL_CALL_STARTED", "TOOL_CALL_COMPLETED", "TOOL_CALL_FAILED"] },
   http: { label: "HTTP", types: ["HTTP_CALL_STARTED", "HTTP_CALL_COMPLETED", "HTTP_CALL_FAILED"] },
@@ -31,7 +32,7 @@ interface RunExecutionTimelineProps {
 
 export function RunExecutionTimeline({ events, className }: RunExecutionTimelineProps) {
   const [filter, setFilter] = useState<FilterGroup>("all");
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [expandAll, setExpandAll] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 

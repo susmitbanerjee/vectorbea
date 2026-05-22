@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Clock, Coins, Copy, User, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RunTimelineEventUi } from "@/types/agent-run-ui";
@@ -60,6 +60,9 @@ interface RunTimelineEventCardProps {
 export function RunTimelineEventCard({ event, isLast, defaultExpanded = false, showDate = false }: RunTimelineEventCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [copied, setCopied] = useState(false);
+
+  // Sync with parent "Expand all / Collapse all" toggle
+  useEffect(() => { setExpanded(defaultExpanded); }, [defaultExpanded]);
 
   const compact = isCompactEvent(event.type);
   const isFailed = event.status === "FAILED";

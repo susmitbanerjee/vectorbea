@@ -241,7 +241,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         <div className="mb-2 mt-4 border-t border-sidebar-border" />
 
         <a
-          href="https://docs.vectorbea.com"
+          href="https://docs.vectorbee.com"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-[12px] text-sidebar-muted transition-all duration-150 hover:bg-sidebar-hover hover:text-sidebar-fg"
@@ -251,17 +251,28 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         </a>
       </nav>
 
-      {/* Bottom: status + user */}
-      <div className="space-y-2 border-t border-sidebar-border px-3 py-3">
-        {/* Worker fleet status pill */}
+      {/* Bottom: env + worker + user */}
+      <div className="border-t border-sidebar-border px-3 py-3 space-y-2">
+
+        {/* Environment + version row */}
+        <div className="flex items-center justify-between px-1">
+          <span className="inline-flex items-center gap-1 rounded border border-blue-500/20 bg-blue-500/8 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400">
+            Development
+          </span>
+          <span className="text-[9px] font-mono text-sidebar-muted/60">MVP Preview</span>
+        </div>
+
+        {/* Worker status */}
         <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
-          <span className={cn("live-dot h-1.5 w-1.5", !workspaceSummary && "!bg-red-500")} />
+          <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", workspaceSummary ? "live-dot" : "bg-red-500")} />
           <div className="flex-1 min-w-0">
             <p className="truncate text-[11px] font-medium text-sidebar-fg">
-              {workspaceSummary ? `${workspaceSummary.activeAgents} worker${workspaceSummary.activeAgents === 1 ? "" : "s"} online` : "—"}
+              {workspaceSummary
+                ? `${workspaceSummary.activeAgents} worker${workspaceSummary.activeAgents === 1 ? "" : "s"} connected`
+                : "No workers connected"}
             </p>
             <p className="text-[10px] text-sidebar-muted">
-              {workspaceSummary ? "Scheduler active" : "No workers connected"}
+              {workspaceSummary ? "Scheduler active" : "Start a worker to run jobs"}
             </p>
           </div>
           <Badge
@@ -274,25 +285,21 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
         {/* Plan badge */}
         {planTier && planTier !== "free" && (
-          <div className="px-2 pb-0.5">
-            <span
-              className={[
-                "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                planTier === "enterprise"
-                  ? "bg-[#1E1B4B]/10 text-[#3730A3]"
-                  : planTier === "pro"
-                    ? "bg-[#2563EB]/10 text-[#1D4ED8]"
-                    : "bg-[#7C3AED]/10 text-[#6D28D9]",
-              ].join(" ")}
-            >
+          <div className="px-1">
+            <span className={cn(
+              "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+              planTier === "enterprise" ? "bg-[#1E1B4B]/10 text-[#3730A3]"
+              : planTier === "pro" ? "bg-[#2563EB]/10 text-[#1D4ED8]"
+              : "bg-[#7C3AED]/10 text-[#6D28D9]",
+            )}>
               {planTier === "pro" ? "Pro" : planTier === "enterprise" ? "Enterprise" : "Plus"}
             </span>
           </div>
         )}
 
-        {/* User */}
+        {/* User row */}
         {user && (
-          <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
+          <div className="flex items-center gap-2 rounded-md px-1 py-1.5">
             {user.avatar_url ? (
               <Image
                 src={user.avatar_url}
