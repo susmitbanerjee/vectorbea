@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
@@ -13,10 +13,16 @@ const geist = Geist({
   weight: ["400", "500", "600", "700"],
 });
 
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "VectorBea",
+  title: "Vectorbee",
   description:
-    "AI Risk Control for Production LLMs. Prevent bad AI outputs, detect regressions, block unsafe rollouts, and audit every inference — control plane in the cloud, data stays in your VPC.",
+    "Production control plane for scheduled and long-running AI agent jobs. Schedule, inspect, retry, and approve AI agent runs with complete execution traceability.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     shortcut: "/icon.svg",
@@ -28,7 +34,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={geist.variable}>
+    <html lang="en" suppressHydrationWarning className={`${geist.variable} ${geistMono.variable} dark`}>
       <body className="font-sans antialiased">
         <ThemeProvider>
           <div className="min-h-screen bg-background text-foreground">

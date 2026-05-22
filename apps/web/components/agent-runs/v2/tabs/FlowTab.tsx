@@ -1,4 +1,4 @@
-import { ArrowDown, Bot, Clock, Coins, Wrench, Zap } from "lucide-react";
+import { ArrowDown, Bot, CheckCircle2, Clock, Coins, Timer, Wrench, XCircle, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentExecutionSummary, RunTimelineEventUi, TimelineEventStatus } from "@/types/agent-run-ui";
 
@@ -13,55 +13,113 @@ function fmtDur(ms?: number) {
   return `${m}m ${s}s`;
 }
 
-const STATUS: Record<TimelineEventStatus, { dot: string; ring: string; label: string; text: string }> = {
-  SUCCEEDED: { dot: "bg-emerald-500", ring: "border-emerald-500/30 bg-emerald-500/[0.06]", label: "Succeeded", text: "text-emerald-500" },
-  FAILED:    { dot: "bg-red-500",     ring: "border-red-500/30 bg-red-500/[0.06]",         label: "Failed",    text: "text-red-500" },
-  RUNNING:   { dot: "bg-blue-500 animate-pulse", ring: "border-blue-500/30 bg-blue-500/[0.06]", label: "Running", text: "text-blue-500" },
-  WAITING:   { dot: "bg-amber-500",  ring: "border-amber-500/30 bg-amber-500/[0.06]",      label: "Waiting",   text: "text-amber-500" },
-  PENDING:   { dot: "bg-muted-foreground/40", ring: "border-border bg-muted/30",           label: "Pending",   text: "text-muted-foreground" },
-  CANCELLED: { dot: "bg-muted-foreground/40", ring: "border-border bg-muted/30",           label: "Cancelled", text: "text-muted-foreground" },
-  SKIPPED:   { dot: "bg-muted-foreground/30", ring: "border-border bg-muted/20",           label: "Skipped",   text: "text-muted-foreground" },
+// ─── Status config ────────────────────────────────────────────────────────────
+
+const STATUS: Record<TimelineEventStatus, {
+  dot: string;
+  border: string;
+  bg: string;
+  label: string;
+  text: string;
+  icon: React.ReactNode;
+}> = {
+  SUCCEEDED: {
+    dot: "bg-emerald-500",
+    border: "border-emerald-500/20",
+    bg: "bg-emerald-500/5",
+    label: "Completed",
+    text: "text-emerald-400",
+    icon: <CheckCircle2 className="h-3 w-3" />,
+  },
+  FAILED: {
+    dot: "bg-red-500",
+    border: "border-red-500/20",
+    bg: "bg-red-500/5",
+    label: "Failed",
+    text: "text-red-400",
+    icon: <XCircle className="h-3 w-3" />,
+  },
+  RUNNING: {
+    dot: "bg-sky-400 animate-pulse",
+    border: "border-sky-500/20",
+    bg: "bg-sky-500/5",
+    label: "Running",
+    text: "text-sky-400",
+    icon: <Timer className="h-3 w-3" />,
+  },
+  WAITING: {
+    dot: "bg-amber-500",
+    border: "border-amber-500/20",
+    bg: "bg-amber-500/5",
+    label: "Waiting",
+    text: "text-amber-400",
+    icon: <Clock className="h-3 w-3" />,
+  },
+  PENDING: {
+    dot: "bg-slate-500",
+    border: "border-border/40",
+    bg: "",
+    label: "Pending",
+    text: "text-muted-foreground",
+    icon: <Clock className="h-3 w-3" />,
+  },
+  CANCELLED: {
+    dot: "bg-slate-500",
+    border: "border-border/40",
+    bg: "",
+    label: "Cancelled",
+    text: "text-muted-foreground",
+    icon: <XCircle className="h-3 w-3" />,
+  },
+  SKIPPED: {
+    dot: "bg-slate-600",
+    border: "border-border/30",
+    bg: "",
+    label: "Skipped",
+    text: "text-muted-foreground/60",
+    icon: <Clock className="h-3 w-3" />,
+  },
 };
 
-// ─── Props ───────────────────────────────────────────────────────────────────
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface FlowTabProps {
   agents: AgentExecutionSummary[];
   timelineEvents: RunTimelineEventUi[];
 }
 
-// ─── Derived: build ordered agent flow from AGENT_HANDOFF events ─────────────
+// ─── Build ordered chain from AGENT_HANDOFF events ───────────────────────────
 
 interface FlowNode {
   agent: AgentExecutionSummary;
-  handoffTo?: string;   // name of next agent in chain
-  handoffAt?: string;   // ISO timestamp of handoff
+  handoffTo?: string;
+  handoffAt?: string;
+  handoffLabel?: string;
 }
 
 function buildFlow(agents: AgentExecutionSummary[], events: RunTimelineEventUi[]): FlowNode[] {
-  // Index agents by name
   const byName = new Map(agents.map(a => [a.name, a]));
-
-  // Collect handoff events in order
   const handoffs = events
     .filter(e => e.type === "AGENT_HANDOFF")
     .sort((a, b) => a.sequence - b.sequence);
 
-  // Build ordered list: first agent is the one that produced the first handoff, or just agents[0]
   const ordered: FlowNode[] = [];
   const visited = new Set<string>();
 
-  // Walk handoffs
   for (const handoff of handoffs) {
     const fromName = handoff.agentName;
     const toName = handoff.handoffTo;
     if (fromName && !visited.has(fromName) && byName.has(fromName)) {
-      ordered.push({ agent: byName.get(fromName)!, handoffTo: toName, handoffAt: handoff.timestamp });
+      ordered.push({
+        agent: byName.get(fromName)!,
+        handoffTo: toName,
+        handoffAt: handoff.timestamp,
+        handoffLabel: handoff.summary,
+      });
       visited.add(fromName);
     }
   }
 
-  // Add any agents not yet in the list (last agent, or agents without a handoff)
   for (const agent of agents) {
     if (!visited.has(agent.name)) {
       ordered.push({ agent });
@@ -72,131 +130,285 @@ function buildFlow(agents: AgentExecutionSummary[], events: RunTimelineEventUi[]
   return ordered;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function FlowTab({ agents, timelineEvents }: FlowTabProps) {
   if (agents.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 py-16 text-center">
-        <Bot className="h-8 w-8 text-muted-foreground/30" />
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <Bot className="h-8 w-8 text-muted-foreground/20" />
         <p className="text-sm text-muted-foreground">No agent execution data available.</p>
       </div>
     );
   }
 
   const flow = buildFlow(agents, timelineEvents);
+  const totalDurationMs = agents.reduce((acc, a) => acc + (a.durationMs ?? 0), 0);
 
   return (
-    <div className="flex flex-col items-center gap-0 py-2">
+    <div className="space-y-0">
+      {/* Legend */}
+      <div
+        className="mb-5 flex items-center gap-4 rounded-lg px-4 py-2.5 text-[11px]"
+        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+      >
+        <span style={{ color: "var(--text-faint)" }} className="uppercase tracking-wider font-semibold text-[10px]">
+          Agent Chain
+        </span>
+        <div className="flex items-center gap-1" style={{ color: "var(--text-faint)" }}>
+          <span style={{ color: "var(--text-muted)" }}>{flow.length} agents</span>
+          <span>·</span>
+          <span style={{ color: "var(--text-muted)" }}>{fmtDur(totalDurationMs)} total</span>
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          {[
+            { dot: "bg-emerald-500", label: "Completed" },
+            { dot: "bg-sky-400", label: "Running" },
+            { dot: "bg-amber-500", label: "Waiting" },
+            { dot: "bg-red-500", label: "Failed" },
+          ].map(s => (
+            <div key={s.label} className="flex items-center gap-1.5">
+              <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+              <span style={{ color: "var(--text-faint)" }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Run start node */}
+      <div className="flex flex-col items-center">
+        <div
+          className="flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-medium"
+          style={{
+            background: "rgba(56,189,248,0.08)",
+            border: "1px solid rgba(56,189,248,0.18)",
+            color: "#38BDF8",
+          }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+          RUN START
+        </div>
+        <div className="h-4 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
+      </div>
+
+      {/* Agent nodes */}
       {flow.map((node, idx) => (
-        <div key={node.agent.id} className="flex flex-col items-center w-full max-w-xl">
-          <AgentFlowNode node={node} index={idx} />
-          {/* Connector arrow to next node */}
+        <div key={node.agent.id} className="flex flex-col items-center">
+          <AgentFlowNode node={node} index={idx} total={flow.length} />
           {idx < flow.length - 1 && (
-            <HandoffConnector handoffTo={node.handoffTo} handoffAt={node.handoffAt} />
+            <HandoffConnector
+              handoffTo={node.handoffTo}
+              handoffAt={node.handoffAt}
+              label={node.handoffLabel}
+            />
           )}
         </div>
       ))}
+
+      {/* Run end node */}
+      <div className="flex flex-col items-center">
+        <div className="h-4 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
+        <div
+          className="flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-medium"
+          style={{
+            background: "rgba(16,185,129,0.08)",
+            border: "1px solid rgba(16,185,129,0.2)",
+            color: "#10B981",
+          }}
+        >
+          <CheckCircle2 className="h-3 w-3" />
+          RUN COMPLETE
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── Agent node card ──────────────────────────────────────────────────────────
+// ─── Agent node ───────────────────────────────────────────────────────────────
 
-function AgentFlowNode({ node, index }: { node: FlowNode; index: number }) {
+function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; total: number }) {
   const { agent } = node;
   const scfg = STATUS[agent.status] ?? STATUS.PENDING;
+  const durationPct = agent.durationMs ? Math.min(100, Math.round((agent.durationMs / 60000) * 100)) : 0;
 
   return (
-    <div className={cn(
-      "w-full rounded-xl border p-4 space-y-3 transition-colors",
-      scfg.ring,
-    )}>
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          {/* Index badge */}
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-violet-500/25 bg-violet-500/10 font-mono text-[10px] font-bold text-violet-400">
-            {index + 1}
-          </span>
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-violet-500/20 bg-violet-500/10">
-            <Bot className="h-3.5 w-3.5 text-violet-400" />
-          </span>
-          <div>
-            <p className="text-[13px] font-semibold leading-tight text-foreground">{agent.name}</p>
-            <p className="text-[11px] text-muted-foreground">{agent.role}</p>
+    <div
+      className={cn("w-full max-w-2xl rounded-xl border transition-all", scfg.border, scfg.bg)}
+      style={{ background: "var(--surface-2)", borderColor: undefined }}
+      // Override via inline style only for non-status borders
+    >
+      <div
+        className={cn("w-full rounded-xl border", scfg.border)}
+        style={{ background: "var(--surface-2)" }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between gap-3 px-4 py-3"
+          style={{ borderBottom: "1px solid rgba(148,163,184,0.08)" }}
+        >
+          <div className="flex items-center gap-3">
+            {/* Index bubble */}
+            <div
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-bold"
+              style={{
+                background: "rgba(139,92,246,0.15)",
+                border: "1px solid rgba(139,92,246,0.25)",
+                color: "#A78BFA",
+              }}
+            >
+              {index + 1}
+            </div>
+            {/* Agent icon */}
+            <div
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+              style={{
+                background: "rgba(139,92,246,0.1)",
+                border: "1px solid rgba(139,92,246,0.2)",
+              }}
+            >
+              <Bot className="h-3.5 w-3.5" style={{ color: "#A78BFA" }} />
+            </div>
+            <div>
+              <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                {agent.name}
+              </p>
+              <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+                {agent.role}
+              </p>
+            </div>
+          </div>
+
+          {/* Status */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className={cn("h-1.5 w-1.5 rounded-full", scfg.dot)} />
+            <span className={cn("text-[11px] font-medium", scfg.text)}>{scfg.label}</span>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
-          <span className={cn("h-1.5 w-1.5 rounded-full", scfg.dot)} />
-          <span className={cn("text-[11px] font-medium", scfg.text)}>{scfg.label}</span>
+
+        {/* Stats row */}
+        <div className="grid grid-cols-2 gap-3 px-4 py-3 sm:grid-cols-4">
+          <StatItem icon={<Clock className="h-3 w-3" />} label="Duration" value={fmtDur(agent.durationMs)} />
+          <StatItem icon={<span className="font-mono text-[10px] font-bold">#</span>} label="Steps" value={String(agent.stepsCount)} />
+          {agent.tokensUsed !== undefined && agent.tokensUsed > 0 && (
+            <StatItem icon={<Zap className="h-3 w-3" />} label="Tokens" value={agent.tokensUsed.toLocaleString()} />
+          )}
+          {agent.estimatedCostUsd !== undefined && agent.estimatedCostUsd > 0 && (
+            <StatItem icon={<Coins className="h-3 w-3" />} label="Cost" value={`$${agent.estimatedCostUsd.toFixed(4)}`} />
+          )}
         </div>
-      </div>
 
-      {/* Stats row */}
-      <div className="flex flex-wrap gap-2">
-        <StatChip icon={<Clock className="h-3 w-3" />} value={fmtDur(agent.durationMs)} label="duration" />
-        <StatChip icon={<span className="font-mono text-[10px] font-bold">#</span>} value={String(agent.stepsCount)} label="steps" />
-        {agent.tokensUsed !== undefined && agent.tokensUsed > 0 && (
-          <StatChip icon={<Zap className="h-3 w-3" />} value={agent.tokensUsed.toLocaleString()} label="tokens" />
+        {/* Duration progress bar */}
+        {agent.durationMs !== undefined && (
+          <div className="px-4 pb-1">
+            <div
+              className="h-0.5 w-full overflow-hidden rounded-full"
+              style={{ background: "rgba(148,163,184,0.08)" }}
+            >
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${durationPct}%`,
+                  background: agent.status === "FAILED" ? "#EF4444" :
+                    agent.status === "WAITING" ? "#F59E0B" : "#38BDF8",
+                }}
+              />
+            </div>
+          </div>
         )}
-        {agent.estimatedCostUsd !== undefined && agent.estimatedCostUsd > 0 && (
-          <StatChip icon={<Coins className="h-3 w-3" />} value={`$${agent.estimatedCostUsd.toFixed(4)}`} label="cost" />
+
+        {/* Tools used */}
+        {agent.toolsUsed && agent.toolsUsed.length > 0 && (
+          <div
+            className="mx-4 mb-3 mt-2 rounded-lg px-3 py-2"
+            style={{ background: "var(--surface-3)", border: "1px solid var(--border-subtle)" }}
+          >
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Wrench className="h-3 w-3 shrink-0" style={{ color: "var(--text-faint)" }} />
+              {agent.toolsUsed.map(t => (
+                <span
+                  key={t}
+                  className="rounded border px-1.5 py-0.5 font-mono text-[10px]"
+                  style={{
+                    background: "rgba(148,163,184,0.05)",
+                    borderColor: "rgba(148,163,184,0.12)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Output summary */}
+        {agent.outputSummary && (
+          <div
+            className="mx-4 mb-3 rounded-lg px-3 py-2 text-[12px] leading-relaxed"
+            style={{
+              background: "rgba(56,189,248,0.03)",
+              borderLeft: "2px solid rgba(56,189,248,0.3)",
+              color: "var(--text-muted)",
+            }}
+          >
+            {agent.outputSummary}
+          </div>
         )}
       </div>
-
-      {/* Tools used */}
-      {agent.toolsUsed && agent.toolsUsed.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <Wrench className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-          {agent.toolsUsed.map(t => (
-            <span key={t} className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              {t.length > 28 ? `${t.slice(0, 28)}…` : t}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Output summary */}
-      {agent.outputSummary && (
-        <p className="border-t border-border/40 pt-2.5 text-[12px] leading-relaxed text-muted-foreground">
-          {agent.outputSummary}
-        </p>
-      )}
     </div>
   );
 }
 
 // ─── Handoff connector ────────────────────────────────────────────────────────
 
-function HandoffConnector({ handoffTo, handoffAt }: { handoffTo?: string; handoffAt?: string }) {
+function HandoffConnector({ handoffTo, handoffAt, label }: {
+  handoffTo?: string;
+  handoffAt?: string;
+  label?: string;
+}) {
   return (
-    <div className="flex flex-col items-center gap-1 py-1">
-      <div className="h-4 w-px bg-border/60" />
-      <div className="flex items-center gap-1.5 rounded border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-1">
-        <ArrowDown className="h-3 w-3 text-cyan-400" />
-        <span className="font-mono text-[10px] text-cyan-400">
-          HANDOFF{handoffTo ? ` → ${handoffTo}` : ""}
+    <div className="flex flex-col items-center gap-0.5 py-1 w-full max-w-2xl">
+      <div className="h-3 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
+      <div
+        className="flex items-center gap-2 self-stretch rounded-lg px-3 py-2"
+        style={{
+          background: "rgba(34,211,238,0.04)",
+          border: "1px solid rgba(34,211,238,0.12)",
+        }}
+      >
+        <ArrowDown className="h-3 w-3 shrink-0" style={{ color: "#22D3EE" }} />
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#22D3EE" }}>
+          AGENT HANDOFF
         </span>
+        {handoffTo && (
+          <>
+            <span style={{ color: "rgba(148,163,184,0.4)" }}>→</span>
+            <span className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {handoffTo}
+            </span>
+          </>
+        )}
         {handoffAt && (
-          <span className="text-[10px] text-muted-foreground/50 ml-1">
+          <span className="ml-auto font-mono text-[10px]" style={{ color: "var(--text-faint)" }}>
             {new Date(handoffAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </span>
         )}
       </div>
-      <div className="h-4 w-px bg-border/60" />
+      <div className="h-3 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
     </div>
   );
 }
 
-// ─── Stat chip ────────────────────────────────────────────────────────────────
+// ─── Stat item ────────────────────────────────────────────────────────────────
 
-function StatChip({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
+function StatItem({ icon, label, value }: { icon: React.ReactNode; value: string; label: string }) {
   return (
-    <div className="flex items-center gap-1 rounded-md border border-border/50 bg-muted/30 px-2 py-1">
-      <span className="text-muted-foreground/70">{icon}</span>
-      <span className="text-[11px] font-medium text-foreground">{value}</span>
-      <span className="text-[10px] text-muted-foreground/60">{label}</span>
+    <div className="flex items-center gap-1.5">
+      <span style={{ color: "var(--text-faint)" }}>{icon}</span>
+      <div>
+        <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>{label}</p>
+        <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{value}</p>
+      </div>
     </div>
   );
 }

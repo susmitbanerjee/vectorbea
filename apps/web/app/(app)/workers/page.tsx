@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { RefreshCw, Server } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Activity, RefreshCw, Server, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -19,6 +16,8 @@ interface Worker {
   heartbeat: string;
   version: string;
   host: string;
+  region: string;
+  uptimeHrs: number;
 }
 
 const MOCK_WORKERS: Worker[] = [
@@ -32,6 +31,8 @@ const MOCK_WORKERS: Worker[] = [
     heartbeat: "2s ago",
     version: "v0.9.4",
     host: "worker-prod-1.us-east-1",
+    region: "us-east-1",
+    uptimeHrs: 142,
   },
   {
     id: "wkr_02KCP5Y9L0RSKN5O8WUDQE7XG",
@@ -43,6 +44,8 @@ const MOCK_WORKERS: Worker[] = [
     heartbeat: "4s ago",
     version: "v0.9.4",
     host: "worker-prod-2.us-east-1",
+    region: "us-east-1",
+    uptimeHrs: 97,
   },
   {
     id: "wkr_03LDQ6Z0M1STLO6P9XVERH8YH",
@@ -54,37 +57,93 @@ const MOCK_WORKERS: Worker[] = [
     heartbeat: "8s ago",
     version: "v0.9.3",
     host: "worker-prod-3.us-east-1",
+    region: "us-east-1",
+    uptimeHrs: 58,
   },
+];
+
+const QUEUE_HEALTH = [
+  { name: "default",         waiting: 2,  active: 3,  delayed: 0, failed: 0,  color: "#38BDF8" },
+  { name: "priority",        waiting: 0,  active: 1,  delayed: 0, failed: 0,  color: "#22D3EE" },
+  { name: "delayed",         waiting: 4,  active: 0,  delayed: 4, failed: 0,  color: "#F59E0B" },
+  { name: "dead-letter",     waiting: 0,  active: 0,  delayed: 0, failed: 3,  color: "#EF4444" },
 ];
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG = {
-  CONNECTED: {
-    dot: "bg-emerald-500",
-    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    label: "Connected",
-  },
-  IDLE: {
-    dot: "bg-blue-400",
-    badge: "border-blue-200 bg-blue-50 text-blue-700",
-    label: "Idle",
-  },
-  DISCONNECTED: {
-    dot: "bg-red-400",
-    badge: "border-red-200 bg-red-50 text-red-700",
-    label: "Disconnected",
-  },
+const STATUS_CFG = {
+  CONNECTED:    { dot: "bg-emerald-500", text: "text-emerald-400", label: "Connected",    bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+  IDLE:         { dot: "bg-sky-400",     text: "text-sky-400",     label: "Idle",         bg: "bg-sky-500/10",     border: "border-sky-500/20" },
+  DISCONNECTED: { dot: "bg-red-500",     text: "text-red-400",     label: "Disconnected", bg: "bg-red-500/10",     border: "border-red-500/20" },
 };
 
-// ─── Page ────────────────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function MetricCard({
+  label,
+  value,
+  sub,
+  accent,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  accent?: string;
+  icon?: React.ElementType;
+}) {
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-2"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-faint)" }}>
+          {label}
+        </p>
+        {Icon && <Icon className="h-3.5 w-3.5" style={{ color: "var(--text-faint)" }} />}
+      </div>
+      <p
+        className="text-[28px] font-semibold leading-none tracking-tight"
+        style={{ color: accent ?? "var(--text-primary)" }}
+      >
+        {value}
+      </p>
+      <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>{sub}</p>
+    </div>
+  );
+}
+
+function CapacityBar({ used, total, color = "#38BDF8" }: { used: number; total: number; color?: string }) {
+  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+  const barColor = pct >= 80 ? "#F59E0B" : pct >= 60 ? "#38BDF8" : "#10B981";
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className="h-1.5 w-24 overflow-hidden rounded-full"
+        style={{ background: "rgba(148,163,184,0.12)" }}
+      >
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${pct}%`, backgroundColor: color !== "#38BDF8" ? color : barColor }}
+        />
+      </div>
+      <span className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>
+        {used}/{total}
+      </span>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function WorkersPage() {
   const [refreshing, setRefreshing] = useState(false);
 
-  const totalActive = MOCK_WORKERS.reduce((acc, w) => acc + w.activeTasks, 0);
-  const totalCapacity = MOCK_WORKERS.reduce((acc, w) => acc + w.maxCapacity, 0);
-  const connected = MOCK_WORKERS.filter((w) => w.status === "CONNECTED").length;
+  const totalActive = MOCK_WORKERS.reduce((a, w) => a + w.activeTasks, 0);
+  const totalCapacity = MOCK_WORKERS.reduce((a, w) => a + w.maxCapacity, 0);
+  const connected = MOCK_WORKERS.filter(w => w.status === "CONNECTED").length;
+  const idle = MOCK_WORKERS.filter(w => w.status === "IDLE").length;
 
   function handleRefresh() {
     setRefreshing(true);
@@ -92,160 +151,246 @@ export default function WorkersPage() {
   }
 
   return (
-    <div className="space-y-6 p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+    <div className="min-h-full p-6 lg:p-8" style={{ color: "var(--text-primary)" }}>
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[18px] font-semibold tracking-tight">Workers</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Active worker processes and execution capacity.
+          <h1 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+            Workers
+          </h1>
+          <p className="mt-1 text-[13px]" style={{ color: "var(--text-muted)" }}>
+            Monitor worker processes, queue assignments, active tasks, and heartbeat health.
           </p>
         </div>
         <button
           type="button"
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all disabled:opacity-50"
+          style={{
+            background: "var(--surface-2)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-secondary)",
+          }}
+          onMouseOver={e => (e.currentTarget.style.borderColor = "var(--border-strong)")}
+          onMouseOut={e => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
         >
-          <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
+          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           Refresh
         </button>
       </div>
 
-      {/* Summary strip */}
-      <div className="flex flex-wrap items-center gap-5 rounded-lg border border-border bg-muted/30 px-5 py-3">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Workers</p>
-          <p className="mt-0.5 text-[18px] font-semibold leading-none">{MOCK_WORKERS.length}</p>
+      {/* ── Metric cards ──────────────────────────────────────────────── */}
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard
+          label="Connected"
+          value={`${connected} / ${MOCK_WORKERS.length}`}
+          sub={idle > 0 ? `${idle} idle worker${idle > 1 ? "s" : ""}` : "All workers active"}
+          accent="#10B981"
+          icon={Server}
+        />
+        <MetricCard
+          label="Active Tasks"
+          value={String(totalActive)}
+          sub="Across default and priority queues"
+          accent="#38BDF8"
+          icon={Zap}
+        />
+        <MetricCard
+          label="Max Capacity"
+          value={String(totalCapacity)}
+          sub={`${totalCapacity - totalActive} slots available`}
+          icon={Activity}
+        />
+        <MetricCard
+          label="Last Heartbeat"
+          value="2s ago"
+          sub="All workers healthy"
+          accent="#10B981"
+        />
+      </div>
+
+      {/* ── Worker fleet table ────────────────────────────────────────── */}
+      <div
+        className="mb-6 overflow-hidden rounded-xl"
+        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+      >
+        {/* Table header */}
+        <div
+          className="flex items-center justify-between px-5 py-3.5"
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+            Worker Fleet
+          </p>
+          <span
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ background: "rgba(16,185,129,0.1)", color: "#10B981" }}
+          >
+            {connected} online
+          </span>
         </div>
-        <div className="h-8 w-px bg-border" />
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Connected</p>
-          <p className="mt-0.5 text-[18px] font-semibold leading-none text-emerald-600">{connected}</p>
-        </div>
-        <div className="h-8 w-px bg-border" />
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Active Tasks</p>
-          <p className="mt-0.5 text-[18px] font-semibold leading-none">{totalActive}</p>
-        </div>
-        <div className="h-8 w-px bg-border" />
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Max Capacity</p>
-          <p className="mt-0.5 text-[18px] font-semibold leading-none">{totalCapacity}</p>
-        </div>
-        <div className="h-8 w-px bg-border" />
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Last Heartbeat</p>
-          <p className="mt-0.5 text-[13px] font-medium leading-none">2s ago</p>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                {["Worker", "Status", "Queue", "Active / Cap.", "Heartbeat", "Version", "Region"].map(h => (
+                  <th
+                    key={h}
+                    className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider"
+                    style={{ color: "var(--text-faint)" }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {MOCK_WORKERS.map((w, i) => {
+                const cfg = STATUS_CFG[w.status];
+                return (
+                  <tr
+                    key={w.id}
+                    className="group transition-colors"
+                    style={i < MOCK_WORKERS.length - 1 ? { borderBottom: "1px solid rgba(148,163,184,0.06)" } : {}}
+                    onMouseOver={e => (e.currentTarget.style.background = "var(--surface-hover)")}
+                    onMouseOut={e => (e.currentTarget.style.background = "")}
+                  >
+                    {/* Worker identity */}
+                    <td className="px-5 py-3.5">
+                      <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                        {w.shortId}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>
+                        {w.host}
+                      </p>
+                    </td>
+
+                    {/* Status badge */}
+                    <td className="px-5 py-3.5">
+                      <span
+                        className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium", cfg.bg, cfg.border)}
+                      >
+                        <span className={cn("h-1.5 w-1.5 rounded-full", cfg.dot,
+                          w.status === "CONNECTED" && "animate-pulse"
+                        )} />
+                        <span className={cfg.text}>{cfg.label}</span>
+                      </span>
+                    </td>
+
+                    {/* Queue chip */}
+                    <td className="px-5 py-3.5">
+                      <span
+                        className="rounded border px-1.5 py-0.5 font-mono text-[11px]"
+                        style={{ background: "var(--surface-3)", border: "1px solid var(--border-subtle)", color: "var(--text-muted)" }}
+                      >
+                        {w.queue}
+                      </span>
+                    </td>
+
+                    {/* Capacity */}
+                    <td className="px-5 py-3.5">
+                      <CapacityBar used={w.activeTasks} total={w.maxCapacity} />
+                    </td>
+
+                    {/* Heartbeat */}
+                    <td className="px-5 py-3.5">
+                      <span className="font-mono text-[12px]" style={{ color: w.status !== "DISCONNECTED" ? "#10B981" : "#EF4444" }}>
+                        {w.heartbeat}
+                      </span>
+                    </td>
+
+                    {/* Version */}
+                    <td className="px-5 py-3.5">
+                      <span className="font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>
+                        {w.version}
+                      </span>
+                    </td>
+
+                    {/* Region */}
+                    <td className="px-5 py-3.5">
+                      <span className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>
+                        {w.region}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* Workers table */}
-      <Card className="overflow-hidden">
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Worker ID", "Status", "Queue", "Active Tasks", "Heartbeat", "Version", "Capacity", ""].map((h) => (
-                    <th
-                      key={h}
-                      className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70"
-                    >
-                      {h}
-                    </th>
+      {/* ── Queue health ──────────────────────────────────────────────── */}
+      <div
+        className="rounded-xl"
+        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+      >
+        <div
+          className="px-5 py-3.5"
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+            Queue Health
+          </p>
+          <p className="mt-0.5 text-[12px]" style={{ color: "var(--text-muted)" }}>
+            Job distribution and backlog across all queues.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 divide-y sm:grid-cols-2 sm:divide-x sm:divide-y-0"
+          style={{ "--tw-divide-opacity": "1" } as React.CSSProperties}
+        >
+          {QUEUE_HEALTH.map(q => {
+            const total = q.waiting + q.active + q.delayed + q.failed;
+            const pct = total === 0 ? 0 : Math.round((q.active / total) * 100);
+            return (
+              <div key={q.name} className="px-5 py-4" style={{ borderColor: "rgba(148,163,184,0.08)" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>
+                    {q.name}
+                  </span>
+                  <span className="font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>
+                    {total} jobs
+                  </span>
+                </div>
+                {/* Progress bar */}
+                <div
+                  className="mb-3 h-1.5 w-full overflow-hidden rounded-full"
+                  style={{ background: "rgba(148,163,184,0.1)" }}
+                >
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: total > 0 ? `${pct}%` : "0%", backgroundColor: q.color }}
+                  />
+                </div>
+                <div className="flex gap-4">
+                  {[
+                    { label: "waiting", val: q.waiting, color: "var(--text-muted)" },
+                    { label: "active",  val: q.active,  color: q.color },
+                    { label: "delayed", val: q.delayed, color: "#F59E0B" },
+                    { label: "failed",  val: q.failed,  color: "#EF4444" },
+                  ].map(s => (
+                    <div key={s.label}>
+                      <p className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-faint)" }}>
+                        {s.label}
+                      </p>
+                      <p className="text-[14px] font-semibold" style={{ color: s.color }}>
+                        {s.val}
+                      </p>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {MOCK_WORKERS.map((w) => {
-                  const cfg = STATUS_CONFIG[w.status];
-                  const pct = Math.round((w.activeTasks / w.maxCapacity) * 100);
-                  return (
-                    <tr key={w.id} className="group transition-colors hover:bg-muted/20">
-                      {/* Worker ID */}
-                      <td className="px-5 py-3.5">
-                        <p className="text-[13px] font-medium">{w.shortId}</p>
-                        <p className="font-mono text-[10px] text-muted-foreground/60">{w.host}</p>
-                      </td>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-                      {/* Status */}
-                      <td className="px-5 py-3.5">
-                        <Badge className={cn("gap-1.5 text-[10px]", cfg.badge)}>
-                          <span className={cn("h-1.5 w-1.5 rounded-full", cfg.dot)} />
-                          {cfg.label}
-                        </Badge>
-                      </td>
-
-                      {/* Queue */}
-                      <td className="px-5 py-3.5">
-                        <span className="rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                          {w.queue}
-                        </span>
-                      </td>
-
-                      {/* Active Tasks */}
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] font-medium">
-                            {w.activeTasks}/{w.maxCapacity}
-                          </span>
-                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className={cn(
-                                "h-full rounded-full transition-all",
-                                pct >= 80 ? "bg-amber-400" : "bg-emerald-500",
-                              )}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Heartbeat */}
-                      <td className="px-5 py-3.5">
-                        <span className="text-[12px] text-muted-foreground">{w.heartbeat}</span>
-                      </td>
-
-                      {/* Version */}
-                      <td className="px-5 py-3.5">
-                        <span className="font-mono text-[11px] text-muted-foreground">{w.version}</span>
-                      </td>
-
-                      {/* Capacity bar */}
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary/60"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-[11px] text-muted-foreground">{pct}%</span>
-                        </div>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-5 py-3.5">
-                        <button
-                          type="button"
-                          className="text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-                        >
-                          Details
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Info note */}
-      <p className="text-[11px] text-muted-foreground/60">
-        Workers poll the task queue every 500ms. Heartbeat timeout is 30s — workers that miss 3 consecutive heartbeats are marked disconnected.
+      {/* Footer note */}
+      <p className="mt-4 text-[11px] font-mono" style={{ color: "var(--text-faint)" }}>
+        Workers poll every 500ms · Heartbeat timeout 30s · 3 missed = disconnected
       </p>
     </div>
   );

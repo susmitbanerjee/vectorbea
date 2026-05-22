@@ -28,7 +28,7 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
 
   return (
     <Tabs defaultValue={defaultTab} className="space-y-0">
-      <div className="sticky top-0 z-10 -mx-0 border-b border-border/50 bg-background/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 -mx-0 backdrop-blur-sm" style={{ borderBottom: "1px solid rgba(148,163,184,0.1)", background: "rgba(10,15,26,0.95)" }}>
         <TabsList className="h-auto w-full justify-start rounded-none border-0 bg-transparent p-0 px-1 gap-0">
           <TabTrigger value="timeline" icon={<History className="h-3.5 w-3.5" />} label="Timeline">
             <span className="ml-1 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium tabular-nums">

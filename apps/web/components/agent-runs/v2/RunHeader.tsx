@@ -150,7 +150,10 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
       )}
 
       {/* Metadata strip */}
-      <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-border/50 bg-muted/20 px-4 py-3 text-xs">
+      <div
+        className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl px-4 py-3 text-xs"
+        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+      >
         <MetaItem icon={<Tag className="h-3.5 w-3.5" />} label="Trigger">{run.triggerSource}</MetaItem>
         <MetaItem icon={<Clock className="h-3.5 w-3.5" />} label="Started">{fmtTs(run.startedAt)}</MetaItem>
         {run.finishedAt && <MetaItem icon={<Clock className="h-3.5 w-3.5" />} label="Finished">{fmtTs(run.finishedAt)}</MetaItem>}

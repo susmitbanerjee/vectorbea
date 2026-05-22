@@ -13,7 +13,7 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ["var(--font-sans)", "Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
-        mono: ["JetBrains Mono", "Fira Code", "Menlo", "Consolas", "monospace"],
+        mono: ["var(--font-mono)", "Geist Mono", "JetBrains Mono", "Fira Code", "Menlo", "Consolas", "monospace"],
       },
       colors: {
         background:         "hsl(var(--background))",
@@ -49,14 +49,21 @@ const config: Config = {
           4: "hsl(var(--chart-4))",
           5: "hsl(var(--chart-5))",
         },
-        // Sidebar design tokens — dark infra-SaaS
+        // Sidebar design tokens
         sidebar: {
-          DEFAULT:    "#050812",
+          DEFAULT:    "#070A11",
           fg:         "#F8FAFC",
-          muted:      "#64748B",
-          border:     "#111D2C",
-          active:     "#111D2C",
-          hover:      "#0D1626",
+          muted:      "#94A3B8",
+          border:     "#0F1726",
+          active:     "#111A2B",
+          hover:      "#0F1726",
+        },
+        // Surface hierarchy
+        surface: {
+          1: "#0F1726",
+          2: "#111A2B",
+          3: "#162033",
+          hover: "#1B2840",
         },
       },
       borderRadius: {
@@ -67,21 +74,17 @@ const config: Config = {
         sm:    "0.375rem",
       },
       boxShadow: {
-        // Dark elevation system
-        xs:    "0 1px 2px rgba(0,0,0,0.25)",
-        sm:    "0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2)",
-        md:    "0 4px 8px -1px rgba(0,0,0,0.35), 0 2px 4px -1px rgba(0,0,0,0.25)",
-        lg:    "0 10px 18px -3px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.3)",
-        xl:    "0 20px 28px -5px rgba(0,0,0,0.45), 0 8px 12px -6px rgba(0,0,0,0.3)",
-        // Card-specific dark shadow
-        card:  "0 0 0 1px rgba(148,163,184,0.1), 0 2px 8px rgba(0,0,0,0.3)",
-        "card-hover": "0 0 0 1px rgba(148,163,184,0.2), 0 4px 16px rgba(0,0,0,0.4)",
-        panel: "0 0 0 1px rgba(148,163,184,0.1), 0 8px 32px rgba(0,0,0,0.35)",
-        // Sky-blue glow for primary actions
-        glow:     "0 0 24px rgba(56,189,248,0.2), 0 0 8px rgba(56,189,248,0.1)",
-        "glow-sm": "0 0 12px rgba(56,189,248,0.15)",
-        // Sidebar elevation
-        sidebar: "1px 0 0 rgba(148,163,184,0.08)",
+        xs:    "0 1px 2px rgba(0,0,0,0.4)",
+        sm:    "0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
+        md:    "0 4px 8px -1px rgba(0,0,0,0.5), 0 2px 4px -1px rgba(0,0,0,0.3)",
+        lg:    "0 10px 18px -3px rgba(0,0,0,0.5), 0 4px 6px -2px rgba(0,0,0,0.4)",
+        xl:    "0 20px 28px -5px rgba(0,0,0,0.55), 0 8px 12px -6px rgba(0,0,0,0.4)",
+        card:  "0 0 0 1px rgba(148,163,184,0.1), 0 2px 8px rgba(0,0,0,0.4)",
+        "card-hover": "0 0 0 1px rgba(148,163,184,0.18), 0 4px 16px rgba(0,0,0,0.5)",
+        panel: "0 0 0 1px rgba(148,163,184,0.1), 0 8px 32px rgba(0,0,0,0.5)",
+        glow:     "0 0 24px rgba(56,189,248,0.25), 0 0 8px rgba(56,189,248,0.12)",
+        "glow-sm": "0 0 12px rgba(56,189,248,0.18)",
+        sidebar: "1px 0 0 rgba(148,163,184,0.07)",
       },
       backgroundImage: {
         "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.10), transparent 65%)",

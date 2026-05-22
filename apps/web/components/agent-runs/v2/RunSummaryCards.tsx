@@ -28,13 +28,16 @@ function SummaryCard({ label, value, sub, icon, accent = "default" }: CardProps)
     purple: "text-violet-600 dark:text-violet-400",
   };
   return (
-    <div className="rounded-xl border border-border/50 bg-card/60 p-4 space-y-2">
+    <div
+      className="rounded-xl p-4 space-y-2"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+    >
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">{label}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>{label}</p>
         <span className={cn("h-4 w-4", accentMap[accent])}>{icon}</span>
       </div>
-      <p className="text-[20px] font-semibold tracking-tight leading-none">{value}</p>
-      {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+      <p className="text-[22px] font-semibold tracking-tight leading-none" style={{ color: "var(--text-primary)" }}>{value}</p>
+      {sub && <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{sub}</p>}
     </div>
   );
 }

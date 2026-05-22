@@ -121,22 +121,29 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left transition-all hover:bg-sidebar-hover"
+          className="group flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition-all"
+          style={{
+            background: "var(--surface-2)",
+            border: "1px solid rgba(148,163,184,0.1)",
+          }}
         >
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/60">
-              <Layers3 className="h-4 w-4 text-muted-foreground" />
+            <div
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+              style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.15)" }}
+            >
+              <Layers3 className="h-3.5 w-3.5" style={{ color: "#38BDF8" }} />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-sidebar-fg">
-                {activeWorkspace?.name ?? "No workspace"}
+              <p className="truncate text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                {activeWorkspace?.name ?? "Vectorbee Demo"}
               </p>
-              <p className="text-[10px] uppercase tracking-wider text-sidebar-muted">
-                {activeWorkspace?.organizationName ?? "Select workspace"}
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+                {activeWorkspace?.organizationName ?? "Development"}
               </p>
             </div>
           </div>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-colors group-hover:text-sidebar-fg" />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 transition-colors" style={{ color: "var(--text-faint)" }} />
         </button>
       </DropdownMenuTrigger>
 

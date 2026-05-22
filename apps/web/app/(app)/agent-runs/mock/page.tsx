@@ -39,7 +39,10 @@ export default function MockAgentRunPage() {
   return (
     <div className="min-h-full">
       {/* Scenario picker */}
-      <div className="border-b border-border/50 bg-muted/20 px-6 py-3 lg:px-8">
+      <div
+        className="px-6 py-3 lg:px-8"
+        style={{ borderBottom: "1px solid rgba(148,163,184,0.09)", background: "var(--surface-1)" }}
+      >
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
