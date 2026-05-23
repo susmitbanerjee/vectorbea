@@ -34,7 +34,7 @@ export default function MockAgentRunPage() {
     });
   }
 
-  const defaultTab = scenario === "waiting" ? "approvals" : "timeline";
+  const defaultTab = scenario === "waiting" ? "approvals" : "events";
 
   return (
     <div className="min-h-full">

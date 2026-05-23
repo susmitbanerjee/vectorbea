@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Search, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import React, { useState, useMemo } from "react";
+import { Search } from "lucide-react";
 import type { RunTimelineEventUi, TimelineEventType } from "@/types/agent-run-ui";
-import { getEventConfig } from "../EventTypeBadge";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Timestamp formatter ──────────────────────────────────────────────────────
 
 function fmtTs(ts: string) {
-  return new Date(ts).toLocaleTimeString(undefined, {
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  });
+  const d = new Date(ts);
+  return (
+    d.toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" }) +
+    " UTC " +
+    d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+  );
 }
 
 function fmtDur(ms?: number) {
@@ -20,157 +21,299 @@ function fmtDur(ms?: number) {
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const m = Math.floor(ms / 60_000);
   const s = Math.round((ms % 60_000) / 1000);
-  return `${m}m${s}s`;
+  return `${m}m ${s}s`;
 }
 
-const STATUS_DOT: Record<string, string> = {
-  SUCCEEDED: "#10B981",
-  FAILED:    "#EF4444",
-  RUNNING:   "#38BDF8",
-  WAITING:   "#F59E0B",
-  PENDING:   "#64748B",
-  CANCELLED: "#64748B",
-  SKIPPED:   "#475569",
-};
+// ─── Event config: icon glyph + dot color per type ───────────────────────────
 
-// ─── Filter definition ────────────────────────────────────────────────────────
+type EventMeta = { glyph: string; dotColor: string; label: string };
+
+function getEventMeta(type: TimelineEventType, status: string): EventMeta {
+  // Dot color driven by STATUS first, then type
+  const dotByStatus: Record<string, string> = {
+    SUCCEEDED: "#10B981",
+    FAILED:    "#EF4444",
+    RUNNING:   "#38BDF8",
+    WAITING:   "#F59E0B",
+    PENDING:   "#64748B",
+    CANCELLED: "#475569",
+    SKIPPED:   "#334155",
+  };
+
+  const dotColor = dotByStatus[status] ?? "#475569";
+
+  const glyphMap: Partial<Record<TimelineEventType, string>> = {
+    RUN_CREATED:            "⊕",
+    RUN_QUEUED:             "○",
+    RUN_STARTED:            "▶",
+    RUN_PAUSED:             "⏸",
+    RUN_RESUMED:            "▶",
+    RUN_SUCCEEDED:          "✓",
+    RUN_FAILED:             "✕",
+    RUN_CANCELLED:          "⊘",
+    RUN_TIMED_OUT:          "⏱",
+    BUDGET_CHECK_PASSED:    "$",
+    BUDGET_CHECK_FAILED:    "$",
+    POLICY_CHECK_PASSED:    "✓",
+    POLICY_CHECK_FAILED:    "✕",
+    AGENT_SELECTED:         "◈",
+    AGENT_STARTED:          "◈",
+    AGENT_PLAN_CREATED:     "◈",
+    AGENT_HANDOFF:          "⇢",
+    AGENT_COMPLETED:        "◈",
+    AGENT_FAILED:           "◈",
+    STEP_STARTED:           "◇",
+    STEP_COMPLETED:         "◇",
+    STEP_FAILED:            "◇",
+    LLM_CALL_STARTED:       "⚡",
+    LLM_CALL_COMPLETED:     "⚡",
+    LLM_CALL_FAILED:        "⚡",
+    LLM_OUTPUT_VALIDATED:   "⚡",
+    TOOL_CALL_STARTED:      "⬡",
+    TOOL_CALL_COMPLETED:    "⬡",
+    TOOL_CALL_FAILED:       "⬡",
+    HTTP_CALL_STARTED:      "⇄",
+    HTTP_CALL_COMPLETED:    "⇄",
+    HTTP_CALL_FAILED:       "⇄",
+    APPROVAL_REQUESTED:     "◉",
+    APPROVAL_APPROVED:      "◉",
+    APPROVAL_REJECTED:      "◉",
+    APPROVAL_EXPIRED:       "◉",
+    RETRY_SCHEDULED:        "↺",
+    RETRY_STARTED:          "↺",
+    RETRY_EXHAUSTED:        "↺",
+    ARTIFACT_CREATED:       "⬟",
+  };
+
+  // Human-readable short label
+  const labelMap: Partial<Record<TimelineEventType, string>> = {
+    RUN_CREATED:            "Run Created",
+    RUN_QUEUED:             "Run Queued",
+    RUN_STARTED:            "Run Started",
+    RUN_PAUSED:             "Run Paused",
+    RUN_RESUMED:            "Run Resumed",
+    RUN_SUCCEEDED:          "Run Succeeded",
+    RUN_FAILED:             "Run Failed",
+    RUN_CANCELLED:          "Run Cancelled",
+    RUN_TIMED_OUT:          "Run Timed Out",
+    BUDGET_CHECK_PASSED:    "Budget Check Passed",
+    BUDGET_CHECK_FAILED:    "Budget Check Failed",
+    POLICY_CHECK_PASSED:    "Policy Check Passed",
+    POLICY_CHECK_FAILED:    "Policy Check Failed",
+    AGENT_SELECTED:         "Agent Selected",
+    AGENT_STARTED:          "Agent Started",
+    AGENT_PLAN_CREATED:     "Agent Plan Created",
+    AGENT_HANDOFF:          "Agent Handoff",
+    AGENT_COMPLETED:        "Agent Completed",
+    AGENT_FAILED:           "Agent Failed",
+    STEP_STARTED:           "Step Started",
+    STEP_COMPLETED:         "Step Completed",
+    STEP_FAILED:            "Step Failed",
+    LLM_CALL_STARTED:       "LLM Call Started",
+    LLM_CALL_COMPLETED:     "LLM Call Completed",
+    LLM_CALL_FAILED:        "LLM Call Failed",
+    LLM_OUTPUT_VALIDATED:   "LLM Output Validated",
+    TOOL_CALL_STARTED:      "Tool Call Started",
+    TOOL_CALL_COMPLETED:    "Tool Call Completed",
+    TOOL_CALL_FAILED:       "Tool Call Failed",
+    HTTP_CALL_STARTED:      "HTTP Call Started",
+    HTTP_CALL_COMPLETED:    "HTTP Call Completed",
+    HTTP_CALL_FAILED:       "HTTP Call Failed",
+    APPROVAL_REQUESTED:     "Approval Requested",
+    APPROVAL_APPROVED:      "Approval Approved",
+    APPROVAL_REJECTED:      "Approval Rejected",
+    APPROVAL_EXPIRED:       "Approval Expired",
+    RETRY_SCHEDULED:        "Retry Scheduled",
+    RETRY_STARTED:          "Retry Started",
+    RETRY_EXHAUSTED:        "Retry Exhausted",
+    ARTIFACT_CREATED:       "Artifact Created",
+  };
+
+  return {
+    glyph: glyphMap[type] ?? "○",
+    dotColor,
+    label: labelMap[type] ?? type,
+  };
+}
+
+// Tag color per event category
+function tagColor(type: TimelineEventType): string {
+  if (type.startsWith("AGENT_"))    return "#A78BFA"; // violet
+  if (type.startsWith("LLM_"))      return "#C084FC"; // purple
+  if (type.startsWith("TOOL_"))     return "#22D3EE"; // cyan
+  if (type.startsWith("HTTP_"))     return "#6EE7B7"; // teal
+  if (type.startsWith("APPROVAL_")) return "#FCD34D"; // amber
+  if (type.startsWith("RETRY_"))    return "#FDA4AF"; // rose
+  if (type.startsWith("ARTIFACT_")) return "#86EFAC"; // green
+  if (type.startsWith("RUN_"))      return "#93C5FD"; // blue
+  return "#64748B";
+}
+
+// ─── Filter chips ─────────────────────────────────────────────────────────────
 
 type EventFilter = "ALL" | "AGENTS" | "LLM" | "TOOLS" | "HTTP" | "APPROVALS" | "RETRIES" | "ERRORS" | "ARTIFACTS";
 
 const FILTERS: { key: EventFilter; label: string; types?: TimelineEventType[] }[] = [
   { key: "ALL",       label: "All" },
-  { key: "AGENTS",    label: "Agents",    types: ["AGENT_STARTED", "AGENT_PLAN_CREATED", "AGENT_COMPLETED", "AGENT_FAILED", "AGENT_HANDOFF"] },
+  { key: "AGENTS",    label: "Agents",    types: ["AGENT_STARTED", "AGENT_PLAN_CREATED", "AGENT_COMPLETED", "AGENT_FAILED", "AGENT_HANDOFF", "AGENT_SELECTED"] },
   { key: "LLM",       label: "LLM",       types: ["LLM_CALL_STARTED", "LLM_CALL_COMPLETED", "LLM_CALL_FAILED", "LLM_OUTPUT_VALIDATED"] },
   { key: "TOOLS",     label: "Tools",     types: ["TOOL_CALL_STARTED", "TOOL_CALL_COMPLETED", "TOOL_CALL_FAILED"] },
   { key: "HTTP",      label: "HTTP",      types: ["HTTP_CALL_STARTED", "HTTP_CALL_COMPLETED", "HTTP_CALL_FAILED"] },
   { key: "APPROVALS", label: "Approvals", types: ["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED", "APPROVAL_EXPIRED"] },
   { key: "RETRIES",   label: "Retries",   types: ["RETRY_SCHEDULED", "RETRY_STARTED", "RETRY_EXHAUSTED"] },
-  { key: "ERRORS",    label: "Errors" },  // filtered by status
+  { key: "ERRORS",    label: "Errors" },
   { key: "ARTIFACTS", label: "Artifacts", types: ["ARTIFACT_CREATED"] },
 ];
 
-// ─── JSON panel ──────────────────────────────────────────────────────────────
+// ─── KV detail row ────────────────────────────────────────────────────────────
 
-function JsonPanel({ label, value }: { label: string; value: unknown }) {
-  const [copied, setCopied] = useState(false);
-  const json = JSON.stringify(value, null, 2);
-  async function copy() {
-    await navigator.clipboard.writeText(json);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
+function KVRow({ label, value, mono, accent }: { label: string; value: string; mono?: boolean; accent?: string }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>{label}</span>
-        <button type="button" onClick={() => void copy()} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-white/5" style={{ color: "var(--text-faint)" }}>
-          {copied ? <><Check className="h-3 w-3 text-emerald-500" />Copied</> : <><Copy className="h-3 w-3" />Copy</>}
-        </button>
-      </div>
-      <pre
-        className="max-h-40 overflow-auto rounded-lg px-3 py-2.5 text-[11px] leading-relaxed font-mono"
-        style={{ background: "#060A10", color: "#CBD5E1", border: "1px solid rgba(148,163,184,0.1)" }}
+    <div className="flex gap-3 py-1.5" style={{ borderBottom: "1px solid rgba(148,163,184,0.05)" }}>
+      <span
+        className="w-40 shrink-0 text-[11px] font-medium"
+        style={{ color: "var(--text-faint)" }}
       >
-        {json}
-      </pre>
+        {label}
+      </span>
+      <span
+        className={`text-[11px] ${mono ? "font-mono" : ""}`}
+        style={{ color: accent ?? "var(--text-secondary)" }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-// ─── Event detail drawer ──────────────────────────────────────────────────────
+// ─── Inline detail block ──────────────────────────────────────────────────────
 
-function EventDetailPanel({ event, onClose }: { event: RunTimelineEventUi; onClose: () => void }) {
-  const cfg = getEventConfig(event.type);
-  const dotColor = STATUS_DOT[event.status] ?? "#64748B";
+function EventDetail({ event }: { event: RunTimelineEventUi }) {
+  const meta = getEventMeta(event.type, event.status);
 
   return (
     <div
-      className="rounded-xl"
-      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+      className="px-4 py-3"
+      style={{ background: "rgba(56,189,248,0.03)", borderBottom: "1px solid rgba(148,163,184,0.08)" }}
     >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between gap-3 px-4 py-3"
-        style={{ borderBottom: "1px solid rgba(148,163,184,0.08)" }}
-      >
-        <div className="flex items-center gap-2.5">
-          <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
-          <span className="font-mono text-[11px] font-semibold" style={{ color: "var(--text-secondary)" }}>
-            #{event.sequence}
-          </span>
-          <span
-            className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium"
-            style={{ background: cfg.bg.replace("bg-", ""), borderColor: "rgba(148,163,184,0.15)", color: "var(--text-muted)" }}
-          >
-            {event.type}
-          </span>
-          <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
-            {event.title}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 transition-colors hover:bg-white/5"
-          style={{ color: "var(--text-faint)" }}
+      {/* Detail header */}
+      <div className="mb-3 flex items-center gap-2">
+        <span
+          className="rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+          style={{ background: "rgba(148,163,184,0.08)", color: tagColor(event.type) }}
         >
-          <X className="h-4 w-4" />
-        </button>
+          {event.type}
+        </span>
+        <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+          Event #{event.sequence}
+        </span>
       </div>
 
-      {/* Content */}
-      <div className="grid gap-4 p-4 sm:grid-cols-2">
-        {/* Left: core metadata */}
-        <div className="space-y-3">
-          <MetaRow label="Source" value={event.source} mono />
-          <MetaRow label="Status" value={event.status} />
-          <MetaRow label="Timestamp" value={new Date(event.timestamp).toLocaleString()} mono />
-          {event.durationMs !== undefined && <MetaRow label="Duration" value={fmtDur(event.durationMs) ?? "—"} mono />}
-          {event.agentName && <MetaRow label="Agent" value={event.agentName} mono />}
-          {event.toolName && <MetaRow label="Tool" value={event.toolName} mono />}
-          {event.modelName && <MetaRow label="Model" value={event.modelName} mono />}
-          {event.tokensUsed !== undefined && <MetaRow label="Tokens" value={event.tokensUsed.toLocaleString()} mono />}
-          {event.estimatedCostUsd !== undefined && <MetaRow label="Cost" value={`$${event.estimatedCostUsd.toFixed(6)}`} mono />}
-          {event.artifactName && <MetaRow label="Artifact" value={event.artifactName} mono />}
-          {event.handoffTo && <MetaRow label="Handoff To" value={event.handoffTo} mono />}
-          {event.summary && (
-            <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>Summary</p>
-              <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>{event.summary}</p>
-            </div>
-          )}
-          {event.errorMessage && (
-            <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#EF4444" }}>Error</p>
-              <p className="rounded-lg px-3 py-2 text-[12px] font-mono" style={{ background: "rgba(239,68,68,0.06)", color: "#FCA5A5" }}>
-                {event.errorMessage}
-              </p>
-            </div>
-          )}
-        </div>
+      {/* KV rows */}
+      <div className="space-y-0">
+        <KVRow label="Status"    value={event.status} />
+        <KVRow label="Source"    value={event.source} mono />
+        <KVRow label="Timestamp" value={fmtTs(event.timestamp)} mono />
 
-        {/* Right: JSON panels */}
-        <div className="space-y-3">
-          {event.inputJson !== undefined && <JsonPanel label="Input" value={event.inputJson} />}
-          {event.outputJson !== undefined && <JsonPanel label="Output" value={event.outputJson} />}
-          {event.approval && <JsonPanel label="Approval payload" value={event.approval} />}
-          {event.metadataJson !== undefined && <JsonPanel label="Metadata" value={event.metadataJson} />}
-        </div>
+        {event.durationMs !== undefined && (
+          <KVRow label="Duration" value={fmtDur(event.durationMs) ?? "—"} mono />
+        )}
+        {event.agentName && (
+          <KVRow label="Agent" value={event.agentName} mono accent="#A78BFA" />
+        )}
+        {event.toolName && (
+          <KVRow label="Tool" value={event.toolName} mono accent="#22D3EE" />
+        )}
+        {event.modelName && (
+          <KVRow label="Model" value={event.modelName} mono accent="#C084FC" />
+        )}
+        {event.tokensUsed !== undefined && (
+          <KVRow label="Tokens Used" value={event.tokensUsed.toLocaleString()} mono />
+        )}
+        {event.estimatedCostUsd !== undefined && (
+          <KVRow label="Estimated Cost" value={`$${event.estimatedCostUsd.toFixed(6)}`} mono />
+        )}
+        {event.handoffTo && (
+          <KVRow label="Handoff To" value={event.handoffTo} mono accent="#A78BFA" />
+        )}
+        {event.artifactName && (
+          <KVRow label="Artifact" value={event.artifactName} mono accent="#86EFAC" />
+        )}
+        {event.actorName && (
+          <KVRow label="Actor" value={event.actorName} mono />
+        )}
+        {event.summary && (
+          <KVRow label="Summary" value={event.summary} />
+        )}
+        {event.errorMessage && (
+          <KVRow label="Error" value={event.errorMessage} mono accent="#FCA5A5" />
+        )}
+
+        {/* Approval details */}
+        {event.approval != null && (() => {
+          const a = event.approval!;
+          return (
+            <>
+              <KVRow label="Approval ID"     value={a.id} mono />
+              <KVRow label="Approval Title"  value={a.title} />
+              <KVRow label="Approval Status" value={a.status} />
+              {a.decidedBy        && <KVRow label="Decided By"      value={a.decidedBy} mono />}
+              {a.decidedAt        && <KVRow label="Decided At"      value={fmtTs(a.decidedAt)} mono />}
+              {a.decisionReason   && <KVRow label="Decision Reason" value={a.decisionReason} />}
+            </>
+          );
+        })()}
+
+        {/* Metadata fields (flattened) */}
+        {event.metadataJson != null && typeof event.metadataJson === "object" &&
+          (Object.entries(event.metadataJson as Record<string, unknown>).map(([k, v]) => (
+            <KVRow
+              key={k}
+              label={k}
+              value={typeof v === "object" ? JSON.stringify(v) : String(v)}
+              mono
+            />
+          )) as React.ReactNode)
+        }
+
+        {/* Input / Output flattened KV */}
+        {event.inputJson != null && typeof event.inputJson === "object" && (
+          <div className="mt-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+              Input
+            </p>
+            {(Object.entries(event.inputJson as Record<string, unknown>).map(([k, v]) => (
+              <KVRow
+                key={k}
+                label={k}
+                value={typeof v === "object" ? JSON.stringify(v) : String(v)}
+                mono
+              />
+            )) as React.ReactNode)}
+          </div>
+        )}
+
+        {event.outputJson != null && typeof event.outputJson === "object" && (
+          <div className="mt-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+              Output
+            </p>
+            {(Object.entries(event.outputJson as Record<string, unknown>).map(([k, v]) => (
+              <KVRow
+                key={k}
+                label={k}
+                value={typeof v === "object" ? JSON.stringify(v) : String(v)}
+                mono
+              />
+            )) as React.ReactNode)}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function MetaRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-start gap-2">
-      <span className="w-20 shrink-0 text-[11px] font-semibold" style={{ color: "var(--text-faint)" }}>{label}</span>
-      <span className={cn("text-[12px]", mono && "font-mono")} style={{ color: "var(--text-secondary)" }}>{value}</span>
-    </div>
-  );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 interface EventHistoryTabProps {
   events: RunTimelineEventUi[];
@@ -178,8 +321,18 @@ interface EventHistoryTabProps {
 
 export function EventHistoryTab({ events }: EventHistoryTabProps) {
   const [activeFilter, setActiveFilter] = useState<EventFilter>("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedEvent, setSelectedEvent] = useState<RunTimelineEventUi | null>(null);
+  const [searchQuery, setSearchQuery]   = useState("");
+  // Allow multiple rows expanded simultaneously (like Temporal)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  function toggleExpanded(id: string) {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const filtered = useMemo(() => {
     let result = events;
@@ -207,177 +360,213 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
 
   return (
     <div className="space-y-3">
-      {/* Toolbar */}
+      {/* Toolbar: filter chips + search */}
       <div
-        className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2.5"
+        className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
         style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
       >
-        {/* Filter chips */}
-        <div className="flex flex-wrap gap-1.5 flex-1">
+        <div className="flex flex-1 flex-wrap gap-1">
           {FILTERS.map(f => (
             <button
               key={f.key}
               type="button"
               onClick={() => setActiveFilter(f.key)}
-              className={cn(
-                "rounded px-2 py-1 text-[11px] font-medium transition-colors",
+              className="rounded px-2 py-1 text-[11px] font-medium transition-colors"
+              style={
                 activeFilter === f.key
-                  ? "text-foreground"
-                  : "hover:bg-white/5",
-              )}
-              style={activeFilter === f.key
-                ? { background: "rgba(56,189,248,0.12)", color: "#38BDF8" }
-                : { color: "var(--text-faint)" }
+                  ? { background: "rgba(56,189,248,0.12)", color: "#38BDF8" }
+                  : { color: "var(--text-faint)" }
               }
             >
               {f.label}
               {f.key === "ERRORS" && errorCount > 0 && (
-                <span className="ml-1 rounded-full px-1 text-[9px]" style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444" }}>
+                <span
+                  className="ml-1 rounded-full px-1 text-[9px]"
+                  style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444" }}
+                >
                   {errorCount}
                 </span>
               )}
             </button>
           ))}
         </div>
-
-        {/* Search */}
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2" style={{ color: "var(--text-faint)" }} />
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search events…"
-            className="h-7 rounded-md pl-6 pr-3 text-[12px] outline-none transition-colors"
+            placeholder="Search…"
+            className="h-7 rounded pl-6 pr-3 text-[11px] outline-none"
             style={{
               background: "var(--surface-3)",
               border: "1px solid var(--border-subtle)",
               color: "var(--text-primary)",
+              width: 160,
             }}
           />
         </div>
       </div>
 
-      {/* Count */}
-      <p className="px-1 text-[11px]" style={{ color: "var(--text-faint)" }}>
-        {filtered.length} event{filtered.length !== 1 ? "s" : ""}
-        {filtered.length !== events.length && <span style={{ color: "var(--text-faint)" }}> of {events.length}</span>}
-      </p>
-
-      {/* Table */}
+      {/* Event list */}
       <div
         className="overflow-hidden rounded-xl"
-        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+        style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}
       >
-        {/* Table head */}
+        {/* Column header */}
         <div
-          className="grid items-center px-4 py-2 text-[10px] font-semibold uppercase tracking-wider"
+          className="flex items-center gap-0 px-0 py-2 text-[10px] font-semibold uppercase tracking-wider"
           style={{
-            gridTemplateColumns: "2.5rem 12rem 1fr 6rem 5rem 5rem",
-            borderBottom: "1px solid rgba(148,163,184,0.08)",
+            borderBottom: "1px solid rgba(148,163,184,0.10)",
+            background: "var(--surface-2)",
             color: "var(--text-faint)",
-            background: "var(--surface-3)",
           }}
         >
-          <span>#</span>
-          <span>Event Type</span>
-          <span>Details</span>
-          <span>Source</span>
-          <span>Time</span>
-          <span>Duration</span>
+          <span className="w-14 shrink-0 pl-4">#</span>
+          <span className="flex-1">Event</span>
+          <span className="w-52 shrink-0 pr-4 text-right">Timestamp</span>
         </div>
 
-        {/* Rows */}
-        <div>
-          {filtered.length === 0 ? (
-            <p className="py-12 text-center text-[13px]" style={{ color: "var(--text-faint)" }}>
-              No events match the current filter.
-            </p>
-          ) : (
-            filtered.map((event, idx) => {
-              const dotColor = STATUS_DOT[event.status] ?? "#64748B";
-              const isSelected = selectedEvent?.id === event.id;
-              const isFailed = event.status === "FAILED";
-              const isWaiting = event.status === "WAITING";
+        {filtered.length === 0 ? (
+          <p className="py-12 text-center text-[13px]" style={{ color: "var(--text-faint)" }}>
+            No events match.
+          </p>
+        ) : (
+          filtered.map((event, idx) => {
+            const meta      = getEventMeta(event.type, event.status);
+            const isOpen    = expanded.has(event.id);
+            const isFailed  = event.status === "FAILED";
+            const isWaiting = event.status === "WAITING" || event.status === "PENDING";
+            const isLast    = idx === filtered.length - 1;
+            const tag       = tagColor(event.type);
 
-              return (
-                <div key={event.id} className="group">
-                  {/* Row */}
-                  <div
-                    className="grid cursor-pointer items-start px-4 py-2.5 transition-colors"
-                    style={{
-                      gridTemplateColumns: "2.5rem 12rem 1fr 6rem 5rem 5rem",
-                      borderBottom: idx < filtered.length - 1 ? "1px solid rgba(148,163,184,0.05)" : undefined,
-                      background: isSelected
-                        ? "rgba(56,189,248,0.05)"
-                        : isFailed
-                          ? "rgba(239,68,68,0.02)"
-                          : undefined,
-                      borderLeft: isSelected ? "2px solid #38BDF8" : isFailed ? "2px solid #EF4444" : isWaiting ? "2px solid #F59E0B" : "2px solid transparent",
-                    }}
-                    onClick={() => setSelectedEvent(isSelected ? null : event)}
-                    onMouseOver={e => {
-                      if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(148,163,184,0.03)";
-                    }}
-                    onMouseOut={e => {
-                      if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = isFailed ? "rgba(239,68,68,0.02)" : "";
-                    }}
-                  >
-                    {/* Seq */}
-                    <span className="font-mono text-[10px] tabular-nums" style={{ color: "var(--text-faint)" }}>
+            // Accent color for row left border
+            const borderAccent = isFailed  ? "#EF4444"
+                               : isWaiting ? "#F59E0B"
+                               : isOpen    ? "#38BDF8"
+                               : "transparent";
+
+            return (
+              <div key={event.id}>
+                {/* ── Row ── */}
+                <div
+                  className="flex cursor-pointer items-center gap-0 transition-colors"
+                  style={{
+                    borderLeft: `2px solid ${borderAccent}`,
+                    borderBottom: isOpen || !isLast ? "1px solid rgba(148,163,184,0.07)" : undefined,
+                    background: isOpen
+                      ? "rgba(56,189,248,0.04)"
+                      : isFailed
+                        ? "rgba(239,68,68,0.025)"
+                        : undefined,
+                  }}
+                  onClick={() => toggleExpanded(event.id)}
+                  // hover via onMouseOver/Out to avoid Tailwind hover fighting inline bg
+                  onMouseEnter={e => {
+                    if (!isOpen) (e.currentTarget as HTMLDivElement).style.background = "rgba(148,163,184,0.04)";
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLDivElement).style.background = isOpen
+                      ? "rgba(56,189,248,0.04)"
+                      : isFailed
+                        ? "rgba(239,68,68,0.025)"
+                        : "";
+                  }}
+                >
+                  {/* Sequence + dot rail */}
+                  <div className="flex w-14 shrink-0 items-center gap-1.5 pl-3">
+                    <span
+                      className="font-mono text-[11px] tabular-nums"
+                      style={{ color: "var(--text-faint)", minWidth: "1.5rem", textAlign: "right" }}
+                    >
                       {event.sequence}
                     </span>
-
-                    {/* Event type */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dotColor }} />
-                      <span className="truncate font-mono text-[10px] font-semibold" style={{ color: "var(--text-muted)" }}>
-                        {event.type}
-                      </span>
-                    </div>
-
-                    {/* Details */}
-                    <div className="min-w-0 pr-4">
-                      <p className="truncate text-[12px] font-medium" style={{ color: isFailed ? "#FCA5A5" : isWaiting ? "#FCD34D" : "var(--text-primary)" }}>
-                        {event.title}
-                      </p>
-                      {(event.agentName || event.toolName || event.modelName) && (
-                        <p className="mt-0.5 truncate font-mono text-[10px]" style={{ color: "var(--text-faint)" }}>
-                          {event.agentName && <span className="text-violet-400">[{event.agentName}]</span>}
-                          {event.toolName && <span className="text-cyan-400"> {event.toolName}</span>}
-                          {event.modelName && <span className="text-purple-400"> {event.modelName}</span>}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Source */}
-                    <span className="font-mono text-[10px]" style={{ color: "var(--text-faint)" }}>
-                      {event.source}
-                    </span>
-
-                    {/* Timestamp */}
-                    <span className="font-mono text-[10px] tabular-nums" style={{ color: "var(--text-faint)" }}>
-                      {fmtTs(event.timestamp)}
-                    </span>
-
-                    {/* Duration */}
-                    <span className="font-mono text-[10px]" style={{ color: "var(--text-faint)" }}>
-                      {fmtDur(event.durationMs) ?? "—"}
-                    </span>
+                    {/* The colored dot */}
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: meta.dotColor, boxShadow: `0 0 4px ${meta.dotColor}60` }}
+                    />
                   </div>
 
-                  {/* Expanded detail panel */}
-                  {isSelected && (
-                    <div className="px-4 pb-4 pt-1">
-                      <EventDetailPanel event={event} onClose={() => setSelectedEvent(null)} />
-                    </div>
-                  )}
+                  {/* Event glyph + label + optional tag */}
+                  <div className="flex flex-1 items-center gap-2 overflow-hidden py-2.5 pr-4">
+                    {/* Glyph */}
+                    <span
+                      className="w-4 shrink-0 text-center text-[12px] leading-none select-none"
+                      style={{ color: tag }}
+                    >
+                      {meta.glyph}
+                    </span>
+
+                    {/* Event label */}
+                    <span
+                      className="text-[13px] font-medium"
+                      style={{
+                        color: isFailed  ? "#FCA5A5"
+                             : isWaiting ? "#FCD34D"
+                             : "var(--text-secondary)",
+                      }}
+                    >
+                      {meta.label}
+                    </span>
+
+                    {/* Agent / tool / model tag — colored pill */}
+                    {event.agentName && (
+                      <span
+                        className="ml-1 truncate rounded px-1.5 py-0.5 text-[11px] font-medium"
+                        style={{ background: "rgba(167,139,250,0.12)", color: "#A78BFA", maxWidth: 200 }}
+                      >
+                        {event.agentName}
+                      </span>
+                    )}
+                    {event.toolName && (
+                      <span
+                        className="truncate rounded px-1.5 py-0.5 text-[11px] font-medium"
+                        style={{ background: "rgba(34,211,238,0.10)", color: "#22D3EE", maxWidth: 200 }}
+                      >
+                        {event.toolName}
+                      </span>
+                    )}
+                    {event.modelName && (
+                      <span
+                        className="truncate rounded px-1.5 py-0.5 text-[11px] font-medium"
+                        style={{ background: "rgba(192,132,252,0.10)", color: "#C084FC", maxWidth: 160 }}
+                      >
+                        {event.modelName}
+                      </span>
+                    )}
+                    {event.handoffTo && (
+                      <span
+                        className="truncate font-mono text-[10px]"
+                        style={{ color: "#A78BFA" }}
+                      >
+                        → {event.handoffTo}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Timestamp */}
+                  <span
+                    className="w-52 shrink-0 pr-4 text-right font-mono text-[11px] tabular-nums"
+                    style={{ color: "var(--text-faint)" }}
+                  >
+                    {fmtTs(event.timestamp)}
+                  </span>
                 </div>
-              );
-            })
-          )}
-        </div>
+
+                {/* ── Inline detail block ── */}
+                {isOpen && <EventDetail event={event} />}
+              </div>
+            );
+          })
+        )}
       </div>
+
+      {/* Footer count */}
+      <p className="px-1 text-[11px]" style={{ color: "var(--text-faint)" }}>
+        {filtered.length} event{filtered.length !== 1 ? "s" : ""}
+        {filtered.length !== events.length && ` of ${events.length}`}
+      </p>
     </div>
   );
 }

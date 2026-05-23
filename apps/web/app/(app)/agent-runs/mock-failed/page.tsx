@@ -50,7 +50,7 @@ export default function MockFailedRunPage() {
         <div className="mx-auto max-w-5xl space-y-6">
           <RunHeaderV2 model={scenarioBMock} isMock onRetry={handleRetry} />
           <RunSummaryCards model={scenarioBMock} />
-          <RunDetailTabsV2 model={scenarioBMock} />
+          <RunDetailTabsV2 model={scenarioBMock} defaultTab="events" />
 
           <div className="rounded-xl border border-dashed border-border/50 bg-muted/10 px-5 py-4">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">Developer note</p>

@@ -15,7 +15,6 @@ import {
   CreditCard,
   FileCode2,
   KeyRound,
-  LayoutDashboard,
   List,
   Loader2,
   LogOut,
@@ -53,7 +52,6 @@ type NavItem = {
 
 // Primary nav — core product surfaces
 const PRIMARY_NAV: NavItem[] = [
-  { href: "/dashboard",   label: "Overview",    icon: LayoutDashboard },
   { href: "/agent-jobs",  label: "Agent Jobs",  icon: BriefcaseBusiness },
   { href: "/agent-runs",  label: "Runs",        icon: List },
   { href: "/approvals",   label: "Approvals",   icon: CheckCircle2 },
