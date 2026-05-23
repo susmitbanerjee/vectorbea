@@ -114,14 +114,17 @@ export async function GET(request: NextRequest) {
       clauses.push(Prisma.sql`(name ILIKE ${q} OR provider ILIKE ${q} OR type ILIKE ${q})`);
     }
 
-    const rows = await db.$queryRaw<Record<string, unknown>[]>(
-      Prisma.sql`
-        SELECT *
-        FROM connections
-        WHERE ${Prisma.join(clauses, Prisma.sql` AND `)}
-        ORDER BY created_at DESC
-      `,
-    );
+    let whereClause = clauses[0] ?? Prisma.sql`1=1`;
+    for (let i = 1; i < clauses.length; i += 1) {
+      whereClause = Prisma.sql`${whereClause} AND ${clauses[i]}`;
+    }
+
+    const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+      SELECT *
+      FROM connections
+      WHERE ${whereClause}
+      ORDER BY created_at DESC
+    `);
 
     return NextResponse.json((rows ?? []).map((r) => dbToConnection(r)));
   } catch (e) {
