@@ -219,12 +219,20 @@ export default function ConnectionsPage() {
   const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
 
   async function load() {
-    const items = await getConnections({
-      search: search || undefined,
-      type: typeFilter === "all" ? undefined : typeFilter,
-    });
-    setConnections(items);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const items = await getConnections({
+        search: search || undefined,
+        type: typeFilter === "all" ? undefined : typeFilter,
+      });
+      setConnections(items);
+    } catch (error) {
+      console.error("[connections] load failed:", error);
+      setConnections([]);
+      toast.error(error instanceof Error ? error.message : "Failed to load connections.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { void load(); }, [search, typeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
