@@ -1,57 +1,56 @@
 "use client";
 
 /**
- * RunExecutionTimeline — horizontal Gantt / trace chart
+ * RunExecutionTimeline — horizontal trace chart (Temporal-style)
  *
- * Layout:
- *   ┌──────────────┬──────────────────────────────────────────┐
- *   │  0s    20s   │  Ruler ticks                             │
- *   ├──────────────┼──────────────────────────────────────────┤
- *   │  Run         │  ◆────────────────────────────────────◆  │
- *   ├──────────────┼──────────────────────────────────────────┤
- *   │  Orchestrator│  [████ Agent] ◆ ◆                        │
- *   ├──────────────┼──────────────────────────────────────────┤
- *   │  Data Agent  │         [████████████] [██ Tool] [██ LLM]│
- *   └──────────────┴──────────────────────────────────────────┘
+ * One row per event. Spans shown as:  ●━━━━━━━━━━━━━━━━━●
+ * Point events shown as:              ●
  *
- * Spans   = events with durationMs  → rendered as horizontal bars
- * Points  = events without duration → rendered as diamond markers
- * Click   = opens inline detail panel below the chart
+ * Hierarchy via left-column indentation:
+ *   Run lifecycle          indent 0
+ *   Agent spans            indent 1
+ *   LLM / Tool / HTTP      indent 2
+ *
+ * Key UX rules
+ * ─────────────
+ * • min-width 40 px on every span → tiny events are always visible + clickable
+ * • End dot always rendered at correct proportional position (not just right edge)
+ * • Click any row → SpanDetail panel slides in below the chart
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import type { RunTimelineEventUi, TimelineEventType } from "@/types/agent-run-ui";
 
-// ─── Layout constants ─────────────────────────────────────────────────────────
+// ─── Layout ───────────────────────────────────────────────────────────────────
 
-const LABEL_W  = 200; // px — fixed left label column
-const BAR_H    = 18;  // px — span bar height
-const ROW_H    = 28;  // px — height per sublane row
-const LANE_PAD = 8;   // px — top+bottom padding inside each lane
-const RULER_H  = 34;  // px — time ruler height
+const LABEL_W   = 220;  // px – fixed label column
+const ROW_H     = 34;   // px – height per row
+const DOT       = 10;   // px – dot diameter
+const LINE_H    = 3;    // px – connecting line thickness
+const RULER_H   = 36;   // px – time ruler
+const MIN_SPAN  = 44;   // px – minimum span width (px) so tiny spans are clickable
+const INDENT_PX = 16;   // px – per indent level
 
-// ─── Color scheme ─────────────────────────────────────────────────────────────
+// ─── Colors ───────────────────────────────────────────────────────────────────
 
-function spanColor(type: TimelineEventType, status: string) {
-  if (status === "FAILED")  return { fill: "rgba(239,68,68,0.18)",    stroke: "#EF4444" };
-  if (status === "WAITING") return { fill: "rgba(245,158,11,0.18)",   stroke: "#F59E0B" };
-  if (status === "PENDING") return { fill: "rgba(245,158,11,0.12)",   stroke: "#F59E0B" };
-  if (type.startsWith("AGENT_"))    return { fill: "rgba(167,139,250,0.20)", stroke: "#A78BFA" };
-  if (type.startsWith("LLM_"))      return { fill: "rgba(192,132,252,0.20)", stroke: "#C084FC" };
-  if (type.startsWith("TOOL_"))     return { fill: "rgba(34,211,238,0.16)",  stroke: "#22D3EE" };
-  if (type.startsWith("HTTP_"))     return { fill: "rgba(110,231,183,0.16)", stroke: "#6EE7B7" };
-  if (type.startsWith("APPROVAL_")) return { fill: "rgba(252,211,77,0.16)",  stroke: "#FCD34D" };
-  if (type.startsWith("RETRY_"))    return { fill: "rgba(253,164,175,0.16)", stroke: "#FDA4AF" };
-  if (type.startsWith("RUN_"))      return { fill: "rgba(56,189,248,0.16)",  stroke: "#38BDF8" };
-  if (type.startsWith("BUDGET_") || type.startsWith("POLICY_"))
-                                     return { fill: "rgba(148,163,184,0.12)", stroke: "#94A3B8" };
-  if (type.startsWith("ARTIFACT_")) return { fill: "rgba(134,239,172,0.16)", stroke: "#86EFAC" };
-  return { fill: "rgba(148,163,184,0.10)", stroke: "#64748B" };
+function eventColor(type: TimelineEventType, status: string) {
+  if (status === "FAILED")  return "#EF4444";
+  if (status === "WAITING" || status === "PENDING") return "#F59E0B";
+  if (type.startsWith("RUN_"))      return "#38BDF8";
+  if (type.startsWith("AGENT_"))    return "#A78BFA";
+  if (type.startsWith("LLM_"))      return "#C084FC";
+  if (type.startsWith("TOOL_"))     return "#22D3EE";
+  if (type.startsWith("HTTP_"))     return "#6EE7B7";
+  if (type.startsWith("APPROVAL_")) return "#FCD34D";
+  if (type.startsWith("RETRY_"))    return "#FDA4AF";
+  if (type.startsWith("BUDGET_") || type.startsWith("POLICY_")) return "#94A3B8";
+  if (type.startsWith("ARTIFACT_")) return "#86EFAC";
+  return "#64748B";
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
-function fmtDur(ms: number): string {
+function fmtDur(ms: number) {
   if (ms < 1000)   return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const m = Math.floor(ms / 60_000);
@@ -65,37 +64,45 @@ function fmtTs(ts: string) {
   });
 }
 
-// Short label to print inside bars
-function barLabel(type: TimelineEventType): string {
-  return type
+// ─── Label helpers ────────────────────────────────────────────────────────────
+
+function rowLabel(e: RunTimelineEventUi): string {
+  if (e.toolName)  return e.toolName;
+  if (e.modelName) return e.modelName;
+  if (e.agentName) return e.agentName;
+  return e.type
     .replace(/_(STARTED|COMPLETED|FAILED|CREATED|REQUESTED|APPROVED|REJECTED|EXPIRED|PASSED|SELECTED|EXHAUSTED|SCHEDULED|VALIDATED)$/, "")
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/^\w/, c => c.toUpperCase());
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface SpanItem {
-  event: RunTimelineEventUi;
-  startMs: number; // ms from T_min
-  endMs: number;   // ms from T_min
-  isPoint: boolean;
+function indentLevel(type: TimelineEventType): number {
+  if (type.startsWith("AGENT_"))    return 1;
+  if (type.startsWith("LLM_"))      return 2;
+  if (type.startsWith("TOOL_"))     return 2;
+  if (type.startsWith("HTTP_"))     return 2;
+  if (type.startsWith("APPROVAL_")) return 2;
+  if (type.startsWith("RETRY_"))    return 2;
+  if (type.startsWith("ARTIFACT_")) return 1;
+  return 0;
 }
 
-interface Lane {
-  name: string;
-  sublanes: SpanItem[][];  // non-overlapping rows of span bars
-  points: SpanItem[];      // point events (no duration)
+// ─── Flat span rows ───────────────────────────────────────────────────────────
+
+interface FlatRow {
+  event: RunTimelineEventUi;
+  startMs: number;
+  endMs: number;
+  isPoint: boolean;
+  indent: number;
+  color: string;
+  label: string;
 }
 
 // ─── Detail panel ─────────────────────────────────────────────────────────────
 
-function KV({
-  label, value, mono, color,
-}: {
-  label: string; value: string; mono?: boolean; color?: string;
-}) {
+function KV({ label, value, mono, color }: { label: string; value: string; mono?: boolean; color?: string }) {
   return (
     <div className="flex gap-3 py-1.5" style={{ borderBottom: "1px solid rgba(148,163,184,0.06)" }}>
       <span className="w-36 shrink-0 text-[11px] font-medium" style={{ color: "var(--text-faint)" }}>
@@ -114,20 +121,12 @@ function KV({
 function JsonBlock({ label, value }: { label: string; value: unknown }) {
   return (
     <div>
-      <p
-        className="mb-1 text-[10px] font-semibold uppercase tracking-wider"
-        style={{ color: "var(--text-faint)" }}
-      >
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
         {label}
       </p>
       <pre
         className="overflow-auto rounded-lg p-3 text-[10px] font-mono leading-relaxed"
-        style={{
-          background: "#060A10",
-          color: "#CBD5E1",
-          border: "1px solid rgba(148,163,184,0.10)",
-          maxHeight: 130,
-        }}
+        style={{ background: "#060A10", color: "#CBD5E1", border: "1px solid rgba(148,163,184,0.10)", maxHeight: 130 }}
       >
         {JSON.stringify(value, null, 2)}
       </pre>
@@ -135,52 +134,47 @@ function JsonBlock({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-function SpanDetail({
-  event, onClose,
-}: {
-  event: RunTimelineEventUi; onClose: () => void;
-}) {
-  const c = spanColor(event.type, event.status);
-
+function SpanDetail({ event, onClose }: { event: RunTimelineEventUi; onClose: () => void }) {
+  const color = eventColor(event.type, event.status);
   return (
     <div
       className="mt-3 overflow-hidden rounded-xl"
-      style={{ border: `1px solid ${c.stroke}33`, background: "var(--surface-2)" }}
+      style={{ border: `1px solid ${color}33`, background: "var(--surface-2)" }}
     >
-      {/* Header */}
       <div
         className="flex items-center justify-between gap-3 px-4 py-3"
-        style={{ background: c.fill, borderBottom: `1px solid ${c.stroke}25` }}
+        style={{ background: `${color}12`, borderBottom: `1px solid ${color}25` }}
       >
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c.stroke }} />
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}80` }} />
           <span className="shrink-0 font-mono text-[10px] font-semibold" style={{ color: "var(--text-faint)" }}>
             #{event.sequence}
           </span>
-          <span className="shrink-0 font-mono text-[10px] font-bold" style={{ color: c.stroke }}>
+          <span className="shrink-0 font-mono text-[10px] font-bold" style={{ color }}>
             {event.type}
           </span>
           <span className="truncate text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
             {event.title}
           </span>
+          {event.durationMs != null && (
+            <span className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]" style={{ background: `${color}18`, color }}>
+              {fmtDur(event.durationMs)}
+            </span>
+          )}
         </div>
         <button
-          type="button"
-          onClick={onClose}
+          type="button" onClick={onClose}
           className="shrink-0 rounded px-2 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
           style={{ color: "var(--text-faint)" }}
         >
           Close ✕
         </button>
       </div>
-
-      {/* Body */}
       <div className="grid gap-6 p-4 lg:grid-cols-2">
-        {/* Left: KV rows */}
         <div>
-          <KV label="Status"    value={event.status} />
-          <KV label="Source"    value={event.source}    mono />
-          <KV label="Timestamp" value={fmtTs(event.timestamp)} mono />
+          <KV label="Status"       value={event.status} />
+          <KV label="Source"       value={event.source}    mono />
+          <KV label="Timestamp"    value={fmtTs(event.timestamp)} mono />
           {event.durationMs    != null  && <KV label="Duration"    value={fmtDur(event.durationMs)} mono />}
           {event.agentName               && <KV label="Agent"       value={event.agentName}  mono color="#A78BFA" />}
           {event.toolName                && <KV label="Tool"        value={event.toolName}   mono color="#22D3EE" />}
@@ -196,16 +190,14 @@ function SpanDetail({
             const a = event.approval!;
             return (
               <>
-                <KV label="Approval ID"     value={a.id}     mono />
-                <KV label="Appr. Status"    value={a.status} />
-                {a.decidedBy      && <KV label="Decided By"  value={a.decidedBy} mono />}
-                {a.decisionReason && <KV label="Decision"    value={a.decisionReason} />}
+                <KV label="Approval ID"  value={a.id}     mono />
+                <KV label="Appr. Status" value={a.status} />
+                {a.decidedBy      && <KV label="Decided By" value={a.decidedBy}       mono />}
+                {a.decisionReason && <KV label="Decision"   value={a.decisionReason} />}
               </>
             );
           })()}
         </div>
-
-        {/* Right: JSON blocks */}
         <div className="space-y-3">
           {event.inputJson    != null && <JsonBlock label="Input"    value={event.inputJson} />}
           {event.outputJson   != null && <JsonBlock label="Output"   value={event.outputJson} />}
@@ -216,14 +208,233 @@ function SpanDetail({
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Span row component ───────────────────────────────────────────────────────
 
-interface RunExecutionTimelineProps {
-  events: RunTimelineEventUi[];
+function SpanRow({
+  row, chartW, totalMs, selected, onSelect, chartRef,
+}: {
+  row: FlatRow;
+  chartW: number;
+  totalMs: number;
+  selected: boolean;
+  onSelect: () => void;
+  chartRef?: React.RefObject<HTMLDivElement | null>;
+}) {
+  const color = row.color;
+
+  if (row.isPoint) {
+    // Point event — single dot at the timestamp position
+    const dotX = Math.round((row.startMs / totalMs) * chartW);
+    return (
+      <div
+        className="flex cursor-pointer items-center transition-colors"
+        style={{
+          height: ROW_H,
+          background: selected ? `${color}0d` : undefined,
+          borderLeft: selected ? `2px solid ${color}` : "2px solid transparent",
+        }}
+        onClick={onSelect}
+      >
+        {/* Label */}
+        <div
+          className="flex shrink-0 items-center"
+          style={{ width: LABEL_W, paddingLeft: 12 + row.indent * INDENT_PX, paddingRight: 8 }}
+        >
+          <span
+            className="truncate text-[11px]"
+            style={{ color: selected ? color : "var(--text-faint)", fontWeight: selected ? 600 : 400 }}
+          >
+            {row.label}
+          </span>
+        </div>
+        {/* Point marker */}
+        <div ref={chartRef} className="relative flex-1" style={{ height: ROW_H }}>
+          <div
+            style={{
+              position: "absolute",
+              left: dotX - DOT / 2,
+              top: (ROW_H - DOT) / 2,
+              width: DOT,
+              height: DOT,
+              borderRadius: "50%",
+              background: color,
+              border: `2px solid ${color}`,
+              boxShadow: selected ? `0 0 0 3px ${color}30, 0 0 8px ${color}50` : `0 0 4px ${color}40`,
+              zIndex: 2,
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Span event — dot ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ dot
+  const rawStartPx = (row.startMs / totalMs) * chartW;
+  const rawEndPx   = (row.endMs   / totalMs) * chartW;
+  const rawWidthPx = rawEndPx - rawStartPx;
+
+  // Apply minimum width — center it on the midpoint so positioning stays honest
+  const spanW   = Math.max(rawWidthPx, MIN_SPAN);
+  const midPx   = rawStartPx + rawWidthPx / 2;
+  const startPx = Math.max(0, Math.min(chartW - spanW, midPx - spanW / 2));
+
+  // Duration label — only if the bar is wide enough to fit text
+  const showDur   = spanW > 80 && row.event.durationMs != null;
+  const showLabel = spanW > 120;
+
+  return (
+    <div
+      className="flex cursor-pointer items-center transition-colors"
+      style={{
+        height: ROW_H,
+        background: selected ? `${color}0d` : undefined,
+        borderLeft: selected ? `2px solid ${color}` : "2px solid transparent",
+      }}
+      onClick={onSelect}
+      onMouseEnter={e => {
+        if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(148,163,184,0.04)";
+      }}
+      onMouseLeave={e => {
+        if (!selected) (e.currentTarget as HTMLDivElement).style.background = "";
+      }}
+    >
+      {/* Label column */}
+      <div
+        className="flex shrink-0 items-center"
+        style={{ width: LABEL_W, paddingLeft: 12 + row.indent * INDENT_PX, paddingRight: 8 }}
+      >
+        <span
+          className="truncate text-[11px]"
+          style={{ color: selected ? color : "var(--text-secondary)", fontWeight: selected ? 600 : 400 }}
+        >
+          {row.label}
+        </span>
+      </div>
+
+      {/* Chart area */}
+      <div ref={chartRef} className="relative flex-1 overflow-visible" style={{ height: ROW_H }}>
+        {/* The span itself: start-dot ━━━━ end-dot */}
+        <div
+          style={{
+            position: "absolute",
+            left: startPx,
+            width: spanW,
+            top: (ROW_H - DOT) / 2,
+            height: DOT,
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          {/* Start dot */}
+          <div
+            style={{
+              width:         DOT,
+              height:        DOT,
+              flexShrink:    0,
+              borderRadius:  "50%",
+              background:    selected ? color : `${color}bb`,
+              border:        `2px solid ${color}`,
+              boxShadow:     selected ? `0 0 0 3px ${color}30, 0 0 8px ${color}50` : `0 0 4px ${color}30`,
+              zIndex:        2,
+            }}
+          />
+
+          {/* Connecting line */}
+          <div
+            style={{
+              flex:       1,
+              height:     LINE_H,
+              background: selected
+                ? `linear-gradient(90deg, ${color}cc, ${color})`
+                : `linear-gradient(90deg, ${color}60, ${color}90)`,
+              position:   "relative",
+              display:    "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow:   "visible",
+            }}
+          >
+            {/* Inline label (only if bar is wide enough) */}
+            {showLabel && (
+              <span
+                style={{
+                  position:   "absolute",
+                  fontSize:   10,
+                  fontWeight: 500,
+                  color,
+                  whiteSpace: "nowrap",
+                  overflow:   "hidden",
+                  textOverflow: "ellipsis",
+                  maxWidth:   "calc(100% - 8px)",
+                  background: "var(--surface-1)",
+                  padding:    "0 4px",
+                  borderRadius: 2,
+                  lineHeight: "16px",
+                }}
+              >
+                {row.label}
+                {showDur && ` · ${fmtDur(row.event.durationMs!)}`}
+              </span>
+            )}
+          </div>
+
+          {/* End dot */}
+          <div
+            style={{
+              width:        DOT,
+              height:       DOT,
+              flexShrink:   0,
+              borderRadius: "50%",
+              background:   color,
+              border:       `2px solid ${color}`,
+              boxShadow:    selected
+                ? `0 0 0 3px ${color}30, 0 0 10px ${color}60`
+                : `0 0 5px ${color}50`,
+              zIndex: 2,
+            }}
+          />
+        </div>
+
+        {/* Duration badge to the right of end dot (only for short bars with no inline label) */}
+        {showDur && !showLabel && (
+          <span
+            style={{
+              position:   "absolute",
+              left:       startPx + spanW + 6,
+              top:        "50%",
+              transform:  "translateY(-50%)",
+              fontSize:   9,
+              fontFamily: "var(--font-mono, monospace)",
+              color:      "var(--text-faint)",
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+            }}
+          >
+            {fmtDur(row.event.durationMs!)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
-export function RunExecutionTimeline({ events }: RunExecutionTimelineProps) {
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+export function RunExecutionTimeline({ events }: { events: RunTimelineEventUi[] }) {
   const [selected, setSelected] = useState<RunTimelineEventUi | null>(null);
+  const chartRef  = useRef<HTMLDivElement>(null);
+  const [chartW, setChartW] = useState(600);
+
+  // Track container width for pixel-accurate positioning
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const obs = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setChartW(w);
+    });
+    obs.observe(chartRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   // ── Time range ──────────────────────────────────────────────────────────────
   const { T_min, totalMs } = useMemo(() => {
@@ -235,82 +446,49 @@ export function RunExecutionTimeline({ events }: RunExecutionTimelineProps) {
       if (s < mn) mn = s;
       if (t > mx) mx = t;
     }
-    const range = mx - mn || 1000;
-    const pad = range * 0.025;
+    const range = Math.max(mx - mn, 1000);
+    const pad   = range * 0.03;
     return { T_min: mn - pad, totalMs: range + pad * 2 };
   }, [events]);
 
-  // ── Build lanes ─────────────────────────────────────────────────────────────
-  const lanes = useMemo<Lane[]>(() => {
-    const map = new Map<string, SpanItem[]>();
-    map.set("Run", []);
-
-    for (const e of events) {
-      const name = e.agentName ?? "Run";
-      if (!map.has(name)) map.set(name, []);
+  // ── Build flat rows ─────────────────────────────────────────────────────────
+  const rows = useMemo<FlatRow[]>(() => {
+    return events.map(e => {
       const t = new Date(e.timestamp).getTime();
-      map.get(name)!.push({
-        event: e,
+      return {
+        event:   e,
         startMs: (e.durationMs ? t - e.durationMs : t) - T_min,
         endMs:   t - T_min,
         isPoint: !e.durationMs,
-      });
-    }
-
-    return Array.from(map.entries())
-      .filter(([, items]) => items.length > 0)
-      .map(([name, items]) => {
-        const spans  = items.filter(s => !s.isPoint);
-        const points = items.filter(s => s.isPoint);
-
-        // Greedy non-overlapping sublane assignment
-        const sublanes: SpanItem[][] = [];
-        const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
-        for (const span of sorted) {
-          let placed = false;
-          for (const row of sublanes) {
-            const last = row[row.length - 1];
-            if (!last || last.endMs <= span.startMs) {
-              row.push(span);
-              placed = true;
-              break;
-            }
-          }
-          if (!placed) sublanes.push([span]);
-        }
-
-        return { name, sublanes, points };
-      });
+        indent:  indentLevel(e.type),
+        color:   eventColor(e.type, e.status),
+        label:   rowLabel(e),
+      };
+    });
   }, [events, T_min]);
 
   // ── Time ruler ticks ────────────────────────────────────────────────────────
   const ticks = useMemo(() => {
-    const count = 8;
+    const count = 9;
     return Array.from({ length: count + 1 }, (_, i) => ({
       pct: (i / count) * 100,
-      label: i === 0 ? "0" : fmtDur(Math.round((i / count) * totalMs)),
+      ms:  Math.round((i / count) * totalMs),
     }));
   }, [totalMs]);
 
-  function toPct(ms: number) {
-    return Math.max(0, Math.min(100, (ms / totalMs) * 100));
-  }
-  function toWidthPct(ms: number) {
-    return Math.max(0.4, (ms / totalMs) * 100); // 0.4% min so tiny spans are visible
-  }
-
   return (
     <div>
-      {/* ── Chart ──────────────────────────────────────────────────────────── */}
+      {/* ── Chart container ──────────────────────────────────────────────── */}
       <div
-        className="overflow-hidden overflow-x-auto rounded-xl"
-        style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)", minWidth: 0 }}
+        className="overflow-hidden rounded-xl"
+        style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}
       >
-        {/* Time ruler */}
+        {/* ── Time ruler ── */}
         <div
           className="flex"
-          style={{ height: RULER_H, borderBottom: "1px solid rgba(148,163,184,0.10)", minWidth: 560 }}
+          style={{ height: RULER_H, borderBottom: "1px solid rgba(148,163,184,0.10)" }}
         >
+          {/* Corner */}
           <div
             className="flex shrink-0 items-center px-4"
             style={{
@@ -319,13 +497,12 @@ export function RunExecutionTimeline({ events }: RunExecutionTimelineProps) {
               borderRight: "1px solid rgba(148,163,184,0.09)",
             }}
           >
-            <span
-              className="text-[10px] font-semibold uppercase tracking-widest"
-              style={{ color: "var(--text-faint)" }}
-            >
-              Agent / Lane
+            <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-faint)" }}>
+              Span
             </span>
           </div>
+
+          {/* Tick marks */}
           <div className="relative flex-1" style={{ background: "var(--surface-2)" }}>
             {ticks.map((tick, i) => (
               <div
@@ -333,202 +510,77 @@ export function RunExecutionTimeline({ events }: RunExecutionTimelineProps) {
                 className="absolute flex flex-col items-center"
                 style={{ left: `${tick.pct}%`, top: 0, bottom: 0, transform: "translateX(-50%)" }}
               >
-                <div
-                  style={{
-                    width: 1, height: 8, marginTop: 6,
-                    background: tick.pct === 0 || tick.pct === 100
-                      ? "rgba(148,163,184,0.35)" : "rgba(148,163,184,0.2)",
-                  }}
-                />
-                <span
-                  style={{
-                    fontSize: 9,
-                    fontFamily: "var(--font-mono, monospace)",
-                    color: "var(--text-faint)",
-                    marginTop: 2,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {tick.label}
+                <div style={{
+                  width: 1, height: 7, marginTop: 7,
+                  background: tick.pct === 0 || tick.pct === 100
+                    ? "rgba(148,163,184,0.4)" : "rgba(148,163,184,0.2)",
+                }} />
+                <span style={{
+                  fontSize: 9,
+                  fontFamily: "var(--font-mono, monospace)",
+                  color: "var(--text-faint)",
+                  marginTop: 2,
+                  whiteSpace: "nowrap",
+                }}>
+                  {tick.ms === 0 ? "0" : fmtDur(tick.ms)}
                 </span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Lanes */}
-        {lanes.map((lane, laneIdx) => {
-          const numRows = Math.max(lane.sublanes.length, 1);
-          const laneH   = LANE_PAD * 2 + numRows * ROW_H;
-          const isLast  = laneIdx === lanes.length - 1;
-
-          return (
-            <div
-              key={lane.name}
-              className="flex"
-              style={{
-                height: laneH,
-                minWidth: 560,
-                borderBottom: !isLast ? "1px solid rgba(148,163,184,0.07)" : undefined,
-              }}
-            >
-              {/* Lane label */}
+        {/* ── Rows ── */}
+        <div>
+          {rows.map((row, idx) => {
+            const isSel  = selected?.id === row.event.id;
+            const isLast = idx === rows.length - 1;
+            return (
               <div
-                className="flex shrink-0 items-start"
-                style={{
-                  width: LABEL_W,
-                  paddingTop: LANE_PAD + 5,
-                  paddingLeft: 16,
-                  paddingRight: 12,
-                  background: "var(--surface-2)",
-                  borderRight: "1px solid rgba(148,163,184,0.08)",
-                }}
+                key={row.event.id}
+                style={{ borderBottom: !isLast ? "1px solid rgba(148,163,184,0.05)" : undefined }}
               >
-                <span
-                  className="truncate text-[12px] font-medium"
-                  style={{ color: lane.name === "Run" ? "#38BDF8" : "#A78BFA" }}
-                >
-                  {lane.name}
-                </span>
+                <SpanRow
+                  row={row}
+                  chartW={chartW}
+                  totalMs={totalMs}
+                  selected={isSel}
+                  onSelect={() => setSelected(isSel ? null : row.event)}
+                  chartRef={idx === 0 ? chartRef : undefined}
+                />
               </div>
-
-              {/* Bars + markers */}
-              <div className="relative flex-1">
-                {/* Vertical grid lines */}
-                {ticks.map((tick, i) => (
-                  <div
-                    key={i}
-                    className="absolute top-0 bottom-0"
-                    style={{
-                      left: `${tick.pct}%`,
-                      width: 1,
-                      background: "rgba(148,163,184,0.04)",
-                    }}
-                  />
-                ))}
-
-                {/* Span bars */}
-                {lane.sublanes.map((row, rowIdx) =>
-                  row.map(span => {
-                    const left  = toPct(span.startMs);
-                    const width = toWidthPct(span.endMs - span.startMs);
-                    const c     = spanColor(span.event.type, span.event.status);
-                    const isSel = selected?.id === span.event.id;
-                    const top   = LANE_PAD + rowIdx * ROW_H + (ROW_H - BAR_H) / 2;
-                    const showDur = span.event.durationMs != null &&
-                      (span.endMs - span.startMs) > totalMs * 0.05;
-
-                    return (
-                      <div
-                        key={span.event.id}
-                        className="absolute cursor-pointer rounded"
-                        style={{
-                          left:     `${left}%`,
-                          width:    `${width}%`,
-                          top,
-                          height:   BAR_H,
-                          minWidth: 3,
-                          background: isSel ? c.stroke + "35" : c.fill,
-                          border: `1px solid ${isSel ? c.stroke : c.stroke + "90"}`,
-                          boxShadow: isSel
-                            ? `0 0 0 1px ${c.stroke}55, 0 0 8px ${c.stroke}22`
-                            : undefined,
-                          display:    "flex",
-                          alignItems: "center",
-                          paddingLeft: 5,
-                          paddingRight: 4,
-                          overflow: "hidden",
-                          transition: "box-shadow 0.1s, border-color 0.1s",
-                        }}
-                        onClick={() => setSelected(isSel ? null : span.event)}
-                        title={span.event.title}
-                      >
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 500,
-                            color: c.stroke,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            fontFamily: "var(--font-sans, sans-serif)",
-                          }}
-                        >
-                          {barLabel(span.event.type)}
-                          {showDur && ` · ${fmtDur(span.event.durationMs!)}`}
-                        </span>
-                      </div>
-                    );
-                  })
-                )}
-
-                {/* Point event markers */}
-                {lane.points.map(pt => {
-                  const left  = toPct(pt.startMs);
-                  const c     = spanColor(pt.event.type, pt.event.status);
-                  const isSel = selected?.id === pt.event.id;
-                  const dSize = isSel ? 8 : 6;
-
-                  return (
-                    <React.Fragment key={pt.event.id}>
-                      {/* Vertical tick */}
-                      <div
-                        className="absolute cursor-pointer"
-                        style={{
-                          left:      `${left}%`,
-                          top:       LANE_PAD,
-                          bottom:    LANE_PAD,
-                          width:     isSel ? 2 : 1,
-                          background: c.stroke + (isSel ? "bb" : "55"),
-                          transform: "translateX(-50%)",
-                          pointerEvents: "none",
-                        }}
-                      />
-                      {/* Diamond */}
-                      <div
-                        className="absolute cursor-pointer"
-                        style={{
-                          left:      `${left}%`,
-                          top:       "50%",
-                          width:     dSize,
-                          height:    dSize,
-                          background: c.stroke,
-                          transform: "translate(-50%, -50%) rotate(45deg)",
-                          boxShadow: isSel ? `0 0 0 2px ${c.stroke}44, 0 0 6px ${c.stroke}66` : undefined,
-                        }}
-                        onClick={() => setSelected(isSel ? null : pt.event)}
-                        title={pt.event.title}
-                      />
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {/* ── Legend ─────────────────────────────────────────────────────────── */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1">
         {[
-          { label: "Run",      color: "#38BDF8" },
-          { label: "Agent",    color: "#A78BFA" },
-          { label: "LLM",      color: "#C084FC" },
-          { label: "Tool",     color: "#22D3EE" },
-          { label: "HTTP",     color: "#6EE7B7" },
-          { label: "Approval", color: "#FCD34D" },
-          { label: "Retry",    color: "#FDA4AF" },
-          { label: "Failed",   color: "#EF4444" },
+          { label: "Run lifecycle", color: "#38BDF8" },
+          { label: "Agent",         color: "#A78BFA" },
+          { label: "LLM",           color: "#C084FC" },
+          { label: "Tool",          color: "#22D3EE" },
+          { label: "HTTP",          color: "#6EE7B7" },
+          { label: "Approval",      color: "#FCD34D" },
+          { label: "Retry",         color: "#FDA4AF" },
+          { label: "Failed",        color: "#EF4444" },
         ].map(item => (
           <div key={item.label} className="flex items-center gap-1.5">
-            <span className="h-2 w-3 rounded-sm" style={{ background: item.color + "60", border: `1px solid ${item.color}` }} />
+            <span
+              className="inline-flex items-center gap-0.5"
+              style={{ color: item.color }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: item.color, display: "inline-block" }} />
+              <span style={{ width: 14, height: 2, background: item.color + "80", display: "inline-block" }} />
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: item.color, display: "inline-block" }} />
+            </span>
             <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>
               {item.label}
             </span>
           </div>
         ))}
-        <span className="text-[10px]" style={{ color: "rgba(100,116,139,0.6)" }}>
-          · bars = spans · ◆ = point events · click to inspect
+        <span className="ml-auto text-[10px]" style={{ color: "rgba(100,116,139,0.5)" }}>
+          click any row to inspect
         </span>
       </div>
 
