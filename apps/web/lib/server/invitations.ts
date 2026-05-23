@@ -167,18 +167,17 @@ export async function acceptInvitation(token: string, userId: string): Promise<{
   return { workspaceId: inv.workspace_id as string, role: inv.role as InviteRole };
 }
 
-// eslint-disable-next-line
-function toInvitationView(row: any): Invitation {
+function toInvitationView(row: Record<string, unknown>): Invitation {
   return {
-    id: row.id,
-    workspaceId: row.workspace_id,
-    email: row.email,
-    role: row.role,
-    invitedBy: row.invited_by,
-    inviterName: row.inviter_name ?? row.invited_by,
-    expiresAt: row.expires_at,
-    acceptedAt: row.accepted_at ?? null,
-    revokedAt: row.revoked_at ?? null,
-    createdAt: row.created_at,
+    id: String(row.id),
+    workspaceId: String(row.workspace_id),
+    email: String(row.email),
+    role: row.role as InviteRole,
+    invitedBy: String(row.invited_by),
+    inviterName: String(row.inviter_name ?? row.invited_by),
+    expiresAt: String(row.expires_at),
+    acceptedAt: typeof row.accepted_at === "string" ? row.accepted_at : null,
+    revokedAt: typeof row.revoked_at === "string" ? row.revoked_at : null,
+    createdAt: String(row.created_at),
   };
 }

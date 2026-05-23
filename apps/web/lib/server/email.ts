@@ -93,8 +93,7 @@ async function sendViaSMTP(payload: EmailPayload): Promise<SendResult> {
   // Nodemailer is optional — only loaded if smtp provider is selected.
   // If nodemailer is not installed, fall back to logged simulation.
   try {
-    // nodemailer is an optional peer dep — loaded at runtime only
-    // eslint-disable-next-line
+    // nodemailer is an optional peer dep and only loaded when SMTP is selected.
     const nodemailer = require("nodemailer");
     const host = process.env.SMTP_HOST;
     const port = parseInt(process.env.SMTP_PORT ?? "587", 10);

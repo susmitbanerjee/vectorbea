@@ -228,9 +228,14 @@ export async function PATCH(request: NextRequest) {
   updates.push(Prisma.sql`updated_at = now()`);
 
   try {
+    let updateClause = updates[0] ?? Prisma.sql`updated_at = now()`;
+    for (let i = 1; i < updates.length; i += 1) {
+      updateClause = Prisma.sql`${updateClause}, ${updates[i]}`;
+    }
+
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
       UPDATE connections
-      SET ${Prisma.join(updates, Prisma.sql`, `)}
+      SET ${updateClause}
       WHERE workspace_id = ${workspaceId} AND id = ${id}
       RETURNING *
     `);
