@@ -384,7 +384,7 @@ export default function LandingPage() {
               <p className="text-[16px] leading-7" style={{ color: S.t3 }}>
                 Vectorbee sits between your scheduler and your agents. It handles
                 triggering, monitoring, budgeting, approving, and retrying — so you
-                don't have to build it.
+                don&apos;t have to build it.
               </p>
             </div>
 
