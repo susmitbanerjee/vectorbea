@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 
 const ALLOWED_TYPES = new Set([
   "llm_provider",
@@ -101,9 +100,6 @@ export async function GET(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get("workspaceId");
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
-  const authResult = await assertWorkspaceMember(request, workspaceId);
-  if (authResult.error) return authResult.error;
-
   try {
     const supabase = createVectorBeaAdminClient();
     let query = supabase
@@ -135,9 +131,6 @@ export async function POST(request: NextRequest) {
   const body = (await request.json()) as Record<string, unknown>;
   const workspaceId = extractWorkspaceId(request, body);
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
-
-  const authResult = await assertWorkspaceMember(request, workspaceId);
-  if (authResult.error) return authResult.error;
 
   try {
     const {
@@ -224,9 +217,6 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "workspaceId and id are required" }, { status: 400 });
   }
 
-  const authResult = await assertWorkspaceMember(request, workspaceId);
-  if (authResult.error) return authResult.error;
-
   const patch: Record<string, unknown> = {};
   if (typeof body.status === "string") {
     if (!ALLOWED_STATUSES.has(body.status)) {
@@ -265,9 +255,6 @@ export async function DELETE(request: NextRequest) {
   if (!workspaceId || !id) {
     return NextResponse.json({ error: "workspaceId and id are required" }, { status: 400 });
   }
-
-  const authResult = await assertWorkspaceMember(request, workspaceId);
-  if (authResult.error) return authResult.error;
 
   try {
     const supabase = createVectorBeaAdminClient();
