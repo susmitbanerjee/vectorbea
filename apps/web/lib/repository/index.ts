@@ -24,6 +24,19 @@ import type { WorkflowGraph } from "@/types/workflow-graph";
 
 import { runWorkflowFromStep, simulateWorkflow } from "@/lib/workflow-runtime/simulator";
 
+// ─── Re-export connections module ─────────────────────────────────────────────
+export {
+  getConnections,
+  getConnection,
+  getConnectionsByType,
+  getCompatibleConnectionsForTool,
+  getCompatibleConnectionsForAgent,
+  createConnection,
+  updateConnection,
+  deleteConnection,
+  testConnection,
+} from "./connections";
+
 import {
   ALL_SEED_EVENTS,
   ALL_SEED_RUNS,
@@ -170,6 +183,7 @@ export async function createAgent(payload: Partial<Agent>): Promise<Agent> {
     retryPolicy: payload.retryPolicy ?? { maxAttempts: 2, backoffType: "exponential", backoffMs: 2000 },
     timeoutPolicy: payload.timeoutPolicy ?? { stepTimeoutMs: 60000, runTimeoutMs: 600000 },
     approvalPolicy: payload.approvalPolicy ?? { requireApproval: false },
+    llmConnectionId: payload.llmConnectionId ?? null,
     status: "active",
     totalRuns: 0,
     lastUsedAt: null,
@@ -218,6 +232,8 @@ export async function createTool(payload: Partial<Tool>): Promise<Tool> {
     retryPolicy: payload.retryPolicy ?? { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
     idempotent: payload.idempotent ?? true,
     authConnectionRef: payload.authConnectionRef ?? null,
+    connectionId: payload.connectionId ?? null,
+    connectionName: payload.connectionName ?? null,
     httpConfig: payload.httpConfig,
     status: "active",
     totalCalls: 0,

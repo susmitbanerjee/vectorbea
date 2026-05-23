@@ -25,6 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 
+
 import { Logo } from "@/components/ui/Logo";
 import type { DashboardSummary } from "@/lib/api";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
@@ -50,28 +51,26 @@ type NavItem = {
   badge?: string;
 };
 
-// Primary nav — exactly the 9 product surfaces
+// Primary nav — 10 product surfaces
 const PRIMARY_NAV: NavItem[] = [
-  { href: "/dashboard" as never,  label: "Overview",   icon: LayoutDashboard },
-  { href: "/workflows" as never,  label: "Workflows",  icon: GitBranch },
-  { href: "/agents" as never,     label: "Agents",     icon: Bot },
-  { href: "/tools" as never,      label: "Tools",      icon: Wrench },
-  { href: "/runs" as never,       label: "Runs",       icon: List },
-  { href: "/approvals",           label: "Approvals",  icon: CheckCircle2 },
-  { href: "/schedules" as never,  label: "Schedules",  icon: CalendarClock },
-  { href: "/workers" as never,    label: "Workers",    icon: Server },
+  { href: "/dashboard" as never,     label: "Overview",     icon: LayoutDashboard },
+  { href: "/workflows" as never,     label: "Workflows",    icon: GitBranch },
+  { href: "/agents" as never,        label: "Agents",       icon: Bot },
+  { href: "/tools" as never,         label: "Tools",        icon: Wrench },
+  { href: "/connections" as never,   label: "Connections",  icon: Plug },
+  { href: "/runs" as never,          label: "Runs",         icon: List },
+  { href: "/approvals",              label: "Approvals",    icon: CheckCircle2 },
+  { href: "/schedules" as never,     label: "Schedules",    icon: CalendarClock },
+  { href: "/workers" as never,       label: "Workers",      icon: Server },
 ];
 
-// System section removed — artifacts & event history live inside Run Detail
-
-// Settings sub-nav
+// Settings sub-nav — Connections removed; lives in PRIMARY_NAV
 const SETTINGS_NAV: NavItem[] = [
-  { href: "/settings",            label: "Settings",     icon: Settings2 },
-  { href: "/settings/members",    label: "Members",      icon: Users,      isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/billing",    label: "Billing",      icon: CreditCard, isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/usage",      label: "Usage",        icon: BarChart3,  isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/sdk",        label: "Connections",  icon: Plug,       isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/api-keys",            label: "API Keys",     icon: KeyRound,   isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
+  { href: "/settings",            label: "Settings",  icon: Settings2 },
+  { href: "/settings/members",    label: "Members",   icon: Users,      isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/billing",    label: "Billing",   icon: CreditCard, isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/usage",      label: "Usage",     icon: BarChart3,  isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/api-keys",            label: "API Keys",  icon: KeyRound,   isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
 type SidebarUser = {

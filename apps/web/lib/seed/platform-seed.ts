@@ -31,6 +31,8 @@ export const SEED_TOOLS: Tool[] = [
     timeoutMs: 10000,
     retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
     idempotent: true,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
     authConnectionRef: "conn-internal-api",
     httpConfig: {
       method: "GET",
@@ -55,6 +57,8 @@ export const SEED_TOOLS: Tool[] = [
     timeoutMs: 8000,
     retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 500 },
     idempotent: true,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
     authConnectionRef: "conn-support-api",
     httpConfig: {
       method: "GET",
@@ -79,6 +83,8 @@ export const SEED_TOOLS: Tool[] = [
     timeoutMs: 12000,
     retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
     idempotent: true,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
     authConnectionRef: "conn-salesforce",
     status: "active",
     totalCalls: 478,
@@ -98,6 +104,8 @@ export const SEED_TOOLS: Tool[] = [
     timeoutMs: 15000,
     retryPolicy: { maxAttempts: 2, backoffType: "exponential", backoffMs: 2000 },
     idempotent: false,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
     authConnectionRef: "conn-salesforce",
     status: "active",
     totalCalls: 234,
@@ -117,6 +125,8 @@ export const SEED_TOOLS: Tool[] = [
     timeoutMs: 30000,
     retryPolicy: { maxAttempts: 1, backoffType: "fixed", backoffMs: 0 },
     idempotent: false,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
     authConnectionRef: "conn-salesforce",
     status: "active",
     totalCalls: 198,
@@ -136,6 +146,8 @@ export const SEED_TOOLS: Tool[] = [
     timeoutMs: 5000,
     retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 500 },
     idempotent: false,
+    connectionId: "conn-slack-workspace",
+    connectionName: "Acme Slack",
     authConnectionRef: "conn-slack",
     status: "active",
     totalCalls: 1203,
@@ -155,6 +167,7 @@ export const SEED_AGENTS: Agent[] = [
     description: "Top-level coordinator that plans and delegates tasks to sub-agents",
     role: "Orchestrator",
     type: "router_agent",
+    llmConnectionId: "conn-openai-prod",
     instructions: `You are the Orchestrator for the Customer Renewal Intelligence workflow.
 Your job is to:
 1. Receive the renewal window configuration
@@ -186,6 +199,7 @@ Always produce a final structured summary with counts, high-risk accounts, and n
     description: "Fetches and enriches customer data from CRM, usage metrics, and support",
     role: "Data Retrieval",
     type: "tool_agent",
+    llmConnectionId: null,
     instructions: `You are the Customer Data Agent. Given a list of customer IDs or a segment filter:
 1. Call usage-metrics-api.getCustomers to fetch usage data
 2. Call crm-api.getRenewalAccounts to get renewal dates and ARR
@@ -213,6 +227,7 @@ Always produce a final structured summary with counts, high-risk accounts, and n
     description: "Scores renewal risk for each customer using LLM-based reasoning over enriched profiles",
     role: "Analysis",
     type: "native_llm_agent",
+    llmConnectionId: "conn-openai-prod",
     instructions: `You are the Risk Analysis Agent. Given a list of customer profiles:
 For each customer, analyze:
 - Usage trends (declining, stable, growing)
@@ -243,6 +258,7 @@ Produce a risk score (0.0–1.0) and a risk tier (LOW/MEDIUM/HIGH/CRITICAL) with
     description: "Prepares and commits renewal risk scores to Salesforce — requires approval for writes",
     role: "CRM Writer",
     type: "tool_agent",
+    llmConnectionId: null,
     instructions: `You are the CRM Update Agent. Given scored accounts:
 1. Call crm-api.prepareBulkUpdate to stage the updates
 2. Report the staging summary to the Orchestrator
@@ -276,6 +292,7 @@ Produce a risk score (0.0–1.0) and a risk tier (LOW/MEDIUM/HIGH/CRITICAL) with
     description: "Sends Slack notifications with run summary and high-risk account highlights",
     role: "Notifier",
     type: "tool_agent",
+    llmConnectionId: null,
     instructions: `You are the Notification Agent. Given a run summary:
 1. Format a clear Slack message with:
    - Total accounts processed

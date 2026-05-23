@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, RefreshCw, Save, TestTube } from "lucide-react";
 import { toast } from "sonner";
 
 import type { RiskLevel, ToolType, RetryPolicy } from "@/types/platform";
-import { createTool } from "@/lib/repository";
+import type { Connection } from "@/types/connections";
+import { CONNECTION_TOOL_COMPAT } from "@/types/connections";
+import { createTool, getCompatibleConnectionsForTool } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,13 +60,14 @@ export default function NewToolPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [compatibleConnections, setCompatibleConnections] = useState<Connection[]>([]);
 
   // Basic info
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<ToolType>("http");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("read_only");
-  const [authConnectionRef, setAuthConnectionRef] = useState("");
+  const [connectionId, setConnectionId] = useState<string>("");
 
   // HTTP config
   const [method, setMethod] = useState<"GET" | "POST" | "PUT" | "PATCH" | "DELETE">("GET");
@@ -85,6 +88,16 @@ export default function NewToolPage() {
   const [retryBackoff, setRetryBackoff] = useState<RetryPolicy["backoffType"]>("exponential");
   const [retryBackoffMs, setRetryBackoffMs] = useState("1000");
 
+  // Reload compatible connections when type changes
+  useEffect(() => {
+    void getCompatibleConnectionsForTool(type).then((conns) => {
+      setCompatibleConnections(conns);
+      setConnectionId(conns.length > 0 && conns[0] ? conns[0].id : "");
+    });
+  }, [type]);
+
+  const needsConnection = (CONNECTION_TOOL_COMPAT[type]?.length ?? 0) > 0;
+
   async function handleCreate() {
     if (!name.trim()) { toast.error("Tool name is required."); return; }
     if (type === "http" && !url.trim()) { toast.error("URL is required for HTTP tools."); return; }
@@ -103,6 +116,7 @@ export default function NewToolPage() {
         backoffMs: parseInt(retryBackoffMs) || 1000,
       };
 
+      const selectedConn = compatibleConnections.find(c => c.id === connectionId);
       const tool = await createTool({
         name: name.trim(),
         description: description.trim(),
@@ -113,7 +127,9 @@ export default function NewToolPage() {
         inputSchema: parsedInput,
         outputSchema: parsedOutput,
         retryPolicy,
-        authConnectionRef: authConnectionRef.trim() || null,
+        authConnectionRef: connectionId || null,
+        connectionId: connectionId || null,
+        connectionName: selectedConn?.name ?? null,
         httpConfig: type === "http"
           ? { method, url: url.trim(), headers: parsedHeaders, bodyTemplate: bodyTemplate || undefined }
           : undefined,
@@ -232,23 +248,42 @@ export default function NewToolPage() {
         </section>
       )}
 
-      {/* ── Auth / Connection ────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
-        <SectionHeader label="Auth / Connection" />
-        <p className="text-[11px] text-muted-foreground">
-          Reference a named connection configured in{" "}
-          <Link href={"/settings/sdk" as never} className="text-primary hover:underline">Connections</Link>.
-          Leave blank if no auth is required.
-        </p>
-        <Field label="Connection reference">
-          <input
-            className={monoCls}
-            value={authConnectionRef}
-            onChange={(e) => setAuthConnectionRef(e.target.value)}
-            placeholder="conn-salesforce"
-          />
-        </Field>
-      </section>
+      {/* ── Connection ───────────────────────────────────────────────── */}
+      {needsConnection && (
+        <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+          <SectionHeader label="Connection" />
+          {compatibleConnections.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-5 rounded-lg border border-border/40" style={{ background: "var(--surface-2)" }}>
+              <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>No compatible connections found</p>
+              <p className="text-[11px] text-muted-foreground">Add a connection of the correct type before registering this tool.</p>
+              <Link
+                href={"/connections/new" as never}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
+                style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
+              >
+                Add Connection
+              </Link>
+            </div>
+          ) : (
+            <Field label="Connection" required>
+              <select
+                className={selectCls}
+                value={connectionId}
+                onChange={(e) => setConnectionId(e.target.value)}
+              >
+                <option value="">None</option>
+                {compatibleConnections.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Only connections compatible with this tool type are shown.{" "}
+                <Link href={"/connections" as never} className="text-primary hover:underline">Manage connections</Link>
+              </p>
+            </Field>
+          )}
+        </section>
+      )}
 
       {/* ── Schema ───────────────────────────────────────────────────── */}
       <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>

@@ -99,7 +99,16 @@ export type RunEventType =
   | "RUN_RESUMED"
   | "RUN_SUCCEEDED"
   | "RUN_FAILED"
-  | "REPLAY_STARTED";
+  | "REPLAY_STARTED"
+  | "CONNECTION_RESOLVED"
+  | "CONNECTION_TEST_STARTED"
+  | "CONNECTION_TEST_COMPLETED"
+  | "CONNECTION_TEST_FAILED"
+  | "CONNECTION_UNREACHABLE"
+  | "SECRET_MISSING"
+  | "WHITELIST_REQUIRED"
+  | "TOOL_CONNECTION_FAILED"
+  | "LLM_CONNECTION_FAILED";
 
 // ─── Policy types ─────────────────────────────────────────────────────────────
 
@@ -142,15 +151,18 @@ export interface Agent {
   role: string;
   instructions: string;
   type: AgentType;
+  llmConnectionId: string | null;   // references Connection of type llm_provider
   modelProvider: string;
   modelName: string;
   temperature: number;
   maxIterations: number;
   allowedToolIds: string[];
   memoryPolicy: MemoryPolicy;
+  memoryConnectionId?: string | null; // references Connection of type vector_store
   retryPolicy: RetryPolicy;
   timeoutPolicy: TimeoutPolicy;
   approvalPolicy: ApprovalPolicy;
+  budgetPolicy?: import("./platform").BudgetPolicy;
   status: "active" | "inactive" | "deprecated";
   totalRuns: number;
   lastUsedAt: string | null;
@@ -166,13 +178,15 @@ export interface Tool {
   slug: string;
   type: ToolType;
   description: string;
+  connectionId: string | null;        // primary Connection reference
+  connectionName?: string | null;     // denormalized for display
+  authConnectionRef: string | null;   // legacy alias
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
   riskLevel: RiskLevel;
   timeoutMs: number;
   retryPolicy: RetryPolicy;
   idempotent: boolean;
-  authConnectionRef: string | null;
   // HTTP-specific
   httpConfig?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

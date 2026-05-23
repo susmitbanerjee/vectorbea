@@ -8,9 +8,13 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { Agent, AgentType, ApprovalPolicy, MemoryPolicy, RetryPolicy, TimeoutPolicy, Tool } from "@/types/platform";
-import { createAgent, getTools } from "@/lib/repository";
+import type { Connection } from "@/types/connections";
+import { LLM_PROVIDER_MODELS } from "@/types/connections";
+import { createAgent, getTools, getConnectionsByType } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+const LLM_AGENT_TYPES = new Set<AgentType>(["native_llm_agent", "router_agent", "imported_langgraph_node"]);
 
 const AGENT_TYPES: { type: AgentType; label: string; description: string }[] = [
   { type: "native_llm_agent",            label: "Native LLM Agent",           description: "Direct LLM calls with tool use. Vectorbee owns execution, replay, and checkpoints." },
@@ -21,14 +25,6 @@ const AGENT_TYPES: { type: AgentType; label: string; description: string }[] = [
   { type: "external_instrumented_agent", label: "External Instrumented Agent", description: "External code with the Vectorbee SDK. Events pushed from the outside." },
 ];
 
-type ModelProvider = "openai" | "anthropic" | "local" | "none";
-
-const PROVIDER_MODELS: Record<ModelProvider, string[]> = {
-  openai:    ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
-  anthropic: ["claude-sonnet-4-5", "claude-haiku-3-5", "claude-opus-4"],
-  local:     ["llama-3.3-70b", "mistral-7b", "custom"],
-  none:      [],
-};
 
 const MEMORY_TYPES: { type: MemoryPolicy["type"]; label: string; description: string }[] = [
   { type: "none",       label: "None",            description: "No memory between calls." },
@@ -66,6 +62,7 @@ const selectCls = "w-full rounded-lg border border-border bg-background px-3 py-
 export default function NewAgentPage() {
   const router = useRouter();
   const [tools, setTools] = useState<Tool[]>([]);
+  const [llmConnections, setLlmConnections] = useState<Connection[]>([]);
   const [saving, setSaving] = useState(false);
 
   // Identity
@@ -75,9 +72,9 @@ export default function NewAgentPage() {
   const [type, setType] = useState<AgentType>("native_llm_agent");
   const [status, setStatus] = useState<Agent["status"]>("active");
 
-  // Model
-  const [provider, setProvider] = useState<ModelProvider>("openai");
-  const [model, setModel] = useState("gpt-4.1-mini");
+  // LLM Connection
+  const [llmConnectionId, setLlmConnectionId] = useState<string>("");
+  const [model, setModel] = useState("");
   const [temperature, setTemperature] = useState("0.1");
   const [maxIter, setMaxIter] = useState("10");
 
@@ -99,14 +96,29 @@ export default function NewAgentPage() {
 
   useEffect(() => {
     void getTools().then(setTools);
+    void getConnectionsByType("llm_provider").then((conns) => {
+      setLlmConnections(conns);
+      if (conns.length > 0 && conns[0]) {
+        setLlmConnectionId(conns[0].id);
+        const cfg = conns[0].config as import("@/types/connections").LlmConnectionConfig;
+        setModel(cfg.defaultModel);
+      }
+    });
   }, []);
 
-  // When provider changes, reset model to first option
-  function handleProviderChange(p: ModelProvider) {
-    setProvider(p);
-    const models = PROVIDER_MODELS[p];
-    setModel(models[0] ?? "");
+  function handleLlmConnectionChange(connId: string) {
+    setLlmConnectionId(connId);
+    const conn = llmConnections.find(c => c.id === connId);
+    if (conn) {
+      const cfg = conn.config as import("@/types/connections").LlmConnectionConfig;
+      setModel(cfg.defaultModel);
+    }
   }
+
+  const selectedLlmConn = llmConnections.find(c => c.id === llmConnectionId);
+  const availableModels: string[] = selectedLlmConn
+    ? (selectedLlmConn.config as import("@/types/connections").LlmConnectionConfig).allowedModels
+    : [];
 
   function toggleTool(id: string) {
     setSelectedTools((prev) =>
@@ -140,11 +152,12 @@ export default function NewAgentPage() {
         type,
         status,
         instructions: instructions.trim(),
-        modelProvider: provider === "none" ? "" : provider,
+        modelProvider: selectedLlmConn ? (selectedLlmConn.config as import("@/types/connections").LlmConnectionConfig).provider : "",
         modelName: model,
         temperature: parseFloat(temperature) || 0.1,
         maxIterations: parseInt(maxIter) || 10,
         allowedToolIds: selectedTools,
+        llmConnectionId: llmConnectionId || null,
         memoryPolicy,
         retryPolicy,
         timeoutPolicy,
@@ -159,7 +172,7 @@ export default function NewAgentPage() {
     }
   }
 
-  const needsModel = type !== "approval_agent" && type !== "external_instrumented_agent";
+  const needsLlmConnection = LLM_AGENT_TYPES.has(type);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6 lg:p-8">
@@ -228,39 +241,49 @@ export default function NewAgentPage() {
         </div>
       </section>
 
-      {/* ── Model Config ─────────────────────────────────────────────── */}
-      {needsModel && (
+      {/* ── LLM Connection ───────────────────────────────────────────── */}
+      {needsLlmConnection && (
         <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
-          <SectionHeader label="Model Config" />
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Provider">
-              <select className={selectCls} value={provider} onChange={(e) => handleProviderChange(e.target.value as ModelProvider)}>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="local">Local / Custom</option>
-                <option value="none">None (non-LLM)</option>
-              </select>
-            </Field>
-            {provider !== "none" && (
-              <Field label="Model">
-                <select className={selectCls} value={model} onChange={(e) => setModel(e.target.value)}>
-                  {PROVIDER_MODELS[provider].map((m) => (
-                    <option key={m} value={m}>{m}</option>
+          <SectionHeader label="LLM Connection" />
+
+          {llmConnections.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-6 rounded-lg border border-border/40" style={{ background: "var(--surface-2)" }}>
+              <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>No LLM provider configured</p>
+              <p className="text-[11px] text-muted-foreground">Add an LLM Provider connection before creating a native LLM agent.</p>
+              <Link
+                href={"/connections/new" as never}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
+                style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
+              >
+                Add LLM Provider Connection
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="LLM Provider Connection" required>
+                <select
+                  className={selectCls}
+                  value={llmConnectionId}
+                  onChange={(e) => handleLlmConnectionChange(e.target.value)}
+                >
+                  {llmConnections.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
                   ))}
                 </select>
               </Field>
-            )}
-            {provider !== "none" && (
-              <>
-                <Field label="Temperature">
-                  <input type="number" min="0" max="2" step="0.05" className={inputCls} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
-                </Field>
-                <Field label="Max Iterations">
-                  <input type="number" min="1" max="100" className={inputCls} value={maxIter} onChange={(e) => setMaxIter(e.target.value)} />
-                </Field>
-              </>
-            )}
-          </div>
+              <Field label="Model" required>
+                <select className={selectCls} value={model} onChange={(e) => setModel(e.target.value)}>
+                  {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Field>
+              <Field label="Temperature">
+                <input type="number" min="0" max="2" step="0.05" className={inputCls} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
+              </Field>
+              <Field label="Max Iterations">
+                <input type="number" min="1" max="100" className={inputCls} value={maxIter} onChange={(e) => setMaxIter(e.target.value)} />
+              </Field>
+            </div>
+          )}
         </section>
       )}
 
