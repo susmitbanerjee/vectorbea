@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { Prisma } from "@/lib/generated/prisma";
+import { db } from "@/server/db";
 
 const ALLOWED_TYPES = new Set([
   "llm_provider",
@@ -101,27 +102,28 @@ export async function GET(request: NextRequest) {
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
   try {
-    const supabase = createVectorBeaAdminClient();
-    let query = supabase
-      .from("connections")
-      .select("*")
-      .eq("workspace_id", workspaceId)
-      .order("created_at", { ascending: false });
-
     const type = request.nextUrl.searchParams.get("type");
     const status = request.nextUrl.searchParams.get("status");
     const search = request.nextUrl.searchParams.get("search");
 
-    if (type) query = query.eq("type", type);
-    if (status) query = query.eq("status", status);
+    const clauses: Prisma.Sql[] = [Prisma.sql`workspace_id = ${workspaceId}`];
+    if (type) clauses.push(Prisma.sql`type = ${type}`);
+    if (status) clauses.push(Prisma.sql`status = ${status}`);
     if (search) {
-      query = query.or(`name.ilike.%${search}%,provider.ilike.%${search}%,type.ilike.%${search}%`);
+      const q = `%${search}%`;
+      clauses.push(Prisma.sql`(name ILIKE ${q} OR provider ILIKE ${q} OR type ILIKE ${q})`);
     }
 
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    const rows = await db.$queryRaw<Record<string, unknown>[]>(
+      Prisma.sql`
+        SELECT *
+        FROM connections
+        WHERE ${Prisma.join(clauses, Prisma.sql` AND `)}
+        ORDER BY created_at DESC
+      `,
+    );
 
-    return NextResponse.json((data ?? []).map((r) => dbToConnection(r as Record<string, unknown>)));
+    return NextResponse.json((rows ?? []).map((r) => dbToConnection(r)));
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
@@ -170,7 +172,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "secretMasked too long" }, { status: 400 });
     }
 
-    const supabase = createVectorBeaAdminClient();
     const ts = Date.now().toString(36);
     const finalSlug = `${createSlug(String(name))}-${ts}`;
     const sanitizedConfig = sanitizeConfig(config);
@@ -178,32 +179,23 @@ export async function POST(request: NextRequest) {
       ? networkPolicy
       : { requireWhitelist: false, privateRunnerRequired: false, networkStatus: "unknown" };
 
-    const { data, error } = await supabase
-      .from("connections")
-      .insert({
-        workspace_id: workspaceId,
-        name: String(name),
-        slug: finalSlug,
-        type: normalizedType,
-        provider: normalizedProvider,
-        environment: normalizedEnvironment,
-        status: "not_tested",
-        auth_type: normalizedAuthType,
-        secret_ref: secretRef ? String(secretRef) : null,
-        secret_masked: secretMasked ? String(secretMasked) : null,
-        config: sanitizedConfig,
-        network_policy: safeNetworkPolicy,
-        used_by_agent_ids: [],
-        used_by_tool_ids: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
+    const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+      INSERT INTO connections (
+        workspace_id, name, slug, type, provider, environment, status, auth_type,
+        secret_ref, secret_masked, config, network_policy,
+        used_by_agent_ids, used_by_tool_ids, created_at, updated_at
+      ) VALUES (
+        ${workspaceId}, ${String(name)}, ${finalSlug}, ${normalizedType}, ${normalizedProvider},
+        ${normalizedEnvironment}, 'not_tested', ${normalizedAuthType},
+        ${secretRef ? String(secretRef) : null}, ${secretMasked ? String(secretMasked) : null},
+        ${JSON.stringify(sanitizedConfig)}::jsonb, ${JSON.stringify(safeNetworkPolicy)}::jsonb,
+        ARRAY[]::text[], ARRAY[]::text[], now(), now()
+      )
+      RETURNING *
+    `);
 
-    if (error) throw new Error(error.message);
-
-    return NextResponse.json(dbToConnection(data as Record<string, unknown>), { status: 201 });
+    const row = rows[0];
+    return NextResponse.json(dbToConnection(row), { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
@@ -217,33 +209,33 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "workspaceId and id are required" }, { status: 400 });
   }
 
-  const patch: Record<string, unknown> = {};
+  const updates: Prisma.Sql[] = [];
+
   if (typeof body.status === "string") {
     if (!ALLOWED_STATUSES.has(body.status)) {
       return NextResponse.json({ error: "invalid status" }, { status: 400 });
     }
-    patch.status = body.status;
+    updates.push(Prisma.sql`status = ${body.status}`);
   }
-  if (typeof body.lastTestStatus === "string") patch.last_test_status = body.lastTestStatus;
-  if (typeof body.lastTestError === "string" || body.lastTestError === null) patch.last_test_error = body.lastTestError;
-  if (typeof body.lastTestLatencyMs === "number" || body.lastTestLatencyMs === null) {
-    patch.last_test_latency_ms = body.lastTestLatencyMs;
-  }
-  if (typeof body.lastTestedAt === "string" || body.lastTestedAt === null) patch.last_tested_at = body.lastTestedAt;
-  patch.updated_at = new Date().toISOString();
+  if (typeof body.lastTestStatus === "string") updates.push(Prisma.sql`last_test_status = ${body.lastTestStatus}`);
+  if (typeof body.lastTestError === "string" || body.lastTestError === null) updates.push(Prisma.sql`last_test_error = ${body.lastTestError}`);
+  if (typeof body.lastTestLatencyMs === "number" || body.lastTestLatencyMs === null) updates.push(Prisma.sql`last_test_latency_ms = ${body.lastTestLatencyMs}`);
+  if (typeof body.lastTestedAt === "string" || body.lastTestedAt === null) updates.push(Prisma.sql`last_tested_at = ${body.lastTestedAt}`);
+
+  updates.push(Prisma.sql`updated_at = now()`);
 
   try {
-    const supabase = createVectorBeaAdminClient();
-    const { data, error } = await supabase
-      .from("connections")
-      .update(patch)
-      .eq("workspace_id", workspaceId)
-      .eq("id", id)
-      .select("*")
-      .single();
+    const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+      UPDATE connections
+      SET ${Prisma.join(updates, Prisma.sql`, `)}
+      WHERE workspace_id = ${workspaceId} AND id = ${id}
+      RETURNING *
+    `);
 
-    if (error) throw new Error(error.message);
-    return NextResponse.json(dbToConnection(data as Record<string, unknown>));
+    if (!rows[0]) {
+      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+    }
+    return NextResponse.json(dbToConnection(rows[0]));
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
@@ -257,14 +249,11 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const supabase = createVectorBeaAdminClient();
-    const { error } = await supabase
-      .from("connections")
-      .delete()
-      .eq("workspace_id", workspaceId)
-      .eq("id", id);
+    await db.$executeRaw(Prisma.sql`
+      DELETE FROM connections
+      WHERE workspace_id = ${workspaceId} AND id = ${id}
+    `);
 
-    if (error) throw new Error(error.message);
     return new NextResponse(null, { status: 204 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
