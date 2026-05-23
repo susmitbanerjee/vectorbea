@@ -309,12 +309,14 @@ export async function testConnection(id: string): Promise<Connection | null> {
   if (idx === -1) return null;
 
   const conn = _connections[idx]!;
-  const isPrivate =
-    conn.networkPolicy.requireWhitelist ||
-    conn.networkPolicy.networkStatus === "whitelist_required";
+  // Only block if the host itself requires a private runner or whitelist
+  const isBlocked =
+    conn.networkPolicy.privateRunnerRequired ||
+    conn.networkPolicy.networkStatus === "private_runner_required";
 
   const now2 = new Date().toISOString();
-  const pass = !isPrivate && Math.random() > 0.1;
+  // Public cloud hosts (Neon, OpenAI, etc.) pass reliably; private hosts always fail
+  const pass = !isBlocked && Math.random() > 0.05; // 95% pass for public hosts
 
   _connections[idx] = {
     ...conn,
@@ -322,7 +324,7 @@ export async function testConnection(id: string): Promise<Connection | null> {
     lastTestedAt: now2,
     lastTestStatus: pass ? "ok" : "failed",
     lastTestLatencyMs: pass ? Math.round(80 + Math.random() * 300) : null,
-    lastTestError: pass ? null : "Connection refused or credentials invalid",
+    lastTestError: pass ? null : isBlocked ? "Host is on a private network — deploy a private runner to reach it" : "Connection refused or credentials invalid",
     updatedAt: now2,
   };
   return _connections[idx]!;

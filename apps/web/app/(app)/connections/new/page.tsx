@@ -450,6 +450,7 @@ export default function NewConnectionPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "failed" | null>(null);
+  const [savedConnId, setSavedConnId] = useState<string | null>(null);
 
   // Shared
   const [name, setName] = useState("");
@@ -522,6 +523,14 @@ export default function NewConnectionPage() {
         config = {} as Parameters<typeof createConnection>[0]["config"];
       }
 
+      // Determine if the target host is private (RFC1918 / .internal / localhost)
+      const targetHost = type === "database" ? (host || connString) : (type === "http_api" ? httpBaseUrl : type === "mcp_server" ? mcpUrl : "");
+      const isPrivate = isPrivateHost(targetHost);
+
+      // Build masked secret — covers all secret fields
+      const anySecret = connString || apiKey || saasToken || secret || password || mcpToken;
+      const maskedSecret = anySecret ? "••••" + anySecret.slice(-4) : null;
+
       const conn = await createConnection({
         name: name.trim(),
         type,
@@ -529,20 +538,35 @@ export default function NewConnectionPage() {
         environment: environment as "development" | "staging" | "production",
         authType: connAuthType,
         secretRef: name.trim().toLowerCase().replace(/\s+/g, "-") + "-secret",
-        secretMasked: apiKey || saasToken || secret || password ? "••••" + (apiKey || "").slice(-4) : null,
+        secretMasked: maskedSecret,
         config,
         networkPolicy: {
-          requireWhitelist: needsNetworkStep,
-          privateRunnerRequired: false,
-          networkStatus: "unknown",
+          requireWhitelist: isPrivate,           // only flag private/internal hosts
+          privateRunnerRequired: isPrivate,
+          networkStatus: isPrivate ? "private_runner_required" : "unknown",
         },
       });
 
+      setSavedConnId(conn.id);
+
       if (!skipTest) {
-        await testConnection(conn.id);
+        const result = await testConnection(conn.id);
+        if (result) {
+          setTestResult(result.lastTestStatus === "ok" ? "ok" : "failed");
+          if (result.lastTestStatus === "ok") {
+            toast.success(`Connection test passed — ${result.lastTestLatencyMs}ms`);
+          } else {
+            toast.error(`Test failed: ${result.lastTestError ?? "Could not reach host"}`);
+          }
+          // Auto-navigate to detail page after short delay on success
+          if (result.lastTestStatus === "ok") {
+            setTimeout(() => router.push(`/connections/${conn.id}` as never), 1200);
+          }
+          return; // stay on page so user can see result
+        }
       }
 
-      toast.success("Connection created.");
+      toast.success("Connection saved.");
       router.push(`/connections/${conn.id}` as never);
     } catch {
       toast.error("Failed to create connection.");
@@ -552,14 +576,15 @@ export default function NewConnectionPage() {
   }
 
   async function handleTest() {
+    if (!type || !name.trim()) { toast.error("Name is required."); return; }
     setTesting(true);
     setTestResult(null);
-    // Simulate test
-    await new Promise((r) => setTimeout(r, 800));
-    const ok = !!name && (type !== "llm_provider" || !!apiKey) && Math.random() > 0.15;
-    setTestResult(ok ? "ok" : "failed");
-    setTesting(false);
-    toast[ok ? "success" : "error"](ok ? "Connection test passed." : "Connection test failed.");
+    try {
+      // Save first (if not already saved), then test
+      await handleSave(/* skipTest = */ false);
+    } finally {
+      setTesting(false);
+    }
   }
 
   return (
