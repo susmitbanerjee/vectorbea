@@ -1,147 +1,540 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, SlidersHorizontal, XCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+/**
+ * RunExecutionTimeline — horizontal Gantt / trace chart
+ *
+ * Layout:
+ *   ┌──────────────┬──────────────────────────────────────────┐
+ *   │  0s    20s   │  Ruler ticks                             │
+ *   ├──────────────┼──────────────────────────────────────────┤
+ *   │  Run         │  ◆────────────────────────────────────◆  │
+ *   ├──────────────┼──────────────────────────────────────────┤
+ *   │  Orchestrator│  [████ Agent] ◆ ◆                        │
+ *   ├──────────────┼──────────────────────────────────────────┤
+ *   │  Data Agent  │         [████████████] [██ Tool] [██ LLM]│
+ *   └──────────────┴──────────────────────────────────────────┘
+ *
+ * Spans   = events with durationMs  → rendered as horizontal bars
+ * Points  = events without duration → rendered as diamond markers
+ * Click   = opens inline detail panel below the chart
+ */
+
+import React, { useMemo, useState } from "react";
 import type { RunTimelineEventUi, TimelineEventType } from "@/types/agent-run-ui";
-import { RunTimelineEventCard } from "./RunTimelineEventCard";
 
-// ─── Filter groups ─────────────────────────────────────────────────────────────
+// ─── Layout constants ─────────────────────────────────────────────────────────
 
-type FilterGroup = "all" | "agents" | "steps" | "llm" | "tools" | "http" | "approvals" | "artifacts" | "errors";
+const LABEL_W  = 200; // px — fixed left label column
+const BAR_H    = 18;  // px — span bar height
+const ROW_H    = 28;  // px — height per sublane row
+const LANE_PAD = 8;   // px — top+bottom padding inside each lane
+const RULER_H  = 34;  // px — time ruler height
 
-const FILTER_CONFIG: Record<FilterGroup, { label: string; types?: TimelineEventType[] }> = {
-  all: { label: "All" },
-  agents: { label: "Agents", types: ["AGENT_SELECTED", "AGENT_STARTED", "AGENT_COMPLETED", "AGENT_FAILED"] },
-  steps: { label: "Steps", types: ["STEP_STARTED", "STEP_COMPLETED", "STEP_FAILED"] },
-  llm: { label: "LLM", types: ["LLM_CALL_STARTED", "LLM_CALL_COMPLETED", "LLM_CALL_FAILED"] },
-  tools: { label: "Tools", types: ["TOOL_CALL_STARTED", "TOOL_CALL_COMPLETED", "TOOL_CALL_FAILED"] },
-  http: { label: "HTTP", types: ["HTTP_CALL_STARTED", "HTTP_CALL_COMPLETED", "HTTP_CALL_FAILED"] },
-  approvals: { label: "Approvals", types: ["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED", "APPROVAL_EXPIRED", "RUN_PAUSED", "RUN_RESUMED"] },
-  artifacts: { label: "Artifacts", types: ["ARTIFACT_CREATED"] },
-  errors: { label: "Errors" }, // special: filter by status
-};
+// ─── Color scheme ─────────────────────────────────────────────────────────────
 
-// ─── Component ─────────────────────────────────────────────────────────────────
+function spanColor(type: TimelineEventType, status: string) {
+  if (status === "FAILED")  return { fill: "rgba(239,68,68,0.18)",    stroke: "#EF4444" };
+  if (status === "WAITING") return { fill: "rgba(245,158,11,0.18)",   stroke: "#F59E0B" };
+  if (status === "PENDING") return { fill: "rgba(245,158,11,0.12)",   stroke: "#F59E0B" };
+  if (type.startsWith("AGENT_"))    return { fill: "rgba(167,139,250,0.20)", stroke: "#A78BFA" };
+  if (type.startsWith("LLM_"))      return { fill: "rgba(192,132,252,0.20)", stroke: "#C084FC" };
+  if (type.startsWith("TOOL_"))     return { fill: "rgba(34,211,238,0.16)",  stroke: "#22D3EE" };
+  if (type.startsWith("HTTP_"))     return { fill: "rgba(110,231,183,0.16)", stroke: "#6EE7B7" };
+  if (type.startsWith("APPROVAL_")) return { fill: "rgba(252,211,77,0.16)",  stroke: "#FCD34D" };
+  if (type.startsWith("RETRY_"))    return { fill: "rgba(253,164,175,0.16)", stroke: "#FDA4AF" };
+  if (type.startsWith("RUN_"))      return { fill: "rgba(56,189,248,0.16)",  stroke: "#38BDF8" };
+  if (type.startsWith("BUDGET_") || type.startsWith("POLICY_"))
+                                     return { fill: "rgba(148,163,184,0.12)", stroke: "#94A3B8" };
+  if (type.startsWith("ARTIFACT_")) return { fill: "rgba(134,239,172,0.16)", stroke: "#86EFAC" };
+  return { fill: "rgba(148,163,184,0.10)", stroke: "#64748B" };
+}
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
+function fmtDur(ms: number): string {
+  if (ms < 1000)   return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+function fmtTs(ts: string) {
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+}
+
+// Short label to print inside bars
+function barLabel(type: TimelineEventType): string {
+  return type
+    .replace(/_(STARTED|COMPLETED|FAILED|CREATED|REQUESTED|APPROVED|REJECTED|EXPIRED|PASSED|SELECTED|EXHAUSTED|SCHEDULED|VALIDATED)$/, "")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/^\w/, c => c.toUpperCase());
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface SpanItem {
+  event: RunTimelineEventUi;
+  startMs: number; // ms from T_min
+  endMs: number;   // ms from T_min
+  isPoint: boolean;
+}
+
+interface Lane {
+  name: string;
+  sublanes: SpanItem[][];  // non-overlapping rows of span bars
+  points: SpanItem[];      // point events (no duration)
+}
+
+// ─── Detail panel ─────────────────────────────────────────────────────────────
+
+function KV({
+  label, value, mono, color,
+}: {
+  label: string; value: string; mono?: boolean; color?: string;
+}) {
+  return (
+    <div className="flex gap-3 py-1.5" style={{ borderBottom: "1px solid rgba(148,163,184,0.06)" }}>
+      <span className="w-36 shrink-0 text-[11px] font-medium" style={{ color: "var(--text-faint)" }}>
+        {label}
+      </span>
+      <span
+        className={`min-w-0 break-all text-[11px] ${mono ? "font-mono" : ""}`}
+        style={{ color: color ?? "var(--text-secondary)" }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function JsonBlock({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div>
+      <p
+        className="mb-1 text-[10px] font-semibold uppercase tracking-wider"
+        style={{ color: "var(--text-faint)" }}
+      >
+        {label}
+      </p>
+      <pre
+        className="overflow-auto rounded-lg p-3 text-[10px] font-mono leading-relaxed"
+        style={{
+          background: "#060A10",
+          color: "#CBD5E1",
+          border: "1px solid rgba(148,163,184,0.10)",
+          maxHeight: 130,
+        }}
+      >
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
+function SpanDetail({
+  event, onClose,
+}: {
+  event: RunTimelineEventUi; onClose: () => void;
+}) {
+  const c = spanColor(event.type, event.status);
+
+  return (
+    <div
+      className="mt-3 overflow-hidden rounded-xl"
+      style={{ border: `1px solid ${c.stroke}33`, background: "var(--surface-2)" }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center justify-between gap-3 px-4 py-3"
+        style={{ background: c.fill, borderBottom: `1px solid ${c.stroke}25` }}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c.stroke }} />
+          <span className="shrink-0 font-mono text-[10px] font-semibold" style={{ color: "var(--text-faint)" }}>
+            #{event.sequence}
+          </span>
+          <span className="shrink-0 font-mono text-[10px] font-bold" style={{ color: c.stroke }}>
+            {event.type}
+          </span>
+          <span className="truncate text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+            {event.title}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
+          style={{ color: "var(--text-faint)" }}
+        >
+          Close ✕
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="grid gap-6 p-4 lg:grid-cols-2">
+        {/* Left: KV rows */}
+        <div>
+          <KV label="Status"    value={event.status} />
+          <KV label="Source"    value={event.source}    mono />
+          <KV label="Timestamp" value={fmtTs(event.timestamp)} mono />
+          {event.durationMs    != null  && <KV label="Duration"    value={fmtDur(event.durationMs)} mono />}
+          {event.agentName               && <KV label="Agent"       value={event.agentName}  mono color="#A78BFA" />}
+          {event.toolName                && <KV label="Tool"        value={event.toolName}   mono color="#22D3EE" />}
+          {event.modelName               && <KV label="Model"       value={event.modelName}  mono color="#C084FC" />}
+          {event.tokensUsed    != null   && <KV label="Tokens"      value={event.tokensUsed.toLocaleString()} mono />}
+          {event.estimatedCostUsd != null && <KV label="Cost"       value={`$${event.estimatedCostUsd.toFixed(6)}`} mono />}
+          {event.handoffTo               && <KV label="Handoff →"   value={event.handoffTo}  mono color="#A78BFA" />}
+          {event.artifactName            && <KV label="Artifact"    value={event.artifactName} mono color="#86EFAC" />}
+          {event.actorName               && <KV label="Actor"       value={event.actorName}  mono />}
+          {event.summary                 && <KV label="Summary"     value={event.summary} />}
+          {event.errorMessage            && <KV label="Error"       value={event.errorMessage} mono color="#FCA5A5" />}
+          {event.approval != null && (() => {
+            const a = event.approval!;
+            return (
+              <>
+                <KV label="Approval ID"     value={a.id}     mono />
+                <KV label="Appr. Status"    value={a.status} />
+                {a.decidedBy      && <KV label="Decided By"  value={a.decidedBy} mono />}
+                {a.decisionReason && <KV label="Decision"    value={a.decisionReason} />}
+              </>
+            );
+          })()}
+        </div>
+
+        {/* Right: JSON blocks */}
+        <div className="space-y-3">
+          {event.inputJson    != null && <JsonBlock label="Input"    value={event.inputJson} />}
+          {event.outputJson   != null && <JsonBlock label="Output"   value={event.outputJson} />}
+          {event.metadataJson != null && <JsonBlock label="Metadata" value={event.metadataJson} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 interface RunExecutionTimelineProps {
   events: RunTimelineEventUi[];
-  className?: string;
 }
 
-export function RunExecutionTimeline({ events, className }: RunExecutionTimelineProps) {
-  const [filter, setFilter] = useState<FilterGroup>("all");
-  const [showFilters, setShowFilters] = useState(true);
-  const [expandAll, setExpandAll] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+export function RunExecutionTimeline({ events }: RunExecutionTimelineProps) {
+  const [selected, setSelected] = useState<RunTimelineEventUi | null>(null);
 
-  const errorCount = useMemo(() => events.filter(e => e.status === "FAILED").length, [events]);
-  const agentCount = useMemo(() => new Set(events.filter(e => e.agentName).map(e => e.agentName)).size, [events]);
+  // ── Time range ──────────────────────────────────────────────────────────────
+  const { T_min, totalMs } = useMemo(() => {
+    if (!events.length) return { T_min: 0, totalMs: 1000 };
+    let mn = Infinity, mx = -Infinity;
+    for (const e of events) {
+      const t = new Date(e.timestamp).getTime();
+      const s = e.durationMs ? t - e.durationMs : t;
+      if (s < mn) mn = s;
+      if (t > mx) mx = t;
+    }
+    const range = mx - mn || 1000;
+    const pad = range * 0.025;
+    return { T_min: mn - pad, totalMs: range + pad * 2 };
+  }, [events]);
 
-  const filtered = useMemo(() => {
-    if (filter === "errors") return events.filter(e => e.status === "FAILED");
-    const cfg = FILTER_CONFIG[filter];
-    if (!cfg.types) return events;
-    return events.filter(e => cfg.types!.includes(e.type));
-  }, [events, filter]);
+  // ── Build lanes ─────────────────────────────────────────────────────────────
+  const lanes = useMemo<Lane[]>(() => {
+    const map = new Map<string, SpanItem[]>();
+    map.set("Run", []);
+
+    for (const e of events) {
+      const name = e.agentName ?? "Run";
+      if (!map.has(name)) map.set(name, []);
+      const t = new Date(e.timestamp).getTime();
+      map.get(name)!.push({
+        event: e,
+        startMs: (e.durationMs ? t - e.durationMs : t) - T_min,
+        endMs:   t - T_min,
+        isPoint: !e.durationMs,
+      });
+    }
+
+    return Array.from(map.entries())
+      .filter(([, items]) => items.length > 0)
+      .map(([name, items]) => {
+        const spans  = items.filter(s => !s.isPoint);
+        const points = items.filter(s => s.isPoint);
+
+        // Greedy non-overlapping sublane assignment
+        const sublanes: SpanItem[][] = [];
+        const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
+        for (const span of sorted) {
+          let placed = false;
+          for (const row of sublanes) {
+            const last = row[row.length - 1];
+            if (!last || last.endMs <= span.startMs) {
+              row.push(span);
+              placed = true;
+              break;
+            }
+          }
+          if (!placed) sublanes.push([span]);
+        }
+
+        return { name, sublanes, points };
+      });
+  }, [events, T_min]);
+
+  // ── Time ruler ticks ────────────────────────────────────────────────────────
+  const ticks = useMemo(() => {
+    const count = 8;
+    return Array.from({ length: count + 1 }, (_, i) => ({
+      pct: (i / count) * 100,
+      label: i === 0 ? "0" : fmtDur(Math.round((i / count) * totalMs)),
+    }));
+  }, [totalMs]);
+
+  function toPct(ms: number) {
+    return Math.max(0, Math.min(100, (ms / totalMs) * 100));
+  }
+  function toWidthPct(ms: number) {
+    return Math.max(0.4, (ms / totalMs) * 100); // 0.4% min so tiny spans are visible
+  }
 
   return (
-    <div className={cn("space-y-3", className)}>
-      {/* ── Toolbar ───────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{filtered.length}</span>
-            {filtered.length !== events.length && <span className="text-muted-foreground/60"> of {events.length}</span>}
-            {" "}events
-          </span>
-          {agentCount > 0 && (
-            <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
-              {agentCount} agent{agentCount !== 1 ? "s" : ""}
+    <div>
+      {/* ── Chart ──────────────────────────────────────────────────────────── */}
+      <div
+        className="overflow-hidden overflow-x-auto rounded-xl"
+        style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)", minWidth: 0 }}
+      >
+        {/* Time ruler */}
+        <div
+          className="flex"
+          style={{ height: RULER_H, borderBottom: "1px solid rgba(148,163,184,0.10)", minWidth: 560 }}
+        >
+          <div
+            className="flex shrink-0 items-center px-4"
+            style={{
+              width: LABEL_W,
+              background: "var(--surface-2)",
+              borderRight: "1px solid rgba(148,163,184,0.09)",
+            }}
+          >
+            <span
+              className="text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--text-faint)" }}
+            >
+              Agent / Lane
             </span>
-          )}
-          {errorCount > 0 && (
-            <span className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
-              {errorCount} error{errorCount !== 1 ? "s" : ""}
-            </span>
-          )}
+          </div>
+          <div className="relative flex-1" style={{ background: "var(--surface-2)" }}>
+            {ticks.map((tick, i) => (
+              <div
+                key={i}
+                className="absolute flex flex-col items-center"
+                style={{ left: `${tick.pct}%`, top: 0, bottom: 0, transform: "translateX(-50%)" }}
+              >
+                <div
+                  style={{
+                    width: 1, height: 8, marginTop: 6,
+                    background: tick.pct === 0 || tick.pct === 100
+                      ? "rgba(148,163,184,0.35)" : "rgba(148,163,184,0.2)",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontFamily: "var(--font-mono, monospace)",
+                    color: "var(--text-faint)",
+                    marginTop: 2,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {tick.label}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setShowFilters(f => !f)}>
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            Filter
-          </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setExpandAll(e => !e)}>
-            {expandAll ? "Collapse all" : "Expand all"}
-          </Button>
-          <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setCollapsed(c => !c)}>
-            {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
+        {/* Lanes */}
+        {lanes.map((lane, laneIdx) => {
+          const numRows = Math.max(lane.sublanes.length, 1);
+          const laneH   = LANE_PAD * 2 + numRows * ROW_H;
+          const isLast  = laneIdx === lanes.length - 1;
+
+          return (
+            <div
+              key={lane.name}
+              className="flex"
+              style={{
+                height: laneH,
+                minWidth: 560,
+                borderBottom: !isLast ? "1px solid rgba(148,163,184,0.07)" : undefined,
+              }}
+            >
+              {/* Lane label */}
+              <div
+                className="flex shrink-0 items-start"
+                style={{
+                  width: LABEL_W,
+                  paddingTop: LANE_PAD + 5,
+                  paddingLeft: 16,
+                  paddingRight: 12,
+                  background: "var(--surface-2)",
+                  borderRight: "1px solid rgba(148,163,184,0.08)",
+                }}
+              >
+                <span
+                  className="truncate text-[12px] font-medium"
+                  style={{ color: lane.name === "Run" ? "#38BDF8" : "#A78BFA" }}
+                >
+                  {lane.name}
+                </span>
+              </div>
+
+              {/* Bars + markers */}
+              <div className="relative flex-1">
+                {/* Vertical grid lines */}
+                {ticks.map((tick, i) => (
+                  <div
+                    key={i}
+                    className="absolute top-0 bottom-0"
+                    style={{
+                      left: `${tick.pct}%`,
+                      width: 1,
+                      background: "rgba(148,163,184,0.04)",
+                    }}
+                  />
+                ))}
+
+                {/* Span bars */}
+                {lane.sublanes.map((row, rowIdx) =>
+                  row.map(span => {
+                    const left  = toPct(span.startMs);
+                    const width = toWidthPct(span.endMs - span.startMs);
+                    const c     = spanColor(span.event.type, span.event.status);
+                    const isSel = selected?.id === span.event.id;
+                    const top   = LANE_PAD + rowIdx * ROW_H + (ROW_H - BAR_H) / 2;
+                    const showDur = span.event.durationMs != null &&
+                      (span.endMs - span.startMs) > totalMs * 0.05;
+
+                    return (
+                      <div
+                        key={span.event.id}
+                        className="absolute cursor-pointer rounded"
+                        style={{
+                          left:     `${left}%`,
+                          width:    `${width}%`,
+                          top,
+                          height:   BAR_H,
+                          minWidth: 3,
+                          background: isSel ? c.stroke + "35" : c.fill,
+                          border: `1px solid ${isSel ? c.stroke : c.stroke + "90"}`,
+                          boxShadow: isSel
+                            ? `0 0 0 1px ${c.stroke}55, 0 0 8px ${c.stroke}22`
+                            : undefined,
+                          display:    "flex",
+                          alignItems: "center",
+                          paddingLeft: 5,
+                          paddingRight: 4,
+                          overflow: "hidden",
+                          transition: "box-shadow 0.1s, border-color 0.1s",
+                        }}
+                        onClick={() => setSelected(isSel ? null : span.event)}
+                        title={span.event.title}
+                      >
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 500,
+                            color: c.stroke,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            fontFamily: "var(--font-sans, sans-serif)",
+                          }}
+                        >
+                          {barLabel(span.event.type)}
+                          {showDur && ` · ${fmtDur(span.event.durationMs!)}`}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+
+                {/* Point event markers */}
+                {lane.points.map(pt => {
+                  const left  = toPct(pt.startMs);
+                  const c     = spanColor(pt.event.type, pt.event.status);
+                  const isSel = selected?.id === pt.event.id;
+                  const dSize = isSel ? 8 : 6;
+
+                  return (
+                    <React.Fragment key={pt.event.id}>
+                      {/* Vertical tick */}
+                      <div
+                        className="absolute cursor-pointer"
+                        style={{
+                          left:      `${left}%`,
+                          top:       LANE_PAD,
+                          bottom:    LANE_PAD,
+                          width:     isSel ? 2 : 1,
+                          background: c.stroke + (isSel ? "bb" : "55"),
+                          transform: "translateX(-50%)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                      {/* Diamond */}
+                      <div
+                        className="absolute cursor-pointer"
+                        style={{
+                          left:      `${left}%`,
+                          top:       "50%",
+                          width:     dSize,
+                          height:    dSize,
+                          background: c.stroke,
+                          transform: "translate(-50%, -50%) rotate(45deg)",
+                          boxShadow: isSel ? `0 0 0 2px ${c.stroke}44, 0 0 6px ${c.stroke}66` : undefined,
+                        }}
+                        onClick={() => setSelected(isSel ? null : pt.event)}
+                        title={pt.event.title}
+                      />
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* ── Filter chips ──────────────────────────────────────────────── */}
-      {showFilters && (
-        <div className="flex flex-wrap gap-1.5 rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5">
-          {(Object.entries(FILTER_CONFIG) as [FilterGroup, typeof FILTER_CONFIG[FilterGroup]][]).map(([key, cfg]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                filter === key
-                  ? "border-primary/30 bg-primary/10 text-primary"
-                  : "border-border/60 bg-background text-muted-foreground hover:border-border hover:text-foreground",
-              )}
-            >
-              {cfg.label}
-              {key === "errors" && errorCount > 0 && (
-                <span className="ml-1 text-red-500">({errorCount})</span>
-              )}
-            </button>
-          ))}
-          {filter !== "all" && (
-            <button type="button" onClick={() => setFilter("all")} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              <XCircle className="h-3.5 w-3.5" /> Clear
-            </button>
-          )}
-        </div>
-      )}
+      {/* ── Legend ─────────────────────────────────────────────────────────── */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1">
+        {[
+          { label: "Run",      color: "#38BDF8" },
+          { label: "Agent",    color: "#A78BFA" },
+          { label: "LLM",      color: "#C084FC" },
+          { label: "Tool",     color: "#22D3EE" },
+          { label: "HTTP",     color: "#6EE7B7" },
+          { label: "Approval", color: "#FCD34D" },
+          { label: "Retry",    color: "#FDA4AF" },
+          { label: "Failed",   color: "#EF4444" },
+        ].map(item => (
+          <div key={item.label} className="flex items-center gap-1.5">
+            <span className="h-2 w-3 rounded-sm" style={{ background: item.color + "60", border: `1px solid ${item.color}` }} />
+            <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>
+              {item.label}
+            </span>
+          </div>
+        ))}
+        <span className="text-[10px]" style={{ color: "rgba(100,116,139,0.6)" }}>
+          · bars = spans · ◆ = point events · click to inspect
+        </span>
+      </div>
 
-      {/* ── Event stream ──────────────────────────────────────────────── */}
-      {!collapsed ? (
-        <div className="pl-1">
-          {filtered.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-12 text-center">
-              <p className="text-sm text-muted-foreground">No events match the current filter.</p>
-            </div>
-          ) : (
-            filtered.map((event, i) => {
-              const prev = filtered[i - 1];
-              const showDate = i === 0 || (prev && new Date(event.timestamp).toDateString() !== new Date(prev.timestamp).toDateString());
-              return (
-                <RunTimelineEventCard
-                  key={event.id}
-                  event={event}
-                  isLast={i === filtered.length - 1}
-                  defaultExpanded={expandAll}
-                  showDate={!!showDate}
-                />
-              );
-            })
-          )}
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          className="flex w-full items-center justify-center rounded-lg border border-dashed border-border/50 py-6 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Show {filtered.length} events
-        </button>
+      {/* ── Detail panel ───────────────────────────────────────────────────── */}
+      {selected && (
+        <SpanDetail event={selected} onClose={() => setSelected(null)} />
       )}
     </div>
   );
