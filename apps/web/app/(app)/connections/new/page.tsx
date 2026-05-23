@@ -580,8 +580,22 @@ export default function NewConnectionPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      // Save first (if not already saved), then test
-      await handleSave(/* skipTest = */ false);
+      if (savedConnId) {
+        // Already saved — just re-run the test against the existing record
+        const result = await testConnection(savedConnId);
+        if (result) {
+          setTestResult(result.lastTestStatus === "ok" ? "ok" : "failed");
+          if (result.lastTestStatus === "ok") {
+            toast.success(`Connection test passed — ${result.lastTestLatencyMs}ms`);
+            setTimeout(() => router.push(`/connections/${savedConnId}` as never), 1200);
+          } else {
+            toast.error(`Test failed: ${result.lastTestError ?? "Could not reach host"}`);
+          }
+        }
+      } else {
+        // First time — save then test
+        await handleSave(false);
+      }
     } finally {
       setTesting(false);
     }
@@ -688,7 +702,7 @@ export default function NewConnectionPage() {
             <button type="button" onClick={() => setStep(1)} className="text-[12px] text-muted-foreground hover:text-foreground">← Back</button>
             <button
               type="button"
-              onClick={() => setStep(needsNetworkStep ? 3 : 3)}
+              onClick={() => setStep(needsNetworkStep ? 3 : totalSteps)}
               disabled={!name.trim()}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground disabled:opacity-40"
             >
