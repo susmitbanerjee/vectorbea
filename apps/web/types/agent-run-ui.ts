@@ -233,7 +233,17 @@ export interface AgentRunUiModel {
   approvals: ApprovalUiModel[];
   artifacts: ArtifactUiModel[];
   auditLogs: AuditLogUiModel[];
+  input?: unknown;
   output?: unknown;
   partialOutput?: unknown;
   raw?: unknown;
+  // Run-level metadata for the Metadata tab
+  runMetadata?: {
+    searchAttributes?: Record<string, unknown>;
+    executionMetadata?: Record<string, unknown>;
+    aiMetadata?: Record<string, unknown>;
+    budgetMetadata?: Record<string, unknown>;
+    retryPolicy?: Record<string, unknown>;
+    memo?: Record<string, unknown>;
+  };
 }

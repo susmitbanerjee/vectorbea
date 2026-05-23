@@ -605,6 +605,21 @@ export const scenarioAMock: AgentRunUiModel = {
     notificationsCreated: 3,
     riskReportArtifact: "risk_report.json",
   },
+  input: {
+    scheduledAt: "2026-05-22T09:00:00.000Z",
+    renewalWindowDays: 30,
+    customerSegment: "enterprise",
+    maxCustomers: 200,
+    requireApprovalForCrmWrite: true,
+  },
+  runMetadata: {
+    searchAttributes: { jobType: "renewal", segment: "enterprise", region: "us-east-1", week: "2026-W20" },
+    aiMetadata: { primaryModel: "gpt-4.1-mini", embeddingModel: "text-embedding-3-small", temperature: 0.2 },
+    budgetMetadata: { tokenBudget: 50000, costBudgetUsd: 0.5, tokensUsed: 12480, costUsedUsd: 0.061 },
+    retryPolicy: { maxAttempts: 3, backoffSeconds: 30, retryOn: ["HTTP_5XX", "TIMEOUT"] },
+    executionMetadata: { workerVersion: "v0.9.4", queue: "default", timezone: "UTC", nodeVersion: "20.11.0" },
+    memo: { triggeredBy: "weekly-cron", approvedBy: "Demo Owner", notes: "Normal renewal cycle — week 20" },
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -740,6 +755,20 @@ export const scenarioBMock: AgentRunUiModel = {
     retryAttempts: 2,
     notificationAgentStatus: "NOT_REACHED",
   },
+  input: {
+    targetDate: "2026-05-22",
+    invoiceBatchSize: 50,
+    maxRetryAttempts: 2,
+    paymentProvider: "stripe",
+    notifyOnFailure: true,
+  },
+  runMetadata: {
+    searchAttributes: { jobType: "payment-recovery", trigger: "manual", region: "us-east-1" },
+    aiMetadata: { primaryModel: "gpt-4.1-mini", temperature: 0.1 },
+    budgetMetadata: { tokenBudget: 20000, costBudgetUsd: 0.5, tokensUsed: 2230, costUsedUsd: 0.013 },
+    retryPolicy: { maxAttempts: 2, backoffSeconds: 60, retryOn: ["HTTP_429", "HTTP_5XX"] },
+    executionMetadata: { workerVersion: "v0.9.4", queue: "default", timezone: "UTC" },
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -850,6 +879,21 @@ export const scenarioCMock: AgentRunUiModel = {
     { id: "al-c-02", time: tc(1), action: "RUN_STARTED", actor: "worker:wkr-01HZB2", entity: "run:run-ccr-001", details: "Worker started execution" },
     { id: "al-c-03", time: tc(64), action: "APPROVAL_REQUESTED", actor: "agent:legal-review", entity: "approval:appr-ccr-001", details: "Send redlines to legal@acmecorp.com · HIGH risk" },
   ],
+  input: {
+    contractIds: ["MSA-2024-001", "SLA-2024-003", "DPA-2024-007"],
+    counterparty: "Acme Corp",
+    requireApprovalBeforeSend: true,
+    complianceFramework: "SOC2",
+    reviewerEmail: "legal@vectorbee.com",
+  },
+  runMetadata: {
+    searchAttributes: { jobType: "compliance-review", counterparty: "acme-corp", framework: "SOC2" },
+    aiMetadata: { primaryModel: "claude-3.5-sonnet", temperature: 0.3, maxTokens: 8000 },
+    budgetMetadata: { tokenBudget: 30000, costBudgetUsd: 1.0, tokensUsed: 5840, costUsedUsd: 0.029 },
+    retryPolicy: { maxAttempts: 3, backoffSeconds: 30, retryOn: ["HTTP_5XX", "TIMEOUT"] },
+    executionMetadata: { workerVersion: "v0.9.4", queue: "compliance", timezone: "UTC" },
+    memo: { triggeredBy: "weekday-cron", notes: "Acme Corp contract renewal package — 3 agreements" },
+  },
 };
 
 // ─── Export helpers ───────────────────────────────────────────────────────────

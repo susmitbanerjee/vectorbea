@@ -2,18 +2,19 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Bot, Clock, FileCode2, GitBranch, History, List, ScrollText, ShieldCheck, Zap,
+  ArrowLeftRight, Bot, Braces, FileCode2, GitBranch, History, List,
+  ScrollText, ShieldCheck, TableProperties,
 } from "lucide-react";
 import type { AgentRunUiModel } from "@/types/agent-run-ui";
 import { RunExecutionTimeline } from "./RunExecutionTimeline";
 import { AgentsTab } from "./tabs/AgentsTab";
-import { StepsTab } from "./tabs/StepsTab";
 import { ApprovalsTab } from "./tabs/ApprovalsTab";
-import { OutputTab } from "./tabs/OutputTab";
 import { ArtifactsTab } from "./tabs/ArtifactsTab";
-import { AuditTab } from "./tabs/AuditTab";
-import { RawTab } from "./tabs/RawTab";
 import { FlowTab } from "./tabs/FlowTab";
+import { EventHistoryTab } from "./tabs/EventHistoryTab";
+import { MetadataTab } from "./tabs/MetadataTab";
+import { InputOutputTab } from "./tabs/InputOutputTab";
+import { RawTab } from "./tabs/RawTab";
 
 interface RunDetailTabsV2Props {
   model: AgentRunUiModel;
@@ -21,54 +22,60 @@ interface RunDetailTabsV2Props {
 }
 
 export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTabsV2Props) {
-  const { run, agents, timelineEvents, steps, approvals, artifacts, auditLogs } = model;
+  const { run, agents, timelineEvents, approvals, artifacts } = model;
   const errorCount = timelineEvents.filter(e => e.status === "FAILED").length;
-  const stepsDone = steps.filter(s => s.status === "SUCCEEDED").length;
   const pendingApprovals = approvals.filter(a => a.status === "PENDING").length;
 
   return (
     <Tabs defaultValue={defaultTab} className="space-y-0">
-      <div className="sticky top-0 z-10 -mx-0 backdrop-blur-sm" style={{ borderBottom: "1px solid rgba(148,163,184,0.1)", background: "rgba(10,15,26,0.95)" }}>
-        <TabsList className="h-auto w-full justify-start rounded-none border-0 bg-transparent p-0 px-1 gap-0">
+      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
+      <div
+        className="sticky top-0 z-10 backdrop-blur-sm"
+        style={{ borderBottom: "1px solid rgba(148,163,184,0.09)", background: "rgba(9,14,24,0.96)" }}
+      >
+        <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-none border-0 bg-transparent p-0 px-0 gap-0 flex-nowrap">
+
           <TabTrigger value="timeline" icon={<History className="h-3.5 w-3.5" />} label="Timeline">
-            <span className="ml-1 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium tabular-nums">
-              {timelineEvents.length}
-            </span>
-            {errorCount > 0 && (
-              <span className="ml-1 rounded-full bg-red-500/15 px-1.5 py-px text-[10px] font-medium text-red-600 dark:text-red-400 tabular-nums">
-                {errorCount}✗
-              </span>
-            )}
+            <Badge>{timelineEvents.length}</Badge>
+            {errorCount > 0 && <ErrorBadge>{errorCount}✗</ErrorBadge>}
           </TabTrigger>
+
           <TabTrigger value="flow" icon={<GitBranch className="h-3.5 w-3.5" />} label="Flow">
-            <span className="ml-1 text-[10px] text-muted-foreground">{agents.length}</span>
+            <Badge>{agents.length}</Badge>
           </TabTrigger>
+
+          <TabTrigger value="events" icon={<TableProperties className="h-3.5 w-3.5" />} label="Events">
+            <Badge>{timelineEvents.length}</Badge>
+          </TabTrigger>
+
           <TabTrigger value="agents" icon={<Bot className="h-3.5 w-3.5" />} label="Agents">
-            <span className="ml-1 text-[10px] text-muted-foreground">{agents.length}</span>
+            <Badge>{agents.length}</Badge>
           </TabTrigger>
-          <TabTrigger value="steps" icon={<List className="h-3.5 w-3.5" />} label="Steps">
-            <span className="ml-1 text-[10px] text-muted-foreground">{stepsDone}/{steps.length}</span>
-          </TabTrigger>
+
           {approvals.length > 0 && (
             <TabTrigger value="approvals" icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approvals">
-              {pendingApprovals > 0 && (
-                <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                  {pendingApprovals} pending
-                </span>
-              )}
+              {pendingApprovals > 0
+                ? <WarnBadge>{pendingApprovals} pending</WarnBadge>
+                : <Badge>{approvals.length}</Badge>
+              }
             </TabTrigger>
           )}
-          <TabTrigger value="output" icon={<Zap className="h-3.5 w-3.5" />} label="Output" />
+
+          <TabTrigger value="io" icon={<ArrowLeftRight className="h-3.5 w-3.5" />} label="I/O" />
+
           {artifacts.length > 0 && (
             <TabTrigger value="artifacts" icon={<FileCode2 className="h-3.5 w-3.5" />} label="Artifacts">
-              <span className="ml-1 text-[10px] text-muted-foreground">{artifacts.length}</span>
+              <Badge>{artifacts.length}</Badge>
             </TabTrigger>
           )}
-          <TabTrigger value="audit" icon={<ScrollText className="h-3.5 w-3.5" />} label="Audit" />
-          <TabTrigger value="raw" icon={<Clock className="h-3.5 w-3.5" />} label="Raw" />
+
+          <TabTrigger value="metadata" icon={<Braces className="h-3.5 w-3.5" />} label="Metadata" />
+
+          <TabTrigger value="raw" icon={<ScrollText className="h-3.5 w-3.5" />} label="Raw" />
         </TabsList>
       </div>
 
+      {/* ── Tab content ──────────────────────────────────────────────────── */}
       <div className="pt-5">
         <TabsContent value="timeline" className="mt-0">
           <RunExecutionTimeline events={timelineEvents} />
@@ -78,22 +85,24 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
           <FlowTab agents={agents} timelineEvents={timelineEvents} />
         </TabsContent>
 
-        <TabsContent value="agents" className="mt-0">
-          <AgentsTab agents={agents} />
+        <TabsContent value="events" className="mt-0">
+          <EventHistoryTab events={timelineEvents} />
         </TabsContent>
 
-        <TabsContent value="steps" className="mt-0">
-          <StepsTab steps={steps} />
+        <TabsContent value="agents" className="mt-0">
+          <AgentsTab agents={agents} />
         </TabsContent>
 
         <TabsContent value="approvals" className="mt-0">
           <ApprovalsTab approvals={approvals} />
         </TabsContent>
 
-        <TabsContent value="output" className="mt-0">
-          <OutputTab
+        <TabsContent value="io" className="mt-0">
+          <InputOutputTab
+            input={model.input}
             output={model.output}
             partialOutput={model.partialOutput}
+            errorMessage={run.errorMessage}
             isFailed={run.status === "FAILED"}
           />
         </TabsContent>
@@ -102,8 +111,8 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
           <ArtifactsTab artifacts={artifacts} />
         </TabsContent>
 
-        <TabsContent value="audit" className="mt-0">
-          <AuditTab entries={auditLogs} />
+        <TabsContent value="metadata" className="mt-0">
+          <MetadataTab model={model} />
         </TabsContent>
 
         <TabsContent value="raw" className="mt-0">
@@ -114,13 +123,10 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
   );
 }
 
-// ─── Tab trigger helper ───────────────────────────────────────────────────────
+// ─── Tab trigger helpers ──────────────────────────────────────────────────────
 
 function TabTrigger({
-  value,
-  icon,
-  label,
-  children,
+  value, icon, label, children,
 }: {
   value: string;
   icon: React.ReactNode;
@@ -130,11 +136,38 @@ function TabTrigger({
   return (
     <TabsTrigger
       value={value}
-      className="relative flex items-center gap-1.5 rounded-none border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground transition-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+      className="relative flex shrink-0 items-center gap-1.5 rounded-none border-b-2 border-transparent px-3 py-2.5 text-[12px] font-medium text-muted-foreground whitespace-nowrap transition-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
     >
       {icon}
       {label}
       {children}
     </TabsTrigger>
+  );
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="ml-1 rounded-full px-1.5 py-px text-[10px] font-medium tabular-nums"
+      style={{ background: "rgba(148,163,184,0.12)", color: "var(--text-faint)" }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ErrorBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="ml-1 rounded-full bg-red-500/15 px-1.5 py-px text-[10px] font-medium tabular-nums text-red-400">
+      {children}
+    </span>
+  );
+}
+
+function WarnBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-400">
+      {children}
+    </span>
   );
 }
