@@ -51,6 +51,8 @@ function mapEventSource(s: RunEvent["source"]): RunTimelineEventUi["source"] {
 }
 
 function eventTitle(evt: RunEvent): string {
+  // Use runtime-provided title if available
+  if (evt.title) return evt.title;
   switch (evt.type) {
     case "RUN_CREATED":           return "Run created";
     case "RUN_QUEUED":            return "Run queued";

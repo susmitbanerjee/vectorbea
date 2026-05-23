@@ -20,9 +20,11 @@ function getStatusCfg(status: string) {
 
 interface ApprovalsTabProps {
   approvals: ApprovalUiModel[];
+  onApprove?: (approvalId: string) => void;
+  onReject?: (approvalId: string) => void;
 }
 
-export function ApprovalsTab({ approvals }: ApprovalsTabProps) {
+export function ApprovalsTab({ approvals, onApprove, onReject }: ApprovalsTabProps) {
   if (approvals.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-16 text-center">
@@ -92,16 +94,27 @@ export function ApprovalsTab({ approvals }: ApprovalsTabProps) {
               </div>
             )}
 
-            {/* Pending CTAs (mock) */}
-            {ap.status === "PENDING" && (
+            {/* Pending CTAs */}
+            {ap.status === "PENDING" && (onApprove ?? onReject) && (
               <div className="flex gap-2 border-t border-border/30 pt-3">
-                <button type="button" className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 transition-colors">
-                  Approve
-                </button>
-                <button type="button" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-500/20 transition-colors">
-                  Reject
-                </button>
-                <span className="ml-1 self-center text-[11px] text-muted-foreground">(mock — not connected to API)</span>
+                {onApprove && (
+                  <button
+                    type="button"
+                    onClick={() => onApprove(ap.id)}
+                    className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    Approve
+                  </button>
+                )}
+                {onReject && (
+                  <button
+                    type="button"
+                    onClick={() => onReject(ap.id)}
+                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-500/20 transition-colors"
+                  >
+                    Reject
+                  </button>
+                )}
               </div>
             )}
           </div>

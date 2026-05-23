@@ -98,7 +98,8 @@ export type RunEventType =
   | "RETRY_EXHAUSTED"
   | "RUN_RESUMED"
   | "RUN_SUCCEEDED"
-  | "RUN_FAILED";
+  | "RUN_FAILED"
+  | "REPLAY_STARTED";
 
 // ─── Policy types ─────────────────────────────────────────────────────────────
 
@@ -289,6 +290,11 @@ export interface RunEvent {
   type: RunEventType;
   status: "ok" | "error" | "pending";
   source: WorkflowCreationMode;
+  // Optional runtime-provided display fields (override auto-derived title)
+  title?: string;
+  summary?: string;
+  workflowId?: string;
+  workflowVersion?: string;
   stepId?: string;
   agentId?: string;
   agentName?: string;

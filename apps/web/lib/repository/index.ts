@@ -20,8 +20,9 @@ import type {
   WorkflowStep,
   WorkflowVersion,
 } from "@/types/platform";
+import type { WorkflowGraph } from "@/types/workflow-graph";
 
-import { simulateWorkflow } from "@/lib/workflow-runtime/simulator";
+import { runWorkflowFromStep, simulateWorkflow } from "@/lib/workflow-runtime/simulator";
 
 import {
   ALL_SEED_EVENTS,
@@ -49,6 +50,20 @@ function paginate<T>(items: T[], page: number, pageSize: number): PaginatedResul
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+// ─── Workflow graphs ──────────────────────────────────────────────────────────
+
+const _workflowGraphs: Map<string, WorkflowGraph> = new Map();
+
+export async function saveWorkflowGraph(workflowId: string, graph: WorkflowGraph): Promise<void> {
+  await sleep(0);
+  _workflowGraphs.set(workflowId, graph);
+}
+
+export async function getWorkflowGraph(workflowId: string): Promise<WorkflowGraph | null> {
+  await sleep(0);
+  return _workflowGraphs.get(workflowId) ?? null;
 }
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
@@ -306,44 +321,218 @@ export async function getPendingApprovals(): Promise<ApprovalGate[]> {
   return _runs.flatMap((r) => r.approvalGates.filter((a) => a.status === "pending"));
 }
 
-export async function approveRun(runId: string, approvalId: string): Promise<boolean> {
+/** Approve a pending gate and resume workflow execution from the next step. */
+export async function approveRunGate(runId: string, approvalId: string): Promise<boolean> {
   await sleep(0);
-  const run = _runs.find((r) => r.id === runId);
-  if (!run) return false;
+  const runIdx = _runs.findIndex((r) => r.id === runId);
+  if (runIdx === -1) return false;
+  const run = _runs[runIdx]!;
   const gate = run.approvalGates.find((a) => a.id === approvalId);
-  if (!gate) return false;
+  if (!gate || gate.status !== "pending") return false;
+
+  // Mark gate approved
   gate.status = "approved";
   gate.decidedAt = new Date().toISOString();
-  run.status = "running";
-  run.updatedAt = new Date().toISOString();
+  gate.decidedBy = "user";
+
+  // Find which step index we paused at
+  const workflow = _workflows.find((w) => w.id === run.workflowId);
+  if (!workflow) return false;
+
+  const steps = workflow.steps.filter((s) => s.type !== "end");
+  const pausedIdx = steps.findIndex((s) => s.id === run.currentStepId);
+  const resumeFromIdx = pausedIdx >= 0 ? pausedIdx + 1 : 0;
+
+  // Add APPROVAL_APPROVED event
+  const existingEvents = _events[runId] ?? [];
+  existingEvents.push({
+    id: `evt-sim-${Date.now()}-${Math.random()}`,
+    runId,
+    sequence: existingEvents.length,
+    timestamp: new Date().toISOString(),
+    type: "APPROVAL_APPROVED",
+    status: "ok",
+    source: "native",
+    workflowId: workflow.id,
+    workflowVersion: workflow.currentVersion,
+    title: "Approval approved",
+    stepId: gate.stepId,
+    metadata: { gateId: approvalId },
+  });
+
+  // Resume simulation from the step after the approval
+  const { updatedRun, events } = runWorkflowFromStep(
+    workflow,
+    { ...run, approvalGates: run.approvalGates, status: "running" },
+    _agents,
+    _tools,
+    existingEvents,
+    resumeFromIdx,
+    { isResume: true },
+  );
+
+  _runs[runIdx] = updatedRun;
+  _events[runId] = events;
   return true;
 }
 
+/** Reject a pending gate — fails the run. */
+export async function rejectRunGate(runId: string, approvalId: string): Promise<boolean> {
+  await sleep(0);
+  const runIdx = _runs.findIndex((r) => r.id === runId);
+  if (runIdx === -1) return false;
+  const run = _runs[runIdx]!;
+  const gate = run.approvalGates.find((a) => a.id === approvalId);
+  if (!gate || gate.status !== "pending") return false;
+
+  const workflow = _workflows.find((w) => w.id === run.workflowId);
+  const now = new Date().toISOString();
+
+  gate.status = "rejected";
+  gate.decidedAt = now;
+  gate.decidedBy = "user";
+
+  // Append APPROVAL_REJECTED + RUN_FAILED events
+  const existingEvents = _events[runId] ?? [];
+  existingEvents.push(
+    {
+      id: `evt-sim-${Date.now()}-${Math.random()}`,
+      runId,
+      sequence: existingEvents.length,
+      timestamp: now,
+      type: "APPROVAL_REJECTED",
+      status: "error",
+      source: "native",
+      workflowId: workflow?.id,
+      workflowVersion: workflow?.currentVersion,
+      title: "Approval rejected",
+      stepId: gate.stepId,
+      metadata: { gateId: approvalId },
+    },
+    {
+      id: `evt-sim-${Date.now()}-${Math.random()}-2`,
+      runId,
+      sequence: existingEvents.length + 1,
+      timestamp: now,
+      type: "RUN_FAILED",
+      status: "error",
+      source: "native",
+      workflowId: workflow?.id,
+      workflowVersion: workflow?.currentVersion,
+      title: "Run failed",
+      error: "Approval rejected by user",
+    },
+  );
+
+  _runs[runIdx] = {
+    ...run,
+    status: "failed",
+    completedAt: now,
+    error: "Approval rejected by user",
+    updatedAt: now,
+  };
+  _events[runId] = existingEvents;
+  return true;
+}
+
+// Legacy aliases
+export async function approveRun(runId: string, approvalId: string): Promise<boolean> {
+  return approveRunGate(runId, approvalId);
+}
 export async function rejectApproval(runId: string, approvalId: string): Promise<boolean> {
+  return rejectRunGate(runId, approvalId);
+}
+
+/** Retry from the failed step (re-run from that step). */
+export async function retryRunFailedStep(runId: string): Promise<boolean> {
+  await sleep(0);
+  const runIdx = _runs.findIndex((r) => r.id === runId);
+  if (runIdx === -1) return false;
+  const run = _runs[runIdx]!;
+  if (run.status !== "failed") return false;
+
+  const workflow = _workflows.find((w) => w.id === run.workflowId);
+  if (!workflow) return false;
+
+  const steps = workflow.steps.filter((s) => s.type !== "end");
+  const failedIdx = steps.findIndex((s) => s.id === run.currentStepId);
+  const retryFromIdx = failedIdx >= 0 ? failedIdx : 0;
+
+  const existingEvents = _events[runId] ?? [];
+  const { updatedRun, events } = runWorkflowFromStep(
+    workflow,
+    { ...run, status: "running" },
+    _agents,
+    _tools,
+    existingEvents,
+    retryFromIdx,
+    { isResume: true },
+  );
+
+  _runs[runIdx] = updatedRun;
+  _events[runId] = events;
+  return true;
+}
+
+/** List checkpoints for a run. */
+export async function listRunCheckpoints(runId: string): Promise<import("@/types/platform").RunCheckpoint[]> {
   await sleep(0);
   const run = _runs.find((r) => r.id === runId);
-  if (!run) return false;
-  const gate = run.approvalGates.find((a) => a.id === approvalId);
-  if (!gate) return false;
-  gate.status = "rejected";
-  gate.decidedAt = new Date().toISOString();
-  run.status = "failed";
-  run.updatedAt = new Date().toISOString();
-  return true;
+  return run?.checkpoints ?? [];
 }
 
 // ─── Replay / Checkpoint ──────────────────────────────────────────────────────
 
-export async function replayRun(runId: string, checkpointId?: string): Promise<{ jobId: string } | null> {
+/** Replay a run from start or from a specific checkpoint. Returns the new run. */
+export async function replayWorkflowRun(
+  runId: string,
+  checkpointId?: string,
+): Promise<AgentRun | null> {
   await sleep(0);
-  const run = _runs.find((r) => r.id === runId);
-  if (!run || !run.replayAvailable) return null;
-  // In production: POST /api/runs/:id/replay { checkpointId }
-  // Returns a new run ID for the replayed execution
-  const checkpoint = checkpointId
-    ? run.checkpoints.find((c) => c.id === checkpointId)
-    : run.checkpoints[0];
-  return { jobId: `replay-${run.id}-${checkpoint?.sequence ?? 0}-${Date.now()}` };
+  const sourceRun = _runs.find((r) => r.id === runId);
+  if (!sourceRun) return null;
+  if (!sourceRun.replayAvailable) return null;
+
+  const workflow = _workflows.find((w) => w.id === sourceRun.workflowId);
+  if (!workflow) return null;
+
+  // Find the start step index
+  let startStepIndex = 0;
+  if (checkpointId) {
+    const ckpt = sourceRun.checkpoints.find((c) => c.id === checkpointId);
+    if (ckpt) {
+      const steps = workflow.steps.filter((s) => s.type !== "end");
+      const ckptIdx = steps.findIndex((s) => s.id === ckpt.stepId);
+      startStepIndex = ckptIdx >= 0 ? ckptIdx + 1 : 0;
+    }
+  }
+
+  // Create a fresh run record
+  const newRun = await createRun(sourceRun.workflowId, sourceRun.input);
+
+  // Run from the starting index
+  const { updatedRun, events } = runWorkflowFromStep(
+    workflow,
+    newRun,
+    _agents,
+    _tools,
+    [],
+    startStepIndex,
+    { isReplay: startStepIndex > 0 },
+  );
+
+  const idx = _runs.findIndex((r) => r.id === newRun.id);
+  if (idx !== -1) _runs[idx] = updatedRun;
+  _events[newRun.id] = events;
+
+  return updatedRun;
+}
+
+// Legacy alias
+export async function replayRun(runId: string, checkpointId?: string): Promise<{ jobId: string } | null> {
+  const newRun = await replayWorkflowRun(runId, checkpointId);
+  if (!newRun) return null;
+  return { jobId: newRun.id };
 }
 
 // ─── Workflow Versions ────────────────────────────────────────────────────────

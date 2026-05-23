@@ -3,29 +3,44 @@
 /**
  * /runs/[id] — canonical run detail page.
  * Tries the repository first (seeded runs); falls back to live API for real runs.
+ *
+ * Local (native) runs get full approval, retry, and replay support.
+ * API-backed runs use remote endpoints.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { RunHeaderV2 } from "@/components/agent-runs/v2/RunHeader";
 import { RunSummaryCards } from "@/components/agent-runs/v2/RunSummaryCards";
 import { RunDetailTabsV2 } from "@/components/agent-runs/v2/RunDetailTabsV2";
-import { getRun, getRunEvents } from "@/lib/repository";
+import {
+  getRun,
+  getRunEvents,
+  approveRunGate,
+  rejectRunGate,
+  retryRunFailedStep,
+  replayWorkflowRun,
+  listRunCheckpoints,
+} from "@/lib/repository";
 import { mapRunToUiModel } from "@/lib/repository/run-to-ui-mapper";
 import { mapApiRunToUiModel, type ApiAgentRun } from "@/lib/api-run-to-ui-model";
 import type { AgentRunUiModel } from "@/types/agent-run-ui";
+import type { RunCheckpoint } from "@/types/platform";
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [model, setModel] = useState<AgentRunUiModel | null>(null);
+  const [isLocalRun, setIsLocalRun] = useState(false);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [forcePausedPending, setForcePausedPending] = useState(false);
   const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
+  const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,6 +49,9 @@ export default function RunDetailPage() {
       const [seedRun, seedEvents] = await Promise.all([getRun(id), getRunEvents(id)]);
       if (seedRun) {
         setModel(mapRunToUiModel(seedRun, seedEvents));
+        setIsLocalRun(true);
+        const ckpts = await listRunCheckpoints(id);
+        setCheckpoints(ckpts);
         return;
       }
       // 2. Fall back to live API
@@ -41,6 +59,7 @@ export default function RunDetailPage() {
       if (!res.ok) throw new Error("Not found");
       const data = (await res.json()) as { run: ApiAgentRun };
       setModel(mapApiRunToUiModel(data.run));
+      setIsLocalRun(false);
     } catch {
       toast.error("Failed to load run details.");
     } finally {
@@ -59,10 +78,58 @@ export default function RunDetailPage() {
     return () => clearInterval(interval);
   }, [model, load]);
 
+  // ── Local approval handlers ────────────────────────────────────────────────
+
+  async function handleApprove(approvalId: string) {
+    setActing(true);
+    try {
+      const ok = await approveRunGate(id, approvalId);
+      if (!ok) throw new Error("Approval failed");
+      toast.success("Approved — run resumed.");
+      await load();
+    } catch {
+      toast.error("Failed to approve.");
+    } finally {
+      setActing(false);
+    }
+  }
+
+  async function handleReject(approvalId: string) {
+    setActing(true);
+    try {
+      const ok = await rejectRunGate(id, approvalId);
+      if (!ok) throw new Error("Rejection failed");
+      toast.success("Rejected — run failed.");
+      await load();
+    } catch {
+      toast.error("Failed to reject.");
+    } finally {
+      setActing(false);
+    }
+  }
+
+  // ── Retry handler ─────────────────────────────────────────────────────────
+
   async function handleRetry(forcePaused = false) {
     setActing(true);
     setRetryWarnings([]);
     setForcePausedPending(false);
+
+    if (isLocalRun) {
+      try {
+        const ok = await retryRunFailedStep(id);
+        if (!ok) throw new Error("Retry failed");
+        toast.success("Retry queued.");
+        await load();
+      } catch {
+        toast.error("Failed to retry.");
+      } finally {
+        setActing(false);
+      }
+      return;
+    }
+
+    // Remote API retry
     try {
       const res = await fetch(`/api/agent-runs/${id}/retry`, {
         method: "POST",
@@ -85,6 +152,8 @@ export default function RunDetailPage() {
     }
   }
 
+  // ── Cancel handler ────────────────────────────────────────────────────────
+
   async function handleCancel() {
     setActing(true);
     try {
@@ -98,6 +167,24 @@ export default function RunDetailPage() {
       setActing(false);
     }
   }
+
+  // ── Replay handler ────────────────────────────────────────────────────────
+
+  async function handleReplay(checkpointId?: string) {
+    setActing(true);
+    try {
+      const newRun = await replayWorkflowRun(id, checkpointId);
+      if (!newRun) throw new Error("Replay unavailable");
+      toast.success("Replay started.");
+      router.push(`/runs/${newRun.id}` as never);
+    } catch {
+      toast.error("Failed to start replay.");
+    } finally {
+      setActing(false);
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading && !model) {
     return (
@@ -122,6 +209,11 @@ export default function RunDetailPage() {
   const displayModel: AgentRunUiModel = forcePausedPending
     ? { ...model, run: { ...model.run, errorMessage: (model.run.errorMessage ? model.run.errorMessage + " · " : "") + "Workflow paused — confirm retry to proceed" } }
     : model;
+
+  const pendingApprovals = model.approvals.filter((a) => a.status === "PENDING");
+  const canReplay = isLocalRun && model.run.status !== "RUNNING" && model.run.status !== "QUEUED" && checkpoints.length > 0;
+  const isFailed = model.run.status === "FAILED";
+  const isWaitingApproval = model.run.status === "WAITING_FOR_APPROVAL";
 
   return (
     <div className="min-h-full p-6 pb-16 lg:p-8">
@@ -153,13 +245,120 @@ export default function RunDetailPage() {
           </div>
         )}
 
+        {/* Approval Banner */}
+        {isWaitingApproval && pendingApprovals.length > 0 && isLocalRun && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-amber-300">Approval Required</p>
+                <p className="mt-0.5 text-xs text-amber-300/70">
+                  This run is paused waiting for human approval before continuing.
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() => void handleApprove(pendingApprovals[0]!.id)}
+                  className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  {acting ? "…" : "Approve"}
+                </button>
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() => void handleReject(pendingApprovals[0]!.id)}
+                  className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {acting ? "…" : "Reject"}
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-amber-300/60">
+              Step: <span className="font-mono">{pendingApprovals[0]!.relatedStep}</span>
+            </p>
+          </div>
+        )}
+
+        {/* Failed — local retry banner */}
+        {isFailed && isLocalRun && (
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-red-500/20 bg-red-500/5 px-5 py-4">
+            <div>
+              <p className="text-sm font-semibold text-red-400">Run Failed</p>
+              {model.run.errorMessage && (
+                <p className="mt-0.5 text-xs text-red-400/70">{model.run.errorMessage}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={acting}
+              onClick={() => void handleRetry()}
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              {acting ? "Retrying…" : "Retry from failed step"}
+            </button>
+          </div>
+        )}
+
+        {/* Replay section */}
+        {canReplay && (
+          <div className="rounded-xl border border-border bg-muted/10 px-5 py-4 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold">Replay Available</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {checkpoints.length} checkpoint{checkpoints.length !== 1 ? "s" : ""} — replay from start or a specific checkpoint.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={acting}
+                onClick={() => void handleReplay()}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 transition-colors"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {acting ? "Starting…" : "Replay from start"}
+              </button>
+            </div>
+            {checkpoints.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-t border-border/30 pt-3">
+                {checkpoints.map((ckpt) => (
+                  <button
+                    key={ckpt.id}
+                    type="button"
+                    disabled={acting}
+                    onClick={() => void handleReplay(ckpt.id)}
+                    className="rounded-lg border border-border px-3 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50 transition-colors"
+                  >
+                    After step <span className="font-mono">{ckpt.stepId}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Replay unavailable notice for non-native runs */}
+        {!isLocalRun && model.run.status === "FAILED" && (
+          <div className="rounded-xl border border-border bg-muted/10 px-5 py-3">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold">Replay unavailable</span> — replay is only supported for native workflow runs.
+            </p>
+          </div>
+        )}
+
         <RunHeaderV2
           model={displayModel}
           onRetry={!forcePausedPending ? () => void handleRetry(false) : undefined}
           onCancel={handleCancel}
         />
         <RunSummaryCards model={model} />
-        <RunDetailTabsV2 model={model} />
+        <RunDetailTabsV2
+          model={model}
+          onApprove={isLocalRun ? handleApprove : undefined}
+          onReject={isLocalRun ? handleReject : undefined}
+        />
       </div>
     </div>
   );

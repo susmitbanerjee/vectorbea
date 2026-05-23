@@ -32,10 +32,13 @@
     "@supabase/supabase-js": "^2.49.8",
     "@tailwindcss/typography": "^0.5.19",
     "@types/canvas-confetti": "^1.9.0",
+    "@xyflow/react": "^12.10.2",
+    "bullmq": "^5.0.0",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
+    "ioredis": "^5.0.0",
     "lucide-react": "^0.468.0",
     "mermaid": "^11.14.0",
     "next": "^15.1.0",
@@ -48,8 +51,6 @@
     "sonner": "^2.0.7",
     "stripe": "^18.4.0",
     "tailwind-merge": "^2.6.0",
-    "bullmq": "^5.0.0",
-    "ioredis": "^5.0.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -19,9 +19,11 @@ import { RawTab } from "./tabs/RawTab";
 interface RunDetailTabsV2Props {
   model: AgentRunUiModel;
   defaultTab?: string;
+  onApprove?: (approvalId: string) => void;
+  onReject?: (approvalId: string) => void;
 }
 
-export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTabsV2Props) {
+export function RunDetailTabsV2({ model, defaultTab = "timeline", onApprove, onReject }: RunDetailTabsV2Props) {
   const { run, agents, timelineEvents, approvals, artifacts } = model;
   const errorCount = timelineEvents.filter(e => e.status === "FAILED").length;
   const pendingApprovals = approvals.filter(a => a.status === "PENDING").length;
@@ -90,7 +92,7 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
         </TabsContent>
 
         <TabsContent value="approvals" className="mt-0">
-          <ApprovalsTab approvals={approvals} />
+          <ApprovalsTab approvals={approvals} onApprove={onApprove} onReject={onReject} />
         </TabsContent>
 
         <TabsContent value="io" className="mt-0">
