@@ -186,9 +186,14 @@ const SEED_CONNECTIONS: Connection[] = [
   },
 ];
 
-// ─── In-memory store ──────────────────────────────────────────────────────────
+// ─── In-memory store (globalThis-anchored to survive HMR re-evaluations) ─────
 
-const _connections: Connection[] = [...SEED_CONNECTIONS];
+type ConnectionsGlobal = typeof globalThis & {
+  __vb_connections?: Connection[];
+};
+const g = globalThis as ConnectionsGlobal;
+if (!g.__vb_connections) g.__vb_connections = [...SEED_CONNECTIONS];
+const _connections = g.__vb_connections;
 
 function sleep(ms = 0) {
   return new Promise<void>((r) => setTimeout(r, ms));

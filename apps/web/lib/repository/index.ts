@@ -65,9 +65,23 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+// ─── Global store (survives Next.js HMR module re-evaluations) ───────────────
+
+type RepoGlobal = typeof globalThis & {
+  __vb_graphs?: Map<string, WorkflowGraph>;
+  __vb_workflows?: Workflow[];
+  __vb_agents?: Agent[];
+  __vb_tools?: Tool[];
+  __vb_runs?: AgentRun[];
+  __vb_events?: Record<string, RunEvent[]>;
+  __vb_versions?: WorkflowVersion[];
+};
+const _g = globalThis as RepoGlobal;
+
 // ─── Workflow graphs ──────────────────────────────────────────────────────────
 
-const _workflowGraphs: Map<string, WorkflowGraph> = new Map();
+if (!_g.__vb_graphs) _g.__vb_graphs = new Map();
+const _workflowGraphs = _g.__vb_graphs;
 
 export async function saveWorkflowGraph(workflowId: string, graph: WorkflowGraph): Promise<void> {
   await sleep(0);
@@ -81,7 +95,8 @@ export async function getWorkflowGraph(workflowId: string): Promise<WorkflowGrap
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
 
-const _workflows: Workflow[] = [SEED_WORKFLOW];
+if (!_g.__vb_workflows) _g.__vb_workflows = [SEED_WORKFLOW];
+const _workflows = _g.__vb_workflows;
 
 export async function getWorkflows(filters: WorkflowFilters = {}): Promise<PaginatedResult<Workflow>> {
   await sleep(0);
@@ -143,7 +158,8 @@ export async function updateWorkflow(id: string, payload: Partial<Workflow>): Pr
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
 
-const _agents: Agent[] = [...SEED_AGENTS];
+if (!_g.__vb_agents) _g.__vb_agents = [...SEED_AGENTS];
+const _agents = _g.__vb_agents;
 
 export async function getAgents(): Promise<Agent[]> {
   await sleep(0);
@@ -196,7 +212,8 @@ export async function createAgent(payload: Partial<Agent>): Promise<Agent> {
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
-const _tools: Tool[] = [...SEED_TOOLS];
+if (!_g.__vb_tools) _g.__vb_tools = [...SEED_TOOLS];
+const _tools = _g.__vb_tools;
 
 export async function getTools(): Promise<Tool[]> {
   await sleep(0);
@@ -247,7 +264,8 @@ export async function createTool(payload: Partial<Tool>): Promise<Tool> {
 
 // ─── Runs ─────────────────────────────────────────────────────────────────────
 
-const _runs: AgentRun[] = [...ALL_SEED_RUNS];
+if (!_g.__vb_runs) _g.__vb_runs = [...ALL_SEED_RUNS];
+const _runs = _g.__vb_runs;
 
 export async function getRuns(filters: RunFilters = {}): Promise<PaginatedResult<AgentRun>> {
   await sleep(0);
@@ -301,7 +319,8 @@ export async function createRun(workflowId: string, input: unknown): Promise<Age
 // ─── Run Events ───────────────────────────────────────────────────────────────
 
 // Mutable event store — starts with seed data, extended by triggerWorkflow
-const _events: Record<string, RunEvent[]> = { ...ALL_SEED_EVENTS };
+if (!_g.__vb_events) _g.__vb_events = { ...ALL_SEED_EVENTS };
+const _events = _g.__vb_events;
 
 export async function getRunEvents(runId: string): Promise<RunEvent[]> {
   await sleep(0);
@@ -553,7 +572,8 @@ export async function replayRun(runId: string, checkpointId?: string): Promise<{
 
 // ─── Workflow Versions ────────────────────────────────────────────────────────
 
-const _versions: WorkflowVersion[] = [];
+if (!_g.__vb_versions) _g.__vb_versions = [];
+const _versions = _g.__vb_versions;
 
 export async function saveWorkflowVersion(
   workflowId: string,
