@@ -110,7 +110,7 @@ export default function AuditPage() {
     <div className="min-h-screen bg-[#F8F5EF]">
       <AppHeader
         title="Audit Trail"
-        subtitle="Immutable log of all governance actions"
+        subtitle="Immutable log of all platform actions"
         actions={
           <button
             type="button"

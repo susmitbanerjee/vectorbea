@@ -52,22 +52,18 @@ export function RunDetailTabsV2({ model, defaultTab = "timeline" }: RunDetailTab
             <Badge>{agents.length}</Badge>
           </TabTrigger>
 
-          {approvals.length > 0 && (
-            <TabTrigger value="approvals" icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approvals">
-              {pendingApprovals > 0
-                ? <WarnBadge>{pendingApprovals} pending</WarnBadge>
-                : <Badge>{approvals.length}</Badge>
-              }
-            </TabTrigger>
-          )}
+          <TabTrigger value="approvals" icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approvals">
+            {pendingApprovals > 0
+              ? <WarnBadge>{pendingApprovals} pending</WarnBadge>
+              : approvals.length > 0 ? <Badge>{approvals.length}</Badge> : null
+            }
+          </TabTrigger>
 
-          <TabTrigger value="io" icon={<ArrowLeftRight className="h-3.5 w-3.5" />} label="I/O" />
+          <TabTrigger value="io" icon={<ArrowLeftRight className="h-3.5 w-3.5" />} label="Input/Output" />
 
-          {artifacts.length > 0 && (
-            <TabTrigger value="artifacts" icon={<FileCode2 className="h-3.5 w-3.5" />} label="Artifacts">
-              <Badge>{artifacts.length}</Badge>
-            </TabTrigger>
-          )}
+          <TabTrigger value="artifacts" icon={<FileCode2 className="h-3.5 w-3.5" />} label="Artifacts">
+            {artifacts.length > 0 && <Badge>{artifacts.length}</Badge>}
+          </TabTrigger>
 
           <TabTrigger value="metadata" icon={<Braces className="h-3.5 w-3.5" />} label="Metadata" />
 

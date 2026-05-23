@@ -4,57 +4,32 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import {
-  Activity,
   AlertTriangle,
+  Bot,
   CheckCircle2,
   Clock,
-  DollarSign,
-  ExternalLink,
-  Loader2,
+  GitBranch,
   Play,
+  Plus,
   RefreshCw,
+  Server,
   ShieldCheck,
-  TrendingUp,
-  Users,
+  Upload,
+  Wrench,
   Zap,
 } from "lucide-react";
-import { RunStatusBadge, TriggerBadge } from "@/components/scheduler/status-badge";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { getPlatformSummary, getRuns } from "@/lib/repository";
+import type { AgentRun } from "@/types/platform";
+import { cn } from "@/lib/utils";
 
-interface RecentRun {
-  id: string;
-  status: string;
-  triggerSource: string;
-  startedAt: string | null;
-  durationMs: number | null;
-  estimatedCostUsd: number | null;
-  createdAt: string;
-  agentJob: { id: string; name: string };
-}
-
-interface DashboardData {
-  activeJobs: number;
-  runsToday: number;
-  failedRuns: number;
-  waitingApprovals: number;
-  estimatedCostToday: number;
-  successRate: number | null;
-  recentRuns: RecentRun[];
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDuration(ms: number | null) {
   if (!ms) return "—";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
-}
-
-function fmtCost(usd: number | null) {
-  if (usd === null || usd === 0) return "—";
-  return `$${usd.toFixed(4)}`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
 function timeAgo(ts: string | null) {
@@ -66,491 +41,285 @@ function timeAgo(ts: string | null) {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// ─── Metric card ─────────────────────────────────────────────────────────────
+const STATUS_DOT: Record<string, string> = {
+  succeeded:            "bg-emerald-400",
+  failed:               "bg-red-400",
+  running:              "bg-sky-400 animate-pulse",
+  waiting_for_approval: "bg-amber-400",
+  queued:               "bg-slate-400",
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function MetricCard({
-  label, value, sub, icon: Icon, accentColor, href,
+  label, value, sub, accent, icon: Icon,
 }: {
   label: string;
   value: string | number;
   sub?: string;
+  accent?: string;
   icon: React.ElementType;
-  accentColor?: string;
-  href?: string;
 }) {
-  const inner = (
+  return (
     <div
-      className="flex flex-col gap-3 rounded-xl p-4 transition-colors"
-      style={{
-        background: "var(--surface-2)",
-        border: "1px solid var(--border-subtle)",
-      }}
+      className="flex flex-col gap-3 rounded-xl border border-border/60 p-4"
+      style={{ background: "var(--surface-1)" }}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span
-          className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-          style={{ color: "var(--text-faint)" }}
-        >
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
           {label}
-        </span>
-        <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-          style={{ background: accentColor ? `${accentColor}18` : "rgba(148,163,184,0.08)" }}
-        >
-          <Icon
-            className="h-3.5 w-3.5"
-            style={{ color: accentColor ?? "var(--text-faint)" }}
-          />
-        </span>
+        </p>
+        <Icon className="h-4 w-4" style={{ color: accent ?? "var(--text-faint)" }} />
       </div>
-      <div>
-        <span
-          className="text-[28px] font-semibold leading-none tracking-tight"
-          style={{ color: "var(--text-primary)" }}
-        >
-          {value}
-        </span>
-        {sub && (
-          <p className="mt-1 text-[11px]" style={{ color: "var(--text-muted)" }}>
-            {sub}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-
-  return href ? (
-    <Link href={href as Route} className="block">
-      {inner}
-    </Link>
-  ) : inner;
-}
-
-// ─── Panel wrapper ────────────────────────────────────────────────────────────
-
-function Panel({
-  title, action, children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className="flex flex-col overflow-hidden rounded-xl"
-      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-    >
-      <div
-        className="flex items-center justify-between px-4 py-3"
-        style={{ borderBottom: "1px solid var(--border-subtle)" }}
-      >
-        <span
-          className="text-[12px] font-semibold"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          {title}
-        </span>
-        {action}
-      </div>
-      {children}
+      <p className="text-[26px] font-semibold leading-none tracking-tight" style={{ color: accent ?? "var(--text-primary)" }}>
+        {value}
+      </p>
+      {sub && <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>{sub}</p>}
     </div>
   );
 }
 
-// ─── Run row ─────────────────────────────────────────────────────────────────
-
-function RunRow({ run }: { run: RecentRun }) {
-  const isActive = run.status === "RUNNING" || run.status === "WAITING_FOR_APPROVAL";
+function RunRow({ run }: { run: AgentRun }) {
+  const dot = STATUS_DOT[run.status] ?? "bg-slate-400";
   return (
-    <div
-      className="group flex items-center gap-3 px-4 py-2.5 transition-colors"
-      style={{ borderBottom: "1px solid rgba(148,163,184,0.05)" }}
+    <Link
+      href={`/runs/${run.id}` as Route}
+      className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/20"
     >
-      {isActive && <span className="live-dot h-1.5 w-1.5 shrink-0" />}
-      {!isActive && run.status === "FAILED" && (
-        <AlertTriangle className="h-3 w-3 shrink-0 text-red-400" />
-      )}
-      {!isActive && run.status === "SUCCEEDED" && (
-        <CheckCircle2 className="h-3 w-3 shrink-0" style={{ color: "#10B981" }} />
-      )}
-      {!isActive && run.status !== "FAILED" && run.status !== "SUCCEEDED" && (
-        <span className="h-3 w-3 shrink-0" />
-      )}
-      <div className="min-w-0 flex-1">
-        <Link
-          href={`/agent-runs/${run.id}` as Route}
-          className="block truncate text-[12px] font-medium transition-colors hover:underline"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          {run.agentJob.name}
-        </Link>
-      </div>
-      <RunStatusBadge status={run.status as never} />
-      <TriggerBadge source={run.triggerSource as never} />
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", dot)} />
+      <span className="flex-1 truncate text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+        {run.workflowName}
+      </span>
       <span className="shrink-0 font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>
         {fmtDuration(run.durationMs)}
       </span>
       <span className="shrink-0 text-[11px]" style={{ color: "var(--text-faint)" }}>
-        {timeAgo(run.startedAt ?? run.createdAt)}
+        {timeAgo(run.startedAt)}
       </span>
-      <Link
-        href={`/agent-runs/${run.id}` as Route}
-        className="shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
-        style={{ color: "var(--text-faint)" }}
-      >
-        <ExternalLink className="h-3 w-3" />
-      </Link>
-    </div>
-  );
-}
-
-// ─── Demo CTA strip ───────────────────────────────────────────────────────────
-
-function DemoCTAStrip() {
-  return (
-    <div
-      className="flex items-center gap-3 rounded-xl px-4 py-3"
-      style={{
-        background: "rgba(56,189,248,0.04)",
-        border: "1px solid rgba(56,189,248,0.15)",
-      }}
-    >
-      <Zap className="h-4 w-4 shrink-0" style={{ color: "#38BDF8" }} />
-      <div className="flex-1">
-        <p className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>
-          Explore mock run data
-        </p>
-        <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-          Fully-populated demo runs — Timeline, Flow, Events, I/O, and Approvals
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Link
-          href={"/agent-runs/mock" as never}
-          className="inline-flex h-7 items-center rounded-lg px-3 text-[11px] font-medium transition-colors"
-          style={{ background: "rgba(56,189,248,0.12)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
-        >
-          Success run →
-        </Link>
-        <Link
-          href={"/agent-runs/mock-failed" as never}
-          className="inline-flex h-7 items-center rounded-lg px-3 text-[11px] font-medium transition-colors"
-          style={{ background: "rgba(239,68,68,0.08)", color: "#F87171", border: "1px solid rgba(239,68,68,0.15)" }}
-        >
-          Failed run →
-        </Link>
-        <Link
-          href={"/agent-runs/mock-waiting-approval" as never}
-          className="inline-flex h-7 items-center rounded-lg px-3 text-[11px] font-medium transition-colors"
-          style={{ background: "rgba(245,158,11,0.08)", color: "#FCD34D", border: "1px solid rgba(245,158,11,0.15)" }}
-        >
-          Approval gate →
-        </Link>
-      </div>
-    </div>
+    </Link>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
+interface Summary {
+  totalWorkflows: number;
+  activeWorkflows: number;
+  runningRuns: number;
+  waitingApprovals: number;
+  failedRuns24h: number;
+  succeededRuns24h: number;
+  totalTokens24h: number;
+  totalCost24h: number;
+  connectedWorkers: number;
+}
+
+export default function OverviewPage() {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [recentRuns, setRecentRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshedAt, setRefreshedAt] = useState<Date>(new Date());
 
-  function fetchData() {
+  async function load() {
     setLoading(true);
-    fetch("/api/dashboard/scheduler")
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-      .then((d: DashboardData) => {
-        setData(d);
-        setRefreshedAt(new Date());
-      })
-      .catch(() => setError("Failed to load dashboard data."))
-      .finally(() => setLoading(false));
+    try {
+      const [s, runsResult] = await Promise.all([
+        getPlatformSummary(),
+        getRuns({ pageSize: 8 }),
+      ]);
+      setSummary(s);
+      setRecentRuns(runsResult.items);
+    } catch {
+      // silently fallback
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { void load(); }, []);
 
-  if (loading && !data) {
-    return (
-      <div className="space-y-6 p-6 lg:p-8">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-28 animate-pulse rounded-xl" style={{ background: "var(--surface-2)" }} />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="h-72 animate-pulse rounded-xl lg:col-span-2" style={{ background: "var(--surface-2)" }} />
-          <div className="h-72 animate-pulse rounded-xl" style={{ background: "var(--surface-2)" }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <div className="flex h-64 items-center justify-center p-8">
-        <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
-          {error ?? "Something went wrong."}
-        </p>
-      </div>
-    );
-  }
-
-  const activeRuns = data.recentRuns.filter((r) => r.status === "RUNNING" || r.status === "WAITING_FOR_APPROVAL");
-  const failedRuns = data.recentRuns.filter((r) => r.status === "FAILED");
-  const recentAll = data.recentRuns.slice(0, 10);
+  const isConnected = (summary?.connectedWorkers ?? 0) > 0;
 
   return (
-    <div className="space-y-5 p-6 lg:p-8">
+    <div className="space-y-6 p-6 lg:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1
-            className="text-[18px] font-semibold tracking-tight"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Agent Operations
+          <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+            Overview
           </h1>
-          <p className="mt-0.5 text-[12px]" style={{ color: "var(--text-faint)" }}>
-            Refreshed{" "}
-            {refreshedAt.toLocaleTimeString(undefined, {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            })}
+          <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>
+            AI agent workflow execution platform
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href={"/agent-jobs/new" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[12px] font-medium transition-colors"
-            style={{ background: "#38BDF8", color: "#080B12" }}
-          >
-            <Play className="h-3 w-3" />
-            New Job
-          </Link>
-          <button
-            type="button"
-            onClick={fetchData}
-            disabled={loading}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:opacity-50"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)", color: "var(--text-faint)" }}
-          >
-            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/60 transition-colors hover:bg-muted disabled:opacity-40"
+          style={{ background: "var(--surface-1)" }}
+        >
+          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} style={{ color: "var(--text-faint)" }} />
+        </button>
       </div>
 
-      {/* Demo CTA */}
-      <DemoCTAStrip />
+      {/* CTA strip */}
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 px-4 py-3"
+        style={{ background: "var(--surface-1)" }}
+      >
+        <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Quick actions:</span>
+        <Link href={"/workflows/new" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+          <Plus className="h-3 w-3" />
+          New Workflow
+        </Link>
+        <Link href={"/workflows/import" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors" style={{ background: "var(--surface-2)" }}>
+          <Upload className="h-3 w-3" />
+          Import Workflow
+        </Link>
+        <Link href={"/agent-runs/mock" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors" style={{ background: "var(--surface-2)" }}>
+          <Zap className="h-3 w-3" />
+          Demo Run
+        </Link>
+        {(summary?.waitingApprovals ?? 0) > 0 && (
+          <Link href={"/approvals" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-[12px] font-medium text-amber-400 hover:bg-amber-500/20 transition-colors">
+            <ShieldCheck className="h-3 w-3" />
+            {summary!.waitingApprovals} pending approval{summary!.waitingApprovals !== 1 ? "s" : ""}
+          </Link>
+        )}
+      </div>
 
-      {/* Metrics grid */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard
-          label="Active Jobs"
-          value={data.activeJobs}
-          icon={Activity}
-          accentColor="#38BDF8"
-          href="/agent-jobs"
-          sub="configured"
-        />
-        <MetricCard
-          label="Runs Today"
-          value={data.runsToday}
-          icon={Play}
-          sub="total executions"
+          label="Active Workflows"
+          value={summary?.activeWorkflows ?? "—"}
+          sub={`${summary?.totalWorkflows ?? 0} total`}
+          accent="#38BDF8"
+          icon={GitBranch}
         />
         <MetricCard
           label="Running Now"
-          value={activeRuns.length}
-          icon={Zap}
-          accentColor={activeRuns.length > 0 ? "#38BDF8" : undefined}
-          sub={activeRuns.length > 0 ? "in progress" : "idle"}
+          value={summary?.runningRuns ?? 0}
+          accent={summary?.runningRuns ? "#10B981" : undefined}
+          icon={Play}
         />
         <MetricCard
-          label="Failed Today"
-          value={data.failedRuns}
+          label="Failed (24h)"
+          value={summary?.failedRuns24h ?? 0}
+          sub={`${summary?.succeededRuns24h ?? 0} succeeded`}
+          accent={summary?.failedRuns24h ? "#F87171" : undefined}
           icon={AlertTriangle}
-          accentColor={data.failedRuns > 0 ? "#EF4444" : undefined}
-          sub={data.failedRuns > 0 ? "need attention" : "all clear"}
         />
         <MetricCard
           label="Pending Approvals"
-          value={data.waitingApprovals}
+          value={summary?.waitingApprovals ?? 0}
+          accent={summary?.waitingApprovals ? "#FCD34D" : undefined}
           icon={ShieldCheck}
-          accentColor={data.waitingApprovals > 0 ? "#F59E0B" : undefined}
-          href="/approvals"
-          sub={data.waitingApprovals > 0 ? "awaiting review" : "none waiting"}
-        />
-        <MetricCard
-          label="Success Rate"
-          value={data.successRate !== null ? `${data.successRate}%` : "—"}
-          icon={TrendingUp}
-          accentColor={
-            data.successRate !== null
-              ? data.successRate >= 90 ? "#10B981"
-              : data.successRate >= 70 ? "#F59E0B"
-              : "#EF4444"
-              : undefined
-          }
-          sub="last 30 days"
         />
       </div>
 
-      {/* Main panels */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Recent runs */}
-        <Panel
-          title="Recent Runs"
-          action={
-            <Link
-              href={"/agent-runs" as never}
-              className="text-[11px] transition-colors hover:underline"
-              style={{ color: "var(--text-faint)" }}
-            >
-              View all →
-            </Link>
-          }
+        <div
+          className="lg:col-span-2 rounded-xl border border-border/60 overflow-hidden"
+          style={{ background: "var(--surface-1)" }}
         >
-          {recentAll.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-14 text-center">
-              <CheckCircle2 className="h-7 w-7" style={{ color: "rgba(148,163,184,0.2)" }} />
-              <p className="text-[13px] font-medium" style={{ color: "var(--text-muted)" }}>No runs yet</p>
-              <Link href="/agent-jobs/new" className="mt-1 text-[11px]" style={{ color: "#38BDF8" }}>
-                Create your first job →
-              </Link>
-            </div>
-          ) : (
-            <div className="divide-y divide-transparent">
-              {recentAll.map((run) => (
-                <RunRow key={run.id} run={run} />
-              ))}
-            </div>
-          )}
-        </Panel>
+          <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+            <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Recent Runs</h2>
+            <Link href={"/runs" as Route} className="text-[11px] text-primary hover:underline">View all →</Link>
+          </div>
+          <div className="divide-y divide-border/30 p-1">
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="h-3 w-3 rounded-full bg-muted animate-pulse" />
+                  <div className="h-3.5 flex-1 rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+                </div>
+              ))
+            ) : recentRuns.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-center">
+                <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>No runs yet</p>
+                <Link href={"/agent-runs/mock" as Route} className="text-[11px] text-primary hover:underline">View demo runs →</Link>
+              </div>
+            ) : (
+              recentRuns.map((run) => <RunRow key={run.id} run={run} />)
+            )}
+          </div>
+        </div>
 
         {/* Right column */}
-        <div className="space-y-4 lg:col-span-1">
-          {/* Active now */}
-          <Panel
-            title="Active Now"
-            action={
-              activeRuns.length > 0 ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="live-dot h-1.5 w-1.5" />
-                  <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-                    {activeRuns.length} running
-                  </span>
-                </div>
-              ) : undefined
-            }
-          >
-            {activeRuns.length === 0 ? (
-              <div className="flex flex-col items-center gap-1.5 py-8 text-center">
-                <Users className="h-5 w-5" style={{ color: "rgba(148,163,184,0.15)" }} />
-                <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>No runs in progress</p>
-              </div>
-            ) : (
-              activeRuns.map((run) => (
-                <div
-                  key={run.id}
-                  className="flex items-center gap-3 px-4 py-2.5"
-                  style={{ borderBottom: "1px solid rgba(148,163,184,0.05)" }}
-                >
-                  <span className="live-dot h-1.5 w-1.5 shrink-0" />
-                  <Link
-                    href={`/agent-runs/${run.id}` as Route}
-                    className="min-w-0 flex-1 truncate text-[12px] font-medium hover:underline"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    {run.agentJob.name}
-                  </Link>
-                  <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-                    {timeAgo(run.startedAt ?? run.createdAt)}
-                  </span>
-                </div>
-              ))
-            )}
-          </Panel>
-
-          {/* Recent failures */}
-          <Panel
-            title="Recent Failures"
-            action={
-              failedRuns.length > 0 ? (
-                <span
-                  className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                  style={{ background: "rgba(239,68,68,0.12)", color: "#F87171" }}
-                >
-                  {failedRuns.length}
-                </span>
-              ) : undefined
-            }
-          >
-            {failedRuns.length === 0 ? (
-              <div className="flex flex-col items-center gap-1.5 py-8 text-center">
-                <CheckCircle2 className="h-5 w-5" style={{ color: "rgba(16,185,129,0.3)" }} />
-                <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>No recent failures</p>
-              </div>
-            ) : (
-              failedRuns.slice(0, 5).map((run) => (
-                <div
-                  key={run.id}
-                  className="flex items-center gap-3 px-4 py-2.5"
-                  style={{ borderBottom: "1px solid rgba(148,163,184,0.05)" }}
-                >
-                  <AlertTriangle className="h-3 w-3 shrink-0 text-red-400" />
-                  <Link
-                    href={`/agent-runs/${run.id}` as Route}
-                    className="min-w-0 flex-1 truncate text-[12px] font-medium hover:underline"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    {run.agentJob.name}
-                  </Link>
-                  <span className="font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>
-                    {fmtDuration(run.durationMs)}
-                  </span>
-                  <Link
-                    href={`/agent-runs/${run.id}` as Route}
-                    className="text-[11px] transition-colors hover:underline"
-                    style={{ color: "#38BDF8" }}
-                  >
-                    View →
-                  </Link>
-                </div>
-              ))
-            )}
-          </Panel>
-
-          {/* Cost today */}
+        <div className="space-y-4">
+          {/* Token / cost */}
           <div
-            className="flex items-center gap-3 rounded-xl px-4 py-3.5"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+            className="rounded-xl border border-border/60 px-4 py-4"
+            style={{ background: "var(--surface-1)" }}
           >
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-              style={{ background: "rgba(56,189,248,0.1)" }}
-            >
-              <DollarSign className="h-4 w-4" style={{ color: "#38BDF8" }} />
-            </span>
-            <div className="flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-faint)" }}>
-                Cost Today
-              </p>
-              <p className="mt-0.5 font-mono text-[18px] font-semibold" style={{ color: "var(--text-primary)" }}>
-                {data.estimatedCostToday > 0 ? `$${data.estimatedCostToday.toFixed(4)}` : "$0.00"}
+            <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+              Usage (24h)
+            </h2>
+            <div className="space-y-3">
+              {[
+                { label: "Tokens", value: summary ? summary.totalTokens24h.toLocaleString() : "—" },
+                { label: "Est. cost", value: summary ? `$${summary.totalCost24h.toFixed(4)}` : "—" },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex items-center justify-between">
+                  <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>{label}</span>
+                  <span className="font-mono text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Worker health */}
+          <div
+            className="rounded-xl border border-border/60 px-4 py-4"
+            style={{ background: "var(--surface-1)" }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Workers</h2>
+              <Link href={"/workers" as Route} className="text-[11px] text-primary hover:underline">Manage →</Link>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className={cn("h-2 w-2 rounded-full shrink-0", isConnected ? "bg-emerald-400" : "bg-red-500/60")} />
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                {isConnected
+                  ? `${summary!.connectedWorkers} worker${summary!.connectedWorkers !== 1 ? "s" : ""} connected`
+                  : "No workers connected"}
               </p>
             </div>
-            <Link
-              href={"/settings/usage" as Route}
-              className="text-[11px] transition-colors hover:underline"
-              style={{ color: "var(--text-faint)" }}
-            >
-              Usage →
-            </Link>
+            {!isConnected && (
+              <p className="mt-2 text-[11px]" style={{ color: "var(--text-faint)" }}>
+                Start a worker process or see docs in{" "}
+                <Link href={"/settings/sdk" as Route} className="text-primary hover:underline">Connections</Link>.
+              </p>
+            )}
+          </div>
+
+          {/* Platform quick links */}
+          <div
+            className="rounded-xl border border-border/60 px-4 py-4"
+            style={{ background: "var(--surface-1)" }}
+          >
+            <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Explore</h2>
+            <div className="space-y-2">
+              {[
+                { href: "/agents",    label: "Agent Registry",  icon: Bot },
+                { href: "/tools",     label: "Tool Registry",   icon: Wrench },
+                { href: "/schedules", label: "Schedules",       icon: Clock },
+                { href: "/approvals", label: "Approval Queue",  icon: ShieldCheck },
+              ].map(({ href, label, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href as Route}
+                  className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[12px] transition-colors hover:bg-muted/30"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--text-faint)" }} />
+                  {label}
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
       </div>

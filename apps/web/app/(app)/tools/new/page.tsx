@@ -1,0 +1,335 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, RefreshCw, Save, TestTube } from "lucide-react";
+import { toast } from "sonner";
+
+import type { RiskLevel, ToolType, RetryPolicy } from "@/types/platform";
+import { createTool } from "@/lib/repository";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TOOL_TYPES: { type: ToolType; label: string }[] = [
+  { type: "http",            label: "HTTP" },
+  { type: "mcp_tool",        label: "MCP" },
+  { type: "database_read",   label: "Database (Read)" },
+  { type: "database_write",  label: "Database (Write)" },
+  { type: "slack",           label: "Slack" },
+  { type: "email",           label: "Email" },
+  { type: "crm",             label: "CRM" },
+  { type: "custom_function", label: "Custom Function" },
+];
+
+const RISK_LEVELS: { level: RiskLevel; label: string; description: string; color: string }[] = [
+  { level: "read_only",       label: "Read Only",        description: "Never modifies state. Safe to retry freely.",           color: "#34D399" },
+  { level: "low_risk_write",  label: "Low Risk Write",   description: "Writes that are easy to undo or idempotent.",           color: "#FCD34D" },
+  { level: "high_risk_write", label: "High Risk Write",  description: "Modifies important data. Requires care on retry.",      color: "#FB923C" },
+  { level: "irreversible",    label: "Irreversible",     description: "Cannot be undone. Payments, sends, deletions.",         color: "#F87171" },
+];
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+      {label}
+    </p>
+  );
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
+        {label}{required && <span className="ml-0.5 text-red-400">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary";
+const selectCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] focus:outline-none";
+const monoCls = `${inputCls} font-mono text-[12px]`;
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function NewToolPage() {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  // Basic info
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [type, setType] = useState<ToolType>("http");
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>("read_only");
+  const [authConnectionRef, setAuthConnectionRef] = useState("");
+
+  // HTTP config
+  const [method, setMethod] = useState<"GET" | "POST" | "PUT" | "PATCH" | "DELETE">("GET");
+  const [url, setUrl] = useState("");
+  const [headers, setHeaders] = useState("{}");
+  const [bodyTemplate, setBodyTemplate] = useState("");
+
+  // Schema
+  const [inputSchema, setInputSchema] = useState('{\n  "type": "object",\n  "properties": {}\n}');
+  const [outputSchema, setOutputSchema] = useState('{\n  "type": "object",\n  "properties": {}\n}');
+
+  // Options
+  const [timeout, setTimeout_] = useState("10000");
+  const [idempotent, setIdempotent] = useState(true);
+
+  // Retry policy
+  const [retryAttempts, setRetryAttempts] = useState("3");
+  const [retryBackoff, setRetryBackoff] = useState<RetryPolicy["backoffType"]>("exponential");
+  const [retryBackoffMs, setRetryBackoffMs] = useState("1000");
+
+  async function handleCreate() {
+    if (!name.trim()) { toast.error("Tool name is required."); return; }
+    if (type === "http" && !url.trim()) { toast.error("URL is required for HTTP tools."); return; }
+    setSaving(true);
+    try {
+      let parsedInput = {};
+      let parsedOutput = {};
+      let parsedHeaders: Record<string, string> = {};
+      try { parsedInput = JSON.parse(inputSchema) as Record<string, unknown>; } catch { toast.error("Invalid input schema JSON."); setSaving(false); return; }
+      try { parsedOutput = JSON.parse(outputSchema) as Record<string, unknown>; } catch { toast.error("Invalid output schema JSON."); setSaving(false); return; }
+      try { parsedHeaders = JSON.parse(headers) as Record<string, string>; } catch { toast.error("Invalid headers JSON."); setSaving(false); return; }
+
+      const retryPolicy: RetryPolicy = {
+        maxAttempts: parseInt(retryAttempts) || 3,
+        backoffType: retryBackoff,
+        backoffMs: parseInt(retryBackoffMs) || 1000,
+      };
+
+      const tool = await createTool({
+        name: name.trim(),
+        description: description.trim(),
+        type,
+        riskLevel,
+        timeoutMs: parseInt(timeout) || 10000,
+        idempotent,
+        inputSchema: parsedInput,
+        outputSchema: parsedOutput,
+        retryPolicy,
+        authConnectionRef: authConnectionRef.trim() || null,
+        httpConfig: type === "http"
+          ? { method, url: url.trim(), headers: parsedHeaders, bodyTemplate: bodyTemplate || undefined }
+          : undefined,
+      });
+      toast.success("Tool registered.");
+      router.push(`/tools/${tool.id}` as never);
+    } catch {
+      toast.error("Failed to register tool.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleTest() {
+    setTesting(true);
+    setTimeout(() => {
+      setTesting(false);
+      toast.info("Test is mocked — connect to a real backend to enable live tool testing.");
+    }, 1200);
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6 p-6 lg:p-8">
+      {/* Breadcrumb */}
+      <Link href={"/tools" as never} className="flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground">
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Tool Registry
+      </Link>
+
+      <div>
+        <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+          New Tool
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Register a tool that agents can call during workflow execution.
+        </p>
+      </div>
+
+      {/* ── Tool Info ────────────────────────────────────────────────── */}
+      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <SectionHeader label="Tool Info" />
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Name" required>
+            <input className={monoCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="crm-api.getRenewalAccounts" />
+          </Field>
+          <Field label="Type">
+            <select className={selectCls} value={type} onChange={(e) => setType(e.target.value as ToolType)}>
+              {TOOL_TYPES.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
+            </select>
+          </Field>
+          <div className="col-span-2">
+            <Field label="Description">
+              <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Retrieves renewal accounts from CRM with upcoming dates." />
+            </Field>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Risk Level ───────────────────────────────────────────────── */}
+      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <SectionHeader label="Risk Level" />
+        <div className="grid grid-cols-2 gap-2">
+          {RISK_LEVELS.map((r) => (
+            <button
+              key={r.level}
+              type="button"
+              onClick={() => setRiskLevel(r.level)}
+              className="rounded-lg border p-3 text-left transition-all"
+              style={{
+                background: riskLevel === r.level ? `${r.color}12` : "var(--surface-2)",
+                borderColor: riskLevel === r.level ? `${r.color}40` : "rgba(148,163,184,0.15)",
+              }}
+            >
+              <p className="text-[12px] font-semibold" style={{ color: riskLevel === r.level ? r.color : "var(--text-primary)" }}>
+                {r.label}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">{r.description}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* ── HTTP Config ──────────────────────────────────────────────── */}
+      {type === "http" && (
+        <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+          <SectionHeader label="HTTP Config" />
+          <div className="flex gap-3">
+            <select
+              className="w-24 shrink-0 rounded-lg border border-border bg-background px-3 py-2 font-mono text-[12px] focus:outline-none"
+              value={method}
+              onChange={(e) => setMethod(e.target.value as typeof method)}
+            >
+              {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => <option key={m}>{m}</option>)}
+            </select>
+            <input
+              className={`flex-1 ${monoCls}`}
+              placeholder="https://api.example.com/v2/endpoint"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </div>
+          <Field label="Headers (JSON)">
+            <textarea rows={3} className={`resize-none ${monoCls}`} value={headers} onChange={(e) => setHeaders(e.target.value)} />
+          </Field>
+          {(method === "POST" || method === "PUT" || method === "PATCH") && (
+            <Field label="Body template (JSON / Handlebars)">
+              <textarea
+                rows={4}
+                className={`resize-none ${monoCls}`}
+                value={bodyTemplate}
+                onChange={(e) => setBodyTemplate(e.target.value)}
+                placeholder={'{"customerId": "{{customerId}}"}'}
+              />
+            </Field>
+          )}
+        </section>
+      )}
+
+      {/* ── Auth / Connection ────────────────────────────────────────── */}
+      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <SectionHeader label="Auth / Connection" />
+        <p className="text-[11px] text-muted-foreground">
+          Reference a named connection configured in{" "}
+          <Link href={"/settings/sdk" as never} className="text-primary hover:underline">Connections</Link>.
+          Leave blank if no auth is required.
+        </p>
+        <Field label="Connection reference">
+          <input
+            className={monoCls}
+            value={authConnectionRef}
+            onChange={(e) => setAuthConnectionRef(e.target.value)}
+            placeholder="conn-salesforce"
+          />
+        </Field>
+      </section>
+
+      {/* ── Schema ───────────────────────────────────────────────────── */}
+      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <SectionHeader label="Input / Output Schema" />
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Input Schema (JSON Schema)">
+            <textarea rows={7} className={`resize-none ${monoCls} text-[11px]`} value={inputSchema} onChange={(e) => setInputSchema(e.target.value)} />
+          </Field>
+          <Field label="Output Schema (JSON Schema)">
+            <textarea rows={7} className={`resize-none ${monoCls} text-[11px]`} value={outputSchema} onChange={(e) => setOutputSchema(e.target.value)} />
+          </Field>
+        </div>
+      </section>
+
+      {/* ── Retry Policy ─────────────────────────────────────────────── */}
+      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <SectionHeader label="Retry Policy" />
+        <div className="grid grid-cols-3 gap-4">
+          <Field label="Max attempts">
+            <input type="number" min="0" max="10" className={inputCls} value={retryAttempts} onChange={(e) => setRetryAttempts(e.target.value)} />
+          </Field>
+          <Field label="Backoff type">
+            <select className={selectCls} value={retryBackoff} onChange={(e) => setRetryBackoff(e.target.value as RetryPolicy["backoffType"])}>
+              <option value="exponential">Exponential</option>
+              <option value="fixed">Fixed</option>
+            </select>
+          </Field>
+          <Field label="Backoff base (ms)">
+            <input type="number" min="0" className={inputCls} value={retryBackoffMs} onChange={(e) => setRetryBackoffMs(e.target.value)} />
+          </Field>
+        </div>
+      </section>
+
+      {/* ── Options ──────────────────────────────────────────────────── */}
+      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <SectionHeader label="Options" />
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Timeout (ms)">
+            <input type="number" className={inputCls} value={timeout} onChange={(e) => setTimeout_(e.target.value)} />
+          </Field>
+          <div className="flex items-end pb-2">
+            <label className="flex cursor-pointer items-center gap-2.5">
+              <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={idempotent} onChange={(e) => setIdempotent(e.target.checked)} />
+              <div>
+                <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Idempotent</p>
+                <p className="text-[11px] text-muted-foreground">Safe to call multiple times with same args</p>
+              </div>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Actions ──────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-end gap-3 pb-8">
+        {type === "http" && (
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={testing || !url.trim()}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-4 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            {testing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <TestTube className="h-3.5 w-3.5" />}
+            Test
+          </button>
+        )}
+        <Link
+          href={"/tools" as never}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-4 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Cancel
+        </Link>
+        <button
+          type="button"
+          onClick={() => void handleCreate()}
+          disabled={saving || !name.trim()}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Register Tool
+        </button>
+      </div>
+    </div>
+  );
+}

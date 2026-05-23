@@ -1,0 +1,460 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  Bot,
+  CheckCircle2,
+  Clock,
+  GitBranch,
+  History,
+  RefreshCw,
+  Shield,
+  Wrench,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { cn } from "@/lib/utils";
+import type { Agent, AgentRun, Tool } from "@/types/platform";
+import { getAgent, getTools, getRunsForAgent } from "@/lib/repository";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TYPE_LABELS: Record<Agent["type"], string> = {
+  native_llm_agent:             "Native LLM",
+  tool_agent:                   "Tool Agent",
+  router_agent:                 "Router",
+  approval_agent:               "Approval",
+  imported_langgraph_node:      "LangGraph Node",
+  external_instrumented_agent:  "External",
+};
+
+const TYPE_COLORS: Record<Agent["type"], string> = {
+  native_llm_agent:             "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  tool_agent:                   "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  router_agent:                 "bg-sky-500/10 text-sky-400 border-sky-500/20",
+  approval_agent:               "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  imported_langgraph_node:      "bg-purple-500/10 text-purple-400 border-purple-500/20",
+  external_instrumented_agent:  "bg-teal-500/10 text-teal-400 border-teal-500/20",
+};
+
+const RISK_COLORS: Record<Tool["riskLevel"], string> = {
+  read_only:       "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  low_risk_write:  "bg-amber-500/10  text-amber-400  border-amber-500/20",
+  high_risk_write: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  irreversible:    "bg-red-500/10    text-red-400    border-red-500/20",
+};
+
+const STATUS_DOT: Record<AgentRun["status"], string> = {
+  succeeded:            "bg-emerald-400",
+  failed:               "bg-red-400",
+  running:              "bg-sky-400 animate-pulse",
+  waiting_for_approval: "bg-amber-400",
+  queued:               "bg-slate-400",
+  paused:               "bg-slate-400",
+  cancelled:            "bg-slate-500",
+  timed_out:            "bg-orange-400",
+};
+
+type Tab = "overview" | "instructions" | "tools" | "policies" | "runs" | "versions";
+
+function timeAgo(ts: string | null) {
+  if (!ts) return "—";
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function fmtDuration(ms: number | null) {
+  if (!ms) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+}
+
+function KVRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2">
+      <span className="shrink-0 text-[12px] text-muted-foreground">{label}</span>
+      <span className="text-right text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{value}</span>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function AgentDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [allowedTools, setAllowedTools] = useState<Tool[]>([]);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>("overview");
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [a, allTools, agentRuns] = await Promise.all([
+          getAgent(id),
+          getTools(),
+          getRunsForAgent(id),
+        ]);
+        setAgent(a);
+        setAllowedTools(allTools.filter((t) => a?.allowedToolIds.includes(t.id)));
+        setRuns(agentRuns);
+      } catch {
+        toast.error("Failed to load agent.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    void load();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!agent) {
+    return (
+      <div className="p-8 text-sm text-muted-foreground">
+        Agent not found.{" "}
+        <Link href={"/agents" as never} className="text-primary hover:underline">← Back to registry</Link>
+      </div>
+    );
+  }
+
+  const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+    { id: "overview",     label: "Overview",     icon: Bot },
+    { id: "instructions", label: "Instructions", icon: GitBranch },
+    { id: "tools",        label: "Tools",        icon: Wrench },
+    { id: "policies",     label: "Policies",     icon: Shield },
+    { id: "runs",         label: "Recent Runs",  icon: History },
+    { id: "versions",     label: "Versions",     icon: Clock },
+  ];
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Breadcrumb + header */}
+      <div className="space-y-4 px-6 pb-0 pt-6 lg:px-8">
+        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <Link href={"/agents" as never} className="flex items-center gap-1 transition-colors hover:text-foreground">
+            <ArrowLeft className="h-3 w-3" />
+            Agent Registry
+          </Link>
+          <span>/</span>
+          <span style={{ color: "var(--text-primary)" }}>{agent.name}</span>
+        </div>
+
+        <div className="flex items-start gap-4">
+          <div
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+            style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.2)" }}
+          >
+            <Bot className="h-6 w-6 text-violet-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+                {agent.name}
+              </h1>
+              <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", TYPE_COLORS[agent.type])}>
+                {TYPE_LABELS[agent.type]}
+              </span>
+              <span className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                agent.status === "active"
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  : "bg-slate-500/10 text-slate-400 border-slate-500/20",
+              )}>
+                {agent.status}
+              </span>
+            </div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {agent.role && <>{agent.role} · </>}
+              {agent.description || "No description"}
+            </p>
+          </div>
+          <Link
+            href={"/agents/new" as never}
+            className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            style={{ background: "var(--surface-1)" }}
+          >
+            Clone
+          </Link>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div
+        className="sticky top-0 z-10 mt-4 px-6 lg:px-8"
+        style={{ borderBottom: "1px solid rgba(148,163,184,0.09)", background: "rgba(9,14,24,0.96)" }}
+      >
+        <div className="flex gap-0 overflow-x-auto">
+          {TABS.map(({ id: tid, label, icon: Icon }) => (
+            <button
+              key={tid}
+              type="button"
+              onClick={() => setTab(tid)}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-[12px] font-medium transition-none whitespace-nowrap",
+                tab === tid
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+              {tid === "tools" && allowedTools.length > 0 && (
+                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "rgba(148,163,184,0.12)", color: "var(--text-faint)" }}>
+                  {allowedTools.length}
+                </span>
+              )}
+              {tid === "runs" && runs.length > 0 && (
+                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "rgba(148,163,184,0.12)", color: "var(--text-faint)" }}>
+                  {runs.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto px-6 py-6 lg:px-8">
+
+        {/* Overview */}
+        {tab === "overview" && (
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Identity</h2>
+              <div className="divide-y divide-border/30">
+                <KVRow label="ID" value={<code className="font-mono text-[11px]">{agent.id}</code>} />
+                <KVRow label="Slug" value={<code className="font-mono text-[11px]">{agent.slug}</code>} />
+                <KVRow label="Type" value={TYPE_LABELS[agent.type]} />
+                <KVRow label="Role" value={agent.role || "—"} />
+                <KVRow label="Status" value={agent.status} />
+                <KVRow label="Total runs" value={agent.totalRuns.toLocaleString()} />
+                <KVRow label="Last used" value={timeAgo(agent.lastUsedAt)} />
+                <KVRow label="Created" value={timeAgo(agent.createdAt)} />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Model Config</h2>
+              <div className="divide-y divide-border/30">
+                <KVRow label="Provider" value={agent.modelProvider || "—"} />
+                <KVRow label="Model" value={<code className="font-mono text-[11px]">{agent.modelName || "—"}</code>} />
+                <KVRow label="Temperature" value={String(agent.temperature)} />
+                <KVRow label="Max iterations" value={String(agent.maxIterations)} />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/60 px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Quick stats</h2>
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: "Total runs",    value: agent.totalRuns.toLocaleString() },
+                  { label: "Allowed tools", value: agent.allowedToolIds.length },
+                  { label: "Last active",   value: timeAgo(agent.lastUsedAt) },
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-lg border border-border/40 px-4 py-3" style={{ background: "var(--surface-2)" }}>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">{label}</p>
+                    <p className="mt-1.5 text-[22px] font-semibold leading-none tracking-tight" style={{ color: "var(--text-primary)" }}>{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Instructions */}
+        {tab === "instructions" && (
+          <div className="rounded-xl border border-border/60 overflow-hidden" style={{ background: "var(--surface-1)" }}>
+            <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
+              <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>System Prompt</h2>
+              <span className="text-[11px] text-muted-foreground">{agent.instructions.length} chars</span>
+            </div>
+            {agent.instructions ? (
+              <pre className="min-h-[300px] px-5 py-4 font-mono text-[12px] leading-6 text-muted-foreground whitespace-pre-wrap">
+                {agent.instructions}
+              </pre>
+            ) : (
+              <div className="flex flex-col items-center gap-2 py-16 text-center">
+                <p className="text-sm text-muted-foreground">No instructions configured.</p>
+                <p className="text-[11px] text-muted-foreground/60">Add a system prompt to guide this agent&apos;s behavior.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tools */}
+        {tab === "tools" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                {allowedTools.length} allowed tool{allowedTools.length !== 1 ? "s" : ""}
+              </p>
+              <Link href={"/tools/new" as never} className="text-[12px] text-primary hover:underline">
+                Register tool →
+              </Link>
+            </div>
+            {allowedTools.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+                <Wrench className="h-8 w-8 text-muted-foreground/20" />
+                <p className="text-sm text-muted-foreground">No tools allowed for this agent.</p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {allowedTools.map((tool) => (
+                  <Link
+                    key={tool.id}
+                    href={`/tools/${tool.id}` as never}
+                    className="group flex items-start gap-3 rounded-xl border border-border/60 p-4 transition-colors hover:border-border"
+                    style={{ background: "var(--surface-1)" }}
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.15)" }}>
+                      <Wrench className="h-4 w-4 text-cyan-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="truncate text-[13px] font-medium group-hover:underline" style={{ color: "var(--text-primary)" }}>
+                        {tool.name}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{tool.description}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-px text-[9px] text-cyan-400 capitalize">
+                          {tool.type.replace(/_/g, " ")}
+                        </span>
+                        <span className={cn("rounded-full border px-1.5 py-px text-[9px]", RISK_COLORS[tool.riskLevel])}>
+                          {tool.riskLevel.replace(/_/g, " ")}
+                        </span>
+                        {tool.idempotent && (
+                          <span className="rounded-full border border-slate-500/20 bg-slate-500/10 px-1.5 py-px text-[9px] text-slate-400">
+                            idempotent
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400 mt-0.5" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Policies */}
+        {tab === "policies" && (
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Memory Policy</h2>
+              <div className="divide-y divide-border/30">
+                <KVRow label="Type" value={agent.memoryPolicy.type} />
+                {agent.memoryPolicy.retentionDays !== undefined && (
+                  <KVRow label="Retention" value={`${agent.memoryPolicy.retentionDays} days`} />
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Retry Policy</h2>
+              <div className="divide-y divide-border/30">
+                <KVRow label="Max attempts" value={agent.retryPolicy.maxAttempts} />
+                <KVRow label="Backoff type" value={agent.retryPolicy.backoffType} />
+                <KVRow label="Backoff base" value={`${agent.retryPolicy.backoffMs}ms`} />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Timeout Policy</h2>
+              <div className="divide-y divide-border/30">
+                <KVRow label="Step timeout" value={`${agent.timeoutPolicy.stepTimeoutMs / 1000}s`} />
+                <KVRow label="Run timeout" value={`${agent.timeoutPolicy.runTimeoutMs / 1000}s`} />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+              <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Approval Policy</h2>
+              <div className="divide-y divide-border/30">
+                <KVRow
+                  label="Requires approval"
+                  value={
+                    agent.approvalPolicy.requireApproval ? (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400">Yes</span>
+                    ) : (
+                      <span className="text-muted-foreground">No</span>
+                    )
+                  }
+                />
+                {agent.approvalPolicy.requireApproval && agent.approvalPolicy.onTimeout && (
+                  <KVRow label="On timeout" value={agent.approvalPolicy.onTimeout.replace(/_/g, " ")} />
+                )}
+                {agent.approvalPolicy.requireApproval && agent.approvalPolicy.timeoutMs && (
+                  <KVRow label="Timeout" value={`${agent.approvalPolicy.timeoutMs / 1000}s`} />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Runs */}
+        {tab === "runs" && (
+          <div className="space-y-3">
+            {runs.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+                <History className="h-8 w-8 text-muted-foreground/20" />
+                <p className="text-sm text-muted-foreground">No runs recorded for this agent yet.</p>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border/60" style={{ background: "var(--surface-1)" }}>
+                <div className="border-b border-border/60 px-5 py-3">
+                  <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {runs.length} run{runs.length !== 1 ? "s" : ""} involving this agent
+                  </h2>
+                </div>
+                <div className="divide-y divide-border/40">
+                  {runs.map((run) => (
+                    <Link
+                      key={run.id}
+                      href={`/runs/${run.id}` as never}
+                      className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/20"
+                    >
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[run.status])} />
+                      <span className="flex-1 truncate text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+                        {run.workflowName}
+                      </span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        {fmtDuration(run.durationMs)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {timeAgo(run.startedAt)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Versions */}
+        {tab === "versions" && (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+            <Clock className="h-8 w-8 text-muted-foreground/20" />
+            <p className="text-sm font-medium text-muted-foreground">Version history is not yet available.</p>
+            <p className="text-[11px] text-muted-foreground/60">Agent versions will be tracked when you save changes.</p>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}

@@ -2,105 +2,97 @@ import Link from "next/link";
 import type { Route } from "next";
 import {
   BadgeCheck,
-  ClipboardCheck,
-  FileBarChart2,
-  GitMerge,
+  Bot,
+  Clock,
+  GitBranch,
   KeyRound,
-  LockKeyhole,
-  Scale,
+  Play,
+  Server,
   ShieldCheck,
-  TriangleAlert,
   Users,
+  Wrench,
 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
 
 const CHECKS = [
   {
-    title: "AI Registry works",
-    description: "Create an AI System, create a draft version, and confirm the version belongs to the system.",
-    href: "/registry/systems",
-    icon: ShieldCheck,
+    title: "Workflows can be created",
+    description: "Create a native workflow, add steps, configure retry and budget policies, and confirm it saves correctly.",
+    href: "/workflows/new",
+    icon: GitBranch,
   },
   {
-    title: "Policy packs load and apply",
-    description: "Apply a policy pack to an AI System and verify required evidence appears.",
-    href: "/governance/policy-packs",
-    icon: Scale,
+    title: "Agents are registered",
+    description: "Register an agent with a model, instructions, and tool bindings. Verify it appears in the agent registry.",
+    href: "/agents",
+    icon: Bot,
   },
   {
-    title: "Evidence runs complete",
-    description: "Run a required evidence check from the AI System detail page and verify the result is visible.",
-    href: "/evidence/runs",
-    icon: ClipboardCheck,
+    title: "Tools are registered",
+    description: "Register an HTTP tool, set its risk level, and confirm the input/output schema validates correctly.",
+    href: "/tools",
+    icon: Wrench,
   },
   {
-    title: "Release gates enforce evidence",
-    description: "Evaluate a version gate, confirm missing evidence blocks release, then confirm passing evidence unblocks it.",
-    href: "/release-gates",
-    icon: GitMerge,
+    title: "Runs execute end-to-end",
+    description: "Trigger a workflow run and confirm events appear in the Timeline tab with correct status transitions.",
+    href: "/runs",
+    icon: Play,
   },
   {
-    title: "Approvals work",
-    description: "Request approval for a high-risk release and confirm only admins can approve or reject it.",
-    href: "/governance/approvals",
+    title: "Approvals gate high-risk steps",
+    description: "Configure an approval gate on a tool step and confirm the run pauses and waits before proceeding.",
+    href: "/approvals",
     icon: BadgeCheck,
   },
   {
-    title: "Audit is complete",
-    description: "Confirm create, policy, evidence, gate, approval, activation, and incident events appear in audit.",
-    href: "/governance/audit",
-    icon: FileBarChart2,
+    title: "Schedules trigger correctly",
+    description: "Create a cron schedule for a workflow and verify the run is queued at the expected time.",
+    href: "/schedules",
+    icon: Clock,
   },
   {
-    title: "Incidents work",
-    description: "Create an incident, link it to an AI System, resolve it, and verify the audit trail.",
-    href: "/incidents",
-    icon: TriangleAlert,
-  },
-  {
-    title: "Reports use real data",
-    description: "Open governance reports and verify the report is generated from registry, evidence, gate, approval, and audit data.",
-    href: "/governance/reports",
-    icon: FileBarChart2,
+    title: "Workers connect and process runs",
+    description: "Start a worker process, confirm it connects in the Workers panel, and verify it picks up queued runs.",
+    href: "/workers",
+    icon: Server,
   },
   {
     title: "Permissions are enforced",
-    description: "Viewer accounts should be read-only; developers can create systems and run evidence; admins can approve and activate.",
+    description: "Viewer accounts should be read-only; developers can create workflows and trigger runs; admins can approve steps.",
     href: "/settings/members",
     icon: Users,
   },
   {
-    title: "Integrations are optional evidence sources",
-    description: "Sidecar, SDK, and OpenTelemetry should feed evidence, not block the governance core from working.",
-    href: "/settings/sdk",
+    title: "API keys are provisioned",
+    description: "Generate an API key and confirm it can be used to authenticate SDK and API calls.",
+    href: "/settings/api-keys",
     icon: KeyRound,
   },
   {
-    title: "Privacy controls are configured",
-    description: "Redaction and retention settings are visible before production evidence sources are connected.",
-    href: "/governance/privacy",
-    icon: LockKeyhole,
+    title: "SDK integration is verified",
+    description: "Connect a worker via the SDK, push a run event, and confirm it appears in the run timeline.",
+    href: "/settings/sdk",
+    icon: ShieldCheck,
   },
 ];
 
 export default function ProductionReadinessPage() {
   return (
-    <div className="min-h-screen bg-[#F8F5EF]">
+    <div className="min-h-screen">
       <AppHeader
         title="Production Readiness Checklist"
-        subtitle="Internal checklist for the enterprise governance MVP"
+        subtitle="Internal checklist for the agent workflow platform MVP"
       />
 
       <main className="px-4 py-6 md:px-6 xl:px-8">
         <div className="max-w-5xl space-y-5">
-          <section className="rounded-xl border border-[#E7DED1] bg-white p-5">
-            <p className="text-sm font-semibold text-[#111111]">Production MVP scope</p>
-            <p className="mt-1 text-sm leading-6 text-[#4B5563]">
-              VectorBea production readiness is centered on AI Registry, Policies, Evaluation Evidence,
-              Release Gates, Approvals, Audit, Incidents, Reports, Integrations, and Settings. Experimental
-              observability, graph import, cost intelligence, and provider-arena surfaces should stay out of
-              the main navigation until they are stable.
+          <section className="rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+            <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Platform MVP scope</p>
+            <p className="mt-1 text-sm leading-6" style={{ color: "var(--text-secondary)" }}>
+              Vectorbee production readiness covers Workflows, Agents, Tools, Runs, Approvals, Schedules, Workers,
+              and Settings. Experimental surfaces should stay out of the main navigation until stable.
             </p>
           </section>
 
@@ -111,15 +103,16 @@ export default function ProductionReadinessPage() {
                 <Link
                   key={item.title}
                   href={item.href as Route}
-                  className="group rounded-xl border border-[#E7DED1] bg-white p-4 transition-colors hover:border-[#2563EB]/40 hover:bg-[#FBFAF7]"
+                  className="group rounded-xl border border-border/60 p-4 transition-colors hover:border-primary/40"
+                  style={{ background: "var(--surface-1)" }}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="rounded-lg bg-[#EFF6FF] p-2">
-                      <Icon className="h-4 w-4 text-[#2563EB]" />
+                    <div className="rounded-lg p-2" style={{ background: "rgba(99,102,241,0.12)" }}>
+                      <Icon className="h-4 w-4 text-primary" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-[#111111]">{item.title}</p>
-                      <p className="mt-1 text-xs leading-5 text-[#6B7280]">{item.description}</p>
+                      <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{item.title}</p>
+                      <p className="mt-1 text-xs leading-5" style={{ color: "var(--text-faint)" }}>{item.description}</p>
                     </div>
                   </div>
                 </Link>

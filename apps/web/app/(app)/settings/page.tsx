@@ -223,7 +223,7 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen">
-      <AppHeader title="Settings" subtitle="Workspace governance, security, and operational controls." />
+      <AppHeader title="Settings" subtitle="Workspace, security, and operational controls." />
 
       <div className="grid gap-6 px-4 py-6 md:px-6 xl:grid-cols-2 xl:px-8">
         <Card className="animate-slide-up">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowRight, Bell, CreditCard, Gauge, ShieldCheck, Swords, Users } from "lucide-react";
+import { Activity, ArrowRight, Bell, CreditCard, Gauge, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/layout/app-header";
@@ -14,13 +14,10 @@ import { useWorkspace } from "@/lib/workspace-context";
 import { cn } from "@/lib/utils";
 
 type UsageMeter =
-  | "traces"
+  | "agent_runs"
   | "replay_runs"
-  | "evaluation_executions"
-  | "provider_executions"
-  | "judge_executions"
-  | "scheduled_regression_runs"
-  | "provider_arena_runs"
+  | "events"
+  | "scheduled_workflow_triggers"
   | "notification_emails";
 
 type BillingUsage = {
@@ -73,18 +70,12 @@ function meterTone(used: number, limit: number | null) {
 
 function meterLabel(meter: UsageMeter) {
   switch (meter) {
-    case "traces":
-      return "Traces";
-    case "evaluation_executions":
-      return "Evaluation executions";
-    case "provider_executions":
-      return "Provider executions";
-    case "judge_executions":
-      return "Judge executions";
-    case "scheduled_regression_runs":
-      return "Scheduled regressions";
-    case "provider_arena_runs":
-      return "Provider Arena runs";
+    case "agent_runs":
+      return "Agent runs";
+    case "events":
+      return "Events";
+    case "scheduled_workflow_triggers":
+      return "Scheduled triggers";
     case "notification_emails":
       return "Notification emails";
     case "replay_runs":
@@ -190,12 +181,10 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
   }, [usage]);
 
   const meters: UsageMeter[] = [
-    "traces",
-    "evaluation_executions",
-    "provider_executions",
-    "judge_executions",
-    "scheduled_regression_runs",
-    "provider_arena_runs",
+    "agent_runs",
+    "events",
+    "replay_runs",
+    "scheduled_workflow_triggers",
   ];
 
   const highlightedPlans = useMemo(
@@ -263,12 +252,10 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
                   value={usage?.usage[meter] ?? 0}
                   limit={usage?.usageLimits[meter] ?? null}
                   icon={
-                    meter === "traces" ? <Activity className="h-4 w-4" /> :
-                    meter === "evaluation_executions" ? <ShieldCheck className="h-4 w-4" /> :
-                    meter === "provider_executions" ? <Users className="h-4 w-4" /> :
-                    meter === "judge_executions" ? <Bell className="h-4 w-4" /> :
-                    meter === "provider_arena_runs" ? <Swords className="h-4 w-4" /> :
-                    <Gauge className="h-4 w-4" />
+                    meter === "agent_runs" ? <Activity className="h-4 w-4" /> :
+                    meter === "events" ? <Gauge className="h-4 w-4" /> :
+                    meter === "replay_runs" ? <ShieldCheck className="h-4 w-4" /> :
+                    <Bell className="h-4 w-4" />
                   }
                 />
               ))}
@@ -300,10 +287,10 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Plan</p>
               <p className="mt-2 text-xl font-semibold text-foreground">{usage?.billingSummary.planDisplayName ?? "—"}</p>
               <p className="mt-2 text-sm text-muted-foreground">
-                {usage?.planTier === "free" && "Explore AI risk control"}
-                {usage?.planTier === "plus" && "Validate LLM features before production"}
-                {usage?.planTier === "pro" && "Control production LLM risk"}
-                {usage?.planTier === "enterprise" && "Govern AI behavior at scale"}
+                {usage?.planTier === "free" && "Explore AI agent automation"}
+                {usage?.planTier === "plus" && "Automate AI workflows before production"}
+                {usage?.planTier === "pro" && "Control production AI agent risk"}
+                {usage?.planTier === "enterprise" && "Scale AI agent operations across your org"}
               </p>
             </div>
 
@@ -322,7 +309,7 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
                     <p className="text-muted-foreground">$399 per workspace billed annually</p>
                   </>
                 )}
-                {usage?.planTier === "enterprise" && <p>Custom pricing and governance controls</p>}
+                {usage?.planTier === "enterprise" && <p>Custom pricing, policies, and deployment options</p>}
                 {usage?.planTier === "free" && <p>$0 with small monthly limits</p>}
               </div>
             </div>
@@ -388,10 +375,10 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
                 </Badge>
               </div>
               <p className="mt-3 text-sm text-muted-foreground">
-                {usage?.planTier === "free" && "Explore AI risk control with small monthly limits."}
-                {usage?.planTier === "plus" && "Validate LLM features before production with paid workspace capacity."}
-                {usage?.planTier === "pro" && "Control production LLM risk with behavioral evaluations, regressions, and rollout safety."}
-                {usage?.planTier === "enterprise" && "Govern AI behavior at scale with advanced controls and custom commercial terms."}
+                {usage?.planTier === "free" && "Explore AI agent automation with small monthly limits."}
+                {usage?.planTier === "plus" && "Automate AI workflows before production with paid workspace capacity."}
+                {usage?.planTier === "pro" && "Control production AI agent risk with approval policies, run replay, and rollout controls."}
+                {usage?.planTier === "enterprise" && "Scale AI agent operations across your org with advanced controls and custom commercial terms."}
               </p>
             </div>
 
@@ -410,7 +397,7 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
                 <p className="mt-1 text-sm text-muted-foreground">
                   {usage?.planTier === "plus" && "$23 per month billed annually"}
                   {usage?.planTier === "pro" && "$399 per workspace billed annually"}
-                  {usage?.planTier === "enterprise" && "Private pricing, governance, and deployment options"}
+                  {usage?.planTier === "enterprise" && "Private pricing, custom policies, and deployment options"}
                   {usage?.planTier === "free" && "No card required"}
                 </p>
               </div>
@@ -505,9 +492,9 @@ export function BillingDashboard({ mode = "usage" }: { mode?: "usage" | "billing
               <CardDescription>Billing stays plan-focused here, with a compact view of your highest-signal limits.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-3">
-              <MeterCard label="Traces" value={usage?.usage.traces ?? 0} limit={usage?.usageLimits.traces ?? null} icon={<Activity className="h-4 w-4" />} />
-              <MeterCard label="Evaluation executions" value={usage?.usage.evaluation_executions ?? 0} limit={usage?.usageLimits.evaluation_executions ?? null} icon={<ShieldCheck className="h-4 w-4" />} />
-              <MeterCard label="Provider Arena runs" value={usage?.usage.provider_arena_runs ?? 0} limit={usage?.usageLimits.provider_arena_runs ?? null} icon={<Swords className="h-4 w-4" />} />
+              <MeterCard label="Agent runs" value={usage?.usage.agent_runs ?? 0} limit={usage?.usageLimits.agent_runs ?? null} icon={<Activity className="h-4 w-4" />} />
+              <MeterCard label="Events" value={usage?.usage.events ?? 0} limit={usage?.usageLimits.events ?? null} icon={<Gauge className="h-4 w-4" />} />
+              <MeterCard label="Replay runs" value={usage?.usage.replay_runs ?? 0} limit={usage?.usageLimits.replay_runs ?? null} icon={<ShieldCheck className="h-4 w-4" />} />
             </CardContent>
           </Card>
         </div>

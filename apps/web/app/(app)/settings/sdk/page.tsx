@@ -443,7 +443,7 @@ export default function SdkPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F5EF]">
-      <AppHeader title="SDK &amp; Ingest Tokens" subtitle="Connect evidence sources — API, SDK, sidecar, or OpenTelemetry" />
+      <AppHeader title="SDK &amp; Connections" subtitle="Connect workers and push run events — API, SDK, or webhook" />
       <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8 max-w-5xl">
 
         {/* Quick-start callout */}
@@ -649,7 +649,7 @@ VectorBea Sidecar
   ↓ batched forward with ingest token
 VectorBea backend
   ↓
-workflow map, execution graph, regression, safety gates, governance, ROI`} />
+workflow map, execution graph, approval gates, run timeline, replay`} />
           <p className="text-xs text-[#6B7280]">
             Direct API is best for quick testing. For production agent workloads, prefer SDK plus Sidecar or OpenTelemetry plus Sidecar.
           </p>

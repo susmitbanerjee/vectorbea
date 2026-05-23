@@ -226,7 +226,7 @@ export default function PricingPage() {
               Pricing that scales with your AI risk
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-[15px] leading-7 text-[#4B5563]">
-              Start free, upgrade when you need regressions, rollout gates, alerts, and governance
+              Start free, upgrade when you need scheduled workflows, rollout controls, approvals, and audit trail
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link href="/signup" className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#111111] px-5 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F1F1F]">
@@ -292,7 +292,7 @@ export default function PricingPage() {
           <div className="max-w-xl">
             <h2 className="text-[1.75rem] font-semibold tracking-tight">Need more capacity</h2>
             <p className="mt-2 text-[14px] leading-6 text-[#4B5563]">
-              Add trace, evaluation, and retention capacity as production usage grows
+              Add run volume, event capacity, and retention as production usage grows
             </p>
           </div>
 
@@ -307,7 +307,7 @@ export default function PricingPage() {
           </div>
 
           <p className="mt-5 text-[12px] text-[#9CA3AF]">
-            Evaluation execution means one test case evaluated against one prompt version or provider
+            One triggered workflow execution counts as one agent run, regardless of the number of steps
           </p>
         </section>
 
@@ -383,7 +383,7 @@ export default function PricingPage() {
                   Enterprise
                 </span>
                 <h2 className="text-balance text-[1.75rem] font-semibold tracking-tight md:text-[2.25rem]">
-                  Need governance across production AI
+                  Scale AI agent operations across your org
                 </h2>
                 <p className="max-w-xl text-[14px] leading-7 text-[#4B5563]">
                   For teams that need security controls, private deployment, custom retention, organization policies, and audit-ready workflows
@@ -441,7 +441,7 @@ export default function PricingPage() {
               Ship production AI with confidence
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-[15px] leading-7 text-[#4B5563]">
-              Start free, or book a demo to see how VectorBea handles regressions, rollout gates, alerts, and governance
+              Start free, or book a demo to see how Vectorbee handles scheduled workflows, rollout controls, approvals, and audit trail
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link href="/signup" className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#111111] px-6 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F1F1F]">

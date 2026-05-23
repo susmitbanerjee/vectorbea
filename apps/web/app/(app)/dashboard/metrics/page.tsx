@@ -63,7 +63,7 @@ export default function MetricsPage() {
     <div className="min-h-screen">
       <AppHeader
         title="Metrics"
-        subtitle="Aggregated runtime execution metrics. Evaluation audits and admin events are excluded."
+        subtitle="Aggregated runtime execution metrics. System events and admin events are excluded."
       />
       <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
         {error && (
@@ -127,7 +127,7 @@ export default function MetricsPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Per-prompt performance</CardTitle>
-                  <CardDescription>Runtime traces only. Evaluation and admin audit rows excluded.</CardDescription>
+                  <CardDescription>Runtime executions only. System and admin rows excluded.</CardDescription>
                 </CardHeader>
                 <CardContent className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -140,7 +140,7 @@ export default function MetricsPage() {
                         <th className="pb-2 text-right font-medium">Avg Latency</th>
                         <th className="pb-2 text-right font-medium">P95</th>
                         <th className="pb-2 text-right font-medium">Cache Hit</th>
-                        <th className="pb-2 text-right font-medium">Eval Score</th>
+                        <th className="pb-2 text-right font-medium">Avg Score</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -203,7 +203,7 @@ export default function MetricsPage() {
         )}
 
         <p className="text-xs text-muted-foreground">
-          Metrics are computed from runtime traces only. Evaluation audit rows, promotion events, and admin actions are excluded.
+          Metrics are computed from runtime executions only. System events, promotion events, and admin actions are excluded.
         </p>
       </div>
     </div>

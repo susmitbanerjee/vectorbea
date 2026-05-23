@@ -48,13 +48,13 @@ const benefits = [
 
 const CHALLENGE_OPTIONS = [
   { value: "", label: "Select your main challenge" },
-  { value: "prompt_regressions",       label: "Prompt regressions" },
-  { value: "llm_observability",        label: "LLM observability" },
-  { value: "evaluation_automation",    label: "Evaluation automation" },
+  { value: "agent_orchestration",      label: "Agent orchestration" },
+  { value: "workflow_automation",      label: "Workflow automation" },
+  { value: "approval_controls",        label: "Approval controls" },
   { value: "rollout_safety",           label: "Rollout safety" },
-  { value: "provider_comparison",      label: "Provider comparison" },
+  { value: "multi_agent_coordination", label: "Multi-agent coordination" },
   { value: "production_incidents",     label: "Production incidents" },
-  { value: "compliance_governance",    label: "Compliance or governance" },
+  { value: "compliance_controls",      label: "Compliance controls" },
   { value: "just_exploring",           label: "Just exploring" },
 ];
 
@@ -213,7 +213,7 @@ export default function BookDemoPage() {
                 See how VectorBea controls production LLM risk
               </h1>
               <p className="max-w-xl text-base leading-7 text-[#4B5563]">
-                Walk through tracing evaluations regressions rollout gates alerts and provider comparison with your own use case in mind
+                Walk through agent workflows, approval gates, rollout controls, run replay, and multi-agent orchestration with your own use case in mind
               </p>
             </div>
 
@@ -461,7 +461,7 @@ function SuccessState({ name, email }: { name: string; email: string }) {
         <ul className="mt-3 space-y-2.5">
           {[
             { label: "Read the architecture overview", href: "/docs/architecture" },
-            { label: "Explore evaluation docs",        href: "/docs/evaluations" },
+            { label: "Explore agent workflow docs",     href: "/docs/workflows" },
             { label: "See rollout gating in action",   href: "/docs/blocked-rollout" },
           ].map((item) => (
             <li key={item.href}>

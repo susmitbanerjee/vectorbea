@@ -1,0 +1,249 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Bot, Plus, RefreshCw, Search } from "lucide-react";
+import { toast } from "sonner";
+
+import { cn } from "@/lib/utils";
+import type { Agent } from "@/types/platform";
+import { getAgents } from "@/lib/repository";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TYPE_LABELS: Record<Agent["type"], string> = {
+  native_llm_agent:             "Native LLM",
+  tool_agent:                   "Tool Agent",
+  router_agent:                 "Router",
+  approval_agent:               "Approval",
+  imported_langgraph_node:      "LangGraph",
+  external_instrumented_agent:  "External",
+};
+
+const TYPE_COLORS: Record<Agent["type"], string> = {
+  native_llm_agent:             "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  tool_agent:                   "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  router_agent:                 "bg-sky-500/10 text-sky-400 border-sky-500/20",
+  approval_agent:               "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  imported_langgraph_node:      "bg-purple-500/10 text-purple-400 border-purple-500/20",
+  external_instrumented_agent:  "bg-teal-500/10 text-teal-400 border-teal-500/20",
+};
+
+function timeAgo(ts: string | null) {
+  if (!ts) return "—";
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function AgentsPage() {
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<Agent["type"] | "">("");
+  const [statusFilter, setStatusFilter] = useState<Agent["status"] | "">("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      setAgents(await getAgents());
+    } catch {
+      toast.error("Failed to load agents.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  const filtered = agents.filter((a) => {
+    if (search) {
+      const q = search.toLowerCase();
+      if (!a.name.toLowerCase().includes(q) && !a.role.toLowerCase().includes(q) && !a.description.toLowerCase().includes(q)) return false;
+    }
+    if (typeFilter && a.type !== typeFilter) return false;
+    if (statusFilter && a.status !== statusFilter) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-5 p-6 lg:p-8">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+            Agent Registry
+          </h1>
+          <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>
+            {loading ? "Loading…" : `${agents.length} agent${agents.length !== 1 ? "s" : ""} registered`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 transition-colors hover:bg-muted disabled:opacity-40"
+            style={{ background: "var(--surface-1)" }}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 text-muted-foreground", loading && "animate-spin")} />
+          </button>
+          <Link
+            href={"/agents/new" as never}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Agent
+          </Link>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
+          <input
+            className="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-3 text-[12px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder="Search agents…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          className="h-8 rounded-lg border border-border/60 bg-background px-3 text-[12px] text-muted-foreground focus:outline-none"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value as Agent["type"] | "")}
+        >
+          <option value="">All types</option>
+          {(Object.keys(TYPE_LABELS) as Agent["type"][]).map((t) => (
+            <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+        <select
+          className="h-8 rounded-lg border border-border/60 bg-background px-3 text-[12px] text-muted-foreground focus:outline-none"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as Agent["status"] | "")}
+        >
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="deprecated">Deprecated</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-hidden rounded-xl border border-border/60" style={{ background: "var(--surface-1)" }}>
+        {loading ? (
+          <div className="divide-y divide-border/60">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-5 py-4">
+                <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+                <div className="h-4 w-20 animate-pulse rounded bg-muted ml-auto" />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-20 text-center">
+            <Bot className="h-10 w-10 text-muted-foreground/20" />
+            <p className="text-sm font-medium text-muted-foreground">
+              {agents.length === 0 ? "No agents registered" : "No agents match your filters"}
+            </p>
+            {agents.length === 0 && (
+              <Link
+                href={"/agents/new" as never}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Register first agent
+              </Link>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/60 bg-muted/10">
+                  {["Agent", "Type", "Role", "Model", "Tools", "Status", "Runs", "Last used", ""].map((h) => (
+                    <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {filtered.map((agent) => (
+                  <tr key={agent.id} className="group transition-colors hover:bg-muted/20">
+                    <td className="px-4 py-3.5">
+                      <Link
+                        href={`/agents/${agent.id}` as never}
+                        className="block text-[13px] font-medium hover:underline"
+                        style={{ color: "var(--text-primary)" }}
+                      >
+                        {agent.name}
+                      </Link>
+                      {agent.description && (
+                        <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted-foreground">
+                          {agent.description}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium", TYPE_COLORS[agent.type])}>
+                        {TYPE_LABELS[agent.type]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-[12px] text-muted-foreground max-w-[140px]">
+                      <span className="truncate block">{agent.role || <span className="opacity-40">—</span>}</span>
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-[11px] text-muted-foreground">
+                      {agent.modelName || <span className="opacity-40">—</span>}
+                    </td>
+                    <td className="px-4 py-3.5 text-[12px] text-muted-foreground">
+                      {agent.allowedToolIds.length > 0 ? (
+                        <span className="rounded-full bg-muted/50 px-2 py-0.5 text-[10px] font-medium">
+                          {agent.allowedToolIds.length}
+                        </span>
+                      ) : (
+                        <span className="opacity-40">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={cn(
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                        agent.status === "active"
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          : agent.status === "deprecated"
+                            ? "bg-red-500/10 text-red-400 border-red-500/20"
+                            : "bg-slate-500/10 text-slate-400 border-slate-500/20",
+                      )}>
+                        {agent.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-[12px] text-muted-foreground">
+                      {agent.totalRuns.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3.5 text-[12px] text-muted-foreground">
+                      {timeAgo(agent.lastUsedAt)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <Link
+                        href={`/agents/${agent.id}` as never}
+                        className="text-[11px] text-muted-foreground opacity-0 transition-all hover:text-foreground group-hover:opacity-100"
+                      >
+                        View →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

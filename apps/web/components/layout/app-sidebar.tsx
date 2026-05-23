@@ -6,21 +6,21 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
-  Activity,
   BarChart3,
-  BriefcaseBusiness,
+  Bot,
   CalendarClock,
   CheckCircle2,
-  ChevronRight,
   CreditCard,
-  FileCode2,
+  GitBranch,
   KeyRound,
+  LayoutDashboard,
   List,
   Loader2,
   LogOut,
-  ScrollText,
+  Plug,
   Server,
   Settings2,
+  Wrench,
   Users,
   Zap,
 } from "lucide-react";
@@ -50,28 +50,28 @@ type NavItem = {
   badge?: string;
 };
 
-// Primary nav — core product surfaces
+// Primary nav — exactly the 9 product surfaces
 const PRIMARY_NAV: NavItem[] = [
-  { href: "/agent-jobs",  label: "Agent Jobs",  icon: BriefcaseBusiness },
-  { href: "/agent-runs",  label: "Runs",        icon: List },
-  { href: "/approvals",   label: "Approvals",   icon: CheckCircle2 },
-  { href: "/schedules" as never, label: "Schedules", icon: CalendarClock },
-  { href: "/workers" as never,   label: "Workers",   icon: Server },
+  { href: "/dashboard" as never,  label: "Overview",   icon: LayoutDashboard },
+  { href: "/workflows" as never,  label: "Workflows",  icon: GitBranch },
+  { href: "/agents" as never,     label: "Agents",     icon: Bot },
+  { href: "/tools" as never,      label: "Tools",      icon: Wrench },
+  { href: "/runs" as never,       label: "Runs",       icon: List },
+  { href: "/approvals",           label: "Approvals",  icon: CheckCircle2 },
+  { href: "/schedules" as never,  label: "Schedules",  icon: CalendarClock },
+  { href: "/workers" as never,    label: "Workers",    icon: Server },
 ];
 
-// System section — developer / secondary surfaces
-const SYSTEM_NAV: NavItem[] = [
-  { href: "/artifacts" as never, label: "Artifacts",     icon: FileCode2 },
-  { href: "/audit-logs" as never, label: "Event History", icon: ScrollText },
-];
+// System section removed — artifacts & event history live inside Run Detail
 
 // Settings sub-nav
 const SETTINGS_NAV: NavItem[] = [
-  { href: "/settings",           label: "Settings",   icon: Settings2 },
-  { href: "/settings/members",   label: "Members",    icon: Users,       isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/billing",   label: "Billing",    icon: CreditCard,  isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/usage",     label: "Usage",      icon: BarChart3,   isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/api-keys",           label: "API Keys",   icon: KeyRound,    isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
+  { href: "/settings",            label: "Settings",     icon: Settings2 },
+  { href: "/settings/members",    label: "Members",      icon: Users,      isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/billing",    label: "Billing",      icon: CreditCard, isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/usage",      label: "Usage",        icon: BarChart3,  isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/settings/sdk",        label: "Connections",  icon: Plug,       isSubItem: true, subItemGroup: isSettingsRoute },
+  { href: "/api-keys",            label: "API Keys",     icon: KeyRound,   isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
 type SidebarUser = {
@@ -233,18 +233,6 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           {filterByRole(SETTINGS_NAV).map(item => navLink(item, SETTINGS_NAV))}
         </div>
 
-        {/* System section */}
-        <div className="mt-4">
-          <p
-            className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
-            style={{ color: "var(--text-faint)" }}
-          >
-            System
-          </p>
-          <div className="space-y-0.5">
-            {filterByRole(SYSTEM_NAV).map(item => navLink(item, SYSTEM_NAV))}
-          </div>
-        </div>
       </nav>
 
       {/* ── Bottom: worker status + user ─────────────────────────────── */}
