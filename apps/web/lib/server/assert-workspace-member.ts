@@ -62,6 +62,19 @@ export async function assertWorkspaceMember(
   request: NextRequest,
   workspaceId: string,
 ): Promise<AssertResult> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseConfigured =
+    !!supabaseUrl &&
+    supabaseUrl !== "https://your-project.supabase.co" &&
+    !supabaseUrl.includes("placeholder");
+  const requireAuth = process.env.REQUIRE_AUTH === "true" || supabaseConfigured;
+
+  // Open/mock-session mode: skip Supabase token+membership enforcement.
+  // This keeps local MVP flows functional when running without Supabase auth.
+  if (!requireAuth) {
+    return { error: null, user: { id: "mock-user", email: null, role: "admin" } };
+  }
+
   // ── 1. Extract token (Authorization header takes precedence over cookie) ──
   const bearerToken = request.headers
     .get("Authorization")
@@ -107,6 +120,15 @@ export async function assertWorkspaceMember(
 
   if (membershipError) {
     console.error("[assertWorkspaceMember] membership query error:", membershipError.message);
+    // Invalid workspace id format should be treated as a client error, not server fault.
+    if (membershipError.code === "22P02") {
+      return {
+        error: NextResponse.json(
+          { error: "Invalid workspaceId format" },
+          { status: 400 },
+        ),
+      };
+    }
     return {
       error: NextResponse.json(
         { error: "Failed to verify workspace access" },
