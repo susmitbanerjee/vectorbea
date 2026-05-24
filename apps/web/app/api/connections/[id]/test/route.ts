@@ -265,7 +265,7 @@ export async function POST(
   const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     SELECT id, workspace_id, type, provider, status, auth_type, secret_ref, config, network_policy
     FROM vectorbea.connections
-    WHERE id = ${id} AND workspace_id = ${workspaceId}
+    WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
     LIMIT 1
   `);
 
@@ -329,7 +329,7 @@ export async function POST(
       last_test_latency_ms     = ${result.latencyMs},
       last_test_error          = ${result.errorMessage},
       updated_at               = now()
-    WHERE id = ${id} AND workspace_id = ${workspaceId}
+    WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
   `);
 
   // Cache result

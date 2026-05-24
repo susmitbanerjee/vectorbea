@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     const status = request.nextUrl.searchParams.get("status");
     const search = request.nextUrl.searchParams.get("search");
 
-    const clauses: Prisma.Sql[] = [Prisma.sql`workspace_id = ${workspaceId}`];
+    const clauses: Prisma.Sql[] = [Prisma.sql`workspace_id = ${workspaceId}::uuid`];
     if (type) clauses.push(Prisma.sql`type = ${type}`);
     if (status) clauses.push(Prisma.sql`status = ${status}`);
     if (search) {
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
         secret_ref, secret_masked, config, network_policy,
         used_by_agent_ids, used_by_tool_ids, created_at, updated_at
       ) VALUES (
-        ${workspaceId}, ${String(name)}, ${finalSlug}, ${normalizedType}, ${normalizedProvider},
+        ${workspaceId}::uuid, ${String(name)}, ${finalSlug}, ${normalizedType}, ${normalizedProvider},
         ${normalizedEnvironment}, 'not_tested', ${normalizedAuthType},
         null, null,
         ${JSON.stringify(sanitizedConfig)}::jsonb, ${JSON.stringify(safeNetworkPolicy)}::jsonb,
@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
       const secretMasked = maskSecret(plaintextSecret.trim());
       const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
         UPDATE vectorbea.connections SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
-        WHERE id = ${connectionId}::uuid AND workspace_id = ${workspaceId}
+        WHERE id = ${connectionId}::uuid AND workspace_id = ${workspaceId}::uuid
         RETURNING *
       `);
       return NextResponse.json(dbToConnection(updated[0] ?? row), { status: 201 });
@@ -254,7 +254,7 @@ export async function PATCH(request: NextRequest) {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
       UPDATE vectorbea.connections
       SET ${updateClause}
-      WHERE workspace_id = ${workspaceId} AND id = ${id}
+      WHERE workspace_id = ${workspaceId}::uuid AND id = ${id}::uuid
       RETURNING *
     `);
 
@@ -280,7 +280,7 @@ export async function DELETE(request: NextRequest) {
 
     await db.$executeRaw(Prisma.sql`
       DELETE FROM vectorbea.connections
-      WHERE workspace_id = ${workspaceId} AND id = ${id}
+      WHERE workspace_id = ${workspaceId}::uuid AND id = ${id}::uuid
     `);
 
     return new NextResponse(null, { status: 204 });

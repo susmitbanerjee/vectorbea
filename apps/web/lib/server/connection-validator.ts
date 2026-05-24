@@ -267,8 +267,8 @@ export async function validateWorkflowConnections(
   const rows = await db.$queryRaw<ConnectionRow[]>(Prisma.sql`
     SELECT id, name, type, status, auth_type, secret_ref, last_test_status, network_policy
     FROM vectorbea.connections
-    WHERE id = ANY(${idList}::text[])
-      AND workspace_id = ${workspaceId}
+    WHERE id = ANY(${idList}::uuid[])
+      AND workspace_id = ${workspaceId}::uuid
   `).catch(() => [] as ConnectionRow[]);
 
   const connMap = new Map<string, ConnectionRow>(rows.map((r) => [r.id, r]));
