@@ -2,7 +2,7 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma";
 import { db } from "@/server/db";
-import { storeSecret, deleteSecret } from "@/lib/server/secret-service";
+import { storeSecret, deleteSecret, getMaskedDisplay } from "@/lib/server/secret-service";
 import { cacheDel, CacheKeys } from "@/lib/server/cache";
 
 function maskSecret(s: string): string {
@@ -159,11 +159,11 @@ export async function PATCH(
 
     if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Secret rotation: if plaintextSecret provided, re-encrypt and store
+    // Secret rotation: re-encrypt inline — no separate secrets table needed
     if (typeof body.plaintextSecret === "string" && body.plaintextSecret.trim()) {
-      const plain = body.plaintextSecret.trim();
-      const secretRef = await storeSecret(workspaceId, id, plain);
-      const secretMasked = maskSecret(plain);
+      const plain        = body.plaintextSecret.trim();
+      const secretRef    = await storeSecret(workspaceId, id, plain);
+      const secretMasked = getMaskedDisplay(secretRef) ?? maskSecret(plain);
       const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
         UPDATE vectorbea.connections
         SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()

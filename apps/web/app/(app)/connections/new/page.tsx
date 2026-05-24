@@ -567,12 +567,6 @@ export default function NewConnectionPage() {
 
       setSavedConnId(conn.id);
 
-      // Warn if credentials could not be stored (missing migration / env var)
-      const raw = conn as unknown as Record<string, unknown>;
-      if (raw.secretStorageError && typeof raw.secretStorageError === "string") {
-        toast.warning(`Connection saved, but: ${raw.secretStorageError}`);
-      }
-
       if (!skipTest) {
         try {
           const result = await testConnection(conn.id);

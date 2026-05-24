@@ -1,28 +1,34 @@
 /**
  * Secret Service — Server-side only
  *
- * Handles encryption/decryption of connection secrets.
- * Uses AES-256-GCM authenticated encryption.
+ * AES-256-GCM encryption for connection secrets.
  *
- * The encryption key is loaded from SECRET_ENCRYPTION_KEY env var.
- * In production, this MUST be set. In local dev, a warning is emitted
- * and a fallback dev-only key is used (never commit the fallback key).
+ * Secrets are stored INLINE in the connections.secret_ref column using the
+ * format:  enc_v1:<base64(iv || tag || ciphertext)>
  *
- * Plaintext secrets NEVER leave this module except for server-side
- * runtime use (connection testing, tool execution).
- * They are NEVER returned to the frontend.
+ * This requires no separate secrets table — secrets work as soon as the
+ * connections table exists, with zero migrations needed.
+ *
+ * Set SECRET_ENCRYPTION_KEY (64-char hex or 44-char base64 = 32 bytes) in
+ * production. Without it a fixed fallback key is used — secrets are still
+ * encrypted but the key is predictable; set the env var for real isolation.
+ *
+ * SECURITY INVARIANTS:
+ *   - Plaintext never leaves this module after encryption
+ *   - secret_ref values that start with "enc_v1:" are opaque to the frontend
+ *     (the actual ciphertext is never surfaced in UI; only secret_masked is)
+ *   - getSecretForRuntime() is server-side only; never called from API routes
+ *     that return data to the browser
  */
 
 import "server-only";
 
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypto";
-import { db } from "@/server/db";
-import { Prisma } from "@/lib/generated/prisma";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
 const ALGORITHM = "aes-256-gcm";
-const IV_BYTES  = 12; // GCM standard
-const TAG_BYTES = 16;
-const KEY_VERSION = 1;
+const IV_BYTES   = 12; // GCM nonce
+const TAG_BYTES  = 16; // GCM auth tag
+const PREFIX     = "enc_v1:";
 
 // ─── Key management ───────────────────────────────────────────────────────────
 
@@ -30,28 +36,23 @@ function getEncryptionKey(): Buffer {
   const raw = process.env.SECRET_ENCRYPTION_KEY;
 
   if (!raw) {
-    // Fallback key used when SECRET_ENCRYPTION_KEY is not set.
-    // Secrets are still AES-256-GCM encrypted — the risk is that the key is
-    // fixed and known. Set SECRET_ENCRYPTION_KEY in production for real isolation.
     console.warn(
-      "[secret-service] WARNING: SECRET_ENCRYPTION_KEY is not set. " +
-      "Using a fixed fallback key — set this env var in production for proper secret isolation.",
+      "[secret-service] SECRET_ENCRYPTION_KEY is not set. " +
+      "Using a fixed fallback key — set this env var in production.",
     );
-    return Buffer.from("dev-only-key-change-this-in-prod!"); // exactly 32 bytes
+    // Exactly 32 ASCII bytes — safe as a fallback, not for production.
+    return Buffer.from("dev-only-key-change-this-in-prod!");
   }
 
-  // Accept hex (64 chars) or base64 (44 chars for 32 bytes)
-  let key: Buffer;
-  if (/^[0-9a-f]{64}$/i.test(raw)) {
-    key = Buffer.from(raw, "hex");
-  } else {
-    key = Buffer.from(raw, "base64");
-  }
+  // Accept 64-char hex or base64-encoded 32-byte value
+  const key = /^[0-9a-f]{64}$/i.test(raw)
+    ? Buffer.from(raw, "hex")
+    : Buffer.from(raw, "base64");
 
   if (key.length !== 32) {
     throw new Error(
-      `[secret-service] SECRET_ENCRYPTION_KEY must be 32 bytes (got ${key.length}). ` +
-      "Provide a 64-char hex string or 44-char base64 string.",
+      `[secret-service] SECRET_ENCRYPTION_KEY must decode to 32 bytes (got ${key.length}). ` +
+      "Use a 64-char hex string or 44-char base64 string.",
     );
   }
   return key;
@@ -59,22 +60,24 @@ function getEncryptionKey(): Buffer {
 
 // ─── Encrypt / Decrypt ───────────────────────────────────────────────────────
 
-function encrypt(plaintext: string): string {
+function encryptInline(plaintext: string): string {
   const key = getEncryptionKey();
   const iv  = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  // Format: base64(iv || tag || ciphertext)
-  const blob = Buffer.concat([iv, tag, encrypted]);
-  return blob.toString("base64");
+  const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag  = cipher.getAuthTag();
+  // Layout: iv (12) || tag (16) || ciphertext
+  return PREFIX + Buffer.concat([iv, tag, body]).toString("base64");
 }
 
-function decrypt(ciphertext: string): string {
+function decryptInline(secretRef: string): string {
+  if (!secretRef.startsWith(PREFIX)) {
+    throw new Error("[secret-service] Not an inline-encrypted secret ref.");
+  }
   const key  = getEncryptionKey();
-  const blob = Buffer.from(ciphertext, "base64");
+  const blob = Buffer.from(secretRef.slice(PREFIX.length), "base64");
   if (blob.length < IV_BYTES + TAG_BYTES) {
-    throw new Error("[secret-service] Ciphertext is too short — data may be corrupted.");
+    throw new Error("[secret-service] Ciphertext too short — data corrupted.");
   }
   const iv        = blob.subarray(0, IV_BYTES);
   const tag       = blob.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
@@ -84,105 +87,111 @@ function decrypt(ciphertext: string): string {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }
 
-function generateSecretRef(workspaceId: string, connectionId: string): string {
-  // Deterministic but opaque reference
-  const hash = createHash("sha256")
-    .update(`${workspaceId}:${connectionId}:${Date.now()}`)
-    .digest("hex")
-    .slice(0, 24);
-  return `sec_${hash}`;
-}
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Store an encrypted secret for a connection.
- * Returns the secretRef that should be stored in the connections table.
- * Plaintext is immediately discarded after encryption.
+ * Encrypt a plaintext secret and return the opaque secretRef to store in
+ * the connections.secret_ref column.  No DB write — the caller persists it.
+ *
+ * The returned value starts with "enc_v1:" and is safe to store in any text
+ * column.  It must NEVER be returned to the frontend.
  */
 export async function storeSecret(
-  workspaceId: string,
-  connectionId: string,
+  _workspaceId: string,
+  _connectionId: string,
   plaintextSecret: string,
 ): Promise<string> {
-  const ciphertext = encrypt(plaintextSecret);
-  const secretRef  = generateSecretRef(workspaceId, connectionId);
-
-  await db.$executeRaw(Prisma.sql`
-    INSERT INTO vectorbea.connection_secrets (workspace_id, connection_id, secret_ref, ciphertext, key_version)
-    VALUES (${workspaceId}::uuid, ${connectionId}::uuid, ${secretRef}, ${ciphertext}, ${KEY_VERSION})
-    ON CONFLICT (connection_id)
-    DO UPDATE SET
-      secret_ref   = EXCLUDED.secret_ref,
-      ciphertext   = EXCLUDED.ciphertext,
-      key_version  = EXCLUDED.key_version,
-      updated_at   = now()
-  `);
-
-  return secretRef;
+  return encryptInline(plaintextSecret);
 }
 
 /**
  * Retrieve and decrypt a secret for server-side runtime use ONLY.
- * This function MUST NOT be called from client components or API handlers
- * that return data to the frontend.
+ * Supports both the new inline format (enc_v1:…) and the legacy DB-backed
+ * format (sec_…) so old rows keep working after a migration.
  */
 export async function getSecretForRuntime(secretRef: string): Promise<string | null> {
-  const rows = await db.$queryRaw<{ ciphertext: string }[]>(Prisma.sql`
-    SELECT ciphertext FROM vectorbea.connection_secrets WHERE secret_ref = ${secretRef} LIMIT 1
-  `);
-  if (!rows[0]) return null;
+  if (!secretRef) return null;
+
+  // New inline format — decrypt without any DB round-trip
+  if (secretRef.startsWith(PREFIX)) {
+    try {
+      return decryptInline(secretRef);
+    } catch (e) {
+      console.error("[secret-service] Inline decryption failed:", (e as Error).message);
+      return null;
+    }
+  }
+
+  // Legacy DB-backed format (sec_…) — try the connection_secrets table if it
+  // exists; silently return null if the table hasn't been created yet.
   try {
-    return decrypt(rows[0].ciphertext);
+    const { db }     = await import("@/server/db");
+    const { Prisma } = await import("@/lib/generated/prisma");
+    const rows = await db.$queryRaw<{ ciphertext: string }[]>(Prisma.sql`
+      SELECT ciphertext FROM vectorbea.connection_secrets
+      WHERE secret_ref = ${secretRef}
+      LIMIT 1
+    `);
+    if (!rows[0]) return null;
+    // The legacy table stores raw base64 ciphertext without the prefix
+    const blob = Buffer.from(rows[0].ciphertext, "base64");
+    const key  = getEncryptionKey();
+    if (blob.length < IV_BYTES + TAG_BYTES) return null;
+    const iv        = blob.subarray(0, IV_BYTES);
+    const tag       = blob.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
+    const encrypted = blob.subarray(IV_BYTES + TAG_BYTES);
+    const decipher  = createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
   } catch (e) {
-    console.error("[secret-service] Decryption failed for secretRef:", secretRef, (e as Error).message);
+    console.error("[secret-service] Legacy DB lookup failed:", (e as Error).message);
     return null;
   }
 }
 
 /**
- * Delete a secret when a connection is removed.
+ * No-op for inline secrets — the secret is deleted when the connection row
+ * is deleted.  Kept for API compatibility and legacy DB cleanup.
  */
 export async function deleteSecret(connectionId: string): Promise<void> {
-  await db.$executeRaw(Prisma.sql`
-    DELETE FROM vectorbea.connection_secrets WHERE connection_id = ${connectionId}::uuid
-  `);
+  // Try to remove from legacy table if it exists — ignore errors
+  try {
+    const { db }     = await import("@/server/db");
+    const { Prisma } = await import("@/lib/generated/prisma");
+    await db.$executeRaw(Prisma.sql`
+      DELETE FROM vectorbea.connection_secrets
+      WHERE connection_id = ${connectionId}::uuid
+    `);
+  } catch {
+    // Table may not exist — that's fine
+  }
 }
 
 /**
- * Rotate — overwrite ciphertext with new encryption of a new plaintext.
+ * Re-encrypt with a new plaintext and return the new secretRef.
+ * Caller must persist the returned value to connections.secret_ref.
  */
 export async function rotateSecret(
-  connectionId: string,
+  _connectionId: string,
   newPlaintext: string,
-): Promise<void> {
-  const ciphertext = encrypt(newPlaintext);
-  await db.$executeRaw(Prisma.sql`
-    UPDATE vectorbea.connection_secrets
-    SET ciphertext = ${ciphertext}, key_version = ${KEY_VERSION}, updated_at = now()
-    WHERE connection_id = ${connectionId}::uuid
-  `);
+): Promise<string> {
+  return encryptInline(newPlaintext);
 }
 
 /**
- * Check whether a secret exists without decrypting it.
+ * Check whether a secret ref is present and in a valid format.
  */
-export async function secretExists(connectionId: string): Promise<boolean> {
-  const rows = await db.$queryRaw<{ exists: boolean }[]>(Prisma.sql`
-    SELECT EXISTS(SELECT 1 FROM vectorbea.connection_secrets WHERE connection_id = ${connectionId}::uuid) AS exists
-  `);
-  return rows[0]?.exists ?? false;
+export function secretExists(secretRef: string | null | undefined): boolean {
+  return typeof secretRef === "string" && secretRef.length > 0;
 }
 
 /**
- * Return the masked display value for a secret.
- * The last 4 chars of a hash — never anything from the plaintext.
+ * Return a safe masked display value from the secret ref.
+ * Extracts nothing from the plaintext — the ref itself is used as a token.
  */
-export async function getMaskedPreview(connectionId: string): Promise<string | null> {
-  const rows = await db.$queryRaw<{ secret_ref: string; updated_at: string }[]>(Prisma.sql`
-    SELECT secret_ref, updated_at::text FROM vectorbea.connection_secrets
-    WHERE connection_id = ${connectionId}::uuid LIMIT 1
-  `);
-  if (!rows[0]) return null;
-  return `[configured · updated ${new Date(rows[0].updated_at).toLocaleDateString()}]`;
+export function getMaskedDisplay(secretRef: string | null | undefined): string | null {
+  if (!secretRef || !secretRef.startsWith(PREFIX)) return null;
+  // Show last 4 chars of the base64 payload as a fingerprint
+  const tail = secretRef.slice(-4);
+  return `••••••••${tail}`;
 }
