@@ -399,10 +399,10 @@ export default function MembersPage() {
                             <Badge variant="outline" className="capitalize text-[10px]">{inv.role}</Badge>
                           </TableCell>
                           <TableCell>
-                            {accepted && <span className="flex items-center gap-1 text-xs text-emerald-400"><CheckCircle2 className="h-3 w-3" />Accepted</span>}
+                            {accepted && <span className="flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3 w-3" />Accepted</span>}
                             {revoked && <span className="flex items-center gap-1 text-xs text-muted-foreground"><XCircle className="h-3 w-3" />Revoked</span>}
-                            {expired && <span className="flex items-center gap-1 text-xs text-amber-400"><Clock className="h-3 w-3" />Expired</span>}
-                            {isPending && <span className="flex items-center gap-1 text-xs text-blue-400"><Clock className="h-3 w-3" />Pending</span>}
+                            {expired && <span className="flex items-center gap-1 text-xs text-amber-700"><Clock className="h-3 w-3" />Expired</span>}
+                            {isPending && <span className="flex items-center gap-1 text-xs text-blue-700"><Clock className="h-3 w-3" />Pending</span>}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {new Date(inv.expiresAt).toLocaleDateString()}
@@ -413,7 +413,7 @@ export default function MembersPage() {
                                 type="button"
                                 onClick={() => void handleRevoke(inv.id)}
                                 disabled={revokingId === inv.id}
-                                className="rounded p-1 text-muted-foreground hover:text-red-400 disabled:opacity-40 transition-colors"
+                                className="rounded p-1 text-muted-foreground hover:text-red-600 disabled:opacity-40 transition-colors"
                                 title="Revoke invitation"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />

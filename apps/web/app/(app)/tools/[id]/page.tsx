@@ -21,10 +21,10 @@ import { getTool, getCallsForTool } from "@/lib/repository";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  read_only:        "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  low_risk_write:   "bg-amber-500/10  text-amber-400  border-amber-500/20",
+  read_only:        "bg-emerald-50 text-emerald-700 border-emerald-200",
+  low_risk_write:   "bg-amber-50  text-amber-700  border-amber-200",
   high_risk_write:  "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  irreversible:     "bg-red-500/10    text-red-400    border-red-500/20",
+  irreversible:     "bg-red-50    text-red-700    border-red-200",
 };
 
 const RISK_LABELS: Record<Tool["riskLevel"], string> = {
@@ -128,7 +128,7 @@ export default function ToolDetailPage() {
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
             style={{ background: "rgba(34,211,238,0.1)", border: "1px solid rgba(34,211,238,0.2)" }}
           >
-            <Wrench className="h-6 w-6 text-cyan-400" />
+            <Wrench className="h-6 w-6 text-cyan-700" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -138,14 +138,14 @@ export default function ToolDetailPage() {
               <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", RISK_COLORS[tool.riskLevel])}>
                 {RISK_LABELS[tool.riskLevel]}
               </span>
-              <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-400 capitalize">
+              <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 capitalize">
                 {tool.type.replace(/_/g, " ")}
               </span>
               <span className={cn(
                 "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
                 tool.status === "active"
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                  : "bg-slate-500/10 text-slate-400 border-slate-500/20",
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]",
               )}>
                 {tool.status}
               </span>
@@ -216,7 +216,7 @@ export default function ToolDetailPage() {
               <div className="rounded-xl border border-border/60 p-5 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
                 <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>HTTP Endpoint</h2>
                 <div className="flex items-center gap-2">
-                  <code className="rounded bg-sky-500/10 px-2 py-0.5 font-mono text-[11px] text-sky-400">
+                  <code className="rounded bg-sky-50 px-2 py-0.5 font-mono text-[11px] text-sky-700">
                     {tool.httpConfig.method}
                   </code>
                   <code className="flex-1 truncate font-mono text-[12px] text-muted-foreground">
@@ -283,7 +283,7 @@ export default function ToolDetailPage() {
                     value={<code className="font-mono text-[11px]">{tool.authConnectionRef}</code>}
                   />
                   <KVRow label="Status" value={
-                    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600">
                       configured
                     </span>
                   } />

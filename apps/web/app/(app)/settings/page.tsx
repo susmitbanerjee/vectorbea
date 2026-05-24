@@ -496,7 +496,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => void saveSlack({ enabled: !slackConfig.enabled })}
-                  className={`text-xs font-medium ${slackConfig.enabled ? "text-amber-400 hover:text-amber-300" : "text-emerald-400 hover:text-emerald-300"}`}
+                  className={`text-xs font-medium ${slackConfig.enabled ? "text-amber-700 hover:text-amber-800" : "text-emerald-700 hover:text-emerald-800"}`}
                 >
                   {slackConfig.enabled ? "Disable" : "Enable"}
                 </button>

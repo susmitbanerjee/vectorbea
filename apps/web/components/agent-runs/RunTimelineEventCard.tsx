@@ -136,7 +136,7 @@ export function RunTimelineEventCard({
             <span
               className={cn(
                 "flex-1 text-sm font-medium leading-snug",
-                isFailed ? "text-red-700 dark:text-red-300" : "text-foreground",
+                isFailed ? "text-red-700" : "text-foreground",
               )}
             >
               {event.title}
@@ -181,9 +181,9 @@ export function RunTimelineEventCard({
               className={cn(
                 "px-3 pb-2.5 text-xs leading-relaxed",
                 isFailed
-                  ? "text-red-600 dark:text-red-400"
+                  ? "text-red-600"
                   : isWaiting
-                    ? "text-amber-600 dark:text-amber-400"
+                    ? "text-amber-600"
                     : "text-muted-foreground",
                 // For compact events, inline the summary on the same visual row
                 isCompact && "pt-0",
@@ -218,7 +218,7 @@ export function RunTimelineEventCard({
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-red-500 mb-1">
                     Error
                   </p>
-                  <p className="text-xs font-mono text-red-600 dark:text-red-400 break-words">
+                  <p className="text-xs font-mono text-red-600 break-words">
                     {event.errorMessage}
                   </p>
                 </div>

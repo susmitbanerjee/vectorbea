@@ -38,7 +38,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RUN_QUEUED: {
     icon: <Clock className="h-3 w-3" />,
     label: "Queued",
-    textClass: "text-sky-600 dark:text-sky-400",
+    textClass: "text-sky-600",
     bgClass: "bg-sky-500/10",
     borderClass: "border-sky-500/20",
     dotClass: "bg-sky-500",
@@ -46,7 +46,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RUN_STARTED: {
     icon: <Play className="h-3 w-3" />,
     label: "Run Started",
-    textClass: "text-blue-600 dark:text-blue-400",
+    textClass: "text-blue-600",
     bgClass: "bg-blue-500/10",
     borderClass: "border-blue-500/20",
     dotClass: "bg-blue-500",
@@ -54,7 +54,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RUN_SUCCEEDED: {
     icon: <Zap className="h-3 w-3" />,
     label: "Succeeded",
-    textClass: "text-emerald-600 dark:text-emerald-400",
+    textClass: "text-emerald-600",
     bgClass: "bg-emerald-500/10",
     borderClass: "border-emerald-500/20",
     dotClass: "bg-emerald-500",
@@ -62,7 +62,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RUN_FAILED: {
     icon: <XCircle className="h-3 w-3" />,
     label: "Failed",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -78,7 +78,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RUN_TIMEOUT: {
     icon: <AlertTriangle className="h-3 w-3" />,
     label: "Timeout",
-    textClass: "text-orange-600 dark:text-orange-400",
+    textClass: "text-orange-600",
     bgClass: "bg-orange-500/10",
     borderClass: "border-orange-500/20",
     dotClass: "bg-orange-500",
@@ -86,7 +86,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RUN_RESUMED: {
     icon: <RefreshCw className="h-3 w-3" />,
     label: "Resumed",
-    textClass: "text-blue-600 dark:text-blue-400",
+    textClass: "text-blue-600",
     bgClass: "bg-blue-500/10",
     borderClass: "border-blue-500/20",
     dotClass: "bg-blue-500",
@@ -102,7 +102,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   BUDGET_CHECK_FAILED: {
     icon: <XCircle className="h-3 w-3" />,
     label: "Budget ✗",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -118,7 +118,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   POLICY_CHECK_FAILED: {
     icon: <ShieldX className="h-3 w-3" />,
     label: "Policy ✗",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -126,7 +126,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   STEP_STARTED: {
     icon: <Bot className="h-3 w-3" />,
     label: "Step",
-    textClass: "text-blue-600 dark:text-blue-400",
+    textClass: "text-blue-600",
     bgClass: "bg-blue-500/10",
     borderClass: "border-blue-500/20",
     dotClass: "bg-blue-500",
@@ -134,7 +134,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   STEP_SUCCEEDED: {
     icon: <CheckCircle2 className="h-3 w-3" />,
     label: "Step ✓",
-    textClass: "text-emerald-600 dark:text-emerald-400",
+    textClass: "text-emerald-600",
     bgClass: "bg-emerald-500/10",
     borderClass: "border-emerald-500/20",
     dotClass: "bg-emerald-500",
@@ -142,7 +142,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   STEP_FAILED: {
     icon: <XCircle className="h-3 w-3" />,
     label: "Step ✗",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -158,7 +158,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   LLM_CALL_STARTED: {
     icon: <Sparkles className="h-3 w-3" />,
     label: "LLM Call",
-    textClass: "text-purple-600 dark:text-purple-400",
+    textClass: "text-purple-600",
     bgClass: "bg-purple-500/10",
     borderClass: "border-purple-500/20",
     dotClass: "bg-purple-500",
@@ -166,7 +166,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   LLM_CALL_SUCCEEDED: {
     icon: <Sparkles className="h-3 w-3" />,
     label: "LLM ✓",
-    textClass: "text-purple-600 dark:text-purple-400",
+    textClass: "text-purple-600",
     bgClass: "bg-purple-500/10",
     borderClass: "border-purple-500/20",
     dotClass: "bg-purple-500",
@@ -174,7 +174,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   LLM_CALL_FAILED: {
     icon: <Sparkles className="h-3 w-3" />,
     label: "LLM ✗",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -182,7 +182,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   TOOL_CALL_STARTED: {
     icon: <Wrench className="h-3 w-3" />,
     label: "Tool Call",
-    textClass: "text-cyan-600 dark:text-cyan-400",
+    textClass: "text-cyan-600",
     bgClass: "bg-cyan-500/10",
     borderClass: "border-cyan-500/20",
     dotClass: "bg-cyan-500",
@@ -190,7 +190,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   TOOL_CALL_SUCCEEDED: {
     icon: <Wrench className="h-3 w-3" />,
     label: "Tool ✓",
-    textClass: "text-cyan-600 dark:text-cyan-400",
+    textClass: "text-cyan-600",
     bgClass: "bg-cyan-500/10",
     borderClass: "border-cyan-500/20",
     dotClass: "bg-cyan-500",
@@ -198,7 +198,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   TOOL_CALL_FAILED: {
     icon: <Wrench className="h-3 w-3" />,
     label: "Tool ✗",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -206,7 +206,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   APPROVAL_PAUSED: {
     icon: <Clock className="h-3 w-3" />,
     label: "Paused",
-    textClass: "text-amber-600 dark:text-amber-400",
+    textClass: "text-amber-600",
     bgClass: "bg-amber-500/10",
     borderClass: "border-amber-500/20",
     dotClass: "bg-amber-500",
@@ -214,7 +214,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   APPROVAL_REQUESTED: {
     icon: <ShieldCheck className="h-3 w-3" />,
     label: "Approval",
-    textClass: "text-amber-600 dark:text-amber-400",
+    textClass: "text-amber-600",
     bgClass: "bg-amber-500/10",
     borderClass: "border-amber-500/20",
     dotClass: "bg-amber-500",
@@ -222,7 +222,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   APPROVAL_APPROVED: {
     icon: <ShieldCheck className="h-3 w-3" />,
     label: "Approved",
-    textClass: "text-emerald-600 dark:text-emerald-400",
+    textClass: "text-emerald-600",
     bgClass: "bg-emerald-500/10",
     borderClass: "border-emerald-500/20",
     dotClass: "bg-emerald-500",
@@ -230,7 +230,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   APPROVAL_REJECTED: {
     icon: <ShieldX className="h-3 w-3" />,
     label: "Rejected",
-    textClass: "text-red-600 dark:text-red-400",
+    textClass: "text-red-600",
     bgClass: "bg-red-500/10",
     borderClass: "border-red-500/20",
     dotClass: "bg-red-500",
@@ -246,7 +246,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RETRY_QUEUED: {
     icon: <RefreshCw className="h-3 w-3" />,
     label: "Retry ⟳",
-    textClass: "text-orange-600 dark:text-orange-400",
+    textClass: "text-orange-600",
     bgClass: "bg-orange-500/10",
     borderClass: "border-orange-500/20",
     dotClass: "bg-orange-500",
@@ -254,7 +254,7 @@ const EVENT_TYPE_CONFIG: Partial<Record<RunTimelineEventType, EventTypeConfig>> 
   RETRY_STARTED: {
     icon: <RefreshCw className="h-3 w-3" />,
     label: "Retry",
-    textClass: "text-orange-600 dark:text-orange-400",
+    textClass: "text-orange-600",
     bgClass: "bg-orange-500/10",
     borderClass: "border-orange-500/20",
     dotClass: "bg-orange-500",

@@ -149,7 +149,7 @@ export default function MetricsPage() {
                           <td className="py-2.5 font-medium">{row.promptName}</td>
                           <td className="py-2.5 text-right tabular-nums">{row.requestCount}</td>
                           <td className="py-2.5 text-right tabular-nums text-green-400">{fmtPct(row.successRate)}</td>
-                          <td className="py-2.5 text-right tabular-nums text-red-400">{fmtPct(row.errorRate)}</td>
+                          <td className="py-2.5 text-right tabular-nums text-red-600">{fmtPct(row.errorRate)}</td>
                           <td className="py-2.5 text-right tabular-nums">{fmtMs(row.avgLatencyMs)}</td>
                           <td className="py-2.5 text-right tabular-nums">{fmtMs(row.p95LatencyMs)}</td>
                           <td className="py-2.5 text-right tabular-nums">{fmtPct(row.cacheHitRate)}</td>

@@ -14,20 +14,20 @@ function fmtTime(ts?: string) {
 }
 
 const STATUS_MAP: Record<string, string> = {
-  SUCCEEDED: "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  FAILED: "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400",
-  RUNNING: "border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  WAITING: "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  PENDING: "border-border bg-muted/40 text-muted-foreground",
-  SKIPPED: "border-border bg-muted/30 text-muted-foreground/60",
+  SUCCEEDED: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  FAILED:    "border-red-200     bg-red-50     text-red-700",
+  RUNNING:   "border-[#BFDBFE]   bg-[#EFF6FF]  text-[#1D4ED8]",
+  WAITING:   "border-amber-200   bg-amber-50   text-amber-700",
+  PENDING:   "border-[#E5E7EB]   bg-[#F9FAFB]  text-[#6B7280]",
+  SKIPPED:   "border-[#E5E7EB]   bg-white      text-[#9CA3AF]",
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  LLM_CALL: "text-purple-600 dark:text-purple-400",
-  TOOL_CALL: "text-cyan-600 dark:text-cyan-400",
-  HTTP_CALL: "text-teal-600 dark:text-teal-400",
-  APPROVAL_GATE: "text-amber-600 dark:text-amber-400",
-  SYSTEM: "text-muted-foreground",
+  LLM_CALL:      "text-purple-600",
+  TOOL_CALL:     "text-cyan-700",
+  HTTP_CALL:     "text-teal-700",
+  APPROVAL_GATE: "text-amber-700",
+  SYSTEM:        "text-muted-foreground",
 };
 
 interface StepsTabProps {
@@ -64,7 +64,7 @@ export function StepsTab({ steps }: StepsTabProps) {
             <tr key={step.id} className="hover:bg-muted/20 transition-colors">
               <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{step.index}</td>
               <td className="px-4 py-2.5">
-                <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 font-mono text-[10px] text-violet-600 dark:text-violet-400">
+                <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-mono text-[10px] text-violet-700">
                   {step.agentName}
                 </span>
               </td>

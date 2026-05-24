@@ -118,9 +118,9 @@ export default function WorkflowDetailPage() {
             <h1 className="text-[20px] font-semibold tracking-tight">{workflow.name}</h1>
             <span className={cn(
               "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-              workflow.status === "active" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-              workflow.status === "draft" ? "bg-slate-500/10 text-slate-400 border-slate-500/20" :
-              "bg-amber-500/10 text-amber-400 border-amber-500/20"
+              workflow.status === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+              workflow.status === "draft" ? "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]" :
+              "bg-amber-50 text-amber-700 border-amber-200"
             )}>
               {workflow.status}
             </span>
@@ -271,7 +271,7 @@ export default function WorkflowDetailPage() {
               )}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Approval required</span>
-                <span className={cn("font-medium", workflow.approvalPolicy.requireApproval ? "text-amber-400" : "text-muted-foreground")}>
+                <span className={cn("font-medium", workflow.approvalPolicy.requireApproval ? "text-amber-700" : "text-muted-foreground")}>
                   {workflow.approvalPolicy.requireApproval ? "Yes" : "No"}
                 </span>
               </div>
@@ -295,8 +295,8 @@ export default function WorkflowDetailPage() {
               <span className={cn(
                 "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
                 workflow.creationMode === "native"
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                  : "bg-amber-500/10 text-amber-400 border-amber-500/20",
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-amber-50 text-amber-700 border-amber-200",
               )}>
                 {workflow.creationMode === "native" ? "Full replay" : "Limited replay"}
               </span>

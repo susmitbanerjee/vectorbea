@@ -50,6 +50,13 @@ const STATUS_DOT: Record<string, string> = {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+const ACCENT_HEX: Record<string, string> = {
+  blue:   "#2563EB",
+  emerald:"#059669",
+  red:    "#DC2626",
+  amber:  "#D97706",
+};
+
 function MetricCard({
   label, value, sub, accent, icon: Icon,
 }: {
@@ -59,20 +66,21 @@ function MetricCard({
   accent?: string;
   icon: React.ElementType;
 }) {
+  const color = accent ? (ACCENT_HEX[accent] ?? accent) : "var(--text-faint)";
   return (
-    <div
-      className="flex flex-col gap-3 rounded-lg border border-border bg-white p-4 shadow-card"
+    <div className="flex flex-col justify-between rounded-lg border border-[#E5E7EB] bg-white px-4 py-3.5 shadow-card"
+      style={{ minHeight: 88 }}
     >
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
           {label}
         </p>
-        <Icon className="h-4 w-4" style={{ color: accent ?? "var(--text-faint)" }} />
+        <Icon className="h-3.5 w-3.5 text-[#9CA3AF]" />
       </div>
-      <p className="text-[26px] font-semibold leading-none tracking-tight" style={{ color: accent ?? "var(--text-primary)" }}>
+      <p className="text-[24px] font-semibold leading-none tracking-tight" style={{ color }}>
         {value}
       </p>
-      {sub && <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>{sub}</p>}
+      {sub && <p className="mt-1.5 text-[11px] text-[#9CA3AF]">{sub}</p>}
     </div>
   );
 }
@@ -145,7 +153,7 @@ export default function OverviewPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+          <h1 className="text-[20px] font-[650] tracking-tight" style={{ color: "var(--text-primary)" }}>
             Overview
           </h1>
           <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -215,7 +223,7 @@ export default function OverviewPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Recent runs */}
         <div
-          className="lg:col-span-2 rounded-xl border border-border bg-white overflow-hidden rounded-lg"
+          className="lg:col-span-2 rounded-lg border border-border bg-white overflow-hidden"
           style={{ background: "var(--surface-1)" }}
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-3">

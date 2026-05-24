@@ -11,10 +11,10 @@ function fmt(ts?: string) {
 
 function getStatusCfg(status: string) {
   switch (status) {
-    case "APPROVED": return { icon: CheckCircle2, label: "Approved", color: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-500/20", bg: "bg-emerald-500/[0.03]" };
-    case "REJECTED": return { icon: XCircle, label: "Rejected", color: "text-red-600 dark:text-red-400", border: "border-red-500/20", bg: "bg-red-500/[0.03]" };
+    case "APPROVED": return { icon: CheckCircle2, label: "Approved", color: "text-emerald-600", border: "border-emerald-500/20", bg: "bg-emerald-500/[0.03]" };
+    case "REJECTED": return { icon: XCircle, label: "Rejected", color: "text-red-600", border: "border-red-500/20", bg: "bg-red-500/[0.03]" };
     case "EXPIRED": return { icon: Clock, label: "Expired", color: "text-muted-foreground", border: "border-border", bg: "bg-muted/20" };
-    default: return { icon: Clock, label: "Pending", color: "text-amber-600 dark:text-amber-400", border: "border-amber-500/20", bg: "bg-amber-500/[0.03]" };
+    default: return { icon: Clock, label: "Pending", color: "text-amber-600", border: "border-amber-500/20", bg: "bg-amber-500/[0.03]" };
   }
 }
 
@@ -101,7 +101,7 @@ export function ApprovalsTab({ approvals, onApprove, onReject }: ApprovalsTabPro
                   <button
                     type="button"
                     onClick={() => onApprove(ap.id)}
-                    className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                    className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-500/20 transition-colors"
                   >
                     Approve
                   </button>
@@ -110,7 +110,7 @@ export function ApprovalsTab({ approvals, onApprove, onReject }: ApprovalsTabPro
                   <button
                     type="button"
                     onClick={() => onReject(ap.id)}
-                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-500/20 transition-colors"
+                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-700 hover:bg-red-500/20 transition-colors"
                   >
                     Reject
                   </button>

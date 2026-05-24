@@ -30,10 +30,10 @@ import { getWorkflows } from "@/lib/repository";
 
 function statusBadge(status: WorkflowStatus) {
   const map: Record<WorkflowStatus, { label: string; cls: string }> = {
-    active:   { label: "Active",   cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
-    paused:   { label: "Paused",   cls: "bg-amber-500/10  text-amber-400  border-amber-500/20" },
-    draft:    { label: "Draft",    cls: "bg-slate-500/10  text-slate-400  border-slate-500/20" },
-    archived: { label: "Archived", cls: "bg-rose-500/10   text-rose-400   border-rose-500/20" },
+    active:   { label: "Active",   cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    paused:   { label: "Paused",   cls: "bg-amber-50   text-amber-700   border-amber-200" },
+    draft:    { label: "Draft",    cls: "bg-[#F9FAFB]  text-[#6B7280]   border-[#E5E7EB]" },
+    archived: { label: "Archived", cls: "bg-rose-50    text-rose-700    border-rose-200" },
   };
   const { label, cls } = map[status] ?? map.draft;
   return (
@@ -275,7 +275,7 @@ export default function WorkflowsPage() {
                     {/* Success rate */}
                     <td className="px-4 py-3.5">
                       {wf.totalRuns > 0 ? (
-                        <span className={cn("text-[12px] font-mono", wf.successRate >= 0.9 ? "text-emerald-400" : wf.successRate >= 0.7 ? "text-amber-400" : "text-red-400")}>
+                        <span className={cn("text-[12px] font-mono", wf.successRate >= 0.9 ? "text-emerald-700" : wf.successRate >= 0.7 ? "text-amber-700" : "text-red-700")}>
                           {Math.round(wf.successRate * 100)}%
                         </span>
                       ) : (
@@ -342,7 +342,7 @@ export default function WorkflowsPage() {
 
 function EmptyWorkflows({ hasFilters }: { hasFilters: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border/60 bg-muted/20">
         <GitBranch className="h-5 w-5 text-muted-foreground/40" />
       </div>

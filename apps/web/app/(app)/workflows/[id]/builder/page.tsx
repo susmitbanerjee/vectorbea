@@ -138,14 +138,14 @@ function makeDefaultNode(type: WFNodeType, position: { x: number; y: number }): 
 function ValidationBadge({ issueCount, valid }: { issueCount: number; valid: boolean }) {
   if (valid) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-400">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
         <CheckCircle2 className="h-3 w-3" />
         Valid
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
       <AlertTriangle className="h-3 w-3" />
       {issueCount} issue{issueCount !== 1 ? "s" : ""}
     </span>
@@ -427,7 +427,7 @@ export default function WorkflowBuilderPage() {
         <span className="text-[12px] font-semibold text-foreground">Builder</span>
 
         {unsaved && (
-          <span className="ml-1 text-[10px] text-amber-400/70">● unsaved</span>
+          <span className="ml-1 text-[10px] text-amber-600">● unsaved</span>
         )}
 
         <div className="ml-auto flex items-center gap-2">

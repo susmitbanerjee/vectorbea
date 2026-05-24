@@ -186,7 +186,7 @@ function ConnectionRow({
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); onDelete(); }}
-                className="block w-full px-3 py-2 text-left text-[12px] text-red-400 hover:bg-red-500/10"
+                className="block w-full px-3 py-2 text-left text-[12px] text-red-600 hover:bg-red-50"
               >
                 Delete
               </button>
@@ -398,7 +398,7 @@ export default function ConnectionsPage() {
       <div className="mt-8 rounded-2xl border border-border/40 bg-card/40 p-5">
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/40 bg-muted/20">
-            <AlertTriangle className="h-5 w-5 text-amber-400" />
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
           </div>
           <div>
             <p className="text-[13px] font-semibold text-foreground">Private systems require network access</p>

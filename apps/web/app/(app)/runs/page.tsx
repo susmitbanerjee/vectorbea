@@ -129,7 +129,7 @@ export default function RunsPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[18px] font-semibold tracking-tight">Runs</h1>
+          <h1 className="text-[20px] font-[650] tracking-tight">Runs</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {pagination ? `${pagination.total} execution${pagination.total !== 1 ? "s" : ""} total` : "All workflow run executions"}
           </p>
@@ -189,7 +189,7 @@ export default function RunsPage() {
             ))}
           </div>
         ) : runs.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-20 text-center">
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
             <AlertTriangle className="h-8 w-8 text-muted-foreground/20" />
             <p className="text-sm font-medium text-muted-foreground">No runs found</p>
             <p className="text-xs text-muted-foreground/60">

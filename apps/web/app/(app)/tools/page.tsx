@@ -12,10 +12,10 @@ import { getTools } from "@/lib/repository";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  read_only:        "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  low_risk_write:   "bg-amber-500/10  text-amber-400  border-amber-500/20",
-  high_risk_write:  "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  irreversible:     "bg-red-500/10    text-red-400    border-red-500/20",
+  read_only:        "bg-emerald-50 text-emerald-700 border-emerald-200",
+  low_risk_write:   "bg-amber-50   text-amber-700   border-amber-200",
+  high_risk_write:  "bg-orange-50  text-orange-700  border-orange-200",
+  irreversible:     "bg-red-50     text-red-700     border-red-200",
 };
 
 const RISK_LABELS: Record<Tool["riskLevel"], string> = {
@@ -202,7 +202,7 @@ export default function ToolsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3.5">
-                      <span className="inline-flex items-center rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-400 capitalize">
+                      <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 capitalize">
                         {tool.type.replace(/_/g, " ")}
                       </span>
                     </td>
@@ -225,8 +225,8 @@ export default function ToolsPage() {
                       <span className={cn(
                         "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
                         tool.status === "active"
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                          : "bg-slate-500/10 text-slate-400 border-slate-500/20",
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]",
                       )}>
                         {tool.status}
                       </span>

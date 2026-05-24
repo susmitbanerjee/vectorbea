@@ -3,14 +3,14 @@ import type { AuditLogUiModel } from "@/types/agent-run-ui";
 
 const ACTION_COLORS: Record<string, string> = {
   RUN_CREATED: "text-muted-foreground",
-  RUN_STARTED: "text-blue-600 dark:text-blue-400",
-  RUN_SUCCEEDED: "text-emerald-600 dark:text-emerald-400",
-  RUN_FAILED: "text-red-600 dark:text-red-400",
-  APPROVAL_REQUESTED: "text-amber-600 dark:text-amber-400",
-  APPROVAL_APPROVED: "text-emerald-600 dark:text-emerald-400",
-  APPROVAL_REJECTED: "text-red-600 dark:text-red-400",
-  HTTP_CALL_FAILED: "text-red-600 dark:text-red-400",
-  CRM_UPDATE_EXECUTED: "text-cyan-600 dark:text-cyan-400",
+  RUN_STARTED: "text-blue-600",
+  RUN_SUCCEEDED: "text-emerald-600",
+  RUN_FAILED: "text-red-600",
+  APPROVAL_REQUESTED: "text-amber-600",
+  APPROVAL_APPROVED: "text-emerald-600",
+  APPROVAL_REJECTED: "text-red-600",
+  HTTP_CALL_FAILED: "text-red-600",
+  CRM_UPDATE_EXECUTED: "text-cyan-600",
 };
 
 function fmtTime(ts: string) {

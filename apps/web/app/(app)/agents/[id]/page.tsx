@@ -32,17 +32,17 @@ const TYPE_LABELS: Record<Agent["type"], string> = {
 };
 
 const TYPE_COLORS: Record<Agent["type"], string> = {
-  native_llm_agent:             "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  tool_agent:                   "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  router_agent:                 "bg-sky-500/10 text-sky-400 border-sky-500/20",
-  approval_agent:               "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  imported_langgraph_node:      "bg-purple-500/10 text-purple-400 border-purple-500/20",
-  external_instrumented_agent:  "bg-teal-500/10 text-teal-400 border-teal-500/20",
+  native_llm_agent:             "bg-violet-50 text-violet-700 border-violet-200",
+  tool_agent:                   "bg-cyan-50 text-cyan-700 border-cyan-200",
+  router_agent:                 "bg-sky-50 text-sky-700 border-sky-200",
+  approval_agent:               "bg-amber-50 text-amber-700 border-amber-200",
+  imported_langgraph_node:      "bg-purple-50 text-purple-700 border-purple-200",
+  external_instrumented_agent:  "bg-teal-50 text-teal-700 border-teal-200",
 };
 
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  read_only:       "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  low_risk_write:  "bg-amber-500/10  text-amber-400  border-amber-500/20",
+  read_only:       "bg-emerald-50 text-emerald-700 border-emerald-200",
+  low_risk_write:  "bg-amber-500/10  text-amber-700  border-amber-500/20",
   high_risk_write: "bg-orange-500/10 text-orange-400 border-orange-500/20",
   irreversible:    "bg-red-500/10    text-red-400    border-red-500/20",
 };
@@ -159,7 +159,7 @@ export default function AgentDetailPage() {
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
             style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.2)" }}
           >
-            <Bot className="h-6 w-6 text-violet-400" />
+            <Bot className="h-6 w-6 text-violet-600" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -172,8 +172,8 @@ export default function AgentDetailPage() {
               <span className={cn(
                 "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
                 agent.status === "active"
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                  : "bg-slate-500/10 text-slate-400 border-slate-500/20",
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]",
               )}>
                 {agent.status}
               </span>
@@ -322,7 +322,7 @@ export default function AgentDetailPage() {
                     style={{ background: "var(--surface-1)" }}
                   >
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.15)" }}>
-                      <Wrench className="h-4 w-4 text-cyan-400" />
+                      <Wrench className="h-4 w-4 text-cyan-700" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-[13px] font-medium group-hover:underline" style={{ color: "var(--text-primary)" }}>
@@ -330,7 +330,7 @@ export default function AgentDetailPage() {
                       </p>
                       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{tool.description}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1">
-                        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-px text-[9px] text-cyan-400 capitalize">
+                        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-px text-[9px] text-cyan-700 capitalize">
                           {tool.type.replace(/_/g, " ")}
                         </span>
                         <span className={cn("rounded-full border px-1.5 py-px text-[9px]", RISK_COLORS[tool.riskLevel])}>
@@ -343,7 +343,7 @@ export default function AgentDetailPage() {
                         )}
                       </div>
                     </div>
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400 mt-0.5" />
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 mt-0.5" />
                   </Link>
                 ))}
               </div>
@@ -388,7 +388,7 @@ export default function AgentDetailPage() {
                   label="Requires approval"
                   value={
                     agent.approvalPolicy.requireApproval ? (
-                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400">Yes</span>
+                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700">Yes</span>
                     ) : (
                       <span className="text-muted-foreground">No</span>
                     )

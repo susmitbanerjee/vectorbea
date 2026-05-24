@@ -215,10 +215,10 @@ export default function AgentsPage() {
                       <span className={cn(
                         "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
                         agent.status === "active"
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                           : agent.status === "deprecated"
-                            ? "bg-red-500/10 text-red-400 border-red-500/20"
-                            : "bg-slate-500/10 text-slate-400 border-slate-500/20",
+                            ? "bg-red-50 text-red-700 border-red-200"
+                            : "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]",
                       )}>
                         {agent.status}
                       </span>

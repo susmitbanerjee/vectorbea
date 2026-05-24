@@ -130,8 +130,8 @@ export function RunTimelineEventCard({ event, isLast, defaultExpanded = false, s
             <div className="min-w-0 flex-1">
               <span className={cn(
                 "text-[13px] font-medium leading-snug",
-                isFailed ? "text-red-700 dark:text-red-300" :
-                isWaiting ? "text-amber-700 dark:text-amber-300" :
+                isFailed ? "text-red-700" :
+                isWaiting ? "text-amber-700" :
                 compact ? "text-muted-foreground" : "text-foreground",
               )}>
                 {event.title}
@@ -139,8 +139,8 @@ export function RunTimelineEventCard({ event, isLast, defaultExpanded = false, s
               {event.summary && !compact && (
                 <p className={cn(
                   "mt-0.5 text-[12px] leading-snug",
-                  isFailed ? "text-red-600/80 dark:text-red-400/80" :
-                  isWaiting ? "text-amber-600/80 dark:text-amber-400/80" :
+                  isFailed ? "text-red-600/80" :
+                  isWaiting ? "text-amber-600/80" :
                   "text-muted-foreground",
                 )}>
                   {event.actorName && (
@@ -205,7 +205,7 @@ export function RunTimelineEventCard({ event, isLast, defaultExpanded = false, s
               {event.errorMessage && (
                 <div className="rounded-md border border-red-500/20 bg-red-500/[0.04] px-3 py-2.5">
                   <p className="mb-1 text-[10px] font-mono font-semibold uppercase tracking-wide text-red-500">Error</p>
-                  <p className="font-mono text-[11px] text-red-600 dark:text-red-400 break-all">{event.errorMessage}</p>
+                  <p className="font-mono text-[11px] text-red-600 break-all">{event.errorMessage}</p>
                 </div>
               )}
               {event.approval && (

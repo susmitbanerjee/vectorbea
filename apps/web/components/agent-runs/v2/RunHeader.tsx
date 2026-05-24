@@ -81,7 +81,7 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
             {run.environment}
           </span>
           {isMock && (
-            <span className="inline-flex items-center rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+            <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
               ⚠ Mock data
             </span>
           )}
@@ -102,7 +102,7 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
               {scfg.label}
             </span>
             {run.attemptNumber > 1 && (
-              <span className="rounded-md border border-orange-500/25 bg-orange-500/10 px-2 py-0.5 text-[11px] font-semibold text-orange-600 dark:text-orange-400">
+              <span className="rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">
                 Attempt #{run.attemptNumber}
               </span>
             )}
@@ -130,7 +130,7 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
           )}
           {run.status === "WAITING_FOR_APPROVAL" && (
             <Link href="/approvals"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10")}>
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 border-amber-200 text-amber-700 hover:bg-amber-50")}>
               Review approval →
             </Link>
           )}
@@ -144,7 +144,7 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
 
       {/* Error banner */}
       {run.errorMessage && (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/[0.04] px-4 py-3 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span className="font-semibold">Error: </span>{run.errorMessage}
         </div>
       )}

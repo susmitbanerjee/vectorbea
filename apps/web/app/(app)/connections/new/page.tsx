@@ -84,8 +84,8 @@ function OutboundIPs() {
     setTimeout(() => setCopied(false), 2000);
   }
   return (
-    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-      <p className="mb-2 text-[12px] font-semibold text-amber-400">Network access requirements</p>
+    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <p className="mb-2 text-[12px] font-semibold text-amber-800">Network access requirements</p>
       <p className="mb-3 text-[11px] text-muted-foreground/70">
         For Vectorbee Cloud to reach your database or API, add these IPs to your firewall, VPC security group,
         API gateway, or database allowlist.
@@ -99,7 +99,7 @@ function OutboundIPs() {
         className={cn(
           "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-all",
           copied
-            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
             : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground",
         )}
       >
@@ -262,7 +262,7 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
       </Section>
 
       {showPrivateWarning && (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-300">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
           <strong>Private address detected.</strong> This host appears to be on a private network. Vectorbee Cloud
           cannot reach it unless you whitelist our outbound IPs or use a private runner.
         </div>
@@ -318,7 +318,7 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
       </Section>
 
       {showPrivateWarning && (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-300">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
           <strong>Private address detected.</strong> This URL appears private. Vectorbee Cloud cannot reach it
           without IP whitelisting or a private runner.
         </div>
@@ -771,15 +771,15 @@ export default function NewConnectionPage() {
           </div>
 
           {testResult === "ok" && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              <p className="text-[12px] text-emerald-300">Connection test passed. Ready to save.</p>
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <p className="text-[12px] text-emerald-800">Connection test passed. Ready to save.</p>
             </div>
           )}
           {testResult === "failed" && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
-              <ShieldCheck className="h-4 w-4 text-red-400 shrink-0" />
-              <p className="text-[12px] text-red-300">Test failed. Check credentials and network access. You can still save as draft.</p>
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <ShieldCheck className="h-4 w-4 text-red-600 shrink-0" />
+              <p className="text-[12px] text-red-700">Test failed. Check credentials and network access. You can still save as draft.</p>
             </div>
           )}
 

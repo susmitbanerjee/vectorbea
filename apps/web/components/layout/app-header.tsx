@@ -31,7 +31,7 @@ export function AppHeader({
   actions,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   actions?: ReactNode;
 }) {
   const pathname = usePathname();
@@ -62,8 +62,6 @@ export function AppHeader({
   useEffect(() => {
     const handle = window.setTimeout(() => pushSearch(query), 250);
     return () => window.clearTimeout(handle);
-    // pushSearch is defined inline each render; adding it would cause
-    // infinite re-runs. The stable dependency is query alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
@@ -81,74 +79,92 @@ export function AppHeader({
   });
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border/50 bg-background/80 backdrop-blur-xl">
-      <div className="flex flex-col gap-3 px-4 py-4 md:px-6 xl:px-8">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="animate-fade-in">
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{title}</h1>
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          </div>
-          <div className="flex items-center gap-2">{actions}</div>
+    <header
+      className="sticky top-0 z-20"
+      style={{
+        background: "var(--bg-main)",
+        borderBottom: "1px solid var(--border-subtle)",
+      }}
+    >
+      {/* ── Main header row ────────────────────────────────────────────── */}
+      <div className="flex h-[52px] items-center gap-4 px-5">
+        {/* Title */}
+        <div className="flex-1 min-w-0">
+          <h1 className="page-title leading-none">{title}</h1>
+          {subtitle && (
+            <p className="page-subtitle hidden sm:block">{subtitle}</p>
+          )}
         </div>
 
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <form className="relative w-full md:max-w-sm" onSubmit={submitSearch}>
-            <Search className={cn(
-              "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transition-colors",
-              searchFocused ? "text-primary" : "text-muted-foreground",
-            )} />
-            <input
-              className={cn(
-                "flex h-9 w-full rounded-lg border bg-background/50 pl-9 pr-3 py-1 text-sm transition-all duration-200 placeholder:text-muted-foreground/50 focus:outline-none",
-                searchFocused
-                  ? "border-primary/50 ring-2 ring-primary/20 bg-background"
-                  : "border-border/60",
-              )}
-              placeholder="Search..."
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => { setQuery(""); pushSearch(""); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
+        {/* Search */}
+        <form
+          className="relative hidden md:flex items-center"
+          onSubmit={submitSearch}
+        >
+          <Search className={cn(
+            "pointer-events-none absolute left-2.5 h-3.5 w-3.5 transition-colors",
+            searchFocused ? "text-[#2563EB]" : "text-[#9CA3AF]",
+          )} />
+          <input
+            className={cn(
+              "h-8 w-52 rounded-md border bg-white pl-8 pr-3 text-[13px] transition-all placeholder:text-[#9CA3AF] focus:outline-none focus:w-64",
+              searchFocused
+                ? "border-[#2563EB] ring-2 ring-blue-500/10"
+                : "border-[#E5E7EB]",
             )}
-          </form>
-          <div className="flex items-center gap-1 self-end md:self-auto">
-            <NotificationsPopover />
-            <ThemeToggle />
+            placeholder="Search…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => { setQuery(""); pushSearch(""); }}
+              className="absolute right-2.5 text-[11px] text-[#9CA3AF] hover:text-[#374151]"
+            >
+              ✕
+            </button>
+          )}
+        </form>
+
+        {/* Actions */}
+        {actions && (
+          <div className="flex items-center gap-2">
+            {actions}
           </div>
-        </div>
+        )}
 
-        <div className="flex gap-1.5 overflow-x-auto pb-1 lg:hidden">
-          {visibleMobileNavigation.map((item) => {
-            const Icon = item.icon;
-            const active =
-              item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
-
-            return (
-              <Link
-                key={item.href}
-                href={`${item.href}${currentQuery ? `?${currentQuery}` : ""}` as Route}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all duration-200",
-                  active
-                    ? "border-primary/30 bg-primary/10 text-primary"
-                    : "border-border/50 bg-card/50 text-muted-foreground hover:bg-accent/30",
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {item.label}
-              </Link>
-            );
-          })}
+        {/* Utility icons */}
+        <div className="flex items-center gap-1">
+          <NotificationsPopover />
+          <ThemeToggle />
         </div>
+      </div>
+
+      {/* ── Mobile nav (small screens only) ───────────────────────────── */}
+      <div className="flex gap-1 overflow-x-auto border-t border-[#E5E7EB] px-4 pb-2 pt-1.5 lg:hidden">
+        {visibleMobileNavigation.map((item) => {
+          const Icon = item.icon;
+          const active =
+            item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <Link
+              key={item.href}
+              href={`${item.href}${currentQuery ? `?${currentQuery}` : ""}` as Route}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12px] font-medium whitespace-nowrap transition-all",
+                active
+                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  : "border-[#E5E7EB] bg-white text-[#4B5563] hover:bg-[#F1F3F5]",
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              {item.label}
+            </Link>
+          );
+        })}
       </div>
     </header>
   );

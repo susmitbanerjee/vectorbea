@@ -62,7 +62,7 @@ export function OutputTab({ output, partialOutput, isFailed }: OutputTabProps) {
         <div>
           <div className="mb-2 flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-500" />
-            <p className="text-sm font-medium text-amber-700 dark:text-amber-300">Partial output (run did not complete)</p>
+            <p className="text-sm font-medium text-amber-700">Partial output (run did not complete)</p>
           </div>
           <JsonViewer label="Partial output" value={partialOutput} />
         </div>

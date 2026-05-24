@@ -223,14 +223,14 @@ export default function RunDetailPage() {
         </Link>
 
         {retryWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-300 space-y-1">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 space-y-1">
             {retryWarnings.map((w, i) => <p key={i}><span className="font-semibold">Warning:</span> {w}</p>)}
           </div>
         )}
 
         {forcePausedPending && (
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-            <p className="text-sm text-amber-300">The workflow is paused. Retry anyway?</p>
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm text-amber-800">The workflow is paused. Retry anyway?</p>
             <div className="flex gap-2 shrink-0">
               <button type="button" onClick={() => setForcePausedPending(false)}
                 className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium hover:bg-muted">Cancel</button>
@@ -244,11 +244,11 @@ export default function RunDetailPage() {
 
         {/* Approval Banner */}
         {isWaitingApproval && pendingApprovals.length > 0 && isLocalRun && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 space-y-3">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-amber-300">Approval Required</p>
-                <p className="mt-0.5 text-xs text-amber-300/70">
+                <p className="text-sm font-semibold text-amber-800">Approval Required</p>
+                <p className="mt-0.5 text-xs text-amber-700">
                   This run is paused waiting for human approval before continuing.
                 </p>
               </div>
@@ -271,7 +271,7 @@ export default function RunDetailPage() {
                 </button>
               </div>
             </div>
-            <p className="text-xs text-amber-300/60">
+            <p className="text-xs text-amber-700">
               Step: <span className="font-mono">{pendingApprovals[0]!.relatedStep}</span>
             </p>
           </div>
@@ -279,18 +279,18 @@ export default function RunDetailPage() {
 
         {/* Failed — local retry banner */}
         {isFailed && isLocalRun && (
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-red-500/20 bg-red-500/5 px-5 py-4">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-5 py-4">
             <div>
-              <p className="text-sm font-semibold text-red-400">Run Failed</p>
+              <p className="text-sm font-semibold text-red-700">Run Failed</p>
               {model.run.errorMessage && (
-                <p className="mt-0.5 text-xs text-red-400/70">{model.run.errorMessage}</p>
+                <p className="mt-0.5 text-xs text-red-600">{model.run.errorMessage}</p>
               )}
             </div>
             <button
               type="button"
               disabled={acting}
               onClick={() => void handleRetry()}
-              className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 transition-colors"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               {acting ? "Retrying…" : "Retry from failed step"}

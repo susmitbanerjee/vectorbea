@@ -15,6 +15,19 @@ const config: Config = {
         sans: ["var(--font-sans)", "Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
         mono: ["var(--font-mono)", "Geist Mono", "JetBrains Mono", "Fira Code", "Menlo", "Consolas", "monospace"],
       },
+      fontWeight: {
+        "450": "450",
+        "550": "550",
+        "650": "650",
+      },
+      fontSize: {
+        "10": ["10px", { lineHeight: "14px" }],
+        "11": ["11px", { lineHeight: "16px" }],
+        "12": ["12px", { lineHeight: "18px" }],
+        "13": ["13px", { lineHeight: "20px" }],
+        "14": ["14px", { lineHeight: "20px" }],
+        "15": ["15px", { lineHeight: "22px" }],
+      },
       colors: {
         background:         "hsl(var(--background))",
         foreground:         "hsl(var(--foreground))",
@@ -33,15 +46,30 @@ const config: Config = {
         border:             "hsl(var(--border))",
         input:              "hsl(var(--input))",
         ring:               "hsl(var(--ring))",
-        brand: {
-          DEFAULT:    "hsl(var(--brand))",
-          foreground: "hsl(var(--brand-foreground))",
-          muted:      "hsl(var(--brand-muted))",
-        },
+        destructive:        "hsl(var(--destructive))",
+        "destructive-foreground": "hsl(var(--destructive-foreground))",
         success:     "hsl(var(--success))",
         warning:     "hsl(var(--warning))",
-        destructive: "hsl(var(--destructive))",
-        "destructive-foreground": "hsl(var(--destructive-foreground))",
+
+        // Sidebar semantic tokens
+        sidebar: {
+          DEFAULT:    "#F4F5F7",
+          fg:         "#111827",
+          muted:      "#4B5563",
+          border:     "#E2E8F0",
+          active:     "#E9EEF5",
+          hover:      "#ECEFF3",
+        },
+
+        // Surface hierarchy
+        surface: {
+          1:     "#FFFFFF",
+          2:     "#FFFFFF",
+          3:     "#F6F7F9",
+          hover: "#F1F3F5",
+        },
+
+        // Chart colors
         chart: {
           1: "hsl(var(--chart-1))",
           2: "hsl(var(--chart-2))",
@@ -49,121 +77,50 @@ const config: Config = {
           4: "hsl(var(--chart-4))",
           5: "hsl(var(--chart-5))",
         },
-        // Sidebar design tokens
-        sidebar: {
-          DEFAULT:    "#F4F5F7",
-          fg:         "#111827",
-          muted:      "#6B7280",
-          border:     "#E5E7EB",
-          active:     "#EAECF0",
-          hover:      "#EDEFF2",
-        },
-        // Surface hierarchy
-        surface: {
-          1: "#FFFFFF",
-          2: "#FFFFFF",
-          3: "#F6F7F9",
-          hover: "#F1F3F5",
-        },
       },
       borderRadius: {
         "2xl": "1rem",
         xl:    "0.75rem",
-        lg:    "0.625rem",
-        md:    "0.5rem",
-        sm:    "0.375rem",
+        lg:    "0.5rem",   // 8px — primary card radius
+        md:    "0.375rem", // 6px — button/input radius
+        sm:    "0.25rem",  // 4px — badge/tag radius
       },
       boxShadow: {
-        xs:    "0 1px 2px rgba(0,0,0,0.04)",
-        sm:    "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
-        md:    "0 4px 8px -1px rgba(0,0,0,0.06), 0 2px 4px -1px rgba(0,0,0,0.04)",
-        lg:    "0 10px 18px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04)",
-        xl:    "0 20px 28px -5px rgba(0,0,0,0.10), 0 8px 12px -6px rgba(0,0,0,0.04)",
-        card:  "0 0 0 1px #E5E7EB, 0 1px 4px rgba(0,0,0,0.04)",
-        "card-hover": "0 0 0 1px #D1D5DB, 0 2px 8px rgba(0,0,0,0.06)",
-        panel: "0 0 0 1px #E5E7EB, 0 4px 16px rgba(0,0,0,0.06)",
-        glow:     "none",
+        xs:     "0 1px 2px rgba(0,0,0,0.04)",
+        sm:     "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
+        md:     "0 4px 8px -1px rgba(0,0,0,0.06), 0 2px 4px -1px rgba(0,0,0,0.04)",
+        lg:     "0 10px 18px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04)",
+        xl:     "0 20px 28px -5px rgba(0,0,0,0.10), 0 8px 12px -6px rgba(0,0,0,0.04)",
+        card:   "0 0 0 1px #E5E7EB, 0 1px 3px rgba(0,0,0,0.04)",
+        "card-hover": "0 0 0 1px #D1D5DB, 0 2px 6px rgba(0,0,0,0.06)",
+        panel:  "0 0 0 1px #E5E7EB, 0 4px 12px rgba(0,0,0,0.06)",
+        glow:   "none",
         "glow-sm": "none",
-        sidebar: "1px 0 0 #E5E7EB",
+        sidebar: "1px 0 0 #E2E8F0",
       },
       backgroundImage: {
-        "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.10), transparent 65%)",
-        "grid-fade":
-          "radial-gradient(ellipse at top, hsl(var(--primary)/0.06), transparent 45%), " +
-          "linear-gradient(rgba(15,23,42,0.04) 1px, transparent 1px), " +
-          "linear-gradient(90deg, rgba(15,23,42,0.04) 1px, transparent 1px)",
-        "auth-panel": "linear-gradient(135deg, hsl(var(--primary)/0.06) 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, rgba(37,99,235,0.08), transparent 50%)",
-        // Neutral card surface
+        "hero-glow": "radial-gradient(ellipse 80% 50% at 50% -10%, hsl(var(--primary)/0.08), transparent 65%)",
         "card-warm": "linear-gradient(180deg, #FFFFFF 0%, #FFFFFF 100%)",
-      },
-      backgroundSize: {
-        grid: "100% 100%, 28px 28px, 28px 28px",
-      },
-      typography: {
-        DEFAULT: {
-          css: {
-            maxWidth: "68ch",
-            color: "hsl(var(--muted-foreground))",
-            "--tw-prose-headings": "#111111",
-            h1: { color: "#111111", fontWeight: "650", letterSpacing: "-0.03em" },
-            h2: { color: "#111111", fontWeight: "600", letterSpacing: "-0.025em" },
-            h3: { color: "#111111", fontWeight: "600", letterSpacing: "-0.02em" },
-            p: { lineHeight: "1.8" },
-            a: {
-              color: "hsl(var(--brand))",
-              textDecorationColor: "hsl(var(--brand) / 0.25)",
-              fontWeight: "500",
-            },
-            strong: { color: "#111111" },
-            code: {
-              color: "#111111",
-              backgroundColor: "hsl(var(--muted))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: "0.375rem",
-              padding: "0.15rem 0.4rem",
-              fontWeight: "450",
-            },
-            "code::before": { content: '""' },
-            "code::after":  { content: '""' },
-            pre: {
-              color: "#F8F5EF",
-              backgroundColor: "#111111",
-              borderRadius: "0.75rem",
-              border: "1px solid #2A2A2A",
-              boxShadow: "0 4px 24px rgba(0,0,0,0.25)",
-            },
-            "pre code": { backgroundColor: "transparent", border: "none", padding: "0", color: "inherit" },
-            blockquote: {
-              color: "#111111",
-              borderLeftColor: "hsl(var(--brand))",
-              backgroundColor: "hsl(var(--muted) / 0.5)",
-              borderRadius: "0.625rem",
-              padding: "0.875rem 1.25rem",
-              fontStyle: "normal",
-            },
-            hr: { borderColor: "hsl(var(--border))" },
-          },
-        },
       },
       keyframes: {
         "fade-in": {
-          from: { opacity: "0", transform: "translateY(6px)" },
+          from: { opacity: "0", transform: "translateY(4px)" },
           to:   { opacity: "1", transform: "translateY(0)" },
         },
         "fade-in-scale": {
-          from: { opacity: "0", transform: "scale(0.96)" },
+          from: { opacity: "0", transform: "scale(0.97)" },
           to:   { opacity: "1", transform: "scale(1)" },
         },
         "slide-in-right": {
-          from: { opacity: "0", transform: "translateX(10px)" },
+          from: { opacity: "0", transform: "translateX(8px)" },
           to:   { opacity: "1", transform: "translateX(0)" },
         },
         "slide-in-left": {
-          from: { opacity: "0", transform: "translateX(-10px)" },
+          from: { opacity: "0", transform: "translateX(-8px)" },
           to:   { opacity: "1", transform: "translateX(0)" },
         },
         "slide-up": {
-          from: { opacity: "0", transform: "translateY(12px)" },
+          from: { opacity: "0", transform: "translateY(10px)" },
           to:   { opacity: "1", transform: "translateY(0)" },
         },
         shimmer: {
@@ -175,21 +132,63 @@ const config: Config = {
           "50%": { opacity: "0.3" },
         },
         "counter-up": {
-          from: { opacity: "0", transform: "translateY(10px)" },
+          from: { opacity: "0", transform: "translateY(8px)" },
           to:   { opacity: "1", transform: "translateY(0)" },
         },
       },
       animation: {
-        "row-in":          "fade-in 0.2s ease-out both",
-        "fade-in":         "fade-in 0.35s ease-out both",
-        "fade-in-scale":   "fade-in-scale 0.25s ease-out both",
-        "slide-in-right":  "slide-in-right 0.25s ease-out both",
-        "slide-in-left":   "slide-in-left 0.25s ease-out both",
-        "slide-up":        "slide-up 0.35s ease-out both",
-        shimmer:           "shimmer 1.8s ease-in-out infinite",
-        "pulse-dot":       "pulse-dot 1.8s ease-in-out infinite",
-        "counter-up":      "counter-up 0.45s ease-out both",
-        pulse_dot:         "pulse-dot 1.8s ease-in-out infinite",
+        "row-in":         "fade-in 0.18s ease-out both",
+        "fade-in":        "fade-in 0.25s ease-out both",
+        "fade-in-scale":  "fade-in-scale 0.2s ease-out both",
+        "slide-in-right": "slide-in-right 0.2s ease-out both",
+        "slide-in-left":  "slide-in-left 0.2s ease-out both",
+        "slide-up":       "slide-up 0.25s ease-out both",
+        shimmer:          "shimmer 1.8s ease-in-out infinite",
+        "pulse-dot":      "pulse-dot 1.8s ease-in-out infinite",
+        "counter-up":     "counter-up 0.4s ease-out both",
+        pulse_dot:        "pulse-dot 1.8s ease-in-out infinite",
+      },
+      typography: {
+        DEFAULT: {
+          css: {
+            maxWidth: "68ch",
+            color: "hsl(var(--muted-foreground))",
+            "--tw-prose-headings": "#111111",
+            h1: { color: "#111111", fontWeight: "650", letterSpacing: "-0.03em" },
+            h2: { color: "#111111", fontWeight: "600", letterSpacing: "-0.025em" },
+            h3: { color: "#111111", fontWeight: "600", letterSpacing: "-0.02em" },
+            p: { lineHeight: "1.8" },
+            a: { color: "hsl(var(--ring))", textDecorationColor: "hsl(var(--ring) / 0.25)", fontWeight: "500" },
+            strong: { color: "#111111" },
+            code: {
+              color: "#111111",
+              backgroundColor: "hsl(var(--muted))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: "0.25rem",
+              padding: "0.1rem 0.35rem",
+              fontWeight: "450",
+            },
+            "code::before": { content: '""' },
+            "code::after":  { content: '""' },
+            pre: {
+              color: "#F8F5EF",
+              backgroundColor: "#111111",
+              borderRadius: "0.5rem",
+              border: "1px solid #2A2A2A",
+              boxShadow: "0 4px 24px rgba(0,0,0,0.25)",
+            },
+            "pre code": { backgroundColor: "transparent", border: "none", padding: "0", color: "inherit" },
+            blockquote: {
+              color: "#111111",
+              borderLeftColor: "hsl(var(--ring))",
+              backgroundColor: "hsl(var(--muted) / 0.5)",
+              borderRadius: "0.5rem",
+              padding: "0.75rem 1.25rem",
+              fontStyle: "normal",
+            },
+            hr: { borderColor: "hsl(var(--border))" },
+          },
+        },
       },
     },
   },

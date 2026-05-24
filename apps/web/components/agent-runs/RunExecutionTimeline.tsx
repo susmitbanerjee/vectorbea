@@ -65,7 +65,7 @@ export function RunExecutionTimeline({ events, className }: RunExecutionTimeline
             {filtered.length} of {events.length} events
           </span>
           {errorCount > 0 && (
-            <span className="inline-flex items-center rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
+            <span className="inline-flex items-center rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-600">
               {errorCount} error{errorCount !== 1 ? "s" : ""}
             </span>
           )}

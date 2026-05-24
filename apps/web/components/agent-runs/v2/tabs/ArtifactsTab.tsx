@@ -10,10 +10,10 @@ function fmtTime(ts: string) {
 }
 
 const TYPE_CONFIG = {
-  json: { icon: <FileCode2 className="h-4 w-4" />, color: "text-cyan-600 dark:text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/20" },
-  markdown: { icon: <FileText className="h-4 w-4" />, color: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
+  json: { icon: <FileCode2 className="h-4 w-4" />, color: "text-cyan-600", bg: "bg-cyan-500/10", border: "border-cyan-500/20" },
+  markdown: { icon: <FileText className="h-4 w-4" />, color: "text-indigo-600", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
   text: { icon: <FileText className="h-4 w-4" />, color: "text-muted-foreground", bg: "bg-muted/50", border: "border-border" },
-  csv: { icon: <FileCode2 className="h-4 w-4" />, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+  csv: { icon: <FileCode2 className="h-4 w-4" />, color: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
 };
 
 function ArtifactCard({ artifact }: { artifact: ArtifactUiModel }) {

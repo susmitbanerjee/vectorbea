@@ -452,7 +452,7 @@ function NetworkTab({ connection }: { connection: Connection }) {
         <InfoRow label="Result">{np.lastReachabilityTestResult ?? "Never run"}</InfoRow>
         {np.reachabilityError && (
           <InfoRow label="Error">
-            <span className="text-[11px] text-red-400">{np.reachabilityError}</span>
+            <span className="text-[11px] text-red-600">{np.reachabilityError}</span>
           </InfoRow>
         )}
         <InfoRow label="Whitelist Required">{np.requireWhitelist ? "Yes" : "No"}</InfoRow>
@@ -461,10 +461,10 @@ function NetworkTab({ connection }: { connection: Connection }) {
 
       {/* Private runner note */}
       {np.privateRunnerRequired && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-          <Server className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <Server className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
           <div>
-            <p className="text-[12px] font-semibold text-amber-300">Private Runner Required</p>
+            <p className="text-[12px] font-semibold text-amber-800">Private Runner Required</p>
             <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
               This host is on a private network. Deploy a Vectorbee private runner inside your network perimeter. The runner has outbound access to your private host and connects back to the Vectorbee control plane.
             </p>
@@ -474,10 +474,10 @@ function NetworkTab({ connection }: { connection: Connection }) {
 
       {/* Whitelist note */}
       {np.requireWhitelist && !np.privateRunnerRequired && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-          <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
           <div>
-            <p className="text-[12px] font-semibold text-amber-300">Firewall Whitelisting Required</p>
+            <p className="text-[12px] font-semibold text-amber-800">Firewall Whitelisting Required</p>
             <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
               This host requires inbound access from Vectorbee. Add the outbound IPs below to your firewall allowlist.
             </p>
@@ -596,14 +596,14 @@ function TestHistoryTab({ connection }: { connection: Connection }) {
           <div key={i} className="flex items-center gap-3 py-2.5">
             {entry.status === "ok"
               ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />
-              : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />
+              : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
             }
             <div className="flex-1 min-w-0">
               <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
                 {entry.status === "ok" ? "Test passed" : "Test failed"}
                 {entry.latencyMs !== null && <span className="ml-2 text-[11px]" style={{ color: "var(--text-faint)" }}>{entry.latencyMs}ms</span>}
               </p>
-              {entry.error && <p className="text-[11px] text-red-400">{entry.error}</p>}
+              {entry.error && <p className="text-[11px] text-red-600">{entry.error}</p>}
             </div>
             <span className="text-[11px] shrink-0" style={{ color: "var(--text-faint)" }}>{formatDate(entry.timestamp)}</span>
           </div>
@@ -653,7 +653,7 @@ function FormField({ label, required, hint, children }: { label: string; require
   return (
     <div>
       <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-        {label}{required && <span className="ml-0.5 text-red-400">*</span>}
+        {label}{required && <span className="ml-0.5 text-red-600">*</span>}
       </label>
       {children}
       {hint && <p className="mt-1 text-[10px] text-muted-foreground/40">{hint}</p>}
