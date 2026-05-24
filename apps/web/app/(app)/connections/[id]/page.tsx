@@ -22,8 +22,11 @@ import {
   Loader2,
   MessageSquare,
   Network,
+  Pencil,
   RefreshCw,
+  Save,
   Server,
+  Settings,
   Shield,
   ShieldCheck,
   Wifi,
@@ -69,15 +72,16 @@ const NETWORK_META: Record<NetworkStatus, { label: string; color: string; icon: 
 
 // ─── Tab definition ───────────────────────────────────────────────────────────
 
-type Tab = "overview" | "credentials" | "network" | "usage" | "test_history" | "events";
+type Tab = "overview" | "credentials" | "network" | "usage" | "test_history" | "events" | "settings";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "overview",     label: "Overview",      icon: Info },
-  { id: "credentials", label: "Credentials",    icon: Shield },
-  { id: "network",     label: "Network Access", icon: Network },
-  { id: "usage",       label: "Usage",          icon: BarChart3 },
-  { id: "test_history",label: "Test History",   icon: Activity },
-  { id: "events",      label: "Events",         icon: Zap },
+  { id: "credentials",  label: "Credentials",   icon: Shield },
+  { id: "network",      label: "Network Access", icon: Network },
+  { id: "usage",        label: "Usage",          icon: BarChart3 },
+  { id: "test_history", label: "Test History",   icon: Activity },
+  { id: "events",       label: "Events",         icon: Zap },
+  { id: "settings",     label: "Settings",       icon: Settings },
 ];
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
@@ -640,6 +644,251 @@ function EventsTab({ connection }: { connection: Connection }) {
   );
 }
 
+// ─── Settings / Edit tab ─────────────────────────────────────────────────────
+
+const inputCls = "w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30";
+const selectCls = "w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary/40";
+
+function FormField({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
+        {label}{required && <span className="ml-0.5 text-red-400">*</span>}
+      </label>
+      {children}
+      {hint && <p className="mt-1 text-[10px] text-muted-foreground/40">{hint}</p>}
+    </div>
+  );
+}
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border/40 bg-card/60 p-4 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function SettingsTab({ connection, onUpdated }: { connection: Connection; onUpdated: (c: Connection) => void }) {
+  const cfg = connection.config as unknown as Record<string, unknown>;
+
+  // Common
+  const [name, setName] = useState(connection.name);
+  const [environment, setEnvironment] = useState<"development" | "staging" | "production">(connection.environment);
+
+  // LLM
+  const [baseUrl, setBaseUrl] = useState(String(cfg.baseUrl ?? ""));
+  const [defaultModel, setDefaultModel] = useState(String(cfg.defaultModel ?? ""));
+
+  // Database
+  const [host, setHost] = useState(String(cfg.host ?? ""));
+  const [port, setPort] = useState(String(cfg.port ?? "5432"));
+  const [dbName, setDbName] = useState(String(cfg.database ?? ""));
+  const [sslRequired, setSslRequired] = useState(cfg.sslRequired !== false);
+  const [readOnly, setReadOnly] = useState(cfg.readOnly === true);
+  const [maxRows, setMaxRows] = useState(String(cfg.maxRows ?? "1000"));
+
+  // HTTP / MCP
+  const [httpBaseUrl, setHttpBaseUrl] = useState(String(cfg.baseUrl ?? cfg.serverUrl ?? ""));
+  const [healthEndpoint, setHealthEndpoint] = useState(String(cfg.healthEndpoint ?? ""));
+
+  // SaaS
+  const [workspace, setWorkspace] = useState(String(cfg.workspace ?? ""));
+
+  // Vector store
+  const [indexName, setIndexName] = useState(String(cfg.indexName ?? ""));
+  const [embeddingModel, setEmbeddingModel] = useState(String(cfg.embeddingModel ?? ""));
+
+  // Object storage
+  const [bucket, setBucket] = useState(String(cfg.bucket ?? ""));
+  const [region, setRegion] = useState(String(cfg.region ?? ""));
+  const [prefix, setPrefix] = useState(String(cfg.prefix ?? ""));
+
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    if (saving) return;
+    if (!name.trim()) { toast.error("Name is required."); return; }
+    setSaving(true);
+
+    // Build updated config — preserve existing keys, overwrite editable ones
+    const newConfig: Record<string, unknown> = { ...cfg };
+
+    if (connection.type === "llm_provider") {
+      if (baseUrl.trim()) newConfig.baseUrl = baseUrl.trim(); else delete newConfig.baseUrl;
+      if (defaultModel.trim()) newConfig.defaultModel = defaultModel.trim();
+    } else if (connection.type === "database") {
+      newConfig.host = host.trim();
+      newConfig.port = parseInt(port) || 5432;
+      newConfig.database = dbName.trim();
+      newConfig.sslRequired = sslRequired;
+      newConfig.readOnly = readOnly;
+      newConfig.maxRows = parseInt(maxRows) || 1000;
+    } else if (connection.type === "http_api") {
+      if (httpBaseUrl.trim()) newConfig.baseUrl = httpBaseUrl.trim();
+      if (healthEndpoint.trim()) newConfig.healthEndpoint = healthEndpoint.trim();
+    } else if (connection.type === "saas") {
+      if (workspace.trim()) newConfig.workspace = workspace.trim();
+    } else if (connection.type === "mcp_server") {
+      if (httpBaseUrl.trim()) newConfig.serverUrl = httpBaseUrl.trim();
+    } else if (connection.type === "vector_store") {
+      if (indexName.trim()) newConfig.indexName = indexName.trim();
+      if (embeddingModel.trim()) newConfig.embeddingModel = embeddingModel.trim();
+    } else if (connection.type === "object_storage") {
+      if (bucket.trim()) newConfig.bucket = bucket.trim();
+      if (region.trim()) newConfig.region = region.trim();
+      if (prefix.trim()) newConfig.prefix = prefix.trim(); else delete newConfig.prefix;
+    }
+
+    try {
+      const updated = await updateConnection(connection.id, {
+        name: name.trim(),
+        environment: environment as Connection["environment"],
+        config: newConfig as unknown as Connection["config"],
+      });
+      if (updated) {
+        onUpdated(updated);
+        toast.success("Connection updated.");
+      } else {
+        toast.error("Update failed — connection not found.");
+      }
+    } catch (e) {
+      toast.error(`Failed to update: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Identity */}
+      <FormSection title="Identity">
+        <FormField label="Name" required>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Connection name" />
+        </FormField>
+        <FormField label="Environment">
+          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value as "development" | "staging" | "production")}>
+            <option value="development">Development</option>
+            <option value="staging">Staging</option>
+            <option value="production">Production</option>
+          </select>
+        </FormField>
+        <div className="flex items-center gap-4 pt-1">
+          <div className="text-[11px] text-muted-foreground/60">
+            <span className="font-medium">Type:</span> {connection.type.replace(/_/g, " ")}
+          </div>
+          <div className="text-[11px] text-muted-foreground/60">
+            <span className="font-medium">Provider:</span> {connection.provider}
+          </div>
+        </div>
+      </FormSection>
+
+      {/* Type-specific config */}
+      {connection.type === "llm_provider" && (
+        <FormSection title="Model settings">
+          <FormField label="Default model" hint="Used when no model is specified in the agent config.">
+            <input className={inputCls} value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder="e.g. gpt-4o or claude-opus-4-5" />
+          </FormField>
+          <FormField label="Base URL (optional)" hint="Override the default API endpoint. Leave blank for the official endpoint.">
+            <input className={inputCls} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your-resource.openai.azure.com" />
+          </FormField>
+        </FormSection>
+      )}
+
+      {connection.type === "database" && (
+        <FormSection title="Database settings">
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Host">
+              <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} placeholder="db.example.com" />
+            </FormField>
+            <FormField label="Port">
+              <input className={inputCls} value={port} onChange={(e) => setPort(e.target.value)} placeholder="5432" />
+            </FormField>
+          </div>
+          <FormField label="Database name">
+            <input className={inputCls} value={dbName} onChange={(e) => setDbName(e.target.value)} placeholder="mydb" />
+          </FormField>
+          <FormField label="Max rows" hint="Maximum rows returned per query.">
+            <input className={inputCls} type="number" value={maxRows} onChange={(e) => setMaxRows(e.target.value)} />
+          </FormField>
+          <div className="flex items-center gap-6">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={sslRequired} onChange={(e) => setSslRequired(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
+              <span className="text-[12px] text-muted-foreground">Require SSL</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
+              <span className="text-[12px] text-muted-foreground">Read-only</span>
+            </label>
+          </div>
+        </FormSection>
+      )}
+
+      {(connection.type === "http_api" || connection.type === "mcp_server") && (
+        <FormSection title={connection.type === "mcp_server" ? "MCP server settings" : "HTTP / API settings"}>
+          <FormField label={connection.type === "mcp_server" ? "Server URL" : "Base URL"} required>
+            <input className={inputCls} value={httpBaseUrl} onChange={(e) => setHttpBaseUrl(e.target.value)} placeholder="https://api.example.com" />
+          </FormField>
+          {connection.type === "http_api" && (
+            <FormField label="Health endpoint (optional)" hint="Path appended to Base URL for connection testing.">
+              <input className={inputCls} value={healthEndpoint} onChange={(e) => setHealthEndpoint(e.target.value)} placeholder="/health" />
+            </FormField>
+          )}
+        </FormSection>
+      )}
+
+      {connection.type === "saas" && (
+        <FormSection title="SaaS settings">
+          <FormField label="Workspace / team slug" hint="Your workspace identifier on the SaaS platform.">
+            <input className={inputCls} value={workspace} onChange={(e) => setWorkspace(e.target.value)} placeholder="my-workspace" />
+          </FormField>
+        </FormSection>
+      )}
+
+      {connection.type === "vector_store" && (
+        <FormSection title="Vector store settings">
+          <FormField label="Index name">
+            <input className={inputCls} value={indexName} onChange={(e) => setIndexName(e.target.value)} placeholder="my-index" />
+          </FormField>
+          <FormField label="Embedding model">
+            <input className={inputCls} value={embeddingModel} onChange={(e) => setEmbeddingModel(e.target.value)} placeholder="text-embedding-3-small" />
+          </FormField>
+        </FormSection>
+      )}
+
+      {connection.type === "object_storage" && (
+        <FormSection title="Storage settings">
+          <FormField label="Bucket name">
+            <input className={inputCls} value={bucket} onChange={(e) => setBucket(e.target.value)} placeholder="my-bucket" />
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Region">
+              <input className={inputCls} value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" />
+            </FormField>
+            <FormField label="Key prefix (optional)">
+              <input className={inputCls} value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="uploads/" />
+            </FormField>
+          </div>
+        </FormSection>
+      )}
+
+      {/* Save */}
+      <div className="flex justify-end pt-1">
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-[13px] font-semibold text-primary-foreground disabled:opacity-40 transition-opacity"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save changes
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ConnectionDetailPage() {
@@ -740,9 +989,11 @@ export default function ConnectionDetailPage() {
 
         <button
           type="button"
+          onClick={() => setTab("settings")}
           className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white/5"
           style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
         >
+          <Pencil className="h-3.5 w-3.5" />
           Edit
         </button>
       </div>
@@ -784,6 +1035,7 @@ export default function ConnectionDetailPage() {
           {tab === "usage"        && <UsageTab connection={connection} />}
           {tab === "test_history" && <TestHistoryTab connection={connection} />}
           {tab === "events"       && <EventsTab connection={connection} />}
+          {tab === "settings"     && <SettingsTab connection={connection} onUpdated={setConnection} />}
         </div>
       </div>
     </div>

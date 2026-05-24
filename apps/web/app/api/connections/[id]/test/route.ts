@@ -320,17 +320,31 @@ export async function POST(
     };
   }
 
-  // Persist test result to DB
-  await db.$executeRaw(Prisma.sql`
+  // Persist test result to DB and return the updated connection row so the
+  // client can update its Connection state directly (no second round-trip).
+  const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     UPDATE vectorbea.connections SET
-      status                   = ${result.status === "connected" ? "connected" : "failed"},
-      last_tested_at           = now(),
-      last_test_status         = ${result.status === "connected" ? "ok" : "failed"},
-      last_test_latency_ms     = ${result.latencyMs},
-      last_test_error          = ${result.errorMessage},
-      updated_at               = now()
+      status               = ${result.status === "connected" ? "connected" : "failed"},
+      last_tested_at       = now(),
+      last_test_status     = ${result.status === "connected" ? "ok" : "failed"},
+      last_test_latency_ms = ${result.latencyMs},
+      last_test_error      = ${result.errorMessage},
+      updated_at           = now()
     WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
+    RETURNING
+      id, workspace_id, name, slug, type, provider, environment, status,
+      auth_type, secret_ref, secret_masked, config, network_policy,
+      last_tested_at::text    AS last_tested_at,
+      last_test_status,
+      last_test_latency_ms,
+      last_test_error,
+      used_by_agent_ids,
+      used_by_tool_ids,
+      created_at::text        AS created_at,
+      updated_at::text        AS updated_at
   `);
+
+  const updatedRow = updated[0];
 
   // Cache result
   await cacheSet(cacheKey, result, TTL.CONNECTION_TEST);
@@ -338,5 +352,30 @@ export async function POST(
   const { cacheDel, CacheKeys: CK } = await import("@/lib/server/cache");
   await cacheDel(CK.connections(workspaceId));
 
-  return NextResponse.json(result);
+  if (!updatedRow) return NextResponse.json(result);
+
+  return NextResponse.json({
+    id:                 updatedRow.id,
+    workspaceId:        updatedRow.workspace_id,
+    name:               updatedRow.name,
+    slug:               updatedRow.slug,
+    type:               updatedRow.type,
+    provider:           updatedRow.provider,
+    environment:        updatedRow.environment,
+    status:             updatedRow.status,
+    authType:           updatedRow.auth_type,
+    secretRef:          updatedRow.secret_ref ?? null,
+    secretMasked:       updatedRow.secret_masked ?? null,
+    secretConfigured:   updatedRow.secret_ref != null,
+    config:             updatedRow.config ?? {},
+    networkPolicy:      updatedRow.network_policy ?? {},
+    lastTestedAt:       updatedRow.last_tested_at ?? null,
+    lastTestStatus:     updatedRow.last_test_status ?? null,
+    lastTestLatencyMs:  updatedRow.last_test_latency_ms ?? null,
+    lastTestError:      updatedRow.last_test_error ?? null,
+    usedByAgentIds:     updatedRow.used_by_agent_ids ?? [],
+    usedByToolIds:      updatedRow.used_by_tool_ids ?? [],
+    createdAt:          updatedRow.created_at,
+    updatedAt:          updatedRow.updated_at,
+  });
 }

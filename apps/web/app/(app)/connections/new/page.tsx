@@ -492,6 +492,7 @@ export default function NewConnectionPage() {
   const totalSteps = needsNetworkStep ? 4 : 3;
 
   async function handleSave(skipTest = false) {
+    if (saving) return; // prevent double-submit
     if (!type || !name.trim()) { toast.error("Name is required."); return; }
     setSaving(true);
     try {
@@ -605,6 +606,7 @@ export default function NewConnectionPage() {
   }
 
   async function handleTest() {
+    if (saving || testing) return; // prevent double-submit
     if (!type || !name.trim()) { toast.error("Name is required."); return; }
     setTesting(true);
     setTestResult(null);

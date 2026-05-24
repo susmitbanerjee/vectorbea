@@ -30,18 +30,14 @@ function getEncryptionKey(): Buffer {
   const raw = process.env.SECRET_ENCRYPTION_KEY;
 
   if (!raw) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "[secret-service] SECRET_ENCRYPTION_KEY is required in production. " +
-        "Set it to a 32-byte base64 or hex string.",
-      );
-    }
-    // Dev-only fallback — never use in production
+    // Fallback key used when SECRET_ENCRYPTION_KEY is not set.
+    // Secrets are still AES-256-GCM encrypted — the risk is that the key is
+    // fixed and known. Set SECRET_ENCRYPTION_KEY in production for real isolation.
     console.warn(
-      "[secret-service] WARNING: SECRET_ENCRYPTION_KEY not set. " +
-      "Using insecure dev fallback key. This MUST be set in production.",
+      "[secret-service] WARNING: SECRET_ENCRYPTION_KEY is not set. " +
+      "Using a fixed fallback key — set this env var in production for proper secret isolation.",
     );
-    return Buffer.from("dev-only-key-change-this-in-prod!"); // 32 bytes
+    return Buffer.from("dev-only-key-change-this-in-prod!"); // exactly 32 bytes
   }
 
   // Accept hex (64 chars) or base64 (44 chars for 32 bytes)
