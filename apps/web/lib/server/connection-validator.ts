@@ -266,7 +266,7 @@ export async function validateWorkflowConnections(
   // Fetch all needed connections in one query, scoped to workspace
   const rows = await db.$queryRaw<ConnectionRow[]>(Prisma.sql`
     SELECT id, name, type, status, auth_type, secret_ref, last_test_status, network_policy
-    FROM connections
+    FROM vectorbea.connections
     WHERE id = ANY(${idList}::text[])
       AND workspace_id = ${workspaceId}
   `).catch(() => [] as ConnectionRow[]);
