@@ -113,7 +113,7 @@ export async function storeSecret(
   const secretRef  = generateSecretRef(workspaceId, connectionId);
 
   await db.$executeRaw(Prisma.sql`
-    INSERT INTO connection_secrets (workspace_id, connection_id, secret_ref, ciphertext, key_version)
+    INSERT INTO vectorbea.connection_secrets (workspace_id, connection_id, secret_ref, ciphertext, key_version)
     VALUES (${workspaceId}::uuid, ${connectionId}::uuid, ${secretRef}, ${ciphertext}, ${KEY_VERSION})
     ON CONFLICT (connection_id)
     DO UPDATE SET
@@ -133,7 +133,7 @@ export async function storeSecret(
  */
 export async function getSecretForRuntime(secretRef: string): Promise<string | null> {
   const rows = await db.$queryRaw<{ ciphertext: string }[]>(Prisma.sql`
-    SELECT ciphertext FROM connection_secrets WHERE secret_ref = ${secretRef} LIMIT 1
+    SELECT ciphertext FROM vectorbea.connection_secrets WHERE secret_ref = ${secretRef} LIMIT 1
   `);
   if (!rows[0]) return null;
   try {
@@ -149,7 +149,7 @@ export async function getSecretForRuntime(secretRef: string): Promise<string | n
  */
 export async function deleteSecret(connectionId: string): Promise<void> {
   await db.$executeRaw(Prisma.sql`
-    DELETE FROM connection_secrets WHERE connection_id = ${connectionId}::uuid
+    DELETE FROM vectorbea.connection_secrets WHERE connection_id = ${connectionId}::uuid
   `);
 }
 
@@ -162,7 +162,7 @@ export async function rotateSecret(
 ): Promise<void> {
   const ciphertext = encrypt(newPlaintext);
   await db.$executeRaw(Prisma.sql`
-    UPDATE connection_secrets
+    UPDATE vectorbea.connection_secrets
     SET ciphertext = ${ciphertext}, key_version = ${KEY_VERSION}, updated_at = now()
     WHERE connection_id = ${connectionId}::uuid
   `);
@@ -173,7 +173,7 @@ export async function rotateSecret(
  */
 export async function secretExists(connectionId: string): Promise<boolean> {
   const rows = await db.$queryRaw<{ exists: boolean }[]>(Prisma.sql`
-    SELECT EXISTS(SELECT 1 FROM connection_secrets WHERE connection_id = ${connectionId}::uuid) AS exists
+    SELECT EXISTS(SELECT 1 FROM vectorbea.connection_secrets WHERE connection_id = ${connectionId}::uuid) AS exists
   `);
   return rows[0]?.exists ?? false;
 }
@@ -184,7 +184,7 @@ export async function secretExists(connectionId: string): Promise<boolean> {
  */
 export async function getMaskedPreview(connectionId: string): Promise<string | null> {
   const rows = await db.$queryRaw<{ secret_ref: string; updated_at: string }[]>(Prisma.sql`
-    SELECT secret_ref, updated_at::text FROM connection_secrets
+    SELECT secret_ref, updated_at::text FROM vectorbea.connection_secrets
     WHERE connection_id = ${connectionId}::uuid LIMIT 1
   `);
   if (!rows[0]) return null;

@@ -13,7 +13,7 @@ export async function POST(
 
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      UPDATE platform_runs
+      UPDATE vectorbea.platform_runs
       SET status = 'cancelled', completed_at = now(), updated_at = now()
       WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
         AND status IN ('queued', 'running', 'waiting_approval')

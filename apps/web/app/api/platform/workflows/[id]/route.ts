@@ -29,7 +29,7 @@ export async function GET(
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
   const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    SELECT * FROM platform_workflows WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
+    SELECT * FROM vectorbea.platform_workflows WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
   `);
   if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(rowToWorkflow(rows[0]));
@@ -57,7 +57,7 @@ export async function PATCH(
   for (let i = 1; i < updates.length; i++) clause = Prisma.sql`${clause}, ${updates[i]}`;
 
   const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    UPDATE platform_workflows SET ${clause}
+    UPDATE vectorbea.platform_workflows SET ${clause}
     WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid RETURNING *
   `);
   if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -74,7 +74,7 @@ export async function DELETE(
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
   await db.$executeRaw(Prisma.sql`
-    DELETE FROM platform_workflows WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
+    DELETE FROM vectorbea.platform_workflows WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
   `);
   await cacheDel(CacheKeys.workflowList(workspaceId));
   return new NextResponse(null, { status: 204 });

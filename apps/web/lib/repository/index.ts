@@ -374,12 +374,21 @@ export async function retryRunFailedStep(_runId: string, _stepId: string): Promi
 
 // ─── Platform summary ─────────────────────────────────────────────────────────
 
+const PLATFORM_SUMMARY_ZERO = {
+  totalWorkflows: 0, activeWorkflows: 0,
+  totalAgents: 0, totalTools: 0, totalRuns: 0,
+  runningRuns: 0, waitingApprovals: 0,
+  failedRuns24h: 0, succeededRuns24h: 0,
+  totalTokens24h: 0, totalCost24h: 0,
+  connectedWorkers: 0,
+};
+
 export async function getPlatformSummary() {
   try {
     const wsId = getActiveWorkspaceId();
-    if (!wsId) return { workflows: 0, agents: 0, tools: 0, runs: 0, activeAgents: 0, pendingApprovals: 0 };
-    return await api<Record<string, number>>(withWorkspace("/api/dashboard/summary"));
+    if (!wsId) return PLATFORM_SUMMARY_ZERO;
+    return await api<typeof PLATFORM_SUMMARY_ZERO>(withWorkspace("/api/platform/summary"));
   } catch {
-    return { workflows: 0, agents: 0, tools: 0, runs: 0, activeAgents: 0, pendingApprovals: 0 };
+    return PLATFORM_SUMMARY_ZERO;
   }
 }

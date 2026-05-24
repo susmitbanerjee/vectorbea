@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
 
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
       SELECT *
-      FROM connections
+      FROM vectorbea.connections
       WHERE ${whereClause}
       ORDER BY created_at DESC
     `);
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
 
     // Insert the connection first to get its ID
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      INSERT INTO connections (
+      INSERT INTO vectorbea.connections (
         workspace_id, name, slug, type, provider, environment, status, auth_type,
         secret_ref, secret_masked, config, network_policy,
         used_by_agent_ids, used_by_tool_ids, created_at, updated_at
@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
       const secretRef = await storeSecret(workspaceId, connectionId, plaintextSecret.trim());
       const secretMasked = maskSecret(plaintextSecret.trim());
       const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-        UPDATE connections SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
+        UPDATE vectorbea.connections SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
         WHERE id = ${connectionId}::uuid AND workspace_id = ${workspaceId}
         RETURNING *
       `);
@@ -252,7 +252,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      UPDATE connections
+      UPDATE vectorbea.connections
       SET ${updateClause}
       WHERE workspace_id = ${workspaceId} AND id = ${id}
       RETURNING *
@@ -279,7 +279,7 @@ export async function DELETE(request: NextRequest) {
     await deleteSecret(id).catch(() => {/* no-op if no secret */});
 
     await db.$executeRaw(Prisma.sql`
-      DELETE FROM connections
+      DELETE FROM vectorbea.connections
       WHERE workspace_id = ${workspaceId} AND id = ${id}
     `);
 

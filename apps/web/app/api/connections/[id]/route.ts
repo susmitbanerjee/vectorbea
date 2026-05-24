@@ -70,7 +70,7 @@ export async function GET(
 
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT * FROM connections
+      SELECT * FROM vectorbea.connections
       WHERE id = ${id} AND workspace_id = ${workspaceId}
       LIMIT 1
     `);
@@ -104,7 +104,7 @@ export async function PATCH(
 
   // Verify the connection belongs to this workspace before updating
   const existing = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    SELECT id FROM connections WHERE id = ${id} AND workspace_id = ${workspaceId} LIMIT 1
+    SELECT id FROM vectorbea.connections WHERE id = ${id} AND workspace_id = ${workspaceId} LIMIT 1
   `);
   if (!existing[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -152,7 +152,7 @@ export async function PATCH(
     for (let i = 1; i < updates.length; i++) clause = Prisma.sql`${clause}, ${updates[i]}`;
 
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      UPDATE connections SET ${clause}
+      UPDATE vectorbea.connections SET ${clause}
       WHERE id = ${id} AND workspace_id = ${workspaceId}
       RETURNING *
     `);
@@ -165,7 +165,7 @@ export async function PATCH(
       const secretRef = await storeSecret(workspaceId, id, plain);
       const secretMasked = maskSecret(plain);
       const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-        UPDATE connections
+        UPDATE vectorbea.connections
         SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
         WHERE id = ${id} AND workspace_id = ${workspaceId}
         RETURNING *
@@ -194,7 +194,7 @@ export async function DELETE(
   try {
     // Check for active dependencies before hard delete
     const conn = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT used_by_agent_ids, used_by_tool_ids FROM connections
+      SELECT used_by_agent_ids, used_by_tool_ids FROM vectorbea.connections
       WHERE id = ${id} AND workspace_id = ${workspaceId}
       LIMIT 1
     `);
@@ -216,7 +216,7 @@ export async function DELETE(
     await deleteSecret(id).catch(() => { /* no-op if no secret */ });
 
     await db.$executeRaw(Prisma.sql`
-      DELETE FROM connections WHERE id = ${id} AND workspace_id = ${workspaceId}
+      DELETE FROM vectorbea.connections WHERE id = ${id} AND workspace_id = ${workspaceId}
     `);
 
     await cacheDel(CacheKeys.connections(workspaceId));

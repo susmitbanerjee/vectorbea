@@ -104,6 +104,9 @@ function RunRow({ run }: { run: AgentRun }) {
 interface Summary {
   totalWorkflows: number;
   activeWorkflows: number;
+  totalAgents: number;
+  totalTools: number;
+  totalRuns: number;
   runningRuns: number;
   waitingApprovals: number;
   failedRuns24h: number;
@@ -125,7 +128,7 @@ export default function OverviewPage() {
         getPlatformSummary(),
         getRuns({ pageSize: 8 }),
       ]);
-      setSummary(s as unknown as Summary);
+      setSummary(s as Summary);
       setRecentRuns(runsResult.items);
     } catch {
       // silently fallback
@@ -255,8 +258,8 @@ export default function OverviewPage() {
             </h2>
             <div className="space-y-3">
               {[
-                { label: "Tokens", value: summary ? summary.totalTokens24h.toLocaleString() : "—" },
-                { label: "Est. cost", value: summary ? `$${summary.totalCost24h.toFixed(4)}` : "—" },
+                { label: "Tokens", value: summary != null ? (summary.totalTokens24h ?? 0).toLocaleString() : "—" },
+                { label: "Est. cost", value: summary != null ? `$${(summary.totalCost24h ?? 0).toFixed(4)}` : "—" },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-center justify-between">
                   <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>{label}</span>

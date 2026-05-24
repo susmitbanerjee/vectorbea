@@ -264,7 +264,7 @@ export async function POST(
   // Fetch connection from DB
   const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     SELECT id, workspace_id, type, provider, status, auth_type, secret_ref, config, network_policy
-    FROM connections
+    FROM vectorbea.connections
     WHERE id = ${id} AND workspace_id = ${workspaceId}
     LIMIT 1
   `);
@@ -322,7 +322,7 @@ export async function POST(
 
   // Persist test result to DB
   await db.$executeRaw(Prisma.sql`
-    UPDATE connections SET
+    UPDATE vectorbea.connections SET
       status                   = ${result.status === "connected" ? "connected" : "failed"},
       last_tested_at           = now(),
       last_test_status         = ${result.status === "connected" ? "ok" : "failed"},

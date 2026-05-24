@@ -63,11 +63,11 @@ export async function GET(request: NextRequest) {
 
     const [rows, countRows] = await Promise.all([
       db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-        SELECT * FROM platform_workflows WHERE ${where}
+        SELECT * FROM vectorbea.platform_workflows WHERE ${where}
         ORDER BY updated_at DESC LIMIT ${pageSize} OFFSET ${offset}
       `),
       db.$queryRaw<{ count: string }[]>(Prisma.sql`
-        SELECT COUNT(*) as count FROM platform_workflows WHERE ${where}
+        SELECT COUNT(*) as count FROM vectorbea.platform_workflows WHERE ${where}
       `),
     ]);
 
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
   try {
     const slug = `${createSlug(String(name))}-${Date.now().toString(36)}`;
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      INSERT INTO platform_workflows (
+      INSERT INTO vectorbea.platform_workflows (
         workspace_id, name, slug, description, status, creation_mode, trigger_type,
         retry_policy, budget_policy, approval_policy
       ) VALUES (

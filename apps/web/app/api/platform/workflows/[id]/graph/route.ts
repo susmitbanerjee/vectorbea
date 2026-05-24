@@ -18,7 +18,7 @@ export async function GET(
   if (cached) return NextResponse.json(cached);
 
   const rows = await db.$queryRaw<{ graph_json: WorkflowGraph }[]>(Prisma.sql`
-    SELECT graph_json FROM workflow_graphs WHERE workflow_id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
+    SELECT graph_json FROM vectorbea.workflow_graphs WHERE workflow_id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
   `);
 
   if (!rows[0]) return NextResponse.json(null);
@@ -39,7 +39,7 @@ export async function PUT(
   const graphJson = JSON.stringify(graph);
 
   await db.$executeRaw(Prisma.sql`
-    INSERT INTO workflow_graphs (workflow_id, workspace_id, graph_json, version)
+    INSERT INTO vectorbea.workflow_graphs (workflow_id, workspace_id, graph_json, version)
     VALUES (${id}::uuid, ${workspaceId}::uuid, ${graphJson}::jsonb, ${graph.version ?? "1"})
     ON CONFLICT (workflow_id) DO UPDATE SET
       graph_json = EXCLUDED.graph_json,

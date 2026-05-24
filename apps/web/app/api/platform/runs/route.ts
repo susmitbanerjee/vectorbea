@@ -41,9 +41,9 @@ export async function GET(request: NextRequest) {
 
     const [rows, countRows] = await Promise.all([
       db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-        SELECT * FROM platform_runs WHERE ${where} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}
+        SELECT * FROM vectorbea.platform_runs WHERE ${where} ORDER BY created_at DESC LIMIT ${pageSize} OFFSET ${offset}
       `),
-      db.$queryRaw<{ count: string }[]>(Prisma.sql`SELECT COUNT(*) as count FROM platform_runs WHERE ${where}`),
+      db.$queryRaw<{ count: string }[]>(Prisma.sql`SELECT COUNT(*) as count FROM vectorbea.platform_runs WHERE ${where}`),
     ]);
 
     const total = parseInt(countRows[0]?.count ?? "0");
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     if (!validation.ok) {
       // Create a FAILED run record so the failure is visible in the run history
       const failedRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-        INSERT INTO platform_runs (
+        INSERT INTO vectorbea.platform_runs (
           workspace_id, workflow_id, workflow_name, workflow_version, creation_mode,
           status, trigger_type, trigger_source, input_json, idempotency_key,
           started_at, completed_at, error_json
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
           'failed',
           ${String(body.triggerType ?? "manual")},
           ${String(body.triggerSource ?? "manual")},
-          ${body.input ? JSON.stringify(body.input) + "::jsonb" : Prisma.sql`NULL`},
+          ${body.input != null ? Prisma.sql`${JSON.stringify(body.input)}::jsonb` : Prisma.sql`NULL`},
           ${idempotencyKey},
           now(), now(),
           ${JSON.stringify({ reason: "RUN_VALIDATION_FAILED", issues: validation.blockingIssues })}::jsonb
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
         let seq = 1;
         for (const issue of validation.blockingIssues) {
           await db.$executeRaw(Prisma.sql`
-            INSERT INTO platform_run_events (
+            INSERT INTO vectorbea.platform_run_events (
               run_id, workspace_id, sequence, type, status, source,
               timestamp, title, summary, agent_name, tool_name,
               input_json_sanitized, output_json_sanitized,
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      INSERT INTO platform_runs (
+      INSERT INTO vectorbea.platform_runs (
         workspace_id, workflow_id, workflow_name, workflow_version, creation_mode,
         status, trigger_type, trigger_source, input_json, idempotency_key, started_at
       ) VALUES (
@@ -183,7 +183,7 @@ export async function POST(request: NextRequest) {
       let seq = 1;
       for (const w of warnings) {
         await db.$executeRaw(Prisma.sql`
-          INSERT INTO platform_run_events (
+          INSERT INTO vectorbea.platform_run_events (
             run_id, workspace_id, sequence, type, status, source,
             timestamp, title, summary
           ) VALUES (

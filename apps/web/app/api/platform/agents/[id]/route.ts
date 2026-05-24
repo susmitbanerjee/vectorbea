@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
   const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    SELECT * FROM platform_agents WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
+    SELECT * FROM vectorbea.platform_agents WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
   `);
   if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(rowToAgent(rows[0]));
@@ -58,7 +58,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   for (let i = 1; i < updates.length; i++) clause = Prisma.sql`${clause}, ${updates[i]}`;
 
   const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    UPDATE platform_agents SET ${clause} WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid RETURNING *
+    UPDATE vectorbea.platform_agents SET ${clause} WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid RETURNING *
   `);
   if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await cacheDel(CacheKeys.agentList(workspaceId));
@@ -70,7 +70,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const workspaceId = request.nextUrl.searchParams.get("workspaceId");
   if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
-  await db.$executeRaw(Prisma.sql`DELETE FROM platform_agents WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid`);
+  await db.$executeRaw(Prisma.sql`DELETE FROM vectorbea.platform_agents WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid`);
   await cacheDel(CacheKeys.agentList(workspaceId));
   return new NextResponse(null, { status: 204 });
 }

@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT * FROM platform_agents WHERE workspace_id = ${workspaceId}::uuid
+      SELECT * FROM vectorbea.platform_agents WHERE workspace_id = ${workspaceId}::uuid
       ORDER BY updated_at DESC
     `);
     return NextResponse.json(rows.map(rowToAgent));
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
   try {
     const slug = `${createSlug(String(body.name))}-${Date.now().toString(36)}`;
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      INSERT INTO platform_agents (
+      INSERT INTO vectorbea.platform_agents (
         workspace_id, name, slug, description, role, instructions, type,
         model_provider, model_name, temperature, max_iterations,
         llm_connection_id, allowed_tool_ids, memory_policy,

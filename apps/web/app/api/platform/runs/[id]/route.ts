@@ -28,7 +28,7 @@ export async function GET(
 
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT * FROM platform_runs WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
+      SELECT * FROM vectorbea.platform_runs WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid LIMIT 1
     `);
     if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(rowToRun(rows[0]));
@@ -67,7 +67,7 @@ export async function PATCH(
     for (let i = 1; i < updates.length; i++) clause = Prisma.sql`${clause}, ${updates[i]}`;
 
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      UPDATE platform_runs SET ${clause} WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid RETURNING *
+      UPDATE vectorbea.platform_runs SET ${clause} WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid RETURNING *
     `);
     if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(rowToRun(rows[0]));

@@ -46,7 +46,7 @@ export async function GET(
 
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT * FROM platform_run_events
+      SELECT * FROM vectorbea.platform_run_events
       WHERE run_id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
       ORDER BY sequence ASC
       LIMIT ${limit} OFFSET ${offset}
@@ -74,7 +74,7 @@ export async function POST(
 
   // Get next sequence number
   const seqRows = await db.$queryRaw<{ seq: string }[]>(Prisma.sql`
-    SELECT COALESCE(MAX(sequence), 0) + 1 AS seq FROM platform_run_events WHERE run_id = ${id}::uuid
+    SELECT COALESCE(MAX(sequence), 0) + 1 AS seq FROM vectorbea.platform_run_events WHERE run_id = ${id}::uuid
   `);
   const sequence = parseInt(seqRows[0]?.seq ?? "1");
 
@@ -84,7 +84,7 @@ export async function POST(
   const sanitizedError    = event.errorMessage ? { message: String(event.errorMessage).slice(0, 2000) } : null;
 
   await db.$executeRaw(Prisma.sql`
-    INSERT INTO platform_run_events (
+    INSERT INTO vectorbea.platform_run_events (
       run_id, workspace_id, sequence, type, status, source,
       timestamp, duration_ms, agent_name, tool_name, model_name,
       title, summary, input_json_sanitized, output_json_sanitized,
