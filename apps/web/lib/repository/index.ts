@@ -318,10 +318,64 @@ export async function getRunEvents(runId: string): Promise<RunEvent[]> {
   }
 }
 
-// ─── Trigger workflow ─────────────────────────────────────────────────────────
+// ─── Trigger workflow (new executor-backed path) ──────────────────────────────
 
-export async function triggerWorkflow(workflowId: string, input: unknown): Promise<AgentRun> {
-  return createRun(workflowId, input);
+/**
+ * Trigger a workflow run using the new fine-grained executor.
+ * The workflow graph is loaded and executed server-side.
+ */
+export async function triggerWorkflow(
+  workflowId: string,
+  input: unknown,
+  opts: { dryRun?: boolean } = {},
+): Promise<AgentRun & { executionResult?: unknown }> {
+  return api<AgentRun & { executionResult?: unknown }>(
+    withWorkspace(`/api/platform/workflows/${workflowId}/run`),
+    {
+      method: "POST",
+      body: JSON.stringify({ input, dryRun: opts.dryRun ?? false, triggerType: "manual" }),
+    },
+  );
+}
+
+/**
+ * Test a single workflow node in isolation.
+ * Returns resolved inputs, raw output, extracted output, and validation results.
+ */
+export async function testWorkflowNode(
+  workflowId: string,
+  nodeId: string,
+  opts: {
+    testInput?: Record<string, unknown>;
+    workflowInput?: Record<string, unknown>;
+    stepOutputs?: Record<string, unknown>;
+    dryRun?: boolean;
+  } = {},
+): Promise<unknown> {
+  return api<unknown>(
+    withWorkspace(`/api/platform/workflows/${workflowId}/nodes/${nodeId}/test`),
+    {
+      method: "POST",
+      body: JSON.stringify(opts),
+    },
+  );
+}
+
+/**
+ * Discover the schema of a database connection.
+ */
+export async function discoverConnectionSchema(connectionId: string): Promise<unknown> {
+  return api<unknown>(withWorkspace(`/api/connections/${connectionId}/discover-schema`), { method: "POST" });
+}
+
+/**
+ * List available models for an LLM provider connection.
+ */
+export async function listConnectionModels(connectionId: string): Promise<{ models: Array<{ id: string; name: string }>; provider: string }> {
+  return api<{ models: Array<{ id: string; name: string }>; provider: string }>(
+    withWorkspace(`/api/connections/${connectionId}/list-models`),
+    { method: "POST" },
+  );
 }
 
 // ─── Runs for agent/tool (analytics) ─────────────────────────────────────────

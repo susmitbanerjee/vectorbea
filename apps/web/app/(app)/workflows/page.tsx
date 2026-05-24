@@ -6,10 +6,8 @@ import {
   AlertTriangle,
   Bot,
   CalendarClock,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock,
   GitBranch,
   Loader2,
   Play,
@@ -21,7 +19,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { PaginatedResult, Workflow, WorkflowStatus } from "@/types/platform";
 import { getWorkflows } from "@/lib/repository";
@@ -37,7 +34,8 @@ function statusBadge(status: WorkflowStatus) {
   };
   const { label, cls } = map[status] ?? map.draft;
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", cls)}>
+    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 uppercase tracking-wider", cls)}
+      style={{ fontSize: 11, fontWeight: 650 }}>
       {label}
     </span>
   );
@@ -52,14 +50,15 @@ function modeBadge(mode: Workflow["creationMode"]) {
   };
   const { label, cls } = map[mode] ?? map.endpoint_only;
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium", cls)}>
+    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5", cls)}
+      style={{ fontSize: 11, fontWeight: 600 }}>
       {label}
     </span>
   );
 }
 
 function runStatusDot(status: Workflow["lastRunStatus"]) {
-  if (!status) return <span className="text-[12px] text-muted-foreground/40">—</span>;
+  if (!status) return <span style={{ fontSize: 13, color: "#D1D5DB" }}>—</span>;
   const colors: Record<string, string> = {
     succeeded: "bg-emerald-500",
     failed: "bg-red-500",
@@ -70,7 +69,7 @@ function runStatusDot(status: Workflow["lastRunStatus"]) {
   return (
     <span className="flex items-center gap-1.5">
       <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", colors[status] ?? "bg-slate-400")} />
-      <span className="text-[12px] capitalize text-muted-foreground">{status.replace(/_/g, " ")}</span>
+      <span style={{ fontSize: 13, color: "#6B7280" }} className="capitalize">{status.replace(/_/g, " ")}</span>
     </span>
   );
 }
@@ -81,11 +80,12 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
       type="button"
       onClick={onClick}
       className={cn(
-        "h-7 rounded-full border px-3 text-[11px] font-medium transition-colors",
+        "rounded-full border px-3 transition-colors",
         active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+          ? "border-[#111827] bg-[#111827] text-white"
+          : "border-[#E5E7EB] bg-white text-[#6B7280] hover:border-[#374151] hover:text-[#374151]",
       )}
+      style={{ height: 30, fontSize: 13, fontWeight: 600 }}
     >
       {label}
     </button>
@@ -131,28 +131,30 @@ export default function WorkflowsPage() {
   ];
 
   return (
-    <div className="space-y-5 p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+    <div className="p-7 lg:p-8 max-w-[1320px]" style={{ paddingTop: 24 }}>
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4" style={{ marginBottom: 18 }}>
         <div>
-          <h1 className="text-[18px] font-semibold tracking-tight">Workflows</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          <h1 className="page-title">Workflows</h1>
+          <p className="page-subtitle">
             {pagination
               ? `${pagination.total} workflow${pagination.total !== 1 ? "s" : ""}`
               : "AI agent execution workflows"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mt-1">
           <Link
             href={"/workflows/import" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 text-[13px] font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+            className="inline-flex h-[34px] items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-3.5 text-[#374151] transition-colors hover:bg-[#F1F3F5]"
+            style={{ fontSize: 13.5, fontWeight: 600 }}
           >
             <Upload className="h-3.5 w-3.5" />
             Import
           </Link>
           <Link
             href={"/workflows/new" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+            className="inline-flex h-[34px] items-center gap-1.5 rounded-lg bg-[#111827] px-3.5 text-white transition-all hover:bg-[#1F2937]"
+            style={{ fontSize: 13.5, fontWeight: 650 }}
           >
             <Plus className="h-3.5 w-3.5" />
             New Workflow
@@ -160,13 +162,14 @@ export default function WorkflowsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[220px] flex-1 max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
+      {/* ── Filters ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2.5" style={{ marginBottom: 16 }}>
+        <div className="relative" style={{ width: 340 }}>
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
+          <input
             placeholder="Search workflows…"
-            className="h-8 pl-8 text-[13px]"
+            className="w-full rounded-lg border border-[#D1D5DB] bg-white pl-8 pr-3 text-[#111827] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-shadow"
+            style={{ height: 36, fontSize: 13.5 }}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -185,20 +188,20 @@ export default function WorkflowsPage() {
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          className="ml-auto flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#6B7280] transition-colors hover:text-[#374151] disabled:opacity-40"
         >
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </button>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-border/60">
+      {/* ── Table ──────────────────────────────────────────────────────── */}
+      <div className="overflow-hidden rounded-[10px] border border-[#E5E7EB] bg-white">
         {loading && workflows.length === 0 ? (
-          <div className="divide-y divide-border/60">
+          <div className="divide-y divide-[#F3F4F6]">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 px-5 py-4">
-                <div className="h-4 w-48 animate-pulse rounded bg-muted" />
-                <div className="h-4 w-16 animate-pulse rounded bg-muted ml-auto" />
+                <div className="h-4 w-48 animate-pulse rounded bg-[#F3F4F6]" />
+                <div className="h-4 w-16 animate-pulse rounded bg-[#F3F4F6] ml-auto" />
               </div>
             ))}
           </div>
@@ -206,44 +209,45 @@ export default function WorkflowsPage() {
           <EmptyWorkflows hasFilters={!!search || !!statusFilter} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="border-b border-border/60 bg-muted/20">
+                <tr className="border-b border-[#F3F4F6] bg-[#FAFAFA]">
                   {["Workflow", "Mode", "Status", "Trigger", "Agents", "Tools", "Last Run", "Success", ""].map((h) => (
                     <th
                       key={h}
-                      className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70"
+                      className="table-header-cell px-5 py-3 text-left"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/40">
+              <tbody className="divide-y divide-[#F3F4F6]">
                 {workflows.map((wf) => (
-                  <tr key={wf.id} className="group transition-colors hover:bg-muted/20">
+                  <tr key={wf.id} className="group transition-colors hover:bg-[#F9FAFB]">
                     {/* Name */}
-                    <td className="px-5 py-3.5">
+                    <td className="px-5 py-3">
                       <Link
                         href={`/workflows/${wf.id}` as never}
-                        className="block text-[13px] font-medium hover:underline"
+                        className="block font-medium hover:underline"
+                        style={{ fontSize: 14, color: "#111827" }}
                       >
                         {wf.name}
                       </Link>
-                      <p className="mt-0.5 max-w-[260px] truncate text-[11px] text-muted-foreground">
+                      <p className="mt-0.5 max-w-[260px] truncate" style={{ fontSize: 12, color: "#9CA3AF" }}>
                         {wf.description}
                       </p>
                     </td>
 
                     {/* Mode */}
-                    <td className="px-4 py-3.5">{modeBadge(wf.creationMode)}</td>
+                    <td className="px-4 py-3">{modeBadge(wf.creationMode)}</td>
 
                     {/* Status */}
-                    <td className="px-4 py-3.5">{statusBadge(wf.status)}</td>
+                    <td className="px-4 py-3">{statusBadge(wf.status)}</td>
 
                     {/* Trigger */}
-                    <td className="px-4 py-3.5">
-                      <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground capitalize">
+                    <td className="px-4 py-3">
+                      <span className="flex items-center gap-1.5 capitalize" style={{ fontSize: 13, color: "#6B7280" }}>
                         {wf.triggerType === "cron" ? (
                           <CalendarClock className="h-3.5 w-3.5 shrink-0" />
                         ) : (
@@ -254,47 +258,50 @@ export default function WorkflowsPage() {
                     </td>
 
                     {/* Agents */}
-                    <td className="px-4 py-3.5">
-                      <span className="flex items-center gap-1 text-[12px] text-muted-foreground">
+                    <td className="px-4 py-3">
+                      <span className="flex items-center gap-1" style={{ fontSize: 13, color: "#6B7280" }}>
                         <Bot className="h-3.5 w-3.5 shrink-0" />
                         {wf.agentIds.length}
                       </span>
                     </td>
 
                     {/* Tools */}
-                    <td className="px-4 py-3.5">
-                      <span className="flex items-center gap-1 text-[12px] text-muted-foreground">
+                    <td className="px-4 py-3">
+                      <span className="flex items-center gap-1" style={{ fontSize: 13, color: "#6B7280" }}>
                         <Wrench className="h-3.5 w-3.5 shrink-0" />
                         {wf.toolIds.length}
                       </span>
                     </td>
 
                     {/* Last run */}
-                    <td className="px-4 py-3.5">{runStatusDot(wf.lastRunStatus)}</td>
+                    <td className="px-4 py-3">{runStatusDot(wf.lastRunStatus)}</td>
 
                     {/* Success rate */}
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3">
                       {wf.totalRuns > 0 ? (
-                        <span className={cn("text-[12px] font-mono", wf.successRate >= 0.9 ? "text-emerald-700" : wf.successRate >= 0.7 ? "text-amber-700" : "text-red-700")}>
+                        <span className={cn("font-mono", wf.successRate >= 0.9 ? "text-emerald-700" : wf.successRate >= 0.7 ? "text-amber-700" : "text-red-700")}
+                          style={{ fontSize: 13 }}>
                           {Math.round(wf.successRate * 100)}%
                         </span>
                       ) : (
-                        <span className="text-[12px] text-muted-foreground/40">—</span>
+                        <span style={{ fontSize: 13, color: "#D1D5DB" }}>—</span>
                       )}
                     </td>
 
                     {/* Actions */}
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Link
                           href={`/workflows/${wf.id}/builder` as never}
-                          className="flex h-6 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          className="flex h-[26px] items-center gap-1 rounded px-2 text-[#6B7280] hover:bg-[#F1F3F5] hover:text-[#111827] transition-colors"
+                          style={{ fontSize: 12 }}
                         >
                           Builder
                         </Link>
                         <Link
                           href={`/workflows/${wf.id}` as never}
-                          className="flex h-6 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          className="flex h-[26px] items-center gap-1 rounded px-2 text-[#6B7280] hover:bg-[#F1F3F5] hover:text-[#111827] transition-colors"
+                          style={{ fontSize: 12 }}
                         >
                           Detail
                         </Link>
@@ -308,9 +315,9 @@ export default function WorkflowsPage() {
         )}
       </div>
 
-      {/* Pagination */}
+      {/* ── Pagination ───────────────────────────────────────────────────── */}
       {pagination && pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-[12px] text-muted-foreground">
+        <div className="mt-4 flex items-center justify-between" style={{ fontSize: 13, color: "#6B7280" }}>
           <span>
             {(pagination.page - 1) * pagination.pageSize + 1}–
             {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
@@ -320,16 +327,16 @@ export default function WorkflowsPage() {
               type="button"
               disabled={pagination.page <= 1}
               onClick={() => void load(pagination.page - 1)}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-background transition-colors hover:bg-muted disabled:opacity-40"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white transition-colors hover:bg-[#F1F3F5] disabled:opacity-40"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
-            <span className="px-2 text-[11px]">Page {pagination.page} of {pagination.totalPages}</span>
+            <span className="px-2" style={{ fontSize: 12 }}>Page {pagination.page} of {pagination.totalPages}</span>
             <button
               type="button"
               disabled={pagination.page >= pagination.totalPages}
               onClick={() => void load(pagination.page + 1)}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-background transition-colors hover:bg-muted disabled:opacity-40"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white transition-colors hover:bg-[#F1F3F5] disabled:opacity-40"
             >
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
@@ -342,32 +349,34 @@ export default function WorkflowsPage() {
 
 function EmptyWorkflows({ hasFilters }: { hasFilters: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border/60 bg-muted/20">
-        <GitBranch className="h-5 w-5 text-muted-foreground/40" />
+    <div className="flex flex-col items-center justify-center gap-3 text-center" style={{ height: 280 }}>
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5E7EB] bg-[#F9FAFB]">
+        <GitBranch className="h-5 w-5" style={{ color: "#D1D5DB" }} />
       </div>
       <div>
-        <p className="text-sm font-medium text-muted-foreground">
+        <p style={{ fontSize: 15, fontWeight: 650, color: "#374151" }}>
           {hasFilters ? "No workflows match your filters" : "No workflows yet"}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground/60">
+        <p className="mt-1 max-w-[300px]" style={{ fontSize: 13, color: "#9CA3AF" }}>
           {hasFilters
             ? "Try adjusting your search or filters."
             : "Build a native workflow, import from LangGraph or Temporal, or instrument existing code."}
         </p>
       </div>
       {!hasFilters && (
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex items-center gap-2 mt-1">
           <Link
             href={"/workflows/new" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#111827] px-3.5 text-white hover:bg-[#1F2937]"
+            style={{ fontSize: 13, fontWeight: 650 }}
           >
             <Plus className="h-3.5 w-3.5" />
             Build workflow
           </Link>
           <Link
             href={"/workflows/import" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F1F3F5]"
+            style={{ fontSize: 13, fontWeight: 600 }}
           >
             <Upload className="h-3.5 w-3.5" />
             Import workflow

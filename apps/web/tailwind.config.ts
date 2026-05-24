@@ -56,8 +56,8 @@ const config: Config = {
           DEFAULT:    "#F4F5F7",
           fg:         "#111827",
           muted:      "#4B5563",
-          border:     "#E2E8F0",
-          active:     "#E9EEF5",
+          border:     "#DDE3EA",
+          active:     "#E8EEF6",
           hover:      "#ECEFF3",
         },
 
@@ -81,8 +81,8 @@ const config: Config = {
       borderRadius: {
         "2xl": "1rem",
         xl:    "0.75rem",
-        lg:    "0.5rem",   // 8px — primary card radius
-        md:    "0.375rem", // 6px — button/input radius
+        lg:    "0.625rem", // 10px — primary card radius
+        md:    "0.4375rem", // 7px — button/input radius
         sm:    "0.25rem",  // 4px — badge/tag radius
       },
       boxShadow: {

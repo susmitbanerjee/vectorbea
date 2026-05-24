@@ -178,7 +178,7 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
 }
 
 function LlmConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeData) => void }) {
-  const cfg: LlmNodeConfig = data.llmConfig ?? { provider: "openai", model: "gpt-4.1-mini", prompt: "", validationEnabled: false };
+  const cfg: LlmNodeConfig = data.llmConfig ?? { provider: "openai", model: "gpt-4.1-mini", userPromptTemplate: "", prompt: "", validationEnabled: false };
   function set(patch: Partial<LlmNodeConfig>) { onChange({ ...data, llmConfig: { ...cfg, ...patch } }); }
   const models = LLM_MODELS[cfg.provider] ?? [];
   return (
@@ -201,7 +201,7 @@ function LlmConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeD
         <div><ILabel>Max tokens</ILabel><INumber value={cfg.maxTokens ?? 2048} onChange={(v) => set({ maxTokens: v })} min={1} /></div>
       </div>
       <div><ILabel>Prompt / Instructions</ILabel>
-        <ITextarea rows={5} value={cfg.prompt} onChange={(v) => set({ prompt: v })} placeholder="You are a helpful assistant…" />
+        <ITextarea rows={5} value={cfg.prompt ?? ""} onChange={(v) => set({ prompt: v, userPromptTemplate: v })} placeholder="You are a helpful assistant…" />
       </div>
       <ICheck id={`validate-llm-${data.label}`} checked={cfg.validationEnabled ?? false} onChange={(v) => set({ validationEnabled: v })} label="Validate output against schema" />
       <ICheck id={`ckpt-llm-${data.label}`} checked={cfg.checkpointEnabled ?? false} onChange={(v) => set({ checkpointEnabled: v })} label="Enable checkpoint" />

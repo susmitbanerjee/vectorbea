@@ -26,7 +26,7 @@
     --accent:              220 13% 93%;        /* ~#EAECF0 */
     --accent-foreground:   222 47% 7%;
     --border:              220 13% 91%;        /* #E5E7EB */
-    --input:               220 13% 91%;
+    --input:               220 13% 88%;        /* #D1D5DB */
     --ring:                221 83% 53%;        /* #2563EB */
     --destructive:         0 84% 51%;          /* #DC2626 */
     --destructive-foreground: 0 0% 100%;
@@ -44,8 +44,8 @@
     --sidebar-bg:          220 17% 95%;        /* #F4F5F7 */
     --sidebar-fg:          222 47% 7%;         /* #111827 */
     --sidebar-muted:       217 19% 35%;        /* #4B5563 */
-    --sidebar-border:      214 24% 89%;        /* #E2E8F0 */
-    --sidebar-active-bg:   216 24% 91%;        /* #E9EEF5 */
+    --sidebar-border:      214 24% 89%;        /* #DDE3EA */
+    --sidebar-active-bg:   216 50% 92%;        /* #E8EEF6 */
     --sidebar-hover-bg:    215 18% 92%;        /* #ECEFF3 */
 
     /* ── Direct hex surface tokens ──────────────────────────────── */
@@ -59,7 +59,7 @@
     --border-subtle:     #E5E7EB;
     --border-medium:     #D1D5DB;
     --border-strong:     #CBD5E1;
-    --sidebar-border-hex:#E2E8F0;
+    --sidebar-border-hex:#DDE3EA;
 
     /* ── Text tokens ─────────────────────────────────────────────── */
     --text-primary:      #111827;
@@ -94,23 +94,24 @@
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     color-scheme: light;
-    font-feature-settings: "rlig" 1, "calt" 1, "cv11" 1;
-    letter-spacing: -0.005em;
+    font-feature-settings: "rlig" 1, "calt" 1, "cv02" 1, "cv03" 1, "cv04" 1, "cv11" 1;
+    letter-spacing: -0.006em;
   }
 
   body {
     background-color: var(--bg-main);
     color: var(--text-primary);
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 14px;
+    line-height: 1.55;
+    font-weight: 450;
   }
 
   /* Strong heading defaults */
-  h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.025em; color: var(--text-primary); line-height: 1.25; }
-  h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.02em;  color: var(--text-primary); }
-  h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.015em; color: var(--text-primary); }
-  h4 { font-size: 13px; font-weight: 600;                           color: var(--text-primary); }
-  h5 { font-size: 11px; font-weight: 600;                           color: var(--text-secondary); }
+  h1 { font-size: 25px; font-weight: 700; letter-spacing: -0.025em; color: var(--text-primary); line-height: 1.2; }
+  h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.02em;  color: var(--text-primary); }
+  h3 { font-size: 15px; font-weight: 650; letter-spacing: -0.015em; color: var(--text-primary); }
+  h4 { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+  h5 { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
 
   /* ── Scrollbars ─────────────────────────────────────────────────────── */
   * {
@@ -125,8 +126,8 @@
   }
   *::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.20); }
 
-  .sidebar-scroll { scrollbar-color: rgba(0,0,0,0.06) transparent; }
-  .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.06); }
+  .sidebar-scroll { scrollbar-color: rgba(0,0,0,0.07) transparent; }
+  .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.07); }
 
   /* ── Select ─────────────────────────────────────────────────────────── */
   select {
@@ -161,30 +162,30 @@
   .card-surface {
     background: #FFFFFF;
     border: 1px solid #E5E7EB;
-    border-radius: 8px;
+    border-radius: 10px;
   }
 
   /* ── Section label (nav group headings) ─────────────────────────────── */
   .nav-section-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.065em;
     text-transform: uppercase;
-    color: var(--text-faint);
+    color: #8B929E;
     padding: 0 10px;
-    margin-bottom: 1px;
-    margin-top: 12px;
+    margin-bottom: 3px;
+    margin-top: 18px;
     display: block;
     user-select: none;
   }
-  .nav-section-label:first-child { margin-top: 0; }
+  .nav-section-label:first-child { margin-top: 4px; }
 
   /* ── Sidebar nav active state ───────────────────────────────────────── */
   .nav-active {
     position: relative;
-    background-color: #E9EEF5;
-    color: var(--text-primary) !important;
-    font-weight: 600;
+    background-color: #E8EEF6;
+    color: #111827 !important;
+    font-weight: 700 !important;
   }
   .nav-active::before {
     content: "";
@@ -192,8 +193,8 @@
     left: 0;
     top: 50%;
     transform: translateY(-50%);
-    width: 2px;
-    height: 62%;
+    width: 3px;
+    height: 64%;
     background: #2563EB;
     border-radius: 0 2px 2px 0;
   }
@@ -219,8 +220,8 @@
   }
 
   /* ── Page header helpers ────────────────────────────────────────────── */
-  .page-title    { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; color: var(--text-primary); line-height: 1.25; }
-  .page-subtitle { font-size: 13px; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
+  .page-title    { font-size: 25px; font-weight: 700; letter-spacing: -0.025em; color: var(--text-primary); line-height: 1.2; }
+  .page-subtitle { font-size: 14px; font-weight: 450; color: var(--text-muted); margin-top: 3px; }
 
   /* ── Stagger delays ─────────────────────────────────────────────────── */
   .stagger-1   { animation-delay: 60ms; }
@@ -280,6 +281,37 @@
   .docs-prose table { @apply mt-6 w-full overflow-hidden rounded-xl border text-left text-sm; border-color: var(--border-subtle); }
   .docs-prose thead { background: var(--surface-3); }
   .docs-prose th, .docs-prose td { @apply px-4 py-3 align-top border-b; border-color: var(--border-subtle); }
+
+  /* ── Console mono labels ─────────────────────────────────────────────── */
+  .mono-label {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 12px;
+    color: var(--text-secondary);
+    letter-spacing: 0;
+  }
+
+  /* ── Table utilities ─────────────────────────────────────────────────── */
+  .table-header-cell {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+  .table-row-cell {
+    font-size: 14px;
+    font-weight: 450;
+    color: var(--text-primary);
+  }
+
+  /* ── Card label ─────────────────────────────────────────────────────── */
+  .card-label {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
 }
 
 /* ── Keyframes ────────────────────────────────────────────────────────────── */

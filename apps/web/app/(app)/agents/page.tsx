@@ -71,11 +71,11 @@ export default function AgentsPage() {
   });
 
   return (
-    <div className="space-y-5 p-6 lg:p-8">
+    <div className="p-7 lg:p-8 max-w-[1320px]">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+          <h1 className="page-title" style={{ color: "var(--text-primary)" }}>
             Agent Registry
           </h1>
           <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>

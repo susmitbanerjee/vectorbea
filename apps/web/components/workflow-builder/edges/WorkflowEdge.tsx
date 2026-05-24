@@ -17,9 +17,13 @@ const EDGE_STYLES: Record<WFEdgeType, { stroke: string; strokeDasharray?: string
   conditional_true:    { stroke: "rgba(52,211,153,0.7)",    labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
   conditional_false:   { stroke: "rgba(251,146,60,0.7)",    labelBg: "rgba(40,30,15,0.9)",   labelColor: "#fb923c" },
   parallel:            { stroke: "rgba(103,232,249,0.6)",   strokeDasharray: "5,3",          labelBg: "rgba(15,35,40,0.9)", labelColor: "#67e8f9" },
+  parallel_branch:     { stroke: "rgba(103,232,249,0.6)",   strokeDasharray: "5,3",          labelBg: "rgba(15,35,40,0.9)", labelColor: "#67e8f9" },
   approval_approved:   { stroke: "rgba(52,211,153,0.75)",   labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
+  approved:            { stroke: "rgba(52,211,153,0.75)",   labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
   approval_rejected:   { stroke: "rgba(248,113,113,0.75)",  labelBg: "rgba(40,20,20,0.9)",   labelColor: "#f87171" },
+  rejected:            { stroke: "rgba(248,113,113,0.75)",  labelBg: "rgba(40,20,20,0.9)",   labelColor: "#f87171" },
   join:                { stroke: "rgba(129,140,248,0.55)",  strokeDasharray: "4,2",          labelBg: "rgba(25,25,45,0.9)", labelColor: "#818cf8" },
+  timeout:             { stroke: "rgba(251,146,60,0.6)",    strokeDasharray: "3,3",          labelBg: "rgba(40,30,15,0.9)", labelColor: "#fb923c" },
 };
 
 export const WorkflowEdge = memo(function WorkflowEdge({

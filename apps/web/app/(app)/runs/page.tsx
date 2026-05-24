@@ -125,11 +125,11 @@ export default function RunsPage() {
   ];
 
   return (
-    <div className="space-y-5 p-6 lg:p-8">
+    <div className="p-7 lg:p-8 max-w-[1320px]">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[20px] font-[650] tracking-tight">Runs</h1>
+          <h1 className="page-title">Runs</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {pagination ? `${pagination.total} execution${pagination.total !== 1 ? "s" : ""} total` : "All workflow run executions"}
           </p>

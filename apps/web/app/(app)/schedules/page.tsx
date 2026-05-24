@@ -113,11 +113,11 @@ export default function SchedulesPage() {
   const pausedCount = MOCK_SCHEDULES.filter((s) => s.status === "PAUSED").length;
 
   return (
-    <div className="space-y-6 p-6 lg:p-8">
+    <div className="p-7 lg:p-8 max-w-[1320px]">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[18px] font-semibold tracking-tight">Schedules</h1>
+          <h1 className="page-title">Schedules</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Upcoming and recurring agent job triggers.
           </p>

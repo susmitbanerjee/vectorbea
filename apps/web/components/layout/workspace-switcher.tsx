@@ -121,29 +121,31 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition-all"
+          className="group flex w-full items-center justify-between gap-2 rounded-[10px] text-left transition-all hover:bg-[#FAFAFB]"
           style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border-subtle)",
+            background: "#FFFFFF",
+            border: "1px solid #E1E5EA",
+            padding: "10px 12px",
+            minHeight: 56,
           }}
         >
           <div className="flex min-w-0 items-center gap-2.5">
             <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+              className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-md"
               style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
             >
               <Layers3 className="h-3.5 w-3.5" style={{ color: "#2563EB" }} />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+              <p className="truncate" style={{ fontSize: 13.5, fontWeight: 650, color: "#111827", lineHeight: 1.25 }}>
                 {activeWorkspace?.name ?? "Vectorbee Demo"}
               </p>
-              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+              <p style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#9CA3AF", marginTop: 1 }}>
                 {activeWorkspace?.organizationName ?? "Development"}
               </p>
             </div>
           </div>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 transition-colors" style={{ color: "var(--text-faint)" }} />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 transition-colors" style={{ color: "#9CA3AF" }} />
         </button>
       </DropdownMenuTrigger>
 
