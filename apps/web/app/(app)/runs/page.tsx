@@ -48,14 +48,14 @@ function timeAgo(ts: string | null) {
 }
 
 const STATUS_STYLES: Record<string, { dot: string; label: string }> = {
-  succeeded:            { dot: "bg-emerald-400",               label: "Succeeded" },
-  failed:               { dot: "bg-red-400",                   label: "Failed" },
-  running:              { dot: "bg-sky-400 animate-pulse",     label: "Running" },
-  waiting_for_approval: { dot: "bg-amber-400",                 label: "Waiting" },
-  queued:               { dot: "bg-slate-400",                 label: "Queued" },
-  cancelled:            { dot: "bg-slate-500",                 label: "Cancelled" },
-  timed_out:            { dot: "bg-orange-400",                label: "Timed out" },
-  paused:               { dot: "bg-amber-300",                 label: "Paused" },
+  succeeded:            { dot: "bg-emerald-500",               label: "Succeeded" },
+  failed:               { dot: "bg-red-500",                   label: "Failed" },
+  running:              { dot: "bg-blue-500 animate-pulse",    label: "Running" },
+  waiting_for_approval: { dot: "bg-amber-500",                 label: "Waiting" },
+  queued:               { dot: "bg-[#9CA3AF]",                 label: "Queued" },
+  cancelled:            { dot: "bg-[#D1D5DB]",                 label: "Cancelled" },
+  timed_out:            { dot: "bg-orange-500",                label: "Timed out" },
+  paused:               { dot: "bg-amber-400",                 label: "Paused" },
 };
 
 function RunStatusCell({ status }: { status: AgentRun["status"] }) {

@@ -5,17 +5,17 @@ type StatusVariant = RunStatus | TimelineEventStatus;
 
 const STATUS_STYLES: Record<string, string> = {
   // Run statuses
-  QUEUED:               "border-slate-500/20  bg-slate-500/10  text-slate-600  dark:text-slate-400",
-  RUNNING:              "border-blue-500/20   bg-blue-500/10   text-blue-600   dark:text-blue-400",
-  WAITING_FOR_APPROVAL: "border-amber-500/20  bg-amber-500/10  text-amber-600  dark:text-amber-400",
-  SUCCEEDED:            "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  FAILED:               "border-red-500/20    bg-red-500/10    text-red-600    dark:text-red-400",
-  CANCELLED:            "border-slate-500/20  bg-slate-500/10  text-slate-500  dark:text-slate-400",
-  TIMEOUT:              "border-orange-500/20 bg-orange-500/10 text-orange-600  dark:text-orange-400",
+  QUEUED:               "border-[#E5E7EB] bg-[#F9FAFB] text-[#6B7280]",
+  RUNNING:              "border-[#BFDBFE] bg-[#EFF6FF] text-[#1D4ED8]",
+  WAITING_FOR_APPROVAL: "border-amber-200 bg-amber-50  text-amber-700",
+  SUCCEEDED:            "border-emerald-200 bg-emerald-50 text-emerald-700",
+  FAILED:               "border-red-200   bg-red-50    text-red-700",
+  CANCELLED:            "border-[#E5E7EB] bg-[#F9FAFB] text-[#6B7280]",
+  TIMEOUT:              "border-orange-200 bg-orange-50 text-orange-700",
   // Timeline event statuses
-  PENDING:              "border-slate-500/20  bg-slate-500/10  text-slate-500",
-  WAITING:              "border-amber-500/20  bg-amber-500/10  text-amber-600",
-  SKIPPED:              "border-slate-500/20  bg-transparent   text-muted-foreground",
+  PENDING:              "border-[#E5E7EB] bg-[#F9FAFB] text-[#6B7280]",
+  WAITING:              "border-amber-200 bg-amber-50  text-amber-700",
+  SKIPPED:              "border-[#E5E7EB] bg-white     text-[#9CA3AF]",
 };
 
 const DOT_COLORS: Record<string, string> = {

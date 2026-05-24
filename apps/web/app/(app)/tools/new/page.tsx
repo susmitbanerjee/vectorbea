@@ -25,10 +25,10 @@ const TOOL_TYPES: { type: ToolType; label: string }[] = [
 ];
 
 const RISK_LEVELS: { level: RiskLevel; label: string; description: string; color: string }[] = [
-  { level: "read_only",       label: "Read Only",        description: "Never modifies state. Safe to retry freely.",           color: "#34D399" },
-  { level: "low_risk_write",  label: "Low Risk Write",   description: "Writes that are easy to undo or idempotent.",           color: "#FCD34D" },
-  { level: "high_risk_write", label: "High Risk Write",  description: "Modifies important data. Requires care on retry.",      color: "#FB923C" },
-  { level: "irreversible",    label: "Irreversible",     description: "Cannot be undone. Payments, sends, deletions.",         color: "#F87171" },
+  { level: "read_only",       label: "Read Only",        description: "Never modifies state. Safe to retry freely.",           color: "#059669" },
+  { level: "low_risk_write",  label: "Low Risk Write",   description: "Writes that are easy to undo or idempotent.",           color: "#D97706" },
+  { level: "high_risk_write", label: "High Risk Write",  description: "Modifies important data. Requires care on retry.",      color: "#EA580C" },
+  { level: "irreversible",    label: "Irreversible",     description: "Cannot be undone. Payments, sends, deletions.",         color: "#DC2626" },
 ];
 
 function SectionHeader({ label }: { label: string }) {
@@ -259,7 +259,7 @@ export default function NewToolPage() {
               <Link
                 href={"/connections/new" as never}
                 className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
-                style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
+                style={{ background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}
               >
                 Add Connection
               </Link>

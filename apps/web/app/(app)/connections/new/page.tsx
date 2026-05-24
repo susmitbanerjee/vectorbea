@@ -37,13 +37,13 @@ const TYPE_CARDS: {
   description: string;
   examples: string;
 }[] = [
-  { type: "llm_provider",   label: "LLM Provider",   icon: BrainCircuit, color: "#A78BFA", description: "Connect to an AI model API to power native agents and LLM steps.", examples: "OpenAI, Anthropic, Azure OpenAI, Gemini, Bedrock" },
-  { type: "database",       label: "Database",        icon: Database,     color: "#22D3EE", description: "Read from or write to SQL and NoSQL databases safely.", examples: "PostgreSQL, MySQL, MongoDB, Snowflake, BigQuery" },
-  { type: "http_api",       label: "HTTP / API",      icon: Globe,        color: "#38BDF8", description: "Call internal or third-party REST APIs from tools.", examples: "CRM API, Billing API, Internal microservices" },
-  { type: "saas",           label: "SaaS Integration",icon: MessageSquare,color: "#34D399", description: "Connect to SaaS platforms for notifications and data sync.", examples: "Slack, Gmail, Salesforce, HubSpot, Jira, GitHub" },
-  { type: "mcp_server",     label: "MCP Server",      icon: Cable,        color: "#FB923C", description: "Connect to an MCP server to expose its tools to agents.", examples: "Remote MCP server, Local MCP bridge" },
-  { type: "vector_store",   label: "Vector Store",    icon: DatabaseZap,  color: "#F472B6", description: "Long-term semantic memory and retrieval for agents.", examples: "Pinecone, Weaviate, Qdrant, pgvector, Redis" },
-  { type: "object_storage", label: "Object Storage",  icon: HardDrive,    color: "#94A3B8", description: "Store and retrieve workflow artifacts and files.", examples: "S3, GCS, Azure Blob, Cloudflare R2" },
+  { type: "llm_provider",   label: "LLM Provider",   icon: BrainCircuit, color: "#7C3AED", description: "Connect to an AI model API to power native agents and LLM steps.", examples: "OpenAI, Anthropic, Azure OpenAI, Gemini, Bedrock" },
+  { type: "database",       label: "Database",        icon: Database,     color: "#0369A1", description: "Read from or write to SQL and NoSQL databases safely.", examples: "PostgreSQL, MySQL, MongoDB, Snowflake, BigQuery" },
+  { type: "http_api",       label: "HTTP / API",      icon: Globe,        color: "#2563EB", description: "Call internal or third-party REST APIs from tools.", examples: "CRM API, Billing API, Internal microservices" },
+  { type: "saas",           label: "SaaS Integration",icon: MessageSquare,color: "#059669", description: "Connect to SaaS platforms for notifications and data sync.", examples: "Slack, Gmail, Salesforce, HubSpot, Jira, GitHub" },
+  { type: "mcp_server",     label: "MCP Server",      icon: Cable,        color: "#D97706", description: "Connect to an MCP server to expose its tools to agents.", examples: "Remote MCP server, Local MCP bridge" },
+  { type: "vector_store",   label: "Vector Store",    icon: DatabaseZap,  color: "#DB2777", description: "Long-term semantic memory and retrieval for agents.", examples: "Pinecone, Weaviate, Qdrant, pgvector, Redis" },
+  { type: "object_storage", label: "Object Storage",  icon: HardDrive,    color: "#6B7280", description: "Store and retrieve workflow artifacts and files.", examples: "S3, GCS, Azure Blob, Cloudflare R2" },
 ];
 
 // ─── Field helpers ────────────────────────────────────────────────────────────

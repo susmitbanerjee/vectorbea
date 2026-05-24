@@ -21,12 +21,12 @@ const TYPE_LABELS: Record<Agent["type"], string> = {
 };
 
 const TYPE_COLORS: Record<Agent["type"], string> = {
-  native_llm_agent:             "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  tool_agent:                   "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  router_agent:                 "bg-sky-500/10 text-sky-400 border-sky-500/20",
-  approval_agent:               "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  imported_langgraph_node:      "bg-purple-500/10 text-purple-400 border-purple-500/20",
-  external_instrumented_agent:  "bg-teal-500/10 text-teal-400 border-teal-500/20",
+  native_llm_agent:             "bg-violet-50 text-violet-700 border-violet-200",
+  tool_agent:                   "bg-cyan-50 text-cyan-700 border-cyan-200",
+  router_agent:                 "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]",
+  approval_agent:               "bg-amber-50 text-amber-700 border-amber-200",
+  imported_langgraph_node:      "bg-purple-50 text-purple-700 border-purple-200",
+  external_instrumented_agent:  "bg-teal-50 text-teal-700 border-teal-200",
 };
 
 function timeAgo(ts: string | null) {

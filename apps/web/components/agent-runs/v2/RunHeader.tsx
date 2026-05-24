@@ -10,13 +10,13 @@ import type { AgentRunUiModel } from "@/types/agent-run-ui";
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 const STATUS_MAP = {
-  SUCCEEDED: { label: "Succeeded", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-500/10", border: "border-emerald-500/25" },
-  FAILED: { label: "Failed", dot: "bg-red-500", text: "text-red-700 dark:text-red-300", bg: "bg-red-500/10", border: "border-red-500/25" },
-  RUNNING: { label: "Running", dot: "bg-blue-500 animate-pulse", text: "text-blue-700 dark:text-blue-300", bg: "bg-blue-500/10", border: "border-blue-500/25" },
-  QUEUED: { label: "Queued", dot: "bg-sky-400", text: "text-sky-700 dark:text-sky-300", bg: "bg-sky-500/10", border: "border-sky-500/25" },
-  WAITING_FOR_APPROVAL: { label: "Waiting for Approval", dot: "bg-amber-500 animate-pulse", text: "text-amber-700 dark:text-amber-300", bg: "bg-amber-500/10", border: "border-amber-500/25" },
-  CANCELLED: { label: "Cancelled", dot: "bg-slate-400", text: "text-muted-foreground", bg: "bg-muted/50", border: "border-border" },
-  TIMEOUT: { label: "Timed Out", dot: "bg-orange-500", text: "text-orange-700 dark:text-orange-300", bg: "bg-orange-500/10", border: "border-orange-500/25" },
+  SUCCEEDED: { label: "Succeeded", dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
+  FAILED: { label: "Failed", dot: "bg-red-500", text: "text-red-700", bg: "bg-red-50", border: "border-red-200" },
+  RUNNING: { label: "Running", dot: "bg-blue-500 animate-pulse", text: "text-[#1D4ED8]", bg: "bg-[#EFF6FF]", border: "border-[#BFDBFE]" },
+  QUEUED: { label: "Queued", dot: "bg-[#9CA3AF]", text: "text-[#6B7280]", bg: "bg-[#F9FAFB]", border: "border-[#E5E7EB]" },
+  WAITING_FOR_APPROVAL: { label: "Waiting for Approval", dot: "bg-amber-500 animate-pulse", text: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
+  CANCELLED: { label: "Cancelled", dot: "bg-[#D1D5DB]", text: "text-[#6B7280]", bg: "bg-[#F9FAFB]", border: "border-[#E5E7EB]" },
+  TIMEOUT: { label: "Timed Out", dot: "bg-orange-500", text: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200" },
 };
 
 function fmtDur(ms?: number) {

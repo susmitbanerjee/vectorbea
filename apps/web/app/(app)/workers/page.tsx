@@ -63,21 +63,28 @@ const MOCK_WORKERS: Worker[] = [
 ];
 
 const QUEUE_HEALTH = [
-  { name: "default",         waiting: 2,  active: 3,  delayed: 0, failed: 0,  color: "#38BDF8" },
-  { name: "priority",        waiting: 0,  active: 1,  delayed: 0, failed: 0,  color: "#22D3EE" },
-  { name: "delayed",         waiting: 4,  active: 0,  delayed: 4, failed: 0,  color: "#F59E0B" },
-  { name: "dead-letter",     waiting: 0,  active: 0,  delayed: 0, failed: 3,  color: "#EF4444" },
+  { name: "default",         waiting: 2,  active: 3,  delayed: 0, failed: 0,  color: "#2563EB" },
+  { name: "priority",        waiting: 0,  active: 1,  delayed: 0, failed: 0,  color: "#0369A1" },
+  { name: "delayed",         waiting: 4,  active: 0,  delayed: 4, failed: 0,  color: "#D97706" },
+  { name: "dead-letter",     waiting: 0,  active: 0,  delayed: 0, failed: 3,  color: "#DC2626" },
 ];
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
 const STATUS_CFG = {
-  CONNECTED:    { dot: "bg-emerald-500", text: "text-emerald-400", label: "Connected",    bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
-  IDLE:         { dot: "bg-sky-400",     text: "text-sky-400",     label: "Idle",         bg: "bg-sky-500/10",     border: "border-sky-500/20" },
-  DISCONNECTED: { dot: "bg-red-500",     text: "text-red-400",     label: "Disconnected", bg: "bg-red-500/10",     border: "border-red-500/20" },
+  CONNECTED:    { dot: "bg-emerald-500", text: "text-emerald-700", label: "Connected",    bg: "bg-emerald-50", border: "border-emerald-200" },
+  IDLE:         { dot: "bg-blue-400",    text: "text-blue-700",    label: "Idle",         bg: "bg-blue-50",    border: "border-blue-200"    },
+  DISCONNECTED: { dot: "bg-red-500",     text: "text-red-700",     label: "Disconnected", bg: "bg-red-50",     border: "border-red-200"     },
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+const ACCENT_COLOR: Record<string, string> = {
+  emerald: "#059669",
+  blue:    "#1D4ED8",
+  amber:   "#D97706",
+  red:     "#DC2626",
+};
 
 function MetricCard({
   label,
@@ -92,40 +99,38 @@ function MetricCard({
   accent?: string;
   icon?: React.ElementType;
 }) {
+  const accentColor = accent ? (ACCENT_COLOR[accent] ?? accent) : undefined;
   return (
-    <div
-      className="rounded-xl p-4 flex flex-col gap-2"
-      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-    >
+    <div className="rounded-lg p-4 flex flex-col gap-2 bg-white border border-border shadow-card">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-faint)" }}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#9CA3AF]">
           {label}
         </p>
-        {Icon && <Icon className="h-3.5 w-3.5" style={{ color: "var(--text-faint)" }} />}
+        {Icon && <Icon className="h-3.5 w-3.5 text-[#9CA3AF]" />}
       </div>
       <p
-        className="text-[28px] font-semibold leading-none tracking-tight"
-        style={{ color: accent ?? "var(--text-primary)" }}
+        className="text-[26px] font-semibold leading-none tracking-tight"
+        style={{ color: accentColor ?? "var(--text-primary)" }}
       >
         {value}
       </p>
-      <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>{sub}</p>
+      <p className="text-[12px] text-[#6B7280]">{sub}</p>
     </div>
   );
 }
 
-function CapacityBar({ used, total, color = "#38BDF8" }: { used: number; total: number; color?: string }) {
+function CapacityBar({ used, total, color = "#2563EB" }: { used: number; total: number; color?: string }) {
   const pct = total > 0 ? Math.round((used / total) * 100) : 0;
-  const barColor = pct >= 80 ? "#F59E0B" : pct >= 60 ? "#38BDF8" : "#10B981";
+  const barColor = pct >= 80 ? "#D97706" : pct >= 60 ? "#2563EB" : "#059669";
   return (
     <div className="flex items-center gap-2">
       <div
         className="h-1.5 w-24 overflow-hidden rounded-full"
-        style={{ background: "rgba(148,163,184,0.12)" }}
+        style={{ background: "#E5E7EB" }}
       >
         <div
           className="h-full rounded-full transition-all duration-300"
-          style={{ width: `${pct}%`, backgroundColor: color !== "#38BDF8" ? color : barColor }}
+          style={{ width: `${pct}%`, backgroundColor: color !== "#2563EB" ? color : barColor }}
         />
       </div>
       <span className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>
@@ -187,14 +192,14 @@ export default function WorkersPage() {
           label="Connected"
           value={`${connected} / ${MOCK_WORKERS.length}`}
           sub={idle > 0 ? `${idle} idle worker${idle > 1 ? "s" : ""}` : "All workers active"}
-          accent="#10B981"
+          accent="emerald"
           icon={Server}
         />
         <MetricCard
           label="Active Tasks"
           value={String(totalActive)}
           sub="Across default and priority queues"
-          accent="#38BDF8"
+          accent="blue"
           icon={Zap}
         />
         <MetricCard
@@ -207,15 +212,12 @@ export default function WorkersPage() {
           label="Last Heartbeat"
           value="2s ago"
           sub="All workers healthy"
-          accent="#10B981"
+          accent="emerald"
         />
       </div>
 
       {/* ── Worker fleet table ────────────────────────────────────────── */}
-      <div
-        className="mb-6 overflow-hidden rounded-xl"
-        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-      >
+      <div className="mb-6 overflow-hidden rounded-lg bg-white border border-border shadow-card">
         {/* Table header */}
         <div
           className="flex items-center justify-between px-5 py-3.5"
@@ -226,7 +228,7 @@ export default function WorkersPage() {
           </p>
           <span
             className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-            style={{ background: "rgba(16,185,129,0.1)", color: "#10B981" }}
+            style={{ background: "#ECFDF5", color: "#059669", border: "1px solid #A7F3D0" }}
           >
             {connected} online
           </span>
@@ -254,7 +256,7 @@ export default function WorkersPage() {
                   <tr
                     key={w.id}
                     className="group transition-colors"
-                    style={i < MOCK_WORKERS.length - 1 ? { borderBottom: "1px solid rgba(148,163,184,0.06)" } : {}}
+                    style={i < MOCK_WORKERS.length - 1 ? { borderBottom: "1px solid #E5E7EB" } : {}}
                     onMouseOver={e => (e.currentTarget.style.background = "var(--surface-hover)")}
                     onMouseOut={e => (e.currentTarget.style.background = "")}
                   >
@@ -297,7 +299,7 @@ export default function WorkersPage() {
 
                     {/* Heartbeat */}
                     <td className="px-5 py-3.5">
-                      <span className="font-mono text-[12px]" style={{ color: w.status !== "DISCONNECTED" ? "#10B981" : "#EF4444" }}>
+                      <span className="font-mono text-[12px]" style={{ color: w.status !== "DISCONNECTED" ? "#059669" : "#DC2626" }}>
                         {w.heartbeat}
                       </span>
                     </td>
@@ -370,7 +372,7 @@ export default function WorkersPage() {
                     { label: "waiting", val: q.waiting, color: "var(--text-muted)" },
                     { label: "active",  val: q.active,  color: q.color },
                     { label: "delayed", val: q.delayed, color: "#F59E0B" },
-                    { label: "failed",  val: q.failed,  color: "#EF4444" },
+                    { label: "failed",  val: q.failed,  color: "#DC2626" },
                   ].map(s => (
                     <div key={s.label}>
                       <p className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-faint)" }}>

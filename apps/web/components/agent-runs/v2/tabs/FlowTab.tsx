@@ -25,58 +25,58 @@ const STATUS: Record<TimelineEventStatus, {
 }> = {
   SUCCEEDED: {
     dot: "bg-emerald-500",
-    border: "border-emerald-500/20",
-    bg: "bg-emerald-500/5",
+    border: "border-emerald-200",
+    bg: "bg-emerald-50",
     label: "Completed",
-    text: "text-emerald-400",
+    text: "text-emerald-700",
     icon: <CheckCircle2 className="h-3 w-3" />,
   },
   FAILED: {
     dot: "bg-red-500",
-    border: "border-red-500/20",
-    bg: "bg-red-500/5",
+    border: "border-red-200",
+    bg: "bg-red-50",
     label: "Failed",
-    text: "text-red-400",
+    text: "text-red-700",
     icon: <XCircle className="h-3 w-3" />,
   },
   RUNNING: {
-    dot: "bg-sky-400 animate-pulse",
-    border: "border-sky-500/20",
-    bg: "bg-sky-500/5",
+    dot: "bg-blue-500 animate-pulse",
+    border: "border-[#BFDBFE]",
+    bg: "bg-[#EFF6FF]",
     label: "Running",
-    text: "text-sky-400",
+    text: "text-[#1D4ED8]",
     icon: <Timer className="h-3 w-3" />,
   },
   WAITING: {
     dot: "bg-amber-500",
-    border: "border-amber-500/20",
-    bg: "bg-amber-500/5",
+    border: "border-amber-200",
+    bg: "bg-amber-50",
     label: "Waiting",
-    text: "text-amber-400",
+    text: "text-amber-700",
     icon: <Clock className="h-3 w-3" />,
   },
   PENDING: {
-    dot: "bg-slate-500",
-    border: "border-border/40",
-    bg: "",
+    dot: "bg-[#9CA3AF]",
+    border: "border-border",
+    bg: "bg-[#F9FAFB]",
     label: "Pending",
-    text: "text-muted-foreground",
+    text: "text-[#6B7280]",
     icon: <Clock className="h-3 w-3" />,
   },
   CANCELLED: {
-    dot: "bg-slate-500",
-    border: "border-border/40",
-    bg: "",
+    dot: "bg-[#D1D5DB]",
+    border: "border-border",
+    bg: "bg-[#F9FAFB]",
     label: "Cancelled",
-    text: "text-muted-foreground",
+    text: "text-[#6B7280]",
     icon: <XCircle className="h-3 w-3" />,
   },
   SKIPPED: {
-    dot: "bg-slate-600",
-    border: "border-border/30",
-    bg: "",
+    dot: "bg-[#E5E7EB]",
+    border: "border-border",
+    bg: "bg-white",
     label: "Skipped",
-    text: "text-muted-foreground/60",
+    text: "text-[#9CA3AF]",
     icon: <Clock className="h-3 w-3" />,
   },
 };
@@ -163,7 +163,7 @@ export function FlowTab({ agents, timelineEvents }: FlowTabProps) {
         <div className="ml-auto flex items-center gap-3">
           {[
             { dot: "bg-emerald-500", label: "Completed" },
-            { dot: "bg-sky-400", label: "Running" },
+            { dot: "bg-blue-500", label: "Running" },
             { dot: "bg-amber-500", label: "Waiting" },
             { dot: "bg-red-500", label: "Failed" },
           ].map(s => (
@@ -182,10 +182,10 @@ export function FlowTab({ agents, timelineEvents }: FlowTabProps) {
           style={{
             background: "rgba(56,189,248,0.08)",
             border: "1px solid rgba(56,189,248,0.18)",
-            color: "#38BDF8",
+            color: "#2563EB",
           }}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
           RUN START
         </div>
         <div className="h-4 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
@@ -309,7 +309,7 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
                 style={{
                   width: `${durationPct}%`,
                   background: agent.status === "FAILED" ? "#EF4444" :
-                    agent.status === "WAITING" ? "#F59E0B" : "#38BDF8",
+                    agent.status === "WAITING" ? "#D97706" : "#2563EB",
                 }}
               />
             </div>
@@ -376,8 +376,8 @@ function HandoffConnector({ handoffTo, handoffAt, label }: {
           border: "1px solid rgba(34,211,238,0.12)",
         }}
       >
-        <ArrowDown className="h-3 w-3 shrink-0" style={{ color: "#22D3EE" }} />
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#22D3EE" }}>
+        <ArrowDown className="h-3 w-3 shrink-0" style={{ color: "#0891B2" }} />
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#0891B2" }}>
           AGENT HANDOFF
         </span>
         {handoffTo && (

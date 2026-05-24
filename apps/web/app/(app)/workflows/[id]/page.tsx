@@ -25,12 +25,12 @@ import { getWorkflow, getRuns, triggerWorkflow } from "@/lib/repository";
 
 function StepTypeBadge({ type }: { type: string }) {
   const colors: Record<string, string> = {
-    agent: "bg-violet-500/10 text-violet-400 border-violet-500/20",
-    llm: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-    tool: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-    approval: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    branch: "bg-sky-500/10 text-sky-400 border-sky-500/20",
-    end: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+    agent: "bg-violet-50 text-violet-700 border-violet-200",
+    llm: "bg-purple-50 text-purple-700 border-purple-200",
+    tool: "bg-blue-50 text-blue-700 border-blue-200",
+    approval: "bg-amber-50 text-amber-700 border-amber-200",
+    branch: "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]",
+    end: "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]",
   };
   return (
     <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize", colors[type] ?? colors.end)}>
@@ -41,14 +41,14 @@ function StepTypeBadge({ type }: { type: string }) {
 
 function RunStatusDot({ status }: { status: AgentRun["status"] }) {
   const colors: Record<string, string> = {
-    succeeded: "bg-emerald-400",
-    failed: "bg-red-400",
-    running: "bg-sky-400 animate-pulse",
-    waiting_for_approval: "bg-amber-400",
-    queued: "bg-slate-400",
-    cancelled: "bg-slate-500",
-    timed_out: "bg-orange-400",
-    paused: "bg-amber-300",
+    succeeded: "bg-emerald-500",
+    failed: "bg-red-500",
+    running: "bg-blue-500 animate-pulse",
+    waiting_for_approval: "bg-amber-500",
+    queued: "bg-[#9CA3AF]",
+    cancelled: "bg-[#D1D5DB]",
+    timed_out: "bg-orange-500",
+    paused: "bg-amber-400",
   };
   return (
     <span className="flex items-center gap-1.5">
@@ -124,7 +124,7 @@ export default function WorkflowDetailPage() {
             )}>
               {workflow.status}
             </span>
-            <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-400">
+            <span className="rounded border border-[#BFDBFE] bg-[#EFF6FF] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8]">
               {workflow.creationMode === "native" ? "Native" : workflow.creationMode}
             </span>
           </div>
@@ -209,7 +209,7 @@ export default function WorkflowDetailPage() {
                 </div>
                 <StepTypeBadge type={step.type} />
                 {step.checkpointEnabled && (
-                  <span title="Checkpoint enabled" className="text-sky-400/60">
+                  <span title="Checkpoint enabled" className="text-[#9CA3AF]">
                     <Shield className="h-3 w-3" />
                   </span>
                 )}

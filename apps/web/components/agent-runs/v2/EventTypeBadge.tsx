@@ -34,7 +34,7 @@ interface EventConfig {
 
 const EVENT_CONFIG: Partial<Record<TimelineEventType, EventConfig>> = {
   RUN_CREATED: { icon: <CircleDot className="h-3 w-3" />, label: "Created", color: "text-muted-foreground", bg: "bg-muted/50", border: "border-border", dot: "bg-slate-400" },
-  RUN_QUEUED: { icon: <Clock className="h-3 w-3" />, label: "Queued", color: "text-sky-600 dark:text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/25", dot: "bg-sky-400" },
+  RUN_QUEUED: { icon: <Clock className="h-3 w-3" />, label: "Queued", color: "text-[#6B7280]", bg: "bg-[#F9FAFB]", border: "border-[#E5E7EB]", dot: "bg-[#9CA3AF]" },
   RUN_STARTED: { icon: <Play className="h-3 w-3" />, label: "Started", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/25", dot: "bg-blue-500" },
   RUN_PAUSED: { icon: <Clock className="h-3 w-3" />, label: "Paused", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/25", dot: "bg-amber-500" },
   RUN_RESUMED: { icon: <RefreshCw className="h-3 w-3" />, label: "Resumed", color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/25", dot: "bg-blue-500" },

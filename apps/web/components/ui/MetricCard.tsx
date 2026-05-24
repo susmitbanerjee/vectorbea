@@ -22,11 +22,11 @@ const ACCENT_ICON: Record<string, string> = {
 };
 
 const ACCENT_VALUE: Record<string, string> = {
-  emerald: "text-emerald-600 dark:text-emerald-400",
-  red:     "text-red-600    dark:text-red-400",
-  amber:   "text-amber-600  dark:text-amber-400",
-  blue:    "text-blue-600   dark:text-blue-400",
-  violet:  "text-violet-600 dark:text-violet-400",
+  emerald: "text-emerald-700",
+  red:     "text-red-700",
+  amber:   "text-amber-700",
+  blue:    "text-[#1D4ED8]",
+  violet:  "text-violet-700",
 };
 
 export function MetricCard({
@@ -40,7 +40,7 @@ export function MetricCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border/50 bg-card/60 px-4 py-3.5 backdrop-blur-sm",
+        "rounded-lg border border-border bg-white px-4 py-3.5 shadow-card",
         className,
       )}
     >

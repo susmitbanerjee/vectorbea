@@ -123,16 +123,16 @@ export function WorkspaceSwitcher() {
           type="button"
           className="group flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition-all"
           style={{
-            background: "var(--surface-2)",
-            border: "1px solid rgba(148,163,184,0.1)",
+            background: "var(--surface-1)",
+            border: "1px solid var(--border-subtle)",
           }}
         >
           <div className="flex min-w-0 items-center gap-2.5">
             <div
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
-              style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.15)" }}
+              style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
             >
-              <Layers3 className="h-3.5 w-3.5" style={{ color: "#38BDF8" }} />
+              <Layers3 className="h-3.5 w-3.5" style={{ color: "#2563EB" }} />
             </div>
             <div className="min-w-0">
               <p className="truncate text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>

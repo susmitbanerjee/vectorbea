@@ -30,11 +30,11 @@ type EventMeta = { glyph: string; dotColor: string; label: string };
 
 function getEventMeta(type: TimelineEventType, status: string): EventMeta {
   const dotByStatus: Record<string, string> = {
-    SUCCEEDED: "#10B981",
-    FAILED:    "#EF4444",
-    RUNNING:   "#38BDF8",
-    WAITING:   "#F59E0B",
-    PENDING:   "#64748B",
+    SUCCEEDED: "#059669",
+    FAILED:    "#DC2626",
+    RUNNING:   "#2563EB",
+    WAITING:   "#D97706",
+    PENDING:   "#6B7280",
     CANCELLED: "#475569",
     SKIPPED:   "#334155",
   };
@@ -229,7 +229,7 @@ function DetailsPanel({ event, onClose }: { event: RunTimelineEventUi; onClose: 
             onClick={() => setTab(t.key)}
             className="shrink-0 px-3 py-2 text-[11px] font-medium transition-colors disabled:opacity-30"
             style={{
-              color: tab === t.key ? "#38BDF8" : "var(--text-faint)",
+              color: tab === t.key ? "#2563EB" : "var(--text-faint)",
               borderBottom: tab === t.key ? "2px solid #38BDF8" : "2px solid transparent",
             }}
           >
@@ -378,7 +378,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
               className="rounded px-2 py-1 text-[11px] font-medium transition-colors"
               style={
                 activeFilter === f.key
-                  ? { background: "rgba(56,189,248,0.12)", color: "#38BDF8" }
+                  ? { background: "#EFF6FF", color: "#2563EB" }
                   : { color: "var(--text-faint)" }
               }
             >
@@ -402,7 +402,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
             title="Compact view"
             onClick={() => setViewMode("compact")}
             className="rounded-l-md p-1.5 transition-colors"
-            style={viewMode === "compact" ? { background: "rgba(56,189,248,0.12)", color: "#38BDF8" } : { color: "var(--text-faint)" }}
+            style={viewMode === "compact" ? { background: "#EFF6FF", color: "#2563EB" } : { color: "var(--text-faint)" }}
           >
             <AlignJustify className="h-3 w-3" />
           </button>
@@ -411,7 +411,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
             title="Full history view"
             onClick={() => setViewMode("full")}
             className="rounded-r-md p-1.5 transition-colors"
-            style={viewMode === "full" ? { background: "rgba(56,189,248,0.12)", color: "#38BDF8" } : { color: "var(--text-faint)" }}
+            style={viewMode === "full" ? { background: "#EFF6FF", color: "#2563EB" } : { color: "var(--text-faint)" }}
           >
             <AlignLeft className="h-3 w-3" />
           </button>
@@ -470,7 +470,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
                 const tag       = tagColor(event.type);
                 const borderAccent = isFailed  ? "#EF4444"
                                    : isWaiting ? "#F59E0B"
-                                   : isSelected ? "#38BDF8"
+                                   : isSelected ? "#2563EB"
                                    : "transparent";
 
                 return (
@@ -481,7 +481,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
                       borderLeft: `2px solid ${borderAccent}`,
                       borderBottom: !isLast ? "1px solid rgba(148,163,184,0.07)" : undefined,
                       background: isSelected
-                        ? "rgba(56,189,248,0.06)"
+                        ? "#F5F9FF"
                         : isFailed
                           ? "rgba(239,68,68,0.025)"
                           : undefined,
@@ -493,7 +493,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
                     }}
                     onMouseLeave={e => {
                       (e.currentTarget as HTMLDivElement).style.background = isSelected
-                        ? "rgba(56,189,248,0.06)"
+                        ? "#F5F9FF"
                         : isFailed ? "rgba(239,68,68,0.025)" : "";
                     }}
                   >

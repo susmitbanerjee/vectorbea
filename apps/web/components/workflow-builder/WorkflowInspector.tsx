@@ -460,7 +460,7 @@ function ValidationSummary({ validation, nodes, edges }: { validation: Validatio
         <div className="space-y-1.5">
           {[...errors, ...warnings, ...infos].map((issue, i) => {
             const Icon = issue.severity === "error" ? XCircle : issue.severity === "warning" ? AlertTriangle : Info;
-            const color = issue.severity === "error" ? "text-red-400" : issue.severity === "warning" ? "text-amber-400" : "text-sky-400";
+            const color = issue.severity === "error" ? "text-red-600" : issue.severity === "warning" ? "text-amber-700" : "text-[#1D4ED8]";
             return (
               <div key={i} className={cn("flex items-start gap-2 rounded-lg border px-3 py-2",
                 issue.severity === "error" ? "border-red-500/20 bg-red-500/5" :

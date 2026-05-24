@@ -31,24 +31,24 @@ import { getConnections, testConnection, deleteConnection } from "@/lib/reposito
 // ─── Connection type meta ─────────────────────────────────────────────────────
 
 const TYPE_META: Record<ConnectionType, { label: string; icon: React.ElementType; color: string }> = {
-  llm_provider:    { label: "LLM Provider",    icon: BrainCircuit, color: "#A78BFA" },
-  database:        { label: "Database",         icon: Database,     color: "#22D3EE" },
-  http_api:        { label: "HTTP / API",       icon: Globe,        color: "#38BDF8" },
-  saas:            { label: "SaaS",             icon: MessageSquare,color: "#34D399" },
-  mcp_server:      { label: "MCP Server",       icon: Cable,        color: "#FB923C" },
-  vector_store:    { label: "Vector Store",     icon: DatabaseZap,  color: "#F472B6" },
-  object_storage:  { label: "Object Storage",   icon: HardDrive,    color: "#94A3B8" },
+  llm_provider:    { label: "LLM Provider",    icon: BrainCircuit, color: "#7C3AED" },
+  database:        { label: "Database",         icon: Database,     color: "#0369A1" },
+  http_api:        { label: "HTTP / API",       icon: Globe,        color: "#2563EB" },
+  saas:            { label: "SaaS",             icon: MessageSquare,color: "#059669" },
+  mcp_server:      { label: "MCP Server",       icon: Cable,        color: "#D97706" },
+  vector_store:    { label: "Vector Store",     icon: DatabaseZap,  color: "#DB2777" },
+  object_storage:  { label: "Object Storage",   icon: HardDrive,    color: "#6B7280" },
 };
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<ConnectionStatus, { label: string; color: string; icon: React.ElementType }> = {
-  connected:       { label: "Connected",       color: "#34D399", icon: CheckCircle2 },
-  not_tested:      { label: "Not tested",      color: "#94A3B8", icon: Clock },
-  failed:          { label: "Failed",          color: "#F87171", icon: XCircle },
-  needs_whitelist: { label: "Needs whitelist", color: "#FCD34D", icon: AlertTriangle },
-  missing_secret:  { label: "Missing secret",  color: "#FB923C", icon: ShieldAlert },
-  disabled:        { label: "Disabled",        color: "#475569", icon: Archive },
+const STATUS_META: Record<ConnectionStatus, { label: string; color: string; border: string; bg: string; icon: React.ElementType }> = {
+  connected:       { label: "Connected",       color: "#059669", border: "#A7F3D0", bg: "#ECFDF5", icon: CheckCircle2 },
+  not_tested:      { label: "Not tested",      color: "#6B7280", border: "#E5E7EB", bg: "#F9FAFB", icon: Clock },
+  failed:          { label: "Failed",          color: "#DC2626", border: "#FECACA", bg: "#FEF2F2", icon: XCircle },
+  needs_whitelist: { label: "Needs whitelist", color: "#D97706", border: "#FDE68A", bg: "#FFFBEB", icon: AlertTriangle },
+  missing_secret:  { label: "Missing secret",  color: "#D97706", border: "#FDE68A", bg: "#FFFBEB", icon: ShieldAlert },
+  disabled:        { label: "Disabled",        color: "#6B7280", border: "#E5E7EB", bg: "#F9FAFB", icon: Archive },
 };
 
 function StatusBadge({ status }: { status: ConnectionStatus }) {
@@ -56,8 +56,8 @@ function StatusBadge({ status }: { status: ConnectionStatus }) {
   const Icon = m.icon;
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
-      style={{ color: m.color, borderColor: `${m.color}30`, background: `${m.color}12` }}
+      className="inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-medium"
+      style={{ color: m.color, borderColor: m.border, background: m.bg }}
     >
       <Icon className="h-3 w-3" />
       {m.label}
@@ -95,7 +95,7 @@ function ConnectionRow({
 
   return (
     <div
-      className="group relative grid items-center gap-4 rounded-xl border border-border/40 bg-card/60 px-5 py-4 transition-all hover:border-border/70 hover:bg-card/80"
+      className="group relative grid items-center gap-4 rounded-lg border border-border bg-white px-5 py-3.5 transition-all hover:border-[#D1D5DB] hover:bg-[#F9FAFB]"
       style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr auto" }}
     >
       {/* Name + provider */}
@@ -135,13 +135,13 @@ function ConnectionRow({
       {/* Network */}
       <div>
         {conn.networkPolicy.networkStatus === "reachable" ? (
-          <span className="text-[11px] text-emerald-400">Reachable</span>
+          <span className="text-[11px] text-emerald-700">Reachable</span>
         ) : conn.networkPolicy.networkStatus === "whitelist_required" ? (
-          <span className="text-[11px] text-amber-400">Whitelist needed</span>
+          <span className="text-[11px] text-amber-700">Whitelist needed</span>
         ) : conn.networkPolicy.networkStatus === "blocked" ? (
-          <span className="text-[11px] text-red-400">Blocked</span>
+          <span className="text-[11px] text-red-700">Blocked</span>
         ) : (
-          <span className="text-[11px] text-muted-foreground/40">Unknown</span>
+          <span className="text-[11px] text-[#9CA3AF]">Unknown</span>
         )}
       </div>
 
@@ -151,7 +151,7 @@ function ConnectionRow({
           type="button"
           onClick={onTest}
           disabled={testing}
-          className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/40 px-2.5 text-[11px] text-muted-foreground transition-all hover:border-border hover:text-foreground disabled:opacity-40"
+          className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-white px-2.5 text-[11px] text-[#6B7280] transition-all hover:border-[#D1D5DB] hover:text-foreground disabled:opacity-40"
         >
           {testing ? <RefreshCw className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           Test
@@ -161,14 +161,14 @@ function ConnectionRow({
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/40 text-muted-foreground transition-all hover:border-border hover:text-foreground"
+            className="flex h-7 w-7 items-center justify-center rounded border border-border bg-white text-[#6B7280] transition-all hover:border-[#D1D5DB] hover:text-foreground"
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
           {menuOpen && (
             <div
               className="absolute right-0 top-8 z-20 w-40 overflow-hidden rounded-xl border border-border/50 shadow-2xl"
-              style={{ background: "var(--surface-2)" }}
+              style={{ background: "#FFFFFF" }}
               onMouseLeave={() => setMenuOpen(false)}
             >
               <Link
@@ -297,8 +297,8 @@ export default function ConnectionsPage() {
       {!loading && (
         <div className="mb-6 grid grid-cols-3 gap-3 sm:grid-cols-3">
           {[
-            { label: "Connected", value: stats.connected, color: "#34D399" },
-            { label: "Failed",    value: stats.failed,    color: "#F87171" },
+            { label: "Connected", value: stats.connected, color: "#059669" },
+            { label: "Failed",    value: stats.failed,    color: "#DC2626" },
             { label: "Needs action", value: stats.needsAction, color: "#FCD34D" },
           ].map((s) => (
             <div

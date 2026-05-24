@@ -41,11 +41,11 @@ function timeAgo(ts: string | null) {
 }
 
 const STATUS_DOT: Record<string, string> = {
-  succeeded:            "bg-emerald-400",
-  failed:               "bg-red-400",
-  running:              "bg-sky-400 animate-pulse",
-  waiting_for_approval: "bg-amber-400",
-  queued:               "bg-slate-400",
+  succeeded:            "bg-emerald-500",
+  failed:               "bg-red-500",
+  running:              "bg-blue-500 animate-pulse",
+  waiting_for_approval: "bg-amber-500",
+  queued:               "bg-[#9CA3AF]",
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -61,8 +61,7 @@ function MetricCard({
 }) {
   return (
     <div
-      className="flex flex-col gap-3 rounded-xl border border-border/60 p-4"
-      style={{ background: "var(--surface-1)" }}
+      className="flex flex-col gap-3 rounded-lg border border-border bg-white p-4 shadow-card"
     >
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
@@ -165,21 +164,18 @@ export default function OverviewPage() {
       </div>
 
       {/* CTA strip */}
-      <div
-        className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 px-4 py-3"
-        style={{ background: "var(--surface-1)" }}
-      >
-        <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Quick actions:</span>
-        <Link href={"/workflows/new" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-white px-4 py-3">
+        <span className="text-[12px] font-medium text-[#374151]">Quick actions:</span>
+        <Link href={"/workflows/new" as Route} className="inline-flex h-7 items-center gap-1.5 rounded bg-[#111827] px-3 text-[12px] font-medium text-white hover:bg-[#1F2937] transition-colors">
           <Plus className="h-3 w-3" />
           New Workflow
         </Link>
-        <Link href={"/workflows/import" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors" style={{ background: "var(--surface-2)" }}>
+        <Link href={"/workflows/import" as Route} className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-white px-3 text-[12px] font-medium text-[#6B7280] hover:text-foreground hover:bg-[#F1F3F5] transition-colors">
           <Upload className="h-3 w-3" />
           Import Workflow
         </Link>
         {(summary?.waitingApprovals ?? 0) > 0 && (
-          <Link href={"/approvals" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-[12px] font-medium text-amber-400 hover:bg-amber-500/20 transition-colors">
+          <Link href={"/approvals" as Route} className="inline-flex h-7 items-center gap-1.5 rounded border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-700 hover:bg-amber-100 transition-colors">
             <ShieldCheck className="h-3 w-3" />
             {summary!.waitingApprovals} pending approval{summary!.waitingApprovals !== 1 ? "s" : ""}
           </Link>
@@ -192,26 +188,26 @@ export default function OverviewPage() {
           label="Active Workflows"
           value={summary?.activeWorkflows ?? "—"}
           sub={`${summary?.totalWorkflows ?? 0} total`}
-          accent="#38BDF8"
+          accent="blue"
           icon={GitBranch}
         />
         <MetricCard
           label="Running Now"
           value={summary?.runningRuns ?? 0}
-          accent={summary?.runningRuns ? "#10B981" : undefined}
+          accent={summary?.runningRuns ? "emerald" : undefined}
           icon={Play}
         />
         <MetricCard
           label="Failed (24h)"
           value={summary?.failedRuns24h ?? 0}
           sub={`${summary?.succeededRuns24h ?? 0} succeeded`}
-          accent={summary?.failedRuns24h ? "#F87171" : undefined}
+          accent={summary?.failedRuns24h ? "red" : undefined}
           icon={AlertTriangle}
         />
         <MetricCard
           label="Pending Approvals"
           value={summary?.waitingApprovals ?? 0}
-          accent={summary?.waitingApprovals ? "#FCD34D" : undefined}
+          accent={summary?.waitingApprovals ? "amber" : undefined}
           icon={ShieldCheck}
         />
       </div>
@@ -219,14 +215,14 @@ export default function OverviewPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Recent runs */}
         <div
-          className="lg:col-span-2 rounded-xl border border-border/60 overflow-hidden"
+          className="lg:col-span-2 rounded-xl border border-border bg-white overflow-hidden rounded-lg"
           style={{ background: "var(--surface-1)" }}
         >
-          <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Recent Runs</h2>
             <Link href={"/runs" as Route} className="text-[11px] text-primary hover:underline">View all →</Link>
           </div>
-          <div className="divide-y divide-border/30 p-1">
+          <div className="divide-y divide-border p-1">
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 px-3 py-2.5">
@@ -250,8 +246,7 @@ export default function OverviewPage() {
         <div className="space-y-4">
           {/* Token / cost */}
           <div
-            className="rounded-xl border border-border/60 px-4 py-4"
-            style={{ background: "var(--surface-1)" }}
+            className="rounded-lg border border-border bg-white px-4 py-4"
           >
             <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
               Usage (24h)
@@ -271,15 +266,14 @@ export default function OverviewPage() {
 
           {/* Worker health */}
           <div
-            className="rounded-xl border border-border/60 px-4 py-4"
-            style={{ background: "var(--surface-1)" }}
+            className="rounded-lg border border-border bg-white px-4 py-4"
           >
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Workers</h2>
               <Link href={"/workers" as Route} className="text-[11px] text-primary hover:underline">Manage →</Link>
             </div>
             <div className="flex items-center gap-2.5">
-              <span className={cn("h-2 w-2 rounded-full shrink-0", isConnected ? "bg-emerald-400" : "bg-red-500/60")} />
+              <span className={cn("h-2 w-2 rounded-full shrink-0", isConnected ? "bg-emerald-500" : "bg-red-400")} />
               <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
                 {isConnected
                   ? `${summary!.connectedWorkers} worker${summary!.connectedWorkers !== 1 ? "s" : ""} connected`
@@ -296,8 +290,7 @@ export default function OverviewPage() {
 
           {/* Platform quick links */}
           <div
-            className="rounded-xl border border-border/60 px-4 py-4"
-            style={{ background: "var(--surface-1)" }}
+            className="rounded-lg border border-border bg-white px-4 py-4"
           >
             <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Explore</h2>
             <div className="space-y-2">

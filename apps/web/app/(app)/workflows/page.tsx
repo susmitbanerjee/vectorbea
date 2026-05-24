@@ -45,10 +45,10 @@ function statusBadge(status: WorkflowStatus) {
 
 function modeBadge(mode: Workflow["creationMode"]) {
   const map: Record<Workflow["creationMode"], { label: string; cls: string }> = {
-    native:          { label: "Native",       cls: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
-    imported:        { label: "Imported",     cls: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
-    instrumented:    { label: "Instrumented", cls: "bg-teal-500/10 text-teal-400 border-teal-500/20" },
-    endpoint_only:   { label: "Endpoint",     cls: "bg-slate-500/10 text-slate-400 border-slate-500/20" },
+    native:          { label: "Native",       cls: "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]" },
+    imported:        { label: "Imported",     cls: "bg-violet-50 text-violet-700 border-violet-200" },
+    instrumented:    { label: "Instrumented", cls: "bg-teal-50 text-teal-700 border-teal-200" },
+    endpoint_only:   { label: "Endpoint",     cls: "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]" },
   };
   const { label, cls } = map[mode] ?? map.endpoint_only;
   return (
@@ -61,11 +61,11 @@ function modeBadge(mode: Workflow["creationMode"]) {
 function runStatusDot(status: Workflow["lastRunStatus"]) {
   if (!status) return <span className="text-[12px] text-muted-foreground/40">—</span>;
   const colors: Record<string, string> = {
-    succeeded: "bg-emerald-400",
-    failed: "bg-red-400",
-    running: "bg-sky-400 animate-pulse",
-    waiting_for_approval: "bg-amber-400",
-    queued: "bg-slate-400",
+    succeeded: "bg-emerald-500",
+    failed: "bg-red-500",
+    running: "bg-blue-500 animate-pulse",
+    waiting_for_approval: "bg-amber-500",
+    queued: "bg-[#9CA3AF]",
   };
   return (
     <span className="flex items-center gap-1.5">

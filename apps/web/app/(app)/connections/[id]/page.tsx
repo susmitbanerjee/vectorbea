@@ -44,30 +44,30 @@ import { getConnection, testConnection, updateConnection } from "@/lib/repositor
 // ─── Type metadata ────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<ConnectionType, { label: string; icon: React.ElementType; color: string }> = {
-  llm_provider:   { label: "LLM Provider",    icon: BrainCircuit, color: "#A78BFA" },
-  database:       { label: "Database",         icon: Database,     color: "#22D3EE" },
-  http_api:       { label: "HTTP / API",       icon: Globe,        color: "#38BDF8" },
-  saas:           { label: "SaaS",             icon: MessageSquare,color: "#34D399" },
-  mcp_server:     { label: "MCP Server",       icon: Cable,        color: "#FB923C" },
-  vector_store:   { label: "Vector Store",     icon: DatabaseZap,  color: "#F472B6" },
-  object_storage: { label: "Object Storage",   icon: HardDrive,    color: "#94A3B8" },
+  llm_provider:   { label: "LLM Provider",    icon: BrainCircuit, color: "#7C3AED" },
+  database:       { label: "Database",         icon: Database,     color: "#0369A1" },
+  http_api:       { label: "HTTP / API",       icon: Globe,        color: "#2563EB" },
+  saas:           { label: "SaaS",             icon: MessageSquare,color: "#059669" },
+  mcp_server:     { label: "MCP Server",       icon: Cable,        color: "#D97706" },
+  vector_store:   { label: "Vector Store",     icon: DatabaseZap,  color: "#DB2777" },
+  object_storage: { label: "Object Storage",   icon: HardDrive,    color: "#6B7280" },
 };
 
-const STATUS_META: Record<ConnectionStatus, { label: string; color: string; bg: string; icon: React.ElementType }> = {
-  connected:       { label: "Connected",       color: "#10B981", bg: "rgba(16,185,129,0.1)", icon: CheckCircle2 },
-  not_tested:      { label: "Not Tested",      color: "#94A3B8", bg: "rgba(148,163,184,0.1)", icon: Clock },
-  failed:          { label: "Failed",          color: "#EF4444", bg: "rgba(239,68,68,0.1)", icon: XCircle },
-  needs_whitelist: { label: "Needs Whitelist", color: "#F59E0B", bg: "rgba(245,158,11,0.1)", icon: AlertTriangle },
-  missing_secret:  { label: "Missing Secret",  color: "#F97316", bg: "rgba(249,115,22,0.1)", icon: AlertTriangle },
-  disabled:        { label: "Disabled",        color: "#64748B", bg: "rgba(100,116,139,0.1)", icon: XCircle },
+const STATUS_META: Record<ConnectionStatus, { label: string; color: string; bg: string; border: string; icon: React.ElementType }> = {
+  connected:       { label: "Connected",       color: "#059669", bg: "#ECFDF5", border: "#A7F3D0", icon: CheckCircle2 },
+  not_tested:      { label: "Not Tested",      color: "#6B7280", bg: "#F9FAFB", border: "#E5E7EB", icon: Clock },
+  failed:          { label: "Failed",          color: "#DC2626", bg: "#FEF2F2", border: "#FECACA", icon: XCircle },
+  needs_whitelist: { label: "Needs Whitelist", color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: AlertTriangle },
+  missing_secret:  { label: "Missing Secret",  color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: AlertTriangle },
+  disabled:        { label: "Disabled",        color: "#6B7280", bg: "#F9FAFB", border: "#E5E7EB", icon: XCircle },
 };
 
 const NETWORK_META: Record<NetworkStatus, { label: string; color: string; icon: React.ElementType }> = {
-  reachable:               { label: "Reachable",              color: "#10B981", icon: Wifi },
-  blocked:                 { label: "Blocked",                color: "#EF4444", icon: WifiOff },
-  unknown:                 { label: "Unknown",                color: "#94A3B8", icon: Network },
-  private_runner_required: { label: "Private Runner Required",color: "#F59E0B", icon: Server },
-  whitelist_required:      { label: "Whitelist Required",     color: "#F59E0B", icon: Shield },
+  reachable:               { label: "Reachable",              color: "#059669", icon: Wifi },
+  blocked:                 { label: "Blocked",                color: "#DC2626", icon: WifiOff },
+  unknown:                 { label: "Unknown",                color: "#6B7280", icon: Network },
+  private_runner_required: { label: "Private Runner Required",color: "#D97706", icon: Server },
+  whitelist_required:      { label: "Whitelist Required",     color: "#D97706", icon: Shield },
 };
 
 // ─── Tab definition ───────────────────────────────────────────────────────────
@@ -189,7 +189,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         {c.allowedPaths.length > 0 && (
           <InfoRow label="Allowed Paths">
             <div className="flex flex-wrap gap-1">
-              {c.allowedPaths.map(p => <span key={p} className="font-mono text-[10px]" style={{ color: "#38BDF8" }}>{p}</span>)}
+              {c.allowedPaths.map(p => <span key={p} className="font-mono text-[10px]" style={{ color: "#2563EB" }}>{p}</span>)}
             </div>
           </InfoRow>
         )}
@@ -225,7 +225,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         {c.allowedTools.length > 0 && (
           <InfoRow label="Allowed Tools">
             <div className="flex flex-wrap gap-1">
-              {c.allowedTools.map(t => <span key={t} className="font-mono text-[10px]" style={{ color: "#FB923C" }}>{t}</span>)}
+              {c.allowedTools.map(t => <span key={t} className="font-mono text-[10px]" style={{ color: "#D97706" }}>{t}</span>)}
             </div>
           </InfoRow>
         )}
@@ -630,9 +630,9 @@ function EventsTab({ connection }: { connection: Connection }) {
         <div className="divide-y divide-border/20">
           {events.map((ev, i) => (
             <div key={i} className="py-2.5 flex items-start gap-3">
-              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "#38BDF8" }} />
+              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "#2563EB" }} />
               <div className="flex-1 min-w-0">
-                <span className="font-mono text-[10px]" style={{ color: "#38BDF8" }}>{ev.type}</span>
+                <span className="font-mono text-[10px]" style={{ color: "#2563EB" }}>{ev.type}</span>
                 <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>{ev.detail}</p>
               </div>
               <span className="text-[10px] shrink-0" style={{ color: "var(--text-faint)" }}>{formatDate(ev.ts)}</span>
@@ -967,7 +967,7 @@ export default function ConnectionDetailPage() {
           <span className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>{connection.name}</span>
           <div
             className="flex items-center gap-1 rounded-full px-2 py-0.5"
-            style={{ background: statusMeta.bg, border: `1px solid ${statusMeta.color}30` }}
+            style={{ background: statusMeta.bg, border: `1px solid ${statusMeta.border}` }}
           >
             <StatusIcon className="h-3 w-3" style={{ color: statusMeta.color }} />
             <span className="text-[10px] font-medium" style={{ color: statusMeta.color }}>{statusMeta.label}</span>
@@ -991,7 +991,7 @@ export default function ConnectionDetailPage() {
           type="button"
           onClick={() => setTab("settings")}
           className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white/5"
-          style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
+          style={{ background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}
         >
           <Pencil className="h-3.5 w-3.5" />
           Edit
@@ -1014,10 +1014,10 @@ export default function ConnectionDetailPage() {
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2.5 text-[12px] font-medium transition-colors border-b-2 -mb-px",
                 active
-                  ? "border-[#38BDF8] text-[#38BDF8]"
+                  ? "border-[#2563EB] text-[#2563EB]"
                   : "border-transparent hover:text-foreground"
               )}
-              style={{ color: active ? "#38BDF8" : "var(--text-faint)" }}
+              style={{ color: active ? "#2563EB" : "var(--text-faint)" }}
             >
               <Icon className="h-3.5 w-3.5" />
               {t.label}

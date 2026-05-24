@@ -263,48 +263,35 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       style={{
         width: sidebarW,
         backgroundColor: "var(--bg-sidebar)",
-        borderRight: "1px solid rgba(148,163,184,0.08)",
+        borderRight: "1px solid var(--border-subtle)",
         transition: "width 200ms cubic-bezier(0.4,0,0.2,1)",
       }}
     >
       {/* ── Logo / header ─────────────────────────────────────────────────── */}
-      <div className={cn("pt-5 pb-4", collapsed ? "px-2" : "px-4")}>
+      <div className={cn("pt-4 pb-3", collapsed ? "px-2" : "px-4")}>
         {collapsed ? (
-          /* Collapsed: just the logo icon */
           <div className="flex flex-col items-center gap-3">
             <Link href="/dashboard" className="flex items-center justify-center">
-              <div
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-                style={{ background: "rgba(56,189,248,0.12)", border: "1px solid rgba(56,189,248,0.2)" }}
-              >
-                <Logo className="h-3.5 w-3.5" />
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#111827]">
+                <Logo className="h-3.5 w-3.5 text-white" />
               </div>
             </Link>
           </div>
         ) : (
-          /* Expanded: logo + workspace switcher */
           <>
-            <div className="mb-4 flex items-center justify-between px-0.5">
-              <Link href="/dashboard" className="flex items-center gap-2.5">
-                <div
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-                  style={{ background: "rgba(56,189,248,0.12)", border: "1px solid rgba(56,189,248,0.2)" }}
-                >
-                  <Logo className="h-3.5 w-3.5" />
+            <div className="mb-3 flex items-center justify-between px-0.5">
+              <Link href="/dashboard" className="flex items-center gap-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#111827]">
+                  <Logo className="h-3.5 w-3.5 text-white" />
                 </div>
-                <span className="text-[14px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+                <span className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)]">
                   Vectorbee
                 </span>
               </Link>
-              {/* Environment chip */}
-              <span
-                className="rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-widest"
-                style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.15)" }}
-              >
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
                 Dev
               </span>
             </div>
-            {/* Workspace card */}
             <WorkspaceSwitcher />
           </>
         )}
@@ -316,7 +303,6 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           {filterByRole(PRIMARY_NAV).map(item => navLink(item, PRIMARY_NAV))}
         </div>
 
-        {/* Settings group */}
         {!collapsed && (
           <div className="mt-4 space-y-0.5">
             {filterByRole(SETTINGS_NAV).map(item => navLink(item, SETTINGS_NAV))}
@@ -330,18 +316,19 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       </nav>
 
       {/* ── Bottom: collapse toggle + worker status + user ─────────────── */}
-      <div className={cn("pb-4 pt-2", collapsed ? "px-1.5" : "px-3")} style={{ borderTop: "1px solid rgba(148,163,184,0.08)" }}>
-
+      <div
+        className={cn("pb-3 pt-2", collapsed ? "px-1.5" : "px-3")}
+        style={{ borderTop: "1px solid var(--border-subtle)" }}
+      >
         {/* Collapse / expand toggle */}
         <button
           type="button"
           onClick={toggleCollapsed}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "mb-3 flex w-full items-center rounded-lg px-2 py-2 transition-colors hover:bg-sidebar-hover",
+            "mb-2 flex w-full items-center rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-sidebar-hover hover:text-foreground",
             collapsed ? "justify-center" : "gap-2",
           )}
-          style={{ color: "var(--text-faint)" }}
         >
           {collapsed
             ? <PanelLeftOpen className="h-4 w-4" />
@@ -351,49 +338,41 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
         {!collapsed && (
           <>
-            {/* Worker health pill */}
-            <div
-              className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2.5"
-              style={{ background: "var(--surface-2)", border: "1px solid rgba(148,163,184,0.1)" }}
-            >
-              <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", isConnected ? "live-dot" : "bg-red-500")} />
+            {/* Worker status — compact */}
+            <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-white px-3 py-2">
+              <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", isConnected ? "bg-emerald-500" : "bg-red-400")} />
               <div className="flex-1 min-w-0">
-                <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
+                <p className="text-[12px] font-medium text-foreground truncate">
                   {isConnected ? `${connectedWorkers} worker${connectedWorkers === 1 ? "" : "s"} connected` : "No workers"}
                 </p>
-                <p className="text-[10px] truncate" style={{ color: "var(--text-faint)" }}>
+                <p className="text-[10px] text-muted-foreground truncate">
                   {isConnected ? "Scheduler active" : "Start a worker process"}
                 </p>
               </div>
-              <Zap className="h-3 w-3 shrink-0" style={{ color: isConnected ? "#10B981" : "var(--text-faint)" }} />
             </div>
 
             {/* User row */}
             {user && (
-              <div className="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-sidebar-hover">
+              <div className="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-sidebar-hover">
                 {user.avatar_url ? (
                   <Image
                     src={user.avatar_url}
                     alt={user.full_name ?? user.email ?? "User"}
-                    width={26}
-                    height={26}
-                    className="h-[26px] w-[26px] shrink-0 rounded-full object-cover"
-                    style={{ border: "1px solid rgba(148,163,184,0.15)" }}
+                    width={24}
+                    height={24}
+                    className="h-6 w-6 shrink-0 rounded-full border border-border object-cover"
                   />
                 ) : (
-                  <div
-                    className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
-                    style={{ background: "rgba(56,189,248,0.12)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
-                  >
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#111827] text-[10px] font-semibold text-white">
                     {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12px] font-medium leading-none" style={{ color: "var(--text-primary)" }}>
+                  <p className="truncate text-[12px] font-medium text-foreground leading-none">
                     {user.full_name ?? user.email?.split("@")[0] ?? "User"}
                   </p>
                   {user.email && (
-                    <p className="mt-0.5 truncate text-[10px]" style={{ color: "var(--text-faint)" }}>
+                    <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
                       {user.email}
                     </p>
                   )}
@@ -402,26 +381,19 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   type="button"
                   onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
                   title="Sign out"
-                  className="shrink-0 rounded p-1 transition-colors hover:text-foreground"
-                  style={{ color: "var(--text-faint)" }}
+                  className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <LogOut className="h-3.5 w-3.5" />
                 </button>
               </div>
             )}
-
-            {/* Version */}
-            <p className="mt-2 px-2 text-[10px] font-mono" style={{ color: "var(--text-faint)" }}>
-              MVP Preview · v0.9.4
-            </p>
           </>
         )}
 
-        {/* Collapsed: just the worker dot */}
         {collapsed && (
           <div className="flex justify-center mt-1">
             <span
-              className={cn("h-2 w-2 rounded-full", isConnected ? "live-dot" : "bg-red-500")}
+              className={cn("h-2 w-2 rounded-full", isConnected ? "bg-emerald-500" : "bg-red-400")}
               title={isConnected ? `${connectedWorkers} worker(s) connected` : "No workers connected"}
             />
           </div>

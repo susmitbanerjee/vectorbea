@@ -33,28 +33,28 @@ const INDENT_PX  = 14;   // px – indent per hierarchy level inside a lane
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
 function eventColor(type: TimelineEventType, status: string): string {
-  if (status === "FAILED")  return "#EF4444";
-  if (status === "WAITING" || status === "PENDING") return "#F59E0B";
-  if (type.startsWith("RUN_"))      return "#38BDF8";
-  if (type.startsWith("AGENT_"))    return "#A78BFA";
-  if (type.startsWith("LLM_"))      return "#C084FC";
-  if (type.startsWith("TOOL_"))     return "#22D3EE";
-  if (type.startsWith("HTTP_"))     return "#6EE7B7";
-  if (type.startsWith("APPROVAL_")) return "#FCD34D";
-  if (type.startsWith("RETRY_"))    return "#FDA4AF";
-  if (type.startsWith("BUDGET_") || type.startsWith("POLICY_")) return "#94A3B8";
-  if (type.startsWith("ARTIFACT_")) return "#86EFAC";
-  return "#64748B";
+  if (status === "FAILED")  return "#DC2626";
+  if (status === "WAITING" || status === "PENDING") return "#D97706";
+  if (type.startsWith("RUN_"))      return "#2563EB";
+  if (type.startsWith("AGENT_"))    return "#7C3AED";
+  if (type.startsWith("LLM_"))      return "#9333EA";
+  if (type.startsWith("TOOL_"))     return "#0891B2";
+  if (type.startsWith("HTTP_"))     return "#059669";
+  if (type.startsWith("APPROVAL_")) return "#D97706";
+  if (type.startsWith("RETRY_"))    return "#E11D48";
+  if (type.startsWith("BUDGET_") || type.startsWith("POLICY_")) return "#6B7280";
+  if (type.startsWith("ARTIFACT_")) return "#059669";
+  return "#6B7280";
 }
 
 function laneColor(laneName: string): string {
-  if (laneName === "Run Lifecycle") return "#38BDF8";
-  if (laneName === "System")        return "#94A3B8";
-  // Cycle through agent colors
-  const agentColors = ["#A78BFA", "#22D3EE", "#6EE7B7", "#FCD34D", "#FB923C", "#F472B6"];
+  if (laneName === "Run Lifecycle") return "#2563EB";
+  if (laneName === "System")        return "#6B7280";
+  // Cycle through agent colors — muted, professional palette
+  const agentColors = ["#7C3AED", "#0891B2", "#059669", "#D97706", "#EA580C", "#DB2777"];
   let hash = 0;
   for (let i = 0; i < laneName.length; i++) hash = (hash * 31 + laneName.charCodeAt(i)) & 0xffff;
-  return agentColors[hash % agentColors.length] ?? "#A78BFA";
+  return agentColors[hash % agentColors.length] ?? "#7C3AED";
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -196,12 +196,12 @@ function SpanDetail({ event, onClose }: { event: RunTimelineEventUi; onClose: ()
           <KV label="Source"    value={event.source}    mono />
           <KV label="Timestamp" value={fmtTs(event.timestamp)} mono />
           {event.durationMs    != null  && <KV label="Duration"    value={fmtDur(event.durationMs)} mono />}
-          {event.agentName               && <KV label="Agent"       value={event.agentName}  mono color="#A78BFA" />}
-          {event.toolName                && <KV label="Tool"        value={event.toolName}   mono color="#22D3EE" />}
+          {event.agentName               && <KV label="Agent"       value={event.agentName}  mono color="#7C3AED" />}
+          {event.toolName                && <KV label="Tool"        value={event.toolName}   mono color="#0891B2" />}
           {event.modelName               && <KV label="Model"       value={event.modelName}  mono color="#C084FC" />}
           {event.tokensUsed    != null   && <KV label="Tokens"      value={event.tokensUsed.toLocaleString()} mono />}
           {event.estimatedCostUsd != null && <KV label="Cost"       value={`$${event.estimatedCostUsd.toFixed(6)}`} mono />}
-          {event.handoffTo               && <KV label="Handoff →"   value={event.handoffTo}  mono color="#A78BFA" />}
+          {event.handoffTo               && <KV label="Handoff →"   value={event.handoffTo}  mono color="#7C3AED" />}
           {event.artifactName            && <KV label="Artifact"    value={event.artifactName} mono color="#86EFAC" />}
           {event.actorName               && <KV label="Actor"       value={event.actorName}  mono />}
           {event.summary                 && <KV label="Summary"     value={event.summary} />}
@@ -481,7 +481,7 @@ export function RunExecutionTimeline({ events }: { events: RunTimelineEventUi[] 
         <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
           Timeline
         </span>
-        <span className="ml-1 rounded px-1.5 py-0.5 font-mono text-[10px]" style={{ background: "rgba(56,189,248,0.10)", color: "#38BDF8" }}>
+        <span className="ml-1 rounded px-1.5 py-0.5 font-mono text-[10px]" style={{ background: "#EFF6FF", color: "#1D4ED8" }}>
           {zoom === 1 ? "fit" : `${zoom}×`}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -558,10 +558,10 @@ export function RunExecutionTimeline({ events }: { events: RunTimelineEventUi[] 
       {/* ── Legend ─────────────────────────────────────────────────────────── */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1">
         {[
-          { label: "Run lifecycle", color: "#38BDF8" },
-          { label: "Agent",         color: "#A78BFA" },
+          { label: "Run lifecycle", color: "#2563EB" },
+          { label: "Agent",         color: "#7C3AED" },
           { label: "LLM",           color: "#C084FC" },
-          { label: "Tool",          color: "#22D3EE" },
+          { label: "Tool",          color: "#0891B2" },
           { label: "HTTP",          color: "#6EE7B7" },
           { label: "Approval",      color: "#FCD34D" },
           { label: "Retry",         color: "#FDA4AF" },

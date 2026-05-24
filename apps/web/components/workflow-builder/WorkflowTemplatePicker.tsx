@@ -67,12 +67,12 @@ function buildCards(templates: WorkflowTemplate[]): TemplateCard[] {
   const find = (id: string) => templates.find(t => t.id === id);
 
   const iconMap: Record<string, { icon: React.ElementType; iconColor: string; bgColor: string; tag: string; tagColor: string }> = {
-    "customer-renewal":  { icon: GitBranch, iconColor: "#A78BFA", bgColor: "rgba(167,139,250,0.08)", tag: "Complex",   tagColor: "#A78BFA" },
+    "customer-renewal":  { icon: GitBranch, iconColor: "#7C3AED", bgColor: "#F5F3FF", tag: "Complex",   tagColor: "#7C3AED" },
     "content-moderation":{ icon: ShieldCheck, iconColor: "#FCD34D", bgColor: "rgba(252,211,77,0.07)", tag: "Approval",  tagColor: "#FCD34D" },
-    "data-enrichment":   { icon: Search,    iconColor: "#22D3EE", bgColor: "rgba(34,211,238,0.07)",  tag: "Data",      tagColor: "#22D3EE" },
-    "research-agent":    { icon: Globe,     iconColor: "#6EE7B7", bgColor: "rgba(110,231,183,0.07)", tag: "Research",  tagColor: "#6EE7B7" },
-    "customer-support":  { icon: Bot,       iconColor: "#38BDF8", bgColor: "rgba(56,189,248,0.07)",  tag: "Support",   tagColor: "#38BDF8" },
-    "lead-scoring":      { icon: Zap,       iconColor: "#FB923C", bgColor: "rgba(251,146,60,0.07)",  tag: "Sales",     tagColor: "#FB923C" },
+    "data-enrichment":   { icon: Search,    iconColor: "#0891B2", bgColor: "#ECFEFF",  tag: "Data",      tagColor: "#0891B2" },
+    "research-agent":    { icon: Globe,     iconColor: "#059669", bgColor: "#ECFDF5", tag: "Research",  tagColor: "#059669" },
+    "customer-support":  { icon: Bot,       iconColor: "#2563EB", bgColor: "#EFF6FF",  tag: "Support",   tagColor: "#2563EB" },
+    "lead-scoring":      { icon: Zap,       iconColor: "#D97706", bgColor: "#FFFBEB",  tag: "Sales",     tagColor: "#D97706" },
   };
 
   const cards: TemplateCard[] = [];
@@ -115,12 +115,12 @@ export function WorkflowTemplatePicker({ templates, workflowName, onSelect }: Wo
       <div className="mb-8 text-center">
         <div
           className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl"
-          style={{ background: "rgba(56,189,248,0.10)", border: "1px solid rgba(56,189,248,0.18)" }}
+          style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
         >
-          <GitBranch className="h-5 w-5" style={{ color: "#38BDF8" }} />
+          <GitBranch className="h-5 w-5" style={{ color: "#2563EB" }} />
         </div>
         <h2 className="text-[18px] font-semibold" style={{ color: "var(--text-primary)" }}>
-          Start building <span style={{ color: "#38BDF8" }}>{workflowName}</span>
+          Start building <span style={{ color: "#2563EB" }}>{workflowName}</span>
         </h2>
         <p className="mt-1.5 text-[13px]" style={{ color: "var(--text-faint)" }}>
           Pick a template to jump-start your workflow, or start with a blank canvas.
@@ -139,8 +139,8 @@ export function WorkflowTemplatePicker({ templates, workflowName, onSelect }: Wo
             border: "1px dashed rgba(148,163,184,0.20)",
           }}
           onMouseEnter={e => {
-            (e.currentTarget as HTMLElement).style.borderColor = "rgba(56,189,248,0.40)";
-            (e.currentTarget as HTMLElement).style.background = "rgba(56,189,248,0.04)";
+            (e.currentTarget as HTMLElement).style.borderColor = "#93C5FD";
+            (e.currentTarget as HTMLElement).style.background = "#F5F9FF";
           }}
           onMouseLeave={e => {
             (e.currentTarget as HTMLElement).style.borderColor = "rgba(148,163,184,0.20)";
