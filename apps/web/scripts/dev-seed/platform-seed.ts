@@ -1,9 +1,17 @@
 /**
- * Vectorbee Platform Seed Data
+ * Vectorbee Platform Seed Data — DEVELOPMENT ONLY
  *
- * Demo seed: Customer Renewal Intelligence workflow with agents, tools, and 3 run scenarios.
- * Loaded through the repository layer — never imported directly into UI pages.
+ * This file is a development seed script. It must NEVER be imported by
+ * application runtime code. It lives in scripts/dev-seed/ specifically to
+ * keep it out of the lib/ import path.
+ *
+ * Usage: npm run db:seed:dev
+ *        (never auto-runs; never runs in production)
  */
+
+if (process.env.NODE_ENV === "production") {
+  throw new Error("Seed data must not be loaded in production. NODE_ENV=production detected.");
+}
 
 import type {
   Agent,

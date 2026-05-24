@@ -56,9 +56,10 @@ import {
   updateWorkflow,
 } from "@/lib/repository";
 import { validateWorkflowGraph } from "@/lib/workflows/workflow-validation";
-import { WORKFLOW_TEMPLATES, CUSTOMER_RENEWAL_GRAPH } from "@/lib/workflows/workflow-templates";
+import { WORKFLOW_TEMPLATES } from "@/lib/workflows/workflow-templates";
 import { NodePalette } from "@/components/workflow-builder/NodePalette";
 import { WorkflowInspector } from "@/components/workflow-builder/WorkflowInspector";
+import { WorkflowTemplatePicker } from "@/components/workflow-builder/WorkflowTemplatePicker";
 import { nodeTypes } from "@/components/workflow-builder/nodes";
 import { edgeTypes } from "@/components/workflow-builder/edges/WorkflowEdge";
 import type { WorkflowTemplate } from "@/types/workflow-graph";
@@ -166,6 +167,7 @@ export default function WorkflowBuilderPage() {
   const [testRunning, setTestRunning] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
 
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<WFNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<WFEdgeData>>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -184,12 +186,15 @@ export default function WorkflowBuilderPage() {
       setTools(tl);
       if (wf) {
         setWorkflow(wf);
-        // Try to load saved graph, fall back to Customer Renewal Intelligence template
         const savedGraph = await getWorkflowGraph(wf.id);
-        const graph = savedGraph ?? CUSTOMER_RENEWAL_GRAPH;
-        const { nodes: n, edges: e } = graphToFlow(graph);
-        setNodes(n);
-        setEdges(e);
+        if (savedGraph) {
+          const { nodes: n, edges: e } = graphToFlow(savedGraph);
+          setNodes(n);
+          setEdges(e);
+        } else {
+          // Brand-new workflow — show the template picker overlay
+          setShowTemplatePicker(true);
+        }
       }
       setLoading(false);
     }
@@ -257,6 +262,19 @@ export default function WorkflowBuilderPage() {
     setSelectedNodeId(null);
     setUnsaved(true);
     toast.success(`Template "${template.name}" applied`);
+  }
+
+  // ── Template picker selection ────────────────────────────────────────────────
+  function handlePickerSelect(template: WorkflowTemplate) {
+    setShowTemplatePicker(false);
+    const { nodes: n, edges: e } = graphToFlow(template.graph);
+    setNodes(n);
+    setEdges(e);
+    setSelectedNodeId(null);
+    setUnsaved(true);
+    if (template.id !== "blank") {
+      toast.success(`Template "${template.name}" applied`);
+    }
   }
 
   // ── Node selection ──────────────────────────────────────────────────────────
@@ -478,6 +496,17 @@ export default function WorkflowBuilderPage() {
 
         {/* Center: React Flow Canvas */}
         <div ref={reactFlowWrapper} className="relative flex-1 overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}>
+          {/* Template picker overlay */}
+          {showTemplatePicker && (
+            <div className="absolute inset-0 z-20 overflow-y-auto" style={{ background: "hsl(220,13%,7%)" }}>
+              <WorkflowTemplatePicker
+                templates={WORKFLOW_TEMPLATES}
+                workflowName={workflow.name}
+                onSelect={handlePickerSelect}
+              />
+            </div>
+          )}
+
           <ReactFlow
             nodes={nodes}
             edges={edges}

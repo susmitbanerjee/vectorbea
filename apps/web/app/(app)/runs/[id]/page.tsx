@@ -51,7 +51,7 @@ export default function RunDetailPage() {
         setModel(mapRunToUiModel(seedRun, seedEvents));
         setIsLocalRun(true);
         const ckpts = await listRunCheckpoints(id);
-        setCheckpoints(ckpts);
+        setCheckpoints(ckpts as RunCheckpoint[]);
         return;
       }
       // 2. Fall back to live API
@@ -83,8 +83,7 @@ export default function RunDetailPage() {
   async function handleApprove(approvalId: string) {
     setActing(true);
     try {
-      const ok = await approveRunGate(id, approvalId);
-      if (!ok) throw new Error("Approval failed");
+      await approveRunGate(id, approvalId);
       toast.success("Approved — run resumed.");
       await load();
     } catch {
@@ -97,8 +96,7 @@ export default function RunDetailPage() {
   async function handleReject(approvalId: string) {
     setActing(true);
     try {
-      const ok = await rejectRunGate(id, approvalId);
-      if (!ok) throw new Error("Rejection failed");
+      await rejectRunGate(id, approvalId);
       toast.success("Rejected — run failed.");
       await load();
     } catch {
@@ -117,8 +115,7 @@ export default function RunDetailPage() {
 
     if (isLocalRun) {
       try {
-        const ok = await retryRunFailedStep(id);
-        if (!ok) throw new Error("Retry failed");
+        await retryRunFailedStep(id, "");
         toast.success("Retry queued.");
         await load();
       } catch {

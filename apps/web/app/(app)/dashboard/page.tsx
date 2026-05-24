@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Upload,
   Wrench,
-  Zap,
 } from "lucide-react";
 
 import { getPlatformSummary, getRuns } from "@/lib/repository";
@@ -126,7 +125,7 @@ export default function OverviewPage() {
         getPlatformSummary(),
         getRuns({ pageSize: 8 }),
       ]);
-      setSummary(s);
+      setSummary(s as unknown as Summary);
       setRecentRuns(runsResult.items);
     } catch {
       // silently fallback
@@ -175,10 +174,6 @@ export default function OverviewPage() {
         <Link href={"/workflows/import" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors" style={{ background: "var(--surface-2)" }}>
           <Upload className="h-3 w-3" />
           Import Workflow
-        </Link>
-        <Link href={"/agent-runs/mock" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors" style={{ background: "var(--surface-2)" }}>
-          <Zap className="h-3 w-3" />
-          Demo Run
         </Link>
         {(summary?.waitingApprovals ?? 0) > 0 && (
           <Link href={"/approvals" as Route} className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-[12px] font-medium text-amber-400 hover:bg-amber-500/20 transition-colors">
@@ -240,7 +235,7 @@ export default function OverviewPage() {
             ) : recentRuns.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-10 text-center">
                 <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>No runs yet</p>
-                <Link href={"/agent-runs/mock" as Route} className="text-[11px] text-primary hover:underline">View demo runs →</Link>
+                <Link href={"/workflows/new" as Route} className="text-[11px] text-primary hover:underline">Create your first workflow →</Link>
               </div>
             ) : (
               recentRuns.map((run) => <RunRow key={run.id} run={run} />)

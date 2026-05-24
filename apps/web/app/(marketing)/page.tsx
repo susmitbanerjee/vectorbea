@@ -143,7 +143,7 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-2">
             <Link
-              href="/agent-runs/mock"
+              href="/runs"
               className="rounded-lg px-3 py-2 text-[13px] transition-colors hover:text-white"
               style={{ color: S.t3 }}
             >
@@ -214,12 +214,12 @@ export default function LandingPage() {
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                   <Link
-                    href="/agent-runs/mock"
+                    href="/runs"
                     className="inline-flex h-11 items-center gap-2 rounded-xl px-6 text-[14px] font-medium transition-colors hover:text-white"
                     style={{ background: S.s2, border: `1px solid ${S.borderMd}`, color: S.t2 }}
                   >
                     <Play className="h-4 w-4" />
-                    View demo run
+                    View runs
                   </Link>
                 </div>
 
@@ -602,7 +602,7 @@ export default function LandingPage() {
 
             <div className="mt-6 text-center">
               <Link
-                href="/agent-runs/mock"
+                href="/runs"
                 className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-medium transition-colors hover:text-white"
                 style={{ background: S.s2, border: `1px solid ${S.borderMd}`, color: S.t2 }}
               >
@@ -709,7 +709,7 @@ export default function LandingPage() {
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                   <Link
-                    href="/agent-runs/mock"
+                    href="/runs"
                     className="inline-flex h-11 items-center gap-2 rounded-xl px-7 text-[14px] font-medium transition-colors hover:text-white"
                     style={{ background: "transparent", border: `1px solid ${S.borderMd}`, color: S.t2 }}
                   >
@@ -752,7 +752,7 @@ export default function LandingPage() {
               ["Runs",       "/agent-runs"],
               ["Approvals",  "/approvals"],
               ["Workers",    "/workers"],
-              ["Demo run",   "/agent-runs/mock"],
+              ["View runs",  "/runs"],
             ].map(([label, href]) => (
               <Link key={label} href={href as never} className="transition-colors hover:text-white">
                 {label}

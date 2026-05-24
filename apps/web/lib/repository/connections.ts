@@ -60,8 +60,12 @@ export async function getConnections(filters?: {
 }
 
 export async function getConnection(id: string): Promise<Connection | null> {
-  const items = await getConnections();
-  return items.find((c) => c.id === id) ?? null;
+  const workspaceId = getActiveWorkspaceId();
+  try {
+    return await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId));
+  } catch {
+    return null;
+  }
 }
 
 export async function getConnectionsByType(type: ConnectionType): Promise<Connection[]> {
@@ -86,15 +90,19 @@ export async function createConnection(payload: Partial<Connection>): Promise<Co
 
 export async function updateConnection(id: string, payload: Partial<Connection>): Promise<Connection | null> {
   const workspaceId = getActiveWorkspaceId();
-  return api<Connection>(withWorkspace(`/api/connections?id=${encodeURIComponent(id)}`, workspaceId), {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
+  try {
+    return await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId), {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function deleteConnection(id: string): Promise<boolean> {
   const workspaceId = getActiveWorkspaceId();
-  await api<void>(withWorkspace(`/api/connections?id=${encodeURIComponent(id)}`, workspaceId), {
+  await api<void>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId), {
     method: "DELETE",
   });
   return true;
@@ -102,17 +110,8 @@ export async function deleteConnection(id: string): Promise<boolean> {
 
 export async function testConnection(id: string): Promise<Connection | null> {
   const workspaceId = getActiveWorkspaceId();
-  const latencyMs = Math.round(80 + Math.random() * 300);
-  const pass = Math.random() > 0.1;
-
-  return api<Connection>(withWorkspace(`/api/connections?id=${encodeURIComponent(id)}`, workspaceId), {
-    method: "PATCH",
-    body: JSON.stringify({
-      status: pass ? "connected" : "failed",
-      lastTestStatus: pass ? "ok" : "failed",
-      lastTestLatencyMs: pass ? latencyMs : null,
-      lastTestError: pass ? null : "Connection refused or credentials invalid",
-      lastTestedAt: new Date().toISOString(),
-    }),
-  });
+  return api<Connection>(
+    withWorkspace(`/api/connections/${encodeURIComponent(id)}/test`, workspaceId),
+    { method: "POST" },
+  );
 }

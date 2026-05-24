@@ -76,7 +76,7 @@ export default function ToolDetailPage() {
       try {
         const [t, c] = await Promise.all([getTool(id), getCallsForTool(id)]);
         setTool(t);
-        setCalls(c);
+        setCalls(c as RunEvent[]);
       } catch {
         toast.error("Failed to load tool.");
       } finally {

@@ -1,6 +1,13 @@
+import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma";
 import { db } from "@/server/db";
+import { storeSecret, deleteSecret } from "@/lib/server/secret-service";
+
+function maskSecret(s: string): string {
+  if (s.length <= 8) return "••••••••";
+  return s.slice(0, 4) + "••••••••" + s.slice(-4);
+}
 
 const ALLOWED_TYPES = new Set([
   "llm_provider",
@@ -144,8 +151,7 @@ export async function POST(request: NextRequest) {
       provider,
       environment,
       authType,
-      secretRef,
-      secretMasked,
+      plaintextSecret, // accepted server-side only; never stored raw
       config,
       networkPolicy,
     } = body;
@@ -171,10 +177,6 @@ export async function POST(request: NextRequest) {
     if (!normalizedProvider) {
       return NextResponse.json({ error: "provider must be non-empty" }, { status: 400 });
     }
-    if (secretMasked && String(secretMasked).length > 120) {
-      return NextResponse.json({ error: "secretMasked too long" }, { status: 400 });
-    }
-
     const ts = Date.now().toString(36);
     const finalSlug = `${createSlug(String(name))}-${ts}`;
     const sanitizedConfig = sanitizeConfig(config);
@@ -182,6 +184,7 @@ export async function POST(request: NextRequest) {
       ? networkPolicy
       : { requireWhitelist: false, privateRunnerRequired: false, networkStatus: "unknown" };
 
+    // Insert the connection first to get its ID
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
       INSERT INTO connections (
         workspace_id, name, slug, type, provider, environment, status, auth_type,
@@ -190,7 +193,7 @@ export async function POST(request: NextRequest) {
       ) VALUES (
         ${workspaceId}, ${String(name)}, ${finalSlug}, ${normalizedType}, ${normalizedProvider},
         ${normalizedEnvironment}, 'not_tested', ${normalizedAuthType},
-        ${secretRef ? String(secretRef) : null}, ${secretMasked ? String(secretMasked) : null},
+        null, null,
         ${JSON.stringify(sanitizedConfig)}::jsonb, ${JSON.stringify(safeNetworkPolicy)}::jsonb,
         ARRAY[]::text[], ARRAY[]::text[], now(), now()
       )
@@ -198,6 +201,21 @@ export async function POST(request: NextRequest) {
     `);
 
     const row = rows[0];
+    if (!row) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+
+    // If a plaintext secret was provided, encrypt and store it server-side
+    if (plaintextSecret && typeof plaintextSecret === "string" && plaintextSecret.trim()) {
+      const connectionId = String(row.id);
+      const secretRef = await storeSecret(workspaceId, connectionId, plaintextSecret.trim());
+      const secretMasked = maskSecret(plaintextSecret.trim());
+      const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+        UPDATE connections SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
+        WHERE id = ${connectionId}::uuid AND workspace_id = ${workspaceId}
+        RETURNING *
+      `);
+      return NextResponse.json(dbToConnection(updated[0] ?? row), { status: 201 });
+    }
+
     return NextResponse.json(dbToConnection(row), { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
@@ -257,6 +275,9 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
+    // Clean up secret before deleting connection
+    await deleteSecret(id).catch(() => {/* no-op if no secret */});
+
     await db.$executeRaw(Prisma.sql`
       DELETE FROM connections
       WHERE workspace_id = ${workspaceId} AND id = ${id}

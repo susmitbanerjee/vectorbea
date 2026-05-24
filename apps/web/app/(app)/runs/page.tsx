@@ -14,7 +14,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -137,13 +136,6 @@ export default function RunsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href={"/agent-runs/mock" as Route}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Zap className="h-3.5 w-3.5" />
-            View demos
-          </Link>
-          <Link
             href={"/workflows/new" as Route}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-all"
           >
@@ -205,11 +197,11 @@ export default function RunsPage() {
             </p>
             {!statusFilter && !search && (
               <Link
-                href={"/agent-runs/mock" as Route}
-                className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3.5 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                href={"/workflows/new" as Route}
+                className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
               >
-                <Zap className="h-3.5 w-3.5" />
-                View demo runs
+                <Plus className="h-3.5 w-3.5" />
+                Create workflow
               </Link>
             )}
           </div>
