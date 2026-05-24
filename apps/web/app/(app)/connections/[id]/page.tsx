@@ -36,7 +36,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Connection, ConnectionType, NetworkStatus, ConnectionStatus } from "@/types/connections";
 import { VECTORBEE_OUTBOUND_IPS } from "@/types/connections";
-import { getConnection, testConnection } from "@/lib/repository";
+import { getConnection, testConnection, updateConnection } from "@/lib/repository";
 
 // ─── Type metadata ────────────────────────────────────────────────────────────
 
@@ -332,7 +332,34 @@ function OverviewTab({ connection }: { connection: Connection }) {
   );
 }
 
-function CredentialsTab({ connection }: { connection: Connection }) {
+function CredentialsTab({ connection, onUpdated }: { connection: Connection; onUpdated: (c: Connection) => void }) {
+  const [newSecret, setNewSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+  const hasSecret = !!connection.secretRef;
+
+  async function handleSaveSecret() {
+    if (!newSecret.trim()) return;
+    setSaving(true);
+    try {
+      const updated = await updateConnection(connection.id, {
+        // plaintextSecret is a server-only field consumed by the PATCH handler
+        // to encrypt and store; it is never persisted raw or returned.
+        ...({ plaintextSecret: newSecret.trim() } as Parameters<typeof updateConnection>[1]),
+      });
+      if (updated) {
+        onUpdated(updated);
+        setNewSecret("");
+        toast.success("Secret saved and encrypted successfully.");
+      } else {
+        toast.error("Failed to save secret — connection not found.");
+      }
+    } catch {
+      toast.error("Failed to save secret.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Security note */}
@@ -341,16 +368,17 @@ function CredentialsTab({ connection }: { connection: Connection }) {
         <div>
           <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Secrets are stored securely</p>
           <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
-            Raw credentials are never displayed after saving. Secrets are stored through your configured secrets backend (Vault, AWS Secrets Manager, or platform-managed). Only masked values are shown here.
+            Raw credentials are never displayed after saving. Secrets are stored through the platform secrets backend (AES-256-GCM encrypted). Only masked values are shown here.
           </p>
         </div>
       </div>
 
+      {/* Current state */}
       <SectionCard title="Secret Reference">
         <InfoRow label="Secret Ref">
           {connection.secretRef
             ? <><span className="font-mono text-[11px]">{connection.secretRef}</span><CopyButton value={connection.secretRef} /></>
-            : <span style={{ color: "var(--text-faint)" }}>None</span>
+            : <span style={{ color: "var(--text-faint)" }}>None — set a secret below</span>
           }
         </InfoRow>
         <InfoRow label="Masked Value">
@@ -362,10 +390,34 @@ function CredentialsTab({ connection }: { connection: Connection }) {
         <InfoRow label="Auth Type">{connection.authType}</InfoRow>
       </SectionCard>
 
-      {/* Rotate instructions */}
-      <SectionCard title="Rotating Credentials">
-        <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>
-          To rotate this credential: update the secret value in your secrets backend under the reference name above, then re-test the connection. The connection ID and all agent/tool references remain unchanged.
+      {/* Set / rotate form */}
+      <SectionCard title={hasSecret ? "Rotate Secret" : "Set Secret"}>
+        <p className="mb-3 text-[11px]" style={{ color: "var(--text-faint)" }}>
+          {hasSecret
+            ? "Enter a new value to re-encrypt and replace the stored secret. The connection ID and all agent/tool references remain unchanged."
+            : "This connection has no secret yet. Enter the API key or credential to encrypt and store it."}
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={newSecret}
+            onChange={(e) => setNewSecret(e.target.value)}
+            placeholder={connection.authType === "connection_string" ? "postgres://user:pass@host:5432/db" : "sk-… or paste your API key"}
+            className="flex-1 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30"
+            onKeyDown={(e) => { if (e.key === "Enter") void handleSaveSecret(); }}
+          />
+          <button
+            type="button"
+            onClick={() => void handleSaveSecret()}
+            disabled={saving || !newSecret.trim()}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground disabled:opacity-40 transition-opacity"
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            {hasSecret ? "Rotate" : "Save Secret"}
+          </button>
+        </div>
+        <p className="mt-2 text-[10px]" style={{ color: "var(--text-faint)" }}>
+          The value is encrypted immediately on submission and never stored in plaintext. After saving, run a connection test to verify.
         </p>
       </SectionCard>
     </div>
@@ -727,7 +779,7 @@ export default function ConnectionDetailPage() {
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto max-w-3xl">
           {tab === "overview"     && <OverviewTab connection={connection} />}
-          {tab === "credentials"  && <CredentialsTab connection={connection} />}
+          {tab === "credentials"  && <CredentialsTab connection={connection} onUpdated={setConnection} />}
           {tab === "network"      && <NetworkTab connection={connection} />}
           {tab === "usage"        && <UsageTab connection={connection} />}
           {tab === "test_history" && <TestHistoryTab connection={connection} />}

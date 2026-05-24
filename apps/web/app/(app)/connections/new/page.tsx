@@ -527,9 +527,16 @@ export default function NewConnectionPage() {
       const targetHost = type === "database" ? (host || connString) : (type === "http_api" ? httpBaseUrl : type === "mcp_server" ? mcpUrl : "");
       const isPrivate = isPrivateHost(targetHost);
 
-      // Build masked secret — covers all secret fields
-      const anySecret = connString || apiKey || saasToken || secret || password || mcpToken;
-      const maskedSecret = anySecret ? "••••" + anySecret.slice(-4) : null;
+      // Resolve the plaintext secret for this connection type.
+      // Sent to the server as plaintextSecret — never stored raw; the API encrypts
+      // it server-side and returns only a masked display value + opaque secretRef.
+      const plaintextSecret =
+        type === "llm_provider" ? apiKey :
+        type === "database"     ? (connString || (password ? `postgres://${username}:${password}@${host}:${port}/${database}` : "")) :
+        type === "http_api"     ? (authType !== "none" ? secret : "") :
+        type === "saas"         ? saasToken :
+        type === "mcp_server"   ? mcpToken :
+        "";
 
       const conn = await createConnection({
         name: name.trim(),
@@ -537,15 +544,16 @@ export default function NewConnectionPage() {
         provider,
         environment: environment as "development" | "staging" | "production",
         authType: connAuthType,
-        secretRef: name.trim().toLowerCase().replace(/\s+/g, "-") + "-secret",
-        secretMasked: maskedSecret,
         config,
         networkPolicy: {
-          requireWhitelist: isPrivate,           // only flag private/internal hosts
+          requireWhitelist: isPrivate,
           privateRunnerRequired: isPrivate,
           networkStatus: isPrivate ? "private_runner_required" : "unknown",
         },
-      });
+        // plaintextSecret is a server-only field: API encrypts it and returns
+        // only secretRef + secretMasked. Never persisted raw.
+        ...(plaintextSecret.trim() ? { plaintextSecret: plaintextSecret.trim() } : {}),
+      } as Parameters<typeof createConnection>[0]);
 
       setSavedConnId(conn.id);
 
