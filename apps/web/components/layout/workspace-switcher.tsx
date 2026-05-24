@@ -137,10 +137,10 @@ export function WorkspaceSwitcher() {
               <Layers3 className="h-3.5 w-3.5" style={{ color: "#2563EB" }} />
             </div>
             <div className="min-w-0">
-              <p className="truncate" style={{ fontSize: 13.5, fontWeight: 650, color: "#111827", lineHeight: 1.25 }}>
+              <p className="truncate" style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.25 }}>
                 {activeWorkspace?.name ?? "Vectorbee Demo"}
               </p>
-              <p style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#9CA3AF", marginTop: 1 }}>
+              <p style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.065em", color: "#6B7280", marginTop: 2 }}>
                 {activeWorkspace?.organizationName ?? "Development"}
               </p>
             </div>

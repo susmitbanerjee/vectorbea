@@ -125,7 +125,7 @@ export default function RunsPage() {
   ];
 
   return (
-    <div className="p-7 lg:p-8 max-w-[1320px]">
+    <div className="page-shell">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

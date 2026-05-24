@@ -100,7 +100,7 @@ export default function WorkflowDetailPage() {
   }
 
   return (
-    <div className="p-7 lg:p-8 max-w-[1320px]">
+    <div className="page-shell">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
         <Link href={"/workflows" as never} className="flex items-center gap-1 hover:text-foreground transition-colors">

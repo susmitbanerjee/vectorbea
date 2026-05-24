@@ -265,7 +265,7 @@ export default function ConnectionsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
+    <div className="page-shell">
       {/* Header */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>

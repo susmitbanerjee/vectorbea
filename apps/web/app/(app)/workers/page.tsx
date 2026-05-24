@@ -156,7 +156,7 @@ export default function WorkersPage() {
   }
 
   return (
-    <div className="p-7 lg:p-8 max-w-[1320px]" style={{ color: "var(--text-primary)" }}>
+    <div className="page-shell" style={{ color: "var(--text-primary)" }}>
 
       {/* ── Page header ───────────────────────────────────────────────── */}
       <div className="mb-8 flex items-start justify-between gap-4">

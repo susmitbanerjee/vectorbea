@@ -35,7 +35,7 @@ import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const COLLAPSED_KEY = "vectorbee.sidebarCollapsed";
-const SIDEBAR_W_EXPANDED = 264;
+const SIDEBAR_W_EXPANDED = 272;
 const SIDEBAR_W_COLLAPSED = 64;
 
 // ─── Route helpers ────────────────────────────────────────────────────────────
@@ -246,7 +246,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             : "px-[10px]",
           active
             ? "nav-active"
-            : "text-[#4B5563] hover:bg-[#ECEFF3] hover:text-[#111827]",
+            : "text-[#374151] hover:bg-[#ECEFF3] hover:text-[#111827]",
           loading && "opacity-60",
         )}
         style={item.isSubItem ? { fontSize: 13 } : { height: 38, fontSize: 14 }}
@@ -265,7 +265,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             item.isSubItem ? "left-7" : "left-[10px]",
           )} />
         )}
-        <span className="flex-1 truncate" style={{ fontWeight: active ? 700 : item.isSubItem ? 500 : 520 }}>
+        <span className="flex-1 truncate" style={{ fontWeight: active ? 700 : item.isSubItem ? 500 : 550 }}>
           {item.label}
         </span>
         {item.badge && (
