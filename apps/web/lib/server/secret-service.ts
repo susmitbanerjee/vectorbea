@@ -41,7 +41,7 @@ function getEncryptionKey(): Buffer {
       "Using a fixed fallback key — set this env var in production.",
     );
     // Exactly 32 ASCII bytes — safe as a fallback, not for production.
-    return Buffer.from("dev-only-key-change-this-in-prod!");
+    return Buffer.from("dev-only-key-change-this-in-prod");
   }
 
   // Accept 64-char hex or base64-encoded 32-byte value
