@@ -203,17 +203,33 @@ export async function POST(request: NextRequest) {
     const row = rows[0];
     if (!row) return NextResponse.json({ error: "Insert failed" }, { status: 500 });
 
-    // If a plaintext secret was provided, encrypt and store it server-side
+    // If a plaintext secret was provided, encrypt and store it server-side.
+    // This is wrapped in its own try/catch so that a missing secrets table or
+    // unset SECRET_ENCRYPTION_KEY does not roll back the whole connection row.
     if (plaintextSecret && typeof plaintextSecret === "string" && plaintextSecret.trim()) {
       const connectionId = String(row.id);
-      const secretRef = await storeSecret(workspaceId, connectionId, plaintextSecret.trim());
-      const secretMasked = maskSecret(plaintextSecret.trim());
-      const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-        UPDATE vectorbea.connections SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
-        WHERE id = ${connectionId}::uuid AND workspace_id = ${workspaceId}::uuid
-        RETURNING *
-      `);
-      return NextResponse.json(dbToConnection(updated[0] ?? row), { status: 201 });
+      try {
+        const secretRef = await storeSecret(workspaceId, connectionId, plaintextSecret.trim());
+        const secretMasked = maskSecret(plaintextSecret.trim());
+        const updated = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+          UPDATE vectorbea.connections SET secret_ref = ${secretRef}, secret_masked = ${secretMasked}, updated_at = now()
+          WHERE id = ${connectionId}::uuid AND workspace_id = ${workspaceId}::uuid
+          RETURNING *
+        `);
+        return NextResponse.json(dbToConnection(updated[0] ?? row), { status: 201 });
+      } catch (secretErr) {
+        console.error("[connections] Secret storage failed:", secretErr instanceof Error ? secretErr.message : secretErr);
+        // Connection row was created successfully — return 201 with a warning so
+        // the client can surface actionable guidance to the user.
+        return NextResponse.json(
+          {
+            ...dbToConnection(row),
+            secretStorageError:
+              "Credentials could not be stored. Ensure SECRET_ENCRYPTION_KEY is set and the vectorbea schema migration has been applied, then rotate the secret in the connection settings.",
+          },
+          { status: 201 },
+        );
+      }
     }
 
     return NextResponse.json(dbToConnection(row), { status: 201 });

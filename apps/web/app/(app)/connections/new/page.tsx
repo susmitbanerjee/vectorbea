@@ -538,46 +538,67 @@ export default function NewConnectionPage() {
         type === "mcp_server"   ? mcpToken :
         "";
 
-      const conn = await createConnection({
-        name: name.trim(),
-        type,
-        provider,
-        environment: environment as "development" | "staging" | "production",
-        authType: connAuthType,
-        config,
-        networkPolicy: {
-          requireWhitelist: isPrivate,
-          privateRunnerRequired: isPrivate,
-          networkStatus: isPrivate ? "private_runner_required" : "unknown",
-        },
-        // plaintextSecret is a server-only field: API encrypts it and returns
-        // only secretRef + secretMasked. Never persisted raw.
-        ...(plaintextSecret.trim() ? { plaintextSecret: plaintextSecret.trim() } : {}),
-      } as Parameters<typeof createConnection>[0]);
+      let conn: Awaited<ReturnType<typeof createConnection>>;
+      try {
+        conn = await createConnection({
+          name: name.trim(),
+          type,
+          provider,
+          environment: environment as "development" | "staging" | "production",
+          authType: connAuthType,
+          config,
+          networkPolicy: {
+            requireWhitelist: isPrivate,
+            privateRunnerRequired: isPrivate,
+            networkStatus: isPrivate ? "private_runner_required" : "unknown",
+          },
+          // plaintextSecret is a server-only field: API encrypts it and returns
+          // only secretRef + secretMasked. Never persisted raw.
+          ...(plaintextSecret.trim() ? { plaintextSecret: plaintextSecret.trim() } : {}),
+        } as Parameters<typeof createConnection>[0]);
+      } catch (createErr) {
+        toast.error(
+          `Failed to create connection: ${createErr instanceof Error ? createErr.message : "Unknown error"}`,
+        );
+        setSaving(false);
+        return;
+      }
 
       setSavedConnId(conn.id);
 
+      // Warn if credentials could not be stored (missing migration / env var)
+      const raw = conn as Record<string, unknown>;
+      if (raw.secretStorageError && typeof raw.secretStorageError === "string") {
+        toast.warning(`Connection saved, but: ${raw.secretStorageError}`);
+      }
+
       if (!skipTest) {
-        const result = await testConnection(conn.id);
-        if (result) {
-          setTestResult(result.lastTestStatus === "ok" ? "ok" : "failed");
-          if (result.lastTestStatus === "ok") {
-            toast.success(`Connection test passed — ${result.lastTestLatencyMs}ms`);
-          } else {
-            toast.error(`Test failed: ${result.lastTestError ?? "Could not reach host"}`);
+        try {
+          const result = await testConnection(conn.id);
+          if (result) {
+            setTestResult(result.lastTestStatus === "ok" ? "ok" : "failed");
+            if (result.lastTestStatus === "ok") {
+              toast.success(`Connection test passed — ${result.lastTestLatencyMs}ms`);
+            } else {
+              toast.error(`Test failed: ${result.lastTestError ?? "Could not reach host"}`);
+            }
+            // Auto-navigate to detail page after short delay on success
+            if (result.lastTestStatus === "ok") {
+              setTimeout(() => router.push(`/connections/${conn.id}` as never), 1200);
+            }
+            return; // stay on page so user can see result
           }
-          // Auto-navigate to detail page after short delay on success
-          if (result.lastTestStatus === "ok") {
-            setTimeout(() => router.push(`/connections/${conn.id}` as never), 1200);
-          }
-          return; // stay on page so user can see result
+        } catch (testErr) {
+          toast.error(
+            `Connection saved but test failed: ${testErr instanceof Error ? testErr.message : "Unknown error"}`,
+          );
+          setSaving(false);
+          return;
         }
       }
 
       toast.success("Connection saved.");
       router.push(`/connections/${conn.id}` as never);
-    } catch {
-      toast.error("Failed to create connection.");
     } finally {
       setSaving(false);
     }
