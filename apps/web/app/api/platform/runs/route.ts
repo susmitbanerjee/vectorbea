@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
         'running',
         ${String(body.triggerType ?? "manual")},
         ${String(body.triggerSource ?? "manual")},
-        ${body.input ? JSON.stringify(body.input) + "::jsonb" : Prisma.sql`NULL`},
+        ${body.input != null ? Prisma.sql`${JSON.stringify(body.input)}::jsonb` : Prisma.sql`NULL`},
         ${idempotencyKey},
         now()
       ) RETURNING *

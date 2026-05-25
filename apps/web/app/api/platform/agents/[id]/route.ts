@@ -46,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (typeof body.modelName === "string")    updates.push(Prisma.sql`model_name = ${body.modelName}`);
   if (typeof body.temperature === "number")  updates.push(Prisma.sql`temperature = ${body.temperature}`);
   if (typeof body.maxIterations === "number") updates.push(Prisma.sql`max_iterations = ${body.maxIterations}`);
-  if (body.llmConnectionId !== undefined)    updates.push(Prisma.sql`llm_connection_id = ${body.llmConnectionId}`);
+  if (body.llmConnectionId !== undefined)    updates.push(Prisma.sql`llm_connection_id = ${body.llmConnectionId ? String(body.llmConnectionId) : null}::uuid`);
   if (typeof body.status === "string")       updates.push(Prisma.sql`status = ${body.status}`);
   if (body.retryPolicy)    updates.push(Prisma.sql`retry_policy = ${JSON.stringify(body.retryPolicy)}::jsonb`);
   if (body.timeoutPolicy)  updates.push(Prisma.sql`timeout_policy = ${JSON.stringify(body.timeoutPolicy)}::jsonb`);

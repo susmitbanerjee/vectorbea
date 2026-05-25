@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
         ${String(body.modelName ?? "gpt-4.1-mini")},
         ${Number(body.temperature ?? 0.1)},
         ${Number(body.maxIterations ?? 10)},
-        ${body.llmConnectionId ? body.llmConnectionId : null},
+        ${body.llmConnectionId ? String(body.llmConnectionId) : null}::uuid,
         ${JSON.stringify(body.allowedToolIds ?? [])}::jsonb,
         ${JSON.stringify(body.memoryPolicy ?? { type: "session" })}::jsonb,
         ${JSON.stringify(body.retryPolicy ?? { maxAttempts: 2, backoffType: "exponential", backoffMs: 2000 })}::jsonb,
