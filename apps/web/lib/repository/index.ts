@@ -338,8 +338,8 @@ export async function triggerWorkflow(
   workflowId: string,
   input: unknown,
   opts: { dryRun?: boolean } = {},
-): Promise<AgentRun & { runId?: string; executionResult?: unknown }> {
-  return api<AgentRun & { runId?: string; executionResult?: unknown }>(
+): Promise<{ runId: string; status: string }> {
+  return api<{ runId: string; status: string }>(
     withWorkspace(`/api/platform/workflows/${workflowId}/run`),
     {
       method: "POST",
