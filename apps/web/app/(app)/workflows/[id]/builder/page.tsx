@@ -391,7 +391,10 @@ export default function WorkflowBuilderPage() {
         return;
       }
       toast.success("Workflow started.");
-      router.push(`/runs/${String(runId)}` as never);
+      // Preserve the org/workspaceId query param so the run page can fetch immediately
+      const orgParam = new URLSearchParams(window.location.search).get("org") ?? new URLSearchParams(window.location.search).get("workspaceId");
+      const runUrl = orgParam ? `/runs/${String(runId)}?org=${encodeURIComponent(orgParam)}` : `/runs/${String(runId)}`;
+      router.push(runUrl as never);
     } catch {
       toast.error("Failed to start workflow.");
     } finally {
