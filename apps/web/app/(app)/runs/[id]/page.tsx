@@ -112,33 +112,40 @@ export default function RunDetailPage() {
   const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
   const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!id || id === "undefined") {
       toast.error("Invalid run ID.");
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!opts.silent) setLoading(true);
     try {
-      // 1. Try platform runs API (new native runs)
-      const [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
+      // 1. Try platform runs API (native runs) — retry up to 3× in case the
+      //    run was just created and the DB write is still propagating.
+      let platformRun = null;
+      let timelineEvents: RunTimelineEventUi[] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 800 * attempt));
+        [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
+        if (platformRun) break;
+      }
+
       if (platformRun) {
-        // Events are already mapped to RunTimelineEventUi by the API route —
-        // build the UI model directly rather than passing through run-to-ui-mapper
         setModel(buildPlatformRunModel(platformRun, timelineEvents));
         setIsLocalRun(true);
         const ckpts = await listRunCheckpoints(id);
         setCheckpoints(ckpts as RunCheckpoint[]);
         return;
       }
-      // 2. Fall back to legacy agent-runs API
+
+      // 2. Fall back to legacy agent-runs API (older runs not in platform_runs)
       const res = await fetch(`/api/agent-runs/${id}`);
       if (!res.ok) throw new Error("Not found");
       const data = (await res.json()) as { run: ApiAgentRun };
       setModel(mapApiRunToUiModel(data.run));
       setIsLocalRun(false);
     } catch {
-      toast.error("Failed to load run details.");
+      if (!opts.silent) toast.error("Failed to load run details.");
     } finally {
       setLoading(false);
     }
@@ -151,7 +158,7 @@ export default function RunDetailPage() {
     if (!model) return;
     const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
     if (!live) return;
-    const interval = setInterval(() => void load(), 6000);
+    const interval = setInterval(() => void load({ silent: true }), 6000);
     return () => clearInterval(interval);
   }, [model, load]);
 

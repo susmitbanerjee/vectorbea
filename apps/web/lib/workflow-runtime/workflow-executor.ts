@@ -83,7 +83,7 @@ async function loadConnection(connectionId: string, workspaceId: string): Promis
       FROM vectorbea.connections
       WHERE id = ${connectionId}::uuid
         AND workspace_id = ${workspaceId}::uuid
-        AND status = 'active'
+        AND status != 'disabled'
       LIMIT 1
     `);
     const row = rows[0];
