@@ -79,7 +79,7 @@ interface ResolvedConnection {
 async function loadConnection(connectionId: string, workspaceId: string): Promise<ResolvedConnection | null> {
   try {
     const rows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-      SELECT id, type, config_json, secret_ref
+      SELECT id, type, config, secret_ref
       FROM vectorbea.connections
       WHERE id = ${connectionId}::uuid
         AND workspace_id = ${workspaceId}::uuid
@@ -91,8 +91,8 @@ async function loadConnection(connectionId: string, workspaceId: string): Promis
 
     const secretRef = typeof row.secret_ref === "string" ? row.secret_ref : null;
     const secret = secretRef ? await getSecretForRuntime(secretRef) : null;
-    const configJson = (row.config_json ?? {}) as Record<string, unknown>;
-    // base_url may be stored in config_json (e.g. for custom LLM endpoints)
+    const configJson = (row.config ?? {}) as Record<string, unknown>;
+    // base_url may be stored in config (e.g. for custom LLM endpoints)
     const baseUrl = typeof configJson.baseUrl === "string" ? configJson.baseUrl
       : typeof configJson.base_url === "string" ? configJson.base_url
       : null;
@@ -103,8 +103,7 @@ async function loadConnection(connectionId: string, workspaceId: string): Promis
       secret,
       baseUrl,
     };
-  } catch (e) {
-    console.error("[loadConnection] query failed:", (e as Error).message);
+  } catch {
     return null;
   }
 }
@@ -571,9 +570,7 @@ async function executeAgentNode(opts: {
 
   // Load LLM connection + API key
   const llmConn = llmConnId ? await loadConnection(llmConnId, workspaceId) : null;
-  if (!llmConnId) throw new Error(`Agent "${agentName}": no llm_connection_id on agent row`);
-  if (!llmConn)   throw new Error(`Agent "${agentName}": loadConnection returned null for id=${llmConnId}`);
-  if (!llmConn.secret) throw new Error(`Agent "${agentName}": connection found but secret is null (secret_ref may be missing or decryption failed)`);
+  if (!llmConn?.secret) throw new Error(`Agent "${agentName}": LLM connection missing or has no API key`);
   const apiKey  = llmConn.secret;
   const baseUrl = llmConn.baseUrl ?? "https://api.openai.com/v1";
 
