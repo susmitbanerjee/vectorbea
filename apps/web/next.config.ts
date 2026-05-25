@@ -5,6 +5,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   typedRoutes: true,
   output: "standalone",
+  experimental: {
+    after: true,
+  },
   images: {
     remotePatterns: [
       // GitHub avatars
