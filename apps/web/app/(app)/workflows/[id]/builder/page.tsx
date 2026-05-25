@@ -384,17 +384,30 @@ export default function WorkflowBuilderPage() {
     try {
       await doSave();
       const run = await triggerWorkflow(workflow.id, {});
-      console.log("[handleRun] trigger response:", JSON.stringify(run));
-      const runId = run.runId ?? run.id;
-      if (!runId || runId === "undefined") {
+      const runId = run.runId ?? (run as Record<string, unknown>).id;
+      if (!runId || String(runId) === "undefined") {
         toast.error("Workflow triggered but run ID was not returned. Check the runs list.");
         router.push("/runs" as never);
         return;
       }
       toast.success("Workflow started.");
+
       // Preserve the org/workspaceId query param so the run page can fetch immediately
-      const orgParam = new URLSearchParams(window.location.search).get("org") ?? new URLSearchParams(window.location.search).get("workspaceId");
-      const runUrl = orgParam ? `/runs/${String(runId)}?org=${encodeURIComponent(orgParam)}` : `/runs/${String(runId)}`;
+      const orgParam =
+        new URLSearchParams(window.location.search).get("org") ??
+        new URLSearchParams(window.location.search).get("workspaceId") ??
+        "";
+      const runUrl = orgParam
+        ? `/runs/${String(runId)}?org=${encodeURIComponent(orgParam)}`
+        : `/runs/${String(runId)}`;
+
+      // Fire execution in the background — client-side fire-and-forget.
+      // The run page polls at 1.5 s intervals and will show live progress.
+      const executeUrl = orgParam
+        ? `/api/platform/workflows/${workflow.id}/run/${String(runId)}/execute?workspaceId=${encodeURIComponent(orgParam)}`
+        : `/api/platform/workflows/${workflow.id}/run/${String(runId)}/execute`;
+      void fetch(executeUrl, { method: "POST" });
+
       router.push(runUrl as never);
     } catch {
       toast.error("Failed to start workflow.");

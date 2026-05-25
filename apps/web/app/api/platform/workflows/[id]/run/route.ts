@@ -1,17 +1,15 @@
 /**
  * POST /api/platform/workflows/:id/run
  *
- * Creates a run record immediately, returns runId to the browser,
- * then executes the workflow in the background using Next.js `after()`.
- * `after()` keeps the execution alive after the response is sent —
- * works correctly on Vercel, Node.js, and edge runtimes.
+ * Step 1: Creates the run record and returns runId immediately.
+ * The browser navigates to the run page, then separately fires
+ * POST /api/platform/workflows/:id/run/:runId/execute to start execution.
  */
 
 import "server-only";
-import { NextRequest, NextResponse, after } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma";
 import { db } from "@/server/db";
-import { executeWorkflow } from "@/lib/workflow-runtime/workflow-executor";
 import type { WorkflowGraph } from "@/types/workflow-graph";
 
 export async function POST(
@@ -19,9 +17,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const workspaceId = request.nextUrl.searchParams.get("workspaceId");
-  if (!workspaceId) {
-    return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
-  }
+  if (!workspaceId) return NextResponse.json({ error: "workspaceId required" }, { status: 400 });
 
   const { id: workflowId } = await params;
   let body: Record<string, unknown> = {};
@@ -53,7 +49,7 @@ export async function POST(
     return NextResponse.json({ error: "Workflow has no graph. Build the workflow in the builder first." }, { status: 422 });
   }
 
-  // -- Create run record immediately ------------------------------------------
+  // -- Create run record and return immediately -------------------------------
   const idempotencyKey = `run-${workspaceId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const runRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     INSERT INTO vectorbea.platform_runs (
@@ -63,36 +59,14 @@ export async function POST(
     ) VALUES (
       ${workspaceId}::uuid, ${workflowId}::uuid,
       ${workflowName}, ${workflowVersion},
-      'native', 'running', ${triggerType}, ${triggerType},
+      'native', 'queued', ${triggerType}, ${triggerType},
       ${JSON.stringify(workflowInput)}::jsonb, ${idempotencyKey}, now()
     ) RETURNING id
-  `).catch((e: unknown) => { throw new Error(`Failed to create run record: ${(e as Error).message}`); });
+  `).catch((e: unknown) => { throw new Error(`Failed to create run: ${(e as Error).message}`); });
 
   const runId = runRows[0] ? String(runRows[0].id) : null;
   if (!runId) return NextResponse.json({ error: "Failed to create run record" }, { status: 500 });
 
-  // -- Schedule background execution via after() ------------------------------
-  // after() keeps this task alive after the HTTP response is sent.
-  // Safe on Vercel, Node.js, and edge runtimes.
-  after(async () => {
-    try {
-      await executeWorkflow({
-        runId, workspaceId, workflowId,
-        workflowName, workflowVersion, triggerType,
-        workflowInput, graph: graphJson, dryRun,
-        privateRunnerMode: false,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Executor crashed";
-      await db.$executeRaw(Prisma.sql`
-        UPDATE vectorbea.platform_runs
-        SET status = 'failed', completed_at = now(), updated_at = now(),
-            error_json = ${JSON.stringify({ message: msg })}::jsonb
-        WHERE id = ${runId}::uuid
-      `).catch(() => {});
-    }
-  });
-
-  // -- Return immediately -----------------------------------------------------
-  return NextResponse.json({ runId, status: "running" }, { status: 201 });
+  // Return runId — browser will separately call /execute to start execution
+  return NextResponse.json({ runId, status: "queued" }, { status: 201 });
 }
