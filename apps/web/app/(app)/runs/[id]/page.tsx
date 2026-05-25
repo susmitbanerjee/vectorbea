@@ -233,10 +233,22 @@ export default function RunDetailPage() {
   async function handleCancel() {
     setActing(true);
     try {
-      const res = await fetch(`/api/agent-runs/${id}/cancel`, { method: "POST" });
-      if (!res.ok) throw new Error((await res.json() as { error?: string }).error);
+      // Platform runs: PATCH status to cancelled
+      const wsId = new URLSearchParams(window.location.search).get("org")
+        ?? new URLSearchParams(window.location.search).get("workspaceId")
+        ?? window.localStorage.getItem("vectorbea.activeWorkspaceId")
+        ?? "";
+      const res = await fetch(
+        `/api/platform/runs/${id}${wsId ? `?workspaceId=${encodeURIComponent(wsId)}` : ""}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "cancelled" }),
+        },
+      );
+      if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? "Failed");
       toast.success("Run cancelled.");
-      void load();
+      void load({ silent: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to cancel.");
     } finally {

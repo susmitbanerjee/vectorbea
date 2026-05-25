@@ -1,9 +1,11 @@
 /**
  * POST /api/platform/workflows/:id/run
  *
- * Creates a run record immediately and returns runId.
- * Execution happens in the background (fire-and-forget) so the browser
- * is never blocked waiting for LLM calls to finish.
+ * Trigger a workflow run. Creates a run record, executes the workflow
+ * synchronously, and returns the result. The browser waits for completion.
+ *
+ * Future: move execution to a background worker queue (BullMQ/pgmq) to
+ * avoid blocking the HTTP request for long-running workflows.
  */
 
 import "server-only";
@@ -24,28 +26,21 @@ export async function POST(
 
   const { id: workflowId } = await params;
   let body: Record<string, unknown> = {};
-  try {
-    body = await request.json() as Record<string, unknown>;
-  } catch {
-    // empty body is fine
-  }
+  try { body = await request.json() as Record<string, unknown>; } catch { /* empty body */ }
 
   const workflowInput = (typeof body.input === "object" && body.input !== null)
-    ? body.input as Record<string, unknown>
-    : {};
-  const dryRun = body.dryRun === true;
+    ? body.input as Record<string, unknown> : {};
+  const dryRun      = body.dryRun === true;
   const triggerType = typeof body.triggerType === "string" ? body.triggerType : "manual";
 
-  // -- Load workflow + graph ---------------------------------------------------
+  // -- Load workflow + graph --------------------------------------------------
   const workflowRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     SELECT w.id, w.name, w.current_version, w.status, g.graph_json
     FROM vectorbea.platform_workflows w
     LEFT JOIN vectorbea.workflow_graphs g ON g.workflow_id = w.id
     WHERE w.id = ${workflowId}::uuid AND w.workspace_id = ${workspaceId}::uuid
     LIMIT 1
-  `).catch((e: unknown) => {
-    throw new Error(`Failed to load workflow: ${(e as Error).message}`);
-  });
+  `).catch((e: unknown) => { throw new Error(`Failed to load workflow: ${(e as Error).message}`); });
 
   const workflowRow = workflowRows[0];
   if (!workflowRow) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
@@ -59,7 +54,7 @@ export async function POST(
     return NextResponse.json({ error: "Workflow has no graph. Build the workflow in the builder first." }, { status: 422 });
   }
 
-  // -- Create run record immediately ------------------------------------------
+  // -- Create run record -----------------------------------------------------
   const idempotencyKey = `run-${workspaceId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const runRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     INSERT INTO vectorbea.platform_runs (
@@ -72,21 +67,32 @@ export async function POST(
       'native', 'running', ${triggerType}, ${triggerType},
       ${JSON.stringify(workflowInput)}::jsonb, ${idempotencyKey}, now()
     ) RETURNING id
-  `).catch((e: unknown) => {
-    throw new Error(`Failed to create run record: ${(e as Error).message}`);
-  });
+  `).catch((e: unknown) => { throw new Error(`Failed to create run record: ${(e as Error).message}`); });
 
   const runId = runRows[0] ? String(runRows[0].id) : null;
   if (!runId) return NextResponse.json({ error: "Failed to create run record" }, { status: 500 });
 
-  // -- Fire execution in background (non-blocking) ----------------------------
-  // The browser gets runId immediately. The run page polls/refreshes for status.
-  void executeWorkflow({
-    runId, workspaceId, workflowId,
-    workflowName, workflowVersion, triggerType,
-    workflowInput, graph: graphJson, dryRun,
-    privateRunnerMode: false,
-  }).catch(async (err: unknown) => {
+  // -- Execute workflow synchronously ----------------------------------------
+  try {
+    const result = await executeWorkflow({
+      runId, workspaceId, workflowId,
+      workflowName, workflowVersion, triggerType,
+      workflowInput, graph: graphJson, dryRun,
+      privateRunnerMode: false,
+    });
+
+    return NextResponse.json({
+      runId,
+      status: result.status,
+      totalTokens: result.totalTokens,
+      estimatedCostUsd: result.estimatedCostUsd,
+      durationMs: result.durationMs,
+      finalOutput: result.finalOutput ?? null,
+      errorMessage: result.errorMessage ?? null,
+      dryRun,
+    }, { status: 201 });
+
+  } catch (err) {
     const msg = err instanceof Error ? err.message : "Executor crashed";
     await db.$executeRaw(Prisma.sql`
       UPDATE vectorbea.platform_runs
@@ -94,8 +100,6 @@ export async function POST(
           error_json = ${JSON.stringify({ message: msg })}::jsonb
       WHERE id = ${runId}::uuid
     `).catch(() => {});
-  });
-
-  // -- Return runId immediately ------------------------------------------------
-  return NextResponse.json({ runId, status: "running" }, { status: 201 });
+    return NextResponse.json({ runId, status: "failed", error: msg }, { status: 500 });
+  }
 }
