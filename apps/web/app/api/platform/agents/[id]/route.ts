@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.retryPolicy)    updates.push(Prisma.sql`retry_policy = ${JSON.stringify(body.retryPolicy)}::jsonb`);
   if (body.timeoutPolicy)  updates.push(Prisma.sql`timeout_policy = ${JSON.stringify(body.timeoutPolicy)}::jsonb`);
   if (body.approvalPolicy) updates.push(Prisma.sql`approval_policy = ${JSON.stringify(body.approvalPolicy)}::jsonb`);
-  if (body.allowedToolIds) updates.push(Prisma.sql`allowed_tool_ids = ${JSON.stringify(body.allowedToolIds)}::jsonb`);
+  if (body.allowedToolIds) updates.push(Prisma.sql`allowed_tool_ids = ${(Array.isArray(body.allowedToolIds) ? body.allowedToolIds : []) as string[]}::text[]`);
   updates.push(Prisma.sql`updated_at = now()`);
 
   let clause = updates[0]!;

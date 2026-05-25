@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
         ${Number(body.temperature ?? 0.1)},
         ${Number(body.maxIterations ?? 10)},
         ${body.llmConnectionId ? String(body.llmConnectionId) : null}::uuid,
-        ${JSON.stringify(body.allowedToolIds ?? [])}::jsonb,
+        ${(Array.isArray(body.allowedToolIds) ? body.allowedToolIds : []) as string[]}::text[],
         ${JSON.stringify(body.memoryPolicy ?? { type: "session" })}::jsonb,
         ${JSON.stringify(body.retryPolicy ?? { maxAttempts: 2, backoffType: "exponential", backoffMs: 2000 })}::jsonb,
         ${JSON.stringify(body.timeoutPolicy ?? { stepTimeoutMs: 60000, runTimeoutMs: 600000 })}::jsonb,
