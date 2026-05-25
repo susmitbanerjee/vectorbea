@@ -146,7 +146,10 @@ export default function WorkflowDetailPage() {
               try {
                 const run = await triggerWorkflow(id, {});
                 toast.success("Workflow started.");
-                router.push(`/runs/${run.id}` as never);
+                const orgParam = new URLSearchParams(window.location.search).get("org") ?? new URLSearchParams(window.location.search).get("workspaceId") ?? "";
+                const executeUrl = `/api/platform/workflows/${id}/run/${run.runId}/execute${orgParam ? `?workspaceId=${encodeURIComponent(orgParam)}` : ""}`;
+                void fetch(executeUrl, { method: "POST" });
+                window.location.href = orgParam ? `/runs/${run.runId}?org=${encodeURIComponent(orgParam)}` : `/runs/${run.runId}`;
               } catch {
                 toast.error("Failed to start workflow.");
               } finally {
