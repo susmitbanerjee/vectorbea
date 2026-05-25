@@ -384,8 +384,13 @@ export default function WorkflowBuilderPage() {
     try {
       await doSave();
       const run = await triggerWorkflow(workflow.id, {});
-      toast.success("Workflow started.");
       const runId = run.runId ?? run.id;
+      if (!runId || runId === "undefined") {
+        toast.error("Workflow triggered but run ID was not returned. Check the runs list.");
+        router.push("/runs" as never);
+        return;
+      }
+      toast.success("Workflow started.");
       router.push(`/runs/${String(runId)}` as never);
     } catch {
       toast.error("Failed to start workflow.");
