@@ -566,8 +566,12 @@ async function executeAgentNode(opts: {
   const agentName      = String(agentRow.name ?? "Agent");
 
   // Load LLM connection + API key
+  console.log(`[executor] agent="${agentName}" llmConnId=${llmConnId} workspaceId=${workspaceId}`);
   const llmConn = llmConnId ? await loadConnection(llmConnId, workspaceId) : null;
-  if (!llmConn?.secret) throw new Error(`Agent "${agentName}": LLM connection missing or has no API key`);
+  console.log(`[executor] llmConn found=${!!llmConn} hasSecret=${!!llmConn?.secret} baseUrl=${llmConn?.baseUrl}`);
+  if (!llmConnId) throw new Error(`Agent "${agentName}": no LLM connection configured on this agent`);
+  if (!llmConn)   throw new Error(`Agent "${agentName}": LLM connection not found (id=${llmConnId}) — check it exists and is not disabled`);
+  if (!llmConn.secret) throw new Error(`Agent "${agentName}": LLM connection found but has no API key stored — edit the connection and re-enter the key`);
   const apiKey  = llmConn.secret;
   const baseUrl = llmConn.baseUrl ?? "https://api.openai.com/v1";
 
