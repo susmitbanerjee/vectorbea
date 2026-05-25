@@ -1,15 +1,21 @@
 /**
  * POST /api/platform/workflows/:id/run
  *
- * Step 1: Creates the run record and returns runId immediately.
- * The browser navigates to the run page, then separately fires
- * POST /api/platform/workflows/:id/run/:runId/execute to start execution.
+ * Creates the run record, schedules execution via next/server `after()`,
+ * and returns { runId, status: "queued" } immediately.
+ *
+ * `after()` is stable in Next.js 15 — no experimental flag needed.
+ * It runs executeWorkflow after the HTTP response is flushed, so the
+ * browser gets the runId immediately and can navigate to the run page
+ * while execution proceeds on the server.
  */
 
 import "server-only";
+import { after } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma";
 import { db } from "@/server/db";
+import { executeWorkflow } from "@/lib/workflow-runtime/workflow-executor";
 import type { WorkflowGraph } from "@/types/workflow-graph";
 
 export async function POST(
@@ -49,7 +55,7 @@ export async function POST(
     return NextResponse.json({ error: "Workflow has no graph. Build the workflow in the builder first." }, { status: 422 });
   }
 
-  // -- Create run record and return immediately -------------------------------
+  // -- Create run record -----------------------------------------------------
   const idempotencyKey = `run-${workspaceId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const runRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     INSERT INTO vectorbea.platform_runs (
@@ -67,6 +73,40 @@ export async function POST(
   const runId = runRows[0] ? String(runRows[0].id) : null;
   if (!runId) return NextResponse.json({ error: "Failed to create run record" }, { status: 500 });
 
-  // Return runId — browser will separately call /execute to start execution
+  // -- Schedule execution after response is sent -----------------------------
+  // `after()` runs this block after the HTTP response is flushed.
+  // The browser receives runId immediately and navigates to the run page.
+  after(async () => {
+    try {
+      // Mark as running
+      await db.$queryRaw(Prisma.sql`
+        UPDATE vectorbea.platform_runs
+        SET status = 'running', started_at = now()
+        WHERE id = ${runId}::uuid AND status = 'queued'
+      `);
+
+      await executeWorkflow({
+        runId,
+        workspaceId,
+        workflowId,
+        workflowName,
+        workflowVersion,
+        triggerType,
+        workflowInput,
+        graph: graphJson,
+        dryRun,
+      });
+    } catch (e) {
+      console.error("[run/after] execution failed:", (e as Error).message);
+      await db.$queryRaw(Prisma.sql`
+        UPDATE vectorbea.platform_runs
+        SET status = 'failed',
+            error_message = ${(e as Error).message}::text,
+            completed_at = now()
+        WHERE id = ${runId}::uuid
+      `).catch(() => { /* best-effort */ });
+    }
+  });
+
   return NextResponse.json({ runId, status: "queued" }, { status: 201 });
 }

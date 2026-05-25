@@ -402,12 +402,6 @@ export default function WorkflowBuilderPage() {
         ? `/runs/${runId}?org=${encodeURIComponent(orgParam)}`
         : `/runs/${runId}`;
 
-      // Fire execution in the background — client-side fire-and-forget.
-      // keepalive: true keeps the request alive even after window.location.href navigation.
-      // The run page polls at 1.5 s intervals to show live progress.
-      const executeUrl = `/api/platform/workflows/${workflow.id}/run/${runId}/execute${orgParam ? `?workspaceId=${encodeURIComponent(orgParam)}` : ""}`;
-      void fetch(executeUrl, { method: "POST", keepalive: true });
-
       // Hard navigate — bypasses Next.js typed-route enforcement that can mangle dynamic segments
       window.location.href = runUrl;
     } catch {
