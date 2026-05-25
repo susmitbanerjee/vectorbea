@@ -1,13 +1,9 @@
 /**
  * POST /api/platform/workflows/:id/run
  *
- * Trigger a workflow run with a given input payload.
- * Resolves the workflow graph, creates a run record, and executes
- * the workflow server-side with full secret resolution.
- *
- * Body: { input?: Record<string, unknown>, dryRun?: boolean }
- *
- * Returns the created AgentRun record plus execution result metadata.
+ * Creates a run record immediately and returns runId.
+ * Execution happens in the background (fire-and-forget) so the browser
+ * is never blocked waiting for LLM calls to finish.
  */
 
 import "server-only";
@@ -40,37 +36,30 @@ export async function POST(
   const dryRun = body.dryRun === true;
   const triggerType = typeof body.triggerType === "string" ? body.triggerType : "manual";
 
-  // ── Load workflow + graph in one query ────────────────────────────────────
+  // -- Load workflow + graph ---------------------------------------------------
   const workflowRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    SELECT w.id, w.name, w.current_version, w.status,
-           g.graph_json
+    SELECT w.id, w.name, w.current_version, w.status, g.graph_json
     FROM vectorbea.platform_workflows w
     LEFT JOIN vectorbea.workflow_graphs g ON g.workflow_id = w.id
-    WHERE w.id = ${workflowId}::uuid
-      AND w.workspace_id = ${workspaceId}::uuid
+    WHERE w.id = ${workflowId}::uuid AND w.workspace_id = ${workspaceId}::uuid
     LIMIT 1
   `).catch((e: unknown) => {
     throw new Error(`Failed to load workflow: ${(e as Error).message}`);
   });
 
   const workflowRow = workflowRows[0];
-  if (!workflowRow) {
-    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-  }
+  if (!workflowRow) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+  if (workflowRow.status === "archived") return NextResponse.json({ error: "Workflow is archived" }, { status: 422 });
 
-  if (workflowRow.status === "archived") {
-    return NextResponse.json({ error: "Workflow is archived" }, { status: 422 });
-  }
-
-  const workflowName = String(workflowRow.name ?? "Unnamed Workflow");
+  const workflowName    = String(workflowRow.name ?? "Unnamed Workflow");
   const workflowVersion = String(workflowRow.current_version ?? "v1");
+  const graphJson       = workflowRow.graph_json as WorkflowGraph | null;
 
-  const graphJson = workflowRow.graph_json as WorkflowGraph | null;
   if (!graphJson || !Array.isArray(graphJson.nodes) || graphJson.nodes.length === 0) {
     return NextResponse.json({ error: "Workflow has no graph. Build the workflow in the builder first." }, { status: 422 });
   }
 
-  // ── Create run record ─────────────────────────────────────────────────────
+  // -- Create run record immediately ------------------------------------------
   const idempotencyKey = `run-${workspaceId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const runRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
     INSERT INTO vectorbea.platform_runs (
@@ -78,71 +67,35 @@ export async function POST(
       creation_mode, status, trigger_type, trigger_source,
       input_json, idempotency_key, started_at
     ) VALUES (
-      ${workspaceId}::uuid,
-      ${workflowId}::uuid,
-      ${workflowName},
-      ${workflowVersion},
-      'native',
-      'running',
-      ${triggerType},
-      ${triggerType},
-      ${JSON.stringify(workflowInput)}::jsonb,
-      ${idempotencyKey},
-      now()
-    ) RETURNING *
+      ${workspaceId}::uuid, ${workflowId}::uuid,
+      ${workflowName}, ${workflowVersion},
+      'native', 'running', ${triggerType}, ${triggerType},
+      ${JSON.stringify(workflowInput)}::jsonb, ${idempotencyKey}, now()
+    ) RETURNING id
   `).catch((e: unknown) => {
     throw new Error(`Failed to create run record: ${(e as Error).message}`);
   });
 
-  const runRow = runRows[0];
-  if (!runRow) {
-    return NextResponse.json({ error: "Failed to create run record" }, { status: 500 });
-  }
+  const runId = runRows[0] ? String(runRows[0].id) : null;
+  if (!runId) return NextResponse.json({ error: "Failed to create run record" }, { status: 500 });
 
-  const runId = String(runRow.id);
-
-  // ── Execute workflow (async or inline depending on graph size) ────────────
-  // For now, execute inline (synchronous). Future: queue via a worker process.
-  let executionResult;
-  try {
-    executionResult = await executeWorkflow({
-      runId,
-      workspaceId,
-      workflowId,
-      workflowName,
-      workflowVersion,
-      triggerType,
-      workflowInput,
-      graph: graphJson,
-      dryRun,
-      privateRunnerMode: false,
-    });
-  } catch (err) {
-    // Unexpected executor crash — mark run as failed
-    const msg = (err instanceof Error) ? err.message : "Executor crashed";
+  // -- Fire execution in background (non-blocking) ----------------------------
+  // The browser gets runId immediately. The run page polls/refreshes for status.
+  void executeWorkflow({
+    runId, workspaceId, workflowId,
+    workflowName, workflowVersion, triggerType,
+    workflowInput, graph: graphJson, dryRun,
+    privateRunnerMode: false,
+  }).catch(async (err: unknown) => {
+    const msg = err instanceof Error ? err.message : "Executor crashed";
     await db.$executeRaw(Prisma.sql`
       UPDATE vectorbea.platform_runs
       SET status = 'failed', completed_at = now(), updated_at = now(),
           error_json = ${JSON.stringify({ message: msg })}::jsonb
       WHERE id = ${runId}::uuid
     `).catch(() => {});
+  });
 
-    return NextResponse.json({
-      runId,
-      status: "failed",
-      error: msg,
-    }, { status: 500 });
-  }
-
-  // ── Return run + result summary ───────────────────────────────────────────
-  return NextResponse.json({
-    runId,
-    status: executionResult.status,
-    totalTokens: executionResult.totalTokens,
-    estimatedCostUsd: executionResult.estimatedCostUsd,
-    durationMs: executionResult.durationMs,
-    finalOutput: executionResult.finalOutput ?? null,
-    errorMessage: executionResult.errorMessage ?? null,
-    dryRun,
-  }, { status: 201 });
+  // -- Return runId immediately ------------------------------------------------
+  return NextResponse.json({ runId, status: "running" }, { status: 201 });
 }

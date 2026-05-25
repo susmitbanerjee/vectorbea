@@ -120,15 +120,10 @@ export default function RunDetailPage() {
     }
     if (!opts.silent) setLoading(true);
     try {
-      // 1. Try platform runs API (native runs) — retry up to 3× in case the
-      //    run was just created and the DB write is still propagating.
+      // 1. Try platform runs API (native runs)
       let platformRun = null;
       let timelineEvents: RunTimelineEventUi[] = [];
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, 800 * attempt));
-        [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
-        if (platformRun) break;
-      }
+      [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
 
       if (platformRun) {
         setModel(buildPlatformRunModel(platformRun, timelineEvents));
