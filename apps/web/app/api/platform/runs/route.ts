@@ -13,8 +13,9 @@ function rowToRun(r: Record<string, unknown>) {
     inputJson: r.input_json ?? null, outputJson: r.output_json ?? null,
     errorJson: r.error_json ?? null, idempotencyKey: r.idempotency_key ?? null,
     startedAt: r.started_at ?? null, completedAt: r.completed_at ?? null,
-    durationMs: r.duration_ms ?? null, totalTokens: r.total_tokens ?? null,
-    estimatedCostUsd: r.estimated_cost_usd ?? null,
+    durationMs: r.duration_ms != null ? Number(r.duration_ms) : null,
+    totalTokens: r.total_tokens != null ? Number(r.total_tokens) : null,
+    estimatedCostUsd: r.estimated_cost_usd != null ? Number(r.estimated_cost_usd) : null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }

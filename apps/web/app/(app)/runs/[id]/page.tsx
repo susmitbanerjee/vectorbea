@@ -43,9 +43,14 @@ export default function RunDetailPage() {
   const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
 
   const load = useCallback(async () => {
+    if (!id || id === "undefined") {
+      toast.error("Invalid run ID.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      // 1. Try repository (seeded / in-memory) first
+      // 1. Try platform runs API (new native runs)
       const [seedRun, seedEvents] = await Promise.all([getRun(id), getRunEvents(id)]);
       if (seedRun) {
         setModel(mapRunToUiModel(seedRun, seedEvents));
@@ -54,7 +59,7 @@ export default function RunDetailPage() {
         setCheckpoints(ckpts as RunCheckpoint[]);
         return;
       }
-      // 2. Fall back to live API
+      // 2. Fall back to legacy agent-runs API
       const res = await fetch(`/api/agent-runs/${id}`);
       if (!res.ok) throw new Error("Not found");
       const data = (await res.json()) as { run: ApiAgentRun };
