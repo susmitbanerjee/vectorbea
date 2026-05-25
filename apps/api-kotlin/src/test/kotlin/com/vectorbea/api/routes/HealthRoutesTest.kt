@@ -1,6 +1,7 @@
 package com.vectorbea.api.routes
 
 import com.vectorbea.api.config.AppConfig
+import com.vectorbea.api.config.DbConfig
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Router
 import com.vectorbea.api.http.fromJson
@@ -20,7 +21,7 @@ class HealthRoutesTest {
         config = AppConfig(
             port = 8080,
             appEnv = "test",
-            databaseUrl = null,
+            db = null,
             redisUrl = null,
             secretEncryptionKeyPresent = false,
             corsAllowedOrigins = setOf("*"),

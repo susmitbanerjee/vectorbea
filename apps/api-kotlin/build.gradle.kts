@@ -23,11 +23,15 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("ch.qos.logback:logback-classic:1.5.8")
 
-    // DB connection pool — HikariCP (wired up in Phase 2)
+    // DB connection pool — HikariCP
     implementation("com.zaxxer:HikariCP:5.1.0")
 
     // Postgres JDBC driver
     implementation("org.postgresql:postgresql:42.7.4")
+
+    // DB migrations — Flyway (core only, no Spring)
+    implementation("org.flywaydb:flyway-core:10.20.1")
+    implementation("org.flywaydb:flyway-database-postgresql:10.20.1")
 
     // Redis client — Lettuce (wired up in Phase 2)
     implementation("io.lettuce:lettuce-core:6.3.2.RELEASE")

@@ -6,16 +6,15 @@ import org.slf4j.LoggerFactory
  * Application configuration — read from environment variables.
  *
  * Rules:
- *  - Required vars cause startup failure (listed below).
+ *  - Required vars cause startup failure in production once DB is mandatory.
  *  - Optional infra vars (DB, Redis, secrets) emit a warning when absent.
- *    Connections are established lazily; their absence only causes failures when
- *    routes that need them are actually called.
- *  - Secret values are NEVER logged — only their presence is noted.
+ *  - Secret values (DATABASE_URL, REDIS_URL, SECRET_ENCRYPTION_KEY) are
+ *    NEVER logged — only their presence is noted.
  */
 data class AppConfig(
     val port: Int,
     val appEnv: String,
-    val databaseUrl: String?,
+    val db: DbConfig?,
     val redisUrl: String?,
     /** Key is present/absent — value never printed */
     val secretEncryptionKeyPresent: Boolean,
@@ -39,9 +38,24 @@ data class AppConfig(
             val port = env("PORT")?.toIntOrNull() ?: DEFAULT_PORT
             val appEnv = env("APP_ENV") ?: "development"
 
-            // ── Optional infra vars — warn, don't fail ──────────────────────
-            val databaseUrl = envOptional("DATABASE_URL", "DB connections will not be available")
-            val redisUrl = envOptional("REDIS_URL", "Redis connections will not be available")
+            // ── Database config ─────────────────────────────────────────────
+            val dbUrl = envSecret("DATABASE_URL", "DB connections will not be available")
+            val db = dbUrl?.let {
+                DbConfig(
+                    url = it,
+                    maxPoolSize = env("DB_POOL_MAX_SIZE")?.toIntOrNull() ?: 10,
+                    connectionTimeoutMs = env("DB_CONNECTION_TIMEOUT_MS")?.toLongOrNull() ?: 30_000L,
+                    idleTimeoutMs = env("DB_IDLE_TIMEOUT_MS")?.toLongOrNull() ?: 600_000L,
+                    keepaliveTimeMs = env("DB_KEEPALIVE_TIME_MS")?.toLongOrNull() ?: 300_000L,
+                    maxLifetimeMs = env("DB_MAX_LIFETIME_MS")?.toLongOrNull() ?: 1_800_000L,
+                    runMigrations = env("RUN_MIGRATIONS")?.lowercase() == "true",
+                )
+            }
+
+            // ── Redis ───────────────────────────────────────────────────────
+            val redisUrl = envSecret("REDIS_URL", "Redis connections will not be available")
+
+            // ── Secret encryption key ───────────────────────────────────────
             val secretKey = env("SECRET_ENCRYPTION_KEY")
             if (secretKey == null) {
                 log.warn("[config] SECRET_ENCRYPTION_KEY not set — secret decryption will not be available")
@@ -54,20 +68,15 @@ data class AppConfig(
                 log.warn("[config] CORS_ALLOWED_ORIGINS=* — accepting all origins (not safe for production)")
             }
 
-            // ── Log level ───────────────────────────────────────────────────
             val logLevel = env("LOG_LEVEL") ?: "INFO"
-
-            // ── Version / commit ────────────────────────────────────────────
             val version = env("APP_VERSION") ?: DEFAULT_VERSION
             val commit = env("GIT_COMMIT")
-
-            // ── Body size ───────────────────────────────────────────────────
             val maxBody = env("MAX_REQUEST_BODY_BYTES")?.toIntOrNull() ?: DEFAULT_MAX_BODY_BYTES
 
             val config = AppConfig(
                 port = port,
                 appEnv = appEnv,
-                databaseUrl = databaseUrl,
+                db = db,
                 redisUrl = redisUrl,
                 secretEncryptionKeyPresent = secretKey != null,
                 corsAllowedOrigins = corsOrigins,
@@ -83,7 +92,8 @@ data class AppConfig(
 
         private fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
 
-        private fun envOptional(name: String, warningIfAbsent: String): String? {
+        /** Reads a secret env var — warns if absent, never logs the value. */
+        private fun envSecret(name: String, warningIfAbsent: String): String? {
             val value = env(name)
             if (value == null) log.warn("[config] $name not set — $warningIfAbsent")
             return value
@@ -95,12 +105,33 @@ data class AppConfig(
         log.info("  port          : $port")
         log.info("  env           : $appEnv")
         log.info("  version       : $version${if (commit != null) " ($commit)" else ""}")
-        log.info("  database      : ${if (databaseUrl != null) "configured" else "NOT SET"}")
+        log.info("  database      : ${if (db != null) "configured (pool=${db.maxPoolSize}, migrations=${db.runMigrations})" else "NOT SET"}")
         log.info("  redis         : ${if (redisUrl != null) "configured" else "NOT SET"}")
         log.info("  secret key    : ${if (secretEncryptionKeyPresent) "present" else "NOT SET"}")
         log.info("  cors origins  : $corsAllowedOrigins")
         log.info("  log level     : $logLevel")
         log.info("  max body      : ${maxRequestBodyBytes / 1024} KB")
-        // !! Never log: databaseUrl, redisUrl, or any key material !!
+        // !! NEVER log: DATABASE_URL, REDIS_URL, SECRET_ENCRYPTION_KEY, or any key material !!
     }
 }
+
+/**
+ * Postgres connection pool configuration.
+ * Extracted from [AppConfig] only when DATABASE_URL is present.
+ */
+data class DbConfig(
+    /** JDBC connection URL — never logged */
+    val url: String,
+    /** Maximum connections in the HikariCP pool */
+    val maxPoolSize: Int = 10,
+    /** Milliseconds to wait for a connection before throwing */
+    val connectionTimeoutMs: Long = 30_000L,
+    /** Milliseconds an idle connection may sit in the pool before eviction */
+    val idleTimeoutMs: Long = 600_000L,
+    /** Milliseconds between TCP keepalive probes (prevents idle-timeout on Neon/RDS) */
+    val keepaliveTimeMs: Long = 300_000L,
+    /** Max lifetime of a connection in the pool */
+    val maxLifetimeMs: Long = 1_800_000L,
+    /** Whether to run Flyway migrations on startup */
+    val runMigrations: Boolean = false,
+)

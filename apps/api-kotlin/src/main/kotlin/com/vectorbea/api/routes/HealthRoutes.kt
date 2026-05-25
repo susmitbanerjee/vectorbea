@@ -1,6 +1,7 @@
 package com.vectorbea.api.routes
 
 import com.vectorbea.api.config.AppConfig
+import com.vectorbea.api.db.Database
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
@@ -11,14 +12,24 @@ import java.time.Instant
  *
  * GET /health
  *   Returns basic service liveness. Always 200 if the process is up.
- *   Does NOT check DB/Redis — use /ready for infrastructure checks.
+ *   Does NOT check DB — use /ready for infrastructure checks.
  *
  * GET /ready
- *   Returns readiness with a "checks" map.
- *   Currently returns ok with empty checks (DB/Redis not yet wired).
- *   Phase 2: will add DB ping and Redis ping sub-checks; if any fail → 503.
+ *   Returns readiness with a "checks" map containing each infrastructure component.
+ *   Responds 503 if any required check fails.
+ *
+ *   Shape:
+ *   {
+ *     "status": "ok" | "error",
+ *     "checks": {
+ *       "database": { "ok": true, "latencyMs": 3 }
+ *     }
+ *   }
  */
-class HealthRoutes(private val config: AppConfig) {
+class HealthRoutes(
+    private val config: AppConfig,
+    private val database: Database? = null,
+) {
 
     fun register(router: Router) {
         router.get("/health", ::health)
@@ -35,16 +46,22 @@ class HealthRoutes(private val config: AppConfig) {
             )
         )
 
-    private fun ready(@Suppress("UNUSED_PARAMETER") req: Request): Response =
-        Response.ok(
-            ReadyResponse(
-                status = "ok",
-                checks = emptyMap(),
-                // Phase 2 will populate this with:
-                // "database" -> CheckResult("ok" / "error", latencyMs),
-                // "redis"    -> CheckResult("ok" / "error", latencyMs),
-            )
-        )
+    private fun ready(@Suppress("UNUSED_PARAMETER") req: Request): Response {
+        val checks = mutableMapOf<String, CheckResult>()
+        var allOk = true
+
+        // Database check — only if DB is configured
+        if (database != null) {
+            val ping = database.pingResult()
+            val result = CheckResult(ok = ping.ok, latencyMs = ping.latencyMs, error = ping.error)
+            checks["database"] = result
+            if (!ping.ok) allOk = false
+        }
+
+        val status = if (allOk) "ok" else "error"
+        val body = ReadyResponse(status = status, checks = checks)
+        return if (allOk) Response.ok(body) else Response.json(503, body)
+    }
 
     // ── Response shapes ───────────────────────────────────────────────────────
 
@@ -55,8 +72,14 @@ class HealthRoutes(private val config: AppConfig) {
         val version: String,
     )
 
+    data class CheckResult(
+        val ok: Boolean,
+        val latencyMs: Long?,
+        val error: String? = null,
+    )
+
     data class ReadyResponse(
         val status: String,
-        val checks: Map<String, Any>,
+        val checks: Map<String, CheckResult>,
     )
 }
