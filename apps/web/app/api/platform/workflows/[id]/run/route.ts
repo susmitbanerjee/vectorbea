@@ -40,14 +40,18 @@ export async function POST(
   const dryRun = body.dryRun === true;
   const triggerType = typeof body.triggerType === "string" ? body.triggerType : "manual";
 
-  // ── Load workflow ─────────────────────────────────────────────────────────
+  // ── Load workflow + graph in one query ────────────────────────────────────
   const workflowRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    SELECT id, name, current_version, status, graph_json
-    FROM vectorbea.platform_workflows
-    WHERE id = ${workflowId}::uuid
-      AND workspace_id = ${workspaceId}::uuid
+    SELECT w.id, w.name, w.current_version, w.status,
+           g.graph_json
+    FROM vectorbea.platform_workflows w
+    LEFT JOIN vectorbea.workflow_graphs g ON g.workflow_id = w.id
+    WHERE w.id = ${workflowId}::uuid
+      AND w.workspace_id = ${workspaceId}::uuid
     LIMIT 1
-  `).catch(() => [] as Record<string, unknown>[]);
+  `).catch((e: unknown) => {
+    throw new Error(`Failed to load workflow: ${(e as Error).message}`);
+  });
 
   const workflowRow = workflowRows[0];
   if (!workflowRow) {
@@ -61,15 +65,7 @@ export async function POST(
   const workflowName = String(workflowRow.name ?? "Unnamed Workflow");
   const workflowVersion = String(workflowRow.current_version ?? "v1");
 
-  // ── Load graph ────────────────────────────────────────────────────────────
-  const graphRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
-    SELECT graph_json FROM vectorbea.workflow_graphs
-    WHERE workflow_id = ${workflowId}::uuid
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).catch(() => [] as Record<string, unknown>[]);
-
-  const graphJson = graphRows[0]?.graph_json as WorkflowGraph | null;
+  const graphJson = workflowRow.graph_json as WorkflowGraph | null;
   if (!graphJson || !Array.isArray(graphJson.nodes) || graphJson.nodes.length === 0) {
     return NextResponse.json({ error: "Workflow has no graph. Build the workflow in the builder first." }, { status: 422 });
   }
