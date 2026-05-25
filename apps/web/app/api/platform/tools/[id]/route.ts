@@ -13,6 +13,7 @@ function rowToTool(r: Record<string, unknown>) {
     retryPolicy: r.retry_policy ?? {}, idempotent: r.idempotent ?? true,
     connectionId: r.connection_id ?? null, connectionName: r.connection_name ?? null,
     authConnectionRef: r.auth_connection_ref ?? null, httpConfig: r.http_config ?? null,
+    dbConfig: r.db_config ?? null,
     status: r.status ?? "active", totalCalls: r.total_calls ?? 0,
     lastUsedAt: r.last_used_at ?? null, createdAt: r.created_at, updatedAt: r.updated_at,
   };
@@ -46,6 +47,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.connectionName !== undefined)    updates.push(Prisma.sql`connection_name = ${body.connectionName}`);
   if (typeof body.status === "string")      updates.push(Prisma.sql`status = ${body.status}`);
   if (body.httpConfig)  updates.push(Prisma.sql`http_config = ${JSON.stringify(body.httpConfig)}::jsonb`);
+  if (body.dbConfig)    updates.push(Prisma.sql`db_config = ${JSON.stringify(body.dbConfig)}::jsonb`);
   if (body.retryPolicy) updates.push(Prisma.sql`retry_policy = ${JSON.stringify(body.retryPolicy)}::jsonb`);
   updates.push(Prisma.sql`updated_at = now()`);
 

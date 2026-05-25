@@ -75,6 +75,11 @@ export default function NewToolPage() {
   const [headers, setHeaders] = useState("{}");
   const [bodyTemplate, setBodyTemplate] = useState("");
 
+  // DB config (database_read / database_write)
+  const [sqlTemplate, setSqlTemplate] = useState("");
+  const [dbMaxRows, setDbMaxRows] = useState("100");
+  const [dbRequireApproval, setDbRequireApproval] = useState(false);
+
   // Schema
   const [inputSchema, setInputSchema] = useState('{\n  "type": "object",\n  "properties": {}\n}');
   const [outputSchema, setOutputSchema] = useState('{\n  "type": "object",\n  "properties": {}\n}');
@@ -101,6 +106,9 @@ export default function NewToolPage() {
   async function handleCreate() {
     if (!name.trim()) { toast.error("Tool name is required."); return; }
     if (type === "http" && !url.trim()) { toast.error("URL is required for HTTP tools."); return; }
+    if ((type === "database_read" || type === "database_write") && !sqlTemplate.trim()) {
+      toast.error("SQL template is required for database tools."); return;
+    }
     setSaving(true);
     try {
       let parsedInput = {};
@@ -132,6 +140,13 @@ export default function NewToolPage() {
         connectionName: selectedConn?.name ?? null,
         httpConfig: type === "http"
           ? { method, url: url.trim(), headers: parsedHeaders, bodyTemplate: bodyTemplate || undefined }
+          : undefined,
+        dbConfig: (type === "database_read" || type === "database_write")
+          ? {
+              sqlTemplate: sqlTemplate.trim(),
+              ...(type === "database_read" ? { maxRows: parseInt(dbMaxRows) || 100 } : {}),
+              ...(type === "database_write" ? { requireApproval: dbRequireApproval } : {}),
+            }
           : undefined,
       });
       toast.success("Tool registered.");
@@ -244,6 +259,58 @@ export default function NewToolPage() {
                 placeholder={'{"customerId": "{{customerId}}"}'}
               />
             </Field>
+          )}
+        </section>
+      )}
+
+      {/* ── DB Config ────────────────────────────────────────────────── */}
+      {(type === "database_read" || type === "database_write") && (
+        <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+          <SectionHeader label="Database Config" />
+
+          <Field label="SQL Template" required>
+            <textarea
+              rows={5}
+              className={`resize-y ${monoCls} text-[12px]`}
+              value={sqlTemplate}
+              onChange={(e) => setSqlTemplate(e.target.value)}
+              placeholder={
+                type === "database_read"
+                  ? "SELECT id, name, email FROM users WHERE status = {{status}} LIMIT 50"
+                  : "INSERT INTO llm_answers (fact, answer, created_at)\nVALUES ({{fact}}, {{answer}}, now())"
+              }
+            />
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Use <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{"{{paramName}}"}</code> for parameters that agents will fill at runtime. They map to <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">$1, $2…</code> in SQL-appearance order.
+            </p>
+          </Field>
+
+          {type === "database_read" && (
+            <Field label="Max rows returned">
+              <input
+                type="number"
+                min="1"
+                max="10000"
+                className={inputCls}
+                value={dbMaxRows}
+                onChange={(e) => setDbMaxRows(e.target.value)}
+              />
+            </Field>
+          )}
+
+          {type === "database_write" && (
+            <label className="flex cursor-pointer items-center gap-2.5">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded accent-primary"
+                checked={dbRequireApproval}
+                onChange={(e) => setDbRequireApproval(e.target.checked)}
+              />
+              <div>
+                <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Require human approval before writing</p>
+                <p className="text-[11px] text-muted-foreground">Workflow will pause and wait for approval before executing this SQL</p>
+              </div>
+            </label>
           )}
         </section>
       )}

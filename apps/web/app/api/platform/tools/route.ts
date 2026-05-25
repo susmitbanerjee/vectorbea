@@ -20,6 +20,7 @@ function rowToTool(r: Record<string, unknown>) {
     retryPolicy: r.retry_policy ?? {}, idempotent: r.idempotent ?? true,
     connectionId: r.connection_id ?? null, connectionName: r.connection_name ?? null,
     authConnectionRef: r.auth_connection_ref ?? null, httpConfig: r.http_config ?? null,
+    dbConfig: r.db_config ?? null,
     status: r.status ?? "active", totalCalls: r.total_calls ?? 0,
     lastUsedAt: r.last_used_at ?? null, createdAt: r.created_at, updatedAt: r.updated_at,
   };
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
       INSERT INTO vectorbea.platform_tools (
         workspace_id, name, slug, description, type, input_schema, output_schema,
         risk_level, timeout_ms, retry_policy, idempotent,
-        connection_id, connection_name, auth_connection_ref, http_config
+        connection_id, connection_name, auth_connection_ref, http_config, db_config
       ) VALUES (
         ${workspaceId}::uuid, ${String(body.name)}, ${slug},
         ${String(body.description ?? "")}, ${type},
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
         ${body.connectionId ? String(body.connectionId) : null}::uuid,
         ${body.connectionName ? String(body.connectionName) : null},
         ${body.authConnectionRef ? String(body.authConnectionRef) : null},
-        ${body.httpConfig ? JSON.stringify(body.httpConfig) : null}::jsonb
+        ${body.httpConfig ? JSON.stringify(body.httpConfig) : null}::jsonb,
+        ${body.dbConfig ? JSON.stringify(body.dbConfig) : null}::jsonb
       ) RETURNING *
     `);
     await cacheDel(CacheKeys.toolList(workspaceId));

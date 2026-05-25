@@ -194,6 +194,13 @@ export interface Tool {
     headers: Record<string, string>;
     bodyTemplate?: string;
   };
+  // DB-specific (database_read / database_write)
+  dbConfig?: {
+    sqlTemplate: string;
+    parameters?: Record<string, string>;
+    maxRows?: number;       // read only
+    requireApproval?: boolean; // write only
+  };
   status: "active" | "inactive";
   totalCalls: number;
   lastUsedAt: string | null;

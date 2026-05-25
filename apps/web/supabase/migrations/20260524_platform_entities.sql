@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS platform_tools (
   connection_name       text,
   auth_connection_ref   text,
   http_config           jsonb,
+  db_config             jsonb,     -- for database_read / database_write tools
   status                text        NOT NULL DEFAULT 'active',
   total_calls           integer     NOT NULL DEFAULT 0,
   last_used_at          timestamptz,
