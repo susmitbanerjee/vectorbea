@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Workflow Executor
  *
  * Server-side only. Executes a WorkflowGraph node-by-node, resolving
@@ -518,6 +518,251 @@ function sanitizeOutput(output: unknown): unknown {
   return sanitized;
 }
 
+// ─── Agent executor ───────────────────────────────────────────────────────────
+// Loads the agent + its tools from DB, calls the LLM with tool definitions
+// (OpenAI function-calling), dispatches tool calls in a loop until the model
+// stops calling tools or maxIterations is reached.
+
+interface AgentToolRecord {
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  connectionId: string | null;
+  dbConfig: { sqlTemplate: string; maxRows?: number; requireApproval?: boolean } | null;
+  httpConfig: { method: string; url: string; headers: Record<string, string>; bodyTemplate?: string } | null;
+}
+
+async function executeAgentNode(opts: {
+  agentId: string;
+  workspaceId: string;
+  runId: string;
+  workflowInput: Record<string, unknown>;
+  stepOutputs: Record<string, unknown>;
+  dryRun: boolean;
+  seqRef: { seq: number };
+}): Promise<{ output: unknown; tokensUsed: number; estimatedCostUsd: number }> {
+  const { agentId, workspaceId, runId, workflowInput, stepOutputs, dryRun, seqRef } = opts;
+
+  // Load agent record
+  const agentRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+    SELECT id, name, model_name, temperature, max_iterations,
+           llm_connection_id, allowed_tool_ids, instructions
+    FROM vectorbea.platform_agents
+    WHERE id = ${agentId}::uuid AND workspace_id = ${workspaceId}::uuid
+    LIMIT 1
+  `);
+  const agentRow = agentRows[0];
+  if (!agentRow) throw new Error(`Agent ${agentId} not found`);
+
+  const modelName      = String(agentRow.model_name ?? "gpt-4o-mini");
+  const temperature    = Number(agentRow.temperature ?? 0.1);
+  const maxIterations  = Number(agentRow.max_iterations ?? 10);
+  const instructions   = String(agentRow.instructions ?? "");
+  const llmConnId      = agentRow.llm_connection_id ? String(agentRow.llm_connection_id) : null;
+  const allowedToolIds = Array.isArray(agentRow.allowed_tool_ids) ? (agentRow.allowed_tool_ids as string[]) : [];
+  const agentName      = String(agentRow.name ?? "Agent");
+
+  // Load LLM connection + API key
+  const llmConn = llmConnId ? await loadConnection(llmConnId, workspaceId) : null;
+  if (!llmConn?.secret) throw new Error(`Agent "${agentName}": LLM connection missing or has no API key`);
+  const apiKey  = llmConn.secret;
+  const baseUrl = llmConn.baseUrl ?? "https://api.openai.com/v1";
+
+  // Load tools
+  let tools: AgentToolRecord[] = [];
+  if (allowedToolIds.length > 0) {
+    const toolRows = await db.$queryRaw<Record<string, unknown>[]>(Prisma.sql`
+      SELECT id, name, slug, type, description, input_schema, connection_id, db_config, http_config
+      FROM vectorbea.platform_tools
+      WHERE id = ANY(${allowedToolIds}::uuid[]) AND workspace_id = ${workspaceId}::uuid
+    `);
+    tools = toolRows.map((r) => ({
+      id:           String(r.id),
+      name:         String(r.name),
+      slug:         String(r.slug ?? r.name).replace(/[^a-zA-Z0-9_-]/g, "_"),
+      type:         String(r.type ?? "http"),
+      description:  String(r.description ?? ""),
+      inputSchema:  (r.input_schema ?? {}) as Record<string, unknown>,
+      connectionId: r.connection_id ? String(r.connection_id) : null,
+      dbConfig:     r.db_config as AgentToolRecord["dbConfig"],
+      httpConfig:   r.http_config as AgentToolRecord["httpConfig"],
+    }));
+  }
+
+  if (dryRun) {
+    return { output: { __dryRun: true, agentName, modelName, tools: tools.map((t) => t.name) }, tokensUsed: 0, estimatedCostUsd: 0 };
+  }
+
+  // Build OpenAI tool definitions
+  const openAiTools = tools.map((t) => ({
+    type: "function" as const,
+    function: { name: t.slug, description: t.description || t.name, parameters: t.inputSchema },
+  }));
+
+  // Build initial messages
+  const systemPrompt = instructions || "You are a helpful AI agent. Complete the user task using the available tools.";
+  const contextSummary = Object.keys(stepOutputs).length > 0
+    ? `\n\nPrevious step outputs:\n${JSON.stringify(stepOutputs, null, 2)}`
+    : "";
+
+  const messages: Record<string, unknown>[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: `Execute the workflow task.${contextSummary}\n\nWorkflow input: ${JSON.stringify(workflowInput)}` },
+  ];
+
+  let totalTokens = 0;
+  let lastOutput: unknown = null;
+
+  // Agentic loop
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const llmStartMs = Date.now();
+
+    const llmRes = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: modelName,
+        temperature,
+        messages,
+        tools: openAiTools.length > 0 ? openAiTools : undefined,
+        tool_choice: openAiTools.length > 0 ? "auto" : undefined,
+      }),
+    });
+
+    if (!llmRes.ok) {
+      const errText = await llmRes.text();
+      throw new Error(`LLM API error (${llmRes.status}): ${errText.slice(0, 300)}`);
+    }
+
+    const llmData = await llmRes.json() as {
+      choices: { message: { role: string; content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[];
+      usage?: { total_tokens: number };
+    };
+
+    const iterTokens = llmData.usage?.total_tokens ?? 0;
+    totalTokens += iterTokens;
+    const assistantMsg = llmData.choices[0]?.message;
+    if (!assistantMsg) break;
+
+    await emitEvent(seqRef, {
+      runId, workspaceId,
+      type: "LLM_CALL_STARTED", status: "SUCCEEDED", source: "NATIVE",
+      agentName, modelName,
+      title: `LLM — ${modelName} (iter ${iteration + 1})`,
+      summary: assistantMsg.content?.slice(0, 200) ?? undefined,
+      durationMs: Date.now() - llmStartMs,
+      tokensUsed: iterTokens,
+      estimatedCostUsd: (iterTokens / 1_000_000) * 2.5,
+    });
+
+    // No tool calls — agent finished
+    if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
+      lastOutput = assistantMsg.content;
+      break;
+    }
+
+    messages.push({ role: "assistant", content: assistantMsg.content, tool_calls: assistantMsg.tool_calls });
+
+    // Dispatch tool calls
+    for (const toolCall of assistantMsg.tool_calls) {
+      const fnName = toolCall.function.name;
+      const tool   = tools.find((t) => t.slug === fnName);
+      let toolArgs: Record<string, unknown> = {};
+      try { toolArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>; } catch { /* ignore */ }
+
+      await emitEvent(seqRef, {
+        runId, workspaceId, type: "TOOL_CALL_STARTED", status: "SUCCEEDED", source: "NATIVE",
+        agentName, toolName: tool?.name ?? fnName,
+        title: `Tool call — ${tool?.name ?? fnName}`,
+        inputJsonSanitized: sanitizeOutput(toolArgs),
+      });
+
+      let toolResult: unknown;
+      const toolStartMs = Date.now();
+
+      try {
+        if (!tool) throw new Error(`Tool "${fnName}" not registered on agent`);
+
+        if (tool.type === "http") {
+          const hc = tool.httpConfig;
+          if (!hc) throw new Error(`Tool "${tool.name}": no HTTP config`);
+          let url = hc.url;
+          for (const [k, v] of Object.entries(toolArgs)) url = url.replace(new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "g"), String(v));
+          await checkSSRF(url);
+          let body: string | undefined;
+          if (hc.bodyTemplate) {
+            body = hc.bodyTemplate;
+            for (const [k, v] of Object.entries(toolArgs)) body = body!.replace(new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "g"), JSON.stringify(v));
+          }
+          const httpRes = await fetch(url, {
+            method: hc.method,
+            headers: { "Content-Type": "application/json", ...hc.headers },
+            body: body ?? (["POST","PUT","PATCH"].includes(hc.method) ? JSON.stringify(toolArgs) : undefined),
+          });
+          const text = await httpRes.text();
+          try { toolResult = JSON.parse(text); } catch { toolResult = text; }
+
+        } else if (tool.type === "database_read" || tool.type === "database_write") {
+          const dc = tool.dbConfig;
+          if (!dc?.sqlTemplate) throw new Error(`Tool "${tool.name}": no SQL template configured`);
+          const conn = tool.connectionId ? await loadConnection(tool.connectionId, workspaceId) : null;
+          if (!conn?.secret) throw new Error(`Tool "${tool.name}": database connection missing or has no credentials`);
+
+          const { Client } = await import("pg");
+          const client = new Client({ connectionString: conn.secret });
+          await client.connect();
+          try {
+            const paramOrder: string[] = [];
+            const sql = dc.sqlTemplate.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name: string) => {
+              if (!paramOrder.includes(name)) paramOrder.push(name);
+              return `$${paramOrder.indexOf(name) + 1}`;
+            });
+            const values = paramOrder.map((k) => toolArgs[k] ?? null);
+            const result = await client.query(sql, values);
+            toolResult = tool.type === "database_read"
+              ? { rows: result.rows, rowCount: result.rowCount }
+              : { rowsAffected: result.rowCount, success: true };
+          } finally {
+            await client.end().catch(() => {});
+          }
+
+        } else {
+          throw new Error(`Tool type "${tool.type}" not supported in agent execution`);
+        }
+
+        await emitEvent(seqRef, {
+          runId, workspaceId, type: "TOOL_CALL_COMPLETED", status: "SUCCEEDED", source: "NATIVE",
+          agentName, toolName: tool.name,
+          title: `Tool completed — ${tool.name}`,
+          durationMs: Date.now() - toolStartMs,
+          outputJsonSanitized: sanitizeOutput(toolResult),
+        });
+
+      } catch (toolErr) {
+        const errMsg = toolErr instanceof Error ? toolErr.message : "Tool failed";
+        toolResult = { error: errMsg };
+        await emitEvent(seqRef, {
+          runId, workspaceId, type: "TOOL_CALL_FAILED", status: "FAILED", source: "NATIVE",
+          agentName, toolName: tool?.name ?? fnName,
+          title: `Tool failed — ${tool?.name ?? fnName}`,
+          durationMs: Date.now() - toolStartMs,
+          errorJsonSanitized: { message: errMsg },
+        });
+      }
+
+      messages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(toolResult) });
+    }
+    lastOutput = assistantMsg.content;
+  }
+
+  const estimatedCostUsd = (totalTokens / 1_000_000) * 2.5;
+  return { output: lastOutput, tokensUsed: totalTokens, estimatedCostUsd };
+}
+
+
 // â”€â”€â”€ Main executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorResult> {
@@ -933,8 +1178,25 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
             agentName: cfg?.agentName as string,
             source: "NATIVE",
           });
-          // Simulate agent output (real agent runner would be invoked here)
-          stepOutput = { agentResult: null, status: "completed" };
+          // Execute real agent: LLM agentic loop with tool calls
+          if (!cfg?.agentId) {
+            stepOutput = { warning: "Agent node has no agentId configured" };
+          } else {
+            const agentResult = await executeAgentNode({
+              agentId: cfg.agentId,
+              workspaceId,
+              runId,
+              workflowInput,
+              stepOutputs: Object.fromEntries(
+                Object.entries(context.steps).map(([k, v]) => [k, (v as { extracted: unknown }).extracted])
+              ),
+              dryRun,
+              seqRef,
+            });
+            stepOutput = { output: agentResult.output, status: "completed" };
+            totalTokens += agentResult.tokensUsed;
+            totalCost   += agentResult.estimatedCostUsd;
+          }
           await emitEvent(seqRef, {
             runId, workspaceId, type: "AGENT_COMPLETED", status: "SUCCEEDED",
             title: `Agent completed â€” ${cfg?.agentName ?? node.data.label}`,
