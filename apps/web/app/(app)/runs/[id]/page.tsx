@@ -153,7 +153,7 @@ export default function RunDetailPage() {
     if (!model) return;
     const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
     if (!live) return;
-    const interval = setInterval(() => void load({ silent: true }), 6000);
+    const interval = setInterval(() => void load({ silent: true }), 1500);
     return () => clearInterval(interval);
   }, [model, load]);
 
