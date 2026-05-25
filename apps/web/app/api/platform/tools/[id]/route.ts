@@ -42,7 +42,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (typeof body.type === "string")        updates.push(Prisma.sql`type = ${body.type}`);
   if (typeof body.riskLevel === "string")   updates.push(Prisma.sql`risk_level = ${body.riskLevel}`);
   if (typeof body.timeoutMs === "number")   updates.push(Prisma.sql`timeout_ms = ${body.timeoutMs}`);
-  if (body.connectionId !== undefined)      updates.push(Prisma.sql`connection_id = ${body.connectionId}`);
+  if (body.connectionId !== undefined)      updates.push(Prisma.sql`connection_id = ${body.connectionId ? String(body.connectionId) : null}::uuid`);
   if (body.connectionName !== undefined)    updates.push(Prisma.sql`connection_name = ${body.connectionName}`);
   if (typeof body.status === "string")      updates.push(Prisma.sql`status = ${body.status}`);
   if (body.httpConfig)  updates.push(Prisma.sql`http_config = ${JSON.stringify(body.httpConfig)}::jsonb`);

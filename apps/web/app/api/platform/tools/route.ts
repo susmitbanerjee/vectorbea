@@ -65,10 +65,10 @@ export async function POST(request: NextRequest) {
         ${riskLevel}, ${Number(body.timeoutMs ?? 10000)},
         ${JSON.stringify(body.retryPolicy ?? { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 })}::jsonb,
         ${body.idempotent !== false},
-        ${body.connectionId ?? null},
+        ${body.connectionId ? String(body.connectionId) : null}::uuid,
         ${body.connectionName ? String(body.connectionName) : null},
         ${body.authConnectionRef ? String(body.authConnectionRef) : null},
-        ${body.httpConfig ? JSON.stringify(body.httpConfig) + "::jsonb" : null}
+        ${body.httpConfig ? JSON.stringify(body.httpConfig) : null}::jsonb
       ) RETURNING *
     `);
     await cacheDel(CacheKeys.toolList(workspaceId));
