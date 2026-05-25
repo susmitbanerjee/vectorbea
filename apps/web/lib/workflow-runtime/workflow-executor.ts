@@ -103,7 +103,8 @@ async function loadConnection(connectionId: string, workspaceId: string): Promis
       secret,
       baseUrl,
     };
-  } catch {
+  } catch (e) {
+    console.error(“[loadConnection] query failed:”, (e as Error).message);
     return null;
   }
 }
@@ -570,7 +571,9 @@ async function executeAgentNode(opts: {
 
   // Load LLM connection + API key
   const llmConn = llmConnId ? await loadConnection(llmConnId, workspaceId) : null;
-  if (!llmConn?.secret) throw new Error(`Agent "${agentName}": LLM connection missing or has no API key`);
+  if (!llmConnId) throw new Error(`Agent "${agentName}": no llm_connection_id on agent row`);
+  if (!llmConn)   throw new Error(`Agent "${agentName}": loadConnection returned null for id=${llmConnId}`);
+  if (!llmConn.secret) throw new Error(`Agent "${agentName}": connection found but secret is null (secret_ref may be missing or decryption failed)`);
   const apiKey  = llmConn.secret;
   const baseUrl = llmConn.baseUrl ?? "https://api.openai.com/v1";
 
