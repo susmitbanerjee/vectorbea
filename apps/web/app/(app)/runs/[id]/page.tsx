@@ -8,7 +8,7 @@
  * API-backed runs use remote endpoints.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, RotateCcw } from "lucide-react";
@@ -156,6 +156,26 @@ export default function RunDetailPage() {
     const interval = setInterval(() => void load({ silent: true }), 1500);
     return () => clearInterval(interval);
   }, [model, load]);
+
+  // If run is still queued when page loads, kick off execution.
+  // This is a reliable fallback in case the builder's fire-and-forget fetch
+  // was cancelled by the page navigation before it could reach the server.
+  const executeTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!model || executeTriggeredRef.current) return;
+    if (model.run.status !== "QUEUED") return;
+    executeTriggeredRef.current = true;
+    const workflowId = model.run.jobId; // mapped from workflowId
+    const wsParam =
+      new URLSearchParams(window.location.search).get("org") ??
+      new URLSearchParams(window.location.search).get("workspaceId") ??
+      "";
+    if (!workflowId || !wsParam) return;
+    void fetch(
+      `/api/platform/workflows/${workflowId}/run/${id}/execute?workspaceId=${encodeURIComponent(wsParam)}`,
+      { method: "POST" },
+    );
+  }, [model, id]);
 
   // ── Local approval handlers ────────────────────────────────────────────────
 
