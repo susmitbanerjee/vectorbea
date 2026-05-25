@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workflow Executor
  *
  * Server-side only. Executes a WorkflowGraph node-by-node, resolving
@@ -38,7 +38,7 @@ import {
 import { processOutput } from "./output-extractor";
 import { validateSchema, repairJson } from "./schema-validator";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Types â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export interface ExecutorOptions {
   runId: string;
@@ -66,12 +66,12 @@ export interface ExecutorResult {
   durationMs: number;
 }
 
-// â”€â”€â”€ Connection loader (server-side, with secret resolution) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Connection loader (server-side, with secret resolution) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 interface ResolvedConnection {
   type: string;
   configJson: Record<string, unknown>;
-  /** Resolved plaintext secret â€” NEVER log or return this */
+  /** Resolved plaintext secret â€" NEVER log or return this */
   secret: string | null;
   baseUrl?: string | null;
 }
@@ -104,12 +104,12 @@ async function loadConnection(connectionId: string, workspaceId: string): Promis
       baseUrl,
     };
   } catch (e) {
-    console.error(“[loadConnection] query failed:”, (e as Error).message);
+    console.error("[loadConnection] query failed:", (e as Error).message);
     return null;
   }
 }
 
-// â”€â”€â”€ Event emitter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Event emitter â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async function emitEvent(seqRef: { seq: number }, opts: {
   runId: string;
@@ -164,7 +164,7 @@ async function emitEvent(seqRef: { seq: number }, opts: {
       )
     `);
   } catch {
-    // Best-effort event emission â€” never fail a run because of event write errors
+    // Best-effort event emission â€" never fail a run because of event write errors
   }
 }
 
@@ -194,7 +194,7 @@ async function updateRunStatus(
   }
 }
 
-// â”€â”€â”€ Graph traversal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Graph traversal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function getStartNode(graph: WorkflowGraph): SavedWorkflowNode | null {
   return graph.nodes.find((n) => n.type === "trigger") ?? graph.nodes[0] ?? null;
@@ -212,7 +212,7 @@ function getSuccessors(graph: WorkflowGraph, nodeId: string, edgeType?: string):
     .filter((n): n is SavedWorkflowNode => n !== undefined);
 }
 
-// â”€â”€â”€ LLM executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ LLM executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async function executeLlmNode(
   cfg: LlmNodeConfig,
@@ -225,7 +225,7 @@ async function executeLlmNode(
   }
 
   const apiKey = connection?.secret ?? null;
-  if (!apiKey) throw new Error(`LLM connection has no API key â€” check Connection configuration`);
+  if (!apiKey) throw new Error(`LLM connection has no API key â€" check Connection configuration`);
 
   const provider = (connection?.configJson.providerType as string) ?? cfg.provider ?? "openai";
   const model = cfg.model;
@@ -269,7 +269,7 @@ async function executeLlmNode(
       output = parsed;
     } catch (e) {
       if ((e as Error).message.startsWith("LLM output failed")) throw e;
-      // JSON parse failed â€” leave as raw text
+      // JSON parse failed â€" leave as raw text
     }
   }
 
@@ -277,7 +277,7 @@ async function executeLlmNode(
   return { output, tokensUsed: result.tokenCount, estimatedCostUsd: cost };
 }
 
-// â”€â”€â”€ HTTP tool executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ HTTP tool executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async function executeHttpNode(
   cfg: HttpToolNodeConfig,
@@ -303,7 +303,7 @@ async function executeHttpNode(
   const timeoutMs = cfg.timeoutMs ?? 30_000;
   const maxBytes = cfg.maxResponseBytes ?? 5 * 1024 * 1024; // 5 MB default
 
-  // Build headers â€” never log raw Authorization values
+  // Build headers â€" never log raw Authorization values
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -407,7 +407,7 @@ async function executeHttpNode(
   };
 }
 
-// â”€â”€â”€ DB read executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ DB read executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async function executeDbReadNode(
   cfg: DbReadNodeConfig,
@@ -419,7 +419,7 @@ async function executeDbReadNode(
     return { output: { __dryRun: true, sql: cfg.sqlTemplate, resolvedParams } };
   }
 
-  if (!connection?.secret) throw new Error("DB read: no connection string â€” check Connection configuration");
+  if (!connection?.secret) throw new Error("DB read: no connection string â€" check Connection configuration");
 
   const connectionString = connection.secret;
 
@@ -450,7 +450,7 @@ async function executeDbReadNode(
   }
 }
 
-// â”€â”€â”€ DB write executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ DB write executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async function executeDbWriteNode(
   cfg: DbWriteNodeConfig,
@@ -462,7 +462,7 @@ async function executeDbWriteNode(
     return { output: { __dryRun: true, sql: cfg.sqlTemplate, resolvedParams } };
   }
 
-  if (!connection?.secret) throw new Error("DB write: no connection string â€” check Connection configuration");
+  if (!connection?.secret) throw new Error("DB write: no connection string â€" check Connection configuration");
 
   const connectionString = connection.secret;
   const { Client } = await import("pg");
@@ -484,7 +484,7 @@ async function executeDbWriteNode(
   }
 }
 
-// â”€â”€â”€ Transform executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Transform executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function executeTransformNode(
   cfg: TransformNodeConfig,
@@ -494,11 +494,11 @@ function executeTransformNode(
   if (engine === "template") {
     return resolveTemplate(cfg.expression, context);
   }
-  // JSONata / jq â€” structural placeholders (not yet implemented server-side)
+  // JSONata / jq â€" structural placeholders (not yet implemented server-side)
   throw new Error(`Transform engine '${engine}' is not yet supported`);
 }
 
-// â”€â”€â”€ Sanitize output (remove any fields that might contain secrets) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Sanitize output (remove any fields that might contain secrets) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function sanitizeOutput(output: unknown): unknown {
   if (!output || typeof output !== "object") return output;
@@ -769,7 +769,7 @@ async function executeAgentNode(opts: {
 }
 
 
-// â”€â”€â”€ Main executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Main executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorResult> {
   const startedAt = new Date().toISOString();
@@ -799,7 +799,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
     runId, workspaceId,
     type: "RUN_STARTED",
     status: "SUCCEEDED",
-    title: `Run started â€” ${workflowName}`,
+    title: `Run started â€" ${workflowName}`,
     source: "SYSTEM",
   });
 
@@ -810,7 +810,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
     return { status: "failed", errorMessage: "No trigger node found", totalTokens: 0, estimatedCostUsd: 0, durationMs: Date.now() - startMs };
   }
 
-  // Skip the trigger node itself â€” it only defines the entry point
+  // Skip the trigger node itself â€" it only defines the entry point
   const successors = getSuccessors(graph, current.id);
   current = successors[0] ?? null;
 
@@ -824,7 +824,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
     const node: SavedWorkflowNode = current;
     const nodeType = node.type;
 
-    // â”€â”€ End node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ End node â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if (nodeType === "end") {
       const endCfg = node.data.endConfig;
       if (endCfg?.outputMapping) {
@@ -833,7 +833,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
       break;
     }
 
-    // â”€â”€ Approval node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Approval node â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if (nodeType === "approval") {
       const cfg = node.data.approvalConfig;
       if (cfg) {
@@ -861,7 +861,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
       break;
     }
 
-    // â”€â”€ Step nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Step nodes â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const stepStartMs = Date.now();
 
     await emitEvent(seqRef, {
@@ -878,13 +878,13 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
     let stepCost = 0;
 
     try {
-      // â”€â”€ Resolve input mapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Resolve input mapping â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const inputMapping = node.data.inputMappingJson ?? {};
       const resolvedInputs = Object.keys(inputMapping).length > 0
         ? resolveMapping(inputMapping, context)
         : {};
 
-      // â”€â”€ Validate input schema (if configured) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Validate input schema (if configured) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const inputSchema = node.data.inputSchemaJson;
       if (inputSchema && Object.keys(resolvedInputs).length > 0) {
         const validation = validateSchema(resolvedInputs, inputSchema);
@@ -893,7 +893,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
         }
       }
 
-      // â”€â”€ Execute per node type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Execute per node type â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       switch (nodeType) {
         case "llm": {
           const cfg = node.data.llmConfig;
@@ -910,7 +910,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
 
           await emitEvent(seqRef, {
             runId, workspaceId, type: "LLM_CALL_STARTED", status: "SUCCEEDED",
-            title: `LLM call â€” ${cfg.model}`,
+            title: `LLM call â€" ${cfg.model}`,
             modelName: cfg.model,
             source: "NATIVE",
           });
@@ -982,7 +982,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
 
           await emitEvent(seqRef, {
             runId, workspaceId, type: "TOOL_CALL_STARTED", status: "SUCCEEDED",
-            title: `HTTP ${cfg.method} â€” ${finalUrl.replace(/[?#].*/, "")}`,
+            title: `HTTP ${cfg.method} â€" ${finalUrl.replace(/[?#].*/, "")}`,
             toolName: node.data.label as string,
             source: "NATIVE",
           });
@@ -1016,7 +1016,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
 
           await emitEvent(seqRef, {
             runId, workspaceId, type: "TOOL_CALL_STARTED", status: "SUCCEEDED",
-            title: `DB query â€” ${node.data.label}`,
+            title: `DB query â€" ${node.data.label}`,
             toolName: node.data.label as string,
             source: "NATIVE",
             // Show sanitized SQL preview (no parameter values)
@@ -1055,7 +1055,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
 
           await emitEvent(seqRef, {
             runId, workspaceId, type: "TOOL_CALL_STARTED", status: "SUCCEEDED",
-            title: `DB write â€” ${node.data.label}`,
+            title: `DB write â€" ${node.data.label}`,
             toolName: node.data.label as string,
             source: "NATIVE",
             inputJsonSanitized: { sqlPreview: cfg.sqlTemplate.slice(0, 200) },
@@ -1081,7 +1081,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
           stepOutput = executeTransformNode(cfg, context);
           await emitEvent(seqRef, {
             runId, workspaceId, type: "STEP_COMPLETED", status: "SUCCEEDED",
-            title: `Transform completed â€” ${node.data.label}`,
+            title: `Transform completed â€" ${node.data.label}`,
             source: "NATIVE",
             outputJsonSanitized: sanitizeOutput(stepOutput),
           });
@@ -1126,7 +1126,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
         case "timer": {
           const cfg = node.data.timerConfig;
           const delayMs = cfg?.delayMs ?? 0;
-          // In real execution we would queue a resume â€” for now we skip the delay
+          // In real execution we would queue a resume â€" for now we skip the delay
           await emitEvent(seqRef, {
             runId, workspaceId, type: "STEP_COMPLETED", status: "SUCCEEDED",
             title: `Timer: ${delayMs}ms delay (skipped in direct execution)`,
@@ -1140,7 +1140,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
           // Pause execution and wait for inbound webhook
           await emitEvent(seqRef, {
             runId, workspaceId, type: "STEP_STARTED", status: "PENDING",
-            title: `Waiting for webhook â€” ${node.data.label}`,
+            title: `Waiting for webhook â€" ${node.data.label}`,
             source: "SYSTEM",
           });
           await updateRunStatus(runId, "paused");
@@ -1180,7 +1180,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
           const cfg = node.data.agentConfig;
           await emitEvent(seqRef, {
             runId, workspaceId, type: "AGENT_STARTED", status: "SUCCEEDED",
-            title: `Agent started â€” ${cfg?.agentName ?? node.data.label}`,
+            title: `Agent started â€" ${cfg?.agentName ?? node.data.label}`,
             agentName: cfg?.agentName as string,
             source: "NATIVE",
           });
@@ -1205,7 +1205,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
           }
           await emitEvent(seqRef, {
             runId, workspaceId, type: "AGENT_COMPLETED", status: "SUCCEEDED",
-            title: `Agent completed â€” ${cfg?.agentName ?? node.data.label}`,
+            title: `Agent completed â€" ${cfg?.agentName ?? node.data.label}`,
             agentName: cfg?.agentName as string,
             durationMs: Date.now() - stepStartMs,
             source: "NATIVE",
@@ -1214,7 +1214,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
         }
 
         default:
-          // Unknown node type â€” skip
+          // Unknown node type â€" skip
           await emitEvent(seqRef, {
             runId, workspaceId, type: "STEP_COMPLETED", status: "SKIPPED",
             title: `Skipped: ${nodeType}`,
@@ -1223,11 +1223,11 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
           stepOutput = null;
       }
 
-      // â”€â”€ Extract output â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Extract output â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const extractionCfg = node.data.outputExtractionJson;
       const extracted = processOutput(stepOutput, extractionCfg);
 
-      // â”€â”€ Validate output schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Validate output schema â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const outputSchema = node.data.outputSchemaJson;
       if (outputSchema) {
         const v = validateSchema(extracted, outputSchema);
@@ -1236,7 +1236,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
         }
       }
 
-      // â”€â”€ Apply output mapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Apply output mapping â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const outputMapping = node.data.outputMappingJson;
       let finalExtracted: Record<string, unknown> = extracted;
       if (outputMapping && Object.keys(outputMapping).length > 0) {
@@ -1250,7 +1250,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
         finalExtracted = { ...extracted, ...mapped };
       }
 
-      // â”€â”€ Store in run context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Store in run context â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const stepEntry: StepOutputEntry = {
         raw: sanitizeOutput(stepOutput),
         extracted: sanitizeOutput(finalExtracted),
@@ -1307,14 +1307,14 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
 
       await emitEvent(seqRef, {
         runId, workspaceId, type: "RUN_FAILED", status: "FAILED",
-        title: `Run failed â€” ${workflowName}`,
+        title: `Run failed â€" ${workflowName}`,
         source: "SYSTEM",
       });
 
       return { status: "failed", errorMessage: stepError, totalTokens, estimatedCostUsd: totalCost, durationMs };
     }
 
-    // â”€â”€ Advance to next node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Advance to next node â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     // Try "success" edges first, then "default", then any edge (untyped graphs)
     let nextNodes = getSuccessors(graph, node.id, "success");
     if (nextNodes.length === 0) nextNodes = getSuccessors(graph, node.id, "default");
@@ -1322,7 +1322,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
     current = nextNodes[0] ?? null;
   }
 
-  // â”€â”€ Run succeeded â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Run succeeded â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const durationMs = Date.now() - startMs;
   await updateRunStatus(runId, "succeeded", {
     output: sanitizeOutput(finalOutput),
@@ -1331,7 +1331,7 @@ export async function executeWorkflow(opts: ExecutorOptions): Promise<ExecutorRe
 
   await emitEvent(seqRef, {
     runId, workspaceId, type: "RUN_SUCCEEDED", status: "SUCCEEDED",
-    title: `Run succeeded â€” ${workflowName}`,
+    title: `Run succeeded â€" ${workflowName}`,
     source: "SYSTEM",
   });
 
