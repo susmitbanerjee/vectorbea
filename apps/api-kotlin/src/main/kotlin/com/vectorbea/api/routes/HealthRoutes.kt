@@ -5,6 +5,7 @@ import com.vectorbea.api.db.Database
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
+import com.vectorbea.api.redis.RedisProvider
 import java.time.Instant
 
 /**
@@ -12,23 +13,33 @@ import java.time.Instant
  *
  * GET /health
  *   Returns basic service liveness. Always 200 if the process is up.
- *   Does NOT check DB — use /ready for infrastructure checks.
+ *   Does NOT check DB or Redis — use /ready for infrastructure checks.
  *
  * GET /ready
- *   Returns readiness with a "checks" map containing each infrastructure component.
- *   Responds 503 if any required check fails.
+ *   Returns infrastructure readiness. Checks DB and Redis.
+ *
+ *   Status semantics:
+ *     "ok"       — all configured checks passed
+ *     "degraded" — non-critical check failed (Redis missing in local/dev)
+ *     "error"    — critical check failed → HTTP 503
  *
  *   Shape:
  *   {
- *     "status": "ok" | "error",
+ *     "status": "ok" | "degraded" | "error",
  *     "checks": {
- *       "database": { "ok": true, "latencyMs": 3 }
+ *       "db":    "ok" | "error",
+ *       "redis": "ok" | "error" | "disabled"
  *     }
  *   }
+ *
+ *   HTTP codes:
+ *     200 — status ok or degraded (degraded means non-critical path)
+ *     503 — status error (required infra is down)
  */
 class HealthRoutes(
     private val config: AppConfig,
     private val database: Database? = null,
+    private val redis: RedisProvider? = null,
 ) {
 
     fun register(router: Router) {
@@ -47,20 +58,48 @@ class HealthRoutes(
         )
 
     private fun ready(@Suppress("UNUSED_PARAMETER") req: Request): Response {
-        val checks = mutableMapOf<String, CheckResult>()
-        var allOk = true
+        val checks = mutableMapOf<String, String>()
+        var hasError = false
+        var hasDegraded = false
 
-        // Database check — only if DB is configured
+        // ── Database check ────────────────────────────────────────────────────
         if (database != null) {
             val ping = database.pingResult()
-            val result = CheckResult(ok = ping.ok, latencyMs = ping.latencyMs, error = ping.error)
-            checks["database"] = result
-            if (!ping.ok) allOk = false
+            checks["db"] = if (ping.ok) "ok" else "error"
+            if (!ping.ok) hasError = true
+        } else {
+            checks["db"] = "disabled"
+            // DB not configured — always an error (DB is required)
+            hasError = true
         }
 
-        val status = if (allOk) "ok" else "error"
+        // ── Redis check ───────────────────────────────────────────────────────
+        if (redis != null) {
+            val ping = redis.pingResult()
+            checks["redis"] = if (ping.ok) "ok" else "error"
+            if (!ping.ok) {
+                // Redis failure is degraded in local/dev, hard error in production
+                if (config.isProduction) hasError = true else hasDegraded = true
+            }
+        } else {
+            checks["redis"] = "disabled"
+            if (config.isProduction) {
+                // Redis required in production
+                hasError = true
+            } else {
+                hasDegraded = true
+            }
+        }
+
+        val status = when {
+            hasError -> "error"
+            hasDegraded -> "degraded"
+            else -> "ok"
+        }
+
         val body = ReadyResponse(status = status, checks = checks)
-        return if (allOk) Response.ok(body) else Response.json(503, body)
+        // 503 only for hard errors; degraded still returns 200 so load balancers pass traffic
+        return if (hasError) Response.json(503, body) else Response.ok(body)
     }
 
     // ── Response shapes ───────────────────────────────────────────────────────
@@ -72,14 +111,8 @@ class HealthRoutes(
         val version: String,
     )
 
-    data class CheckResult(
-        val ok: Boolean,
-        val latencyMs: Long?,
-        val error: String? = null,
-    )
-
     data class ReadyResponse(
         val status: String,
-        val checks: Map<String, CheckResult>,
+        val checks: Map<String, String>,
     )
 }

@@ -15,7 +15,7 @@ data class AppConfig(
     val port: Int,
     val appEnv: String,
     val db: DbConfig?,
-    val redisUrl: String?,
+    val redis: RedisConfig?,
     /** Key is present/absent — value never printed */
     val secretEncryptionKeyPresent: Boolean,
     val corsAllowedOrigins: Set<String>,
@@ -26,6 +26,7 @@ data class AppConfig(
     val maxRequestBodyBytes: Int,
 ) {
     val isProduction: Boolean get() = appEnv == "production"
+    val isLocal: Boolean get() = appEnv == "local" || appEnv == "development"
 
     companion object {
         private val log = LoggerFactory.getLogger(AppConfig::class.java)
@@ -54,6 +55,19 @@ data class AppConfig(
 
             // ── Redis ───────────────────────────────────────────────────────
             val redisUrl = envSecret("REDIS_URL", "Redis connections will not be available")
+            val redis = redisUrl?.let {
+                RedisConfig(
+                    url = it,
+                    tlsEnabled = env("REDIS_TLS_ENABLED")?.lowercase() == "true",
+                    commandTimeoutMs = env("REDIS_COMMAND_TIMEOUT_MS")?.toLongOrNull() ?: 2_000L,
+                    queueStream = env("REDIS_QUEUE_STREAM") ?: "workflow-runs",
+                    queueGroup = env("REDIS_QUEUE_GROUP") ?: "workflow-workers",
+                    eventChannelPrefix = env("REDIS_EVENT_CHANNEL_PREFIX") ?: "run-events",
+                    cachePrefix = env("REDIS_CACHE_PREFIX") ?: "vectorbea",
+                    lockPrefix = env("REDIS_LOCK_PREFIX") ?: "lock",
+                    workerHeartbeatTtlSeconds = env("REDIS_WORKER_HEARTBEAT_TTL_SECONDS")?.toLongOrNull() ?: 60L,
+                )
+            }
 
             // ── Secret encryption key ───────────────────────────────────────
             val secretKey = env("SECRET_ENCRYPTION_KEY")
@@ -77,7 +91,7 @@ data class AppConfig(
                 port = port,
                 appEnv = appEnv,
                 db = db,
-                redisUrl = redisUrl,
+                redis = redis,
                 secretEncryptionKeyPresent = secretKey != null,
                 corsAllowedOrigins = corsOrigins,
                 logLevel = logLevel,
@@ -106,7 +120,7 @@ data class AppConfig(
         log.info("  env           : $appEnv")
         log.info("  version       : $version${if (commit != null) " ($commit)" else ""}")
         log.info("  database      : ${if (db != null) "configured (pool=${db.maxPoolSize}, migrations=${db.runMigrations})" else "NOT SET"}")
-        log.info("  redis         : ${if (redisUrl != null) "configured" else "NOT SET"}")
+        log.info("  redis         : ${if (redis != null) "configured (tls=${redis.tlsEnabled}, stream=${redis.queueStream})" else "NOT SET"}")
         log.info("  secret key    : ${if (secretEncryptionKeyPresent) "present" else "NOT SET"}")
         log.info("  cors origins  : $corsAllowedOrigins")
         log.info("  log level     : $logLevel")
@@ -114,6 +128,32 @@ data class AppConfig(
         // !! NEVER log: DATABASE_URL, REDIS_URL, SECRET_ENCRYPTION_KEY, or any key material !!
     }
 }
+
+/**
+ * Redis client configuration.
+ * Extracted from [AppConfig] only when REDIS_URL is present.
+ * The URL is treated as a secret — NEVER logged.
+ */
+data class RedisConfig(
+    /** Redis connection URL — never logged */
+    val url: String,
+    /** Whether to enable SSL/TLS (required for Upstash, Redis Cloud, etc.) */
+    val tlsEnabled: Boolean = false,
+    /** Milliseconds to wait for a command response before timing out */
+    val commandTimeoutMs: Long = 2_000L,
+    /** Redis Stream key for workflow run jobs */
+    val queueStream: String = "workflow-runs",
+    /** Consumer group name (workers create this group on startup) */
+    val queueGroup: String = "workflow-workers",
+    /** Pub/Sub channel prefix for run events */
+    val eventChannelPrefix: String = "run-events",
+    /** Key prefix for cache entries */
+    val cachePrefix: String = "vectorbea",
+    /** Key prefix for distributed locks */
+    val lockPrefix: String = "lock",
+    /** TTL in seconds for worker heartbeat keys */
+    val workerHeartbeatTtlSeconds: Long = 60L,
+)
 
 /**
  * Postgres connection pool configuration.

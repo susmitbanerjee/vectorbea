@@ -1,7 +1,6 @@
 package com.vectorbea.api.routes
 
 import com.vectorbea.api.config.AppConfig
-import com.vectorbea.api.config.DbConfig
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Router
 import com.vectorbea.api.http.fromJson
@@ -22,7 +21,7 @@ class HealthRoutesTest {
             port = 8080,
             appEnv = "test",
             db = null,
-            redisUrl = null,
+            redis = null,
             secretEncryptionKeyPresent = false,
             corsAllowedOrigins = setOf("*"),
             logLevel = "INFO",
@@ -31,7 +30,8 @@ class HealthRoutesTest {
             maxRequestBodyBytes = 2 * 1024 * 1024,
         )
         router = Router()
-        HealthRoutes(config).register(router)
+        // No database or redis wired — tests degraded/disabled paths
+        HealthRoutes(config, database = null, redis = null).register(router)
     }
 
     private fun get(path: String) = router.dispatch(
@@ -56,28 +56,48 @@ class HealthRoutesTest {
     }
 
     @Test
-    fun `GET ready returns 200`() {
+    fun `GET ready returns non-200 when db missing (required)`() {
+        // DB is required — missing DB → error → 503
         val response = get("/ready")
-        assertEquals(200, response.status)
+        assertEquals(503, response.status)
     }
 
     @Test
-    fun `GET ready body has status ok`() {
+    fun `GET ready body has status error when db missing`() {
         val response = get("/ready")
         val body = fromJson<Map<String, Any>>(response.body)
-        assertEquals("ok", body["status"])
+        assertEquals("error", body["status"])
     }
 
     @Test
-    fun `GET ready body has checks field`() {
+    fun `GET ready body checks map contains db and redis keys`() {
         val response = get("/ready")
         val body = fromJson<Map<String, Any>>(response.body)
-        assertTrue(body.containsKey("checks"))
+        @Suppress("UNCHECKED_CAST")
+        val checks = body["checks"] as? Map<String, Any>
+        assertNotNull(checks)
+        assertTrue(checks.containsKey("db"))
+        assertTrue(checks.containsKey("redis"))
+    }
+
+    @Test
+    fun `GET ready checks db=disabled when no db configured`() {
+        val response = get("/ready")
+        val body = fromJson<Map<String, Any>>(response.body)
+        @Suppress("UNCHECKED_CAST")
+        val checks = body["checks"] as Map<String, Any>
+        assertEquals("disabled", checks["db"])
     }
 
     @Test
     fun `health response content-type is JSON`() {
         val response = get("/health")
+        assertEquals("application/json; charset=utf-8", response.headers["Content-Type"])
+    }
+
+    @Test
+    fun `ready response content-type is JSON`() {
+        val response = get("/ready")
         assertEquals("application/json; charset=utf-8", response.headers["Content-Type"])
     }
 }
