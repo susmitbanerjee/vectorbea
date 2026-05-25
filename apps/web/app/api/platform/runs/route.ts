@@ -5,18 +5,33 @@ import { db } from "@/server/db";
 import { validateWorkflowConnections } from "@/lib/server/connection-validator";
 
 function rowToRun(r: Record<string, unknown>) {
+  const errorJson = r.error_json as Record<string, unknown> | null ?? null;
   return {
-    id: r.id, workspaceId: r.workspace_id, workflowId: r.workflow_id ?? null,
-    workflowName: r.workflow_name, workflowVersion: r.workflow_version ?? "v1",
-    creationMode: r.creation_mode ?? "native", status: r.status ?? "queued",
-    triggerType: r.trigger_type ?? "manual", triggerSource: r.trigger_source ?? "manual",
-    inputJson: r.input_json ?? null, outputJson: r.output_json ?? null,
-    errorJson: r.error_json ?? null, idempotencyKey: r.idempotency_key ?? null,
-    startedAt: r.started_at ?? null, completedAt: r.completed_at ?? null,
+    id: r.id,
+    workspaceId: r.workspace_id,
+    workflowId: r.workflow_id ?? null,
+    workflowName: r.workflow_name,
+    workflowVersion: r.workflow_version ?? "v1",
+    creationMode: r.creation_mode ?? "native",
+    status: r.status ?? "queued",
+    triggerType: r.trigger_type ?? "manual",
+    triggerSource: r.trigger_source ?? "manual",
+    input: r.input_json ?? null,
+    output: r.output_json ?? null,
+    error: errorJson ? String(errorJson.message ?? JSON.stringify(errorJson)) : null,
+    idempotencyKey: r.idempotency_key ?? null,
+    startedAt: r.started_at ?? null,
+    completedAt: r.completed_at ?? null,
     durationMs: r.duration_ms != null ? Number(r.duration_ms) : null,
     totalTokens: r.total_tokens != null ? Number(r.total_tokens) : null,
     estimatedCostUsd: r.estimated_cost_usd != null ? Number(r.estimated_cost_usd) : null,
-    createdAt: r.created_at, updatedAt: r.updated_at,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    // Fields required by AgentRun type but not stored separately — safe defaults
+    checkpoints: [],
+    artifacts: [],
+    approvalGates: [],
+    replayAvailable: false,
   };
 }
 

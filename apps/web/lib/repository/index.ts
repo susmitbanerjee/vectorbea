@@ -318,6 +318,16 @@ export async function getRunEvents(runId: string): Promise<RunEvent[]> {
   }
 }
 
+export async function getRunTimeline(runId: string): Promise<import("@/types/agent-run-ui").RunTimelineEventUi[]> {
+  try {
+    return await api<import("@/types/agent-run-ui").RunTimelineEventUi[]>(
+      withWorkspace(`/api/platform/runs/${runId}/events`),
+    );
+  } catch {
+    return [];
+  }
+}
+
 // ─── Trigger workflow (new executor-backed path) ──────────────────────────────
 
 /**

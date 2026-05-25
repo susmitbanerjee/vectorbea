@@ -19,7 +19,7 @@ import { RunSummaryCards } from "@/components/agent-runs/v2/RunSummaryCards";
 import { RunDetailTabsV2 } from "@/components/agent-runs/v2/RunDetailTabsV2";
 import {
   getRun,
-  getRunEvents,
+  getRunTimeline,
   approveRunGate,
   rejectRunGate,
   retryRunFailedStep,
@@ -28,8 +28,78 @@ import {
 } from "@/lib/repository";
 import { mapRunToUiModel } from "@/lib/repository/run-to-ui-mapper";
 import { mapApiRunToUiModel, type ApiAgentRun } from "@/lib/api-run-to-ui-model";
-import type { AgentRunUiModel } from "@/types/agent-run-ui";
+import type { AgentRunUiModel, RunTimelineEventUi } from "@/types/agent-run-ui";
 import type { RunCheckpoint } from "@/types/platform";
+
+function buildPlatformRunModel(
+  run: import("@/types/platform").AgentRun,
+  events: RunTimelineEventUi[],
+): AgentRunUiModel {
+  const statusMap: Record<string, AgentRunUiModel["run"]["status"]> = {
+    queued: "QUEUED", running: "RUNNING", waiting_for_approval: "WAITING_FOR_APPROVAL",
+    paused: "RUNNING", succeeded: "SUCCEEDED", failed: "FAILED",
+    cancelled: "CANCELLED", timed_out: "TIMEOUT",
+  };
+
+  // Derive agent summaries from timeline events
+  const agentNames = [...new Set(events.filter((e) => e.agentName).map((e) => e.agentName!))];
+  const agents = agentNames.map((name) => {
+    const ae = events.filter((e) => e.agentName === name);
+    const started = ae.find((e) => e.type === "AGENT_STARTED");
+    const ended = ae.find((e) => e.type === "AGENT_COMPLETED" || e.type === "AGENT_FAILED");
+    return {
+      id: `agent-${name.toLowerCase().replace(/\s+/g, "-")}`,
+      name, role: name,
+      status: (ended?.type === "AGENT_FAILED" ? "FAILED" : ended ? "SUCCEEDED" : "RUNNING") as "RUNNING" | "SUCCEEDED" | "FAILED",
+      startedAt: started?.timestamp,
+      finishedAt: ended?.timestamp,
+      durationMs: ended?.durationMs,
+      stepsCount: ae.length,
+      tokensUsed: ae.reduce((s, e) => s + (e.tokensUsed ?? 0), 0) || undefined,
+      estimatedCostUsd: ae.reduce((s, e) => s + (e.estimatedCostUsd ?? 0), 0) || undefined,
+      toolsUsed: [...new Set(ae.filter((e) => e.toolName).map((e) => e.toolName!))],
+    };
+  });
+
+  return {
+    run: {
+      id: run.id,
+      jobId: run.workflowId,
+      jobName: run.workflowName,
+      title: run.workflowName,
+      status: statusMap[run.status] ?? "QUEUED",
+      triggerSource: run.triggerType === "cron" ? "SCHEDULE" : "MANUAL",
+      attemptNumber: 1,
+      environment: "Production",
+      idempotencyKey: run.idempotencyKey ?? `idem-${run.id}`,
+      startedAt: run.startedAt ?? run.createdAt,
+      finishedAt: run.completedAt ?? undefined,
+      durationMs: run.durationMs ?? undefined,
+      totalTokens: run.totalTokens ?? undefined,
+      estimatedCostUsd: run.estimatedCostUsd ?? undefined,
+      errorMessage: run.error ?? undefined,
+    },
+    agents,
+    timelineEvents: events,
+    steps: [],
+    approvals: [],
+    artifacts: [],
+    auditLogs: [],
+    input: run.input,
+    output: run.output,
+    runMetadata: {
+      searchAttributes: {
+        workflowId: run.workflowId,
+        workflowVersion: run.workflowVersion,
+        creationMode: run.creationMode,
+      },
+      aiMetadata: { primaryModel: agents[0]?.name ?? "gpt-4.1-mini" },
+      budgetMetadata: {},
+      retryPolicy: { maxAttempts: 2 },
+      executionMetadata: { workerId: "worker-001" },
+    },
+  };
+}
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,9 +121,11 @@ export default function RunDetailPage() {
     setLoading(true);
     try {
       // 1. Try platform runs API (new native runs)
-      const [seedRun, seedEvents] = await Promise.all([getRun(id), getRunEvents(id)]);
-      if (seedRun) {
-        setModel(mapRunToUiModel(seedRun, seedEvents));
+      const [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
+      if (platformRun) {
+        // Events are already mapped to RunTimelineEventUi by the API route —
+        // build the UI model directly rather than passing through run-to-ui-mapper
+        setModel(buildPlatformRunModel(platformRun, timelineEvents));
         setIsLocalRun(true);
         const ckpts = await listRunCheckpoints(id);
         setCheckpoints(ckpts as RunCheckpoint[]);
