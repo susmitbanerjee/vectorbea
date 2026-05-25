@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "check:boundaries": "node ../../scripts/check-forbidden-imports.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate --schema=../../prisma/schema.prisma",

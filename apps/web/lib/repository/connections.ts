@@ -1,47 +1,15 @@
 import type { Connection, ConnectionStatus, ConnectionType } from "@/types/connections";
-
-const ACTIVE_WORKSPACE_STORAGE_KEY = "vectorbea.activeWorkspaceId";
-
-function getActiveWorkspaceId(): string {
-  if (typeof window === "undefined") {
-    throw new Error("Connections API is client-side only in this module.");
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const fromQuery = params.get("org")?.trim();
-  if (fromQuery) return fromQuery;
-
-  const fromStorage = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY)?.trim();
-  if (fromStorage) return fromStorage;
-
-  throw new Error("No active workspace selected");
-}
-
-function withWorkspace(path: string, workspaceId: string): string {
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}workspaceId=${encodeURIComponent(workspaceId)}`;
-}
+import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
+  const { method = "GET", body, headers, ...rest } = init ?? {};
+  const parsedBody = typeof body === "string" ? (JSON.parse(body) as unknown) : undefined;
+  return apiFetch<T>(path, {
+    method,
+    ...(parsedBody !== undefined ? { json: parsedBody } : {}),
+    headers: headers as Record<string, string> | undefined,
+    ...rest,
   });
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed (${response.status})`);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
 }
 
 export async function getConnections(filters?: {

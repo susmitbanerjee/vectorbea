@@ -24,6 +24,7 @@ import type {
   WorkflowVersion,
 } from "@/types/platform";
 import type { WorkflowGraph } from "@/types/workflow-graph";
+import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client";
 
 // ─── Re-export connections module ─────────────────────────────────────────────
 export {
@@ -38,41 +39,18 @@ export {
   testConnection,
 } from "./connections";
 
-// ─── Workspace resolution ─────────────────────────────────────────────────────
-
-function getActiveWorkspaceId(): string {
-  if (typeof window === "undefined") {
-    // Server-side: fall back to env (only used in server-side repository calls)
-    return process.env.MOCK_ORG_ID ?? "";
-  }
-  const params = new URLSearchParams(window.location.search);
-  const fromQuery = params.get("org")?.trim() ?? params.get("workspaceId")?.trim();
-  if (fromQuery) return fromQuery;
-  // localStorage as routing hint only — NOT used for authorization
-  const fromStorage = window.localStorage.getItem("vectorbea.activeWorkspaceId")?.trim();
-  if (fromStorage) return fromStorage;
-  return "";
-}
-
-function withWorkspace(path: string, workspaceId?: string): string {
-  const wsId = workspaceId ?? getActiveWorkspaceId();
-  if (!wsId) return path;
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}workspaceId=${encodeURIComponent(wsId)}`;
-}
+// ─── Internal fetch alias (delegates to typed API client) ─────────────────────
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
+  const { method = "GET", body, headers, ...rest } = init ?? {};
+  // body is always a JSON string produced by JSON.stringify() in this file
+  const parsedBody = typeof body === "string" ? (JSON.parse(body) as unknown) : undefined;
+  return apiFetch<T>(path, {
+    method,
+    ...(parsedBody !== undefined ? { json: parsedBody } : {}),
+    headers: headers as Record<string, string> | undefined,
+    ...rest,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `API error ${res.status}`);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
 }
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
