@@ -50,29 +50,34 @@ class Router {
 
     /**
      * Match [request] against registered routes.
-     * Returns a [Response], handling 404 and 405 internally.
+     * Returns a [Response] — never throws. All [ApiError]s (404, 405, handler errors)
+     * are caught here and converted to structured JSON responses.
      */
     fun dispatch(request: Request): Response {
-        val pathSegments = splitPath(request.path)
+        return try {
+            val pathSegments = splitPath(request.path)
 
-        // Find all routes whose path pattern matches (any method)
-        val pathMatches = routes.filter { route ->
-            matchPath(route.segments, pathSegments) != null
+            // Find all routes whose path pattern matches (any method)
+            val pathMatches = routes.filter { route ->
+                matchPath(route.segments, pathSegments) != null
+            }
+
+            if (pathMatches.isEmpty()) {
+                // No route has this path at all → 404
+                throw ApiError.NotFound(request.path)
+            }
+
+            // Among path-matching routes, find one with the right method
+            val methodMatch = pathMatches.firstOrNull { it.method == request.method }
+                ?: throw ApiError.MethodNotAllowed(request.method, request.path)
+
+            // Extract path params and dispatch
+            val pathParams = matchPath(methodMatch.segments, pathSegments)!!
+            val enrichedRequest = request.copy(pathParams = pathParams)
+            methodMatch.handler(enrichedRequest)
+        } catch (e: ApiError) {
+            Response.fromApiError(e, request.requestId)
         }
-
-        if (pathMatches.isEmpty()) {
-            // No route has this path at all → 404
-            throw ApiError.NotFound(request.path)
-        }
-
-        // Among path-matching routes, find one with the right method
-        val methodMatch = pathMatches.firstOrNull { it.method == request.method }
-            ?: throw ApiError.MethodNotAllowed(request.method, request.path)
-
-        // Extract path params and dispatch
-        val pathParams = matchPath(methodMatch.segments, pathSegments)!!
-        val enrichedRequest = request.copy(pathParams = pathParams)
-        return methodMatch.handler(enrichedRequest)
     }
 
     /** All HTTP methods that have a registered route for [path] (for Allow header). */

@@ -133,7 +133,7 @@ class HttpServer(
         return mapOf(
             "Access-Control-Allow-Origin" to effectiveOrigin,
             "Access-Control-Allow-Methods" to "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers" to "Content-Type, Authorization, X-Request-Id, X-Workspace-Id",
+            "Access-Control-Allow-Headers" to "Content-Type, Authorization, X-Request-Id, X-Workspace-Id, X-Environment-Id",
             "Access-Control-Allow-Credentials" to "true",
             "Access-Control-Max-Age" to "86400",  // 24h preflight cache
         )

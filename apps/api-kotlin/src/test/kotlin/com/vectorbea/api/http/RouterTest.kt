@@ -1,8 +1,6 @@
 package com.vectorbea.api.http
 
-import com.vectorbea.api.errors.ApiError
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
@@ -52,23 +50,21 @@ class RouterTest {
     }
 
     @Test
-    fun `unknown path throws NotFound`() {
+    fun `unknown path returns 404`() {
         val router = Router()
         router.get("/health") { Response.ok(emptyMap<String, String>()) }
 
-        assertThrows<ApiError.NotFound> {
-            router.dispatch(makeRequest("GET", "/nonexistent"))
-        }
+        val resp = router.dispatch(makeRequest("GET", "/nonexistent"))
+        assertEquals(404, resp.status)
     }
 
     @Test
-    fun `wrong method throws MethodNotAllowed`() {
+    fun `wrong method returns 405`() {
         val router = Router()
         router.get("/health") { Response.ok(emptyMap<String, String>()) }
 
-        assertThrows<ApiError.MethodNotAllowed> {
-            router.dispatch(makeRequest("POST", "/health"))
-        }
+        val resp = router.dispatch(makeRequest("POST", "/health"))
+        assertEquals(405, resp.status)
     }
 
     @Test
@@ -87,9 +83,8 @@ class RouterTest {
         val router = Router()
         router.get("/health") { Response.ok(emptyMap<String, String>()) }
 
-        assertThrows<ApiError.NotFound> {
-            router.dispatch(makeRequest("GET", "/health/extra"))
-        }
+        val resp = router.dispatch(makeRequest("GET", "/health/extra"))
+        assertEquals(404, resp.status)
     }
 
     @Test

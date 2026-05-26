@@ -53,7 +53,7 @@ data class CreateConnectionRequest(
     val allowedTables: List<String> = emptyList(),
 )
 
-class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSource) {
+open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     override val log = LoggerFactory.getLogger(ConnectionRepository::class.java)
 
     private val cols = """
@@ -63,13 +63,13 @@ class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         last_test_error_code, last_test_error_message_sanitized, created_at, updated_at
     """.trimIndent()
 
-    fun findById(id: UUID, workspaceId: UUID): Connection? = queryOne(
+    open fun findById(id: UUID, workspaceId: UUID): Connection? = queryOne(
         "SELECT $cols FROM connections WHERE id = ? AND workspace_id = ?",
         { setUuid(1, id); setUuid(2, workspaceId) },
         ::mapRow,
     )
 
-    fun list(
+    open fun list(
         workspaceId: UUID,
         environmentId: UUID? = null,
         type: String? = null,
@@ -109,7 +109,7 @@ class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         )
     }
 
-    fun create(req: CreateConnectionRequest): Connection = executeReturning(
+    open fun create(req: CreateConnectionRequest): Connection = executeReturning(
         """
         INSERT INTO connections (
             workspace_id, environment_id, name, slug, type, provider, auth_type,
@@ -135,12 +135,60 @@ class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         ::mapRow,
     )
 
-    fun updateStatus(
+    open fun update(
+        id: UUID,
+        workspaceId: UUID,
+        name: String? = null,
+        configJson: Map<String, Any>? = null,
+        allowedHosts: List<String>? = null,
+        allowedPaths: List<String>? = null,
+        allowedSchemas: List<String>? = null,
+        allowedTables: List<String>? = null,
+        status: String? = null,
+        /** Opaque secret ref — stored as-is, never the plaintext */
+        secretRef: String? = null,
+    ): Connection? {
+        val setClauses = buildList {
+            if (name != null) add("name = ?")
+            if (configJson != null) add("config_json = ?")
+            if (allowedHosts != null) add("allowed_hosts = ?")
+            if (allowedPaths != null) add("allowed_paths = ?")
+            if (allowedSchemas != null) add("allowed_schemas = ?")
+            if (allowedTables != null) add("allowed_tables = ?")
+            if (status != null) add("status = ?")
+            if (secretRef != null) add("secret_ref = ?")
+            add("updated_at = now()")
+        }
+        if (setClauses.size == 1) return findById(id, workspaceId)
+        return queryOne(
+            "UPDATE connections SET ${setClauses.joinToString(", ")} WHERE id = ? AND workspace_id = ? RETURNING $cols",
+            {
+                var i = 1
+                if (name != null) setString(i++, name)
+                if (configJson != null) setJsonb(i++, configJson)
+                if (allowedHosts != null) setJsonb(i++, allowedHosts)
+                if (allowedPaths != null) setJsonb(i++, allowedPaths)
+                if (allowedSchemas != null) setJsonb(i++, allowedSchemas)
+                if (allowedTables != null) setJsonb(i++, allowedTables)
+                if (status != null) setString(i++, status)
+                if (secretRef != null) setString(i++, secretRef)
+                setUuid(i++, id)
+                setUuid(i, workspaceId)
+            },
+            ::mapRow,
+        )
+    }
+
+    /**
+     * Update last-test result fields after a connection test.
+     * [errorMessage] is expected to be already sanitized (no secrets).
+     */
+    open fun updateStatus(
         id: UUID,
         workspaceId: UUID,
         status: String,
         networkStatus: String,
-        lastTestedAt: Instant,
+        lastTestedAt: java.time.Instant,
         latencyMs: Int?,
         errorCode: String?,
         errorMessage: String?,
@@ -167,7 +215,7 @@ class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         ::mapRow,
     )
 
-    fun delete(id: UUID, workspaceId: UUID): Boolean =
+    open fun delete(id: UUID, workspaceId: UUID): Boolean =
         execute("DELETE FROM connections WHERE id = ? AND workspace_id = ?") {
             setUuid(1, id); setUuid(2, workspaceId)
         } > 0

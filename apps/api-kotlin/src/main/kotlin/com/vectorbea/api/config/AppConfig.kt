@@ -18,6 +18,9 @@ data class AppConfig(
     val redis: RedisConfig?,
     /** Key is present/absent — value never printed */
     val secretEncryptionKeyPresent: Boolean,
+    /** Raw key string — NEVER log, pass to Encryption.decodeKey() at startup only */
+    val secretEncryptionKey: String? = null,
+    val secretKeyVersion: String = "1",
     val corsAllowedOrigins: Set<String>,
     val logLevel: String,
     val version: String,
@@ -72,8 +75,9 @@ data class AppConfig(
             // ── Secret encryption key ───────────────────────────────────────
             val secretKey = env("SECRET_ENCRYPTION_KEY")
             if (secretKey == null) {
-                log.warn("[config] SECRET_ENCRYPTION_KEY not set — secret decryption will not be available")
+                log.warn("[config] SECRET_ENCRYPTION_KEY not set — secret encryption will not be available")
             }
+            val secretKeyVersion = env("SECRET_KEY_VERSION") ?: "1"
 
             // ── CORS ────────────────────────────────────────────────────────
             val corsRaw = env("CORS_ALLOWED_ORIGINS") ?: "*"
@@ -93,6 +97,8 @@ data class AppConfig(
                 db = db,
                 redis = redis,
                 secretEncryptionKeyPresent = secretKey != null,
+                secretEncryptionKey = secretKey,
+                secretKeyVersion = secretKeyVersion,
                 corsAllowedOrigins = corsOrigins,
                 logLevel = logLevel,
                 version = version,

@@ -13,8 +13,28 @@ import com.vectorbea.api.queue.RedisStreamsWorkflowQueue
 import com.vectorbea.api.queue.WorkflowQueue
 import com.vectorbea.api.rate.RedisRateLimiter
 import com.vectorbea.api.redis.RedisProvider
+import com.vectorbea.api.repository.AgentRepository
+import com.vectorbea.api.repository.ApprovalRepository
+import com.vectorbea.api.repository.ConnectionRepository
+import com.vectorbea.api.repository.RunEventRepository
+import com.vectorbea.api.repository.RunRepository
+import com.vectorbea.api.repository.ToolRepository
+import com.vectorbea.api.repository.WorkflowRepository
+import com.vectorbea.api.routes.AgentRoutes
+import com.vectorbea.api.routes.ApprovalRoutes
+import com.vectorbea.api.routes.ConnectionRoutes
+import com.vectorbea.api.routes.ConnectionTestRoutes
 import com.vectorbea.api.routes.HealthRoutes
+import com.vectorbea.api.routes.NetworkRoutes
+import com.vectorbea.api.routes.RunRoutes
+import com.vectorbea.api.routes.ToolRoutes
 import com.vectorbea.api.routes.VersionRoutes
+import com.vectorbea.api.routes.WorkflowRoutes
+import com.vectorbea.api.secrets.EncryptedSecretService
+import com.vectorbea.api.secrets.NoOpSecretService
+import com.vectorbea.api.secrets.SecretRepository
+import com.vectorbea.api.secrets.SecretService
+import com.vectorbea.api.security.Encryption
 import com.vectorbea.api.workers.WorkerHeartbeatRepository
 import org.slf4j.LoggerFactory
 
@@ -22,23 +42,28 @@ import org.slf4j.LoggerFactory
  * Application entry point.
  *
  * Wiring order:
- *  1. Read config from environment
- *  2. Initialize database (HikariCP pool + optional Flyway migrations)
- *  3. Initialize Redis (Lettuce client)
- *  4. Wire application services (cache, queue, locks, events)
- *  5. Build router and register all route groups
- *  6. Start HTTP server
- *  7. Register shutdown hook
+ *  1. Config
+ *  2. Database (HikariCP + Flyway)
+ *  3. Redis (Lettuce)
+ *  4. Application services (cache, queue, locks, events)
+ *  5. Secret service (AES-256-GCM — required for connection secrets)
+ *  6. Repositories
+ *  7. Routes
+ *  8. HTTP server
+ *  9. Shutdown hook
  *
- * Security:
- *   DATABASE_URL, REDIS_URL, and SECRET_ENCRYPTION_KEY values are NEVER logged.
- *   Only their presence is noted in the startup summary.
+ * Security: DATABASE_URL, REDIS_URL, and SECRET_ENCRYPTION_KEY values are NEVER logged.
  */
 fun main() {
     val log = LoggerFactory.getLogger("vectorbea.main")
 
     // 1. Config
     val config = AppConfig.fromEnv()
+
+    // Production guard
+    if (config.isProduction && !config.secretEncryptionKeyPresent) {
+        throw IllegalStateException("SECRET_ENCRYPTION_KEY is required in production")
+    }
 
     // 2. Database
     val database: Database? = if (config.db != null) {
@@ -60,9 +85,7 @@ fun main() {
                 throw ex
             }
         } else {
-            try {
-                Migrations.validate(db.dataSource)
-            } catch (ex: Exception) {
+            try { Migrations.validate(db.dataSource) } catch (ex: Exception) {
                 log.warn("Flyway validation warning: {}", ex.message)
             }
         }
@@ -80,31 +103,23 @@ fun main() {
             if (ping.ok) {
                 log.info("Redis connected (latency={}ms)", ping.latencyMs)
             } else {
-                log.error("Redis ping failed on startup: {}", ping.error)
                 if (config.isProduction) {
                     r.close()
                     throw IllegalStateException("Redis required in production but ping failed: ${ping.error}")
-                } else {
-                    log.warn("Redis ping failed in non-production env — continuing with degraded Redis")
                 }
+                log.warn("Redis ping failed in non-production env — degraded mode")
             }
             r
         } catch (ex: IllegalStateException) {
             throw ex
         } catch (ex: Exception) {
-            if (config.isProduction) {
-                log.error("Failed to connect to Redis — aborting startup (production)", ex)
-                throw ex
-            } else {
-                log.warn("Redis not available in local/dev mode — cache disabled, queue will fail: {}", ex.message)
-                null
-            }
+            if (config.isProduction) throw ex
+            log.warn("Redis not available in local/dev mode: {}", ex.message)
+            null
         }
     } else {
-        if (config.isProduction) {
-            throw IllegalStateException("REDIS_URL is required in production but was not set")
-        }
-        log.warn("REDIS_URL not set — running without Redis (cache=disabled, queue=unavailable)")
+        if (config.isProduction) throw IllegalStateException("REDIS_URL is required in production")
+        log.warn("REDIS_URL not set — running without Redis")
         null
     }
 
@@ -117,52 +132,90 @@ fun main() {
     }
 
     val workflowQueue: WorkflowQueue? = if (redis != null) {
-        val queue = RedisStreamsWorkflowQueue(
-            redis = redis,
-            streamKey = config.redis!!.queueStream,
-            consumerGroup = config.redis.queueGroup,
-        )
+        val q = RedisStreamsWorkflowQueue(redis, config.redis!!.queueStream, config.redis.queueGroup)
         RedisStreamsWorkflowQueue.verifyStream(redis, config.redis.queueStream)
-        queue
-    } else {
-        log.warn("WorkflowQueue disabled — Redis not available (enqueue calls will fail)")
-        null
-    }
-
-    val distributedLock = if (redis != null) {
-        RedisDistributedLock(redis, config.redis!!.lockPrefix)
+        q
     } else null
 
-    val eventBus = if (redis != null) {
-        RedisRunEventBus(redis, config.redis!!.eventChannelPrefix)
-    } else null
+    val distributedLock = if (redis != null) RedisDistributedLock(redis, config.redis!!.lockPrefix) else null
+    val eventBus = if (redis != null) RedisRunEventBus(redis, config.redis!!.eventChannelPrefix) else null
+    val rateLimiter = if (redis != null) RedisRateLimiter(redis, config.redis!!.cachePrefix) else null
+    val workerHeartbeatRepository = if (redis != null)
+        WorkerHeartbeatRepository(redis, config.redis!!.workerHeartbeatTtlSeconds) else null
 
-    val rateLimiter = if (redis != null) {
-        RedisRateLimiter(redis, config.redis!!.cachePrefix)
-    } else null
-
-    val workerHeartbeatRepository = if (redis != null) {
-        WorkerHeartbeatRepository(redis, config.redis!!.workerHeartbeatTtlSeconds)
-    } else null
-
-    log.info(
-        "Services ready — cache={}, queue={}, lock={}, events={}, rateLimit={}",
+    log.info("Services ready — cache={}, queue={}, lock={}, events={}",
         if (redis != null) "redis" else "noop",
         if (workflowQueue != null) "redis-streams" else "disabled",
         if (distributedLock != null) "redis" else "disabled",
         if (eventBus != null) "redis-pubsub" else "disabled",
-        if (rateLimiter != null) "redis" else "disabled",
     )
 
-    // 5. Router
+    // 5. Secret service
+    // SECURITY: keyBytes decoded from env — NEVER logged or serialized
+    val secretService: SecretService = if (config.secretEncryptionKey != null && database != null) {
+        val keyBytes = try {
+            Encryption.decodeKey(config.secretEncryptionKey)
+        } catch (ex: Exception) {
+            log.error("SECRET_ENCRYPTION_KEY is invalid: {} — aborting", ex.message)
+            throw ex
+        }
+        val secretRepo = SecretRepository(database.dataSource)
+        log.info("Secret service: AES-256-GCM (keyVersion={})", config.secretKeyVersion)
+        EncryptedSecretService(secretRepo, keyBytes, config.secretKeyVersion)
+    } else {
+        if (config.secretEncryptionKey == null) {
+            log.warn("Secret service: NoOp — SECRET_ENCRYPTION_KEY not set (secrets unavailable)")
+        } else {
+            log.warn("Secret service: NoOp — database not available")
+        }
+        NoOpSecretService()
+    }
+
+    // 6. Repositories (require DB)
+    val ds = database?.dataSource
+    val connectionRepo = ds?.let { ConnectionRepository(it) }
+    val agentRepo = ds?.let { AgentRepository(it) }
+    val toolRepo = ds?.let { ToolRepository(it) }
+    val workflowRepo = ds?.let { WorkflowRepository(it) }
+    val runRepo = ds?.let { RunRepository(it) }
+    val runEventRepo = ds?.let { RunEventRepository(it) }
+    val approvalRepo = ds?.let { ApprovalRepository(it) }
+
+    // 7. Router + routes
     val router = Router()
     HealthRoutes(config, database, redis).register(router)
     VersionRoutes(config).register(router)
+    NetworkRoutes().register(router)
 
-    // 6. HTTP server
+    if (connectionRepo != null) {
+        ConnectionRoutes(connectionRepo, cacheService, secretService).register(router)
+        ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
+    } else log.warn("ConnectionRoutes disabled — no database")
+
+    if (agentRepo != null && connectionRepo != null) {
+        AgentRoutes(agentRepo, connectionRepo, cacheService).register(router)
+    } else log.warn("AgentRoutes disabled — no database")
+
+    if (toolRepo != null && connectionRepo != null) {
+        ToolRoutes(toolRepo, connectionRepo, cacheService).register(router)
+    } else log.warn("ToolRoutes disabled — no database")
+
+    if (workflowRepo != null) {
+        WorkflowRoutes(workflowRepo, cacheService).register(router)
+    } else log.warn("WorkflowRoutes disabled — no database")
+
+    if (runRepo != null && runEventRepo != null) {
+        RunRoutes(runRepo, runEventRepo).register(router)
+    } else log.warn("RunRoutes disabled — no database")
+
+    if (approvalRepo != null) {
+        ApprovalRoutes(approvalRepo).register(router)
+    } else log.warn("ApprovalRoutes disabled — no database")
+
+    // 8. HTTP server
     val server = HttpServer(config, router)
 
-    // 7. Graceful shutdown
+    // 9. Graceful shutdown
     Runtime.getRuntime().addShutdownHook(Thread {
         log.info("Shutdown signal received — stopping server...")
         server.stop(delaySeconds = 5)
@@ -173,6 +226,5 @@ fun main() {
 
     server.start()
     log.info("vectorbea-api running on port {} — press Ctrl+C to stop", config.port)
-
     Thread.currentThread().join()
 }
