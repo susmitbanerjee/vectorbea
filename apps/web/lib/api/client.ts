@@ -68,7 +68,12 @@ export function getActiveWorkspaceId(): string {
   const params = new URLSearchParams(window.location.search);
   const fromQuery = params.get("org")?.trim() ?? params.get("workspaceId")?.trim();
   if (fromQuery) return fromQuery;
-  return window.localStorage.getItem("vectorbea.activeWorkspaceId")?.trim() ?? "";
+  return (
+    window.localStorage.getItem("vectorbea.activeWorkspaceId")?.trim() ||
+    // Public fallback — safe to expose (UUID used as routing hint, not auth boundary)
+    process.env.NEXT_PUBLIC_MOCK_ORG_ID?.trim() ||
+    ""
+  );
 }
 
 /**
@@ -82,7 +87,12 @@ export function getActiveEnvironmentId(): string {
   const params = new URLSearchParams(window.location.search);
   const fromQuery = params.get("environmentId")?.trim();
   if (fromQuery) return fromQuery;
-  return window.localStorage.getItem("vectorbea.activeEnvironmentId")?.trim() ?? "";
+  return (
+    window.localStorage.getItem("vectorbea.activeEnvironmentId")?.trim() ||
+    // Public fallback — safe to expose (UUID used as routing hint, not auth boundary)
+    process.env.NEXT_PUBLIC_MOCK_ENV_ID?.trim() ||
+    ""
+  );
 }
 
 /**
