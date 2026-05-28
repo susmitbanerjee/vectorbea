@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { ConnectionType, LlmProvider, DatabaseProvider, SaasProvider, AuthType } from "@/types/connections";
 import { LLM_PROVIDER_MODELS, VECTORBEE_OUTBOUND_IPS, isPrivateHost } from "@/types/connections";
 import { createConnection, testConnection } from "@/lib/repository";
+import { SchemaPickerPanel, type SchemaSelection } from "@/components/connections/SchemaPickerPanel";
 
 // ─── Type cards ───────────────────────────────────────────────────────────────
 
@@ -178,7 +179,7 @@ function LlmForm({ name, setName, provider, setProvider, apiKey, setApiKey, base
   );
 }
 
-function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, setConnString, host, setHost, port, setPort, database, setDatabase, username, setUsername, password, setPassword, sslRequired, setSslRequired, readOnly, setReadOnly, environment, setEnvironment }: {
+function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, setConnString, host, setHost, port, setPort, database, setDatabase, username, setUsername, password, setPassword, sslRequired, setSslRequired, readOnly, setReadOnly, environment, setEnvironment, onSchemaSelect, schemaSelection }: {
   name: string; setName: (v: string) => void;
   dbProvider: DatabaseProvider; setDbProvider: (v: DatabaseProvider) => void;
   connString: string; setConnString: (v: string) => void;
@@ -190,6 +191,8 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
   sslRequired: boolean; setSslRequired: (v: boolean) => void;
   readOnly: boolean; setReadOnly: (v: boolean) => void;
   environment: string; setEnvironment: (v: string) => void;
+  onSchemaSelect: (sel: SchemaSelection) => void;
+  schemaSelection: SchemaSelection | null;
 }) {
   const showPrivateWarning = isPrivateHost(host) || isPrivateHost(connString);
   return (
@@ -267,6 +270,32 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
           cannot reach it unless you whitelist our outbound IPs or use a private runner.
         </div>
       )}
+
+      <Divider />
+
+      {/* Schema explorer */}
+      <div className="space-y-2">
+        <p className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
+          Browse database schema
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          Connect to your database to explore tables and columns — no SQL needed.
+          {schemaSelection && (
+            <span className="ml-1 font-medium text-primary">
+              ✓ Using {schemaSelection.schema}.{schemaSelection.table} ({schemaSelection.columns.length} columns)
+            </span>
+          )}
+        </p>
+        <SchemaPickerPanel
+          plaintextSecret={connString || undefined}
+          dbType={dbProvider}
+          username={username || undefined}
+          host={host || undefined}
+          port={port ? parseInt(port) : undefined}
+          database={database || undefined}
+          onSelect={onSchemaSelect}
+        />
+      </div>
     </div>
   );
 }
@@ -472,6 +501,7 @@ export default function NewConnectionPage() {
   const [password, setPassword] = useState("");
   const [sslRequired, setSslRequired] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
+  const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
 
   // HTTP
   const [httpBaseUrl, setHttpBaseUrl] = useState("");
@@ -506,7 +536,16 @@ export default function NewConnectionPage() {
       } else if (type === "database") {
         provider = dbProvider;
         connAuthType = "connection_string";
-        config = { provider: dbProvider, connectionMode: connString ? "connection_string" : "host_port", host, port: parseInt(port) || 5432, database, sslRequired, readOnly, allowedSchemas: [], allowedTables: [], queryTimeoutMs: 10000, maxRows: 1000 };
+        config = {
+          provider: dbProvider,
+          connectionMode: connString ? "connection_string" : "host_port",
+          host, port: parseInt(port) || 5432, database, sslRequired, readOnly,
+          // Populated from schema picker if user explored the schema
+          allowedSchemas: schemaSelection ? [schemaSelection.schema] : [],
+          allowedTables:  schemaSelection ? [`${schemaSelection.schema}.${schemaSelection.table}`] : [],
+          selectedColumns: schemaSelection ? schemaSelection.columns.map((c) => c.name) : [],
+          queryTimeoutMs: 10000, maxRows: 1000,
+        };
       } else if (type === "http_api") {
         provider = "http_api";
         connAuthType = authType;
@@ -706,7 +745,7 @@ export default function NewConnectionPage() {
             <LlmForm name={name} setName={setName} provider={llmProvider} setProvider={setLlmProvider} apiKey={apiKey} setApiKey={setApiKey} baseUrl={baseUrl} setBaseUrl={setBaseUrl} defaultModel={defaultModel} setDefaultModel={setDefaultModel} environment={environment} setEnvironment={setEnvironment} />
           )}
           {type === "database" && (
-            <DatabaseForm name={name} setName={setName} dbProvider={dbProvider} setDbProvider={setDbProvider} connString={connString} setConnString={setConnString} host={host} setHost={setHost} port={port} setPort={setPort} database={database} setDatabase={setDatabase} username={username} setUsername={setUsername} password={password} setPassword={setPassword} sslRequired={sslRequired} setSslRequired={setSslRequired} readOnly={readOnly} setReadOnly={setReadOnly} environment={environment} setEnvironment={setEnvironment} />
+            <DatabaseForm name={name} setName={setName} dbProvider={dbProvider} setDbProvider={setDbProvider} connString={connString} setConnString={setConnString} host={host} setHost={setHost} port={port} setPort={setPort} database={database} setDatabase={setDatabase} username={username} setUsername={setUsername} password={password} setPassword={setPassword} sslRequired={sslRequired} setSslRequired={setSslRequired} readOnly={readOnly} setReadOnly={setReadOnly} environment={environment} setEnvironment={setEnvironment} onSchemaSelect={setSchemaSelection} schemaSelection={schemaSelection} />
           )}
           {type === "http_api" && (
             <HttpForm name={name} setName={setName} baseUrl={httpBaseUrl} setBaseUrl={setHttpBaseUrl} authType={authType} setAuthType={setAuthType} secret={secret} setSecret={setSecret} environment={environment} setEnvironment={setEnvironment} />

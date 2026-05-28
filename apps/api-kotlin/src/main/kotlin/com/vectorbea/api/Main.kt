@@ -31,6 +31,7 @@ import com.vectorbea.api.routes.RunRoutes
 import com.vectorbea.api.routes.ToolRoutes
 import com.vectorbea.api.routes.VersionRoutes
 import com.vectorbea.api.routes.BootstrapRoutes
+import com.vectorbea.api.routes.SchemaPreviewRoutes
 import com.vectorbea.api.routes.WorkerRoutes
 import com.vectorbea.api.routes.WorkflowRoutes
 import com.vectorbea.api.secrets.EncryptedSecretService
@@ -194,6 +195,7 @@ fun main() {
     if (connectionRepo != null) {
         ConnectionRoutes(connectionRepo, cacheService, secretService).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
+        SchemaPreviewRoutes(connectionRepo, secretService).register(router)
     } else log.warn("ConnectionRoutes disabled — no database")
 
     if (agentRepo != null && connectionRepo != null) {

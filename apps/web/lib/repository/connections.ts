@@ -125,6 +125,54 @@ export async function deleteConnection(id: string): Promise<boolean> {
   return true;
 }
 
+// ─── Schema preview ───────────────────────────────────────────────────────────
+
+export interface SchemaColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  defaultValue: string | null;
+  maxLength: number | null;
+}
+
+export interface SchemaTable {
+  schema: string;
+  table: string;
+  tableType: "TABLE" | "VIEW";
+  rowCountEstimate: number | null;
+  columns: SchemaColumn[];
+}
+
+export interface SchemaPreviewResult {
+  schemas: string[];
+  tables: SchemaTable[];
+  provider: string;
+  databaseName: string | null;
+  fetchedAt: string;
+}
+
+export async function previewDatabaseSchema(params: {
+  dbType: string;
+  plaintextSecret?: string;   // connection string (sent over TLS, never stored)
+  username?: string;
+  host?: string;
+  port?: number;
+  database?: string;
+}): Promise<SchemaPreviewResult> {
+  return apiFetch<SchemaPreviewResult>("/api/connections/schema-preview", {
+    method: "POST",
+    json: params,
+  });
+}
+
+export async function previewSavedConnectionSchema(connectionId: string): Promise<SchemaPreviewResult> {
+  return apiFetch<SchemaPreviewResult>(`/api/connections/${encodeURIComponent(connectionId)}/schema-preview`, {
+    method: "POST",
+    json: {},
+  });
+}
+
 export interface ConnectionTestResult {
   /** "connected" | "failed" | "private_runner_required" | "whitelist_required" */
   status: string;
