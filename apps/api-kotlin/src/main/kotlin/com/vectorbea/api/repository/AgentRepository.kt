@@ -21,6 +21,7 @@ data class Agent(
     val temperature: Double?,
     val maxTokens: Int?,
     val maxIterations: Int?,
+    val allowedToolIds: List<String>,
     val memoryPolicyJson: String,
     val retryPolicyJson: String,
     val timeoutPolicyJson: String,
@@ -44,6 +45,7 @@ data class CreateAgentRequest(
     val temperature: Double? = null,
     val maxTokens: Int? = null,
     val maxIterations: Int? = null,
+    val allowedToolIds: List<String> = emptyList(),
     val memoryPolicy: Map<String, Any> = emptyMap(),
     val retryPolicy: Map<String, Any> = emptyMap(),
     val timeoutPolicy: Map<String, Any> = emptyMap(),
@@ -58,6 +60,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     private val cols = """
         id, workspace_id, environment_id, name, slug, type, role, instructions,
         llm_connection_id, model_name, temperature, max_tokens, max_iterations,
+        allowed_tool_ids,
         memory_policy_json, retry_policy_json, timeout_policy_json,
         approval_policy_json, output_schema_json, status, created_at, updated_at
     """.trimIndent()
@@ -100,9 +103,10 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         INSERT INTO agents (
             workspace_id, environment_id, name, slug, type, role, instructions,
             llm_connection_id, model_name, temperature, max_tokens, max_iterations,
+            allowed_tool_ids,
             memory_policy_json, retry_policy_json, timeout_policy_json,
             approval_policy_json, output_schema_json, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -118,12 +122,13 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (req.temperature != null) setDouble(10, req.temperature) else setNull(10, java.sql.Types.NUMERIC)
             if (req.maxTokens != null) setInt(11, req.maxTokens) else setNull(11, java.sql.Types.INTEGER)
             if (req.maxIterations != null) setInt(12, req.maxIterations) else setNull(12, java.sql.Types.INTEGER)
-            setJsonb(13, req.memoryPolicy)
-            setJsonb(14, req.retryPolicy)
-            setJsonb(15, req.timeoutPolicy)
-            setJsonb(16, req.approvalPolicy)
-            setJsonb(17, req.outputSchema)
-            setString(18, req.status)
+            setArray(13, createArrayOf("text", req.allowedToolIds.toTypedArray()))
+            setJsonb(14, req.memoryPolicy)
+            setJsonb(15, req.retryPolicy)
+            setJsonb(16, req.timeoutPolicy)
+            setJsonb(17, req.approvalPolicy)
+            setJsonb(18, req.outputSchema)
+            setString(19, req.status)
         },
         ::mapRow,
     )
@@ -139,6 +144,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         temperature: Double? = null,
         maxTokens: Int? = null,
         maxIterations: Int? = null,
+        allowedToolIds: List<String>? = null,
         memoryPolicy: Map<String, Any>? = null,
         retryPolicy: Map<String, Any>? = null,
         timeoutPolicy: Map<String, Any>? = null,
@@ -155,6 +161,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (temperature != null) add("temperature = ?")
             if (maxTokens != null) add("max_tokens = ?")
             if (maxIterations != null) add("max_iterations = ?")
+            if (allowedToolIds != null) add("allowed_tool_ids = ?")
             if (memoryPolicy != null) add("memory_policy_json = ?")
             if (retryPolicy != null) add("retry_policy_json = ?")
             if (timeoutPolicy != null) add("timeout_policy_json = ?")
@@ -176,6 +183,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                 if (temperature != null) setDouble(i++, temperature)
                 if (maxTokens != null) setInt(i++, maxTokens)
                 if (maxIterations != null) setInt(i++, maxIterations)
+                if (allowedToolIds != null) setArray(i++, createArrayOf("text", allowedToolIds.toTypedArray()))
                 if (memoryPolicy != null) setJsonb(i++, memoryPolicy)
                 if (retryPolicy != null) setJsonb(i++, retryPolicy)
                 if (timeoutPolicy != null) setJsonb(i++, timeoutPolicy)
@@ -200,6 +208,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setUuid(1, id); setUuid(2, workspaceId)
         } > 0
 
+    @Suppress("UNCHECKED_CAST")
     private fun mapRow(rs: java.sql.ResultSet) = Agent(
         id = rs.uuid("id"),
         workspaceId = rs.uuid("workspace_id"),
@@ -214,6 +223,8 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         temperature = rs.getObject("temperature") as? Double,
         maxTokens = rs.getObject("max_tokens") as? Int,
         maxIterations = rs.getObject("max_iterations") as? Int,
+        allowedToolIds = (rs.getArray("allowed_tool_ids")?.array as? Array<*>)
+            ?.filterIsInstance<String>() ?: emptyList(),
         memoryPolicyJson = rs.getJsonbString("memory_policy_json"),
         retryPolicyJson = rs.getJsonbString("retry_policy_json"),
         timeoutPolicyJson = rs.getJsonbString("timeout_policy_json"),

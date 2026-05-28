@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -12,13 +12,14 @@ import {
   History,
   RefreshCw,
   Shield,
+  Trash2,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { Agent, AgentRun, Tool } from "@/types/platform";
-import { getAgent, getTools, getRunsForAgent } from "@/lib/repository";
+import { getAgent, getTools, getRunsForAgent, deleteAgent } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -89,11 +90,26 @@ function KVRow({ label, value }: { label: string; value: React.ReactNode }) {
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [allowedTools, setAllowedTools] = useState<Tool[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
+
+  async function handleDelete() {
+    if (!confirm(`Delete agent "${agent?.name}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await deleteAgent(id);
+      toast.success("Agent deleted.");
+      router.push("/agents" as never);
+    } catch {
+      toast.error("Failed to delete agent.");
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -183,13 +199,24 @@ export default function AgentDetailPage() {
               {agent.description || "No description"}
             </p>
           </div>
-          <Link
-            href={"/agents/new" as never}
-            className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            style={{ background: "var(--surface-1)" }}
-          >
-            Clone
-          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <Link
+              href={"/agents/new" as never}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              style={{ background: "var(--surface-1)" }}
+            >
+              Clone
+            </Link>
+            <button
+              type="button"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-[12px] font-medium text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50"
+            >
+              {deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Delete
+            </button>
+          </div>
         </div>
       </div>
 
