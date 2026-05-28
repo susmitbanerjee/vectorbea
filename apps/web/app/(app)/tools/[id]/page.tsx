@@ -228,7 +228,7 @@ export default function ToolDetailPage() {
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Usage</h2>
               <div className="divide-y divide-border/30">
-                <KVRow label="Total calls" value={tool.totalCalls.toLocaleString()} />
+                <KVRow label="Total calls" value={(tool.totalCalls ?? 0).toLocaleString()} />
                 <KVRow label="Last used" value={timeAgo(tool.lastUsedAt)} />
                 <KVRow label="Created" value={timeAgo(tool.createdAt)} />
                 <KVRow label="Updated" value={timeAgo(tool.updatedAt)} />

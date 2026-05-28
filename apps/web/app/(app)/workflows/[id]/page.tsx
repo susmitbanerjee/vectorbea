@@ -261,7 +261,7 @@ export default function WorkflowDetailPage() {
               {workflow.budgetPolicy.maxTokensPerRun && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Max tokens/run</span>
-                  <span className="font-mono font-medium">{workflow.budgetPolicy.maxTokensPerRun.toLocaleString()}</span>
+                  <span className="font-mono font-medium">{(workflow.budgetPolicy?.maxTokensPerRun ?? 0).toLocaleString()}</span>
                 </div>
               )}
               {workflow.budgetPolicy.maxCostUsdPerRun && (

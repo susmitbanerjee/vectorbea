@@ -242,7 +242,7 @@ export default function AgentDetailPage() {
                 <KVRow label="Type" value={TYPE_LABELS[agent.type]} />
                 <KVRow label="Role" value={agent.role || "—"} />
                 <KVRow label="Status" value={agent.status} />
-                <KVRow label="Total runs" value={agent.totalRuns.toLocaleString()} />
+                <KVRow label="Total runs" value={(agent.totalRuns ?? 0).toLocaleString()} />
                 <KVRow label="Last used" value={timeAgo(agent.lastUsedAt)} />
                 <KVRow label="Created" value={timeAgo(agent.createdAt)} />
               </div>
@@ -262,7 +262,7 @@ export default function AgentDetailPage() {
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Quick stats</h2>
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  { label: "Total runs",    value: agent.totalRuns.toLocaleString() },
+                  { label: "Total runs",    value: (agent.totalRuns ?? 0).toLocaleString() },
                   { label: "Allowed tools", value: agent.allowedToolIds.length },
                   { label: "Last active",   value: timeAgo(agent.lastUsedAt) },
                 ].map(({ label, value }) => (

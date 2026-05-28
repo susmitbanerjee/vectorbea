@@ -156,7 +156,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         </InfoRow>
         {c.baseUrl && <InfoRow label="Base URL"><span className="font-mono text-[11px]">{c.baseUrl}</span></InfoRow>}
         <InfoRow label="Timeout">{c.requestTimeoutMs}ms</InfoRow>
-        {c.tokenBudgetLimit && <InfoRow label="Token Budget">{c.tokenBudgetLimit.toLocaleString()}</InfoRow>}
+        {c.tokenBudgetLimit != null && <InfoRow label="Token Budget">{c.tokenBudgetLimit.toLocaleString()}</InfoRow>}
         {c.rateLimitRpm && <InfoRow label="Rate Limit">{c.rateLimitRpm} req/min</InfoRow>}
       </div>
     );
@@ -173,7 +173,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         <InfoRow label="SSL">{c.sslRequired ? "Required" : "Optional"}</InfoRow>
         <InfoRow label="Read-only">{c.readOnly ? "Yes" : "No"}</InfoRow>
         <InfoRow label="Query Timeout">{c.queryTimeoutMs}ms</InfoRow>
-        <InfoRow label="Max Rows">{c.maxRows.toLocaleString()}</InfoRow>
+        {c.maxRows != null && <InfoRow label="Max Rows">{c.maxRows.toLocaleString()}</InfoRow>}
       </div>
     );
   }

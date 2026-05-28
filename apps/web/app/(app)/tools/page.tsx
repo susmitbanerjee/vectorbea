@@ -257,7 +257,7 @@ export default function ToolsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3.5 font-mono text-[12px] text-muted-foreground">
-                      {tool.totalCalls.toLocaleString()}
+                      {(tool.totalCalls ?? 0).toLocaleString()}
                     </td>
                     <td className="px-4 py-3.5 text-[12px] text-muted-foreground">
                       {timeAgo(tool.lastUsedAt)}

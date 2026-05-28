@@ -224,7 +224,7 @@ export default function AgentsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3.5 font-mono text-[12px] text-muted-foreground">
-                      {agent.totalRuns.toLocaleString()}
+                      {(agent.totalRuns ?? 0).toLocaleString()}
                     </td>
                     <td className="px-4 py-3.5 text-[12px] text-muted-foreground">
                       {timeAgo(agent.lastUsedAt)}
