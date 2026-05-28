@@ -187,6 +187,8 @@ export interface Tool {
   timeoutMs: number;
   retryPolicy: RetryPolicy;
   idempotent: boolean;
+  // Raw config bag returned by the backend (used for uiToolType, direction, etc.)
+  config?: Record<string, unknown>;
   // HTTP-specific
   httpConfig?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

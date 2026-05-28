@@ -211,9 +211,12 @@ export const CONNECTION_TOOL_COMPAT: Record<string, ConnectionType[]> = {
   http:             ["http_api"],
   database_read:    ["database"],
   database_write:   ["database"],
-  slack:            ["saas"],
-  email:            ["saas"],
-  crm:              ["saas", "http_api"],
+  // Slack/email/crm are HTTP tools backed by SaaS connections.
+  // SaaS connections are stored as type "http" in the backend and
+  // normalized to "http_api" by the frontend — NOT "saas".
+  slack:            ["http_api"],
+  email:            ["http_api"],
+  crm:              ["http_api"],
   mcp_tool:         ["mcp_server"],
   imported_tool:    ["mcp_server", "http_api"],
   custom_function:  [],

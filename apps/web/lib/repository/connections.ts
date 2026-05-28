@@ -1,4 +1,5 @@
 import type { Connection, ConnectionStatus, ConnectionType } from "@/types/connections";
+import { CONNECTION_TOOL_COMPAT, CONNECTION_AGENT_COMPAT } from "@/types/connections";
 import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client";
 
 /**
@@ -91,12 +92,19 @@ export async function getConnectionsByType(type: ConnectionType): Promise<Connec
   return getConnections({ type });
 }
 
-export async function getCompatibleConnectionsForTool(_toolType: string): Promise<Connection[]> {
-  return getConnections();
+export async function getCompatibleConnectionsForTool(toolType: string): Promise<Connection[]> {
+  const compatTypes = CONNECTION_TOOL_COMPAT[toolType] ?? [];
+  if (compatTypes.length === 0) return [];
+  // Fetch all and filter client-side — one request, multiple compatible types supported
+  const all = await getConnections();
+  return all.filter((c) => compatTypes.includes(c.type));
 }
 
-export async function getCompatibleConnectionsForAgent(_agentType: string): Promise<Connection[]> {
-  return getConnections();
+export async function getCompatibleConnectionsForAgent(agentType: string): Promise<Connection[]> {
+  const compatTypes = CONNECTION_AGENT_COMPAT[agentType] ?? [];
+  if (compatTypes.length === 0) return [];
+  const all = await getConnections();
+  return all.filter((c) => compatTypes.includes(c.type));
 }
 
 export async function createConnection(payload: Partial<Connection>): Promise<Connection> {

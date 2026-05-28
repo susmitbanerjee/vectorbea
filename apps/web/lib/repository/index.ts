@@ -172,6 +172,33 @@ export async function deleteAgent(id: string): Promise<void> {
   await api<void>(withWorkspace(`/api/agents/${id}`), { method: "DELETE" });
 }
 
+// ─── Tool type vocabulary ─────────────────────────────────────────────────────
+//
+// The frontend uses descriptive ToolType values that are meaningful in the UI.
+// The Kotlin backend only accepts its own allowlist:
+//   "http" | "database" | "code" | "builtin" | "llm_generate" | "custom"
+//
+// This map translates before every POST/PATCH. The original friendly type is
+// preserved in config.uiToolType so the frontend can reconstruct display labels.
+
+const TOOL_TYPE_TO_API: Record<string, string> = {
+  http:             "http",
+  database_read:    "database",
+  database_write:   "database",
+  slack:            "http",       // Slack is an HTTP tool using a SaaS/http connection
+  email:            "http",       // same pattern
+  crm:              "http",       // same pattern
+  mcp_tool:         "custom",
+  custom_function:  "code",
+  imported_tool:    "custom",
+};
+
+/** Translates a frontend ToolType to the API's type vocabulary. */
+function toApiToolType(uiType: string | undefined): string | undefined {
+  if (!uiType) return uiType;
+  return TOOL_TYPE_TO_API[uiType] ?? uiType;
+}
+
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
 export async function getTools(): Promise<Tool[]> {
@@ -192,9 +219,17 @@ export async function getTool(id: string): Promise<Tool | null> {
 }
 
 export async function createTool(payload: Partial<Tool>): Promise<Tool> {
+  const uiType = payload.type;
+  const apiType = toApiToolType(uiType);
+  // Preserve the original UI type in config so the detail page can show the
+  // right label (e.g. "Database (Read)" vs "Database (Write)", "Slack", etc.)
+  const config = {
+    ...(payload.dbConfig ?? (payload as Record<string, unknown>).config ?? {}),
+    uiToolType: uiType,
+  };
   return api<Tool>(withWorkspace("/api/tools"), {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, type: apiType, config }),
   });
 }
 

@@ -11,6 +11,31 @@ import { getTools } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Maps uiToolType (stored in config by createTool) → human label.
+// Falls back to capitalising the raw API type when uiToolType is absent.
+const TOOL_TYPE_LABELS: Record<string, string> = {
+  http:             "HTTP",
+  database_read:    "Database (Read)",
+  database_write:   "Database (Write)",
+  database:         "Database",
+  slack:            "Slack",
+  email:            "Email",
+  crm:              "CRM",
+  mcp_tool:         "MCP",
+  custom_function:  "Custom Function",
+  imported_tool:    "Imported Tool",
+  code:             "Code",
+  custom:           "Custom",
+  builtin:          "Built-in",
+  llm_generate:     "LLM Generate",
+};
+
+function displayToolType(tool: Tool): string {
+  const ui = (tool.config as Record<string, unknown> | undefined)?.uiToolType as string | undefined;
+  const key = ui ?? tool.type;
+  return TOOL_TYPE_LABELS[key] ?? key.replace(/_/g, " ");
+}
+
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
   low:      "bg-emerald-50 text-emerald-700 border-emerald-200",
   medium:   "bg-amber-50   text-amber-700   border-amber-200",
@@ -203,7 +228,7 @@ export default function ToolsPage() {
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 capitalize">
-                        {tool.type.replace(/_/g, " ")}
+                        {displayToolType(tool)}
                       </span>
                     </td>
                     <td className="px-4 py-3.5">
