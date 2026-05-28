@@ -1,6 +1,22 @@
 import type { Connection, ConnectionStatus, ConnectionType } from "@/types/connections";
 import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client";
 
+/**
+ * Maps API connection types (backend vocabulary) to frontend display types.
+ * The backend stores "llm" | "database" | "http" | "tool".
+ * The frontend uses "llm_provider" | "database" | "http_api" | "mcp_server" etc.
+ */
+function normalizeConnection(conn: Connection): Connection {
+  const typeMap: Record<string, ConnectionType> = {
+    llm:  "llm_provider",
+    http: "http_api",
+    tool: "mcp_server",
+    // "database" is the same on both sides — no mapping needed
+  };
+  const mappedType = typeMap[conn.type as string];
+  return mappedType ? { ...conn, type: mappedType } : conn;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const { method = "GET", body, headers, ...rest } = init ?? {};
   const parsedBody = typeof body === "string" ? (JSON.parse(body) as unknown) : undefined;
@@ -28,7 +44,8 @@ export async function getConnections(filters?: {
     const res = await api<{ items: Connection[] } | Connection[]>(
       withWorkspace(`/api/connections${query ? `?${query}` : ""}`, workspaceId),
     );
-    return Array.isArray(res) ? res : (res as { items: Connection[] }).items ?? [];
+    const items = Array.isArray(res) ? res : (res as { items: Connection[] }).items ?? [];
+    return items.map(normalizeConnection);
   } catch {
     return [];
   }
@@ -37,7 +54,8 @@ export async function getConnections(filters?: {
 export async function getConnection(id: string): Promise<Connection | null> {
   const workspaceId = getActiveWorkspaceId();
   try {
-    return await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId));
+    const conn = await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId));
+    return normalizeConnection(conn);
   } catch {
     return null;
   }
@@ -57,19 +75,21 @@ export async function getCompatibleConnectionsForAgent(_agentType: string): Prom
 
 export async function createConnection(payload: Partial<Connection>): Promise<Connection> {
   const workspaceId = getActiveWorkspaceId();
-  return api<Connection>(withWorkspace("/api/connections", workspaceId), {
+  const conn = await api<Connection>(withWorkspace("/api/connections", workspaceId), {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  return normalizeConnection(conn);
 }
 
 export async function updateConnection(id: string, payload: Partial<Connection>): Promise<Connection | null> {
   const workspaceId = getActiveWorkspaceId();
   try {
-    return await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId), {
+    const conn = await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId), {
       method: "PATCH",
       body: JSON.stringify(payload),
     });
+    return normalizeConnection(conn);
   } catch {
     return null;
   }
@@ -85,8 +105,9 @@ export async function deleteConnection(id: string): Promise<boolean> {
 
 export async function testConnection(id: string): Promise<Connection | null> {
   const workspaceId = getActiveWorkspaceId();
-  return api<Connection>(
+  const conn = await api<Connection>(
     withWorkspace(`/api/connections/${encodeURIComponent(id)}/test`, workspaceId),
     { method: "POST" },
   );
+  return normalizeConnection(conn);
 }

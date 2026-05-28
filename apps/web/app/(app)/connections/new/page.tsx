@@ -539,11 +539,22 @@ export default function NewConnectionPage() {
         type === "mcp_server"   ? mcpToken :
         "";
 
+      // Map frontend display types to backend API types
+      const apiType = ((): string => {
+        switch (type) {
+          case "llm_provider": return "llm";
+          case "http_api":     return "http";
+          case "saas":         return "http";   // SaaS connections go through http
+          case "mcp_server":   return "tool";   // MCP servers are tool connections
+          default:             return type;     // "database" | "http" | "tool" pass through
+        }
+      })();
+
       let conn: Awaited<ReturnType<typeof createConnection>>;
       try {
         conn = await createConnection({
           name: name.trim(),
-          type,
+          type: apiType,
           provider,
           environment: environment as "development" | "staging" | "production",
           authType: connAuthType,
