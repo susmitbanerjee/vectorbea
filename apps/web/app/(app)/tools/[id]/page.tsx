@@ -21,17 +21,17 @@ import { getTool, getCallsForTool } from "@/lib/repository";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  read_only:        "bg-emerald-50 text-emerald-700 border-emerald-200",
-  low_risk_write:   "bg-amber-50  text-amber-700  border-amber-200",
-  high_risk_write:  "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  irreversible:     "bg-red-50    text-red-700    border-red-200",
+  low:      "bg-emerald-50 text-emerald-700 border-emerald-200",
+  medium:   "bg-amber-50  text-amber-700  border-amber-200",
+  high:     "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  critical: "bg-red-50    text-red-700    border-red-200",
 };
 
 const RISK_LABELS: Record<Tool["riskLevel"], string> = {
-  read_only:        "Read Only",
-  low_risk_write:   "Low Risk Write",
-  high_risk_write:  "High Risk Write",
-  irreversible:     "Irreversible",
+  low:      "Low",
+  medium:   "Medium",
+  high:     "High",
+  critical: "Critical",
 };
 
 type Tab = "overview" | "schema" | "auth" | "calls" | "policies";
@@ -380,10 +380,10 @@ export default function ToolDetailPage() {
             <div className="rounded-xl border border-border/60 px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-2 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Risk implications</h2>
               <p className="text-[12px] text-muted-foreground leading-5">
-                {tool.riskLevel === "read_only" && "This tool only reads data. It is safe to retry without side effects."}
-                {tool.riskLevel === "low_risk_write" && "This tool writes data but mutations are easy to undo or are idempotent. Use with care on retry."}
-                {tool.riskLevel === "high_risk_write" && "This tool modifies important data. Approval may be required before execution in production workflows."}
-                {tool.riskLevel === "irreversible" && "This tool cannot be undone. Common examples: sending messages, processing payments, deleting records. Always gate with an approval step."}
+                {tool.riskLevel === "low" && "This tool only reads data. It is safe to retry without side effects."}
+                {tool.riskLevel === "medium" && "This tool writes data but mutations are easy to undo or are idempotent. Use with care on retry."}
+                {tool.riskLevel === "high" && "This tool modifies important data. Approval may be required before execution in production workflows."}
+                {tool.riskLevel === "critical" && "This tool cannot be undone. Common examples: sending messages, processing payments, deleting records. Always gate with an approval step."}
               </p>
             </div>
           </div>

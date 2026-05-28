@@ -26,10 +26,10 @@ const TOOL_TYPES: { type: ToolType; label: string }[] = [
 ];
 
 const RISK_LEVELS: { level: RiskLevel; label: string; description: string; color: string }[] = [
-  { level: "read_only",       label: "Read Only",        description: "Never modifies state. Safe to retry freely.",           color: "#059669" },
-  { level: "low_risk_write",  label: "Low Risk Write",   description: "Writes that are easy to undo or idempotent.",           color: "#D97706" },
-  { level: "high_risk_write", label: "High Risk Write",  description: "Modifies important data. Requires care on retry.",      color: "#EA580C" },
-  { level: "irreversible",    label: "Irreversible",     description: "Cannot be undone. Payments, sends, deletions.",         color: "#DC2626" },
+  { level: "low",      label: "Low",      description: "Never modifies state. Safe to retry freely.",           color: "#059669" },
+  { level: "medium",   label: "Medium",   description: "Writes that are easy to undo or idempotent.",           color: "#D97706" },
+  { level: "high",     label: "High",     description: "Modifies important data. Requires care on retry.",      color: "#EA580C" },
+  { level: "critical", label: "Critical", description: "Cannot be undone. Payments, sends, deletions.",         color: "#DC2626" },
 ];
 
 function SectionHeader({ label }: { label: string }) {
@@ -67,7 +67,7 @@ export default function NewToolPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<ToolType>("http");
-  const [riskLevel, setRiskLevel] = useState<RiskLevel>("read_only");
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>("low");
   const [connectionId, setConnectionId] = useState<string>("");
 
   // HTTP config

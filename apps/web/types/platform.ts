@@ -27,10 +27,10 @@ export type ToolType =
   | "imported_tool";
 
 export type RiskLevel =
-  | "read_only"
-  | "low_risk_write"
-  | "high_risk_write"
-  | "irreversible";
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
 
 export type WorkflowStatus = "active" | "paused" | "draft" | "archived";
 

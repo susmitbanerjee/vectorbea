@@ -12,17 +12,17 @@ import { getTools } from "@/lib/repository";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  read_only:        "bg-emerald-50 text-emerald-700 border-emerald-200",
-  low_risk_write:   "bg-amber-50   text-amber-700   border-amber-200",
-  high_risk_write:  "bg-orange-50  text-orange-700  border-orange-200",
-  irreversible:     "bg-red-50     text-red-700     border-red-200",
+  low:      "bg-emerald-50 text-emerald-700 border-emerald-200",
+  medium:   "bg-amber-50   text-amber-700   border-amber-200",
+  high:     "bg-orange-50  text-orange-700  border-orange-200",
+  critical: "bg-red-50     text-red-700     border-red-200",
 };
 
 const RISK_LABELS: Record<Tool["riskLevel"], string> = {
-  read_only:        "Read Only",
-  low_risk_write:   "Low Risk Write",
-  high_risk_write:  "High Risk Write",
-  irreversible:     "Irreversible",
+  low:      "Low",
+  medium:   "Medium",
+  high:     "High",
+  critical: "Critical",
 };
 
 function timeAgo(ts: string | null) {
@@ -119,10 +119,10 @@ export default function ToolsPage() {
           onChange={(e) => setRiskFilter(e.target.value as Tool["riskLevel"] | "")}
         >
           <option value="">All risk levels</option>
-          <option value="read_only">Read Only</option>
-          <option value="low_risk_write">Low Risk Write</option>
-          <option value="high_risk_write">High Risk Write</option>
-          <option value="irreversible">Irreversible</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
         </select>
         {allTypes.length > 0 && (
           <select

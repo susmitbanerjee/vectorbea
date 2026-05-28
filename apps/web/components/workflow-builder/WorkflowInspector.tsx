@@ -238,7 +238,7 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
 }
 
 function ApprovalConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeData) => void }) {
-  const cfg: ApprovalNodeConfig = data.approvalConfig ?? { title: "Approval Required", message: "", riskLevel: "low_risk_write" };
+  const cfg: ApprovalNodeConfig = data.approvalConfig ?? { title: "Approval Required", message: "", riskLevel: "medium" };
   function set(patch: Partial<ApprovalNodeConfig>) { onChange({ ...data, approvalConfig: { ...cfg, ...patch } }); }
   return (
     <div className="space-y-3">
@@ -251,10 +251,10 @@ function ApprovalConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WF
       <div><ILabel>Message to Approver</ILabel><ITextarea rows={3} value={cfg.message} onChange={(v) => set({ message: v })} placeholder="Please review and approve to continue…" /></div>
       <div><ILabel>Risk Level</ILabel>
         <ISelect value={cfg.riskLevel} onChange={(v) => set({ riskLevel: v as ApprovalNodeConfig["riskLevel"] })}>
-          <option value="read_only">Read only</option>
-          <option value="low_risk_write">Low risk write</option>
-          <option value="high_risk_write">High risk write</option>
-          <option value="irreversible">Irreversible</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
         </ISelect>
       </div>
       <div><ILabel>Approver Role</ILabel><IInput value={cfg.approverRole ?? ""} onChange={(v) => set({ approverRole: v || undefined })} placeholder="admin, manager…" /></div>

@@ -41,10 +41,10 @@ const TYPE_COLORS: Record<Agent["type"], string> = {
 };
 
 const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  read_only:       "bg-emerald-50 text-emerald-700 border-emerald-200",
-  low_risk_write:  "bg-amber-500/10  text-amber-700  border-amber-500/20",
-  high_risk_write: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-  irreversible:    "bg-red-500/10    text-red-400    border-red-500/20",
+  low:      "bg-emerald-50 text-emerald-700 border-emerald-200",
+  medium:   "bg-amber-500/10  text-amber-700  border-amber-500/20",
+  high:     "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  critical: "bg-red-500/10    text-red-400    border-red-500/20",
 };
 
 const STATUS_DOT: Record<AgentRun["status"], string> = {
