@@ -61,11 +61,11 @@ export type ObjectStorageProvider =
 
 export type AuthType =
   | "api_key"
-  | "bearer_token"
-  | "basic_auth"
+  | "bearer"
+  | "basic"
   | "oauth2"
-  | "aws_iam"
-  | "custom_header"
+  | "mtls"
+  | "custom"
   | "connection_string"
   | "none";
 

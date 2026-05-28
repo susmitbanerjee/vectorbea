@@ -304,10 +304,10 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
           <select className={selectCls} value={authType} onChange={(e) => setAuthType(e.target.value as AuthType)}>
             <option value="none">None</option>
             <option value="api_key">API key header</option>
-            <option value="bearer_token">Bearer token</option>
-            <option value="basic_auth">Basic auth</option>
+            <option value="bearer">Bearer token</option>
+            <option value="basic">Basic auth</option>
             <option value="oauth2">OAuth 2.0 (placeholder)</option>
-            <option value="custom_header">Custom header</option>
+            <option value="custom">Custom header</option>
           </select>
         </Field>
         {authType !== "none" && (
@@ -520,11 +520,11 @@ export default function NewConnectionPage() {
         config = { baseUrl: httpBaseUrl, authType, defaultHeaders: {}, allowedPaths: [], blockedPaths: [], requestTimeoutMs: 15000, retryAttempts: 2 };
       } else if (type === "saas") {
         provider = saasProvider;
-        connAuthType = "bearer_token";
+        connAuthType = "bearer";
         config = { provider: saasProvider, workspace, allowedResources: [] };
       } else if (type === "mcp_server") {
         provider = "mcp";
-        connAuthType = mcpToken ? "bearer_token" : "none";
+        connAuthType = mcpToken ? "bearer" : "none";
         config = { serverUrl: mcpUrl, transport, allowedTools: [] };
       } else {
         provider = type;
