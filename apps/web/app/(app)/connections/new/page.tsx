@@ -541,8 +541,8 @@ export default function NewConnectionPage() {
           connectionMode: connString ? "connection_string" : "host_port",
           host, port: parseInt(port) || 5432, database, sslRequired, readOnly,
           // Populated from schema picker if user explored the schema
-          allowedSchemas: schemaSelection ? [schemaSelection.schema] : [],
-          allowedTables:  schemaSelection ? [`${schemaSelection.schema}.${schemaSelection.table}`] : [],
+          allowedSchemas: schemaSelection ? [schemaSelection.schema] : [] as string[],
+          allowedTables:  schemaSelection ? [`${schemaSelection.schema}.${schemaSelection.table}`] : [] as string[],
           queryTimeoutMs: 10000, maxRows: 1000,
         };
       } else if (type === "http_api") {
