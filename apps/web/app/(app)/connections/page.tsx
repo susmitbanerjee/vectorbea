@@ -26,7 +26,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { Connection, ConnectionType, ConnectionStatus } from "@/types/connections";
-import { getConnections, testConnection, deleteConnection } from "@/lib/repository";
+import { getConnections, getConnection, testConnection, deleteConnection } from "@/lib/repository";
 
 // ─── Connection type meta ─────────────────────────────────────────────────────
 
@@ -239,14 +239,19 @@ export default function ConnectionsPage() {
 
   async function handleTest(id: string) {
     setTestingIds((s) => new Set([...s, id]));
-    const updated = await testConnection(id);
+    const result = await testConnection(id);
     setTestingIds((s) => { const n = new Set(s); n.delete(id); return n; });
-    if (updated) {
-      setConnections((prev) => prev.map((c) => (c.id === id ? updated : c)));
-      toast[updated.lastTestStatus === "ok" ? "success" : "error"](
-        updated.lastTestStatus === "ok"
-          ? `${updated.name} connected (${updated.lastTestLatencyMs}ms)`
-          : `${updated.name} test failed`,
+    if (result) {
+      const passed = result.status === "connected";
+      // Re-fetch the full connection so the list reflects the persisted test status
+      const refreshed = await getConnection(id);
+      if (refreshed) {
+        setConnections((prev) => prev.map((c) => (c.id === id ? refreshed : c)));
+      }
+      toast[passed ? "success" : "error"](
+        passed
+          ? `${refreshed?.name ?? id} connected (${result.latencyMs}ms)`
+          : `${refreshed?.name ?? id} test failed: ${result.message}`,
       );
     }
   }
