@@ -15,12 +15,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SchemaPreviewResult, SchemaTable, SchemaColumn } from "@/lib/repository/connections";
-import { previewDatabaseSchema } from "@/lib/repository/connections";
+import { previewDatabaseSchema, previewSavedConnectionSchema } from "@/lib/repository/connections";
 
 interface Props {
+  /** ID of a saved connection — when provided, secrets are resolved server-side */
+  connectionId?: string;
   /** Connection string to preview (sent over TLS, never stored by this component) */
   plaintextSecret?: string;
-  dbType: string;
+  dbType?: string;
   username?: string;
   host?: string;
   port?: number;
@@ -39,6 +41,7 @@ export interface SchemaSelection {
 }
 
 export function SchemaPickerPanel({
+  connectionId,
   plaintextSecret,
   dbType,
   username,
@@ -60,8 +63,8 @@ export function SchemaPickerPanel({
   const [selectedCols, setSelectedCols] = useState<Set<string>>(new Set());
 
   async function handleFetch() {
-    if (!plaintextSecret && !host) {
-      setError("Enter a connection string or host details first.");
+    if (!connectionId && !plaintextSecret && !host) {
+      setError("Select a connection or enter connection details first.");
       return;
     }
     setLoading(true);
@@ -70,14 +73,16 @@ export function SchemaPickerPanel({
     setSelectedTable(null);
     setSelectedCols(new Set());
     try {
-      const data = await previewDatabaseSchema({
-        dbType,
-        plaintextSecret: plaintextSecret || undefined,
-        username: username || undefined,
-        host: host || undefined,
-        port: port || undefined,
-        database: database || undefined,
-      });
+      const data = connectionId
+        ? await previewSavedConnectionSchema(connectionId)
+        : await previewDatabaseSchema({
+            dbType: dbType ?? "",
+            plaintextSecret: plaintextSecret || undefined,
+            username: username || undefined,
+            host: host || undefined,
+            port: port || undefined,
+            database: database || undefined,
+          });
       setResult(data);
       // Auto-expand first schema
       if (data.schemas.length > 0) {

@@ -10,6 +10,7 @@ import type { RiskLevel, ToolType, RetryPolicy } from "@/types/platform";
 import type { Connection } from "@/types/connections";
 import { CONNECTION_TOOL_COMPAT } from "@/types/connections";
 import { createTool, getCompatibleConnectionsForTool } from "@/lib/repository";
+import { SchemaPickerPanel, type SchemaSelection } from "@/components/connections/SchemaPickerPanel";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,7 @@ export default function NewToolPage() {
   const [sqlTemplate, setSqlTemplate] = useState("");
   const [dbMaxRows, setDbMaxRows] = useState("100");
   const [dbRequireApproval, setDbRequireApproval] = useState(false);
+  const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
 
   // Schema
   const [inputSchema, setInputSchema] = useState('{\n  "type": "object",\n  "properties": {}\n}');
@@ -92,6 +94,31 @@ export default function NewToolPage() {
   const [retryAttempts, setRetryAttempts] = useState("3");
   const [retryBackoff, setRetryBackoff] = useState<RetryPolicy["backoffType"]>("exponential");
   const [retryBackoffMs, setRetryBackoffMs] = useState("1000");
+
+  function handleSchemaSelect(sel: SchemaSelection) {
+    setSchemaSelection(sel);
+    const cols = sel.columns.map((c) => c.name);
+    if (type === "database_read") {
+      const colList = cols.join(", ");
+      setSqlTemplate(`SELECT ${colList}\nFROM ${sel.schema}.${sel.table}\nWHERE {{filter}}\nLIMIT {{limit}}`);
+      const properties: Record<string, unknown> = {
+        filter: { type: "string", description: "SQL WHERE clause condition, e.g. status = 'active'" },
+        limit:  { type: "integer", default: 50, description: "Max rows to return" },
+      };
+      setInputSchema(JSON.stringify({ type: "object", properties }, null, 2));
+      const outProps: Record<string, unknown> = {};
+      sel.columns.forEach((c) => { outProps[c.name] = { type: "string", description: c.dataType }; });
+      setOutputSchema(JSON.stringify({ type: "object", properties: { rows: { type: "array", items: { type: "object", properties: outProps } } } }, null, 2));
+    } else {
+      const colList = cols.join(", ");
+      const placeholders = cols.map((c) => `{{${c}}}`).join(", ");
+      setSqlTemplate(`INSERT INTO ${sel.schema}.${sel.table} (${colList})\nVALUES (${placeholders})`);
+      const properties: Record<string, unknown> = {};
+      sel.columns.forEach((c) => { properties[c.name] = { type: "string", description: c.dataType }; });
+      setInputSchema(JSON.stringify({ type: "object", properties, required: sel.columns.filter((c) => !c.nullable && !c.isPrimaryKey).map((c) => c.name) }, null, 2));
+      setOutputSchema(JSON.stringify({ type: "object", properties: { rowsAffected: { type: "integer" } } }, null, 2));
+    }
+  }
 
   // Reload compatible connections when type changes
   useEffect(() => {
@@ -263,10 +290,70 @@ export default function NewToolPage() {
         </section>
       )}
 
+      {/* ── Connection ───────────────────────────────────────────────── */}
+      {needsConnection && (
+        <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+          <SectionHeader label="Connection" />
+          {compatibleConnections.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-5 rounded-lg border border-border/40" style={{ background: "var(--surface-2)" }}>
+              <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>No compatible connections found</p>
+              <p className="text-[11px] text-muted-foreground">Add a connection of the correct type before registering this tool.</p>
+              <Link
+                href={"/connections/new" as never}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
+                style={{ background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}
+              >
+                Add Connection
+              </Link>
+            </div>
+          ) : (
+            <Field label="Connection" required>
+              <select
+                className={selectCls}
+                value={connectionId}
+                onChange={(e) => { setConnectionId(e.target.value); setSchemaSelection(null); }}
+              >
+                <option value="">None</option>
+                {compatibleConnections.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Only connections compatible with this tool type are shown.{" "}
+                <Link href={"/connections" as never} className="text-primary hover:underline">Manage connections</Link>
+              </p>
+            </Field>
+          )}
+        </section>
+      )}
+
       {/* ── DB Config ────────────────────────────────────────────────── */}
       {(type === "database_read" || type === "database_write") && (
         <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
           <SectionHeader label="Database Config" />
+
+          {/* Schema picker — shown when a database connection is selected */}
+          {connectionId ? (
+            <div className="space-y-1.5">
+              <p className="text-[12px] font-medium text-muted-foreground">Browse schema</p>
+              <p className="text-[11px] text-muted-foreground/60">
+                Select a table and columns — the SQL template and schemas will be generated automatically.
+                {schemaSelection && (
+                  <span className="ml-1 font-semibold text-primary">
+                    ✓ {schemaSelection.schema}.{schemaSelection.table} ({schemaSelection.columns.length} columns)
+                  </span>
+                )}
+              </p>
+              <SchemaPickerPanel
+                connectionId={connectionId}
+                onSelect={handleSchemaSelect}
+              />
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border/40 bg-muted/20 p-3 text-[11px] text-muted-foreground">
+              Select a database connection above to browse its schema and auto-generate the SQL template.
+            </div>
+          )}
 
           <Field label="SQL Template" required>
             <textarea
@@ -311,43 +398,6 @@ export default function NewToolPage() {
                 <p className="text-[11px] text-muted-foreground">Workflow will pause and wait for approval before executing this SQL</p>
               </div>
             </label>
-          )}
-        </section>
-      )}
-
-      {/* ── Connection ───────────────────────────────────────────────── */}
-      {needsConnection && (
-        <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
-          <SectionHeader label="Connection" />
-          {compatibleConnections.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-5 rounded-lg border border-border/40" style={{ background: "var(--surface-2)" }}>
-              <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>No compatible connections found</p>
-              <p className="text-[11px] text-muted-foreground">Add a connection of the correct type before registering this tool.</p>
-              <Link
-                href={"/connections/new" as never}
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
-                style={{ background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}
-              >
-                Add Connection
-              </Link>
-            </div>
-          ) : (
-            <Field label="Connection" required>
-              <select
-                className={selectCls}
-                value={connectionId}
-                onChange={(e) => setConnectionId(e.target.value)}
-              >
-                <option value="">None</option>
-                {compatibleConnections.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
-                ))}
-              </select>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Only connections compatible with this tool type are shown.{" "}
-                <Link href={"/connections" as never} className="text-primary hover:underline">Manage connections</Link>
-              </p>
-            </Field>
           )}
         </section>
       )}
