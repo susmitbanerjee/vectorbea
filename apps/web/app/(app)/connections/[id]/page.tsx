@@ -186,10 +186,10 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         <InfoRow label="Auth Type">{c.authType}</InfoRow>
         <InfoRow label="Timeout">{c.requestTimeoutMs}ms</InfoRow>
         <InfoRow label="Retries">{c.retryAttempts}</InfoRow>
-        {c.allowedPaths.length > 0 && (
+        {(c.allowedPaths ?? []).length > 0 && (
           <InfoRow label="Allowed Paths">
             <div className="flex flex-wrap gap-1">
-              {c.allowedPaths.map(p => <span key={p} className="font-mono text-[10px]" style={{ color: "#2563EB" }}>{p}</span>)}
+              {(c.allowedPaths ?? []).map(p => <span key={p} className="font-mono text-[10px]" style={{ color: "#2563EB" }}>{p}</span>)}
             </div>
           </InfoRow>
         )}
