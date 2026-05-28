@@ -141,10 +141,13 @@ class ConnectionRoutes(
         val envId = ctx.environmentId
 
         val cacheKey = "${CacheKeys.connectionList(ctx.workspaceId.toString(), envId?.toString() ?: "all")}:${typeFilter.orEmpty()}:${statusFilter.orEmpty()}:${params.page}:${params.pageSize}"
+        // Cache the already-mapped response page (not the raw Connection objects) to
+        // avoid Jackson type-erasure issues when deserializing Page<Connection> generics.
         val page = cache.getOrSet(cacheKey, ttlSeconds = 60L) {
             repo.list(ctx.workspaceId, envId, typeFilter, statusFilter, params)
+                .mapItems { it.toResponse() }
         }
-        return Response.ok(page.mapItems { it.toResponse() })
+        return Response.ok(page)
     }
 
     private fun create(req: Request): Response {

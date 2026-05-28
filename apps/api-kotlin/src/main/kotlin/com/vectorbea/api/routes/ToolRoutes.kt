@@ -105,9 +105,9 @@ class ToolRoutes(
 
         val cacheKey = "${CacheKeys.toolList(ctx.workspaceId.toString(), envId?.toString() ?: "all")}:${typeFilter.orEmpty()}:${statusFilter.orEmpty()}:${params.page}:${params.pageSize}"
         val page = cache.getOrSet(cacheKey, ttlSeconds = 60L) {
-            repo.list(ctx.workspaceId, envId, typeFilter, statusFilter, params)
+            repo.list(ctx.workspaceId, envId, typeFilter, statusFilter, params).mapItems { it.toResponse() }
         }
-        return Response.ok(page.mapItems { it.toResponse() })
+        return Response.ok(page)
     }
 
     private fun create(req: Request): Response {
