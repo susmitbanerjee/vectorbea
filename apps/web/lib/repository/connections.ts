@@ -24,7 +24,14 @@ export async function getConnections(filters?: {
   if (filters?.search) params.set("search", filters.search);
 
   const query = params.toString();
-  return api<Connection[]>(withWorkspace(`/api/connections${query ? `?${query}` : ""}`, workspaceId));
+  try {
+    const res = await api<{ items: Connection[] } | Connection[]>(
+      withWorkspace(`/api/connections${query ? `?${query}` : ""}`, workspaceId),
+    );
+    return Array.isArray(res) ? res : (res as { items: Connection[] }).items ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export async function getConnection(id: string): Promise<Connection | null> {

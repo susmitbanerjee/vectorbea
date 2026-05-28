@@ -135,7 +135,8 @@ export async function saveWorkflowVersion(_workflowId: string, _graph: WorkflowG
 
 export async function getAgents(): Promise<Agent[]> {
   try {
-    return await api<Agent[]>(withWorkspace("/api/agents"));
+    const res = await api<{ items: Agent[] } | Agent[]>(withWorkspace("/api/agents"));
+    return Array.isArray(res) ? res : (res as { items: Agent[] }).items ?? [];
   } catch {
     return [];
   }
@@ -175,7 +176,8 @@ export async function deleteAgent(id: string): Promise<void> {
 
 export async function getTools(): Promise<Tool[]> {
   try {
-    return await api<Tool[]>(withWorkspace("/api/tools"));
+    const res = await api<{ items: Tool[] } | Tool[]>(withWorkspace("/api/tools"));
+    return Array.isArray(res) ? res : (res as { items: Tool[] }).items ?? [];
   } catch {
     return [];
   }
