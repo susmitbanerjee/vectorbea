@@ -23,8 +23,7 @@ function normalizeConnection(conn: Connection): Connection {
   return {
     ...conn,
     ...(mappedType ? { type: mappedType } : {}),
-    lastTestError,
-    // Guarantee array fields are never undefined — API may omit them
+    // Guarantee fields that may be absent in the API response are never undefined
     usedByAgentIds: conn.usedByAgentIds ?? [],
     usedByToolIds:  conn.usedByToolIds  ?? [],
     networkPolicy:  conn.networkPolicy  ?? { requireWhitelist: false, privateRunnerRequired: false, networkStatus: "unknown" },
@@ -34,7 +33,7 @@ function normalizeConnection(conn: Connection): Connection {
     lastTestedAt:          conn.lastTestedAt         ?? null,
     lastTestStatus:        conn.lastTestStatus        ?? null,
     lastTestLatencyMs:     conn.lastTestLatencyMs     ?? null,
-    lastTestError:         lastTestError,
+    lastTestError,
     lastTestErrorMessageSanitized: raw.lastTestErrorMessageSanitized ?? null,
     lastTestErrorCode:     conn.lastTestErrorCode     ?? null,
   };
