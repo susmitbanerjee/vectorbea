@@ -203,9 +203,9 @@ export default function AgentsPage() {
                       {agent.modelName || <span className="opacity-40">—</span>}
                     </td>
                     <td className="px-4 py-3.5 text-[12px] text-muted-foreground">
-                      {agent.allowedToolIds.length > 0 ? (
+                      {(agent.allowedToolIds ?? []).length > 0 ? (
                         <span className="rounded-full bg-muted/50 px-2 py-0.5 text-[10px] font-medium">
-                          {agent.allowedToolIds.length}
+                          {(agent.allowedToolIds ?? []).length}
                         </span>
                       ) : (
                         <span className="opacity-40">—</span>

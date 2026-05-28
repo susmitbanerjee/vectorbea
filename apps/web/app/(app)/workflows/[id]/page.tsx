@@ -170,9 +170,9 @@ export default function WorkflowDetailPage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: "Total Runs",    value: workflow.totalRuns,                  icon: List },
-          { label: "Success Rate",  value: `${Math.round(workflow.successRate * 100)}%`, icon: CheckCircle2 },
-          { label: "Agents",        value: workflow.agentIds.length,            icon: Bot },
-          { label: "Tools",         value: workflow.toolIds.length,             icon: Wrench },
+          { label: "Success Rate",  value: `${Math.round((workflow.successRate ?? 0) * 100)}%`, icon: CheckCircle2 },
+          { label: "Agents",        value: (workflow.agentIds ?? []).length,    icon: Bot },
+          { label: "Tools",         value: (workflow.toolIds ?? []).length,     icon: Wrench },
         ].map(({ label, value, icon: Icon }) => (
           <div
             key={label}
