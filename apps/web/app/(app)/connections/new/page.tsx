@@ -582,14 +582,15 @@ export default function NewConnectionPage() {
         try {
           const result = await testConnection(conn.id);
           if (result) {
-            setTestResult(result.lastTestStatus === "ok" ? "ok" : "failed");
-            if (result.lastTestStatus === "ok") {
-              toast.success(`Connection test passed — ${result.lastTestLatencyMs}ms`);
+            const passed = result.status === "connected";
+            setTestResult(passed ? "ok" : "failed");
+            if (passed) {
+              toast.success(`Connection test passed — ${result.latencyMs}ms`);
             } else {
-              toast.error(`Test failed: ${result.lastTestError ?? "Could not reach host"}`);
+              toast.error(`Test failed: ${result.message ?? "Could not reach host"}`);
             }
             // Auto-navigate to detail page after short delay on success
-            if (result.lastTestStatus === "ok") {
+            if (passed) {
               setTimeout(() => router.push(`/connections/${conn.id}` as never), 1200);
             }
             return; // stay on page so user can see result
@@ -620,12 +621,13 @@ export default function NewConnectionPage() {
         // Already saved — just re-run the test against the existing record
         const result = await testConnection(savedConnId);
         if (result) {
-          setTestResult(result.lastTestStatus === "ok" ? "ok" : "failed");
-          if (result.lastTestStatus === "ok") {
-            toast.success(`Connection test passed — ${result.lastTestLatencyMs}ms`);
+          const passed = result.status === "connected";
+          setTestResult(passed ? "ok" : "failed");
+          if (passed) {
+            toast.success(`Connection test passed — ${result.latencyMs}ms`);
             setTimeout(() => router.push(`/connections/${savedConnId}` as never), 1200);
           } else {
-            toast.error(`Test failed: ${result.lastTestError ?? "Could not reach host"}`);
+            toast.error(`Test failed: ${result.message ?? "Could not reach host"}`);
           }
         }
       } else {

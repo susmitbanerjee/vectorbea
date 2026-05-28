@@ -190,7 +190,13 @@ export interface Connection {
   lastTestedAt: string | null;
   lastTestStatus: "ok" | "failed" | "skipped" | null;
   lastTestLatencyMs: number | null;
+  /** Error message from the last test — present if lastTestStatus is "failed" */
   lastTestError: string | null;
+  /** API field name for lastTestError (from Kotlin serialization) */
+  lastTestErrorMessageSanitized: string | null;
+  lastTestErrorCode: string | null;
+  /** Whether a secret has been configured (API returns secretConfigured, not secretRef) */
+  secretConfigured?: boolean;
   usedByAgentIds: string[];
   usedByToolIds: string[];
   createdAt: string;

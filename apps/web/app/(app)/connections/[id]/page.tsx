@@ -911,14 +911,17 @@ export default function ConnectionDetailPage() {
     if (!connection || testing) return;
     setTesting(true);
     try {
-      const updated = await testConnection(connection.id);
-      if (!updated) { toast.error("Test failed — connection not found"); return; }
-      setConnection(updated);
-      if (updated.lastTestStatus === "ok") {
-        toast.success(`Test passed — ${updated.lastTestLatencyMs}ms`);
+      const result = await testConnection(connection.id);
+      if (!result) { toast.error("Test failed — connection not found"); return; }
+      const passed = result.status === "connected";
+      if (passed) {
+        toast.success(`Test passed — ${result.latencyMs}ms`);
       } else {
-        toast.error(`Test failed: ${updated.lastTestError ?? "Unknown error"}`);
+        toast.error(`Test failed: ${result.message ?? "Unknown error"}`);
       }
+      // Re-fetch the full connection so the UI reflects the persisted test result
+      const refreshed = await getConnection(connection.id);
+      if (refreshed) setConnection(refreshed);
     } catch {
       toast.error("Test failed");
     } finally {

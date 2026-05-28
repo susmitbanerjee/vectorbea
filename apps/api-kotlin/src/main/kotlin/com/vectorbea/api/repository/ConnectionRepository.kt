@@ -185,6 +185,8 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
         latencyMs: Int?,
         errorCode: String?,
         errorMessage: String?,
+        /** Value stored in last_test_status — defaults to "ok"/"failed" vocabulary for the frontend */
+        testStatus: String = if (status == "connected") "ok" else "failed",
     ): Connection? = queryOne(
         """
         UPDATE connections SET
@@ -198,7 +200,7 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
             setString(1, status)
             setString(2, networkStatus)
             setInstant(3, lastTestedAt)
-            setString(4, status)
+            setString(4, testStatus)
             if (latencyMs != null) setInt(5, latencyMs) else setNull(5, java.sql.Types.INTEGER)
             setString(6, errorCode)
             setString(7, errorMessage)

@@ -7,14 +7,24 @@ import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client"
  * The frontend uses "llm_provider" | "database" | "http_api" | "mcp_server" etc.
  */
 function normalizeConnection(conn: Connection): Connection {
+  // Map backend type vocab → frontend display types
   const typeMap: Record<string, ConnectionType> = {
     llm:  "llm_provider",
     http: "http_api",
     tool: "mcp_server",
-    // "database" is the same on both sides — no mapping needed
+    // "database" is the same on both sides
   };
   const mappedType = typeMap[conn.type as string];
-  return mappedType ? { ...conn, type: mappedType } : conn;
+
+  // Normalize error field: API returns lastTestErrorMessageSanitized, UI reads lastTestError
+  const raw = conn as Connection & { lastTestErrorMessageSanitized?: string | null };
+  const lastTestError = conn.lastTestError ?? raw.lastTestErrorMessageSanitized ?? null;
+
+  return {
+    ...conn,
+    ...(mappedType ? { type: mappedType } : {}),
+    lastTestError,
+  };
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -103,11 +113,24 @@ export async function deleteConnection(id: string): Promise<boolean> {
   return true;
 }
 
-export async function testConnection(id: string): Promise<Connection | null> {
+export interface ConnectionTestResult {
+  /** "connected" | "failed" | "private_runner_required" | "whitelist_required" */
+  status: string;
+  latencyMs: number;
+  errorCode: string | null;
+  message: string;
+  testedAt: string;
+  details: Record<string, unknown>;
+}
+
+export async function testConnection(id: string): Promise<ConnectionTestResult | null> {
   const workspaceId = getActiveWorkspaceId();
-  const conn = await api<Connection>(
-    withWorkspace(`/api/connections/${encodeURIComponent(id)}/test`, workspaceId),
-    { method: "POST" },
-  );
-  return normalizeConnection(conn);
+  try {
+    return await api<ConnectionTestResult>(
+      withWorkspace(`/api/connections/${encodeURIComponent(id)}/test`, workspaceId),
+      { method: "POST" },
+    );
+  } catch {
+    return null;
+  }
 }
