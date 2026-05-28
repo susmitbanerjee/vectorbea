@@ -134,12 +134,7 @@ class WorkerHeartbeat(
                 stmt.setInt(6, active)
                 stmt.setTimestamp(7, Timestamp.from(now))
                 stmt.setString(8, config.version)
-                // ON CONFLICT update fields:
-                stmt.setString(9, config.workerName)
-                stmt.setString(10, st.value)
-                stmt.setInt(11, active)
-                stmt.setTimestamp(12, Timestamp.from(now))
-                stmt.setString(13, config.version)
+                // ON CONFLICT SET uses EXCLUDED.* — no extra parameters needed
                 stmt.executeUpdate()
             }
         }
