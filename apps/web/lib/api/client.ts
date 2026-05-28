@@ -72,6 +72,20 @@ export function getActiveWorkspaceId(): string {
 }
 
 /**
+ * Resolves the active environment ID from URL params or localStorage.
+ * Sent as X-Environment-Id header to the Kotlin API.
+ */
+export function getActiveEnvironmentId(): string {
+  if (typeof window === "undefined") {
+    return process.env.MOCK_ENV_ID ?? "";
+  }
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("environmentId")?.trim();
+  if (fromQuery) return fromQuery;
+  return window.localStorage.getItem("vectorbea.activeEnvironmentId")?.trim() ?? "";
+}
+
+/**
  * Appends ?workspaceId=<wsId> to `path` when a workspace is active.
  */
 export function withWorkspace(path: string, workspaceId?: string): string {
@@ -105,8 +119,12 @@ export async function apiFetch<T = unknown>(
 
   const url = path.startsWith("http") ? path : `${apiBase()}${path}`;
 
+  const workspaceId = getActiveWorkspaceId();
+  const environmentId = getActiveEnvironmentId();
   const headers: Record<string, string> = {
     ...authHeaders(),
+    ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+    ...(environmentId ? { "X-Environment-Id": environmentId } : {}),
     ...extraHeaders,
   };
   if (json !== undefined) {
@@ -169,4 +187,107 @@ export const apiDelete = <T = void>(path: string, opts?: RequestOptions) =>
 export function apiEventSource(path: string): EventSource {
   const url = path.startsWith("http") ? path : `${apiBase()}${path}`;
   return new EventSource(url, { withCredentials: true });
+}
+
+// ─── Run streaming ────────────────────────────────────────────────────────────
+
+export interface RunStreamEvent {
+  type: string;
+  status: string;
+  sequence: number;
+  title?: string;
+  summary?: string;
+  source?: string;
+  timestamp: string;
+  durationMs?: number;
+  errorJsonSanitized?: string;
+  [key: string]: unknown;
+}
+
+export type RunStreamCallback = {
+  onEvent?: (event: RunStreamEvent) => void;
+  onComplete?: (status: string) => void;
+  onHeartbeat?: () => void;
+  onError?: (err: Event) => void;
+  onUnavailable?: () => void;
+};
+
+/**
+ * Opens an SSE stream for live run events.
+ *
+ * Connects to GET /api/runs/{runId}/stream on the Kotlin API.
+ * Sends workspace/environment headers via query params (SSE does not support
+ * custom headers natively in the browser EventSource API).
+ *
+ * Returns a cleanup function — call it to close the connection.
+ *
+ * Falls back to polling if SSE is unavailable (stream_unavailable event).
+ */
+export function streamRunEvents(
+  runId: string,
+  workspaceId: string,
+  environmentId: string,
+  callbacks: RunStreamCallback,
+): () => void {
+  const base = apiBase();
+  const params = new URLSearchParams({
+    workspaceId,
+    environmentId,
+  });
+  const url = `${base}/api/runs/${encodeURIComponent(runId)}/stream?${params.toString()}`;
+
+  let es: EventSource | null = null;
+  let closed = false;
+
+  function close() {
+    closed = true;
+    es?.close();
+    es = null;
+  }
+
+  try {
+    es = new EventSource(url, { withCredentials: true });
+
+    es.addEventListener("run_event", (e: MessageEvent) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse(e.data as string) as RunStreamEvent;
+        callbacks.onEvent?.(data);
+      } catch {
+        // ignore malformed event
+      }
+    });
+
+    es.addEventListener("run_complete", (e: MessageEvent) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse(e.data as string) as { status: string };
+        callbacks.onComplete?.(data.status ?? "completed");
+      } catch {
+        callbacks.onComplete?.("completed");
+      }
+      close();
+    });
+
+    es.addEventListener("stream_unavailable", () => {
+      if (closed) return;
+      callbacks.onUnavailable?.();
+      close();
+    });
+
+    es.addEventListener("heartbeat", () => {
+      if (closed) return;
+      callbacks.onHeartbeat?.();
+    });
+
+    es.onerror = (err: Event) => {
+      if (closed) return;
+      callbacks.onError?.(err);
+      // EventSource auto-reconnects on error — don't close unless it's a fatal error
+    };
+  } catch {
+    callbacks.onUnavailable?.();
+  }
+
+  return close;
 }

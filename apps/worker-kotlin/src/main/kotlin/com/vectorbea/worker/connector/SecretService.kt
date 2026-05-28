@@ -1,0 +1,151 @@
+package com.vectorbea.worker.connector
+
+import com.vectorbea.worker.logging.logger
+import java.security.SecureRandom
+import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
+import javax.sql.DataSource
+
+/**
+ * Resolves and decrypts connection secrets.
+ *
+ * Secret storage formats supported:
+ *
+ *   1. Direct encrypted value (self-contained, no DB lookup):
+ *      secretRef = "aes256gcm:<base64(12-byte-IV || ciphertext || 16-byte-GCM-tag)>"
+ *
+ *   2. Table lookup (secretRef is a key into `connection_secrets`):
+ *      secretRef = "ref:<key>" or any value not starting with "aes256gcm:"
+ *      → queries: SELECT encrypted_value FROM connection_secrets WHERE ref = ?
+ *      → decrypts the retrieved value
+ *
+ *   3. No encryption key (development only):
+ *      If [keyBase64] is null, returns the secretRef as-is (plaintext dev secret).
+ *      This mode is REJECTED in production (checked at startup via [WorkerConfig]).
+ *
+ * SECURITY:
+ *  - The decrypted plaintext is wrapped in [SecretValue] and immediately cleared after use.
+ *  - The [keyBase64] raw value is NEVER logged — only its presence is noted.
+ *  - Failed decryption throws [SecretException] with a sanitized message.
+ *  - Timing-safe comparison is not needed here (we're only decrypting, not comparing).
+ */
+open class SecretService(
+    private val keyBase64: String?,
+    private val dataSource: DataSource,
+) {
+    private val log = logger()
+
+    private val aesKey: SecretKeySpec? by lazy {
+        keyBase64?.let { b64 ->
+            try {
+                val keyBytes = Base64.getDecoder().decode(b64.trim())
+                require(keyBytes.size == 32) {
+                    "SECRET_ENCRYPTION_KEY must be 32 bytes (256-bit) when base64-decoded, got ${keyBytes.size}"
+                }
+                SecretKeySpec(keyBytes, "AES")
+            } catch (e: Exception) {
+                log.error("[secrets] Failed to initialise AES key: {}", e.message)
+                null
+            }
+        }
+    }
+
+    /**
+     * Resolve [secretRef] to a [SecretValue].
+     * Returns null if [secretRef] is null or blank.
+     * Throws [SecretException] on decryption failure.
+     */
+    fun resolve(secretRef: String?): SecretValue? {
+        if (secretRef.isNullOrBlank()) return null
+
+        // Mode 1: direct encrypted value
+        if (secretRef.startsWith(DIRECT_PREFIX)) {
+            val encrypted = secretRef.removePrefix(DIRECT_PREFIX)
+            return decrypt(encrypted, "direct secret ref")
+        }
+
+        // Mode 2: table lookup
+        val encryptedValue = lookupInTable(secretRef)
+            ?: if (aesKey == null) {
+                // Dev mode: treat secretRef as cleartext (no key)
+                log.warn("[secrets] No encryption key — returning secretRef as plaintext (dev mode only)")
+                return SecretValue(secretRef.toCharArray())
+            } else {
+                throw SecretException("Secret ref '${ secretRef.take(20)}...' not found in connection_secrets table")
+            }
+
+        return decrypt(encryptedValue, "table ref")
+    }
+
+    // ── Encryption (for test helpers / provisioning) ──────────────────────────
+
+    /**
+     * Encrypt [plaintext] and return a self-contained secret ref string.
+     * Used by provisioning tooling and tests — NOT called during execution.
+     */
+    fun encrypt(plaintext: String): String {
+        val key = aesKey ?: throw SecretException("Cannot encrypt: no AES key configured")
+        val iv = ByteArray(IV_LENGTH).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance(ALGORITHM)
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val combined = iv + ciphertext  // IV (12) || ciphertext+tag
+        return "$DIRECT_PREFIX${Base64.getEncoder().encodeToString(combined)}"
+    }
+
+    // ── Internal ──────────────────────────────────────────────────────────────
+
+    private fun decrypt(base64Combined: String, context: String): SecretValue {
+        if (aesKey == null) {
+            log.warn("[secrets] No AES key — returning base64 value as-is (dev mode)")
+            return SecretValue(base64Combined.toCharArray())
+        }
+
+        return try {
+            val combined = Base64.getDecoder().decode(base64Combined)
+            require(combined.size > IV_LENGTH) { "Encrypted value too short" }
+
+            val iv         = combined.sliceArray(0 until IV_LENGTH)
+            val ciphertext = combined.sliceArray(IV_LENGTH until combined.size)
+
+            val cipher = Cipher.getInstance(ALGORITHM)
+            cipher.init(Cipher.DECRYPT_MODE, aesKey, GCMParameterSpec(GCM_TAG_BITS, iv))
+            val plainBytes = cipher.doFinal(ciphertext)
+
+            SecretValue(String(plainBytes, Charsets.UTF_8).toCharArray().also {
+                plainBytes.fill(0) // zero plaintext bytes
+            })
+        } catch (e: Exception) {
+            log.error("[secrets] Decryption failed for {}: {}", context, e.javaClass.simpleName)
+            throw SecretException("Secret decryption failed for $context")
+        }
+    }
+
+    private fun lookupInTable(ref: String): String? =
+        try {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    "SELECT encrypted_value FROM connection_secrets WHERE ref = ?"
+                ).use { stmt ->
+                    stmt.setString(1, ref)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) rs.getString("encrypted_value") else null
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[secrets] Failed to look up secret ref: {}", e.message)
+            null
+        }
+
+    companion object {
+        private const val DIRECT_PREFIX = "aes256gcm:"
+        private const val ALGORITHM     = "AES/GCM/NoPadding"
+        private const val IV_LENGTH     = 12
+        private const val GCM_TAG_BITS  = 128
+    }
+}
+
+class SecretException(message: String) : Exception(message)

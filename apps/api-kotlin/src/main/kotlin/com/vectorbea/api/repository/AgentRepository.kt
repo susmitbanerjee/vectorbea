@@ -132,6 +132,67 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         ::mapRow,
     )
 
+    fun update(
+        id: UUID,
+        workspaceId: UUID,
+        name: String? = null,
+        role: String? = null,
+        instructions: String? = null,
+        llmConnectionId: UUID? = null,
+        modelName: String? = null,
+        temperature: Double? = null,
+        maxTokens: Int? = null,
+        maxIterations: Int? = null,
+        memoryPolicy: Map<String, Any>? = null,
+        retryPolicy: Map<String, Any>? = null,
+        timeoutPolicy: Map<String, Any>? = null,
+        approvalPolicy: Map<String, Any>? = null,
+        outputSchema: Map<String, Any>? = null,
+        status: String? = null,
+    ): Agent? {
+        val setClauses = buildList {
+            if (name != null) add("name = ?")
+            if (role != null) add("role = ?")
+            if (instructions != null) add("instructions = ?")
+            if (llmConnectionId != null) add("llm_connection_id = ?")
+            if (modelName != null) add("model_name = ?")
+            if (temperature != null) add("temperature = ?")
+            if (maxTokens != null) add("max_tokens = ?")
+            if (maxIterations != null) add("max_iterations = ?")
+            if (memoryPolicy != null) add("memory_policy_json = ?")
+            if (retryPolicy != null) add("retry_policy_json = ?")
+            if (timeoutPolicy != null) add("timeout_policy_json = ?")
+            if (approvalPolicy != null) add("approval_policy_json = ?")
+            if (outputSchema != null) add("output_schema_json = ?")
+            if (status != null) add("status = ?")
+            add("updated_at = now()")
+        }
+        if (setClauses.size == 1) return findById(id, workspaceId)
+        return queryOne(
+            "UPDATE agents SET ${setClauses.joinToString(", ")} WHERE id = ? AND workspace_id = ? RETURNING $cols",
+            {
+                var i = 1
+                if (name != null) setString(i++, name)
+                if (role != null) setString(i++, role)
+                if (instructions != null) setString(i++, instructions)
+                if (llmConnectionId != null) setUuid(i++, llmConnectionId)
+                if (modelName != null) setString(i++, modelName)
+                if (temperature != null) setDouble(i++, temperature)
+                if (maxTokens != null) setInt(i++, maxTokens)
+                if (maxIterations != null) setInt(i++, maxIterations)
+                if (memoryPolicy != null) setJsonb(i++, memoryPolicy)
+                if (retryPolicy != null) setJsonb(i++, retryPolicy)
+                if (timeoutPolicy != null) setJsonb(i++, timeoutPolicy)
+                if (approvalPolicy != null) setJsonb(i++, approvalPolicy)
+                if (outputSchema != null) setJsonb(i++, outputSchema)
+                if (status != null) setString(i++, status)
+                setUuid(i++, id)
+                setUuid(i, workspaceId)
+            },
+            ::mapRow,
+        )
+    }
+
     fun updateStatus(id: UUID, workspaceId: UUID, status: String): Agent? = queryOne(
         "UPDATE agents SET status = ?, updated_at = now() WHERE id = ? AND workspace_id = ? RETURNING $cols",
         { setString(1, status); setUuid(2, id); setUuid(3, workspaceId) },

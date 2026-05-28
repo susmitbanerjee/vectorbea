@@ -1,6 +1,7 @@
 package com.vectorbea.api.repository
 
 import com.vectorbea.api.db.withConnection
+import com.vectorbea.api.metrics.AppMetrics
 import org.slf4j.Logger
 import java.sql.PreparedStatement
 import java.sql.ResultSet
@@ -34,12 +35,19 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
         sql: String,
         bind: PreparedStatement.() -> Unit = {},
         mapRow: (ResultSet) -> T,
-    ): List<T> = dataSource.withConnection { conn ->
-        conn.prepareStatement(sql).use { stmt ->
-            stmt.bind()
-            stmt.executeQuery().use { rs ->
-                buildList { while (rs.next()) add(mapRow(rs)) }
+    ): List<T> {
+        val t0 = System.currentTimeMillis()
+        return try {
+            dataSource.withConnection { conn ->
+                conn.prepareStatement(sql).use { stmt ->
+                    stmt.bind()
+                    stmt.executeQuery().use { rs ->
+                        buildList { while (rs.next()) add(mapRow(rs)) }
+                    }
+                }
             }
+        } finally {
+            AppMetrics.dbQueryDuration.observe(System.currentTimeMillis() - t0, "query")
         }
     }
 
@@ -48,12 +56,19 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
         sql: String,
         bind: PreparedStatement.() -> Unit = {},
         mapRow: (ResultSet) -> T,
-    ): T? = dataSource.withConnection { conn ->
-        conn.prepareStatement(sql).use { stmt ->
-            stmt.bind()
-            stmt.executeQuery().use { rs ->
-                if (rs.next()) mapRow(rs) else null
+    ): T? {
+        val t0 = System.currentTimeMillis()
+        return try {
+            dataSource.withConnection { conn ->
+                conn.prepareStatement(sql).use { stmt ->
+                    stmt.bind()
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) mapRow(rs) else null
+                    }
+                }
             }
+        } finally {
+            AppMetrics.dbQueryDuration.observe(System.currentTimeMillis() - t0, "query_one")
         }
     }
 
@@ -85,10 +100,17 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
     protected fun execute(
         sql: String,
         bind: PreparedStatement.() -> Unit = {},
-    ): Int = dataSource.withConnection { conn ->
-        conn.prepareStatement(sql).use { stmt ->
-            stmt.bind()
-            stmt.executeUpdate()
+    ): Int {
+        val t0 = System.currentTimeMillis()
+        return try {
+            dataSource.withConnection { conn ->
+                conn.prepareStatement(sql).use { stmt ->
+                    stmt.bind()
+                    stmt.executeUpdate()
+                }
+            }
+        } finally {
+            AppMetrics.dbQueryDuration.observe(System.currentTimeMillis() - t0, "execute")
         }
     }
 
@@ -100,13 +122,20 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
         sql: String,
         bind: PreparedStatement.() -> Unit = {},
         mapRow: (ResultSet) -> T,
-    ): T = dataSource.withConnection { conn ->
-        conn.prepareStatement(sql).use { stmt ->
-            stmt.bind()
-            stmt.executeQuery().use { rs ->
-                if (rs.next()) mapRow(rs)
-                else throw IllegalStateException("INSERT RETURNING produced no row")
+    ): T {
+        val t0 = System.currentTimeMillis()
+        return try {
+            dataSource.withConnection { conn ->
+                conn.prepareStatement(sql).use { stmt ->
+                    stmt.bind()
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) mapRow(rs)
+                        else throw IllegalStateException("INSERT RETURNING produced no row")
+                    }
+                }
             }
+        } finally {
+            AppMetrics.dbQueryDuration.observe(System.currentTimeMillis() - t0, "execute_returning")
         }
     }
 

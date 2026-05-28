@@ -48,6 +48,52 @@ class Router {
     fun patch(pattern: String, handler: (Request) -> Response) = route("PATCH", pattern, handler)
     fun delete(pattern: String, handler: (Request) -> Response) = route("DELETE", pattern, handler)
 
+    // ── SSE streaming routes ──────────────────────────────────────────────────
+
+    /**
+     * Represents a streaming Server-Sent Events emitter.
+     * Implementations are provided by [HttpServer]; handlers call [sendEvent] / [sendComment]
+     * to push data and check [isConnected] to detect client disconnect.
+     */
+    interface SseEmitter {
+        /** Write an SSE event frame. Returns false if the client has disconnected. */
+        fun sendEvent(eventType: String, data: String): Boolean
+        /** Write an SSE comment (heartbeat). Returns false if disconnected. */
+        fun sendComment(comment: String): Boolean
+        /** True while the underlying connection is still open. */
+        fun isConnected(): Boolean
+    }
+
+    data class SseRoute(
+        val pathPattern: String,
+        val segments: List<Segment>,
+        val handler: (Request, SseEmitter) -> Unit,
+    )
+
+    private val sseRoutes = mutableListOf<SseRoute>()
+
+    /** Register a GET SSE streaming route. */
+    fun sseGet(pattern: String, handler: (Request, SseEmitter) -> Unit) {
+        sseRoutes += SseRoute(
+            pathPattern = pattern,
+            segments = parsePattern(pattern),
+            handler = handler,
+        )
+        // Also register a normal GET that returns 405-ish for non-SSE clients (content-type check
+        // happens in HttpServer before dispatch — just ensure allowedMethods includes GET).
+    }
+
+    /** Returns the matching SSE route and extracted path params, or null. */
+    fun findSseRoute(method: String, path: String): Pair<SseRoute, Map<String, String>>? {
+        if (method != "GET") return null
+        val segments = splitPath(path)
+        for (route in sseRoutes) {
+            val params = matchPath(route.segments, segments) ?: continue
+            return route to params
+        }
+        return null
+    }
+
     /**
      * Match [request] against registered routes.
      * Returns a [Response] — never throws. All [ApiError]s (404, 405, handler errors)

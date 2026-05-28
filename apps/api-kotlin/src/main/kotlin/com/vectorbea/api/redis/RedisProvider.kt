@@ -35,6 +35,13 @@ class RedisProvider private constructor(
     val pubSubConnection: StatefulRedisPubSubConnection<String, String> = _pubSubConnection
 
     /**
+     * Opens a fresh Pub/Sub connection for SUBSCRIBE use.
+     * Each SSE stream gets its own connection so subscriptions are independent.
+     * Callers MUST close the returned connection when done (client disconnect / run terminal).
+     */
+    fun newPubSubConnection(): StatefulRedisPubSubConnection<String, String> = client.connectPubSub()
+
+    /**
      * Sends PING and returns round-trip latency, or throws on failure.
      */
     fun ping(): Long {

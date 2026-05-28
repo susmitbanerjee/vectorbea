@@ -2,13 +2,17 @@
 
 /**
  * /runs/[id] — canonical run detail page.
- * Tries the repository first (seeded runs); falls back to live API for real runs.
+ *
+ * Live updates strategy:
+ *   1. Primary: SSE stream via GET /api/runs/:id/stream.
+ *      Events arrive in real-time without polling.
+ *   2. Fallback: polling every 4 s if SSE is unavailable (no Redis, old browser, etc.)
  *
  * Local (native) runs get full approval, retry, and replay support.
  * API-backed runs use remote endpoints.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, RotateCcw } from "lucide-react";
@@ -24,10 +28,11 @@ import {
   rejectRunGate,
   retryRunFailedStep,
   replayWorkflowRun,
+  cancelRun,
   listRunCheckpoints,
+  streamRunEvents,
 } from "@/lib/repository";
-import { mapRunToUiModel } from "@/lib/repository/run-to-ui-mapper";
-import { mapApiRunToUiModel, type ApiAgentRun } from "@/lib/api-run-to-ui-model";
+import { getActiveWorkspaceId } from "@/lib/api/client";
 import type { AgentRunUiModel, RunTimelineEventUi } from "@/types/agent-run-ui";
 import type { RunCheckpoint } from "@/types/platform";
 
@@ -111,6 +116,9 @@ export default function RunDetailPage() {
   const [forcePausedPending, setForcePausedPending] = useState(false);
   const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
   const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
+  /** true while SSE connection is active — disables fallback polling */
+  const [sseActive, setSseActive] = useState(false);
+  const sseCloseRef = useRef<(() => void) | null>(null);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!id || id === "undefined") {
@@ -120,10 +128,7 @@ export default function RunDetailPage() {
     }
     if (!opts.silent) setLoading(true);
     try {
-      // 1. Try platform runs API (native runs)
-      let platformRun = null;
-      let timelineEvents: RunTimelineEventUi[] = [];
-      [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
+      const [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
 
       if (platformRun) {
         setModel(buildPlatformRunModel(platformRun, timelineEvents));
@@ -133,12 +138,8 @@ export default function RunDetailPage() {
         return;
       }
 
-      // 2. Fall back to legacy agent-runs API (older runs not in platform_runs)
-      const res = await fetch(`/api/agent-runs/${id}`);
-      if (!res.ok) throw new Error("Not found");
-      const data = (await res.json()) as { run: ApiAgentRun };
-      setModel(mapApiRunToUiModel(data.run));
-      setIsLocalRun(false);
+      // Run not found in Kotlin API
+      throw new Error("Run not found");
     } catch {
       if (!opts.silent) toast.error("Failed to load run details.");
     } finally {
@@ -148,14 +149,77 @@ export default function RunDetailPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Auto-refresh while live
+  // ── SSE live stream ────────────────────────────────────────────────────────
+  // Open an SSE connection once we know the run is live (RUNNING or QUEUED).
+  // On run_event: silently reload the run to get updated state.
+  // On run_complete: do a final load and stop SSE.
+  // On stream_unavailable or error: fall back to polling.
+  useEffect(() => {
+    if (!id || id === "undefined") return;
+    if (!model) return;
+
+    const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
+    if (!live) {
+      // Run is already terminal — close any open SSE connection
+      sseCloseRef.current?.();
+      sseCloseRef.current = null;
+      setSseActive(false);
+      return;
+    }
+
+    // Don't open a second connection if one is already active
+    if (sseActive && sseCloseRef.current) return;
+
+    const workspaceId = getActiveWorkspaceId();
+    const environmentId =
+      new URLSearchParams(window.location.search).get("environmentId") ?? "";
+
+    const close = streamRunEvents(id, workspaceId, environmentId, {
+      onEvent: () => {
+        // A new event arrived — silently reload to pick up status changes
+        void load({ silent: true });
+      },
+      onComplete: () => {
+        // Run reached terminal state
+        void load({ silent: true });
+        setSseActive(false);
+        sseCloseRef.current = null;
+      },
+      onHeartbeat: () => {
+        // keep-alive — no action needed
+      },
+      onUnavailable: () => {
+        // Redis unavailable — fall back to polling
+        setSseActive(false);
+        sseCloseRef.current = null;
+      },
+      onError: () => {
+        // EventSource auto-reconnects on transient errors
+        // Only mark SSE as inactive if it actually closes
+      },
+    });
+
+    sseCloseRef.current = close;
+    setSseActive(true);
+
+    return () => {
+      close();
+      sseCloseRef.current = null;
+      setSseActive(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, model?.run.status]);
+
+  // ── Fallback polling (only when SSE is not active) ─────────────────────────
   useEffect(() => {
     if (!model) return;
     const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
     if (!live) return;
-    const interval = setInterval(() => void load({ silent: true }), 1500);
+    // Don't poll if SSE is active — SSE already covers live updates
+    if (sseActive) return;
+    const interval = setInterval(() => void load({ silent: true }), 4000);
     return () => clearInterval(interval);
-  }, [model, load]);
+  }, [model, load, sseActive]);
 
 
   // ── Local approval handlers ────────────────────────────────────────────────
@@ -188,40 +252,14 @@ export default function RunDetailPage() {
 
   // ── Retry handler ─────────────────────────────────────────────────────────
 
-  async function handleRetry(forcePaused = false) {
+  async function handleRetry(_forcePaused = false) {
     setActing(true);
     setRetryWarnings([]);
     setForcePausedPending(false);
-
-    if (isLocalRun) {
-      try {
-        await retryRunFailedStep(id, "");
-        toast.success("Retry queued.");
-        await load();
-      } catch {
-        toast.error("Failed to retry.");
-      } finally {
-        setActing(false);
-      }
-      return;
-    }
-
-    // Remote API retry
     try {
-      const res = await fetch(`/api/agent-runs/${id}/retry`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ forcePaused }),
-      });
-      if (!res.ok) {
-        const b = (await res.json()) as { error?: string; code?: string };
-        if (b.code === "JOB_PAUSED") { setForcePausedPending(true); toast.warning("Workflow is paused. Confirm retry."); return; }
-        throw new Error(b.error ?? "Failed to retry");
-      }
-      const data = (await res.json()) as { run: { id: string }; warnings?: string[] };
-      if (data.warnings?.length) setRetryWarnings(data.warnings);
+      await retryRunFailedStep(id, "");
       toast.success("Retry queued.");
-      void load();
+      await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to retry.");
     } finally {
@@ -234,20 +272,7 @@ export default function RunDetailPage() {
   async function handleCancel() {
     setActing(true);
     try {
-      // Platform runs: PATCH status to cancelled
-      const wsId = new URLSearchParams(window.location.search).get("org")
-        ?? new URLSearchParams(window.location.search).get("workspaceId")
-        ?? window.localStorage.getItem("vectorbea.activeWorkspaceId")
-        ?? "";
-      const res = await fetch(
-        `/api/platform/runs/${id}${wsId ? `?workspaceId=${encodeURIComponent(wsId)}` : ""}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "cancelled" }),
-        },
-      );
-      if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? "Failed");
+      await cancelRun(id);
       toast.success("Run cancelled.");
       void load({ silent: true });
     } catch (err) {

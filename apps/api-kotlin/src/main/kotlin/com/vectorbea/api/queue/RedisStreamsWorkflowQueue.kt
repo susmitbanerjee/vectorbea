@@ -77,7 +77,10 @@ class RedisStreamsWorkflowQueue(
         put("jobType", job.jobType.name)
         put("createdAt", job.createdAt.toString())
         put("attempt", job.attempt.toString())
-        if (job.resumeFromNodeId != null) put("resumeFromNodeId", job.resumeFromNodeId)
+        if (job.resumeFromNodeId != null) {
+            put("resumeFromNodeId", job.resumeFromNodeId)
+            put("nodeId", job.resumeFromNodeId)  // worker reads "nodeId"; keep both for compatibility
+        }
         put("inputJson", job.inputJson)  // must already have secrets stripped by caller
     }
 

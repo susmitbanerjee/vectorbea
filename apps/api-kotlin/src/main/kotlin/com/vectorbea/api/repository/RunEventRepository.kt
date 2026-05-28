@@ -1,81 +1,145 @@
 package com.vectorbea.api.repository
 
-import com.vectorbea.api.db.getJsonbString
 import com.vectorbea.api.db.getJsonbStringOrNull
-import com.vectorbea.api.db.setJsonb
-import com.vectorbea.api.db.toJsonb
-import com.vectorbea.api.db.transaction
 import org.slf4j.LoggerFactory
-import java.sql.PreparedStatement
-import java.sql.Types
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
+/**
+ * Repository for run_events.
+ * [append] writes lifecycle events from the API (RUN_CREATED, RUN_QUEUED).
+ * The workflow executor writes execution events; [listByRun] reads all of them.
+ * All sanitized fields (*_json_sanitized) are already scrubbed — safe to return.
+ */
 data class RunEvent(
     val id: UUID,
     val runId: UUID,
     val workspaceId: UUID,
+    val environmentId: UUID,
     val sequence: Int,
-    val eventType: String,
-    /** Payload must never contain secrets or connection strings */
-    val payloadJson: String,
+    val type: String,
+    val status: String,
+    val source: String,
+    val timestamp: Instant,
+    val durationMs: Long?,
+    val stepId: String?,
     val agentId: UUID?,
     val toolId: UUID?,
-    val stepId: String?,
-    val durationMs: Int?,
-    val tokenUsageJson: String?,
+    val connectionId: UUID?,
+    val modelName: String?,
+    val parentEventId: UUID?,
+    val correlationId: String?,
+    val traceId: String?,
+    val retryAttempt: Int?,
+    val checkpointId: UUID?,
+    val title: String?,
+    val summary: String?,
+    /** Already sanitized — safe to return to clients */
+    val inputJsonSanitized: String?,
+    val outputJsonSanitized: String?,
+    val metadataJsonSanitized: String?,
+    val errorJsonSanitized: String?,
+    val tokenCount: Int?,
+    val estimatedCost: Double?,
     val createdAt: Instant,
 )
 
-data class CreateRunEventRequest(
+data class AppendEventRequest(
     val runId: UUID,
     val workspaceId: UUID,
-    val sequence: Int,
-    val eventType: String,
-    /** Caller is responsible for stripping secrets before populating payload */
-    val payload: Map<String, Any> = emptyMap(),
-    val agentId: UUID? = null,
-    val toolId: UUID? = null,
-    val stepId: String? = null,
-    val durationMs: Int? = null,
-    val tokenUsage: Map<String, Any>? = null,
+    val environmentId: UUID,
+    val type: String,
+    val status: String,
+    val source: String,
+    val title: String? = null,
+    val summary: String? = null,
+    val correlationId: String? = null,
 )
 
-class RunEventRepository(dataSource: DataSource) : BaseRepository(dataSource) {
+open class RunEventRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     override val log = LoggerFactory.getLogger(RunEventRepository::class.java)
 
     private val cols = """
-        id, run_id, workspace_id, sequence, event_type, payload_json,
-        agent_id, tool_id, step_id, duration_ms, token_usage_json, created_at
+        id, run_id, workspace_id, environment_id, sequence, type, status, source,
+        timestamp, duration_ms, step_id, agent_id, tool_id, connection_id, model_name,
+        parent_event_id, correlation_id, trace_id, retry_attempt, checkpoint_id,
+        title, summary, input_json_sanitized, output_json_sanitized,
+        metadata_json_sanitized, error_json_sanitized, token_count, estimated_cost, created_at
     """.trimIndent()
 
-    fun findById(id: UUID, workspaceId: UUID): RunEvent? = queryOne(
-        "SELECT $cols FROM run_events WHERE id = ? AND workspace_id = ?",
-        { setUuid(1, id); setUuid(2, workspaceId) },
-        ::mapRow,
-    )
+    /**
+     * Insert a lifecycle event for a run.
+     * Sequence is assigned inside a transaction: MAX(sequence)+1 to avoid races.
+     * Returns the newly inserted [RunEvent].
+     */
+    open fun append(req: AppendEventRequest): RunEvent {
+        val conn = dataSource.connection
+        return conn.use { c ->
+            val prev = c.autoCommit
+            c.autoCommit = false
+            try {
+                val seq = c.prepareStatement(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_events WHERE run_id = ?"
+                ).use { s ->
+                    s.setObject(1, req.runId)
+                    s.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                }
+                val event = c.prepareStatement(
+                    """
+                    INSERT INTO run_events
+                        (run_id, workspace_id, environment_id, sequence, type, status,
+                         source, title, summary, correlation_id, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                    RETURNING $cols
+                    """.trimIndent()
+                ).use { s ->
+                    s.setObject(1, req.runId)
+                    s.setObject(2, req.workspaceId)
+                    s.setObject(3, req.environmentId)
+                    s.setInt(4, seq)
+                    s.setString(5, req.type)
+                    s.setString(6, req.status)
+                    s.setString(7, req.source)
+                    s.setString(8, req.title)
+                    s.setString(9, req.summary)
+                    s.setString(10, req.correlationId)
+                    s.executeQuery().use { rs ->
+                        rs.next()
+                        mapRow(rs)
+                    }
+                }
+                c.commit()
+                event
+            } catch (e: Exception) {
+                c.rollback()
+                throw e
+            } finally {
+                c.autoCommit = prev
+            }
+        }
+    }
 
-    fun listByRun(
+    open fun listByRun(
         runId: UUID,
         workspaceId: UUID,
-        eventType: String? = null,
         afterSequence: Int? = null,
+        type: String? = null,
         params: PageParams = PageParams(),
     ): Page<RunEvent> {
         val filters = buildList {
             add("run_id = ?")
             add("workspace_id = ?")
-            if (eventType != null) add("event_type = ?")
             if (afterSequence != null) add("sequence > ?")
+            if (type != null) add("type = ?")
         }
         val where = "WHERE ${filters.joinToString(" AND ")}"
         val bindBase: (java.sql.PreparedStatement) -> Unit = {
             var i = 1
             it.setUuid(i++, runId)
             it.setUuid(i++, workspaceId)
-            if (eventType != null) it.setString(i++, eventType)
             if (afterSequence != null) it.setInt(i++, afterSequence)
+            if (type != null) it.setString(i++, type)
         }
         return queryPage(
             sql = "SELECT $cols FROM run_events $where ORDER BY sequence ASC LIMIT ? OFFSET ?",
@@ -90,80 +154,35 @@ class RunEventRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         )
     }
 
-    fun create(req: CreateRunEventRequest): RunEvent = executeReturning(
-        """
-        INSERT INTO run_events (
-            run_id, workspace_id, sequence, event_type, payload_json,
-            agent_id, tool_id, step_id, duration_ms, token_usage_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING $cols
-        """.trimIndent(),
-        {
-            setUuid(1, req.runId)
-            setUuid(2, req.workspaceId)
-            setInt(3, req.sequence)
-            setString(4, req.eventType)
-            setJsonb(5, req.payload)
-            setUuidOrNull(6, req.agentId)
-            setUuidOrNull(7, req.toolId)
-            setString(8, req.stepId)
-            if (req.durationMs != null) setInt(9, req.durationMs) else setNull(9, Types.INTEGER)
-            if (req.tokenUsage != null) setJsonb(10, req.tokenUsage) else setNull(10, Types.OTHER)
-        },
-        ::mapRow,
-    )
-
-    /** Returns the next sequence number for a run (MAX + 1, or 1 if no events yet). */
-    fun nextSequence(runId: UUID, workspaceId: UUID): Int =
-        query(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_events WHERE run_id = ? AND workspace_id = ?",
-            { setUuid(1, runId); setUuid(2, workspaceId) },
-        ) { rs -> rs.getInt(1) }.first()
-
-    /** Bulk-insert events; returns inserted count. Uses a transaction internally. */
-    fun createBatch(events: List<CreateRunEventRequest>): Int {
-        if (events.isEmpty()) return 0
-        var count = 0
-        dataSource.transaction { conn ->
-            val insertSql = """
-                INSERT INTO run_events (
-                    run_id, workspace_id, sequence, event_type, payload_json,
-                    agent_id, tool_id, step_id, duration_ms, token_usage_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """.trimIndent()
-            conn.prepareStatement(insertSql).use { stmt ->
-                for (req in events) {
-                    // Use setObject directly to avoid ambiguity with BaseRepository extension methods
-                    stmt.setObject(1, req.runId)
-                    stmt.setObject(2, req.workspaceId)
-                    stmt.setInt(3, req.sequence)
-                    stmt.setString(4, req.eventType)
-                    stmt.setObject(5, toJsonb(req.payload))
-                    if (req.agentId != null) stmt.setObject(6, req.agentId) else stmt.setNull(6, Types.OTHER)
-                    if (req.toolId != null) stmt.setObject(7, req.toolId) else stmt.setNull(7, Types.OTHER)
-                    stmt.setString(8, req.stepId)
-                    if (req.durationMs != null) stmt.setInt(9, req.durationMs) else stmt.setNull(9, Types.INTEGER)
-                    if (req.tokenUsage != null) stmt.setObject(10, toJsonb(req.tokenUsage)) else stmt.setNull(10, Types.OTHER)
-                    stmt.addBatch()
-                }
-                count = stmt.executeBatch().sum()
-            }
-        }
-        return count
-    }
-
     private fun mapRow(rs: java.sql.ResultSet) = RunEvent(
         id = rs.uuid("id"),
         runId = rs.uuid("run_id"),
         workspaceId = rs.uuid("workspace_id"),
+        environmentId = rs.uuid("environment_id"),
         sequence = rs.getInt("sequence"),
-        eventType = rs.getString("event_type"),
-        payloadJson = rs.getJsonbString("payload_json"),
+        type = rs.getString("type"),
+        status = rs.getString("status"),
+        source = rs.getString("source"),
+        timestamp = rs.instant("timestamp"),
+        durationMs = rs.getObject("duration_ms") as? Long,
+        stepId = rs.getString("step_id"),
         agentId = rs.uuidOrNull("agent_id"),
         toolId = rs.uuidOrNull("tool_id"),
-        stepId = rs.getString("step_id"),
-        durationMs = rs.getObject("duration_ms") as? Int,
-        tokenUsageJson = rs.getJsonbStringOrNull("token_usage_json"),
+        connectionId = rs.uuidOrNull("connection_id"),
+        modelName = rs.getString("model_name"),
+        parentEventId = rs.uuidOrNull("parent_event_id"),
+        correlationId = rs.getString("correlation_id"),
+        traceId = rs.getString("trace_id"),
+        retryAttempt = rs.getObject("retry_attempt") as? Int,
+        checkpointId = rs.uuidOrNull("checkpoint_id"),
+        title = rs.getString("title"),
+        summary = rs.getString("summary"),
+        inputJsonSanitized = rs.getJsonbStringOrNull("input_json_sanitized"),
+        outputJsonSanitized = rs.getJsonbStringOrNull("output_json_sanitized"),
+        metadataJsonSanitized = rs.getJsonbStringOrNull("metadata_json_sanitized"),
+        errorJsonSanitized = rs.getJsonbStringOrNull("error_json_sanitized"),
+        tokenCount = rs.getObject("token_count") as? Int,
+        estimatedCost = (rs.getObject("estimated_cost") as? java.math.BigDecimal)?.toDouble(),
         createdAt = rs.instant("created_at"),
     )
 }

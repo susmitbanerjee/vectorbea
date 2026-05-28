@@ -127,6 +127,61 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         ::mapRow,
     )
 
+    fun update(
+        id: UUID,
+        workspaceId: UUID,
+        name: String? = null,
+        description: String? = null,
+        connectionId: UUID? = null,
+        inputSchema: Map<String, Any>? = null,
+        outputSchema: Map<String, Any>? = null,
+        config: Map<String, Any>? = null,
+        riskLevel: String? = null,
+        requiresApproval: Boolean? = null,
+        timeoutMs: Int? = null,
+        retryPolicy: Map<String, Any>? = null,
+        idempotencyStrategy: String? = null,
+        status: String? = null,
+    ): Tool? {
+        val setClauses = buildList {
+            if (name != null) add("name = ?")
+            if (description != null) add("description = ?")
+            if (connectionId != null) add("connection_id = ?")
+            if (inputSchema != null) add("input_schema_json = ?")
+            if (outputSchema != null) add("output_schema_json = ?")
+            if (config != null) add("config_json = ?")
+            if (riskLevel != null) add("risk_level = ?")
+            if (requiresApproval != null) add("requires_approval = ?")
+            if (timeoutMs != null) add("timeout_ms = ?")
+            if (retryPolicy != null) add("retry_policy_json = ?")
+            if (idempotencyStrategy != null) add("idempotency_strategy = ?")
+            if (status != null) add("status = ?")
+            add("updated_at = now()")
+        }
+        if (setClauses.size == 1) return findById(id, workspaceId)
+        return queryOne(
+            "UPDATE tools SET ${setClauses.joinToString(", ")} WHERE id = ? AND workspace_id = ? RETURNING $cols",
+            {
+                var i = 1
+                if (name != null) setString(i++, name)
+                if (description != null) setString(i++, description)
+                if (connectionId != null) setUuidOrNull(i++, connectionId)
+                if (inputSchema != null) setJsonb(i++, inputSchema)
+                if (outputSchema != null) setJsonb(i++, outputSchema)
+                if (config != null) setJsonb(i++, config)
+                if (riskLevel != null) setString(i++, riskLevel)
+                if (requiresApproval != null) setBoolean(i++, requiresApproval)
+                if (timeoutMs != null) setInt(i++, timeoutMs)
+                if (retryPolicy != null) setJsonb(i++, retryPolicy)
+                if (idempotencyStrategy != null) setString(i++, idempotencyStrategy)
+                if (status != null) setString(i++, status)
+                setUuid(i++, id)
+                setUuid(i, workspaceId)
+            },
+            ::mapRow,
+        )
+    }
+
     fun delete(id: UUID, workspaceId: UUID): Boolean =
         execute("DELETE FROM tools WHERE id = ? AND workspace_id = ?") {
             setUuid(1, id); setUuid(2, workspaceId)

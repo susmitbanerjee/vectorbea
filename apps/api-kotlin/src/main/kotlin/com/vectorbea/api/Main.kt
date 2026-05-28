@@ -25,6 +25,7 @@ import com.vectorbea.api.routes.ApprovalRoutes
 import com.vectorbea.api.routes.ConnectionRoutes
 import com.vectorbea.api.routes.ConnectionTestRoutes
 import com.vectorbea.api.routes.HealthRoutes
+import com.vectorbea.api.routes.MetricsRoutes
 import com.vectorbea.api.routes.NetworkRoutes
 import com.vectorbea.api.routes.RunRoutes
 import com.vectorbea.api.routes.ToolRoutes
@@ -186,6 +187,7 @@ fun main() {
     HealthRoutes(config, database, redis).register(router)
     VersionRoutes(config).register(router)
     NetworkRoutes().register(router)
+    MetricsRoutes().register(router)
 
     if (connectionRepo != null) {
         ConnectionRoutes(connectionRepo, cacheService, secretService).register(router)
@@ -205,11 +207,24 @@ fun main() {
     } else log.warn("WorkflowRoutes disabled — no database")
 
     if (runRepo != null && runEventRepo != null) {
-        RunRoutes(runRepo, runEventRepo).register(router)
+        RunRoutes(
+            runRepo = runRepo,
+            eventRepo = runEventRepo,
+            workflowRepo = workflowRepo,
+            queue = workflowQueue,
+            eventBus = eventBus,
+            lock = distributedLock,
+            redis = redis,
+        ).register(router)
     } else log.warn("RunRoutes disabled — no database")
 
     if (approvalRepo != null) {
-        ApprovalRoutes(approvalRepo).register(router)
+        ApprovalRoutes(
+            repo      = approvalRepo,
+            runRepo   = runRepo,
+            eventRepo = runEventRepo,
+            queue     = workflowQueue,
+        ).register(router)
     } else log.warn("ApprovalRoutes disabled — no database")
 
     // 8. HTTP server

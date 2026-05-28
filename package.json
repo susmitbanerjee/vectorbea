@@ -8,20 +8,42 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently --names web,worker --prefix-colors cyan,yellow \"npm run dev --workspace=apps/web\" \"npm run dev --workspace=apps/worker\"",
+    "dev": "concurrently --names web,api,worker --prefix-colors cyan,green,yellow \"npm run dev:web\" \"npm run dev:api\" \"npm run dev:worker:kotlin\"",
+
     "dev:web": "npm run dev --workspace=apps/web",
-    "dev:worker": "npm run dev --workspace=apps/worker",
-    "worker:start": "npm run start --workspace=apps/worker",
-    "build": "npm run build --workspace=apps/web",
-    "lint": "npm run lint --workspaces --if-present",
+
+    "dev:api": "bash -c 'set -a; [ -f apps/api-kotlin/.env ] && source apps/api-kotlin/.env; set +a; cd apps/api-kotlin && gradle run --console=plain'",
+
+    "dev:worker:kotlin": "bash -c 'set -a; [ -f apps/worker-kotlin/.env ] && source apps/worker-kotlin/.env; set +a; cd apps/worker-kotlin && gradle run --console=plain'",
+
+    "dev:infra": "docker compose up postgres redis -d",
+    "dev:infra:stop": "docker compose stop postgres redis",
+    "dev:infra:down": "docker compose down",
+
+    "build:api": "bash -c 'cd apps/api-kotlin && gradle fatJar --no-daemon --console=plain'",
+    "build:worker": "bash -c 'cd apps/worker-kotlin && gradle fatJar --no-daemon --console=plain'",
+    "build:web": "npm run build --workspace=apps/web",
+    "build": "npm run build:api && npm run build:worker && npm run build:web",
+
+    "test:api": "bash -c 'cd apps/api-kotlin && gradle test --no-daemon --console=plain'",
+    "test:worker": "bash -c 'cd apps/worker-kotlin && gradle test --no-daemon --console=plain'",
+    "test:web": "npm run test --workspace=apps/web --if-present",
+    "test": "npm run test:api && npm run test:worker && npm run test:web",
+
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+
     "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio --schema prisma/schema.prisma",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
-    "db:reset": "prisma migrate reset --schema prisma/schema.prisma --force"
+    "db:reset": "prisma migrate reset --schema prisma/schema.prisma --force",
+
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:build": "docker compose build"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"

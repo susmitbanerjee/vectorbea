@@ -1,0 +1,699 @@
+package com.vectorbea.worker.runtime
+
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.vectorbea.worker.connector.ConnectionResolver
+import com.vectorbea.worker.connector.NoOpConnectionResolver
+import com.vectorbea.worker.connector.pool.ClientDbPoolManager
+import com.vectorbea.worker.events.RunEventStore
+import com.vectorbea.worker.events.RunEventStore.EventType
+import com.vectorbea.worker.events.RunEventStore.RunEvent
+import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.mapping.InMemoryStepOutputView
+import com.vectorbea.worker.mapping.MappingResolver
+import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
+import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
+import com.vectorbea.worker.runtime.executor.NodeExecutorRegistry
+import com.vectorbea.worker.runtime.executor.NodeResult
+import com.vectorbea.worker.runtime.executor.TransformNodeExecutor
+import com.vectorbea.worker.runtime.graph.*
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import javax.sql.DataSource
+
+/**
+ * Core workflow execution engine.
+ *
+ * Responsibilities:
+ *  - Validate and traverse the workflow DAG.
+ *  - Execute each node via [NodeExecutorRegistry].
+ *  - Emit durable run events via [RunEventStore].
+ *  - Write checkpoints after each completed node.
+ *  - Handle parallel branches via forked [RuntimeContext]s.
+ *  - Pause on APPROVAL nodes without blocking the thread pool.
+ *  - Handle unsupported node types via failure policy.
+ *
+ * Thread model: sequential nodes run on the calling thread.
+ * Parallel branches run on [branchExecutor] (bounded thread pool).
+ *
+ * SECURITY:
+ *  - workflowInput is never logged raw.
+ *  - Node outputs are never logged raw.
+ *  - Only sanitized titles/summaries reach [RunEventStore].
+ */
+class WorkflowRuntime(
+    private val dataSource: DataSource,
+    private val eventStore: RunEventStore,
+    private val checkpointStore: CheckpointStore,
+    private val approvalStore: ApprovalStore,
+    private val stepOutputStore: StepOutputStore,
+    private val workerId: String,
+    connectionResolver: ConnectionResolver? = null,
+    dbPoolManager: ClientDbPoolManager? = null,
+) {
+    private val log      = logger()
+    private val registry = NodeExecutorRegistry(
+        approvalStore      = approvalStore,
+        connectionResolver = connectionResolver ?: NoOpConnectionResolver,
+        dbPoolManager      = dbPoolManager ?: ClientDbPoolManager(),
+        eventStore         = eventStore,
+    )
+    private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
+
+    // Dedicated pool for parallel branch execution — bounded to avoid monopolising the worker pool
+    private val branchExecutor: ExecutorService = Executors.newFixedThreadPool(
+        maxOf(2, Runtime.getRuntime().availableProcessors())
+    )
+
+    sealed class ExecutionResult {
+        data class Succeeded(val output: Map<String, Any>) : ExecutionResult()
+        data class Failed(val reason: String) : ExecutionResult()
+        data class WaitingForApproval(val approvalId: String, val nodeId: String) : ExecutionResult()
+        data class Cancelled(val reason: String = "Run cancelled by request") : ExecutionResult()
+    }
+
+    /**
+     * Execute the workflow described by [graph], starting from the trigger node.
+     *
+     * @param runId       UUID of the agent_run row
+     * @param workspaceId workspace context
+     * @param environmentId environment context
+     * @param workflowVersionId version this graph was loaded from
+     * @param graph       the parsed workflow graph
+     * @param inputJson   raw JSON input (treat as untrusted)
+     * @param source      event source tag (e.g. "worker:abc123")
+     */
+    fun execute(
+        runId: UUID,
+        workspaceId: UUID,
+        environmentId: UUID,
+        workflowVersionId: UUID,
+        graph: WorkflowGraph,
+        inputJson: String,
+        source: String = "worker:$workerId",
+        cancellationCheck: () -> Boolean = { false },
+    ): ExecutionResult {
+        // 1. Validate graph
+        val graphScheduler = GraphScheduler(graph)
+        val validationErrors = graphScheduler.validateGraph()
+        if (validationErrors.isNotEmpty()) {
+            val msg = "Invalid workflow graph: ${validationErrors.joinToString("; ")}"
+            log.error("[runtime] {} [runId={}]", msg, runId)
+            return ExecutionResult.Failed(msg)
+        }
+
+        // 2. Parse input
+        val workflowInput: Map<String, Any> = try {
+            @Suppress("UNCHECKED_CAST")
+            jacksonObjectMapper().readValue(inputJson, Map::class.java) as Map<String, Any>
+        } catch (_: Exception) {
+            emptyMap()
+        }
+
+        // 3. Build context
+        val ctx = RuntimeContext(
+            runId = runId,
+            workspaceId = workspaceId,
+            environmentId = environmentId,
+            workflowVersionId = workflowVersionId,
+            workflowInput = workflowInput,
+            graph = graph,
+        )
+
+        // 4. Build per-run output view for cross-step template resolution
+        val stepOutputView = InMemoryStepOutputView()
+
+        // 5. Run the DAG
+        return runDag(graph, graphScheduler, ctx, source, stepOutputView, cancellationCheck)
+    }
+
+    /**
+     * Resume a previously paused run from a [snapshot].
+     *
+     * Used for:
+     *   - Approval resume: mark the approval node back to PENDING so [ApprovalNodeExecutor]
+     *     re-evaluates the approval decision (it checks [ApprovalStore.findApproval] first).
+     *   - Retry-node: mark a failed node back to PENDING and re-run it.
+     *
+     * Outputs for already-completed nodes are loaded from [StepOutputStore] so that
+     * downstream nodes can still resolve `steps.nodeId.key` expressions correctly.
+     *
+     * @param snapshot      the checkpoint to restore from
+     * @param pendingNodeIds nodes to force back to PENDING (e.g. approval node, failed node)
+     */
+    fun resume(
+        runId: UUID,
+        workspaceId: UUID,
+        environmentId: UUID,
+        workflowVersionId: UUID,
+        graph: WorkflowGraph,
+        inputJson: String,
+        snapshot: RuntimeSnapshot,
+        pendingNodeIds: Set<String> = emptySet(),
+        source: String = "worker:$workerId",
+        cancellationCheck: () -> Boolean = { false },
+    ): ExecutionResult {
+        val graphScheduler = GraphScheduler(graph)
+
+        val workflowInput: Map<String, Any> = try {
+            @Suppress("UNCHECKED_CAST")
+            jacksonObjectMapper().readValue(inputJson, Map::class.java) as Map<String, Any>
+        } catch (_: Exception) { emptyMap() }
+
+        val ctx = RuntimeContext(
+            runId             = runId,
+            workspaceId       = workspaceId,
+            environmentId     = environmentId,
+            workflowVersionId = workflowVersionId,
+            workflowInput     = workflowInput,
+            graph             = graph,
+        )
+
+        // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)
+        for ((nodeId, statusName) in snapshot.nodeStatus) {
+            if (nodeId in pendingNodeIds) continue // leave as PENDING
+            when (statusName) {
+                "COMPLETED" -> ctx.markCompleted(nodeId)
+                "FAILED"    -> ctx.markFailed(nodeId)
+                "SKIPPED"   -> ctx.markSkipped(nodeId)
+                // RUNNING or PENDING → leave as PENDING so the node re-runs
+            }
+        }
+
+        // Restore selected edges
+        for (edgeId in snapshot.selectedEdges) ctx.selectEdge(edgeId)
+
+        // Restore step outputs for completed nodes so cross-step references resolve
+        val stepOutputView = InMemoryStepOutputView()
+        for (nodeId in snapshot.completedNodeIds) {
+            if (nodeId in pendingNodeIds) continue
+            val output = stepOutputStore.loadRaw(runId, nodeId) ?: continue
+            ctx.setOutput(nodeId, output)
+            stepOutputView.putRaw(nodeId, output)
+            stepOutputView.putExtracted(nodeId, output)
+            stepOutputView.putValidated(nodeId, output)
+        }
+
+        ctx.restoreSequence(snapshot.sequence)
+
+        log.info("[runtime] resuming run from checkpoint [runId={}, seq={}, pendingOverrides={}]",
+            runId, snapshot.sequence, pendingNodeIds)
+
+        return runDag(graph, graphScheduler, ctx, source, stepOutputView, cancellationCheck)
+    }
+
+    // ── DAG execution loop ────────────────────────────────────────────────────
+
+    private fun runDag(
+        graph: WorkflowGraph,
+        scheduler: GraphScheduler,
+        ctx: RuntimeContext,
+        source: String,
+        stepOutputView: InMemoryStepOutputView,
+        cancellationCheck: () -> Boolean = { false },
+    ): ExecutionResult {
+        val maxIterations = graph.nodes.size * 10 + 100 // safety cap
+
+        for (iteration in 0..maxIterations) {
+            // Check for cancellation (every 5 iterations to avoid excessive DB reads)
+            if (iteration % 5 == 0 && cancellationCheck()) {
+                log.info("[runtime] run cancelled by external request [runId={}]", ctx.runId)
+                return ExecutionResult.Cancelled()
+            }
+
+            // Check for completion
+            if (scheduler.isRunComplete(ctx)) {
+                val endNode  = graph.nodes.firstOrNull { it.nodeType == NodeType.END && ctx.isCompleted(it.id) }
+                val output   = endNode?.let { ctx.getOutput(it.id) } ?: buildFinalOutput(ctx, graph)
+                return ExecutionResult.Succeeded(output)
+            }
+
+            // Check for deadlock
+            val deadlocked = scheduler.detectDeadlock(ctx)
+            if (deadlocked.isNotEmpty() && scheduler.findRunnableNodes(ctx).isEmpty()) {
+                val msg = "Workflow deadlocked — nodes blocked with no progress: ${deadlocked.take(5).joinToString()}"
+                log.error("[runtime] {} [runId={}]", msg, ctx.runId)
+                return ExecutionResult.Failed(msg)
+            }
+
+            // Find and execute runnable nodes
+            val runnableNodes = scheduler.findRunnableNodes(ctx)
+            if (runnableNodes.isEmpty()) {
+                // Nothing runnable but run isn't complete — detect stall
+                if (!hasRunningBranches(ctx, graph)) {
+                    log.warn("[runtime] no runnable nodes and no running branches [runId={}]", ctx.runId)
+                    break
+                }
+                continue
+            }
+
+            // Group by parallel vs sequential
+            val parallelNodes = runnableNodes.filter { it.nodeType == NodeType.PARALLEL }
+            val sequential    = runnableNodes.filter { it.nodeType != NodeType.PARALLEL }
+
+            // Execute parallel nodes (they fan out their branches)
+            for (parallelNode in parallelNodes) {
+                val result = executeParallelNode(parallelNode, scheduler, ctx, source, stepOutputView, cancellationCheck)
+                if (result != null) return result
+            }
+
+            // Execute sequential nodes one by one
+            for (node in sequential) {
+                if (!ctx.isPending(node.id)) continue // may have been marked during parallel
+                val result = executeSingleNode(node, scheduler, ctx, source, stepOutputView)
+                if (result != null) return result
+            }
+        }
+
+        return ExecutionResult.Failed("Workflow execution exceeded iteration limit (possible cycle)")
+    }
+
+    // ── Single-node execution ─────────────────────────────────────────────────
+
+    private fun executeSingleNode(
+        node: WorkflowNode,
+        scheduler: GraphScheduler,
+        ctx: RuntimeContext,
+        source: String,
+        stepOutputView: InMemoryStepOutputView,
+    ): ExecutionResult? {
+        ctx.markRunning(node.id)
+
+        // Emit STEP_SCHEDULED then STEP_STARTED
+        emitEvent(ctx, EventType.STEP_SCHEDULED, "running", source,
+            title   = "Scheduled: ${nodeLabel(node)}",
+            summary = "Node ${node.id} scheduled for execution",
+            stepId  = node.id)
+        emitEvent(ctx, EventType.STEP_STARTED, "running", source,
+            title  = "Started: ${nodeLabel(node)}",
+            stepId = node.id)
+
+        // For TRANSFORM nodes — emit INPUT_MAPPING_STARTED before resolution
+        val isTransform = node.nodeType == NodeType.TRANSFORM
+        if (isTransform) {
+            emitEvent(ctx, EventType.INPUT_MAPPING_STARTED, "running", source,
+                title  = "Resolving input mapping",
+                stepId = node.id)
+        }
+
+        // Resolve inputs — use MappingResolver for template expressions when inputMapping has {{ }}
+        val resolvedInputs = resolveNodeInputs(node, ctx, stepOutputView, source)
+            ?: return null.also {
+                ctx.markFailed(node.id)
+                emitEvent(ctx, EventType.INPUT_MAPPING_FAILED, "running", source,
+                    title  = "Input mapping failed",
+                    stepId = node.id)
+            }
+
+        if (isTransform) {
+            emitEvent(ctx, EventType.INPUT_MAPPING_COMPLETED, "running", source,
+                title  = "Input mapping resolved",
+                stepId = node.id,
+                meta   = """{"fieldCount":${resolvedInputs.size}}""")
+            emitEvent(ctx, EventType.TRANSFORM_STARTED, "running", source,
+                title  = "Transform started",
+                stepId = node.id)
+        } else {
+            emitEvent(ctx, EventType.STEP_INPUT_RESOLVED, "running", source,
+                title  = "Inputs resolved",
+                stepId = node.id)
+        }
+
+        // Execute — for TRANSFORM nodes, pass a view that has the latest step outputs
+        val executor = if (isTransform)
+            TransformNodeExecutor(stepOutputView)
+        else
+            registry.executorFor(node)
+
+        val result = try {
+            executor.execute(node, resolvedInputs, ctx)
+        } catch (e: Exception) {
+            NodeResult.Failed(sanitizeError(e))
+        }
+
+        return applyNodeResult(node, result, scheduler, ctx, source, stepOutputView)
+    }
+
+    /**
+     * Resolve node inputs using [MappingResolver] for template expressions,
+     * falling back to [RuntimeContext.resolveInputMapping] for legacy expressions.
+     * Returns null if resolution fails (caller should mark node as failed).
+     */
+    private fun resolveNodeInputs(
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+        stepOutputView: InMemoryStepOutputView,
+        source: String,
+    ): Map<String, Any>? {
+        val mapping = node.inputMapping
+        if (mapping.isEmpty()) return ctx.resolveInputMapping(node)
+
+        // Check if any mapping value contains {{ template }} syntax
+        val hasTemplates = mapping.values.any { it.contains("{{") }
+        return if (hasTemplates) {
+            try {
+                MappingResolver.resolveMapping(mapping, ctx, stepOutputView)
+            } catch (e: com.vectorbea.worker.mapping.MappingException) {
+                log.warn("[runtime] input mapping failed [nodeId={}, runId={}]: {}", node.id, ctx.runId, e.message)
+                emitEvent(ctx, EventType.INPUT_MAPPING_FAILED, "running", source,
+                    title  = "Input mapping failed: ${e.message?.take(100)}",
+                    stepId = node.id,
+                    error  = """{"reason":${jsonStr(e.message ?: "unknown")}}""")
+                null
+            }
+        } else {
+            ctx.resolveInputMapping(node)
+        }
+    }
+
+    private fun applyNodeResult(
+        node: WorkflowNode,
+        result: NodeResult,
+        scheduler: GraphScheduler,
+        ctx: RuntimeContext,
+        source: String,
+        stepOutputView: InMemoryStepOutputView,
+    ): ExecutionResult? = when (result) {
+        is NodeResult.Completed -> {
+            ctx.setOutput(node.id, result.output)
+            ctx.markCompleted(node.id)
+
+            // Persist step outputs (raw = validated = output for now; transform populates tiers separately)
+            stepOutputView.putRaw(node.id, result.output)
+            stepOutputView.putExtracted(node.id, result.output)
+            stepOutputView.putValidated(node.id, result.output)
+
+            // Persist to DB (non-fatal if fails)
+            persistStepOutput(node, result, ctx)
+
+            // Select outgoing edges based on output
+            val selectedEdges = scheduler.selectEdgesAfterNode(node, result.output, ctx)
+
+            val isTransform = node.nodeType == NodeType.TRANSFORM
+            if (isTransform) {
+                emitEvent(ctx, EventType.TRANSFORM_COMPLETED, "running", source,
+                    title  = "Transform completed",
+                    stepId = node.id,
+                    meta   = buildMetaJson(result.metadata + mapOf("edgesSelected" to selectedEdges.size)))
+            }
+
+            emitEvent(ctx, EventType.STEP_COMPLETED, "running", source,
+                title  = "Completed: ${nodeLabel(node)}",
+                stepId = node.id,
+                meta   = """{"edgesSelected":${selectedEdges.size},"nodeType":"${node.type}"}""")
+
+            // Branch event for BRANCH nodes
+            if (node.nodeType == NodeType.BRANCH) {
+                emitEvent(ctx, EventType.BRANCH_EVALUATED, "running", source,
+                    title   = "Branch evaluated",
+                    summary = "Selected ${selectedEdges.size} edge(s)",
+                    stepId  = node.id)
+            }
+
+            // Checkpoint after each completed node (when policy allows)
+            if (node.checkpointPolicy.enabled) {
+                writeCheckpoint(node.id, ctx, source)
+            }
+
+            null // continue
+        }
+
+        is NodeResult.Failed -> {
+            ctx.markFailed(node.id)
+            val failEdges = scheduler.selectEdgesAfterFailure(node, ctx)
+
+            emitEvent(ctx, EventType.STEP_FAILED, "running", source,
+                title  = "Failed: ${nodeLabel(node)}",
+                stepId = node.id,
+                error  = """{"reason":${jsonStr(result.reason)},"nodeType":"${node.type}"}""")
+
+            when {
+                node.failurePolicy.onFailure == "continue" -> {
+                    null // keep going, ignore this failure
+                }
+                failEdges.isNotEmpty() -> {
+                    null // follow failure edge, continue
+                }
+                else -> {
+                    ExecutionResult.Failed("Node ${node.id} (${node.type}) failed: ${result.reason}")
+                }
+            }
+        }
+
+        is NodeResult.Unsupported -> {
+            ctx.markFailed(node.id)
+            val failEdges = scheduler.selectEdgesAfterFailure(node, ctx)
+
+            emitEvent(ctx, EventType.NODE_TYPE_UNSUPPORTED, "running", source,
+                title  = "Unsupported node type: ${result.nodeType}",
+                stepId = node.id,
+                error  = """{"nodeType":"${result.nodeType}","nodeId":"${node.id}"}""")
+
+            when {
+                node.failurePolicy.onFailure == "continue" -> null
+                failEdges.isNotEmpty()                     -> null
+                else -> ExecutionResult.Failed("Unsupported node type '${result.nodeType}' for node ${node.id}")
+            }
+        }
+
+        is NodeResult.ApprovalPaused -> {
+            emitEvent(ctx, EventType.APPROVAL_REQUESTED, "waiting_for_approval", source,
+                title   = "Approval required: ${nodeLabel(node)}",
+                summary = result.message,
+                stepId  = node.id,
+                meta    = """{"approvalId":${jsonStr(result.approvalId)},"nodeId":"${node.id}"}""")
+
+            if (node.checkpointPolicy.enabled) {
+                writeCheckpoint(node.id, ctx, source)
+            }
+
+            ExecutionResult.WaitingForApproval(result.approvalId, node.id)
+        }
+    }
+
+    // ── Parallel node execution ───────────────────────────────────────────────
+
+    private fun executeParallelNode(
+        parallelNode: WorkflowNode,
+        scheduler: GraphScheduler,
+        ctx: RuntimeContext,
+        source: String,
+        stepOutputView: InMemoryStepOutputView,
+        cancellationCheck: () -> Boolean = { false },
+    ): ExecutionResult? {
+        ctx.markRunning(parallelNode.id)
+
+        // Find the corresponding JOIN node
+        val joinNode = scheduler.findJoinForParallel(parallelNode, ctx.graph)
+
+        // Find branch nodes between PARALLEL and JOIN
+        val branchNodeIds = if (joinNode != null)
+            scheduler.branchNodesBetween(parallelNode, joinNode)
+        else
+            ctx.graph.edgesFrom(parallelNode.id).map { it.target }.toSet()
+
+        emitEvent(ctx, EventType.PARALLEL_STARTED, "running", source,
+            title   = "Parallel execution started",
+            summary = "Fanout to ${branchNodeIds.size} branch(es)",
+            stepId  = parallelNode.id)
+
+        // Execute the parallel node itself (passes through inputs)
+        val executor       = registry.executorFor(parallelNode)
+        val parallelResult = try { executor.execute(parallelNode, ctx.resolveInputMapping(parallelNode), ctx) }
+                             catch (e: Exception) { NodeResult.Failed(sanitizeError(e)) }
+
+        when (parallelResult) {
+            is NodeResult.Failed      -> {
+                ctx.markFailed(parallelNode.id)
+                return ExecutionResult.Failed("PARALLEL node ${parallelNode.id} failed: ${parallelResult.reason}")
+            }
+            is NodeResult.Completed   -> {
+                ctx.setOutput(parallelNode.id, parallelResult.output)
+                ctx.markCompleted(parallelNode.id)
+                scheduler.selectEdgesAfterNode(parallelNode, parallelResult.output, ctx)
+            }
+            else -> {}
+        }
+
+        // Get the immediate branch entry nodes (direct successors of PARALLEL node)
+        val branchEntryEdges = ctx.graph.edgesFrom(parallelNode.id)
+            .filter { it.edgeType == EdgeType.PARALLEL || it.edgeType == EdgeType.DEFAULT }
+
+        // Fork contexts and execute each branch concurrently
+        val futures = branchEntryEdges.map { edge ->
+            val entryNodeId = edge.target
+            val branchCtx   = ctx.fork(branchNodeIds)
+            branchCtx.selectEdge(edge.id)
+
+            val branchScheduler = GraphScheduler(ctx.graph)
+
+            emitEvent(ctx, EventType.PARALLEL_BRANCH_STARTED, "running", source,
+                title  = "Branch started: $entryNodeId",
+                stepId = entryNodeId)
+
+            CompletableFuture.supplyAsync({
+                val branchView   = InMemoryStepOutputView()
+                // Copy parent step outputs into branch view so cross-step refs work
+                ctx.completedNodeIds().forEach { id ->
+                    stepOutputView.getRaw(id)?.let       { branchView.putRaw(id, it) }
+                    stepOutputView.getExtracted(id)?.let { branchView.putExtracted(id, it) }
+                    stepOutputView.getValidated(id)?.let { branchView.putValidated(id, it) }
+                }
+                val branchResult = runDag(ctx.graph, branchScheduler, branchCtx, source, branchView, cancellationCheck)
+                Triple(entryNodeId, branchCtx, branchResult)
+            }, branchExecutor)
+        }
+
+        // Wait for all branches
+        val branchResults = futures.map { it.get() }
+
+        // Check for failures
+        val failedBranch = branchResults.firstOrNull { it.third is ExecutionResult.Failed }
+        if (failedBranch != null) {
+            return failedBranch.third
+        }
+
+        val waitingBranch = branchResults.firstOrNull { it.third is ExecutionResult.WaitingForApproval }
+        if (waitingBranch != null) {
+            return waitingBranch.third
+        }
+
+        // Merge branch contexts back into parent
+        val branchContexts = branchResults.map { it.second }
+        ctx.merge(branchContexts, branchNodeIds)
+
+        branchResults.forEach { (entryNodeId, _, _) ->
+            emitEvent(ctx, EventType.PARALLEL_BRANCH_COMPLETED, "running", source,
+                title  = "Branch completed: $entryNodeId",
+                stepId = entryNodeId)
+        }
+
+        // Handle JOIN node if present
+        if (joinNode != null) {
+            // SELECT the edges into the join node (from branches that just completed)
+            ctx.graph.edgesTo(joinNode.id).forEach { ctx.selectEdge(it.id) }
+        }
+
+        return null // continue main loop
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun emitEvent(
+        ctx: RuntimeContext,
+        type: EventType,
+        status: String,
+        source: String,
+        title: String? = null,
+        summary: String? = null,
+        stepId: String? = null,
+        meta: String? = null,
+        error: String? = null,
+    ) {
+        runCatching {
+            eventStore.appendEvent(RunEvent(
+                runId                = ctx.runId,
+                workspaceId          = ctx.workspaceId,
+                environmentId        = ctx.environmentId,
+                type                 = type,
+                status               = status,
+                source               = source,
+                title                = title,
+                summary              = summary,
+                stepId               = stepId,
+                metadataJsonSanitized = meta,
+                errorJsonSanitized   = error,
+            ))
+        }.onFailure { e ->
+            log.warn("[runtime] failed to emit event [type={}, runId={}]: {}", type, ctx.runId, e.message)
+        }
+    }
+
+    private fun persistStepOutput(node: WorkflowNode, result: NodeResult.Completed, ctx: RuntimeContext) {
+        runCatching {
+            stepOutputStore.save(
+                runId           = ctx.runId,
+                workspaceId     = ctx.workspaceId,
+                environmentId   = ctx.environmentId,
+                nodeId          = node.id,
+                nodeType        = node.type,
+                rawOutput       = result.output,
+                extractedOutput = result.output,
+                validatedOutput = result.output,
+            )
+        }.onFailure { e ->
+            log.warn("[runtime] step output persist failed [nodeId={}, runId={}]: {}", node.id, ctx.runId, e.message)
+        }
+    }
+
+    private fun buildMetaJson(meta: Map<String, Any>): String {
+        val sb = StringBuilder("{")
+        meta.entries.forEachIndexed { i, (k, v) ->
+            if (i > 0) sb.append(",")
+            sb.append("\"$k\":")
+            when (v) {
+                is String  -> sb.append("\"${v.take(200).replace("\"", "\\\"")}\"")
+                is Number  -> sb.append(v)
+                is Boolean -> sb.append(v)
+                is List<*> -> sb.append("[${v.take(10).joinToString(",") { "\"${it?.toString()?.take(100)}\"" }}]")
+                else       -> sb.append("\"${v.toString().take(100)}\"")
+            }
+        }
+        sb.append("}")
+        return sb.toString()
+    }
+
+    private fun writeCheckpoint(nodeId: String, ctx: RuntimeContext, source: String) {
+        runCatching {
+            val snap = ctx.snapshot()
+            val cpId = checkpointStore.save(ctx.runId, ctx.workspaceId, ctx.environmentId, nodeId, snap)
+            emitEvent(ctx, EventType.CHECKPOINT_CREATED, "running", source,
+                title  = "Checkpoint saved after node $nodeId",
+                stepId = nodeId,
+                meta   = """{"checkpointId":"$cpId","sequence":${snap.sequence}}""")
+        }.onFailure { e ->
+            log.warn("[runtime] checkpoint write failed [nodeId={}, runId={}]: {}", nodeId, ctx.runId, e.message)
+        }
+    }
+
+    private fun hasRunningBranches(ctx: RuntimeContext, graph: WorkflowGraph): Boolean =
+        graph.nodes.any { ctx.statusOf(it.id) == RuntimeContext.NodeStatus.RUNNING }
+
+    private fun buildFinalOutput(ctx: RuntimeContext, graph: WorkflowGraph): Map<String, Any> {
+        // Collect outputs from all terminal nodes with no outgoing edges
+        val terminals = graph.nodes.filter { ctx.isCompleted(it.id) && graph.edgesFrom(it.id).isEmpty() }
+        return terminals.fold(mutableMapOf()) { acc, node ->
+            acc.putAll(ctx.getOutput(node.id))
+            acc
+        }
+    }
+
+    private fun nodeLabel(node: WorkflowNode): String =
+        node.label.ifBlank { node.type + ":" + node.id.take(8) }
+
+    private fun sanitizeError(e: Exception): String =
+        (e.message ?: e.javaClass.simpleName)
+            .take(300)
+            .replace(Regex("""[A-Za-z0-9+/]{40,}"""), "[REDACTED]")
+            .replace(Regex("""://[^@]*@"""), "://[REDACTED]@")
+
+    private fun jsonStr(s: String): String =
+        "\"${s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")}\""
+}
+
+/** Extension to find the join node for a given parallel node. */
+private fun GraphScheduler.findJoinForParallel(parallelNode: WorkflowNode, graph: WorkflowGraph): WorkflowNode? {
+    // BFS forward from the parallel node's successors to find a JOIN node
+    val visited = mutableSetOf<String>()
+    val queue   = ArrayDeque(graph.edgesFrom(parallelNode.id).map { it.target })
+    while (queue.isNotEmpty()) {
+        val id = queue.removeFirst()
+        if (id in visited) continue
+        visited.add(id)
+        val n = graph.nodeById(id) ?: continue
+        if (n.nodeType == NodeType.JOIN) return n
+        graph.edgesFrom(id).map { it.target }.forEach { queue.add(it) }
+    }
+    return null
+}

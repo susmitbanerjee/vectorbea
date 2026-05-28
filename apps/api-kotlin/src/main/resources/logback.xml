@@ -5,10 +5,10 @@
   <property name="LOG_LEVEL" value="${LOG_LEVEL:-INFO}"/>
 
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <encoder>
-      <!-- Structured single-line format: timestamp level logger - message -->
-      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} %-5level [%thread] %logger{36} - %msg%n</pattern>
-    </encoder>
+    <!-- Structured JSON lines — one JSON object per log event (NDJSON).
+         All MDC fields (requestId, traceId, workspaceId, etc.) are merged into
+         the root JSON object automatically by JsonLayout. -->
+    <layout class="com.vectorbea.api.observability.JsonLayout"/>
   </appender>
 
   <!-- Access log (request/response lines) -->

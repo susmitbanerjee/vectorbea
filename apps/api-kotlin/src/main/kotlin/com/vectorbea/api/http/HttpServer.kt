@@ -5,10 +5,16 @@ import com.sun.net.httpserver.HttpServer as JdkHttpServer
 import com.vectorbea.api.config.AppConfig
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.errors.ErrorResponse
+import com.vectorbea.api.metrics.AppMetrics
+import com.vectorbea.api.observability.MdcKeys
+import com.vectorbea.api.observability.mdcClearAll
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Thin wrapper around JDK's built-in [com.sun.net.httpserver.HttpServer].
@@ -46,7 +52,24 @@ class HttpServer(
 
     private fun handleExchange(exchange: HttpExchange) {
         val requestId = UUID.randomUUID().toString().replace("-", "").take(16)
+        // Honour X-Trace-Id from upstream proxy/gateway; generate one if absent
+        val traceId = exchange.requestHeaders.getFirst("X-Trace-Id")
+            ?.takeIf { it.isNotBlank() }
+            ?: UUID.randomUUID().toString().replace("-", "").take(24)
         val start = System.currentTimeMillis()
+
+        // ── Set MDC context for the duration of this request ─────────────────
+        MDC.put(MdcKeys.SERVICE, "api")
+        MDC.put(MdcKeys.REQUEST_ID, requestId)
+        MDC.put(MdcKeys.TRACE_ID, traceId)
+        MDC.put(MdcKeys.METHOD, exchange.requestMethod)
+        MDC.put(MdcKeys.PATH, exchange.requestURI.path)
+
+        // Propagate workspace/environment from headers if present
+        exchange.requestHeaders.getFirst("X-Workspace-Id")?.takeIf { it.isNotBlank() }
+            ?.let { MDC.put(MdcKeys.WORKSPACE_ID, it) }
+        exchange.requestHeaders.getFirst("X-Environment-Id")?.takeIf { it.isNotBlank() }
+            ?.let { MDC.put(MdcKeys.ENVIRONMENT_ID, it) }
 
         var response: Response? = null
         try {
@@ -54,12 +77,21 @@ class HttpServer(
             val request = Request.from(exchange, requestId, config.maxRequestBodyBytes)
 
             // OPTIONS preflight — answer without hitting the router
-            response = if (request.method == "OPTIONS") {
+            if (request.method == "OPTIONS") {
                 val allowed = router.allowedMethods(request.path)
                     .plus("OPTIONS").joinToString(", ")
-                Response.options(allowed, corsHeaders(exchange))
+                response = Response.options(allowed, corsHeaders(exchange))
             } else {
-                router.dispatch(request).withHeaders(corsHeaders(exchange))
+                // Check for SSE route before normal dispatch
+                val sseMatch = router.findSseRoute(request.method, request.path)
+                if (sseMatch != null) {
+                    val (sseRoute, params) = sseMatch
+                    val enrichedRequest = request.copy(pathParams = params)
+                    handleSseExchange(exchange, enrichedRequest, requestId, sseRoute.handler)
+                    // SSE handler owns the exchange — return without calling send()
+                    return
+                }
+                response = router.dispatch(request).withHeaders(corsHeaders(exchange))
             }
         } catch (e: ApiError) {
             val requestIdFallback = response?.headers?.get("X-Request-Id") ?: requestId
@@ -78,6 +110,7 @@ class HttpServer(
 
         send(exchange, response, requestId)
         log(exchange, response, requestId, start)
+        mdcClearAll()
     }
 
     private fun send(exchange: HttpExchange, response: Response, requestId: String) {
@@ -109,11 +142,103 @@ class HttpServer(
         val status = response?.status ?: 0
         val method = exchange.requestMethod
         val path = exchange.requestURI.path
-        // Log level based on status
+        val pathPattern = AppMetrics.normalisePath(path)
+
+        // Record metrics — labels use normalised path to bound cardinality
+        AppMetrics.requestCount.inc(method, AppMetrics.statusClass(status), pathPattern)
+        AppMetrics.requestDuration.observe(duration, method, pathPattern)
+
+        // Structured log — MDC already holds requestId/traceId/workspaceId
+        val msg = "$method $path → $status [${duration}ms]"
         when {
-            status >= 500 -> log.error("$method $path → $status [${duration}ms] [id=$requestId]")
-            status >= 400 -> log.warn("$method $path → $status [${duration}ms] [id=$requestId]")
-            else -> log.info("$method $path → $status [${duration}ms] [id=$requestId]")
+            status >= 500 -> log.error(msg)
+            status >= 400 -> log.warn(msg)
+            else          -> log.info(msg)
+        }
+    }
+
+    // ── SSE streaming ─────────────────────────────────────────────────────────
+
+    /**
+     * Handles a Server-Sent Events exchange.
+     * Sends SSE headers, then delegates to [handler] which may block the calling thread
+     * while the connection stays open.  The exchange is closed when [handler] returns.
+     *
+     * The emitter returned to the handler is backed by the raw [HttpExchange] output stream.
+     * Writing to a closed stream throws [IOException] which the handler should treat as
+     * client disconnect.
+     */
+    private fun handleSseExchange(
+        exchange: HttpExchange,
+        request: Request,
+        requestId: String,
+        handler: (Request, Router.SseEmitter) -> Unit,
+    ) {
+        // Add CORS + request-id headers before sending response headers
+        corsHeaders(exchange).forEach { (k, v) -> exchange.responseHeaders.add(k, v) }
+        exchange.responseHeaders.add("X-Request-Id", requestId)
+        exchange.responseHeaders.set("Content-Type", "text/event-stream; charset=utf-8")
+        exchange.responseHeaders.set("Cache-Control", "no-cache, no-transform")
+        exchange.responseHeaders.set("Connection", "keep-alive")
+        exchange.responseHeaders.set("X-Accel-Buffering", "no")
+
+        try {
+            // 0 = unknown/chunked length → stream until close
+            exchange.sendResponseHeaders(200, 0)
+        } catch (e: Exception) {
+            log.debug("Failed to send SSE headers [requestId=$requestId]: ${e.message}")
+            exchange.close()
+            return
+        }
+
+        val out = exchange.responseBody
+        val connected = AtomicBoolean(true)
+
+        val emitter = object : Router.SseEmitter {
+            override fun sendEvent(eventType: String, data: String): Boolean {
+                if (!connected.get()) return false
+                return try {
+                    out.write("event: $eventType\ndata: $data\n\n".toByteArray(Charsets.UTF_8))
+                    out.flush()
+                    true
+                } catch (_: IOException) {
+                    connected.set(false)
+                    false
+                }
+            }
+
+            override fun sendComment(comment: String): Boolean {
+                if (!connected.get()) return false
+                return try {
+                    out.write(": $comment\n\n".toByteArray(Charsets.UTF_8))
+                    out.flush()
+                    true
+                } catch (_: IOException) {
+                    connected.set(false)
+                    false
+                }
+            }
+
+            override fun isConnected(): Boolean = connected.get()
+        }
+
+        val start = System.currentTimeMillis()
+        try {
+            handler(request, emitter)
+        } catch (e: ApiError) {
+            // Too late to change HTTP status — just log and close
+            log.debug("SSE handler ApiError [requestId=$requestId]: ${e.message}")
+        } catch (e: Exception) {
+            if (connected.get()) {
+                log.error("SSE handler error [requestId=$requestId]", e)
+            }
+            // else: IOException from client disconnect — expected, no need to log
+        } finally {
+            connected.set(false)
+            try { out.close() } catch (_: Exception) {}
+            exchange.close()
+            val duration = System.currentTimeMillis() - start
+            log.info("SSE ${request.path} closed [${duration}ms] [id=$requestId]")
         }
     }
 
