@@ -55,7 +55,7 @@ val RISK_LEVELS = setOf("low", "medium", "high", "critical")
 val WORKFLOW_STATUSES = setOf("draft", "active", "archived")
 
 /** Connection auth types */
-val AUTH_TYPES = setOf("api_key", "oauth2", "basic", "bearer", "none", "mtls", "custom")
+val AUTH_TYPES = setOf("api_key", "oauth2", "basic", "bearer", "none", "mtls", "custom", "connection_string")
 
 /**
  * Returns compatible connection types for each tool type.
