@@ -543,7 +543,6 @@ export default function NewConnectionPage() {
           // Populated from schema picker if user explored the schema
           allowedSchemas: schemaSelection ? [schemaSelection.schema] : [],
           allowedTables:  schemaSelection ? [`${schemaSelection.schema}.${schemaSelection.table}`] : [],
-          selectedColumns: schemaSelection ? schemaSelection.columns.map((c) => c.name) : [],
           queryTimeoutMs: 10000, maxRows: 1000,
         };
       } else if (type === "http_api") {

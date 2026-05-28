@@ -307,7 +307,9 @@ export function SchemaPickerPanel({
                               {col.name}
                             </span>
                             {col.isPrimaryKey && (
-                              <Key className="h-2.5 w-2.5 shrink-0 text-amber-500" title="Primary key" />
+                              <span title="Primary key">
+                                <Key className="h-2.5 w-2.5 shrink-0 text-amber-500" />
+                              </span>
                             )}
                             {!col.nullable && (
                               <span className="text-[9px] text-red-400/70 font-medium">required</span>
