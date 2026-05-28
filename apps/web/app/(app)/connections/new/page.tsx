@@ -521,7 +521,24 @@ export default function NewConnectionPage() {
       } else if (type === "saas") {
         provider = saasProvider;
         connAuthType = "bearer";
-        config = { provider: saasProvider, workspace, allowedResources: [] };
+        // baseUrl is required by the HTTP connection tester — map each SaaS provider
+        // to its canonical API base so "Test connection" can reach a health endpoint.
+        const SAAS_BASE_URLS: Record<string, string> = {
+          slack:       "https://slack.com/api",
+          gmail:       "https://gmail.googleapis.com",
+          salesforce:  "https://login.salesforce.com/services/data/v59.0",
+          hubspot:     "https://api.hubapi.com",
+          zendesk:     "https://api.zendesk.com/api/v2",
+          jira:        "https://api.atlassian.com",
+          github:      "https://api.github.com",
+        };
+        config = {
+          provider: saasProvider,
+          baseUrl: SAAS_BASE_URLS[saasProvider] ?? "https://api.slack.com",
+          workspace,
+          allowedResources: [],
+          healthPath: saasProvider === "slack" ? "/api.test" : undefined,
+        };
       } else if (type === "mcp_server") {
         provider = "mcp";
         connAuthType = mcpToken ? "bearer" : "none";

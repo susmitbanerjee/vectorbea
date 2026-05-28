@@ -127,8 +127,10 @@ export interface HttpApiConnectionConfig {
 
 export interface SaasConnectionConfig {
   provider: SaasProvider;
+  baseUrl?: string;
   workspace?: string;
   allowedResources: string[];
+  healthPath?: string;
 }
 
 export interface McpConnectionConfig {

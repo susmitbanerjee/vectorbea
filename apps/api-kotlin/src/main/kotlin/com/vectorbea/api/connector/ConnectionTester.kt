@@ -165,10 +165,15 @@ class ConnectionTester(private val secretService: SecretService) {
 
     private fun testHttp(conn: Connection, secret: String?): ConnectionTestResult {
         val config = parseConfig(conn.configJson)
+        // Fall back to a known base URL for recognised SaaS providers so that
+        // connections saved before baseUrl was included in the config still work.
         val baseUrl = (config["baseUrl"] as? String ?: config["base_url"] as? String
-            ?: config["url"] as? String)
+            ?: config["url"] as? String
+            ?: knownSaasBaseUrl(conn.provider))
             ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR",
                 "HTTP connection requires a baseUrl in config")
+
+        val healthPath = config["healthPath"] as? String ?: knownSaasHealthPath(conn.provider)
 
         return HttpTester.test(HttpTester.HttpTestInput(
             url = baseUrl,
@@ -177,8 +182,28 @@ class ConnectionTester(private val secretService: SecretService) {
             username = config["username"] as? String,
             password = null,  // password resolved via secret
             apiKeyHeaderName = config["apiKeyHeaderName"] as? String,
-            healthPath = config["healthPath"] as? String,
+            healthPath = healthPath,
         ))
+    }
+
+    /** Canonical API base URLs for known SaaS providers — used as a fallback
+     *  when the connection was saved without an explicit baseUrl in config. */
+    private fun knownSaasBaseUrl(provider: String): String? = when (provider.lowercase()) {
+        "slack"      -> "https://slack.com/api"
+        "gmail"      -> "https://gmail.googleapis.com"
+        "salesforce" -> "https://login.salesforce.com/services/data/v59.0"
+        "hubspot"    -> "https://api.hubapi.com"
+        "zendesk"    -> "https://api.zendesk.com/api/v2"
+        "jira"       -> "https://api.atlassian.com"
+        "github"     -> "https://api.github.com"
+        else         -> null
+    }
+
+    /** Lightweight health-check paths for known SaaS providers that validate auth. */
+    private fun knownSaasHealthPath(provider: String): String? = when (provider.lowercase()) {
+        "slack"  -> "/api.test"   // returns {"ok":true} with valid token, {"ok":false} without
+        "github" -> "/rate_limit" // always returns 200 + rate-limit headers
+        else     -> null
     }
 
     private fun testHttpUnsaved(
