@@ -17,13 +17,36 @@ function normalizeConnection(conn: Connection): Connection {
   const mappedType = typeMap[conn.type as string];
 
   // Normalize error field: API returns lastTestErrorMessageSanitized, UI reads lastTestError
-  const raw = conn as Connection & { lastTestErrorMessageSanitized?: string | null };
+  const raw = conn as Connection & {
+    lastTestErrorMessageSanitized?: string | null;
+    allowedHosts?: string[];
+    allowedPaths?: string[];
+    allowedSchemas?: string[];
+    allowedTables?: string[];
+  };
   const lastTestError = conn.lastTestError ?? raw.lastTestErrorMessageSanitized ?? null;
 
   return {
     ...conn,
     ...(mappedType ? { type: mappedType } : {}),
     lastTestError,
+    // Guarantee array fields are never undefined — API may omit them
+    usedByAgentIds: conn.usedByAgentIds ?? [],
+    usedByToolIds:  conn.usedByToolIds  ?? [],
+    allowedHosts:   raw.allowedHosts   ?? [],
+    allowedPaths:   raw.allowedPaths   ?? [],
+    allowedSchemas: raw.allowedSchemas ?? [],
+    allowedTables:  raw.allowedTables  ?? [],
+    networkPolicy:  conn.networkPolicy  ?? { requireWhitelist: false, privateRunnerRequired: false, networkStatus: "unknown" },
+    config:         conn.config         ?? ({} as Connection["config"]),
+    secretRef:      conn.secretRef      ?? null,
+    secretMasked:   conn.secretMasked   ?? null,
+    lastTestedAt:          conn.lastTestedAt         ?? null,
+    lastTestStatus:        conn.lastTestStatus        ?? null,
+    lastTestLatencyMs:     conn.lastTestLatencyMs     ?? null,
+    lastTestError:         lastTestError,
+    lastTestErrorMessageSanitized: raw.lastTestErrorMessageSanitized ?? null,
+    lastTestErrorCode:     conn.lastTestErrorCode     ?? null,
   };
 }
 
