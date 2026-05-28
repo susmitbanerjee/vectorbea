@@ -2,6 +2,21 @@ import type { Connection, ConnectionStatus, ConnectionType } from "@/types/conne
 import { CONNECTION_TOOL_COMPAT, CONNECTION_AGENT_COMPAT } from "@/types/connections";
 import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client";
 
+// ─── Connection type vocabulary ───────────────────────────────────────────────
+// Frontend uses descriptive types; backend stores a shorter vocabulary.
+// This map translates before query params are sent to the API.
+const CONN_TYPE_TO_API: Record<string, string> = {
+  llm_provider:   "llm",
+  http_api:       "http",
+  mcp_server:     "tool",
+  // "database", "vector_store", "object_storage" are the same on both sides
+};
+
+function toApiConnectionType(uiType: string | undefined): string | undefined {
+  if (!uiType) return uiType;
+  return CONN_TYPE_TO_API[uiType] ?? uiType;
+}
+
 /**
  * Maps API connection types (backend vocabulary) to frontend display types.
  * The backend stores "llm" | "database" | "http" | "tool".
@@ -58,7 +73,7 @@ export async function getConnections(filters?: {
 }): Promise<Connection[]> {
   const workspaceId = getActiveWorkspaceId();
   const params = new URLSearchParams();
-  if (filters?.type) params.set("type", filters.type);
+  if (filters?.type) params.set("type", toApiConnectionType(filters.type) ?? filters.type);
   if (filters?.status) params.set("status", filters.status);
   if (filters?.search) params.set("search", filters.search);
 
