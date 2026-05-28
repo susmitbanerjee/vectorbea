@@ -53,7 +53,7 @@ EXPOSE 9090
 #   UseContainerSupport  — respect cgroup memory/CPU limits
 #   MaxRAMPercentage=75  — use up to 75 % of container RAM for heap
 #   UseG1GC              — good for mixed throughput / latency workloads
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+ENV JAVA_OPTS="-Xms64m -Xmx384m -XX:+UseG1GC -XX:+UseContainerSupport"
 
 # The worker has no HTTP health endpoint — use the metrics server for liveness.
 # Platforms that require a health check can probe GET /metrics on METRICS_PORT.

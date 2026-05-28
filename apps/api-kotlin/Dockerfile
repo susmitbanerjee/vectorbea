@@ -51,10 +51,12 @@ USER vectorbea
 EXPOSE 8080
 
 # JVM flags:
-#   UseContainerSupport  — respect cgroup memory/CPU limits (JDK 8u191+)
-#   MaxRAMPercentage=75  — use up to 75 % of container RAM for heap
-#   UseZGC               — low-latency GC, good for API latency
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseZGC -Xlog:gc:stderr"
+#   Xms / Xmx  — explicit heap bounds (safe on Railway / shared-host containers
+#                where UseContainerSupport may read host RAM instead of cgroup limit)
+#   UseG1GC    — well-tested, low memory-mapping footprint (ZGC needs
+#                vm.max_map_count >> 65530 and is unsafe on shared kernels)
+#   Override at runtime: set JAVA_OPTS env var in Railway Variables.
+ENV JAVA_OPTS="-Xms64m -Xmx256m -XX:+UseG1GC -XX:+UseContainerSupport"
 
 # Liveness probe: GET /health returns 200 when the JVM is up.
 # Readiness probe: GET /ready returns 200 when DB + Redis are reachable.
