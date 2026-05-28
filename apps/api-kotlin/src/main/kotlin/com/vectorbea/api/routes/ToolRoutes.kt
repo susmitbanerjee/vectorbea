@@ -228,8 +228,7 @@ class ToolRoutes(
     }
 
     private fun invalidateListCache(workspaceId: UUID, environmentId: UUID) {
-        cache.del(CacheKeys.toolList(workspaceId.toString(), environmentId.toString()))
-        cache.del(CacheKeys.toolList(workspaceId.toString(), "all"))
+        cache.delByPrefix(CacheKeys.toolList(workspaceId.toString(), "").dropLast(1))
     }
 }
 

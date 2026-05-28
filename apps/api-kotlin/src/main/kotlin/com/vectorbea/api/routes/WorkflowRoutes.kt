@@ -234,8 +234,7 @@ class WorkflowRoutes(
     }
 
     private fun invalidateListCache(workspaceId: String, environmentId: String) {
-        cache.del(CacheKeys.workflowList(workspaceId, environmentId))
-        cache.del(CacheKeys.workflowList(workspaceId, "all"))
+        cache.delByPrefix(CacheKeys.workflowList(workspaceId, "").dropLast(1))
     }
 }
 

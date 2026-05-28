@@ -248,8 +248,8 @@ class AgentRoutes(
     }
 
     private fun invalidateListCache(workspaceId: UUID, environmentId: UUID) {
-        cache.del(CacheKeys.agentList(workspaceId.toString(), environmentId.toString()))
-        cache.del(CacheKeys.agentList(workspaceId.toString(), "all"))
+        // Use prefix deletion — actual cache keys include :statusFilter:page:pageSize suffixes
+        cache.delByPrefix(CacheKeys.agentList(workspaceId.toString(), "").dropLast(1))
     }
 }
 
