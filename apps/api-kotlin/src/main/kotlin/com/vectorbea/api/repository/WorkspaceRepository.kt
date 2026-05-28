@@ -29,18 +29,10 @@ class WorkspaceRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     )
 
     fun list(params: PageParams = PageParams()): Page<Workspace> = queryPage(
-        sql = """
-            SELECT id, name, slug, created_at, updated_at
-            FROM workspaces
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """.trimIndent(),
+        sql = "SELECT id, name, slug, created_at, updated_at FROM workspaces ORDER BY created_at DESC",
         countSql = "SELECT COUNT(*) FROM workspaces",
         params = params,
-        bind = {
-            setInt(1, params.limit)
-            setInt(2, params.offset)
-        },
+        bind = {},
         mapRow = ::mapRow,
     )
 

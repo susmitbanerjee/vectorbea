@@ -120,14 +120,10 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
             if (status != null) it.setString(i++, status)
         }
         return queryPage(
-            sql = "SELECT $cols FROM workflows $where ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            sql = "SELECT $cols FROM workflows $where ORDER BY created_at DESC",
             countSql = "SELECT COUNT(*) FROM workflows $where",
             params = params,
-            bind = {
-                bindBase(this)
-                setInt(filters.size + 1, params.limit)
-                setInt(filters.size + 2, params.offset)
-            },
+            bind = { bindBase(this) },
             mapRow = ::mapRow,
         )
     }
@@ -191,14 +187,10 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
     )
 
     fun listVersions(workflowId: UUID, params: PageParams = PageParams()): Page<WorkflowVersion> = queryPage(
-        sql = "SELECT $vCols FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC LIMIT ? OFFSET ?",
+        sql = "SELECT $vCols FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC",
         countSql = "SELECT COUNT(*) FROM workflow_versions WHERE workflow_id = ?",
         params = params,
-        bind = {
-            setUuid(1, workflowId)
-            setInt(2, params.limit)
-            setInt(3, params.offset)
-        },
+        bind = { setUuid(1, workflowId) },
         mapRow = ::mapVersionRow,
     )
 

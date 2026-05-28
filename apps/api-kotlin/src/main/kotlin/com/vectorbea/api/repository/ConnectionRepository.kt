@@ -94,17 +94,10 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
         }
 
         return queryPage(
-            sql = """
-                SELECT $cols FROM connections $where
-                ORDER BY created_at DESC LIMIT ? OFFSET ?
-            """.trimIndent(),
+            sql = "SELECT $cols FROM connections $where ORDER BY created_at DESC",
             countSql = "SELECT COUNT(*) FROM connections $where",
             params = params,
-            bind = {
-                bindParams(this)
-                setInt(filters.size + 1, params.limit)
-                setInt(filters.size + 2, params.offset)
-            },
+            bind = { bindParams(this) },
             mapRow = ::mapRow,
         )
     }

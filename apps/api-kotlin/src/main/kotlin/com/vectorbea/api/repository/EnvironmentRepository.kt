@@ -33,19 +33,10 @@ class EnvironmentRepository(dataSource: DataSource) : BaseRepository(dataSource)
     )
 
     fun list(workspaceId: UUID, params: PageParams = PageParams()): Page<Environment> = queryPage(
-        sql = """
-            SELECT $cols FROM environments
-            WHERE workspace_id = ?
-            ORDER BY created_at ASC
-            LIMIT ? OFFSET ?
-        """.trimIndent(),
+        sql = "SELECT $cols FROM environments WHERE workspace_id = ? ORDER BY created_at ASC",
         countSql = "SELECT COUNT(*) FROM environments WHERE workspace_id = ?",
         params = params,
-        bind = {
-            setUuid(1, workspaceId)
-            setInt(2, params.limit)
-            setInt(3, params.offset)
-        },
+        bind = { setUuid(1, workspaceId) },
         mapRow = ::mapRow,
     )
 

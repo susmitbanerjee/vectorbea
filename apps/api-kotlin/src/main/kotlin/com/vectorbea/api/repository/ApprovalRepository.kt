@@ -125,7 +125,7 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                 SELECT $cols
                 FROM approvals a JOIN agent_runs r ON r.id = a.run_id
                 $where
-                ORDER BY a.requested_at DESC LIMIT ? OFFSET ?
+                ORDER BY a.requested_at DESC
             """.trimIndent(),
             countSql = """
                 SELECT COUNT(*)
@@ -133,11 +133,7 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                 $where
             """.trimIndent(),
             params = params,
-            bind = {
-                bindBase(this)
-                setInt(filters.size + 1, params.limit)
-                setInt(filters.size + 2, params.offset)
-            },
+            bind = { bindBase(this) },
             mapRow = ::mapRow,
         )
     }

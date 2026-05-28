@@ -87,14 +87,10 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (status != null) it.setString(i++, status)
         }
         return queryPage(
-            sql = "SELECT $cols FROM agents $where ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            sql = "SELECT $cols FROM agents $where ORDER BY created_at DESC",
             countSql = "SELECT COUNT(*) FROM agents $where",
             params = params,
-            bind = {
-                bindBase(this)
-                setInt(filters.size + 1, params.limit)
-                setInt(filters.size + 2, params.offset)
-            },
+            bind = { bindBase(this) },
             mapRow = ::mapRow,
         )
     }

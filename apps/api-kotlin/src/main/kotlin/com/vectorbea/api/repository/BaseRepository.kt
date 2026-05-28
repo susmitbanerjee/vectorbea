@@ -74,7 +74,15 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
 
     /**
      * Executes a paginated SELECT and returns a [Page<T>].
-     * [countSql] must be the same query wrapped in `SELECT COUNT(*) FROM (…) c`.
+     *
+     * [sql]      — base query WITHOUT "LIMIT ? OFFSET ?"; pagination is appended inline.
+     * [countSql] — count query with the same WHERE clause (no ORDER BY / LIMIT).
+     * [bind]     — binds only the filter parameters (workspace_id, env_id, etc.).
+     *              Do NOT include LIMIT/OFFSET in [bind] — they are handled here.
+     *
+     * LIMIT/OFFSET are inlined as integer literals (not `?`) so that [bind] can be
+     * called on the count statement without a parameter-index mismatch.
+     * params.limit and params.pageSize are validated integers, never raw user strings.
      */
     protected fun <T> queryPage(
         sql: String,
@@ -87,7 +95,8 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
             stmt.bind()
             stmt.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else 0L }
         }
-        val items = conn.prepareStatement(sql).use { stmt ->
+        val paginatedSql = "$sql LIMIT ${params.limit} OFFSET ${params.offset}"
+        val items = conn.prepareStatement(paginatedSql).use { stmt ->
             stmt.bind()
             stmt.executeQuery().use { rs ->
                 buildList { while (rs.next()) add(mapRow(rs)) }

@@ -142,14 +142,10 @@ open class RunEventRepository(dataSource: DataSource) : BaseRepository(dataSourc
             if (type != null) it.setString(i++, type)
         }
         return queryPage(
-            sql = "SELECT $cols FROM run_events $where ORDER BY sequence ASC LIMIT ? OFFSET ?",
+            sql = "SELECT $cols FROM run_events $where ORDER BY sequence ASC",
             countSql = "SELECT COUNT(*) FROM run_events $where",
             params = params,
-            bind = {
-                bindBase(this)
-                setInt(filters.size + 1, params.limit)
-                setInt(filters.size + 2, params.offset)
-            },
+            bind = { bindBase(this) },
             mapRow = ::mapRow,
         )
     }
