@@ -105,7 +105,7 @@ export default function AgentDetailPage() {
           getRunsForAgent(id),
         ]);
         setAgent(a);
-        setAllowedTools(allTools.filter((t) => a?.allowedToolIds.includes(t.id)));
+        setAllowedTools(allTools.filter((t) => (a?.allowedToolIds ?? []).includes(t.id)));
         setRuns(agentRuns);
       } catch {
         toast.error("Failed to load agent.");
@@ -263,7 +263,7 @@ export default function AgentDetailPage() {
               <div className="grid grid-cols-3 gap-4">
                 {[
                   { label: "Total runs",    value: (agent.totalRuns ?? 0).toLocaleString() },
-                  { label: "Allowed tools", value: agent.allowedToolIds.length },
+                  { label: "Allowed tools", value: (agent.allowedToolIds ?? []).length },
                   { label: "Last active",   value: timeAgo(agent.lastUsedAt) },
                 ].map(({ label, value }) => (
                   <div key={label} className="rounded-lg border border-border/40 px-4 py-3" style={{ background: "var(--surface-2)" }}>
@@ -281,7 +281,7 @@ export default function AgentDetailPage() {
           <div className="rounded-xl border border-border/60 overflow-hidden" style={{ background: "var(--surface-1)" }}>
             <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
               <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>System Prompt</h2>
-              <span className="text-[11px] text-muted-foreground">{agent.instructions.length} chars</span>
+              <span className="text-[11px] text-muted-foreground">{(agent.instructions ?? "").length} chars</span>
             </div>
             {agent.instructions ? (
               <pre className="min-h-[300px] px-5 py-4 font-mono text-[12px] leading-6 text-muted-foreground whitespace-pre-wrap">
@@ -357,8 +357,8 @@ export default function AgentDetailPage() {
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Memory Policy</h2>
               <div className="divide-y divide-border/30">
-                <KVRow label="Type" value={agent.memoryPolicy.type} />
-                {agent.memoryPolicy.retentionDays !== undefined && (
+                <KVRow label="Type" value={agent.memoryPolicy?.type ?? "—"} />
+                {agent.memoryPolicy?.retentionDays !== undefined && (
                   <KVRow label="Retention" value={`${agent.memoryPolicy.retentionDays} days`} />
                 )}
               </div>
@@ -367,17 +367,17 @@ export default function AgentDetailPage() {
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Retry Policy</h2>
               <div className="divide-y divide-border/30">
-                <KVRow label="Max attempts" value={agent.retryPolicy.maxAttempts} />
-                <KVRow label="Backoff type" value={agent.retryPolicy.backoffType} />
-                <KVRow label="Backoff base" value={`${agent.retryPolicy.backoffMs}ms`} />
+                <KVRow label="Max attempts" value={agent.retryPolicy?.maxAttempts ?? "—"} />
+                <KVRow label="Backoff type" value={agent.retryPolicy?.backoffType ?? "—"} />
+                <KVRow label="Backoff base" value={agent.retryPolicy ? `${agent.retryPolicy.backoffMs}ms` : "—"} />
               </div>
             </div>
 
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Timeout Policy</h2>
               <div className="divide-y divide-border/30">
-                <KVRow label="Step timeout" value={`${agent.timeoutPolicy.stepTimeoutMs / 1000}s`} />
-                <KVRow label="Run timeout" value={`${agent.timeoutPolicy.runTimeoutMs / 1000}s`} />
+                <KVRow label="Step timeout" value={agent.timeoutPolicy ? `${agent.timeoutPolicy.stepTimeoutMs / 1000}s` : "—"} />
+                <KVRow label="Run timeout"  value={agent.timeoutPolicy ? `${agent.timeoutPolicy.runTimeoutMs / 1000}s`  : "—"} />
               </div>
             </div>
 
@@ -387,17 +387,17 @@ export default function AgentDetailPage() {
                 <KVRow
                   label="Requires approval"
                   value={
-                    agent.approvalPolicy.requireApproval ? (
+                    agent.approvalPolicy?.requireApproval ? (
                       <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700">Yes</span>
                     ) : (
                       <span className="text-muted-foreground">No</span>
                     )
                   }
                 />
-                {agent.approvalPolicy.requireApproval && agent.approvalPolicy.onTimeout && (
+                {agent.approvalPolicy?.requireApproval && agent.approvalPolicy.onTimeout && (
                   <KVRow label="On timeout" value={agent.approvalPolicy.onTimeout.replace(/_/g, " ")} />
                 )}
-                {agent.approvalPolicy.requireApproval && agent.approvalPolicy.timeoutMs && (
+                {agent.approvalPolicy?.requireApproval && agent.approvalPolicy.timeoutMs && (
                   <KVRow label="Timeout" value={`${agent.approvalPolicy.timeoutMs / 1000}s`} />
                 )}
               </div>
