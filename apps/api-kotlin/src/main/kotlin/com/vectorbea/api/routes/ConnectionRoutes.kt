@@ -265,8 +265,10 @@ class ConnectionRoutes(
     }
 
     private fun invalidateListCache(workspaceId: java.util.UUID, environmentId: java.util.UUID) {
-        cache.del(CacheKeys.connectionList(workspaceId.toString(), environmentId.toString()))
-        cache.del(CacheKeys.connectionList(workspaceId.toString(), "all"))
+        // Use prefix deletion because the actual cache key appends filter and pagination
+        // params (":type:status:page:pageSize") that the invalidation site doesn't know.
+        // Pattern: connections:list:{workspaceId}:* — clears all env/filter/page combos.
+        cache.delByPrefix(CacheKeys.connectionList(workspaceId.toString(), "").dropLast(1))
     }
 }
 

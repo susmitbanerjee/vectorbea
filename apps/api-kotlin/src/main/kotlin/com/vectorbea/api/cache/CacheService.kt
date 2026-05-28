@@ -41,6 +41,13 @@ interface CacheService {
     fun del(key: String)
 
     /**
+     * Delete all entries whose key starts with [prefix].
+     * Uses SCAN+DEL in Redis — safe for large keyspaces (no KEYS command).
+     * No-op if no matching keys exist.
+     */
+    fun delByPrefix(prefix: String)
+
+    /**
      * Return the cached value for [key], or call [loader], cache the result,
      * and return it.  Uses a read-then-write pattern (no distributed lock here;
      * occasional double-writes on cold start are acceptable).

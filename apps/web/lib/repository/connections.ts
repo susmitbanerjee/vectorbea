@@ -66,7 +66,11 @@ export async function getConnections(filters?: {
     const res = await api<{ items: Connection[] } | Connection[]>(
       withWorkspace(`/api/connections${query ? `?${query}` : ""}`, workspaceId),
     );
-    const items = Array.isArray(res) ? res : (res as { items: Connection[] }).items ?? [];
+    const raw = Array.isArray(res) ? res : (res as { items: Connection[] }).items ?? [];
+    // Deduplicate by id — guards against stale cache returning items that were
+    // also present in a concurrent fresh response, or accidental DB duplicates.
+    const seen = new Set<string>();
+    const items = raw.filter((c) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
     return items.map(normalizeConnection);
   } catch {
     return [];

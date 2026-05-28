@@ -66,6 +66,24 @@ class RedisCacheService(
         }
     }
 
+    override fun delByPrefix(prefix: String) {
+        val nsPrefix = namespaced(prefix)
+        try {
+            // Use SCAN to avoid blocking Redis with KEYS on large keyspaces
+            var cursor = io.lettuce.core.ScanCursor.INITIAL
+            val scanArgs = io.lettuce.core.ScanArgs.Builder.matches("$nsPrefix*").limit(200)
+            do {
+                val result = redis.commands.scan(cursor, scanArgs)
+                if (result.keys.isNotEmpty()) {
+                    redis.commands.del(*result.keys.toTypedArray())
+                }
+                cursor = result
+            } while (!cursor.isFinished)
+        } catch (e: Exception) {
+            log.warn("[cache] DEL-BY-PREFIX failed for prefix={}: {}", nsPrefix, e.message)
+        }
+    }
+
     override fun <T : Any> getOrSet(key: String, ttlSeconds: Long, clazz: Class<T>, loader: () -> T): T {
         get(key, clazz)?.let { return it }
         val value = loader()
@@ -93,6 +111,7 @@ class NoOpCacheService : CacheService {
     override fun <T> get(key: String, clazz: Class<T>): T? { warnOnce(); return null }
     override fun set(key: String, value: Any, ttlSeconds: Long) { warnOnce() }
     override fun del(key: String) { warnOnce() }
+    override fun delByPrefix(prefix: String) { warnOnce() }
     override fun <T : Any> getOrSet(key: String, ttlSeconds: Long, clazz: Class<T>, loader: () -> T): T {
         warnOnce(); return loader()
     }
