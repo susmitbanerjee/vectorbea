@@ -29,7 +29,7 @@ private fun Approval.toResponse(): Map<String, Any?> = mapOf(
     "workflowId" to workflowId.toString(),
     "stepId" to stepId,
     "agentId" to agentId?.toString(),
-    "status" to status,
+    "status" to status.uppercase(),   // UI compares against "PENDING"/"APPROVED"/"REJECTED"
     "title" to title,
     "message" to message,
     "riskLevel" to riskLevel,
@@ -121,7 +121,7 @@ class ApprovalRoutes(
         val approval = repo.findById(id, ctx.workspaceId)
             ?: throw ApiError.NotFound("Approval")
 
-        if (approval.status != "pending") {
+        if (approval.status.lowercase() != "pending") {
             throw ApiError.ValidationError(
                 "Approval is already '${approval.status}' — cannot $decision"
             )

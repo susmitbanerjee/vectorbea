@@ -110,7 +110,8 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             add("r.workspace_id = ?")
             if (workflowId != null) add("a.workflow_id = ?")
             if (runId != null) add("a.run_id = ?")
-            if (status != null) add("a.status = ?")
+            // Case-insensitive: frontend sends PENDING/APPROVED; DB stores pending/approved
+            if (status != null) add("LOWER(a.status) = LOWER(?)")
         }
         val where = "WHERE ${filters.joinToString(" AND ")}"
         val bindBase: (java.sql.PreparedStatement) -> Unit = {
