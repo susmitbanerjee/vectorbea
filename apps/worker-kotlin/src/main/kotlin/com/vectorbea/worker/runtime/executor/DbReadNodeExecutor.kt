@@ -128,10 +128,11 @@ class DbReadNodeExecutor(
             }
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startMs
-            log.warn("[dbread] query failed [nodeId={}, durationMs={}]: {}",
-                node.id, durationMs, e.javaClass.simpleName)
+            // Include the DB error message (postgres errors are safe to log — no PII)
+            log.warn("[dbread] query failed [nodeId={}, durationMs={}]: {} — {}",
+                node.id, durationMs, e.javaClass.simpleName, e.message?.take(300))
             return NodeResult.Failed(
-                "DB_QUERY node '${node.id}': query execution failed: ${e.javaClass.simpleName}"
+                "DB_QUERY node '${node.id}': query failed: ${e.message?.take(300) ?: e.javaClass.simpleName}"
             )
         }
 

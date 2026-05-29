@@ -163,8 +163,8 @@ class ToolNodeExecutor(
             }
         }
     } catch (e: Exception) {
-        log.warn("[tool-executor] failed to load tool [toolId={}, workspaceId={}]: {}",
-            toolId, workspaceId, e.javaClass.simpleName)
+        log.warn("[tool-executor] failed to load tool [toolId={}, workspaceId={}]: {} — {}",
+            toolId, workspaceId, e.javaClass.simpleName, e.message?.take(200))
         null
     }
 
@@ -193,14 +193,50 @@ class ToolNodeExecutor(
         // Base from tool's stored config
         result.putAll(tool.configJson)
 
-        // Remap HTTP tool keys
+        // Remap HTTP tool keys.
+        // urlTemplate / bodyTemplate are the stored forms; HttpNodeExecutor reads "url" / "body".
         (tool.configJson["urlTemplate"] as? String)?.let { result["url"] = it }
-        (tool.configJson["bodyTemplate"] as? String)?.let { result["body"] = it }
+        (tool.configJson["url"] as? String)?.let { result["url"] = it }  // also accept plain "url"
+        // For body: prefer the bodyTemplate from config; if absent and there are resolved
+        // inputs, pass them as the body so POST tools receive their mapped parameters.
+        val bodyTemplate = tool.configJson["bodyTemplate"] as? String
+            ?: tool.configJson["body"] as? String
+        if (bodyTemplate != null) {
+            result["body"] = bodyTemplate
+        } else if (resolvedInputs.isNotEmpty() &&
+                   (tool.type == "http" || tool.type == "slack" || tool.type == "email")) {
+            // No explicit body template — pass resolved inputs as the JSON body
+            result["body"] = resolvedInputs
+        }
 
         // Remap DB tool keys
         (tool.configJson["sqlTemplate"] as? String)?.let {
             result["query"]     = it  // DbReadNodeExecutor reads "query"
             result["statement"] = it  // DbWriteNodeExecutor reads "statement"
+        }
+
+        // Resolve DB parameters: the tool's config_json stores a named parameter map
+        // (e.g. {"days_ahead": "{{input.days_ahead}}", "limit": "{{input.limit}}"})
+        // whose keys appear in insertion order matching $1, $2, ... in the SQL.
+        // DbReadNodeExecutor expects cfg["params"] as a positional List<Any?>, so we
+        // build that list by looking up each parameter name in resolvedInputs.
+        //
+        // Also fall back to resolvedInputs values in insertion order when the parameter
+        // map is absent — handles tools whose SQL has no explicit parameter declarations
+        // but whose input mapping populates resolvedInputs with the right values.
+        val toolParameters = tool.configJson["parameters"] as? Map<*, *>
+        if (toolParameters != null && toolParameters.isNotEmpty()) {
+            val paramList: List<Any?> = toolParameters.keys.map { key ->
+                // Look up the resolved value by parameter name first, then try the
+                // raw value from the tool config as a literal fallback.
+                resolvedInputs[key?.toString()] ?: toolParameters[key]
+            }
+            result["params"] = paramList
+        } else if (resolvedInputs.isNotEmpty() && result["params"] == null) {
+            // No explicit parameter map — pass all resolved inputs as an ordered list.
+            // This covers simple single-parameter queries where the only resolved input
+            // is the SQL's $1 value.
+            result["params"] = resolvedInputs.values.toList()
         }
 
         // Risk / approval from tool definition
