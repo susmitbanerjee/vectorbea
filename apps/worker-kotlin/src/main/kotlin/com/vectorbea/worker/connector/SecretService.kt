@@ -104,7 +104,13 @@ open class SecretService(
         }
 
         return try {
-            val combined = Base64.getDecoder().decode(base64Combined)
+            // The API stores ciphertext as base64url (URL-safe, no padding).
+            // Fall back to standard base64 for any legacy values.
+            val combined = try {
+                Base64.getUrlDecoder().decode(base64Combined.trim())
+            } catch (_: Exception) {
+                Base64.getDecoder().decode(base64Combined.trim())
+            }
             require(combined.size > IV_LENGTH) { "Encrypted value too short" }
 
             val iv         = combined.sliceArray(0 until IV_LENGTH)
@@ -123,20 +129,37 @@ open class SecretService(
         }
     }
 
+    /**
+     * Look up a secret from the `encrypted_secrets` table.
+     *
+     * The `connections.secret_ref` column stores the UUID primary key of
+     * `encrypted_secrets.id` (as a plain text UUID string).
+     *
+     * The stored ciphertext uses the API's versioned format:
+     *   `v{keyVersion}:{base64url(iv || ciphertext || authTag)}`
+     * This method strips the version prefix before returning, so the caller
+     * receives the raw base64url blob that [decrypt] expects.
+     */
     private fun lookupInTable(ref: String): String? =
         try {
             dataSource.connection.use { conn ->
                 conn.prepareStatement(
-                    "SELECT encrypted_value FROM connection_secrets WHERE ref = ?"
+                    "SELECT secret_ciphertext FROM encrypted_secrets WHERE id = ?::uuid"
                 ).use { stmt ->
                     stmt.setString(1, ref)
                     stmt.executeQuery().use { rs ->
-                        if (rs.next()) rs.getString("encrypted_value") else null
+                        if (!rs.next()) return@use null
+                        val raw = rs.getString("secret_ciphertext") ?: return@use null
+                        // Strip the versioned prefix "v1:", "v2:", etc. produced by
+                        // the API's Encryption.encrypt() before passing to decrypt().
+                        val colonIdx = raw.indexOf(':')
+                        if (colonIdx > 0 && raw.startsWith("v")) raw.substring(colonIdx + 1)
+                        else raw
                     }
                 }
             }
         } catch (e: Exception) {
-            log.warn("[secrets] Failed to look up secret ref: {}", e.message)
+            log.warn("[secrets] Failed to look up secret ref '{}': {}", ref.take(8), e.message)
             null
         }
 
