@@ -102,6 +102,8 @@ export interface RunTimelineEventUi {
   title: string;
   summary?: string;
   timestamp: string;
+  /** Node / step ID this event belongs to — maps to workflow canvas node IDs */
+  stepId?: string;
   startedAt?: string;
   finishedAt?: string;
   durationMs?: number;

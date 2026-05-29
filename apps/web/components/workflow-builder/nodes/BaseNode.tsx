@@ -23,7 +23,7 @@ interface BaseNodeProps {
   compact?: boolean;
 }
 
-// Inject wfNodeSpin keyframe once into <head>
+// Inject animation keyframes once into <head>
 let _nodeAnimInjected = false;
 function useNodeAnimCSS() {
   useEffect(() => {
@@ -35,9 +35,66 @@ function useNodeAnimCSS() {
         from { transform: rotate(0deg); }
         to   { transform: rotate(360deg); }
       }
+      @keyframes wfArcSpin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+      @keyframes wfArcDash {
+        0%   { stroke-dashoffset: 56; }
+        50%  { stroke-dashoffset: 0; }
+        100% { stroke-dashoffset: -56; }
+      }
     `;
     document.head.appendChild(el);
   }, []);
+}
+
+/** Circular arrow spinner — renders as an SVG arc that rotates over the icon badge */
+function RunningSpinner({ size }: { size: number }) {
+  const r = size / 2 - 3;          // radius leaving 3px gap from edge
+  const circ = 2 * Math.PI * r;    // full circumference
+  return (
+    <svg
+      aria-hidden
+      width={size + 8}
+      height={size + 8}
+      viewBox={`0 0 ${size + 8} ${size + 8}`}
+      className="pointer-events-none absolute"
+      style={{
+        top: -4, left: -4,
+        animation: "wfArcSpin 1s linear infinite",
+        zIndex: 20,
+      }}
+    >
+      {/* Track ring (faint) */}
+      <circle
+        cx={(size + 8) / 2}
+        cy={(size + 8) / 2}
+        r={r}
+        fill="none"
+        stroke="rgba(59,130,246,0.15)"
+        strokeWidth={2.5}
+      />
+      {/* Animated arc */}
+      <circle
+        cx={(size + 8) / 2}
+        cy={(size + 8) / 2}
+        r={r}
+        fill="none"
+        stroke="rgba(59,130,246,0.9)"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        strokeDasharray={`${circ * 0.28} ${circ * 0.72}`}
+        strokeDashoffset={0}
+        style={{ filter: "drop-shadow(0 0 3px rgba(59,130,246,0.7))" }}
+      />
+      {/* Arrow-head at arc end */}
+      <polygon
+        points={`${(size + 8) / 2 + r - 1},${ (size + 8) / 2 - 5} ${(size + 8) / 2 + r + 4},${(size + 8) / 2} ${(size + 8) / 2 + r - 1},${(size + 8) / 2 + 5}`}
+        fill="rgba(59,130,246,0.9)"
+      />
+    </svg>
+  );
 }
 
 function StatusDot({ status }: { status?: string }) {
@@ -97,31 +154,16 @@ export const BaseNode = memo(function BaseNode({
           : "0 2px 8px rgba(0,0,0,0.3)",
       }}
     >
-      {/* Running animation — spinning conic gradient ring */}
+      {/* Running animation — pulsing border glow (no conic ring needed; spinner is on the icon) */}
       {status === "running" && (
-        <>
-          {/* Outer spinning arc */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute rounded-[13px]"
-            style={{
-              inset: -2,
-              background: "conic-gradient(from 0deg, transparent 60%, rgba(59,130,246,0.85) 100%)",
-              animation: "wfNodeSpin 1.2s linear infinite",
-              zIndex: 0,
-            }}
-          />
-          {/* Inner card background to mask the ring (keeps content readable) */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute rounded-[11px]"
-            style={{
-              inset: 1,
-              background: "hsl(var(--card, 220 13% 9%))",
-              zIndex: 0,
-            }}
-          />
-        </>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-xl"
+          style={{
+            boxShadow: "0 0 0 2px rgba(59,130,246,0.5), 0 0 20px rgba(59,130,246,0.15)",
+            zIndex: 0,
+          }}
+        />
       )}
 
       {/* Status ring / dot */}
@@ -131,16 +173,19 @@ export const BaseNode = memo(function BaseNode({
       <div className={cn("relative z-10 px-3", compact ? "py-2.5" : "py-3")}>
         {/* Header row */}
         <div className="flex items-center gap-2.5">
-          {/* Icon badge */}
+          {/* Icon badge — circular arrow spinner overlaid when running */}
           <span
-            className="relative flex shrink-0 items-center justify-center rounded-lg overflow-hidden"
+            className="relative flex shrink-0 items-center justify-center rounded-lg overflow-visible"
             style={{
               width: compact ? 28 : 32,
               height: compact ? 28 : 32,
               background: ProviderIcon ? "transparent" : meta.bgColor,
-              border: ProviderIcon ? "none" : `1px solid ${meta.borderColor}`,
+              border: ProviderIcon ? "none" : `1px solid ${status === "running" ? "rgba(59,130,246,0.4)" : meta.borderColor}`,
             }}
           >
+            {status === "running" && (
+              <RunningSpinner size={compact ? 28 : 32} />
+            )}
             {ProviderIcon ? (
               <ProviderIcon size={compact ? 28 : 32} />
             ) : (

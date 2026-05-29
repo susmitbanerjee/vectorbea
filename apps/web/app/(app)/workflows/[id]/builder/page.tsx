@@ -56,6 +56,8 @@ import {
   getWorkflowGraph,
   triggerWorkflow,
   updateWorkflow,
+  getRun,
+  getRunTimeline,
 } from "@/lib/repository";
 import { validateWorkflowGraph } from "@/lib/workflows/workflow-validation";
 import { WORKFLOW_TEMPLATES } from "@/lib/workflows/workflow-templates";
@@ -200,12 +202,89 @@ export default function WorkflowBuilderPage() {
   const [testRunning, setTestRunning] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
 
+  // ── Live run mode ────────────────────────────────────────────────────────────
+  const [activeRunId, setActiveRunId]     = useState<string | null>(null);
+  const [liveRunStatus, setLiveRunStatus] = useState<string>("idle");
+  const liveRunRef = useRef<NodeJS.Timeout | null>(null);
+
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<WFNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<WFEdgeData>>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+
+  // ── Live run: poll events → update node previewStatus on canvas ─────────────
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    // Map run-event types → node previewStatus
+    // Use `string` cast since worker emits types not in the frontend TimelineEventType union
+    function applyEvents(events: import("@/types/agent-run-ui").RunTimelineEventUi[]) {
+      const statusMap: Record<string, WFNodeData["previewStatus"]> = {};
+      for (const ev of events) {
+        const sid = ev.stepId;
+        if (!sid) continue;
+        const t = ev.type as string;
+        if (["STEP_SCHEDULED"].includes(t))
+          statusMap[sid] = "idle";
+        else if (["STEP_STARTED","INPUT_MAPPING_STARTED","TOOL_CALL_STARTED",
+                  "LLM_CALL_STARTED","AGENT_STARTED","DB_QUERY_STARTED",
+                  "HTTP_REQUEST_STARTED","PARALLEL_STARTED","TRANSFORM_STARTED"].includes(t))
+          statusMap[sid] = "running";
+        else if (["STEP_COMPLETED","AGENT_COMPLETED","LLM_CALL_COMPLETED",
+                  "TOOL_CALL_COMPLETED","DB_QUERY_COMPLETED","HTTP_REQUEST_COMPLETED",
+                  "TRANSFORM_COMPLETED","JOIN_COMPLETED","HTTP_CALL_COMPLETED"].includes(t))
+          statusMap[sid] = "succeeded";
+        else if (["STEP_FAILED","AGENT_FAILED","TOOL_CALL_FAILED",
+                  "NODE_TYPE_UNSUPPORTED","LLM_CALL_FAILED","HTTP_CALL_FAILED"].includes(t))
+          statusMap[sid] = "failed";
+        else if (["APPROVAL_REQUESTED"].includes(t))
+          statusMap[sid] = "waiting";
+        else if (["STEP_SKIPPED"].includes(t))
+          statusMap[sid] = "skipped";
+      }
+      setNodes((nds) =>
+        nds.map((n) => {
+          const newStatus = statusMap[n.id];
+          if (!newStatus || n.data.previewStatus === newStatus) return n;
+          return { ...n, data: { ...n.data, previewStatus: newStatus } };
+        })
+      );
+    }
+
+    async function pollOnce() {
+      try {
+        const [run, events] = await Promise.all([
+          getRun(activeRunId!),
+          getRunTimeline(activeRunId!),
+        ]);
+        if (run) setLiveRunStatus(run.status);
+        applyEvents(events);
+        // Stop polling when run reaches terminal state
+        const terminal = ["succeeded", "failed", "cancelled", "timed_out"];
+        if (run && terminal.includes(run.status)) {
+          stopLiveRun(false); // keep status visible, just stop polling
+        }
+      } catch { /* ignore transient errors */ }
+    }
+
+    void pollOnce();
+    liveRunRef.current = setInterval(() => void pollOnce(), 2500);
+    return () => { if (liveRunRef.current) clearInterval(liveRunRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRunId]);
+
+  function stopLiveRun(resetStatuses = true) {
+    if (liveRunRef.current) clearInterval(liveRunRef.current);
+    setActiveRunId(null);
+    if (resetStatuses) {
+      setLiveRunStatus("idle");
+      setNodes((nds) =>
+        nds.map((n) => ({ ...n, data: { ...n.data, previewStatus: "idle" as const } }))
+      );
+    }
+  }
 
   // ── Load ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -402,7 +481,7 @@ export default function WorkflowBuilderPage() {
     toast.success("Test run complete — check node statuses on canvas.");
   }
 
-  // ── Run Workflow ─────────────────────────────────────────────────────────────
+  // ── Run Workflow — stays on canvas, animates nodes live ─────────────────────
   async function handleRun() {
     if (!workflow) return;
     setRunning(true);
@@ -411,24 +490,16 @@ export default function WorkflowBuilderPage() {
       const run = await triggerWorkflow(workflow.id, {});
       const runId = run.runId;
       if (!runId) {
-        toast.error("Workflow triggered but run ID was not returned. Check the runs list.");
-        window.location.href = "/runs";
+        toast.error("Workflow triggered but run ID was not returned.");
         return;
       }
-
-      toast.success("Workflow started.");
-
-      // Preserve the org/workspaceId query param so the run page can load immediately
-      const orgParam =
-        new URLSearchParams(window.location.search).get("org") ??
-        new URLSearchParams(window.location.search).get("workspaceId") ??
-        "";
-      const runUrl = orgParam
-        ? `/runs/${runId}?org=${encodeURIComponent(orgParam)}`
-        : `/runs/${runId}`;
-
-      // Hard navigate — bypasses Next.js typed-route enforcement that can mangle dynamic segments
-      window.location.href = runUrl;
+      // Reset all nodes to idle, then start live polling
+      setNodes((nds) =>
+        nds.map((n) => ({ ...n, data: { ...n.data, previewStatus: "idle" as const } }))
+      );
+      setLiveRunStatus("queued");
+      setActiveRunId(runId);
+      toast.success("Workflow started — watch nodes animate live on the canvas.");
     } catch {
       toast.error("Failed to start workflow.");
     } finally {
@@ -520,20 +591,58 @@ export default function WorkflowBuilderPage() {
             Test
           </button>
 
-          {/* Run */}
-          <button
-            type="button"
-            onClick={() => void handleRun()}
-            disabled={saving || running}
-            className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-          >
-            {running ? (
-              <RefreshCw className="h-3 w-3 animate-spin" />
-            ) : (
-              <Play className="h-3 w-3" />
-            )}
-            Run Workflow
-          </button>
+          {/* Run / Live controls */}
+          {activeRunId ? (
+            <div className="flex items-center gap-2">
+              {/* Live status pill */}
+              <span className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                liveRunStatus === "running"  && "bg-blue-50 text-blue-700 border border-blue-200",
+                liveRunStatus === "queued"   && "bg-slate-100 text-slate-600 border border-slate-200",
+                liveRunStatus === "succeeded"&& "bg-emerald-50 text-emerald-700 border border-emerald-200",
+                liveRunStatus === "failed"   && "bg-red-50 text-red-700 border border-red-200",
+                liveRunStatus === "waiting_for_approval" && "bg-amber-50 text-amber-700 border border-amber-200",
+              )}>
+                {(liveRunStatus === "running" || liveRunStatus === "queued") && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                )}
+                {liveRunStatus === "waiting_for_approval" && <ShieldCheck className="h-3 w-3" />}
+                {liveRunStatus === "succeeded" && <CheckCircle2 className="h-3 w-3" />}
+                {liveRunStatus.charAt(0).toUpperCase() + liveRunStatus.slice(1).replace(/_/g, " ")}
+              </span>
+              {/* View full run */}
+              <a
+                href={`/runs/${activeRunId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                Full run →
+              </a>
+              {/* Stop live view */}
+              <button
+                type="button"
+                onClick={() => stopLiveRun(true)}
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                ✕ Stop
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleRun()}
+              disabled={saving || running}
+              className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+            >
+              {running ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : (
+                <Play className="h-3 w-3" />
+              )}
+              Run Workflow
+            </button>
+          )}
         </div>
       </div>
 
