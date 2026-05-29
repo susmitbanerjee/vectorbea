@@ -116,9 +116,11 @@ export default function RunDetailPage() {
   const [forcePausedPending, setForcePausedPending] = useState(false);
   const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
   const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
-  /** true while SSE connection is active — disables fallback polling */
+  /** true while SSE connection is healthy — used to avoid double-open only */
   const [sseActive, setSseActive] = useState(false);
   const sseCloseRef = useRef<(() => void) | null>(null);
+  /** consecutive SSE error count — fall back to polling-only after threshold */
+  const sseErrorCountRef = useRef(0);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!id || id === "undefined") {
@@ -174,28 +176,37 @@ export default function RunDetailPage() {
     const environmentId =
       new URLSearchParams(window.location.search).get("environmentId") ?? "";
 
+    sseErrorCountRef.current = 0;
+
     const close = streamRunEvents(id, workspaceId, environmentId, {
       onEvent: () => {
         // A new event arrived — silently reload to pick up status changes
+        sseErrorCountRef.current = 0;
         void load({ silent: true });
       },
       onComplete: () => {
-        // Run reached terminal state
+        // Run reached terminal state — do a final load then stop SSE
         void load({ silent: true });
         setSseActive(false);
         sseCloseRef.current = null;
       },
       onHeartbeat: () => {
-        // keep-alive — no action needed
+        sseErrorCountRef.current = 0;
       },
       onUnavailable: () => {
-        // Redis unavailable — fall back to polling
+        // Redis/SSE unavailable — polling covers it
         setSseActive(false);
         sseCloseRef.current = null;
       },
       onError: () => {
-        // EventSource auto-reconnects on transient errors
-        // Only mark SSE as inactive if it actually closes
+        // Count consecutive errors. After 3 failures with no successful event,
+        // treat SSE as unavailable and let polling take over.
+        sseErrorCountRef.current += 1;
+        if (sseErrorCountRef.current >= 3) {
+          setSseActive(false);
+          sseCloseRef.current = null;
+          close();
+        }
       },
     });
 
@@ -209,16 +220,19 @@ export default function RunDetailPage() {
     };
   }, [id, model?.run.status]);
 
-  // ── Fallback polling (only when SSE is not active) ─────────────────────────
+  // ── Polling for live runs ──────────────────────────────────────────────────
+  // Always poll every 4 s while the run is live, regardless of SSE state.
+  // SSE provides faster real-time pushes when available; polling is the
+  // guaranteed baseline that works even when the SSE endpoint is absent.
+  // The status string is the only dep needed — avoids re-creating the interval
+  // on every silent load (which would reset the 4 s countdown each time).
+  const runStatus = model?.run.status;
   useEffect(() => {
-    if (!model) return;
-    const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
+    const live = runStatus && ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(runStatus);
     if (!live) return;
-    // Don't poll if SSE is active — SSE already covers live updates
-    if (sseActive) return;
     const interval = setInterval(() => void load({ silent: true }), 4000);
     return () => clearInterval(interval);
-  }, [model, load, sseActive]);
+  }, [runStatus, load]);
 
 
   // ── Local approval handlers ────────────────────────────────────────────────

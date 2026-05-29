@@ -79,13 +79,25 @@ class ToolNodeExecutor(
         val result: NodeResult = when (tool.type) {
             "http" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
+            // "database" is the canonical type in the tools table (see V001 migration).
+            // Distinguish read vs write by inspecting the first keyword of the SQL statement —
+            // SELECT = read-only path; INSERT/UPDATE/DELETE/MERGE/UPSERT = write path.
+            "database" -> {
+                val sql = (tool.configJson["sqlTemplate"] as? String ?: "").trimStart()
+                val firstWord = sql.split(Regex("\\s+"), limit = 2).firstOrNull()?.uppercase() ?: ""
+                if (firstWord == "SELECT") {
+                    dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
+                } else {
+                    dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
+                }
+            }
+
             "database_read" -> dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
             "database_write" -> dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
             "slack", "email", "crm" -> {
                 // Slack/Email/CRM tools are stored as HTTP tools under the hood
-                // (the frontend sends them to the same HTTP infrastructure)
                 httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
             }
 
