@@ -123,8 +123,8 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
     <div className="min-h-screen bg-background text-foreground">
       <div className="grid min-h-screen lg:grid-cols-[1fr_480px]">
 
-        {/* ── Left panel — dark infra preview ───────────────────────────── */}
-        <section className="relative hidden border-r border-border bg-[#050812] lg:flex">
+        {/* ── Left panel — dark infra preview (always dark, explicit light colors) ── */}
+        <section className="relative hidden border-r border-white/[0.06] bg-[#050812] lg:flex">
           {/* Subtle grid */}
           <div className="absolute inset-0 opacity-30"
             style={{
@@ -138,26 +138,26 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
           <div className="relative flex h-full w-full flex-col px-10 py-10 xl:px-14 xl:py-12">
             {/* Logo */}
             <Link href="/" className="inline-flex w-fit items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card shadow-sm">
-                <BeeLogo className="h-4 w-4" />
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 shadow-sm">
+                <BeeLogo className="h-4 w-4 text-white" />
               </span>
-              <span className="text-sm font-semibold tracking-tight text-foreground">Vectorbee</span>
+              <span className="text-sm font-semibold tracking-tight text-white/90">Vectorbee</span>
             </Link>
 
             <div className="my-auto max-w-lg space-y-8">
               {/* Tag */}
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/80">
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-400/80">
                 Production control plane for AI agent jobs
               </p>
 
               {/* Headline */}
-              <h1 className="text-balance text-[2.25rem] font-semibold leading-[1.1] tracking-tight text-foreground">
+              <h1 className="text-balance text-[2.25rem] font-semibold leading-[1.1] tracking-tight text-white">
                 {mode === "signin"
                   ? "Operate AI agent jobs with confidence."
                   : "Start running AI jobs safely."}
               </h1>
 
-              <p className="text-[0.9375rem] leading-7 text-muted-foreground">
+              <p className="text-[0.9375rem] leading-7 text-white/60">
                 {mode === "signin"
                   ? "Schedule, inspect, retry, and approve long-running AI agent jobs — with complete execution traceability."
                   : "Create your workspace and monitor AI agent automations with approvals, retries, budgets, and audit logs."}
@@ -167,18 +167,18 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
               <ul className="space-y-2.5">
                 {benefits.map((item) => (
                   <li key={item} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/15">
-                      <Check className="h-2.5 w-2.5 text-primary" />
+                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-sky-400/15">
+                      <Check className="h-2.5 w-2.5 text-sky-400" />
                     </span>
-                    <span className="text-sm leading-6 text-muted-foreground">{item}</span>
+                    <span className="text-sm leading-6 text-white/60">{item}</span>
                   </li>
                 ))}
               </ul>
 
               {/* Execution timeline preview */}
-              <div className="rounded-xl border border-border bg-card/60 p-4 backdrop-blur-sm">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                  <p className="font-mono text-[9px] font-semibold uppercase tracking-widest text-white/30">
                     Customer Renewal Intelligence · Run #47
                   </p>
                   <span className="inline-flex items-center gap-1.5 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-emerald-400">
@@ -191,18 +191,18 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
                     <div key={e.type} className="flex items-center gap-2.5">
                       <div className="flex flex-col items-center">
                         <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", e.dot)} />
-                        {i < PREVIEW_EVENTS.length - 1 && <div className="mt-1 h-3 w-px bg-border/60" />}
+                        {i < PREVIEW_EVENTS.length - 1 && <div className="mt-1 h-3 w-px bg-white/10" />}
                       </div>
-                      <span className="min-w-[96px] font-mono text-[9px] text-muted-foreground/50">{e.type}</span>
-                      <span className="flex-1 truncate text-[11px] text-muted-foreground">{e.label}</span>
-                      <span className="font-mono text-[9px] text-muted-foreground/40">{e.time}</span>
+                      <span className="min-w-[96px] font-mono text-[9px] text-white/25">{e.type}</span>
+                      <span className="flex-1 truncate text-[11px] text-white/55">{e.label}</span>
+                      <span className="font-mono text-[9px] text-white/25">{e.time}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Stat strip */}
-              <div className="flex items-center gap-6 border-t border-border/50 pt-5">
+              <div className="flex items-center gap-6 border-t border-white/10 pt-5">
                 {[
                   { icon: Zap, label: "12,480 tokens" },
                   { icon: Clock, label: "2m 38s duration" },
@@ -210,8 +210,8 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
                   { icon: GitBranch, label: "5 agents" },
                 ].map(({ icon: Icon, label }) => (
                   <div key={label} className="flex items-center gap-1.5">
-                    <Icon className="h-3 w-3 text-muted-foreground/40" />
-                    <span className="text-[11px] text-muted-foreground/60">{label}</span>
+                    <Icon className="h-3 w-3 text-white/25" />
+                    <span className="text-[11px] text-white/40">{label}</span>
                   </div>
                 ))}
               </div>

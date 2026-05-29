@@ -41,10 +41,10 @@ const STATUS: Record<TimelineEventStatus, {
   },
   RUNNING: {
     dot: "bg-blue-500 animate-pulse",
-    border: "border-[#BFDBFE]",
-    bg: "bg-[#EFF6FF]",
+    border: "border-blue-200",
+    bg: "bg-blue-50",
     label: "Running",
-    text: "text-[#1D4ED8]",
+    text: "text-blue-700",
     icon: <Timer className="h-3 w-3" />,
   },
   WAITING: {
@@ -56,27 +56,27 @@ const STATUS: Record<TimelineEventStatus, {
     icon: <Clock className="h-3 w-3" />,
   },
   PENDING: {
-    dot: "bg-[#9CA3AF]",
+    dot: "bg-slate-400",
     border: "border-border",
-    bg: "bg-[#F9FAFB]",
+    bg: "bg-muted/30",
     label: "Pending",
-    text: "text-[#6B7280]",
+    text: "text-muted-foreground",
     icon: <Clock className="h-3 w-3" />,
   },
   CANCELLED: {
-    dot: "bg-[#D1D5DB]",
+    dot: "bg-slate-300",
     border: "border-border",
-    bg: "bg-[#F9FAFB]",
+    bg: "bg-muted/20",
     label: "Cancelled",
-    text: "text-[#6B7280]",
+    text: "text-muted-foreground",
     icon: <XCircle className="h-3 w-3" />,
   },
   SKIPPED: {
-    dot: "bg-[#E5E7EB]",
+    dot: "bg-slate-200",
     border: "border-border",
-    bg: "bg-white",
+    bg: "bg-background",
     label: "Skipped",
-    text: "text-[#9CA3AF]",
+    text: "text-muted-foreground/70",
     icon: <Clock className="h-3 w-3" />,
   },
 };
@@ -177,18 +177,11 @@ export function FlowTab({ agents, timelineEvents }: FlowTabProps) {
 
       {/* Run start node */}
       <div className="flex flex-col items-center">
-        <div
-          className="flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-medium"
-          style={{
-            background: "rgba(56,189,248,0.08)",
-            border: "1px solid rgba(56,189,248,0.18)",
-            color: "#2563EB",
-          }}
-        >
+        <div className="flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-medium text-blue-700">
           <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
           RUN START
         </div>
-        <div className="h-4 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
+        <div className="h-4 w-px bg-border" />
       </div>
 
       {/* Agent nodes */}
@@ -207,15 +200,8 @@ export function FlowTab({ agents, timelineEvents }: FlowTabProps) {
 
       {/* Run end node */}
       <div className="flex flex-col items-center">
-        <div className="h-4 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
-        <div
-          className="flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-medium"
-          style={{
-            background: "rgba(16,185,129,0.08)",
-            border: "1px solid rgba(16,185,129,0.2)",
-            color: "#10B981",
-          }}
-        >
+        <div className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-medium text-emerald-700">
           <CheckCircle2 className="h-3 w-3" />
           RUN COMPLETE
         </div>
@@ -244,29 +230,16 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
         {/* Header */}
         <div
           className="flex items-center justify-between gap-3 px-4 py-3"
-          style={{ borderBottom: "1px solid rgba(148,163,184,0.08)" }}
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
         >
           <div className="flex items-center gap-3">
             {/* Index bubble */}
-            <div
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-bold"
-              style={{
-                background: "rgba(139,92,246,0.15)",
-                border: "1px solid rgba(139,92,246,0.25)",
-                color: "#A78BFA",
-              }}
-            >
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-violet-100 font-mono text-[10px] font-bold text-violet-600">
               {index + 1}
             </div>
             {/* Agent icon */}
-            <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-              style={{
-                background: "rgba(139,92,246,0.1)",
-                border: "1px solid rgba(139,92,246,0.2)",
-              }}
-            >
-              <Bot className="h-3.5 w-3.5" style={{ color: "#A78BFA" }} />
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50">
+              <Bot className="h-3.5 w-3.5 text-violet-500" />
             </div>
             <div>
               <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
@@ -302,14 +275,14 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
           <div className="px-4 pb-1">
             <div
               className="h-0.5 w-full overflow-hidden rounded-full"
-              style={{ background: "rgba(148,163,184,0.08)" }}
+              style={{ background: "var(--border-subtle)" }}
             >
               <div
                 className="h-full rounded-full transition-all"
                 style={{
                   width: `${durationPct}%`,
-                  background: agent.status === "FAILED" ? "#EF4444" :
-                    agent.status === "WAITING" ? "#D97706" : "#2563EB",
+                  background: agent.status === "FAILED" ? "var(--status-failure)" :
+                    agent.status === "WAITING" ? "var(--status-waiting)" : "var(--status-running)",
                 }}
               />
             </div>
@@ -368,33 +341,27 @@ function HandoffConnector({ handoffTo, handoffAt, label }: {
 }) {
   return (
     <div className="flex flex-col items-center gap-0.5 py-1 w-full max-w-2xl">
-      <div className="h-3 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
-      <div
-        className="flex items-center gap-2 self-stretch rounded-lg px-3 py-2"
-        style={{
-          background: "rgba(34,211,238,0.04)",
-          border: "1px solid rgba(34,211,238,0.12)",
-        }}
-      >
-        <ArrowDown className="h-3 w-3 shrink-0" style={{ color: "#0891B2" }} />
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#0891B2" }}>
+      <div className="h-3 w-px bg-border" />
+      <div className="flex items-center gap-2 self-stretch rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2">
+        <ArrowDown className="h-3 w-3 shrink-0 text-cyan-600" />
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-cyan-700">
           AGENT HANDOFF
         </span>
         {handoffTo && (
           <>
-            <span style={{ color: "rgba(148,163,184,0.4)" }}>→</span>
-            <span className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>
+            <span className="text-muted-foreground/40">→</span>
+            <span className="font-mono text-[11px] text-muted-foreground">
               {handoffTo}
             </span>
           </>
         )}
         {handoffAt && (
-          <span className="ml-auto font-mono text-[10px]" style={{ color: "var(--text-faint)" }}>
+          <span className="ml-auto font-mono text-[10px] text-muted-foreground/60">
             {new Date(handoffAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </span>
         )}
       </div>
-      <div className="h-3 w-px" style={{ background: "rgba(148,163,184,0.15)" }} />
+      <div className="h-3 w-px bg-border" />
     </div>
   );
 }

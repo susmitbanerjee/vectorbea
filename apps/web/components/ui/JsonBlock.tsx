@@ -24,7 +24,7 @@ export function JsonBlock({ value, maxHeight = 320, className, label }: JsonBloc
   }
 
   return (
-    <div className={cn("relative rounded-lg border border-border/50 bg-[#0f0f0f] dark:bg-[#0a0a0a]", className)}>
+    <div className={cn("relative rounded-lg border border-border/50 bg-[#0f0f0f]", className)}>
       {label && (
         <div className="flex items-center justify-between border-b border-border/30 px-3 py-1.5">
           <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">

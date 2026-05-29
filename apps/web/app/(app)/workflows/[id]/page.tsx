@@ -40,20 +40,32 @@ function StepTypeBadge({ type }: { type: string }) {
 }
 
 function RunStatusDot({ status }: { status: AgentRun["status"] }) {
-  const colors: Record<string, string> = {
+  const dot: Record<string, string> = {
     succeeded: "bg-emerald-500",
     failed: "bg-red-500",
     running: "bg-blue-500 animate-pulse",
     waiting_for_approval: "bg-amber-500",
-    queued: "bg-[#9CA3AF]",
-    cancelled: "bg-[#D1D5DB]",
+    queued: "bg-slate-400",
+    cancelled: "bg-slate-300",
     timed_out: "bg-orange-500",
     paused: "bg-amber-400",
   };
+  const label: Record<string, string> = {
+    succeeded: "text-emerald-700",
+    failed: "text-red-600",
+    running: "text-blue-600",
+    waiting_for_approval: "text-amber-700",
+    queued: "text-slate-500",
+    cancelled: "text-slate-400",
+    timed_out: "text-orange-600",
+    paused: "text-amber-600",
+  };
   return (
     <span className="flex items-center gap-1.5">
-      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", colors[status] ?? "bg-slate-400")} />
-      <span className="text-[12px] capitalize text-muted-foreground">{status.replace(/_/g, " ")}</span>
+      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot[status] ?? "bg-slate-400")} />
+      <span className={cn("text-[12px] capitalize font-medium", label[status] ?? "text-slate-500")}>
+        {status.replace(/_/g, " ")}
+      </span>
     </span>
   );
 }
@@ -326,7 +338,7 @@ export default function WorkflowDetailPage() {
                 className="flex items-center gap-4 px-5 py-3 hover:bg-muted/20 transition-colors"
               >
                 <RunStatusDot status={run.status} />
-                <span className="font-mono text-[11px] text-muted-foreground/60">{run.id.slice(0, 14)}…</span>
+                <span className="font-mono text-[11px] text-muted-foreground">{run.id.slice(0, 14)}…</span>
                 <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto">
                   <Clock className="h-3 w-3" />
                   {run.durationMs ? `${(run.durationMs / 1000).toFixed(0)}s` : "—"}

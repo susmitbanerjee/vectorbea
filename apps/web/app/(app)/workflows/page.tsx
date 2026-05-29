@@ -58,7 +58,7 @@ function modeBadge(mode: Workflow["creationMode"]) {
 }
 
 function runStatusDot(status: Workflow["lastRunStatus"]) {
-  if (!status) return <span style={{ fontSize: 13, color: "#D1D5DB" }}>—</span>;
+  if (!status) return <span style={{ fontSize: 13, color: "#9CA3AF" }}>—</span>;
   const colors: Record<string, string> = {
     succeeded: "bg-emerald-500",
     failed: "bg-red-500",
@@ -284,7 +284,7 @@ export default function WorkflowsPage() {
                           {Math.round((wf.successRate ?? 0) * 100)}%
                         </span>
                       ) : (
-                        <span style={{ fontSize: 13, color: "#D1D5DB" }}>—</span>
+                        <span style={{ fontSize: 13, color: "#9CA3AF" }}>—</span>
                       )}
                     </td>
 
