@@ -261,7 +261,7 @@ export default function WorkflowsPage() {
                     <td className="px-4 py-3">
                       <span className="flex items-center gap-1" style={{ fontSize: 13, color: "#6B7280" }}>
                         <Bot className="h-3.5 w-3.5 shrink-0" />
-                        {wf.agentIds.length}
+                        {(wf.agentIds ?? []).length}
                       </span>
                     </td>
 
@@ -269,7 +269,7 @@ export default function WorkflowsPage() {
                     <td className="px-4 py-3">
                       <span className="flex items-center gap-1" style={{ fontSize: 13, color: "#6B7280" }}>
                         <Wrench className="h-3.5 w-3.5 shrink-0" />
-                        {wf.toolIds.length}
+                        {(wf.toolIds ?? []).length}
                       </span>
                     </td>
 
@@ -278,10 +278,10 @@ export default function WorkflowsPage() {
 
                     {/* Success rate */}
                     <td className="px-4 py-3">
-                      {wf.totalRuns > 0 ? (
-                        <span className={cn("font-mono", wf.successRate >= 0.9 ? "text-emerald-700" : wf.successRate >= 0.7 ? "text-amber-700" : "text-red-700")}
+                      {(wf.totalRuns ?? 0) > 0 ? (
+                        <span className={cn("font-mono", (wf.successRate ?? 0) >= 0.9 ? "text-emerald-700" : (wf.successRate ?? 0) >= 0.7 ? "text-amber-700" : "text-red-700")}
                           style={{ fontSize: 13 }}>
-                          {Math.round(wf.successRate * 100)}%
+                          {Math.round((wf.successRate ?? 0) * 100)}%
                         </span>
                       ) : (
                         <span style={{ fontSize: 13, color: "#D1D5DB" }}>—</span>
