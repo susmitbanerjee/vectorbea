@@ -1,3 +1,4 @@
+// Worker service — Kotlin workflow execution engine
 plugins {
     kotlin("jvm") version "2.1.20"
     application
