@@ -164,4 +164,14 @@ abstract class BaseRepository(protected val dataSource: DataSource) {
         setTimestamp(index, Timestamp.from(instant))
     protected fun PreparedStatement.setInstantOrNull(index: Int, instant: Instant?) =
         if (instant != null) setTimestamp(index, Timestamp.from(instant)) else setNull(index, java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+
+    /**
+     * Sets a TEXT[] array parameter.
+     * [PreparedStatement.connection] is used to create the SQL Array because
+     * [java.sql.Array] instances must be created from [java.sql.Connection],
+     * not directly from [PreparedStatement].
+     */
+    protected fun PreparedStatement.setTextArray(index: Int, values: List<String>) {
+        setArray(index, connection.createArrayOf("text", values.toTypedArray()))
+    }
 }
