@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.1.20"
     application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = "com.vectorbea"
@@ -50,23 +51,25 @@ tasks.test {
     useJUnitPlatform()
 }
 
-// ── Fat jar (no Shadow plugin needed) ─────────────────────────────────────────
-// Bundles all runtime dependencies into a single executable jar.
-// Used by Dockerfile: `java -jar build/libs/vectorbea-api-all.jar`
-tasks.register<Jar>("fatJar") {
-    group = "build"
-    description = "Assembles an executable fat jar with all runtime dependencies"
+// ── Fat jar via Shadow — merges META-INF/services/* correctly ─────────────────
+// DuplicatesStrategy.INCLUDE silently overwrites service-loader files, which
+// causes Flyway's PostgreSQL database-type provider to disappear and Flyway to
+// report "Unsupported Database" even for well-supported PostgreSQL versions.
+// Shadow's mergeServiceFiles() appends all service declarations correctly.
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
     archiveClassifier = "all"
-    manifest {
-        attributes["Main-Class"] = "com.vectorbea.api.MainKt"
-    }
-    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
-    from(sourceSets.main.get().output)
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    mergeServiceFiles()   // ← critical: merges META-INF/services/* from all jars
+}
+
+// Keep a "fatJar" alias so the Dockerfile's `gradle fatJar` command still works
+tasks.register("fatJar") {
+    group = "build"
+    description = "Alias for shadowJar — assembles fat jar with merged service files"
+    dependsOn("shadowJar")
 }
 
 tasks.named("assemble") {
-    dependsOn("fatJar")
+    dependsOn("shadowJar")
 }
 
 // ── Run task tuning ───────────────────────────────────────────────────────────
