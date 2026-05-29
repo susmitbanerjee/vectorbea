@@ -443,9 +443,17 @@ function ParallelConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WF
 function JoinConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeData) => void }) {
   const cfg: JoinNodeConfig = data.joinConfig ?? { joinPolicy: "wait_all" };
   function set(patch: Partial<JoinNodeConfig>) { onChange({ ...data, joinConfig: { ...cfg, ...patch } }); }
+
+  // Output mapping stored as an extension on joinConfig
+  const outputMapping = (cfg as JoinNodeConfig & { outputMapping?: Record<string, string> }).outputMapping ?? {};
+  function setOutputMapping(m: Record<string, string>) {
+    set({ ...(cfg as JoinNodeConfig & { outputMapping?: Record<string, string> }), outputMapping: m });
+  }
+
   return (
     <div className="space-y-3">
       <div><ILabel>Step Label</ILabel><IInput value={data.label} onChange={(v) => onChange({ ...data, label: v })} /></div>
+
       <div><ILabel>Join Policy</ILabel>
         <ISelect value={cfg.joinPolicy} onChange={(v) => set({ joinPolicy: v as JoinNodeConfig["joinPolicy"] })}>
           <option value="wait_all">Wait for all branches</option>
@@ -453,9 +461,19 @@ function JoinConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNode
           <option value="quorum">Quorum (N of M)</option>
         </ISelect>
       </div>
+
+      <div>
+        <ILabel>Incoming branches</ILabel>
+        <INumber value={cfg.incomingBranchCount ?? 2} onChange={(v) => set({ incomingBranchCount: v })} min={2} />
+        <p className="mt-1 text-[10px] text-muted-foreground/40">
+          How many incoming edges to expect. Connect one edge from each parallel branch.
+        </p>
+      </div>
+
       {cfg.joinPolicy === "quorum" && (
         <div><ILabel>Quorum count</ILabel><INumber value={cfg.quorumCount ?? 2} onChange={(v) => set({ quorumCount: v })} min={1} /></div>
       )}
+
       <div><ILabel>Timeout (ms, 0 = no timeout)</ILabel><INumber value={cfg.timeoutMs ?? 0} onChange={(v) => set({ timeoutMs: v > 0 ? v : undefined })} min={0} /></div>
       <div><ILabel>On Timeout</ILabel>
         <ISelect value={cfg.onTimeout ?? "fail"} onChange={(v) => set({ onTimeout: v as JoinNodeConfig["onTimeout"] })}>
@@ -463,6 +481,20 @@ function JoinConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNode
           <option value="continue_available">Continue with available results</option>
         </ISelect>
       </div>
+
+      <IDivider />
+
+      {/* Output mapping lets you name collected branch results before forwarding */}
+      <MappingEditor
+        label="Output Mapping (branch results → named keys)"
+        mapping={outputMapping}
+        onChange={setOutputMapping}
+        keyPlaceholder="result_key"
+        valuePlaceholder="{{steps.branch_step.output}}"
+      />
+      <p className="text-[10px] text-muted-foreground/40">
+        Map each branch&apos;s output to a named key. The next node can reference these via <code className="font-mono">{"{{steps.<join_label>.output.<key>}}"}</code>.
+      </p>
     </div>
   );
 }
