@@ -506,14 +506,18 @@ class WorkflowRuntime(
                              catch (e: Exception) { NodeResult.Failed(sanitizeError(e)) }
 
         when (parallelResult) {
-            is NodeResult.Failed      -> {
+            is NodeResult.Failed -> {
                 ctx.markFailed(parallelNode.id)
                 return ExecutionResult.Failed("PARALLEL node ${parallelNode.id} failed: ${parallelResult.reason}")
             }
-            is NodeResult.Completed   -> {
+            is NodeResult.Completed -> {
                 ctx.setOutput(parallelNode.id, parallelResult.output)
                 ctx.markCompleted(parallelNode.id)
-                scheduler.selectEdgesAfterNode(parallelNode, parallelResult.output, ctx)
+                // DO NOT call selectEdgesAfterNode here — that would mark ALL outgoing edges as
+                // selected in the parent context.  ctx.fork() copies selectedEdges, so every
+                // branch context would inherit all 4 PARALLEL→agent edges and each branch would
+                // run ALL 4 agents instead of just its own.
+                // Each branch selects only its own entry edge via branchCtx.selectEdge(edge.id).
             }
             else -> {}
         }
