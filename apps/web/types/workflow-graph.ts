@@ -297,6 +297,8 @@ export interface JoinNodeConfig {
   timeoutMs?: number;
   onTimeout?: "fail" | "continue_available";
   incomingBranchCount?: number;
+  /** Maps collected branch outputs to named keys forwarded to downstream nodes */
+  outputMapping?: Record<string, string>;
 }
 
 export interface TimerNodeConfig {

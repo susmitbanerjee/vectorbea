@@ -444,11 +444,8 @@ function JoinConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNode
   const cfg: JoinNodeConfig = data.joinConfig ?? { joinPolicy: "wait_all" };
   function set(patch: Partial<JoinNodeConfig>) { onChange({ ...data, joinConfig: { ...cfg, ...patch } }); }
 
-  // Output mapping stored as an extension on joinConfig
-  const outputMapping = (cfg as JoinNodeConfig & { outputMapping?: Record<string, string> }).outputMapping ?? {};
-  function setOutputMapping(m: Record<string, string>) {
-    set({ ...(cfg as JoinNodeConfig & { outputMapping?: Record<string, string> }), outputMapping: m });
-  }
+  const outputMapping = cfg.outputMapping ?? {};
+  function setOutputMapping(m: Record<string, string>) { set({ outputMapping: m }); }
 
   return (
     <div className="space-y-3">

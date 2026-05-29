@@ -207,7 +207,6 @@ export default function RunDetailPage() {
       sseCloseRef.current = null;
       setSseActive(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, model?.run.status]);
 
   // ── Fallback polling (only when SSE is not active) ─────────────────────────
