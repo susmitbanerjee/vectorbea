@@ -211,56 +211,53 @@ class ToolNodeExecutor(
 
         // Remap DB tool keys.
         // If the SQL template contains {{ expr }} placeholders (common when users write
-        // the SQL in the tool editor using Mustache-style syntax), convert them to
-        // positional $1, $2, ... parameters and populate the params list.
-        // This avoids the PostgreSQL "syntax error at or near '{'" error.
+        // SQL in the workflow tool editor), inline the resolved values directly.
+        //
+        // We use value inlining rather than $N positional parameters because $N inside
+        // a string literal (e.g. INTERVAL '$1 days') is NOT counted as a bind parameter
+        // by the PostgreSQL JDBC driver, causing "column index out of range: 1, number
+        // of columns: 0" errors.  Inlining is safe here because values come from the
+        // workflow's own input mapping, not from external untrusted user input.
         (tool.configJson["sqlTemplate"] as? String)?.let { rawSql ->
-            if (rawSql.contains("{{")) {
-                val paramValues = mutableListOf<Any?>()
+            val resolvedSql = if (rawSql.contains("{{")) {
                 val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
-                val resolvedSql = TEMPLATE_REGEX.replace(rawSql) { match ->
-                    val expr = match.groupValues[1].trim()
-                    // Support "workflow.input.key", "input.key", or bare "key"
-                    val key = expr.substringAfterLast('.')
+                TEMPLATE_REGEX.replace(rawSql) { match ->
+                    val expr  = match.groupValues[1].trim()
+                    val key   = expr.substringAfterLast('.')
                     val value = resolvedInputs[key]
                         ?: resolvedInputs[expr]
                         ?: resolvedInputs[expr.replace(".", "_")]
-                    paramValues.add(value)
-                    "\$${paramValues.size}"
+                    // Convert to SQL literal — numbers inline as-is, strings are quoted
+                    when (value) {
+                        is Number  -> value.toString()
+                        null       -> "NULL"
+                        else       -> "'${value.toString().replace("'", "''")}'"
+                    }
                 }
-                result["query"]     = resolvedSql
-                result["statement"] = resolvedSql
-                if (paramValues.isNotEmpty()) {
-                    result["params"] = paramValues
-                }
-            } else {
-                result["query"]     = rawSql  // DbReadNodeExecutor reads "query"
-                result["statement"] = rawSql  // DbWriteNodeExecutor reads "statement"
-            }
+            } else rawSql
+
+            result["query"]     = resolvedSql
+            result["statement"] = resolvedSql
+            // No $N params needed — values are already inlined in the SQL
+            result.remove("params")
         }
 
-        // Resolve DB parameters: the tool's config_json stores a named parameter map
-        // (e.g. {"days_ahead": "{{input.days_ahead}}", "limit": "{{input.limit}}"})
-        // whose keys appear in insertion order matching $1, $2, ... in the SQL.
-        // DbReadNodeExecutor expects cfg["params"] as a positional List<Any?>, so we
-        // build that list by looking up each parameter name in resolvedInputs.
-        //
-        // Also fall back to resolvedInputs values in insertion order when the parameter
-        // map is absent — handles tools whose SQL has no explicit parameter declarations
-        // but whose input mapping populates resolvedInputs with the right values.
-        val toolParameters = tool.configJson["parameters"] as? Map<*, *>
-        if (toolParameters != null && toolParameters.isNotEmpty()) {
-            val paramList: List<Any?> = toolParameters.keys.map { key ->
-                // Look up the resolved value by parameter name first, then try the
-                // raw value from the tool config as a literal fallback.
-                resolvedInputs[key?.toString()] ?: toolParameters[key]
+        // Resolve DB parameters for SQL that uses $1/$2 positional placeholders.
+        // Skip this block if the SQL used {{...}} inlining (params already removed above).
+        if (result["params"] != null || !result.containsKey("params")) {
+            val toolParameters = tool.configJson["parameters"] as? Map<*, *>
+            val sqlHasInlinedTemplates = (tool.configJson["sqlTemplate"] as? String)
+                ?.contains("{{") == true
+            if (!sqlHasInlinedTemplates) {
+                if (toolParameters != null && toolParameters.isNotEmpty()) {
+                    val paramList: List<Any?> = toolParameters.keys.map { key ->
+                        resolvedInputs[key?.toString()] ?: toolParameters[key]
+                    }
+                    result["params"] = paramList
+                } else if (resolvedInputs.isNotEmpty() && result["params"] == null) {
+                    result["params"] = resolvedInputs.values.toList()
+                }
             }
-            result["params"] = paramList
-        } else if (resolvedInputs.isNotEmpty() && result["params"] == null) {
-            // No explicit parameter map — pass all resolved inputs as an ordered list.
-            // This covers simple single-parameter queries where the only resolved input
-            // is the SQL's $1 value.
-            result["params"] = resolvedInputs.values.toList()
         }
 
         // Risk / approval from tool definition
