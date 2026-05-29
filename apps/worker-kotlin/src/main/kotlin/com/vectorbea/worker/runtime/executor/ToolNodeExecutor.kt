@@ -1,0 +1,232 @@
+package com.vectorbea.worker.runtime.executor
+
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.vectorbea.worker.connector.ConnectionResolver
+import com.vectorbea.worker.connector.pool.ClientDbPoolManager
+import com.vectorbea.worker.events.RunEventStore
+import com.vectorbea.worker.events.RunEventStore.EventType
+import com.vectorbea.worker.events.RunEventStore.RunEvent
+import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
+import com.vectorbea.worker.runtime.graph.RuntimeContext
+import com.vectorbea.worker.runtime.graph.WorkflowNode
+import java.util.UUID
+import javax.sql.DataSource
+
+/**
+ * Executes TOOL nodes by looking up the named tool definition from the DB
+ * and dispatching to the appropriate underlying executor (HTTP or DB).
+ *
+ * The node's config must contain `toolId` (UUID string) referencing a row in
+ * the `tools` table.  The tool row's `type` determines which executor handles it:
+ *   - "http"            → [HttpNodeExecutor]
+ *   - "database_read"   → [DbReadNodeExecutor]
+ *   - "database_write"  → [DbWriteNodeExecutor]
+ *
+ * Input/output mappings from the workflow node override defaults from the
+ * tool's stored config.
+ *
+ * SECURITY:
+ *   - toolId is validated as a UUID before DB query.
+ *   - Tool lookup is workspace-scoped — cross-workspace access is impossible.
+ *   - config_json contents (including any template strings) are treated as
+ *     untrusted user data and never logged raw.
+ *   - Credentials are always resolved via [ConnectionResolver], never stored in config.
+ */
+class ToolNodeExecutor(
+    private val dataSource: DataSource,
+    private val connectionResolver: ConnectionResolver,
+    private val dbPoolManager: ClientDbPoolManager,
+    private val eventStore: RunEventStore,
+) : NodeExecutor {
+
+    private val log    = logger()
+    private val mapper = jacksonObjectMapper()
+
+    private val httpExecutor    by lazy { HttpNodeExecutor(connectionResolver, eventStore) }
+    private val dbReadExecutor  by lazy { DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore) }
+    private val dbWriteExecutor by lazy { DbWriteNodeExecutor(connectionResolver, dbPoolManager,
+        ApprovalStore(dataSource), eventStore) }
+
+    override fun execute(
+        node: WorkflowNode,
+        resolvedInputs: Map<String, Any>,
+        ctx: RuntimeContext,
+    ): NodeResult {
+        val toolIdStr = node.config["toolId"] as? String
+            ?: return NodeResult.Failed("Tool node '${node.id}' missing required config: toolId")
+
+        val toolId = try { UUID.fromString(toolIdStr) }
+        catch (_: Exception) {
+            return NodeResult.Failed("Tool node '${node.id}': invalid toolId format (expected UUID)")
+        }
+
+        // Load tool definition — workspace-scoped
+        val tool = loadTool(toolId, ctx.workspaceId)
+            ?: return NodeResult.Failed("Tool '$toolIdStr' not found or not accessible for node '${node.id}'")
+
+        emitEvent(ctx, node.id, EventType.TOOL_CALL_STARTED, "running",
+            title   = "Tool call started: ${tool.name}",
+            summary = "type=${tool.type}")
+
+        val startMs = System.currentTimeMillis()
+
+        // Build a synthetic WorkflowNode with the tool's resolved config so existing
+        // executor implementations (HttpNodeExecutor, etc.) work without modification.
+        val syntheticConfig = buildSyntheticConfig(tool, node.config, resolvedInputs)
+        val syntheticNode   = node.copy(config = syntheticConfig)
+
+        val result: NodeResult = when (tool.type) {
+            "http" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+
+            "database_read" -> dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
+
+            "database_write" -> dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
+
+            "slack", "email", "crm" -> {
+                // Slack/Email/CRM tools are stored as HTTP tools under the hood
+                // (the frontend sends them to the same HTTP infrastructure)
+                httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            }
+
+            else -> NodeResult.Failed(
+                "Tool type '${tool.type}' is not yet supported by the worker (toolId=$toolIdStr)"
+            )
+        }
+
+        val durationMs = System.currentTimeMillis() - startMs
+        val eventStatus = if (result is NodeResult.Completed) "success" else "failed"
+        emitEvent(ctx, node.id, EventType.TOOL_CALL_COMPLETED, eventStatus,
+            title      = "Tool call ${if (result is NodeResult.Completed) "completed" else "failed"}: ${tool.name}",
+            durationMs = durationMs)
+
+        return result
+    }
+
+    // ── Tool row ──────────────────────────────────────────────────────────────
+
+    private data class ToolRow(
+        val id: String,
+        val name: String,
+        val type: String,
+        val connectionId: String?,
+        /** Raw config from tools.config_json — contains method/url/sql etc. */
+        val configJson: Map<String, Any>,
+        val riskLevel: String,
+        val requiresApproval: Boolean,
+        val timeoutMs: Int?,
+    )
+
+    private fun loadTool(toolId: UUID, workspaceId: UUID): ToolRow? = try {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """SELECT id, name, type, connection_id, config_json,
+                   risk_level, requires_approval, timeout_ms
+                   FROM tools
+                   WHERE id = ? AND workspace_id = ? AND status = 'active'"""
+            ).use { stmt ->
+                stmt.setObject(1, toolId)
+                stmt.setObject(2, workspaceId)
+                stmt.executeQuery().use { rs ->
+                    if (!rs.next()) return@use null
+                    @Suppress("UNCHECKED_CAST")
+                    val cfgJson = try {
+                        mapper.readValue(rs.getString("config_json") ?: "{}", Map::class.java)
+                            as Map<String, Any>
+                    } catch (_: Exception) { emptyMap() }
+
+                    ToolRow(
+                        id               = rs.getString("id"),
+                        name             = rs.getString("name"),
+                        type             = rs.getString("type"),
+                        connectionId     = rs.getString("connection_id"),
+                        configJson       = cfgJson,
+                        riskLevel        = rs.getString("risk_level") ?: "low",
+                        requiresApproval = rs.getBoolean("requires_approval"),
+                        timeoutMs        = rs.getObject("timeout_ms")?.let {
+                            (it as? Number)?.toInt()
+                        },
+                    )
+                }
+            }
+        }
+    } catch (e: Exception) {
+        log.warn("[tool-executor] failed to load tool [toolId={}, workspaceId={}]: {}",
+            toolId, workspaceId, e.javaClass.simpleName)
+        null
+    }
+
+    /**
+     * Build the config map for the synthetic WorkflowNode that the underlying
+     * executor will process.
+     *
+     * Priority: node-level overrides > tool DB config.
+     *
+     * Key remapping between tool config_json keys and executor expected keys:
+     *   - config_json.url / urlTemplate  → "url"
+     *   - config_json.bodyTemplate       → "body"
+     *   - config_json.sqlTemplate        → "query"
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun buildSyntheticConfig(
+        tool: ToolRow,
+        nodeConfig: Map<String, Any>,
+        resolvedInputs: Map<String, Any>,
+    ): Map<String, Any> {
+        val result = mutableMapOf<String, Any>()
+
+        // Inject connection ID from tool definition
+        tool.connectionId?.let { result["connectionId"] = it }
+
+        // Base from tool's stored config
+        result.putAll(tool.configJson)
+
+        // Remap HTTP tool keys
+        (tool.configJson["urlTemplate"] as? String)?.let { result["url"] = it }
+        (tool.configJson["bodyTemplate"] as? String)?.let { result["body"] = it }
+
+        // Remap DB tool keys
+        (tool.configJson["sqlTemplate"] as? String)?.let {
+            result["query"]     = it  // DbReadNodeExecutor reads "query"
+            result["statement"] = it  // DbWriteNodeExecutor reads "statement"
+        }
+
+        // Risk / approval from tool definition
+        result["riskLevel"]        = tool.riskLevel
+        result["requireApproval"]  = tool.requiresApproval
+        tool.timeoutMs?.let { result["timeoutMs"] = it }
+
+        // Allow node-level config to override individual fields (e.g. a user-supplied url override)
+        nodeConfig.forEach { (k, v) ->
+            if (k !in setOf("toolId", "toolName", "toolType", "uiToolType")) {
+                result[k] = v
+            }
+        }
+
+        return result
+    }
+
+    // ── Event helper ──────────────────────────────────────────────────────────
+
+    private fun emitEvent(
+        ctx: RuntimeContext,
+        nodeId: String,
+        type: EventType,
+        status: String,
+        title: String? = null,
+        summary: String? = null,
+        durationMs: Long? = null,
+    ) = try {
+        eventStore.appendEvent(RunEvent(
+            runId         = ctx.runId,
+            workspaceId   = ctx.workspaceId,
+            environmentId = ctx.environmentId,
+            type          = type,
+            status        = status,
+            stepId        = nodeId,
+            title         = title,
+            summary       = summary,
+            durationMs    = durationMs,
+        ))
+    } catch (_: Exception) {}
+}

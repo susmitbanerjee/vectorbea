@@ -114,8 +114,14 @@ open class RunEventStore(
         // DB write events
         DB_WRITE_PREPARED("DB_WRITE_PREPARED"),
         DB_WRITE_COMPLETED("DB_WRITE_COMPLETED"),
-        // Tool call failure
+        // Tool call events
+        TOOL_CALL_STARTED("TOOL_CALL_STARTED"),
+        TOOL_CALL_COMPLETED("TOOL_CALL_COMPLETED"),
         TOOL_CALL_FAILED("TOOL_CALL_FAILED"),
+        // Agent events
+        AGENT_STARTED("AGENT_STARTED"),
+        AGENT_COMPLETED("AGENT_COMPLETED"),
+        AGENT_FAILED("AGENT_FAILED"),
         // Durable control operations
         RETRY_REQUESTED("RETRY_REQUESTED"),
         RETRY_STARTED("RETRY_STARTED"),

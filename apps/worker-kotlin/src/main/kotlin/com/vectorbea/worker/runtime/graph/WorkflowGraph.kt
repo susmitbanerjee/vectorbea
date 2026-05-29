@@ -5,6 +5,44 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 
+// ── React Flow wire format (from frontend) ────────────────────────────────────
+// The frontend saves SavedWorkflowNode { id, type, position, data: WFNodeData }
+// The worker's internal WorkflowNode is flat — we convert on parse.
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class RfGraph(
+    val nodes: List<RfNode> = emptyList(),
+    val edges: List<RfEdge> = emptyList(),
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class RfNode(
+    val id: String = "",
+    val type: String = "unknown",
+    // React Flow nodes embed all config inside `data`; internal format uses flat `config`
+    val data: Map<String, Any?> = emptyMap(),
+    // Allow internal format too (flat config at top level)
+    val config: Map<String, Any?> = emptyMap(),
+    val label: String = "",
+    val inputMapping: Map<String, String> = emptyMap(),
+    val outputMapping: Map<String, String> = emptyMap(),
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class RfEdge(
+    val id: String = "",
+    val source: String = "",
+    val target: String = "",
+    val sourceHandle: String? = null,
+    val targetHandle: String? = null,
+    // React Flow edges embed type/condition inside `data`
+    val data: Map<String, Any?> = emptyMap(),
+    // Allow internal format (type directly at top level)
+    val type: String = "default",
+    val condition: String? = null,
+    val label: String? = null,
+)
+
 /**
  * Parsed workflow graph loaded from workflow_versions.graph_json.
  *
@@ -30,7 +68,146 @@ data class WorkflowGraph(
             configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         }
 
-        fun parse(json: String): WorkflowGraph = mapper.readValue(json)
+        /**
+         * Parse a workflow graph from JSON.
+         *
+         * Accepts two formats:
+         *  1. React Flow format — nodes have { id, type, position, data: { label, *Config, ... } }
+         *     This is the format saved by the frontend workflow builder.
+         *  2. Internal format — nodes have flat { id, type, label, config, inputMapping, ... }
+         *
+         * React Flow format is detected by the presence of a non-empty `data` field on nodes.
+         */
+        fun parse(json: String): WorkflowGraph {
+            val rf = mapper.readValue<RfGraph>(json)
+            val nodes = rf.nodes.map { convertNode(it) }
+            val edges = rf.edges.map { convertEdge(it) }
+            return WorkflowGraph(nodes = nodes, edges = edges)
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        private fun convertNode(rf: RfNode): WorkflowNode {
+            // React Flow format: everything is inside `data`
+            val isReactFlow = rf.data.isNotEmpty()
+            val data = rf.data
+
+            val label: String = if (isReactFlow) {
+                data["label"] as? String ?: rf.label
+            } else rf.label
+
+            // Helper: extract a nested config map from data by key, removing nulls
+            fun configOf(key: String): Map<String, Any> =
+                (data[key] as? Map<String, Any?> ?: emptyMap())
+                    .filterValues { it != null }
+                    .mapValues { (_, v) -> v!! }
+
+            // Helper: safely read string mapping from data
+            fun mappingOf(key: String): Map<String, String> =
+                (data[key] as? Map<String, Any?> ?: emptyMap())
+                    .filterValues { it is String }
+                    .mapValues { (_, v) -> v as String }
+
+            val config: Map<String, Any> = if (isReactFlow) {
+                when (rf.type) {
+                    "llm" -> {
+                        val cfg = configOf("llmConfig")
+                        // Convert LlmNodeConfig to the flat map LlmNodeExecutor expects.
+                        // Build messages list from systemPrompt + userPromptTemplate.
+                        val systemPrompt = cfg["systemPrompt"] as? String
+                        val userPrompt   = cfg["userPromptTemplate"] as? String
+                            ?: cfg["prompt"] as? String
+                        val messages     = buildLlmMessages(systemPrompt, userPrompt)
+                        cfg + mapOf("messages" to messages)
+                    }
+                    "http_tool" -> {
+                        // Frontend uses urlTemplate/bodyTemplate; HttpNodeExecutor reads url/body
+                        val cfg = configOf("httpToolConfig")
+                        val result = cfg.toMutableMap()
+                        (cfg["urlTemplate"] as? String)?.let { result["url"] = it }
+                        (cfg["bodyTemplate"] as? String)?.let { result["body"] = it }
+                        result
+                    }
+                    "db_read"   -> {
+                        // Frontend uses sqlTemplate; DbReadNodeExecutor reads query
+                        val cfg = configOf("dbReadConfig")
+                        val result = cfg.toMutableMap()
+                        (cfg["sqlTemplate"] as? String)?.let { result["query"] = it }
+                        result
+                    }
+                    "db_write"  -> {
+                        val cfg = configOf("dbWriteConfig")
+                        val result = cfg.toMutableMap()
+                        // Frontend uses sqlTemplate; DbWriteNodeExecutor reads statement
+                        (cfg["sqlTemplate"] as? String)?.let { result["statement"] = it }
+                        result
+                    }
+                    "tool"      -> configOf("toolConfig")
+                    "agent"     -> configOf("agentConfig")
+                    "transform" -> configOf("transformConfig")
+                    "branch"    -> configOf("branchConfig")
+                    "parallel"  -> configOf("parallelConfig")
+                    "join"      -> configOf("joinConfig")
+                    "trigger"   -> configOf("triggerConfig")
+                    "approval"  -> configOf("approvalConfig")
+                    "mcp_tool"  -> configOf("mcpToolConfig")
+                    "grpc_tool" -> configOf("grpcToolConfig")
+                    "graphql_tool" -> configOf("graphqlToolConfig")
+                    "webhook_wait" -> configOf("webhookWaitConfig")
+                    "timer"     -> configOf("timerConfig")
+                    "artifact"  -> configOf("artifactConfig")
+                    "checkpoint" -> configOf("checkpointConfig")
+                    "end"       -> configOf("endConfig")
+                    else        -> emptyMap()
+                }
+            } else {
+                // Internal format: config is already at top level
+                rf.config.filterValues { it != null }.mapValues { (_, v) -> v!! }
+            }
+
+            val inputMapping: Map<String, String> = if (isReactFlow) {
+                mappingOf("inputMappingJson")
+            } else rf.inputMapping
+
+            val outputMapping: Map<String, String> = if (isReactFlow) {
+                mappingOf("outputMappingJson")
+            } else rf.outputMapping
+
+            return WorkflowNode(
+                id            = rf.id,
+                type          = rf.type,
+                label         = label,
+                config        = config,
+                inputMapping  = inputMapping,
+                outputMapping = outputMapping,
+            )
+        }
+
+        private fun convertEdge(rf: RfEdge): WorkflowEdge {
+            val data = rf.data
+            // React Flow: edgeType/condition/label are inside `data`
+            val edgeType  = (data["edgeType"] as? String) ?: rf.type
+            val condition = (data["condition"] as? String) ?: rf.condition
+            val label     = (data["label"]     as? String) ?: rf.label
+            return WorkflowEdge(
+                id        = rf.id,
+                source    = rf.source,
+                target    = rf.target,
+                type      = edgeType,
+                condition = condition,
+                label     = label,
+            )
+        }
+
+        private fun buildLlmMessages(systemPrompt: String?, userPrompt: String?): List<Map<String, Any>> {
+            val messages = mutableListOf<Map<String, Any>>()
+            if (!systemPrompt.isNullOrBlank()) {
+                messages += mapOf("role" to "system", "content" to systemPrompt)
+            }
+            if (!userPrompt.isNullOrBlank()) {
+                messages += mapOf("role" to "user", "content" to userPrompt)
+            }
+            return messages
+        }
     }
 }
 
@@ -64,6 +241,7 @@ data class WorkflowNode(
         NodeType.TRIGGER, NodeType.TRANSFORM, NodeType.BRANCH,
         NodeType.PARALLEL, NodeType.JOIN, NodeType.APPROVAL, NodeType.END,
         NodeType.LLM, NodeType.HTTP, NodeType.DB_QUERY, NodeType.DB_WRITE,
+        NodeType.TOOL, NodeType.AGENT,
     )
 }
 
@@ -121,15 +299,43 @@ enum class NodeType(val value: String) {
     HTTP("http"),
     DB_QUERY("db_query"),
     DB_WRITE("db_write"),
-    // Unsupported
+    // Reference types — resolved at runtime via DB lookup
     TOOL("tool"),
     AGENT("agent"),
     UNKNOWN("unknown"),
     ;
 
     companion object {
-        fun fromString(s: String): NodeType =
-            entries.firstOrNull { it.value == s.lowercase() } ?: UNKNOWN
+        /**
+         * Map node type strings (from both frontend React Flow and internal formats) to [NodeType].
+         *
+         * Frontend aliases:
+         *  - "http_tool"     → HTTP   (frontend's explicit HTTP tool node)
+         *  - "db_read"       → DB_QUERY
+         *  - "graphql_tool"  → UNKNOWN (not yet supported)
+         *  - "mcp_tool"      → UNKNOWN
+         *  - "grpc_tool"     → UNKNOWN
+         *  - "webhook_wait"  → UNKNOWN
+         *  - "timer"         → UNKNOWN
+         *  - "artifact"      → UNKNOWN
+         *  - "checkpoint"    → UNKNOWN
+         */
+        fun fromString(s: String): NodeType = when (s.lowercase()) {
+            "trigger"                    -> TRIGGER
+            "transform"                  -> TRANSFORM
+            "branch"                     -> BRANCH
+            "parallel"                   -> PARALLEL
+            "join"                       -> JOIN
+            "approval"                   -> APPROVAL
+            "end"                        -> END
+            "llm"                        -> LLM
+            "http", "http_tool"          -> HTTP
+            "db_query", "db_read"        -> DB_QUERY
+            "db_write"                   -> DB_WRITE
+            "tool"                       -> TOOL
+            "agent"                      -> AGENT
+            else                         -> UNKNOWN
+        }
     }
 }
 

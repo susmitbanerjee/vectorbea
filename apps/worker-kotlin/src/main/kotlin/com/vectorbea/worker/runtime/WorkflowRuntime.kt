@@ -58,6 +58,7 @@ class WorkflowRuntime(
         connectionResolver = connectionResolver ?: NoOpConnectionResolver,
         dbPoolManager      = dbPoolManager ?: ClientDbPoolManager(),
         eventStore         = eventStore,
+        dataSource         = dataSource,
     )
     private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
 

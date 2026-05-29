@@ -65,12 +65,7 @@ open class StepOutputStore(private val dataSource: DataSource) {
                     setJsonb(stmt, 10, errorsJson)
                     stmt.setTimestamp(11, now)
                     stmt.setTimestamp(12, now)
-                    // ON CONFLICT update columns
-                    setJsonb(stmt, 13, rawJson)
-                    setJsonb(stmt, 14, extractedJson)
-                    setJsonb(stmt, 15, validatedJson)
-                    setJsonb(stmt, 16, errorsJson)
-                    stmt.setTimestamp(17, now)
+                    // ON CONFLICT clause uses EXCLUDED.column_name — no extra parameters needed
                     stmt.executeUpdate()
                 }
             }
