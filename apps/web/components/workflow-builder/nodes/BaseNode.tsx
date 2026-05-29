@@ -6,10 +6,10 @@
 
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import { Handle, Position } from "@xyflow/react";
 import { cn } from "@/lib/utils";
-import { getNodeMeta, PREVIEW_STATUS_COLORS } from "@/components/workflow-builder/NodeIcon";
+import { getNodeMeta, getToolNodeMeta, getLLMProviderForNode, PREVIEW_STATUS_COLORS } from "@/components/workflow-builder/NodeIcon";
 import type { WFNodeData, WFNodeType } from "@/types/workflow-graph";
 
 interface BaseNodeProps {
@@ -23,11 +23,28 @@ interface BaseNodeProps {
   compact?: boolean;
 }
 
+// Inject wfNodeSpin keyframe once into <head>
+let _nodeAnimInjected = false;
+function useNodeAnimCSS() {
+  useEffect(() => {
+    if (_nodeAnimInjected || typeof document === "undefined") return;
+    _nodeAnimInjected = true;
+    const el = document.createElement("style");
+    el.textContent = `
+      @keyframes wfNodeSpin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(el);
+  }, []);
+}
+
 function StatusDot({ status }: { status?: string }) {
   if (!status || status === "idle") return null;
   const s = PREVIEW_STATUS_COLORS[status] ?? PREVIEW_STATUS_COLORS.idle;
   return (
-    <span className={cn("absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-background", s.dot)} />
+    <span className={cn("absolute -top-1 -right-1 z-20 h-2.5 w-2.5 rounded-full border-2 border-background", s.dot)} />
   );
 }
 
@@ -41,8 +58,26 @@ export const BaseNode = memo(function BaseNode({
   width = 220,
   compact = false,
 }: BaseNodeProps) {
-  const meta = getNodeMeta(data.nodeType as WFNodeType);
-  const Icon = meta.icon;
+  useNodeAnimCSS();
+
+  // Resolve base meta from node type
+  const baseMeta = data.nodeType === "tool"
+    ? getToolNodeMeta(data)
+    : getNodeMeta(data.nodeType as WFNodeType);
+
+  // For agent/llm nodes, check if a specific LLM provider is configured
+  const llmProvider = (data.nodeType === "agent" || data.nodeType === "llm")
+    ? getLLMProviderForNode(data)
+    : null;
+
+  const meta = llmProvider
+    ? { ...baseMeta, color: llmProvider.color, bgColor: llmProvider.bgColor, borderColor: llmProvider.borderColor }
+    : baseMeta;
+
+  // Resolved icon: LLM provider SVG component (size-aware) or lucide Icon
+  const ProviderIcon = llmProvider?.Icon ?? null;
+  const LucideIcon = meta.icon;
+
   const status = data.previewStatus ?? "idle";
   const statusCfg = PREVIEW_STATUS_COLORS[status] ?? PREVIEW_STATUS_COLORS.idle;
 
@@ -52,34 +87,67 @@ export const BaseNode = memo(function BaseNode({
       style={{
         width,
         background: "hsl(var(--card, 220 13% 9%))",
-        borderColor: selected ? meta.color : "rgba(255,255,255,0.08)",
+        borderColor: selected ? meta.color : status === "running" ? "rgba(59,130,246,0.6)" : "rgba(255,255,255,0.08)",
         boxShadow: selected
           ? `0 0 0 2px ${meta.color}40, 0 4px 24px rgba(0,0,0,0.4)`
+          : status === "running"
+          ? "0 0 0 2px rgba(59,130,246,0.4), 0 0 16px rgba(59,130,246,0.2)"
           : statusCfg.ring !== "transparent"
           ? `0 0 0 2px ${statusCfg.ring}`
           : "0 2px 8px rgba(0,0,0,0.3)",
       }}
     >
+      {/* Running animation — spinning conic gradient ring */}
+      {status === "running" && (
+        <>
+          {/* Outer spinning arc */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute rounded-[13px]"
+            style={{
+              inset: -2,
+              background: "conic-gradient(from 0deg, transparent 60%, rgba(59,130,246,0.85) 100%)",
+              animation: "wfNodeSpin 1.2s linear infinite",
+              zIndex: 0,
+            }}
+          />
+          {/* Inner card background to mask the ring (keeps content readable) */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute rounded-[11px]"
+            style={{
+              inset: 1,
+              background: "hsl(var(--card, 220 13% 9%))",
+              zIndex: 0,
+            }}
+          />
+        </>
+      )}
+
       {/* Status ring / dot */}
       <StatusDot status={status} />
 
-      {/* Content */}
-      <div className={cn("px-3", compact ? "py-2.5" : "py-3")}>
+      {/* Content — sits above the running-ring overlay layers */}
+      <div className={cn("relative z-10 px-3", compact ? "py-2.5" : "py-3")}>
         {/* Header row */}
         <div className="flex items-center gap-2.5">
           {/* Icon badge */}
           <span
-            className="flex shrink-0 items-center justify-center rounded-lg"
+            className="relative flex shrink-0 items-center justify-center rounded-lg overflow-hidden"
             style={{
               width: compact ? 28 : 32,
               height: compact ? 28 : 32,
-              background: meta.bgColor,
-              border: `1px solid ${meta.borderColor}`,
+              background: ProviderIcon ? "transparent" : meta.bgColor,
+              border: ProviderIcon ? "none" : `1px solid ${meta.borderColor}`,
             }}
           >
-            <Icon
-              style={{ color: meta.color, width: compact ? 13 : 15, height: compact ? 13 : 15 }}
-            />
+            {ProviderIcon ? (
+              <ProviderIcon size={compact ? 28 : 32} />
+            ) : (
+              <LucideIcon
+                style={{ color: meta.color, width: compact ? 13 : 15, height: compact ? 13 : 15 }}
+              />
+            )}
           </span>
 
           <div className="min-w-0 flex-1">

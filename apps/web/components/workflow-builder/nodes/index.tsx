@@ -9,6 +9,8 @@ import { memo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Bot, Clock, GitBranch, Layers, RotateCcw, ShieldCheck, Zap } from "lucide-react";
 import { BaseNode, Chip } from "./BaseNode";
+import { TOOL_TYPE_META } from "@/components/workflow-builder/NodeIcon";
+import { detectLLMProvider } from "@/components/workflow-builder/LLMProviderIcon";
 import type { WFNodeData } from "@/types/workflow-graph";
 
 type WFNode = Node<WFNodeData>;
@@ -32,10 +34,15 @@ export const TriggerNode = memo(function TriggerNode({ data, selected }: NodePro
 
 export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<WFNode>) {
   const cfg = data.agentConfig;
+  const provider = detectLLMProvider(cfg?.modelName);
+  const accentColor = provider?.color ?? "#7C3AED";
   return (
     <BaseNode data={data} selected={selected} width={240}>
-      {cfg?.agentName && <Chip color="#7C3AED"><Bot className="h-2.5 w-2.5" />{cfg.agentName}</Chip>}
-      {cfg?.modelName && <Chip>{cfg.modelName}</Chip>}
+      {cfg?.agentName && <Chip color={accentColor}><Bot className="h-2.5 w-2.5" />{cfg.agentName}</Chip>}
+      {provider
+        ? <Chip color={provider.color}>{provider.label}</Chip>
+        : cfg?.modelName && <Chip>{cfg.modelName}</Chip>
+      }
       {cfg?.retryPolicy?.maxAttempts && cfg.retryPolicy.maxAttempts > 1 && (
         <Chip color="#FB923C"><RotateCcw className="h-2.5 w-2.5" />×{cfg.retryPolicy.maxAttempts}</Chip>
       )}
@@ -48,10 +55,14 @@ export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<W
 
 export const LlmNode = memo(function LlmNode({ data, selected }: NodeProps<WFNode>) {
   const cfg = data.llmConfig;
+  const provider = detectLLMProvider(cfg?.provider, cfg?.model);
   return (
     <BaseNode data={data} selected={selected} width={220}>
-      {cfg?.provider && <Chip>{cfg.provider}</Chip>}
-      {cfg?.model && <Chip color="#C084FC">{cfg.model}</Chip>}
+      {provider
+        ? <Chip color={provider.color}>{provider.label}</Chip>
+        : cfg?.provider && <Chip>{cfg.provider}</Chip>
+      }
+      {cfg?.model && <Chip color={provider?.color ?? "#C084FC"}>{cfg.model}</Chip>}
       {cfg?.validationEnabled && <Chip color="#059669">validated</Chip>}
     </BaseNode>
   );
@@ -60,20 +71,28 @@ export const LlmNode = memo(function LlmNode({ data, selected }: NodeProps<WFNod
 // ─── Tool Node ────────────────────────────────────────────────────────────────
 
 const RISK_COLORS: Record<string, string> = {
-  read_only: "#059669",
-  low_risk_write: "#2563EB",
-  high_risk_write: "#D97706",
-  irreversible: "#DC2626",
+  low: "#059669",
+  medium: "#2563EB",
+  high: "#D97706",
+  critical: "#DC2626",
 };
 
 export const ToolNode = memo(function ToolNode({ data, selected }: NodeProps<WFNode>) {
   const cfg = data.toolConfig;
   const riskColor = cfg?.riskLevel ? RISK_COLORS[cfg.riskLevel] : undefined;
+
+  // Resolve display type label from TOOL_TYPE_META (prefers uiToolType stored in config)
+  const extCfg = cfg as (typeof cfg & { uiToolType?: string }) | undefined;
+  const resolvedType = extCfg?.uiToolType ?? cfg?.toolType;
+  const typeMeta = resolvedType ? TOOL_TYPE_META[resolvedType] : undefined;
+  const typeLabel = typeMeta?.label ?? resolvedType?.replace(/_/g, " ");
+  const typeColor = typeMeta?.color ?? "#0891B2";
+
   return (
     <BaseNode data={data} selected={selected} width={220}>
-      {cfg?.toolName && <Chip color="#0891B2">{cfg.toolName}</Chip>}
-      {cfg?.toolType && <Chip>{cfg.toolType}</Chip>}
-      {cfg?.riskLevel && <Chip color={riskColor}>{cfg.riskLevel.replace(/_/g, " ")}</Chip>}
+      {cfg?.toolName && <Chip color={typeColor}>{cfg.toolName}</Chip>}
+      {typeLabel && <Chip color={typeColor}>{typeLabel}</Chip>}
+      {cfg?.riskLevel && <Chip color={riskColor}>{cfg.riskLevel}</Chip>}
       {cfg?.requireApproval && <Chip color="#D97706"><ShieldCheck className="h-2.5 w-2.5" />approval</Chip>}
     </BaseNode>
   );
@@ -83,7 +102,7 @@ export const ToolNode = memo(function ToolNode({ data, selected }: NodeProps<WFN
 
 export const ApprovalNode = memo(function ApprovalNode({ data, selected }: NodeProps<WFNode>) {
   const cfg = data.approvalConfig;
-  const riskColor = cfg?.riskLevel ? RISK_COLORS[cfg.riskLevel] : "#D97706";
+  const riskColor = cfg?.riskLevel ? (RISK_COLORS[cfg.riskLevel] ?? "#D97706") : "#D97706";
   return (
     <BaseNode data={data} selected={selected} width={240}>
       {cfg?.riskLevel && <Chip color={riskColor}>{cfg.riskLevel.replace(/_/g, " ")}</Chip>}

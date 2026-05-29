@@ -219,7 +219,15 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
       <div><ILabel>Registered Tool</ILabel>
         <ISelect value={cfg.toolId ?? ""} onChange={(v) => {
           const t = tools.find((x) => x.id === v);
-          set({ toolId: v || undefined, toolName: t?.name, toolType: t?.type, riskLevel: t?.riskLevel });
+          const uiToolType = (t?.config as Record<string, unknown> | undefined)?.uiToolType as string | undefined;
+          set({
+            toolId: v || undefined,
+            toolName: t?.name,
+            toolType: uiToolType ?? t?.type,
+            riskLevel: t?.riskLevel,
+            // store uiToolType so node icon resolves correctly
+            ...(uiToolType ? { uiToolType } : {}),
+          } as Parameters<typeof set>[0]);
         }}>
           <option value="">— select tool —</option>
           {tools.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
@@ -408,6 +416,17 @@ function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFN
       {cfg.triggerType === "webhook" && (
         <div><ILabel>Webhook Path</ILabel><IInput mono value={cfg.webhookPath ?? ""} onChange={(v) => set({ webhookPath: v })} placeholder="/webhooks/my-workflow" /></div>
       )}
+      <div>
+        <ILabel>Input Schema (JSON)</ILabel>
+        <ITextarea
+          rows={6}
+          mono
+          value={cfg.inputSchema ?? ""}
+          onChange={(v) => set({ inputSchema: v })}
+          placeholder={`{\n  "type": "object",\n  "properties": {\n    "days_ahead": { "type": "integer" },\n    "limit": { "type": "integer" }\n  }\n}`}
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground/50">JSON Schema describing the inputs this workflow accepts when triggered.</p>
+      </div>
       <div><ILabel>Description</ILabel><ITextarea rows={2} value={data.description ?? ""} onChange={(v) => onChange({ ...data, description: v })} placeholder="When does this trigger?" /></div>
     </div>
   );

@@ -28,6 +28,8 @@ import {
   type OnConnect,
   BackgroundVariant,
   SelectionMode,
+  ConnectionLineType,
+  type ConnectionLineComponentProps,
 } from "@xyflow/react";
 import {
   AlertTriangle,
@@ -157,6 +159,29 @@ function ValidationBadge({ issueCount, valid }: { issueCount: number; valid: boo
       <AlertTriangle className="h-3 w-3" />
       {issueCount} issue{issueCount !== 1 ? "s" : ""}
     </span>
+  );
+}
+
+// ─── Custom connection line (shown while dragging to connect nodes) ───────────
+
+function ConnectionLine({ fromX, fromY, toX, toY }: ConnectionLineComponentProps) {
+  // Bezier-style cubic approximation for the in-progress connection
+  const midX = (fromX + toX) / 2;
+  const d = `M${fromX},${fromY} C${midX},${fromY} ${midX},${toY} ${toX},${toY}`;
+  return (
+    <g>
+      {/* Glowing solid line while dragging */}
+      <path
+        d={d}
+        fill="none"
+        stroke="rgba(99,179,237,0.9)"
+        strokeWidth={2}
+        strokeLinecap="round"
+        style={{ filter: "drop-shadow(0 0 4px rgba(99,179,237,0.8))" }}
+      />
+      {/* Target dot */}
+      <circle cx={toX} cy={toY} r={4} fill="rgba(99,179,237,0.9)" />
+    </g>
   );
 }
 
@@ -550,6 +575,8 @@ export default function WorkflowBuilderPage() {
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             defaultEdgeOptions={{ type: "workflow", data: { edgeType: "default" } }}
+            connectionLineComponent={ConnectionLine}
+            connectionLineType={ConnectionLineType.Bezier}
             selectionMode={SelectionMode.Partial}
             fitView
             fitViewOptions={{ padding: 0.15 }}
