@@ -458,8 +458,18 @@ export interface PaginatedResult<T> {
 export interface WorkflowVersion {
   id: string;
   workflowId: string;
-  version: string;
-  steps: WorkflowStep[];
+  version: string | number;
+  /** Full React Flow graph — nodes + edges. Returned by the Kotlin versions endpoint. */
+  graph?: import("@/types/workflow-graph").WorkflowGraph | string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  triggerConfig?: Record<string, unknown>;
+  retryPolicy?: Record<string, unknown>;
+  timeoutPolicy?: Record<string, unknown>;
+  budgetPolicy?: Record<string, unknown>;
+  replaySupport?: string;
+  steps?: WorkflowStep[];
   changelog?: string;
   createdAt: string;
+  updatedAt?: string;
 }

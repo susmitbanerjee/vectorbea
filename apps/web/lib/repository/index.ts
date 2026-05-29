@@ -103,32 +103,77 @@ export async function deleteWorkflow(id: string): Promise<void> {
   await api<void>(withWorkspace(`/api/workflows/${id}`), { method: "DELETE" });
 }
 
-// ─── Workflow Graphs ──────────────────────────────────────────────────────────
+// ─── Workflow Graphs (persisted via workflow versions) ────────────────────────
 
+/**
+ * Loads the graph from the latest workflow version.
+ * Calls GET /api/workflows/:id/versions and picks the first (most recent) entry.
+ * Returns null if no version exists yet (brand-new workflow).
+ */
 export async function getWorkflowGraph(workflowId: string): Promise<WorkflowGraph | null> {
   try {
-    const wf = await api<Workflow & { graph?: WorkflowGraph }>(withWorkspace(`/api/workflows/${workflowId}`));
-    return wf?.graph ?? null;
+    const res = await api<{ items: WorkflowVersion[]; total: number }>(
+      withWorkspace(`/api/workflows/${workflowId}/versions?page=1&pageSize=1`)
+    );
+    const latest = res?.items?.[0];
+    if (!latest?.graph) return null;
+    // graph may arrive as a parsed object or a JSON string depending on API version
+    if (typeof latest.graph === "string") {
+      try { return JSON.parse(latest.graph) as WorkflowGraph; } catch { return null; }
+    }
+    return latest.graph as WorkflowGraph;
   } catch {
     return null;
   }
 }
 
+/**
+ * Saves the graph by creating a new workflow version.
+ * Calls POST /api/workflows/:id/versions with the full graph.
+ */
 export async function saveWorkflowGraph(workflowId: string, graph: WorkflowGraph): Promise<void> {
-  await api<void>(withWorkspace(`/api/workflows/${workflowId}`), {
-    method: "PATCH",
-    body: JSON.stringify({ graph }),
+  await api<WorkflowVersion>(withWorkspace(`/api/workflows/${workflowId}/versions`), {
+    method: "POST",
+    body: JSON.stringify({
+      graph,
+      inputSchema: {},
+      outputSchema: {},
+      triggerConfig: {},
+      retryPolicy: {},
+      timeoutPolicy: {},
+      budgetPolicy: {},
+      replaySupport: "full",
+    }),
   });
 }
 
 // ─── Workflow Versions ────────────────────────────────────────────────────────
 
-export async function getWorkflowVersions(_workflowId: string): Promise<WorkflowVersion[]> {
-  return []; // Future: GET /api/workflows/:id/versions
+export async function getWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+  try {
+    const res = await api<{ items: WorkflowVersion[]; total: number }>(
+      withWorkspace(`/api/workflows/${workflowId}/versions`)
+    );
+    return res?.items ?? [];
+  } catch {
+    return [];
+  }
 }
 
-export async function saveWorkflowVersion(_workflowId: string, _graph: WorkflowGraph): Promise<WorkflowVersion> {
-  throw new Error("saveWorkflowVersion: not yet implemented in Kotlin API");
+export async function saveWorkflowVersion(workflowId: string, graph: WorkflowGraph): Promise<WorkflowVersion> {
+  return api<WorkflowVersion>(withWorkspace(`/api/workflows/${workflowId}/versions`), {
+    method: "POST",
+    body: JSON.stringify({
+      graph,
+      inputSchema: {},
+      outputSchema: {},
+      triggerConfig: {},
+      retryPolicy: {},
+      timeoutPolicy: {},
+      budgetPolicy: {},
+      replaySupport: "full",
+    }),
+  });
 }
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
