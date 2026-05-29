@@ -53,14 +53,17 @@ open class ConnectionResolver(
         // "inactive"   → explicitly disabled by the user — reject.
         // "error"      → last test failed — reject to surface the problem early.
         when (record.status) {
-            "active"     -> { /* OK */ }
+            // All usable statuses — "connected" is what the UI/API sets after a
+            // successful test; "active" is the legacy value; "not_tested" means
+            // the user skipped the test step (proceed with a warning).
+            "active", "connected", "ok" -> { /* OK */ }
             "not_tested" -> log.warn(
                 "[conn] connection '{}' ({}) has not been tested — proceeding anyway",
                 record.name, record.id
             )
             else -> throw ConnectionException(
                 "Connection '${record.name}' (${record.id}) cannot be used — status: ${record.status}. " +
-                "Set the connection to active in your workspace settings."
+                "Check the connection in your workspace settings."
             )
         }
 
