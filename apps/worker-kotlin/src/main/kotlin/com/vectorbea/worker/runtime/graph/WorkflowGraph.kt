@@ -347,10 +347,23 @@ enum class EdgeType(val value: String) {
     PARALLEL("parallel"),
     TRUE("true"),
     FALSE("false"),
+    APPROVED("approved"),
+    REJECTED("rejected"),
     ;
 
     companion object {
-        fun fromString(s: String): EdgeType =
-            entries.firstOrNull { it.value == s.lowercase() } ?: DEFAULT
+        fun fromString(s: String): EdgeType = when (s.lowercase()) {
+            "default"                    -> DEFAULT
+            "success"                    -> SUCCESS
+            "failure"                    -> FAILURE
+            "branch"                     -> BRANCH
+            "parallel", "parallel_branch"-> PARALLEL
+            "true", "conditional_true"   -> TRUE
+            "false", "conditional_false" -> FALSE
+            "approval_approved", "approved" -> APPROVED
+            "approval_rejected", "rejected" -> REJECTED
+            "join"                       -> DEFAULT  // join connectors are default-follow
+            else                         -> DEFAULT
+        }
     }
 }

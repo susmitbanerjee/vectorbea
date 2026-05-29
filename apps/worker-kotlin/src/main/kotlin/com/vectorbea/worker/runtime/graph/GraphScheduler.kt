@@ -82,6 +82,16 @@ class GraphScheduler(private val graph: WorkflowGraph) {
             NodeType.BRANCH   -> selectBranchEdges(outEdges, output)
             NodeType.PARALLEL -> outEdges.filter { it.edgeType == EdgeType.PARALLEL || it.edgeType == EdgeType.DEFAULT }
             NodeType.END      -> emptyList()
+            NodeType.APPROVAL -> {
+                // After approval completes (approved path) follow APPROVED or SUCCESS/DEFAULT edges.
+                // REJECTED edges are only followed when the node fails (handled by selectEdgesAfterFailure).
+                val approvedEdges = outEdges.filter { edge ->
+                    edge.edgeType in setOf(EdgeType.APPROVED, EdgeType.SUCCESS, EdgeType.DEFAULT)
+                }
+                // If there are explicit APPROVED edges, prefer those over generic DEFAULT ones
+                val explicit = approvedEdges.filter { it.edgeType == EdgeType.APPROVED }
+                if (explicit.isNotEmpty()) explicit else approvedEdges
+            }
             else              -> outEdges.filter { edge ->
                 edge.edgeType in setOf(EdgeType.SUCCESS, EdgeType.DEFAULT) &&
                         ConditionEvaluator.evaluate(edge.condition, output)
@@ -98,8 +108,17 @@ class GraphScheduler(private val graph: WorkflowGraph) {
      * Otherwise returns empty (caller should fail the run).
      */
     fun selectEdgesAfterFailure(node: WorkflowNode, ctx: RuntimeContext): List<WorkflowEdge> {
+        val outEdges = graph.edgesFrom(node.id)
+        // For APPROVAL nodes: follow REJECTED edges on failure (rejection = failure)
+        if (node.nodeType == NodeType.APPROVAL) {
+            val rejectedEdges = outEdges.filter { it.edgeType == EdgeType.REJECTED || it.edgeType == EdgeType.FAILURE }
+            if (rejectedEdges.isNotEmpty()) {
+                rejectedEdges.forEach { ctx.selectEdge(it.id) }
+                return rejectedEdges
+            }
+        }
         if (node.failurePolicy.onFailure != "follow_failure_edge") return emptyList()
-        val failEdges = graph.edgesFrom(node.id).filter { it.edgeType == EdgeType.FAILURE }
+        val failEdges = outEdges.filter { it.edgeType == EdgeType.FAILURE }
         failEdges.forEach { ctx.selectEdge(it.id) }
         return failEdges
     }
