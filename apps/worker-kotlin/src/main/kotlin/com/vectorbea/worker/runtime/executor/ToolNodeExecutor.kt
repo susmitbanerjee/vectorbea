@@ -209,10 +209,34 @@ class ToolNodeExecutor(
             result["body"] = resolvedInputs
         }
 
-        // Remap DB tool keys
-        (tool.configJson["sqlTemplate"] as? String)?.let {
-            result["query"]     = it  // DbReadNodeExecutor reads "query"
-            result["statement"] = it  // DbWriteNodeExecutor reads "statement"
+        // Remap DB tool keys.
+        // If the SQL template contains {{ expr }} placeholders (common when users write
+        // the SQL in the tool editor using Mustache-style syntax), convert them to
+        // positional $1, $2, ... parameters and populate the params list.
+        // This avoids the PostgreSQL "syntax error at or near '{'" error.
+        (tool.configJson["sqlTemplate"] as? String)?.let { rawSql ->
+            if (rawSql.contains("{{")) {
+                val paramValues = mutableListOf<Any?>()
+                val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
+                val resolvedSql = TEMPLATE_REGEX.replace(rawSql) { match ->
+                    val expr = match.groupValues[1].trim()
+                    // Support "workflow.input.key", "input.key", or bare "key"
+                    val key = expr.substringAfterLast('.')
+                    val value = resolvedInputs[key]
+                        ?: resolvedInputs[expr]
+                        ?: resolvedInputs[expr.replace(".", "_")]
+                    paramValues.add(value)
+                    "\$${paramValues.size}"
+                }
+                result["query"]     = resolvedSql
+                result["statement"] = resolvedSql
+                if (paramValues.isNotEmpty()) {
+                    result["params"] = paramValues
+                }
+            } else {
+                result["query"]     = rawSql  // DbReadNodeExecutor reads "query"
+                result["statement"] = rawSql  // DbWriteNodeExecutor reads "statement"
+            }
         }
 
         // Resolve DB parameters: the tool's config_json stores a named parameter map
