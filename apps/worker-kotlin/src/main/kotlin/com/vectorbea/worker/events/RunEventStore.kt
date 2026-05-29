@@ -155,26 +155,59 @@ open class RunEventStore(
 
     // ── DB insert ─────────────────────────────────────────────────────────────
 
+    /**
+     * Insert the event, retrying up to [MAX_INSERT_ATTEMPTS] times on a
+     * unique-sequence conflict.
+     *
+     * WHY retries are needed:
+     * Parallel workflow branches emit events concurrently on separate threads.
+     * `SELECT MAX(sequence)+1` is not atomic — two threads can read the same
+     * MAX value before either commits, causing a unique constraint violation on
+     * `(run_id, sequence)`.  A short sleep + retry resolves this without
+     * requiring advisory locks or SERIALIZABLE isolation.
+     */
     private fun insertEvent(event: RunEvent): Int {
+        var lastException: Exception? = null
+        for (attempt in 1..MAX_INSERT_ATTEMPTS) {
+            try {
+                return doInsert(event)
+            } catch (e: java.sql.SQLException) {
+                if (e.sqlState == UNIQUE_VIOLATION_SQLSTATE) {
+                    lastException = e
+                    log.debug("[events] sequence conflict, retrying [runId={}, type={}, attempt={}/{}]",
+                        event.runId, event.type.value, attempt, MAX_INSERT_ATTEMPTS)
+                    Thread.sleep(10L * attempt)  // 10 ms, 20 ms, 30 ms, 40 ms
+                } else {
+                    log.error("[events] failed to insert event [runId={}, type={}]: {}",
+                        event.runId, event.type.value, e.message)
+                    throw e
+                }
+            } catch (e: Exception) {
+                log.error("[events] failed to insert event [runId={}, type={}]: {}",
+                    event.runId, event.type.value, e.message)
+                throw e
+            }
+        }
+        log.error("[events] gave up inserting event after {} attempts [runId={}, type={}]",
+            MAX_INSERT_ATTEMPTS, event.runId, event.type.value)
+        throw lastException!!
+    }
+
+    private fun doInsert(event: RunEvent): Int {
         return dataSource.connection.use { conn ->
-            // Atomic sequence: MAX(sequence)+1 scoped to the run, inside one txn
             conn.autoCommit = false
             try {
                 val seq = nextSequence(conn, event.runId)
-
                 conn.prepareStatement(INSERT_SQL).use { stmt ->
                     bindInsert(stmt, event, seq)
                     stmt.executeUpdate()
                 }
-
                 conn.commit()
                 log.debug("[events] inserted event [runId={}, type={}, seq={}]",
                     event.runId, event.type.value, seq)
                 seq
             } catch (e: Exception) {
                 conn.rollback()
-                log.error("[events] failed to insert event [runId={}, type={}]: {}",
-                    event.runId, event.type.value, e.message)
                 throw e
             } finally {
                 conn.autoCommit = true
@@ -275,6 +308,11 @@ open class RunEventStore(
         "\"${s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").take(500)}\""
 
     companion object {
+        /** PostgreSQL SQLSTATE for unique_violation. */
+        private const val UNIQUE_VIOLATION_SQLSTATE = "23505"
+        /** Max retry attempts on sequence conflict from concurrent parallel branches. */
+        private const val MAX_INSERT_ATTEMPTS = 5
+
         private val INSERT_SQL = """
             INSERT INTO run_events (
                 run_id, workspace_id, environment_id, sequence,
