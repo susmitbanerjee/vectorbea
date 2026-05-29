@@ -110,12 +110,15 @@ open class ClientDbPoolManager(
             }
             HikariDataSource(hk)
         } catch (e: Exception) {
-            // Sanitize: never include jdbcUrl (may contain credentials) in message
+            // Log the root cause message (safe — no JDBC URL, no credentials).
+            // HikariCP wraps the real error in PoolInitializationException.cause
+            val rootMsg = (e.cause?.message ?: e.message ?: e.javaClass.simpleName)
+                .take(300)
+                .replace(Regex("""://[^@]*@"""), "://[REDACTED]@")  // strip creds if leaked
             log.error("[clientdb] failed to create pool [connId={}, provider={}]: {}",
-                record.id, record.provider, e.javaClass.simpleName)
+                record.id, record.provider, rootMsg)
             throw ClientDbPoolException(
-                "Cannot create pool for connection '${record.name}' (${record.id}): " +
-                        e.javaClass.simpleName
+                "Cannot create pool for connection '${record.name}' (${record.id}): $rootMsg"
             )
         }
     }
@@ -129,10 +132,26 @@ open class ClientDbPoolManager(
             return normaliseJdbcUrl(explicitUrl, record.provider)
         }
 
+        // Also handle a full libpq connection string stored as "connectionString" or "url"
+        val connStr = cfg["connectionString"] as? String ?: cfg["url"] as? String
+        if (!connStr.isNullOrBlank() &&
+            (connStr.startsWith("postgresql://") || connStr.startsWith("postgres://"))) {
+            return normaliseJdbcUrl(connStr, record.provider)
+        }
+
         val host     = cfg["host"] as? String ?: "localhost"
         val port     = cfg["port"]?.toString()?.toIntOrNull() ?: defaultPortFor(record.provider)
         val database = cfg["database"] as? String ?: cfg["dbname"] as? String ?: ""
-        val sslMode  = cfg["sslMode"] as? String
+
+        // Explicit sslMode from config takes priority.
+        // If absent, auto-require SSL for any non-local host — cloud providers
+        // (Neon, Supabase, RDS, etc.) require SSL and reject plain connections.
+        val explicitSsl = cfg["sslMode"] as? String
+        val sslMode = when {
+            !explicitSsl.isNullOrBlank() -> explicitSsl
+            isLocalHost(host)            -> null          // local / Docker — no SSL needed
+            else                         -> "require"     // cloud — enforce SSL
+        }
 
         return when (record.provider.lowercase()) {
             "postgresql", "postgres" -> {
@@ -151,14 +170,21 @@ open class ClientDbPoolManager(
         }
     }
 
-    private fun normaliseJdbcUrl(url: String, provider: String): String =
-        when {
-            url.startsWith("jdbc:") -> url
-            url.startsWith("postgresql://") || url.startsWith("postgres://") ->
-                "jdbc:postgresql://" + url.substringAfter("://")
-            url.startsWith("mysql://") -> "jdbc:mysql://" + url.substringAfter("://")
-            else -> url
-        }
+    /** Returns true for hosts that are local/Docker — SSL not required. */
+    private fun isLocalHost(host: String): Boolean {
+        val h = host.lowercase()
+        return h == "localhost" || h == "127.0.0.1" || h == "::1" ||
+               h == "postgres"  || h == "postgresql" || h == "db" ||
+               !h.contains('.')   // single-label names are Docker service names
+    }
+
+    private fun normaliseJdbcUrl(url: String, provider: String): String = when {
+        url.startsWith("jdbc:") -> url
+        url.startsWith("postgresql://") || url.startsWith("postgres://") ->
+            "jdbc:postgresql://" + url.substringAfter("://")
+        url.startsWith("mysql://") -> "jdbc:mysql://" + url.substringAfter("://")
+        else -> url
+    }
 
     private fun driverFor(provider: String): String = when (provider.lowercase()) {
         "postgresql", "postgres" -> "org.postgresql.Driver"
