@@ -169,7 +169,7 @@ export default function WorkflowDetailPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "Total Runs",    value: workflow.totalRuns,                  icon: List },
+          { label: "Total Runs",    value: workflow.totalRuns ?? 0,             icon: List },
           { label: "Success Rate",  value: `${Math.round((workflow.successRate ?? 0) * 100)}%`, icon: CheckCircle2 },
           { label: "Agents",        value: (workflow.agentIds ?? []).length,    icon: Bot },
           { label: "Tools",         value: (workflow.toolIds ?? []).length,     icon: Wrench },
@@ -195,7 +195,7 @@ export default function WorkflowDetailPage() {
             <h2 className="text-[13px] font-semibold">Execution Steps</h2>
           </div>
           <div className="divide-y divide-border/40">
-            {workflow.steps.map((step, idx) => (
+            {(workflow.steps ?? []).map((step, idx) => (
               <div key={step.id} className="flex items-center gap-3 px-5 py-3">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
                   {idx + 1}
@@ -254,17 +254,19 @@ export default function WorkflowDetailPage() {
               Policies
             </h2>
             <div className="space-y-2 text-[12px]">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Retry</span>
-                <span className="font-medium">{workflow.retryPolicy.maxAttempts}× {workflow.retryPolicy.backoffType}</span>
-              </div>
-              {workflow.budgetPolicy.maxTokensPerRun && (
+              {workflow.retryPolicy && (
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Max tokens/run</span>
-                  <span className="font-mono font-medium">{(workflow.budgetPolicy?.maxTokensPerRun ?? 0).toLocaleString()}</span>
+                  <span className="text-muted-foreground">Retry</span>
+                  <span className="font-medium">{workflow.retryPolicy.maxAttempts}× {workflow.retryPolicy.backoffType}</span>
                 </div>
               )}
-              {workflow.budgetPolicy.maxCostUsdPerRun && (
+              {workflow.budgetPolicy?.maxTokensPerRun && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Max tokens/run</span>
+                  <span className="font-mono font-medium">{workflow.budgetPolicy.maxTokensPerRun.toLocaleString()}</span>
+                </div>
+              )}
+              {workflow.budgetPolicy?.maxCostUsdPerRun && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Max cost/run</span>
                   <span className="font-mono font-medium">${workflow.budgetPolicy.maxCostUsdPerRun.toFixed(2)}</span>
@@ -272,8 +274,8 @@ export default function WorkflowDetailPage() {
               )}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Approval required</span>
-                <span className={cn("font-medium", workflow.approvalPolicy.requireApproval ? "text-amber-700" : "text-muted-foreground")}>
-                  {workflow.approvalPolicy.requireApproval ? "Yes" : "No"}
+                <span className={cn("font-medium", workflow.approvalPolicy?.requireApproval ? "text-amber-700" : "text-muted-foreground")}>
+                  {workflow.approvalPolicy?.requireApproval ? "Yes" : "No"}
                 </span>
               </div>
             </div>
@@ -302,7 +304,7 @@ export default function WorkflowDetailPage() {
                 {workflow.creationMode === "native" ? "Full replay" : "Limited replay"}
               </span>
               <span className="text-[10px] text-muted-foreground">
-                {workflow.steps.filter((s) => s.checkpointEnabled).length} checkpointed steps
+                {(workflow.steps ?? []).filter((s) => s.checkpointEnabled).length} checkpointed steps
               </span>
             </div>
           </div>
