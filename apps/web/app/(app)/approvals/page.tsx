@@ -57,17 +57,26 @@ export default function ApprovalsPage() {
   const [total, setTotal]         = useState(0);
   const [filter, setFilter]       = useState<StatusFilter>("PENDING");
   const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
   const [actingId, setActingId]   = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
-    const page = await getApprovals({
-      status: filter === "ALL" ? undefined : filter,
-      pageSize: 50,
-    });
-    setApprovals(page.items);
-    setTotal(page.total);
-    if (!silent) setLoading(false);
+    setError(null);
+    try {
+      const page = await getApprovals({
+        status: filter === "ALL" ? undefined : filter,
+        pageSize: 50,
+      });
+      setApprovals(page.items ?? []);
+      setTotal(page.total ?? 0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      console.error("[approvals] load failed:", msg);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, [filter]);
 
   useEffect(() => { void load(); }, [load]);
@@ -138,6 +147,13 @@ export default function ApprovalsPage() {
           </span>
         )}
       </div>
+
+      {/* Error */}
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <strong>Failed to load approvals:</strong> {error}
+        </div>
+      )}
 
       {/* Content */}
       {loading ? (

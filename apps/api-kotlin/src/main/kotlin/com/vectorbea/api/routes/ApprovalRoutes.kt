@@ -28,6 +28,7 @@ private fun Approval.toResponse(): Map<String, Any?> = mapOf(
     "runId" to runId.toString(),
     "workflowId" to workflowId.toString(),
     "stepId" to stepId,
+    "nodeId" to stepId,   // frontend ApprovalItem uses nodeId; stepId is the canonical DB name
     "agentId" to agentId?.toString(),
     "status" to status.uppercase(),   // UI compares against "PENDING"/"APPROVED"/"REJECTED"
     "title" to title,

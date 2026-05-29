@@ -478,11 +478,8 @@ export async function getApprovals(params: {
   if (params.page)     qs.set("page", String(params.page));
   if (params.pageSize) qs.set("pageSize", String(params.pageSize));
   const q = qs.toString();
-  try {
-    return await api<ApprovalPage>(withWorkspace(`/api/approvals${q ? `?${q}` : ""}`));
-  } catch {
-    return { items: [], total: 0, page: 1, pageSize: 20, totalPages: 0 };
-  }
+  // Do NOT catch — let errors surface so the UI can show what went wrong
+  return await api<ApprovalPage>(withWorkspace(`/api/approvals${q ? `?${q}` : ""}`));
 }
 
 export async function approveRunGate(_runId: string, approvalId: string, reason?: string): Promise<void> {
