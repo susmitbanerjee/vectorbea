@@ -14,20 +14,23 @@ data class ApprovalRow(
     val id: UUID,
     val runId: UUID,
     val nodeId: String,
-    /** "PENDING" | "APPROVED" | "REJECTED" */
+    /** "pending" | "approved" | "rejected" | "expired" (lowercase — matches DB) */
     val status: String,
     val message: String?,
     val resolvedBy: String?,
 )
 
 /**
- * Creates and manages approval rows in the `run_approvals` table.
+ * Creates and queries approval rows in the `approvals` table.
  *
- * An approval row is created when an APPROVAL node is reached.
- * The run pauses until the approval is resolved via the API.
+ * The `approvals` table is shared between the worker (writer) and the API
+ * (reader + decision writer).  The worker inserts `status = 'pending'`; the
+ * API sets `status = 'approved'` or `'rejected'` via POST /api/approvals/:id/approve.
  *
- * SECURITY: [resolvedInputs] may contain user data.  Only the keys
- * are stored in the metadata; raw values are not stored here.
+ * Status values are lowercase to match the API's ApprovalRepository convention.
+ * [ApprovalNodeExecutor] calls `.uppercase()` when comparing so both cases work.
+ *
+ * SECURITY: Only metadata keys (not values) from [resolvedInputs] are stored.
  */
 open class ApprovalStore(private val dataSource: DataSource) {
 
@@ -35,8 +38,8 @@ open class ApprovalStore(private val dataSource: DataSource) {
     private val mapper = jacksonObjectMapper()
 
     /**
-     * Create a pending approval row.
-     * Returns the approval UUID (stored in the run_approvals table).
+     * Create a pending approval row in the `approvals` table.
+     * Returns the approval UUID as a string.
      */
     open fun createPendingApproval(
         runId: UUID,
@@ -49,33 +52,47 @@ open class ApprovalStore(private val dataSource: DataSource) {
     ): String {
         val id = UUID.randomUUID()
 
-        // Only store keys from resolvedInputs — not values — to avoid persisting sensitive data
-        val metadataJson = mapper.writeValueAsString(
+        // Build sanitized payload — only input keys, never raw values
+        val payloadJson = mapper.writeValueAsString(
             mapOf(
-                "nodeId"       to nodeId,
-                "approvers"    to approvers,
-                "inputKeys"    to resolvedInputs.keys.toList(),
-                "message"      to message,
+                "nodeId"    to nodeId,
+                "approvers" to approvers,
+                "inputKeys" to resolvedInputs.keys.toList(),
             )
         )
 
+        // Look up workflow_id from the run (needed by ApprovalRepository)
+        val workflowId = lookupWorkflowId(runId) ?: runId  // fallback to runId if not found
+
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                """INSERT INTO run_approvals
-                       (id, run_id, workspace_id, environment_id, node_id,
-                        status, message, metadata_json, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?::jsonb, ?, ?)"""
+                """
+                INSERT INTO approvals (
+                    id, run_id, workflow_id, step_id,
+                    status, title, message, risk_level,
+                    requested_by, requested_at,
+                    payload_json_sanitized,
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?,
+                    'pending', ?, ?, 'medium',
+                    'workflow-worker', ?,
+                    ?::jsonb,
+                    ?, ?
+                )
+                """.trimIndent()
             ).use { stmt ->
                 val now = Timestamp.from(Instant.now())
                 stmt.setObject(1, id)
                 stmt.setObject(2, runId)
-                stmt.setObject(3, workspaceId)
-                stmt.setObject(4, environmentId)
-                stmt.setString(5, nodeId)
-                stmt.setString(6, message)
-                stmt.setString(7, metadataJson)
-                stmt.setTimestamp(8, now)
-                stmt.setTimestamp(9, now)
+                stmt.setObject(3, workflowId)
+                stmt.setString(4, nodeId)
+                stmt.setString(5, message)           // title
+                stmt.setString(6, message)           // message
+                stmt.setTimestamp(7, now)            // requested_at
+                stmt.setString(8, payloadJson)       // payload_json_sanitized
+                stmt.setTimestamp(9, now)            // created_at
+                stmt.setTimestamp(10, now)           // updated_at
                 stmt.executeUpdate()
             }
         }
@@ -86,18 +103,21 @@ open class ApprovalStore(private val dataSource: DataSource) {
     }
 
     /**
-     * Find the most recent approval row for [runId] + [nodeId], or null if none exists.
-     * Used by [DbWriteNodeExecutor] to check whether an approval was already granted or rejected.
+     * Find the most recent approval row for [runId] + [nodeId].
+     * Used by [com.vectorbea.worker.runtime.executor.ApprovalNodeExecutor]
+     * to check whether an approval was already decided.
      */
     open fun findApproval(runId: UUID, nodeId: String): ApprovalRow? {
         return try {
             dataSource.connection.use { conn ->
                 conn.prepareStatement(
-                    """SELECT id, run_id, node_id, status, message, resolved_by
-                       FROM run_approvals
-                       WHERE run_id = ? AND node_id = ?
-                       ORDER BY created_at DESC
-                       LIMIT 1"""
+                    """
+                    SELECT id, run_id, step_id, status, message, decided_by
+                    FROM approvals
+                    WHERE run_id = ? AND step_id = ?
+                    ORDER BY requested_at DESC
+                    LIMIT 1
+                    """.trimIndent()
                 ).use { stmt ->
                     stmt.setObject(1, runId)
                     stmt.setString(2, nodeId)
@@ -106,10 +126,10 @@ open class ApprovalStore(private val dataSource: DataSource) {
                         ApprovalRow(
                             id         = UUID.fromString(rs.getString("id")),
                             runId      = UUID.fromString(rs.getString("run_id")),
-                            nodeId     = rs.getString("node_id"),
-                            status     = rs.getString("status") ?: "PENDING",
+                            nodeId     = rs.getString("step_id"),
+                            status     = rs.getString("status") ?: "pending",
                             message    = rs.getString("message"),
-                            resolvedBy = rs.getString("resolved_by"),
+                            resolvedBy = rs.getString("decided_by"),
                         )
                     }
                 }
@@ -120,4 +140,19 @@ open class ApprovalStore(private val dataSource: DataSource) {
             null
         }
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun lookupWorkflowId(runId: UUID): UUID? = try {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                "SELECT workflow_id FROM agent_runs WHERE id = ?"
+            ).use { stmt ->
+                stmt.setObject(1, runId)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) UUID.fromString(rs.getString("workflow_id")) else null
+                }
+            }
+        }
+    } catch (_: Exception) { null }
 }
