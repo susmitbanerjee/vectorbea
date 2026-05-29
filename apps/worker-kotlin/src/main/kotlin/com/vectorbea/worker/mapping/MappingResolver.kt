@@ -165,14 +165,26 @@ object MappingResolver {
             throw MappingException("Invalid step reference 'steps.$ref'. Format: steps.<nodeId>.output.<path>")
         }
 
-        val nodeId = parts[0]
+        val rawRef = parts[0]
+
+        // Resolve the step reference by node ID first, then by node label (case-insensitive).
+        // Users often write {{ steps.FetchUpcomingRenewals.output.rows }} using the node's
+        // display label rather than its auto-generated ID (n1001). Both are supported.
+        val nodeId = ctx.graph.nodes
+            .firstOrNull { node ->
+                node.id == rawRef ||
+                node.label.equals(rawRef, ignoreCase = true) ||
+                node.label.replace(" ", "").equals(rawRef, ignoreCase = true) ||
+                node.label.replace(" ", "_").equals(rawRef, ignoreCase = true)
+            }?.id
+            ?: throw MappingException(
+                "steps.$rawRef does not exist in the workflow graph. " +
+                "Available steps: ${ctx.graph.nodes.joinToString { "'${it.id}' (${it.label})" }}"
+            )
 
         // Security: only allow references to completed steps
         if (!ctx.isCompleted(nodeId)) {
-            if (ctx.graph.nodeById(nodeId) == null) {
-                throw MappingException("steps.$nodeId does not exist in the workflow graph")
-            }
-            throw MappingException("steps.$nodeId is not yet completed — forward references are not allowed")
+            throw MappingException("steps.$rawRef is not yet completed — forward references are not allowed")
         }
 
         // Determine tier and path

@@ -238,7 +238,8 @@ export default function WorkflowBuilderPage() {
                   "PARALLEL_BRANCH_COMPLETED"].includes(t))
           statusMap[sid] = "succeeded";
         else if (["STEP_FAILED","AGENT_FAILED","TOOL_CALL_FAILED",
-                  "NODE_TYPE_UNSUPPORTED","LLM_CALL_FAILED","HTTP_CALL_FAILED"].includes(t))
+                  "NODE_TYPE_UNSUPPORTED","LLM_CALL_FAILED","HTTP_CALL_FAILED",
+                  "INPUT_MAPPING_FAILED"].includes(t))
           statusMap[sid] = "failed";
         else if (["APPROVAL_REQUESTED"].includes(t))
           statusMap[sid] = "waiting";

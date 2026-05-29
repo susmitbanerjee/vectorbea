@@ -301,11 +301,24 @@ class WorkflowRuntime(
 
         // Resolve inputs — use MappingResolver for template expressions when inputMapping has {{ }}
         val resolvedInputs = resolveNodeInputs(node, ctx, stepOutputView, source)
-            ?: return null.also {
+            ?: run {
+                // Input mapping failed — mark the node as FAILED and emit both
+                // INPUT_MAPPING_FAILED (for diagnostics) and STEP_FAILED (so the run
+                // knows the step definitively failed and the UI shows it as "failed").
+                // Return ExecutionResult.Failed so the branch properly fails instead of
+                // silently completing as Succeeded with a failed node inside.
                 ctx.markFailed(node.id)
                 emitEvent(ctx, EventType.INPUT_MAPPING_FAILED, "running", source,
-                    title  = "Input mapping failed",
+                    title  = "Input mapping failed: ${nodeLabel(node)}",
                     stepId = node.id)
+                emitEvent(ctx, EventType.STEP_FAILED, "running", source,
+                    title  = "Failed: ${nodeLabel(node)}",
+                    stepId = node.id,
+                    error  = """{"reason":"input_mapping_failed","nodeType":"${node.type}"}""")
+                return ExecutionResult.Failed(
+                    "Input mapping failed for node '${node.id}' (${node.label.ifBlank { node.type }}). " +
+                    "Check that all step references use the correct node ID or label and that the referenced steps are completed."
+                )
             }
 
         if (isTransform) {
