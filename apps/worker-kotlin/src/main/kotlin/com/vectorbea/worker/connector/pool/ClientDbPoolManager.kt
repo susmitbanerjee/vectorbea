@@ -79,8 +79,49 @@ open class ClientDbPoolManager(
     // ── Pool construction ─────────────────────────────────────────────────────
 
     private fun buildPool(record: ConnectionRecord, secret: SecretValue?): HikariDataSource {
+        val cfg = record.configJson
+        val connectionMode = cfg["connectionMode"] as? String ?: "host_port"
+        val readOnly = cfg["readOnly"] as? Boolean ?: false
+
+        // ── Connection string mode ────────────────────────────────────────────
+        // The frontend encrypts the full postgres:// URL as the secret.
+        // Use it directly as the JDBC URL — credentials are embedded in the URL.
+        // This avoids having to parse host/port/database/user separately.
+        if (connectionMode == "connection_string" && secret != null && !secret.isCleared()) {
+            var jdbcUrl = ""
+            secret.useOnce { raw ->
+                jdbcUrl = normaliseJdbcUrl(raw, record.provider)
+            }
+            return try {
+                val hk = HikariConfig().apply {
+                    this.jdbcUrl = jdbcUrl
+                    driverClassName = driverFor(record.provider)
+                    poolName = "client-${record.id}"
+                    maximumPoolSize = maxConnectionsPerPool
+                    minimumIdle = 1
+                    connectionTimeout = connectionTimeoutMs
+                    idleTimeout = idleTimeoutMs
+                    maxLifetime = 1_800_000L
+                    connectionTestQuery = "SELECT 1"
+                    isRegisterMbeans = false
+                    leakDetectionThreshold = 60_000L
+                    isReadOnly = readOnly
+                }
+                HikariDataSource(hk)
+            } catch (e: Exception) {
+                val rootMsg = (e.cause?.message ?: e.message ?: e.javaClass.simpleName)
+                    .take(300).replace(Regex("""://[^@]*@"""), "://[REDACTED]@")
+                log.error("[clientdb] failed to create pool (conn-string mode) [connId={}, provider={}]: {}",
+                    record.id, record.provider, rootMsg)
+                throw ClientDbPoolException(
+                    "Cannot create pool for connection '${record.name}' (${record.id}): $rootMsg"
+                )
+            }
+        }
+
+        // ── Host/port mode ────────────────────────────────────────────────────
         val jdbcUrl = buildJdbcUrl(record)
-        val username = record.configJson["username"] as? String ?: ""
+        val username = cfg["username"] as? String ?: ""
 
         return try {
             val hk = HikariConfig().apply {
@@ -104,8 +145,6 @@ open class ClientDbPoolManager(
                     this.password = secret.asStringRetained()
                 }
 
-                // Read-only mode can be set via configJson
-                val readOnly = record.configJson["readOnly"] as? Boolean ?: false
                 isReadOnly = readOnly
             }
             HikariDataSource(hk)
@@ -143,14 +182,19 @@ open class ClientDbPoolManager(
         val port     = cfg["port"]?.toString()?.toIntOrNull() ?: defaultPortFor(record.provider)
         val database = cfg["database"] as? String ?: cfg["dbname"] as? String ?: ""
 
-        // Explicit sslMode from config takes priority.
-        // If absent, auto-require SSL for any non-local host — cloud providers
-        // (Neon, Supabase, RDS, etc.) require SSL and reject plain connections.
-        val explicitSsl = cfg["sslMode"] as? String
+        // sslMode resolution (in priority order):
+        //  1. Explicit string  cfg["sslMode"] = "require" / "disable" / etc.
+        //  2. Boolean flag     cfg["sslRequired"] = true  → "require"
+        //  3. Auto-detect:     non-local host             → "require"
+        //                      local / Docker host        → no SSL
+        val explicitSsl   = cfg["sslMode"] as? String
+        val sslRequiredBool = cfg["sslRequired"] as? Boolean
         val sslMode = when {
             !explicitSsl.isNullOrBlank() -> explicitSsl
-            isLocalHost(host)            -> null          // local / Docker — no SSL needed
-            else                         -> "require"     // cloud — enforce SSL
+            sslRequiredBool == true      -> "require"
+            sslRequiredBool == false     -> null
+            isLocalHost(host)            -> null
+            else                         -> "require"
         }
 
         return when (record.provider.lowercase()) {
