@@ -234,7 +234,8 @@ export default function WorkflowBuilderPage() {
           statusMap[sid] = "running";
         else if (["STEP_COMPLETED","AGENT_COMPLETED","LLM_CALL_COMPLETED",
                   "TOOL_CALL_COMPLETED","DB_QUERY_COMPLETED","HTTP_REQUEST_COMPLETED",
-                  "TRANSFORM_COMPLETED","JOIN_COMPLETED","HTTP_CALL_COMPLETED"].includes(t))
+                  "TRANSFORM_COMPLETED","JOIN_COMPLETED","HTTP_CALL_COMPLETED",
+                  "PARALLEL_BRANCH_COMPLETED"].includes(t))
           statusMap[sid] = "succeeded";
         else if (["STEP_FAILED","AGENT_FAILED","TOOL_CALL_FAILED",
                   "NODE_TYPE_UNSUPPORTED","LLM_CALL_FAILED","HTTP_CALL_FAILED"].includes(t))

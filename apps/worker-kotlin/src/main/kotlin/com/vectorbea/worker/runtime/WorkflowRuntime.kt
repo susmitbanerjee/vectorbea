@@ -620,6 +620,15 @@ class WorkflowRuntime(
             ctx.graph.edgesTo(joinNode.id).forEach { ctx.selectEdge(it.id) }
         }
 
+        // Emit STEP_COMPLETED for the PARALLEL node itself.
+        // executeParallelNode bypasses executeSingleNode/applyNodeResult so no event was
+        // emitted yet. Without this, the canvas keeps showing the PARALLEL node as "running"
+        // forever — making it look like the parallel never finished when it actually did.
+        emitEvent(ctx, EventType.STEP_COMPLETED, "running", source,
+            title  = "Completed: ${parallelNode.label.ifBlank { parallelNode.id }}",
+            stepId = parallelNode.id,
+            meta   = """{"branches":${branchResults.size},"succeeded":${succeededBranches.size}}""")
+
         return null // continue main loop
     }
 
