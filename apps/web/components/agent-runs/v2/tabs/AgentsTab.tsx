@@ -75,8 +75,8 @@ export function AgentsTab({ agents }: AgentsTabProps) {
               {agent.tokensUsed !== undefined && agent.tokensUsed > 0 && (
                 <Stat icon={<Zap className="h-3 w-3" />} label="Tokens" value={agent.tokensUsed.toLocaleString()} />
               )}
-              {agent.estimatedCostUsd !== undefined && agent.estimatedCostUsd > 0 && (
-                <Stat icon={<Coins className="h-3 w-3" />} label="Cost" value={`$${agent.estimatedCostUsd.toFixed(4)}`} />
+              {agent.estimatedCostUsd != null && agent.estimatedCostUsd > 0 && (
+                <Stat icon={<Coins className="h-3 w-3" />} label="Cost" value={`$${(agent.estimatedCostUsd ?? 0).toFixed(4)}`} />
               )}
             </div>
 

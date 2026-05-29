@@ -78,12 +78,12 @@ export function RunSummaryCards({ model }: RunSummaryCardsProps) {
       <SummaryCard
         label="Tokens"
         value={run.totalTokens ? run.totalTokens.toLocaleString() : "—"}
-        sub={run.estimatedCostUsd ? `$${run.estimatedCostUsd.toFixed(4)} est.` : undefined}
+        sub={run.estimatedCostUsd != null ? `$${(run.estimatedCostUsd ?? 0).toFixed(4)} est.` : undefined}
         icon={<Zap className="h-4 w-4" />}
       />
       <SummaryCard
         label="Cost"
-        value={run.estimatedCostUsd ? `$${run.estimatedCostUsd.toFixed(4)}` : "—"}
+        value={run.estimatedCostUsd != null ? `$${(run.estimatedCostUsd ?? 0).toFixed(4)}` : "—"}
         sub="Estimated USD"
         icon={<Coins className="h-4 w-4" />}
       />

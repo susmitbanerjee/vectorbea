@@ -269,7 +269,7 @@ export default function WorkflowDetailPage() {
               {workflow.budgetPolicy?.maxCostUsdPerRun && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Max cost/run</span>
-                  <span className="font-mono font-medium">${workflow.budgetPolicy.maxCostUsdPerRun.toFixed(2)}</span>
+                  <span className="font-mono font-medium">${(workflow.budgetPolicy.maxCostUsdPerRun ?? 0).toFixed(2)}</span>
                 </div>
               )}
               <div className="flex items-center justify-between">
@@ -331,9 +331,9 @@ export default function WorkflowDetailPage() {
                   <Clock className="h-3 w-3" />
                   {run.durationMs ? `${(run.durationMs / 1000).toFixed(0)}s` : "—"}
                 </span>
-                {run.estimatedCostUsd !== null && (
+                {run.estimatedCostUsd != null && (
                   <span className="font-mono text-[11px] text-muted-foreground">
-                    ${run.estimatedCostUsd.toFixed(4)}
+                    ${(run.estimatedCostUsd ?? 0).toFixed(4)}
                   </span>
                 )}
               </Link>

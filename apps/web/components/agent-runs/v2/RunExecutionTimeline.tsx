@@ -200,7 +200,7 @@ function SpanDetail({ event, onClose }: { event: RunTimelineEventUi; onClose: ()
           {event.toolName                && <KV label="Tool"        value={event.toolName}   mono color="#0891B2" />}
           {event.modelName               && <KV label="Model"       value={event.modelName}  mono color="#C084FC" />}
           {event.tokensUsed    != null   && <KV label="Tokens"      value={event.tokensUsed.toLocaleString()} mono />}
-          {event.estimatedCostUsd != null && <KV label="Cost"       value={`$${event.estimatedCostUsd.toFixed(6)}`} mono />}
+          {event.estimatedCostUsd != null && <KV label="Cost"       value={`$${(event.estimatedCostUsd ?? 0).toFixed(6)}`} mono />}
           {event.handoffTo               && <KV label="Handoff →"   value={event.handoffTo}  mono color="#7C3AED" />}
           {event.artifactName            && <KV label="Artifact"    value={event.artifactName} mono color="#86EFAC" />}
           {event.actorName               && <KV label="Actor"       value={event.actorName}  mono />}

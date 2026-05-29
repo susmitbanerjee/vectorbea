@@ -112,7 +112,7 @@ export function MetadataTab({ model }: MetadataTabProps) {
 
   const aiRows = [
     { label: "Total Tokens",    value: run.totalTokens?.toLocaleString() ?? "—", mono: true },
-    { label: "Estimated Cost",  value: run.estimatedCostUsd != null ? `$${run.estimatedCostUsd.toFixed(6)}` : "—", mono: true },
+    { label: "Estimated Cost",  value: run.estimatedCostUsd != null ? `$${(run.estimatedCostUsd ?? 0).toFixed(6)}` : "—", mono: true },
     { label: "Current Agent",   value: run.currentAgent ?? "—" },
     { label: "Current Step",    value: run.currentStep ?? "—" },
   ];

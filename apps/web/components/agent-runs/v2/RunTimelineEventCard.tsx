@@ -163,9 +163,9 @@ export function RunTimelineEventCard({ event, isLast, defaultExpanded = false, s
                   <Zap className="h-3 w-3" />{event.tokensUsed.toLocaleString()}
                 </span>
               )}
-              {event.estimatedCostUsd && (
+              {event.estimatedCostUsd != null && (
                 <span className="hidden items-center gap-0.5 sm:flex">
-                  <Coins className="h-3 w-3" />${event.estimatedCostUsd.toFixed(4)}
+                  <Coins className="h-3 w-3" />${(event.estimatedCostUsd ?? 0).toFixed(4)}
                 </span>
               )}
               {dur && (

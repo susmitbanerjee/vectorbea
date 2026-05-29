@@ -250,7 +250,7 @@ function DetailsPanel({ event, onClose }: { event: RunTimelineEventUi; onClose: 
             {event.toolName   && <KVRow label="Tool"     value={event.toolName}   mono accent="#22D3EE" />}
             {event.modelName  && <KVRow label="Model"    value={event.modelName}  mono accent="#C084FC" />}
             {event.tokensUsed != null && <KVRow label="Tokens"  value={event.tokensUsed.toLocaleString()} mono />}
-            {event.estimatedCostUsd != null && <KVRow label="Cost" value={`$${event.estimatedCostUsd.toFixed(6)}`} mono />}
+            {event.estimatedCostUsd != null && <KVRow label="Cost" value={`$${(event.estimatedCostUsd ?? 0).toFixed(6)}`} mono />}
             {event.handoffTo  && <KVRow label="Handoff →" value={event.handoffTo} mono accent="#A78BFA" />}
             {event.artifactName && <KVRow label="Artifact" value={event.artifactName} mono accent="#86EFAC" />}
             {event.actorName  && <KVRow label="Actor"   value={event.actorName} mono />}

@@ -156,10 +156,10 @@ export function RunTimelineEventCard({
                   {event.tokensUsed.toLocaleString()}
                 </span>
               )}
-              {event.estimatedCostUsd && (
+              {event.estimatedCostUsd != null && (
                 <span className="flex items-center gap-0.5">
                   <Coins className="h-3 w-3" />
-                  ${event.estimatedCostUsd.toFixed(4)}
+                  ${(event.estimatedCostUsd ?? 0).toFixed(4)}
                 </span>
               )}
               <span className="font-mono">{fmtTime(event.timestamp)}</span>

@@ -95,7 +95,7 @@ export function StepsTab({ steps }: StepsTabProps) {
                 {step.tokensUsed ? step.tokensUsed.toLocaleString() : "—"}
               </td>
               <td className="px-4 py-2.5 font-mono text-[11px] text-muted-foreground">
-                {step.estimatedCostUsd ? `$${step.estimatedCostUsd.toFixed(4)}` : "—"}
+                {step.estimatedCostUsd != null ? `$${(step.estimatedCostUsd ?? 0).toFixed(4)}` : "—"}
               </td>
             </tr>
           ))}

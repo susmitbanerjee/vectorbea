@@ -292,8 +292,8 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
           {agent.tokensUsed !== undefined && agent.tokensUsed > 0 && (
             <StatItem icon={<Zap className="h-3 w-3" />} label="Tokens" value={agent.tokensUsed.toLocaleString()} />
           )}
-          {agent.estimatedCostUsd !== undefined && agent.estimatedCostUsd > 0 && (
-            <StatItem icon={<Coins className="h-3 w-3" />} label="Cost" value={`$${agent.estimatedCostUsd.toFixed(4)}`} />
+          {agent.estimatedCostUsd != null && agent.estimatedCostUsd > 0 && (
+            <StatItem icon={<Coins className="h-3 w-3" />} label="Cost" value={`$${(agent.estimatedCostUsd ?? 0).toFixed(4)}`} />
           )}
         </div>
 
