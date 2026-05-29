@@ -172,6 +172,26 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
         <div><ILabel>Backoff (ms)</ILabel><INumber value={retry.backoffMs} onChange={(v) => set({ retryPolicy: { ...retry, backoffMs: v } })} min={0} /></div>
       </ISection>
       <IDivider />
+      <ISection title="Input Mapping">
+        <MappingEditor
+          label=""
+          mapping={cfg.inputMapping ?? {}}
+          onChange={(m) => set({ inputMapping: m })}
+          keyPlaceholder="param_name"
+          valuePlaceholder="{{input.field}}"
+        />
+      </ISection>
+      <IDivider />
+      <ISection title="Output Mapping">
+        <MappingEditor
+          label=""
+          mapping={cfg.outputMapping ?? {}}
+          onChange={(m) => set({ outputMapping: m })}
+          keyPlaceholder="output_key"
+          valuePlaceholder="{{steps.N.output.field}}"
+        />
+      </ISection>
+      <IDivider />
       <ICheck id={`ckpt-${data.label}`} checked={cfg.checkpointEnabled ?? false} onChange={(v) => set({ checkpointEnabled: v })} label="Enable checkpoint (allows replay from here)" />
     </div>
   );
@@ -209,13 +229,103 @@ function LlmConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeD
   );
 }
 
+// ─── Mapping editor (key → template expression pairs) ────────────────────────
+
+function MappingEditor({
+  label,
+  mapping,
+  onChange,
+  keyPlaceholder,
+  valuePlaceholder,
+}: {
+  label: string;
+  mapping: Record<string, string>;
+  onChange: (m: Record<string, string>) => void;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+}) {
+  const entries = Object.entries(mapping);
+
+  function updateKey(idx: number, newKey: string) {
+    const next: Record<string, string> = {};
+    entries.forEach(([k, v], i) => { next[i === idx ? newKey : k] = v; });
+    onChange(next);
+  }
+  function updateValue(idx: number, newVal: string) {
+    const next: Record<string, string> = {};
+    entries.forEach(([k, v], i) => { next[k] = i === idx ? newVal : v; });
+    onChange(next);
+  }
+  function addRow() {
+    onChange({ ...mapping, "": "" });
+  }
+  function removeRow(idx: number) {
+    const next: Record<string, string> = {};
+    entries.forEach(([k, v], i) => { if (i !== idx) next[k] = v; });
+    onChange(next);
+  }
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <ILabel>{label}</ILabel>
+        <button
+          type="button"
+          onClick={addRow}
+          className="text-[10px] font-semibold text-primary/70 hover:text-primary transition-colors"
+        >
+          + Add row
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-[10px] text-muted-foreground/40 italic px-1">No mappings — click &quot;Add row&quot; to start.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {entries.map(([k, v], idx) => (
+            <div key={idx} className="flex items-center gap-1.5">
+              {/* Key */}
+              <input
+                className="w-[38%] shrink-0 rounded-md border border-border/50 bg-background/60 px-2 py-1.5 font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30"
+                value={k}
+                onChange={(e) => updateKey(idx, e.target.value)}
+                placeholder={keyPlaceholder ?? "param"}
+              />
+              <span className="shrink-0 text-[10px] text-muted-foreground/40">←</span>
+              {/* Value */}
+              <input
+                className="min-w-0 flex-1 rounded-md border border-border/50 bg-background/60 px-2 py-1.5 font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30"
+                value={v}
+                onChange={(e) => updateValue(idx, e.target.value)}
+                placeholder={valuePlaceholder ?? "{{input.field}}"}
+              />
+              {/* Remove */}
+              <button
+                type="button"
+                onClick={() => removeRow(idx)}
+                className="shrink-0 text-muted-foreground/30 hover:text-red-400 transition-colors"
+                aria-label="Remove row"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tool node config ─────────────────────────────────────────────────────────
+
 function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d: WFNodeData) => void; tools: Tool[] }) {
   const cfg: ToolNodeConfig = data.toolConfig ?? {};
   function set(patch: Partial<ToolNodeConfig>) { onChange({ ...data, toolConfig: { ...cfg, ...patch } }); }
   const tool = cfg.toolId ? tools.find((t) => t.id === cfg.toolId) : null;
+
   return (
     <div className="space-y-3">
       <div><ILabel>Step Label</ILabel><IInput value={data.label} onChange={(v) => onChange({ ...data, label: v })} /></div>
+
       <div><ILabel>Registered Tool</ILabel>
         <ISelect value={cfg.toolId ?? ""} onChange={(v) => {
           const t = tools.find((x) => x.id === v);
@@ -225,7 +335,6 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
             toolName: t?.name,
             toolType: uiToolType ?? t?.type,
             riskLevel: t?.riskLevel,
-            // store uiToolType so node icon resolves correctly
             ...(uiToolType ? { uiToolType } : {}),
           } as Parameters<typeof set>[0]);
         }}>
@@ -233,13 +342,33 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
           {tools.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
         </ISelect>
       </div>
+
       {tool && (
         <div className="rounded-lg border border-border/30 bg-muted/10 px-3 py-2 text-[11px] space-y-1">
-          <div className="flex justify-between"><span className="text-muted-foreground/50">Risk</span><span className="font-medium capitalize">{tool.riskLevel.replace(/_/g, " ")}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground/50">Risk</span><span className="font-medium capitalize">{(tool.riskLevel ?? "").replace(/_/g, " ")}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground/50">Idempotent</span><span className={tool.idempotent ? "text-emerald-400" : "text-amber-400"}>{tool.idempotent ? "yes" : "no"}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground/50">Timeout</span><span>{tool.timeoutMs}ms</span></div>
         </div>
       )}
+
+      {/* ── Input Mapping ── */}
+      <MappingEditor
+        label="Input Mapping"
+        mapping={cfg.inputMapping ?? {}}
+        onChange={(m) => set({ inputMapping: m })}
+        keyPlaceholder="param_name"
+        valuePlaceholder="{{input.field}}"
+      />
+
+      {/* ── Output Mapping ── */}
+      <MappingEditor
+        label="Output Mapping"
+        mapping={cfg.outputMapping ?? {}}
+        onChange={(m) => set({ outputMapping: m })}
+        keyPlaceholder="output_key"
+        valuePlaceholder="{{steps.N.output.field}}"
+      />
+
       <ICheck id={`approval-tool-${data.label}`} checked={cfg.requireApproval ?? false} onChange={(v) => set({ requireApproval: v })} label="Require approval before executing" />
     </div>
   );
