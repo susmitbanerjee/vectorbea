@@ -46,10 +46,21 @@ open class ConnectionResolver(
         log.debug("[conn] resolved [id={}, type={}, provider={}, status={}]",
             connectionId, record.type, record.provider, record.status)
 
-        // Validate status
-        if (record.status != "active") {
-            throw ConnectionException(
-                "Connection '${record.name}' (${record.id}) is not active — status: ${record.status}"
+        // Validate status.
+        // "active"     → tested and confirmed working — always allowed.
+        // "not_tested" → newly created, never tested — allowed with a warning;
+        //                the real connectivity error will surface during I/O.
+        // "inactive"   → explicitly disabled by the user — reject.
+        // "error"      → last test failed — reject to surface the problem early.
+        when (record.status) {
+            "active"     -> { /* OK */ }
+            "not_tested" -> log.warn(
+                "[conn] connection '{}' ({}) has not been tested — proceeding anyway",
+                record.name, record.id
+            )
+            else -> throw ConnectionException(
+                "Connection '${record.name}' (${record.id}) cannot be used — status: ${record.status}. " +
+                "Set the connection to active in your workspace settings."
             )
         }
 
@@ -121,12 +132,22 @@ open class ConnectionResolver(
         }
     }
 
-    /** Type compatibility: "database" is compatible with "db", etc. */
+    /**
+     * Type compatibility — map between the stored connection type in the DB and
+     * the expectedType string each executor passes.
+     *
+     * DB `type` values (from V001 migration): "llm" | "database" | "http" | "tool"
+     * Executor expectedType values: "llm" | "database" | "http" | "db" | "db_query"
+     */
     private fun isTypeCompatible(actual: String, expected: String): Boolean {
         if (actual == expected) return true
         val aliases = mapOf(
-            "database" to setOf("db", "db_query"),
-            "db"       to setOf("database", "db_query"),
+            "database"    to setOf("db", "db_query", "database_read", "database_write"),
+            "db"          to setOf("database", "db_query"),
+            "db_query"    to setOf("database", "db"),
+            "http"        to setOf("tool", "http_tool"),
+            "tool"        to setOf("http", "http_tool"),
+            "llm"         to setOf("llm_provider", "ai"),
         )
         return aliases[actual]?.contains(expected) ?: false
     }
