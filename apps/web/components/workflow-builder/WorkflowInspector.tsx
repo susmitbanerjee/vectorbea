@@ -397,6 +397,30 @@ function EndConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeD
 function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeData) => void }) {
   const cfg = data.triggerConfig ?? { triggerType: "manual" as const };
   function set(patch: Partial<typeof cfg>) { onChange({ ...data, triggerConfig: { ...cfg, ...patch } }); }
+
+  // Local draft string for the JSON textarea — lets user type freely; commits on valid JSON
+  const [schemaDraft, setSchemaDraft] = useState<string>(
+    cfg.inputSchema ? JSON.stringify(cfg.inputSchema, null, 2) : "",
+  );
+  const [schemaError, setSchemaError] = useState(false);
+
+  function handleSchemaChange(v: string) {
+    setSchemaDraft(v);
+    if (v.trim() === "") {
+      setSchemaError(false);
+      set({ inputSchema: undefined });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(v) as Record<string, unknown>;
+      setSchemaError(false);
+      set({ inputSchema: parsed });
+    } catch {
+      setSchemaError(true);
+      // don't commit invalid JSON to the graph
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div><ILabel>Label</ILabel><IInput value={data.label} onChange={(v) => onChange({ ...data, label: v })} /></div>
@@ -421,11 +445,16 @@ function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFN
         <ITextarea
           rows={6}
           mono
-          value={cfg.inputSchema ?? ""}
-          onChange={(v) => set({ inputSchema: v })}
+          value={schemaDraft}
+          onChange={handleSchemaChange}
           placeholder={`{\n  "type": "object",\n  "properties": {\n    "days_ahead": { "type": "integer" },\n    "limit": { "type": "integer" }\n  }\n}`}
         />
-        <p className="mt-1 text-[10px] text-muted-foreground/50">JSON Schema describing the inputs this workflow accepts when triggered.</p>
+        {schemaError && (
+          <p className="mt-1 text-[10px] text-red-400">Invalid JSON — fix syntax to save.</p>
+        )}
+        {!schemaError && (
+          <p className="mt-1 text-[10px] text-muted-foreground/50">JSON Schema for workflow inputs. Saved automatically when valid.</p>
+        )}
       </div>
       <div><ILabel>Description</ILabel><ITextarea rows={2} value={data.description ?? ""} onChange={(v) => onChange({ ...data, description: v })} placeholder="When does this trigger?" /></div>
     </div>
