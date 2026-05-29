@@ -62,10 +62,11 @@ class WorkflowRuntime(
     )
     private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
 
-    // Dedicated pool for parallel branch execution — bounded to avoid monopolising the worker pool
-    private val branchExecutor: ExecutorService = Executors.newFixedThreadPool(
-        maxOf(2, Runtime.getRuntime().availableProcessors())
-    )
+    // Dedicated pool for parallel branch execution.
+    // Use a cached thread pool so N parallel branches actually run N threads concurrently.
+    // A fixed pool of size 2 on a 2-CPU container would queue branches 3,4 behind 1,2,
+    // making 4-way parallel look sequential to the user.
+    private val branchExecutor: ExecutorService = Executors.newCachedThreadPool()
 
     sealed class ExecutionResult {
         data class Succeeded(val output: Map<String, Any>) : ExecutionResult()
@@ -546,33 +547,72 @@ class WorkflowRuntime(
             }, branchExecutor)
         }
 
-        // Wait for all branches
-        val branchResults = futures.map { it.get() }
-
-        // Check for failures
-        val failedBranch = branchResults.firstOrNull { it.third is ExecutionResult.Failed }
-        if (failedBranch != null) {
-            return failedBranch.third
+        // Wait for ALL branches — collect results even if some fail so we get full diagnostic info
+        val branchResults = futures.map { future ->
+            try {
+                future.get()
+            } catch (e: Exception) {
+                // Branch threw unexpectedly — treat as failed result with a sanitized reason
+                val reason = sanitizeError(e)
+                log.warn("[runtime] branch future threw [parallelId={}]: {}", parallelNode.id, reason)
+                Triple("unknown", ctx, ExecutionResult.Failed(reason) as ExecutionResult)
+            }
         }
 
+        // Log per-branch outcome so failures are always visible
+        branchResults.forEach { (entryNodeId, _, result) ->
+            val status = when (result) {
+                is ExecutionResult.Succeeded          -> "succeeded"
+                is ExecutionResult.Failed             -> "failed: ${result.reason.take(120)}"
+                is ExecutionResult.WaitingForApproval -> "waiting_for_approval"
+                is ExecutionResult.Cancelled          -> "cancelled"
+            }
+            log.info("[runtime] branch {} → {} [parallelId={}]", entryNodeId, status, parallelNode.id)
+        }
+
+        // If ALL branches failed, the parallel itself fails
+        val allFailed = branchResults.all { it.third is ExecutionResult.Failed }
+        if (allFailed) {
+            val firstReason = (branchResults.first().third as ExecutionResult.Failed).reason
+            log.error("[runtime] all {} branches failed for parallel node {} — aborting",
+                branchResults.size, parallelNode.id)
+            return ExecutionResult.Failed(
+                "All parallel branches failed for node ${parallelNode.id}. First reason: $firstReason"
+            )
+        }
+
+        // If any branch is waiting for approval, propagate that
         val waitingBranch = branchResults.firstOrNull { it.third is ExecutionResult.WaitingForApproval }
         if (waitingBranch != null) {
             return waitingBranch.third
         }
 
-        // Merge branch contexts back into parent
+        // Partial failures are tolerated — succeeded branches contribute their outputs;
+        // failed branches contribute nothing but don't block the JOIN.
+        val succeededBranches = branchResults.filter { it.third is ExecutionResult.Succeeded }
+        val failedCount = branchResults.size - succeededBranches.size
+        if (failedCount > 0) {
+            log.warn("[runtime] {}/{} branches failed for parallel node {} — continuing with partial results",
+                failedCount, branchResults.size, parallelNode.id)
+            emitEvent(ctx, EventType.PARALLEL_BRANCH_COMPLETED, "running", source,
+                title   = "$failedCount of ${branchResults.size} branches failed",
+                summary = "Parallel execution continuing with partial results",
+                stepId  = parallelNode.id)
+        }
+
+        // Merge ALL branch contexts (including failed ones — their completed sub-nodes matter)
         val branchContexts = branchResults.map { it.second }
         ctx.merge(branchContexts, branchNodeIds)
 
-        branchResults.forEach { (entryNodeId, _, _) ->
+        branchResults.forEach { (entryNodeId, _, result) ->
+            val statusLabel = if (result is ExecutionResult.Succeeded) "completed" else "failed"
             emitEvent(ctx, EventType.PARALLEL_BRANCH_COMPLETED, "running", source,
-                title  = "Branch completed: $entryNodeId",
+                title  = "Branch $statusLabel: $entryNodeId",
                 stepId = entryNodeId)
         }
 
-        // Handle JOIN node if present
+        // Handle JOIN node if present — select inbound edges for branches that contributed
         if (joinNode != null) {
-            // SELECT the edges into the join node (from branches that just completed)
             ctx.graph.edgesTo(joinNode.id).forEach { ctx.selectEdge(it.id) }
         }
 
