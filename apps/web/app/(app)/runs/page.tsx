@@ -301,23 +301,27 @@ export default function RunsPage() {
       {/* ── Health bar ──────────────────────────────────────────────────── */}
       <RunsHealthBar />
 
-      {/* ── Divider ─────────────────────────────────────────────────────── */}
-      <div className="h-px bg-[#E5E7EB]" />
-
-      {/* ── Filters row ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
-
+      {/* ── Filters ─────────────────────────────────────────────────────── */}
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-2xl bg-white px-4 py-2.5"
+        style={{ border: "1px solid #E2E8F0", boxShadow: "0 1px 3px rgba(15,23,42,0.04)" }}
+      >
         {/* Search */}
         <SearchInput
-          containerClassName="min-w-[200px] max-w-xs flex-1"
+          containerClassName="w-[240px] shrink-0"
           placeholder="Search workflow name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
 
+        {/* Separator */}
+        <div className="h-5 w-px bg-slate-200 shrink-0" />
+
         {/* Status filter chips */}
         <div className="flex flex-wrap items-center gap-1">
           {statusFilters.map((f) => {
+            // "All" (empty value) is the default — show neutral, not blue
+            const isAll = f.value === "";
             const active = statusFilter === f.value;
             return (
               <button
@@ -325,10 +329,12 @@ export default function RunsPage() {
                 type="button"
                 onClick={() => setStatusFilter(f.value)}
                 className={cn(
-                  "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-colors",
-                  active
+                  "inline-flex h-8 items-center rounded-lg border px-2.5 text-[12px] font-medium transition-colors",
+                  active && !isAll
                     ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
-                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
+                    : active && isAll
+                    ? "border-slate-300 bg-slate-100 text-slate-700 font-semibold"
+                    : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700",
                 )}
               >
                 {f.label}
@@ -337,9 +343,13 @@ export default function RunsPage() {
           })}
         </div>
 
+        {/* Separator */}
+        <div className="h-5 w-px bg-slate-200 shrink-0" />
+
         {/* Time range chips */}
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex items-center gap-1">
           {TIME_RANGES.map((t) => {
+            const isAll = t.value === "all";
             const active = timeRange === t.value;
             return (
               <button
@@ -347,10 +357,12 @@ export default function RunsPage() {
                 type="button"
                 onClick={() => setTimeRange(t.value)}
                 className={cn(
-                  "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-colors",
-                  active
+                  "inline-flex h-8 items-center rounded-lg border px-2.5 text-[12px] font-medium transition-colors",
+                  active && !isAll
                     ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
-                    : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-600",
+                    : active && isAll
+                    ? "border-slate-300 bg-slate-100 text-slate-700 font-semibold"
+                    : "border-transparent text-slate-400 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-600",
                 )}
               >
                 {t.label}
@@ -359,12 +371,12 @@ export default function RunsPage() {
           })}
         </div>
 
-        {/* Refresh */}
+        {/* Refresh — right side */}
         <button
           type="button"
           onClick={() => void load(page)}
           disabled={loading}
-          className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-slate-300 hover:text-slate-600 disabled:opacity-50"
+          className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:border-slate-300 hover:text-slate-600 disabled:opacity-50"
         >
           {loading
             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -465,7 +477,7 @@ export default function RunsPage() {
                           href={`/runs/${run.id}` as Route}
                           className="block text-[13px] font-semibold text-[#111827] hover:underline"
                         >
-                          {run.workflowName}
+                          {run.workflowName?.trim() || `Run ${run.id.slice(0, 8)}`}
                         </Link>
                         <CopyId id={run.id} />
                       </td>
