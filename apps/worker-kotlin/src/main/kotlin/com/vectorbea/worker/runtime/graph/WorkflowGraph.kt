@@ -164,12 +164,41 @@ data class WorkflowGraph(
                 rf.config.filterValues { it != null }.mapValues { (_, v) -> v!! }
             }
 
+            // Input mapping resolution:
+            //  1. data.inputMappingJson  — top-level workflow mapping (generic nodes)
+            //  2. data.toolConfig.inputMapping — tool-node inspector stores it here
+            //  3. data.agentConfig.inputMapping — agent-node inspector
+            //  4. rf.inputMapping — internal format fallback
             val inputMapping: Map<String, String> = if (isReactFlow) {
-                mappingOf("inputMappingJson")
+                mappingOf("inputMappingJson").ifEmpty {
+                    // Tool nodes: inspector writes to toolConfig.inputMapping
+                    @Suppress("UNCHECKED_CAST")
+                    (data["toolConfig"] as? Map<String, Any?>)
+                        ?.let { tc -> (tc["inputMapping"] as? Map<String, Any?>)
+                            ?.filterValues { it is String }
+                            ?.mapValues { (_, v) -> v as String } }
+                    // Agent nodes: inspector writes to agentConfig.inputMapping
+                        ?: (data["agentConfig"] as? Map<String, Any?>)
+                            ?.let { ac -> (ac["inputMapping"] as? Map<String, Any?>)
+                                ?.filterValues { it is String }
+                                ?.mapValues { (_, v) -> v as String } }
+                        ?: emptyMap()
+                }
             } else rf.inputMapping
 
             val outputMapping: Map<String, String> = if (isReactFlow) {
-                mappingOf("outputMappingJson")
+                mappingOf("outputMappingJson").ifEmpty {
+                    @Suppress("UNCHECKED_CAST")
+                    (data["toolConfig"] as? Map<String, Any?>)
+                        ?.let { tc -> (tc["outputMapping"] as? Map<String, Any?>)
+                            ?.filterValues { it is String }
+                            ?.mapValues { (_, v) -> v as String } }
+                        ?: (data["agentConfig"] as? Map<String, Any?>)
+                            ?.let { ac -> (ac["outputMapping"] as? Map<String, Any?>)
+                                ?.filterValues { it is String }
+                                ?.mapValues { (_, v) -> v as String } }
+                        ?: emptyMap()
+                }
             } else rf.outputMapping
 
             return WorkflowNode(
