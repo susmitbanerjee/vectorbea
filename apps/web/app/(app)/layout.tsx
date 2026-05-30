@@ -63,9 +63,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
     return (
       <WorkspaceProvider organizations={organizations}>
-        <div className="flex h-screen overflow-hidden bg-background">
+        <div className="flex h-screen overflow-hidden" style={{ background: "#F8FAFC" }}>
           <AppSidebar summary={null} user={profile} />
-          <main className="page-surface min-w-0 h-full flex-1 overflow-y-auto">{children}</main>
+          <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "#F8FAFC" }}>{children}</main>
         </div>
       </WorkspaceProvider>
     );
@@ -74,9 +74,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // ── Open / mock-session path (no Supabase configured) ────────────────────
   return (
     <WorkspaceProvider organizations={[]}>
-      <div className="flex h-screen overflow-hidden bg-background">
+      <div className="flex h-screen overflow-hidden" style={{ background: "#F8FAFC" }}>
         <AppSidebar summary={null} user={null} />
-        <main className="page-surface min-w-0 h-full flex-1 overflow-y-auto">{children}</main>
+        <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "#F8FAFC" }}>{children}</main>
       </div>
     </WorkspaceProvider>
   );

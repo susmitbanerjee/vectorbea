@@ -6,10 +6,8 @@ import { cn } from "@/lib/utils";
 
 interface JsonBlockProps {
   value: unknown;
-  /** Max height before scroll (default 320px) */
   maxHeight?: number;
   className?: string;
-  /** Collapse long strings to this length */
   label?: string;
 }
 
@@ -24,16 +22,16 @@ export function JsonBlock({ value, maxHeight = 320, className, label }: JsonBloc
   }
 
   return (
-    <div className={cn("relative rounded-lg border border-border/50 bg-[#0f0f0f]", className)}>
+    <div className={cn("relative rounded-xl border border-slate-200 bg-slate-50", className)}>
       {label && (
-        <div className="flex items-center justify-between border-b border-border/30 px-3 py-1.5">
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+        <div className="flex items-center justify-between border-b border-slate-200 px-3 py-1.5">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-slate-500">
             {label}
           </span>
           <button
             type="button"
             onClick={handleCopy}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+            className="flex items-center gap-1 text-[10px] text-slate-400 transition-colors hover:text-slate-700"
           >
             {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
             {copied ? "copied" : "copy"}
@@ -41,7 +39,7 @@ export function JsonBlock({ value, maxHeight = 320, className, label }: JsonBloc
         </div>
       )}
       <pre
-        className="overflow-auto p-3 font-mono text-[11px] leading-relaxed text-[#e5e7eb]"
+        className="overflow-auto p-3 font-mono text-[11.5px] leading-relaxed text-slate-700"
         style={{ maxHeight }}
       >
         {json}
@@ -50,7 +48,7 @@ export function JsonBlock({ value, maxHeight = 320, className, label }: JsonBloc
         <button
           type="button"
           onClick={handleCopy}
-          className="absolute right-2 top-2 flex items-center gap-1 rounded border border-border/30 bg-background/80 px-2 py-1 text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+          className="absolute right-2 top-2 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/80 px-2 py-1 text-[10px] text-slate-500 transition-colors hover:text-slate-700 backdrop-blur-sm"
         >
           {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
           {copied ? "copied" : "copy"}

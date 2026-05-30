@@ -40,7 +40,7 @@ function JsonPreview({ label, value }: { label: string; value: unknown }) {
           : `${Object.keys(value).length} keys` : typeof value})</span>
       </button>
       {open && (
-        <pre className="mt-1.5 max-h-48 overflow-auto rounded-md bg-[#0f0f0f] p-3 text-[11px] leading-relaxed text-[#e5e7eb]">
+        <pre className="mt-1.5 max-h-48 overflow-auto rounded-md bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700 border border-slate-200">
           {json}
         </pre>
       )}
