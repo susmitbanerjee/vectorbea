@@ -24,33 +24,33 @@ const PALETTE_SECTIONS: { label: string; items: PaletteItem[] }[] = [
   {
     label: "Core",
     items: [
-      { nodeType: "trigger", description: "Start workflow on schedule or event" },
+      { nodeType: "trigger", description: "Start on schedule, webhook, or manual trigger" },
       { nodeType: "end", description: "Mark workflow as complete" },
     ],
   },
   {
     label: "AI",
     items: [
-      { nodeType: "agent", description: "Reason, plan, and act with your agent" },
-      { nodeType: "llm", description: "Direct LLM inference" },
-      { nodeType: "tool", description: "Call a registered tool or API" },
+      { nodeType: "agent", description: "Reason, plan, extract, classify, or generate" },
+      { nodeType: "llm", description: "Direct LLM inference with a configured model" },
+      { nodeType: "tool", description: "Call a registered tool or external API" },
     ],
   },
   {
     label: "Control Flow",
     items: [
-      { nodeType: "branch", description: "Route based on conditions" },
-      { nodeType: "parallel", description: "Fan-out to multiple branches" },
+      { nodeType: "branch", description: "Route using deterministic conditions" },
+      { nodeType: "parallel", description: "Fan-out to multiple concurrent branches" },
       { nodeType: "join", description: "Merge and synchronize branches" },
-      { nodeType: "timer", description: "Sleep, delay, or wait" },
+      { nodeType: "timer", description: "Sleep, delay, or wait for a duration" },
     ],
   },
   {
     label: "Governance",
     items: [
-      { nodeType: "approval", description: "Pause for human review" },
-      { nodeType: "checkpoint", description: "Enable replay from this point" },
-      { nodeType: "artifact", description: "Store output artifact" },
+      { nodeType: "approval", description: "Pause until a human approves or rejects" },
+      { nodeType: "checkpoint", description: "Enable replay from this exact point" },
+      { nodeType: "artifact", description: "Store and name an output artifact" },
     ],
   },
 ];

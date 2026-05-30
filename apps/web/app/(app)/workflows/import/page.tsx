@@ -4,7 +4,7 @@
  * /workflows/import
  *
  * Unified import / instrumentation hub for bringing external workflows into
- * Vectorbee. Supports four modes:
+ * Vectorbea. Supports four modes:
  *  1. LangGraph — parse graph JSON, convert nodes/edges, create native workflow
  *  2. Temporal   — register namespace + workflow type, ingest history events
  *  3. SDK        — instrumentation guide + code snippets
@@ -123,7 +123,7 @@ const MODES: {
   },
   {
     mode: "sdk",
-    label: "Vectorbee SDK",
+    label: "Vectorbea SDK",
     sublabel: "Instrument existing code",
     icon: Code2,
     color: "#34D399",
@@ -228,7 +228,7 @@ const REPLAY_LABEL: Record<ConversionReport["replayLevel"], { label: string; col
   full: {
     label: "Full Replay",
     color: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5",
-    desc: "All nodes converted to native Vectorbee steps. Full checkpoint replay is available.",
+    desc: "All nodes converted to native Vectorbea steps. Full checkpoint replay is available.",
   },
   partial: {
     label: "Partial Replay",
@@ -238,7 +238,7 @@ const REPLAY_LABEL: Record<ConversionReport["replayLevel"], { label: string; col
   observability_only: {
     label: "Observability Only",
     color: "text-slate-400 border-slate-500/20 bg-slate-500/5",
-    desc: "No nodes could be converted. Vectorbee will observe events only — no step replay.",
+    desc: "No nodes could be converted. Vectorbea will observe events only — no step replay.",
   },
 };
 
@@ -605,7 +605,7 @@ function LangGraphSection({ onCreated }: { onCreated: (workflowId: string) => vo
         <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-wider">What gets converted</p>
         <div className="grid grid-cols-2 gap-2 text-[12px]">
           {[
-            ["Nodes → function / agent / llm", "Vectorbee Agent steps"],
+            ["Nodes → function / agent / llm", "Vectorbea Agent steps"],
             ["Nodes → tool / retriever / api", "Tool steps"],
             ["Nodes → conditional / router", "Branch steps"],
             ["Nodes → human / approval / hitl", "Approval gates"],
@@ -846,7 +846,7 @@ function SdkSection() {
       <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 space-y-1.5">
         <p className="text-[13px] font-semibold text-emerald-300">Instrument existing agent code</p>
         <p className="text-[12px] text-emerald-300/70 leading-relaxed">
-          Add the Vectorbee SDK to your existing TypeScript or Python agent code. Push structured
+          Add the Vectorbea SDK to your existing TypeScript or Python agent code. Push structured
           events and checkpoints to Vectorbea for observability, cost tracking, and partial replay
           — without changing how your agent executes.
         </p>
@@ -939,7 +939,7 @@ function SdkSection() {
         <p className="text-[12px] font-semibold text-emerald-400">Event ingestion endpoint</p>
         <code className="block font-mono text-[11px] text-emerald-300">POST /api/ingest/events</code>
         <p className="text-[11px] text-emerald-300/60">
-          Accepts a batch of Vectorbee run events. The SDK uses this internally.
+          Accepts a batch of Vectorbea run events. The SDK uses this internally.
           You can also POST directly if you need fine-grained control.
         </p>
       </div>
@@ -990,9 +990,9 @@ function EndpointSection() {
           External Endpoint — Limited Observability
         </p>
         <p className="text-[12px] text-amber-300/70 leading-relaxed">
-          Vectorbee can trigger this endpoint and record start / end status, but cannot inspect
+          Vectorbea can trigger this endpoint and record start / end status, but cannot inspect
           internal steps, replay from checkpoints, or retry individual agent steps. To unlock
-          step-level visibility and replay, add the Vectorbee SDK to your endpoint&apos;s code.
+          step-level visibility and replay, add the Vectorbea SDK to your endpoint&apos;s code.
         </p>
       </div>
 
@@ -1061,7 +1061,7 @@ function EndpointSection() {
       <div className="flex items-start gap-2 rounded-lg border border-border/40 bg-muted/10 px-4 py-3">
         <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 mt-0.5" />
         <p className="text-[12px] text-muted-foreground/70">
-          In endpoint mode, retry applies to the whole job only. Individual step retry and approval gates require the Vectorbee SDK.
+          In endpoint mode, retry applies to the whole job only. Individual step retry and approval gates require the Vectorbea SDK.
         </p>
       </div>
 

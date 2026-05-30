@@ -441,7 +441,7 @@ export default function PricingPage() {
               Ship production AI with confidence
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-[15px] leading-7 text-[#4B5563]">
-              Start free, or book a demo to see how Vectorbee handles scheduled workflows, rollout controls, approvals, and audit trail
+              Start free, or book a demo to see how Vectorbea handles scheduled workflows, rollout controls, approvals, and audit trail
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link href="/signup" className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#111111] px-6 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F1F1F]">

@@ -152,7 +152,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
                 <BeeLogo className="h-4 w-4" />
               </span>
               <span className="text-[15px] font-bold tracking-tight" style={{ color: "rgba(255,255,255,0.90)" }}>
-                Vectorbee
+                Vectorbea
               </span>
             </Link>
 
@@ -263,7 +263,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
             <div className="flex items-center justify-between lg:justify-end">
               <Link href="/" className="inline-flex items-center gap-2 lg:hidden">
                 <BeeLogo className="h-6 w-6" />
-                <span className="text-[14px] font-bold text-foreground">Vectorbee</span>
+                <span className="text-[14px] font-bold text-foreground">Vectorbea</span>
               </Link>
               <ThemeToggle />
             </div>
@@ -275,7 +275,7 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
               </h2>
               <p className="text-[13px] text-muted-foreground">
                 {mode === "signin"
-                  ? "Sign in to your Vectorbee workspace."
+                  ? "Sign in to your Vectorbea workspace."
                   : "Start running AI agent workflows reliably."}
               </p>
             </div>

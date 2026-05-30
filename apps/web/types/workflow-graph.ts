@@ -1,5 +1,5 @@
 /**
- * Vectorbee Workflow Graph Types
+ * Vectorbea Workflow Graph Types
  *
  * The graph-based data model for the Workflow Builder.
  * Supports the full fine-grained execution model including HTTP, DB, LLM,

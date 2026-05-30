@@ -17,12 +17,12 @@ import { createAgent, getTools, getConnectionsByType } from "@/lib/repository";
 const LLM_AGENT_TYPES = new Set<AgentType>(["native_llm_agent", "router_agent", "imported_langgraph_node"]);
 
 const AGENT_TYPES: { type: AgentType; label: string; description: string }[] = [
-  { type: "native_llm_agent",            label: "Native LLM Agent",           description: "Direct LLM calls with tool use. Vectorbee owns execution, replay, and checkpoints." },
+  { type: "native_llm_agent",            label: "Native LLM Agent",           description: "Direct LLM calls with tool use. Vectorbea owns execution, replay, and checkpoints." },
   { type: "tool_agent",                  label: "Tool Agent",                  description: "Primarily orchestrates tool calls in sequence or parallel." },
   { type: "router_agent",               label: "Router Agent",                description: "Delegates tasks to sub-agents based on input or context." },
   { type: "approval_agent",             label: "Approval Agent",              description: "Pauses workflow execution and waits for a human decision." },
   { type: "imported_langgraph_node",    label: "LangGraph Node",              description: "Imported from a LangGraph graph. Events are observed, not owned." },
-  { type: "external_instrumented_agent", label: "External Instrumented Agent", description: "External code with the Vectorbee SDK. Events pushed from the outside." },
+  { type: "external_instrumented_agent", label: "External Instrumented Agent", description: "External code with the Vectorbea SDK. Events pushed from the outside." },
 ];
 
 

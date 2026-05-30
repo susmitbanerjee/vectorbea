@@ -1,5 +1,5 @@
 /**
- * Vectorbee Platform Domain Types
+ * Vectorbea Platform Domain Types
  *
  * Central type definitions for the full AI-agent execution control plane.
  * These replace the old "endpoint-only job" model.
@@ -64,9 +64,9 @@ export type RunStatus =
   | "timed_out";
 
 export type WorkflowCreationMode =
-  | "native"          // Built inside Vectorbee — full replay, full control
+  | "native"          // Built inside Vectorbea — full replay, full control
   | "imported"        // LangGraph/Temporal graph converted to native DAG
-  | "instrumented"    // External code with Vectorbee SDK — events/checkpoints pushed
+  | "instrumented"    // External code with Vectorbea SDK — events/checkpoints pushed
   | "endpoint_only";  // Endpoint trigger only — limited observability
 
 export type RunEventType =

@@ -87,7 +87,7 @@ function OutboundIPs() {
     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
       <p className="mb-2 text-[12px] font-semibold text-amber-800">Network access requirements</p>
       <p className="mb-3 text-[11px] text-muted-foreground/70">
-        For Vectorbee Cloud to reach your database or API, add these IPs to your firewall, VPC security group,
+        For Vectorbea Cloud to reach your database or API, add these IPs to your firewall, VPC security group,
         API gateway, or database allowlist.
       </p>
       <div className="mb-3 rounded-lg border border-border/40 bg-background/40 p-3 font-mono text-[11px] text-muted-foreground">
@@ -240,7 +240,7 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
             <input className={inputCls} value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="mydb" />
           </Field>
           <Field label="Username">
-            <input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="vectorbee_user" />
+            <input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="vectorbea_user" />
           </Field>
         </div>
         <Field label="Password" hint="Stored through secrets backend">
@@ -263,7 +263,7 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
 
       {showPrivateWarning && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
-          <strong>Private address detected.</strong> This host appears to be on a private network. Vectorbee Cloud
+          <strong>Private address detected.</strong> This host appears to be on a private network. Vectorbea Cloud
           cannot reach it unless you whitelist our outbound IPs or use a private runner.
         </div>
       )}
@@ -319,7 +319,7 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
 
       {showPrivateWarning && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
-          <strong>Private address detected.</strong> This URL appears private. Vectorbee Cloud cannot reach it
+          <strong>Private address detected.</strong> This URL appears private. Vectorbea Cloud cannot reach it
           without IP whitelisting or a private runner.
         </div>
       )}

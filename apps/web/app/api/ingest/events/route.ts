@@ -2,8 +2,8 @@
  * POST /api/ingest/events
  *
  * SDK event ingestion endpoint.
- * Accepts a batch of Vectorbee RunEvents from external agent code instrumented
- * with the Vectorbee SDK.
+ * Accepts a batch of Vectorbea RunEvents from external agent code instrumented
+ * with the Vectorbea SDK.
  *
  * Production: authenticate with API key, persist to event store, fan-out to
  * subscribers (WebSocket / SSE for live run updates).
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 export async function GET(): Promise<NextResponse> {
   return NextResponse.json({
     endpoint: "POST /api/ingest/events",
-    description: "Accepts a batch of Vectorbee run events from SDK-instrumented agent code.",
+    description: "Accepts a batch of Vectorbea run events from SDK-instrumented agent code.",
     auth: "Bearer token via Authorization header (VECTORBEE_INGEST_SECRET env var).",
     body: {
       workflowId: "string (optional)",

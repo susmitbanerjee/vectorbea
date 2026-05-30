@@ -12,20 +12,20 @@ import { createWorkflow } from "@/lib/repository";
 const CREATION_MODES: { mode: WorkflowCreationMode; label: string; description: string; color: string }[] = [
   {
     mode: "native",
-    label: "Native Vectorbee Workflow",
-    description: "Build agents, tools, and steps inside Vectorbee. Full replay, approvals, checkpoints, and retries.",
+    label: "Native Vectorbea Workflow",
+    description: "Build agents, tools, and steps inside Vectorbea. Full replay, approvals, checkpoints, and retries.",
     color: "#38BDF8",
   },
   {
     mode: "imported",
     label: "Import from LangGraph / Temporal",
-    description: "Convert an existing LangGraph or Temporal workflow. Vectorbee stores the normalized graph.",
+    description: "Convert an existing LangGraph or Temporal workflow. Vectorbea stores the normalized graph.",
     color: "#A78BFA",
   },
   {
     mode: "instrumented",
     label: "Instrument Existing Code",
-    description: "Keep execution in your code. Add the Vectorbee SDK to push events and checkpoints.",
+    description: "Keep execution in your code. Add the Vectorbea SDK to push events and checkpoints.",
     color: "#34D399",
   },
   {

@@ -1,5 +1,5 @@
 /**
- * Vectorbee Workflow Graph Validation
+ * Vectorbea Workflow Graph Validation
  */
 
 import type { Node, Edge } from "@xyflow/react";

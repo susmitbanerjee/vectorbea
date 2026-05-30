@@ -466,7 +466,7 @@ function NetworkTab({ connection }: { connection: Connection }) {
           <div>
             <p className="text-[12px] font-semibold text-amber-800">Private Runner Required</p>
             <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
-              This host is on a private network. Deploy a Vectorbee private runner inside your network perimeter. The runner has outbound access to your private host and connects back to the Vectorbee control plane.
+              This host is on a private network. Deploy a Vectorbea private runner inside your network perimeter. The runner has outbound access to your private host and connects back to the Vectorbea control plane.
             </p>
           </div>
         </div>
@@ -479,14 +479,14 @@ function NetworkTab({ connection }: { connection: Connection }) {
           <div>
             <p className="text-[12px] font-semibold text-amber-800">Firewall Whitelisting Required</p>
             <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
-              This host requires inbound access from Vectorbee. Add the outbound IPs below to your firewall allowlist.
+              This host requires inbound access from Vectorbea. Add the outbound IPs below to your firewall allowlist.
             </p>
           </div>
         </div>
       )}
 
       {/* Outbound IPs */}
-      <SectionCard title="Vectorbee Outbound IPs">
+      <SectionCard title="Vectorbea Outbound IPs">
         <p className="mb-3 text-[11px]" style={{ color: "var(--text-faint)" }}>
           Allow inbound connections from these IPs in your firewall or security group rules.
         </p>

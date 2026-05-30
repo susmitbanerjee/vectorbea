@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vectorbee",
+  title: "Vectorbea",
   description:
     "Production control plane for scheduled and long-running AI agent jobs. Schedule, inspect, retry, and approve AI agent runs with complete execution traceability.",
   icons: {

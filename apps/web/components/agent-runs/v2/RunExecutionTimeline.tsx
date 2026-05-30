@@ -466,7 +466,7 @@ export function RunExecutionTimeline({ events }: { events: RunTimelineEventUi[] 
         </div>
         <p className="text-[14px] font-semibold text-slate-700">No timeline events yet</p>
         <p className="mt-2 max-w-sm text-[13px] text-slate-400 leading-relaxed">
-          When this run starts, Vectorbee will show every step, tool call, approval, retry, and checkpoint here.
+          When this run starts, Vectorbea will show every step, tool call, approval, retry, and checkpoint here.
         </p>
       </div>
     );

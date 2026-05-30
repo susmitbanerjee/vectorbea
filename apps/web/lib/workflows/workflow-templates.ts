@@ -1,5 +1,5 @@
 /**
- * Vectorbee Workflow Builder Templates
+ * Vectorbea Workflow Builder Templates
  *
  * Pre-built workflow graphs for common AI agent patterns.
  * The "Customer Renewal Intelligence" template is the flagship demo

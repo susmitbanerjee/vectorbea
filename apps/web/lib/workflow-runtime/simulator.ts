@@ -1,5 +1,5 @@
 /**
- * Vectorbee Workflow Runtime Simulator
+ * Vectorbea Workflow Runtime Simulator
  *
  * Takes a saved workflow definition and a queued AgentRun, then generates a
  * realistic, persisted set of RunEvents + an updated AgentRun.

@@ -1,5 +1,5 @@
 /**
- * Vectorbee Connection Types
+ * Vectorbea Connection Types
  *
  * A Connection = configured, named access to an external system or provider.
  * Agents and Tools reference connections by ID — never store raw secrets.
@@ -242,7 +242,7 @@ export const LLM_PROVIDER_MODELS: Record<LlmProvider, string[]> = {
   openai_compatible: ["custom"],
 };
 
-// ─── Vectorbee outbound IPs (placeholder — real values from infra team) ───────
+// ─── Vectorbea outbound IPs (placeholder — real values from infra team) ───────
 
 export const VECTORBEE_OUTBOUND_IPS = [
   "34.102.136.180",

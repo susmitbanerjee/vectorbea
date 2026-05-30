@@ -91,7 +91,7 @@ export default function ProductionReadinessPage() {
           <section className="rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
             <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Platform MVP scope</p>
             <p className="mt-1 text-sm leading-6" style={{ color: "var(--text-secondary)" }}>
-              Vectorbee production readiness covers Workflows, Agents, Tools, Runs, Approvals, Schedules, Workers,
+              Vectorbea production readiness covers Workflows, Agents, Tools, Runs, Approvals, Schedules, Workers,
               and Settings. Experimental surfaces should stay out of the main navigation until stable.
             </p>
           </section>

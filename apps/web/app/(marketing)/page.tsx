@@ -171,7 +171,7 @@ export default function LandingPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900">
               <BeeLogo className="h-4 w-4 text-white" />
             </div>
-            <span className="text-[15px] font-bold tracking-tight text-slate-900">Vectorbee</span>
+            <span className="text-[15px] font-bold tracking-tight text-slate-900">Vectorbea</span>
           </Link>
 
           <nav className="hidden items-center gap-1 sm:flex">
@@ -224,7 +224,7 @@ export default function LandingPage() {
             </h1>
 
             <p className="mt-6 mx-auto max-w-2xl text-[17px] text-slate-500 leading-[1.7]">
-              Vectorbee gives AI workflows the execution layer they&#39;re missing: durable runs,
+              Vectorbea gives AI workflows the execution layer they&#39;re missing: durable runs,
               human approval gates, automatic retries, event history, and clean debugging —
               without hiding your automation inside a black box.
             </p>
@@ -481,7 +481,7 @@ export default function LandingPage() {
             Build workflows your team can trust.
           </h2>
           <p className="mt-5 text-[17px] text-slate-400 leading-relaxed">
-            Not another AI demo. Vectorbee is the production execution layer for agentic automation — durable, observable, and debuggable.
+            Not another AI demo. Vectorbea is the production execution layer for agentic automation — durable, observable, and debuggable.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link href="/signup"
@@ -516,7 +516,7 @@ export default function LandingPage() {
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800">
                 <BeeLogo className="h-3.5 w-3.5 text-slate-300" />
               </div>
-              <span className="text-[14px] font-semibold text-slate-400">Vectorbee</span>
+              <span className="text-[14px] font-semibold text-slate-400">Vectorbea</span>
             </div>
             <p className="text-[12.5px] text-slate-600">
               Durable agentic automation. Built for production.

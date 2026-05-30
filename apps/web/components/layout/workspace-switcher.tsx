@@ -138,7 +138,7 @@ export function WorkspaceSwitcher() {
             </div>
             <div className="min-w-0">
               <p className="truncate" style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.25 }}>
-                {activeWorkspace?.name ?? "Vectorbee Demo"}
+                {activeWorkspace?.name ?? "Vectorbea Demo"}
               </p>
               <p style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.065em", color: "#6B7280", marginTop: 2 }}>
                 {activeWorkspace?.organizationName ?? "Development"}

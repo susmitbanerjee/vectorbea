@@ -1,5 +1,5 @@
 /**
- * Vectorbee Platform Seed Data — DEVELOPMENT ONLY
+ * Vectorbea Platform Seed Data — DEVELOPMENT ONLY
  *
  * This file is a development seed script. It must NEVER be imported by
  * application runtime code. It lives in scripts/dev-seed/ specifically to

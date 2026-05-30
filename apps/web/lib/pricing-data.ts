@@ -252,7 +252,7 @@ export const PRICING_FAQ: FaqItem[] = [
   },
   {
     q: "What happens when I exceed my limits",
-    a: "Vectorbee warns before quota thresholds and returns a clear quota response once a limit is reached.",
+    a: "Vectorbea warns before quota thresholds and returns a clear quota response once a limit is reached.",
   },
   {
     q: "Can I change plans later",

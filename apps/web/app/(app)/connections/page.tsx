@@ -408,8 +408,8 @@ export default function ConnectionsPage() {
           <div>
             <p className="text-[13px] font-semibold text-foreground">Private systems require network access</p>
             <p className="mt-1 text-[12px] text-muted-foreground/70 max-w-2xl">
-              For Vectorbee Cloud to connect to databases, internal APIs, or self-hosted services,
-              your firewall or VPC security group must allow inbound connections from Vectorbee&apos;s outbound IPs.
+              For Vectorbea Cloud to connect to databases, internal APIs, or self-hosted services,
+              your firewall or VPC security group must allow inbound connections from Vectorbea&apos;s outbound IPs.
               Alternatively, deploy a{" "}
               <Link href={"/workers" as never} className="text-primary hover:underline">
                 private runner

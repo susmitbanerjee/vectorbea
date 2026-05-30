@@ -226,7 +226,7 @@ export default function OverviewPage() {
           style={{ border: "1px solid #E2E8F0", padding: "16px 18px", marginBottom: 16, boxShadow: "0 4px 14px rgba(15,23,42,0.03)" }}
         >
           <p style={{ fontSize: 13, fontWeight: 650, color: "#0F172A", marginBottom: 12 }}>
-            Get started with Vectorbee
+            Get started with Vectorbea
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <GetStartedTile icon={GitBranch}  title="Create workflow" description="Build a native AI workflow" href="/workflows/new" color="#2563EB" />

@@ -310,7 +310,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   <Logo className="h-3.5 w-3.5 text-white" />
                 </div>
                 <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.02em", color: "#111827" }}>
-                  Vectorbee
+                  Vectorbea
                 </span>
               </Link>
               <span
