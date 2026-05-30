@@ -772,9 +772,9 @@ export default function WorkflowBuilderPage() {
           >
             <Background
               variant={BackgroundVariant.Lines}
-              gap={40}
-              size={3}
-              color="rgba(148,163,184,0.18)"
+              gap={80}
+              size={1}
+              color="rgba(148,163,184,0.22)"
             />
             <Controls
               className="!bottom-4 !left-4"
