@@ -222,30 +222,53 @@ export default function WorkflowBuilderPage() {
     // Use `string` cast since worker emits types not in the frontend TimelineEventType union
     function applyEvents(events: import("@/types/agent-run-ui").RunTimelineEventUi[]) {
       const statusMap: Record<string, WFNodeData["previewStatus"]> = {};
+
+      // Terminal statuses — once a node reaches these, don't downgrade back to "running"
+      const TERMINAL: Set<WFNodeData["previewStatus"]> = new Set(["succeeded", "failed", "waiting", "skipped"]);
+
       for (const ev of events) {
         const sid = ev.stepId;
         if (!sid) continue;
         const t = ev.type as string;
+
+        let newStatus: WFNodeData["previewStatus"] | undefined;
         if (["STEP_SCHEDULED"].includes(t))
-          statusMap[sid] = "idle";
+          newStatus = "idle";
         else if (["STEP_STARTED","INPUT_MAPPING_STARTED","TOOL_CALL_STARTED",
                   "LLM_CALL_STARTED","AGENT_STARTED","DB_QUERY_STARTED",
                   "HTTP_REQUEST_STARTED","PARALLEL_STARTED","TRANSFORM_STARTED"].includes(t))
-          statusMap[sid] = "running";
+          newStatus = "running";
         else if (["STEP_COMPLETED","AGENT_COMPLETED","LLM_CALL_COMPLETED",
                   "TOOL_CALL_COMPLETED","DB_QUERY_COMPLETED","HTTP_REQUEST_COMPLETED",
                   "TRANSFORM_COMPLETED","JOIN_COMPLETED","HTTP_CALL_COMPLETED",
                   "PARALLEL_BRANCH_COMPLETED"].includes(t))
-          statusMap[sid] = "succeeded";
+          newStatus = "succeeded";
         else if (["STEP_FAILED","AGENT_FAILED","TOOL_CALL_FAILED",
                   "NODE_TYPE_UNSUPPORTED","LLM_CALL_FAILED","HTTP_CALL_FAILED",
                   "INPUT_MAPPING_FAILED"].includes(t))
-          statusMap[sid] = "failed";
+          newStatus = "failed";
         else if (["APPROVAL_REQUESTED"].includes(t))
-          statusMap[sid] = "waiting";
+          newStatus = "waiting";
         else if (["STEP_SKIPPED"].includes(t))
-          statusMap[sid] = "skipped";
+          newStatus = "skipped";
+
+        if (newStatus) {
+          // Never downgrade a terminal status back to "running" or "idle"
+          // (events arrive ordered by sequence, but some "started" sub-events
+          //  like LLM_CALL_STARTED may come AFTER STEP_COMPLETED due to
+          //  concurrent branch event serialization)
+          const current = statusMap[sid];
+          if (!current || !TERMINAL.has(current) || TERMINAL.has(newStatus)) {
+            statusMap[sid] = newStatus;
+          }
+        }
       }
+
+      // Debug: log final status map to console (remove after confirming fix)
+      if (Object.keys(statusMap).length > 0) {
+        console.debug("[live-run] final statusMap:", statusMap);
+      }
+
       setNodes((nds) =>
         nds.map((n) => {
           const newStatus = statusMap[n.id];
