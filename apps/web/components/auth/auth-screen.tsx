@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, Check, Loader2, Shield, Zap, GitBranch, Clock, ChevronRight } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, Clock, GitBranch, Loader2, Shield, Zap } from "lucide-react";
 
 import { BeeLogo } from "@/components/brand/bee-logo";
 import {
@@ -12,7 +12,6 @@ import {
   GoogleMark,
   MicrosoftMark,
 } from "@/components/auth/oauth-provider-icons";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -21,17 +20,17 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 type Mode = "signin" | "signup";
 type Provider = "github" | "google" | "azure" | "sso";
 
-// ─── Left panel — fixed dark theme ───────────────────────────────────────────
+// ─── Left panel data ──────────────────────────────────────────────────────────
 
 const PREVIEW_EVENTS = [
-  { type: "RUN_STARTED",         label: "Run started",                        dot: "bg-blue-500",    time: "09:00:01" },
-  { type: "AGENT_STARTED",       label: "Orchestrator Agent started",         dot: "bg-violet-500",  time: "09:00:02" },
-  { type: "HTTP_CALL_COMPLETED", label: "Usage API returned 128 customers",   dot: "bg-teal-500",    time: "09:00:41" },
-  { type: "LLM_CALL_COMPLETED",  label: "Risk model · 6,200 tokens",         dot: "bg-purple-500",  time: "09:01:17" },
-  { type: "APPROVAL_REQUESTED",  label: "Approval gate · CRM update",        dot: "bg-amber-500",   time: "09:01:40" },
-  { type: "APPROVAL_APPROVED",   label: "Approved by Demo Owner",             dot: "bg-emerald-500", time: "09:03:18" },
-  { type: "ARTIFACT_CREATED",    label: "risk_report.json generated",        dot: "bg-indigo-500",  time: "09:04:02" },
-  { type: "RUN_SUCCEEDED",       label: "Run succeeded · $0.061 · 2m 38s",   dot: "bg-emerald-500", time: "09:04:08" },
+  { type: "RUN_STARTED",         label: "Run started",                       dot: "bg-blue-500",    time: "09:00:01" },
+  { type: "AGENT_STARTED",       label: "Orchestrator Agent started",        dot: "bg-violet-500",  time: "09:00:02" },
+  { type: "HTTP_CALL_COMPLETED", label: "Usage API returned 128 customers",  dot: "bg-teal-500",    time: "09:00:41" },
+  { type: "LLM_CALL_COMPLETED",  label: "Risk model · 6,200 tokens",        dot: "bg-purple-500",  time: "09:01:17" },
+  { type: "APPROVAL_REQUESTED",  label: "Approval gate · CRM update",       dot: "bg-amber-500",   time: "09:01:40" },
+  { type: "APPROVAL_APPROVED",   label: "Approved by Demo Owner",            dot: "bg-emerald-500", time: "09:03:18" },
+  { type: "ARTIFACT_CREATED",    label: "risk_report.json generated",       dot: "bg-indigo-500",  time: "09:04:02" },
+  { type: "RUN_SUCCEEDED",       label: "Run succeeded · $0.061 · 2m 38s",  dot: "bg-emerald-500", time: "09:04:08" },
 ];
 
 const BENEFITS = [
@@ -123,55 +122,62 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen lg:grid-cols-[1fr_460px]">
+    <div
+      className="min-h-screen"
+      style={{
+        background: "radial-gradient(circle at 20% 15%, rgba(37,99,235,0.07), transparent 32%), radial-gradient(circle at 80% 85%, rgba(124,58,237,0.05), transparent 30%), #F8FAFC",
+      }}
+    >
+      <div className="grid min-h-screen lg:grid-cols-[1fr_480px]">
 
-        {/* ── Left — dark feature panel ─────────────────────────────────── */}
-        <section className="relative hidden overflow-hidden bg-[#040710] lg:flex"
-          style={{ borderRight: "1px solid rgba(148,163,184,0.07)" }}>
-
-          {/* Background grid */}
-          <div className="pointer-events-none absolute inset-0"
+        {/* ── Left — light feature panel ────────────────────────────────── */}
+        <section
+          className="relative hidden overflow-hidden lg:flex"
+          style={{ borderRight: "1px solid #E2E8F0" }}
+        >
+          {/* Subtle grid overlay */}
+          <div
+            className="pointer-events-none absolute inset-0"
             style={{
-              backgroundImage: "linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px)",
-              backgroundSize: "40px 40px",
+              backgroundImage: "linear-gradient(rgba(148,163,184,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.10) 1px, transparent 1px)",
+              backgroundSize: "32px 32px",
             }}
           />
-          {/* Radial glow top-left */}
-          <div className="pointer-events-none absolute -left-20 -top-20 h-[500px] w-[500px] rounded-full"
-            style={{ background: "radial-gradient(circle, rgba(56,189,248,0.06) 0%, transparent 70%)" }} />
-          {/* Radial glow bottom-right */}
-          <div className="pointer-events-none absolute -bottom-20 -right-20 h-[400px] w-[400px] rounded-full"
-            style={{ background: "radial-gradient(circle, rgba(167,139,250,0.04) 0%, transparent 70%)" }} />
 
           <div className="relative flex h-full w-full flex-col px-10 py-10 xl:px-14 xl:py-12">
             {/* Logo */}
             <Link href="/" className="inline-flex w-fit items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                <BeeLogo className="h-4 w-4" />
+              <span
+                className="flex h-8 w-8 items-center justify-center rounded-lg"
+                style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
+              >
+                <BeeLogo className="h-4 w-4 text-blue-600" />
               </span>
-              <span className="text-[15px] font-bold tracking-tight" style={{ color: "rgba(255,255,255,0.90)" }}>
+              <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.02em", color: "#0F172A" }}>
                 Vectorbea
               </span>
             </Link>
 
             <div className="my-auto max-w-lg space-y-9">
               {/* Eyebrow */}
-              <span className="inline-block font-mono text-[10px] font-bold uppercase tracking-[0.2em]"
-                style={{ color: "rgba(56,189,248,0.75)" }}>
+              <span
+                className="inline-block font-mono text-[10px] font-bold uppercase tracking-[0.18em]"
+                style={{ color: "#2563EB" }}
+              >
                 Production control plane for AI agent jobs
               </span>
 
               {/* Headline */}
-              <div className="space-y-4">
-                <h1 className="text-balance text-[2.25rem] font-bold leading-[1.1] tracking-[-0.03em]"
-                  style={{ color: "rgba(241,245,249,0.97)" }}>
+              <div className="space-y-3">
+                <h1
+                  className="text-balance leading-[1.1] tracking-[-0.03em]"
+                  style={{ fontSize: "2.1rem", fontWeight: 700, color: "#0F172A" }}
+                >
                   {mode === "signin"
                     ? "Operate AI agents with confidence."
                     : "Run AI agent jobs safely."}
                 </h1>
-                <p className="text-[15px] leading-7" style={{ color: "rgba(148,163,184,0.75)" }}>
+                <p style={{ fontSize: 15, lineHeight: 1.7, color: "#475569" }}>
                   {mode === "signin"
                     ? "Schedule, inspect, retry, and approve long-running AI agent workflows — with complete execution traceability."
                     : "Create your workspace and ship AI agent automations with approval gates, retries, cost budgets, and audit logs."}
@@ -182,46 +188,60 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
               <ul className="space-y-2.5">
                 {BENEFITS.map((item) => (
                   <li key={item} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                      style={{ background: "rgba(56,189,248,0.12)" }}>
-                      <Check className="h-2.5 w-2.5" style={{ color: "#38BDF8" }} />
+                    <span
+                      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+                      style={{ background: "#DBEAFE" }}
+                    >
+                      <Check className="h-2.5 w-2.5" style={{ color: "#2563EB" }} />
                     </span>
-                    <span className="text-[13px] leading-6" style={{ color: "rgba(148,163,184,0.70)" }}>{item}</span>
+                    <span style={{ fontSize: 13, lineHeight: 1.6, color: "#475569" }}>{item}</span>
                   </li>
                 ))}
               </ul>
 
-              {/* Run timeline preview */}
-              <div className="rounded-xl overflow-hidden"
-                style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", backdropFilter: "blur(8px)" }}>
-                {/* Mini chrome */}
-                <div className="flex items-center justify-between px-4 py-2.5"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
-                  <span className="font-mono text-[9px] font-semibold uppercase tracking-widest"
-                    style={{ color: "rgba(148,163,184,0.35)" }}>
+              {/* Run timeline preview card */}
+              <div
+                className="overflow-hidden rounded-2xl"
+                style={{
+                  background: "#FFFFFF",
+                  border: "1px solid #E2E8F0",
+                  boxShadow: "0 8px 24px rgba(15,23,42,0.07)",
+                }}
+              >
+                {/* Mini chrome header */}
+                <div
+                  className="flex items-center justify-between px-4 py-2.5"
+                  style={{ borderBottom: "1px solid #F1F5F9", background: "#FAFBFC" }}
+                >
+                  <span
+                    className="font-mono text-[9px] font-semibold uppercase tracking-widest"
+                    style={{ color: "#94A3B8" }}
+                  >
                     Customer Renewal Intelligence · Run #47
                   </span>
-                  <span className="inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold"
-                    style={{ borderColor: "rgba(52,211,153,0.25)", background: "rgba(52,211,153,0.08)", color: "#34D399" }}>
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold"
+                    style={{ borderColor: "#BBF7D0", background: "#ECFDF5", color: "#16A34A" }}
+                  >
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     SUCCEEDED
                   </span>
                 </div>
-                {/* Events */}
+                {/* Event rows */}
                 <div className="space-y-0 px-4 py-3">
                   {PREVIEW_EVENTS.map((e, i) => (
                     <div key={e.type} className="flex items-start gap-2.5" style={{ paddingTop: i > 0 ? 6 : 0 }}>
                       <div className="flex flex-col items-center pt-0.5">
                         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", e.dot)} />
                         {i < PREVIEW_EVENTS.length - 1 && (
-                          <div className="mt-1 w-px flex-1" style={{ height: 10, background: "rgba(255,255,255,0.07)" }} />
+                          <div className="mt-1 w-px" style={{ height: 10, background: "#E2E8F0" }} />
                         )}
                       </div>
                       <div className="flex flex-1 items-start justify-between gap-2 min-w-0">
-                        <span className="text-[11px] leading-4 truncate" style={{ color: "rgba(203,213,225,0.55)" }}>
+                        <span className="truncate" style={{ fontSize: 11, lineHeight: "16px", color: "#64748B" }}>
                           {e.label}
                         </span>
-                        <span className="shrink-0 font-mono text-[9px] tabular-nums" style={{ color: "rgba(148,163,184,0.30)" }}>
+                        <span className="shrink-0 font-mono tabular-nums" style={{ fontSize: 9, color: "#94A3B8" }}>
                           {e.time}
                         </span>
                       </div>
@@ -231,103 +251,156 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
               </div>
 
               {/* Stats strip */}
-              <div className="grid grid-cols-4 gap-0 rounded-xl overflow-hidden"
-                style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div
+                className="grid grid-cols-4 overflow-hidden rounded-2xl"
+                style={{ border: "1px solid #E2E8F0", background: "#FFFFFF" }}
+              >
                 {[
                   { icon: Zap,       label: "12,480 tokens" },
                   { icon: Clock,     label: "2m 38s" },
                   { icon: Shield,    label: "1 approval" },
                   { icon: GitBranch, label: "5 agents" },
                 ].map(({ icon: Icon, label }, i) => (
-                  <div key={label} className="flex flex-col items-center gap-1 py-3"
-                    style={{ borderRight: i < 3 ? "1px solid rgba(255,255,255,0.06)" : undefined, background: "rgba(255,255,255,0.02)" }}>
-                    <Icon className="h-3.5 w-3.5" style={{ color: "rgba(148,163,184,0.35)" }} />
-                    <span className="text-[10px] text-center leading-tight" style={{ color: "rgba(148,163,184,0.40)" }}>{label}</span>
+                  <div
+                    key={label}
+                    className="flex flex-col items-center gap-1 py-3"
+                    style={{ borderRight: i < 3 ? "1px solid #F1F5F9" : undefined }}
+                  >
+                    <Icon className="h-3.5 w-3.5" style={{ color: "#94A3B8" }} />
+                    <span className="text-center" style={{ fontSize: 10, lineHeight: 1.3, color: "#64748B" }}>{label}</span>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Footer note */}
-            <p className="text-[11px]" style={{ color: "rgba(100,116,139,0.60)" }}>
+            <p style={{ fontSize: 11, color: "#94A3B8" }}>
               Works with LangChain, CrewAI, AutoGen, and any HTTP-callable agent.
             </p>
           </div>
         </section>
 
         {/* ── Right — auth form ─────────────────────────────────────────── */}
-        <section className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12 sm:px-10">
-          <div className="w-full max-w-[380px] space-y-6">
+        <section className="flex min-h-screen flex-col items-center justify-center bg-transparent px-6 py-12 sm:px-10">
+          <div className="w-full max-w-[400px] space-y-6">
 
-            {/* Mobile header + theme toggle */}
-            <div className="flex items-center justify-between lg:justify-end">
-              <Link href="/" className="inline-flex items-center gap-2 lg:hidden">
-                <BeeLogo className="h-6 w-6" />
-                <span className="text-[14px] font-bold text-foreground">Vectorbea</span>
+            {/* Mobile logo */}
+            <div className="flex items-center justify-between lg:hidden">
+              <Link href="/" className="inline-flex items-center gap-2">
+                <span
+                  className="flex h-7 w-7 items-center justify-center rounded-lg"
+                  style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
+                >
+                  <BeeLogo className="h-3.5 w-3.5 text-blue-600" />
+                </span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>Vectorbea</span>
               </Link>
-              <ThemeToggle />
             </div>
 
             {/* Heading */}
-            <div className="space-y-1">
-              <h2 className="text-[1.5rem] font-bold tracking-tight text-foreground">
-                {mode === "signin" ? "Welcome back" : "Create your account"}
+            <div className="space-y-1.5">
+              <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.025em", color: "#0F172A", lineHeight: 1.2 }}>
+                {mode === "signin" ? "Sign in to Vectorbea" : "Create your Vectorbea workspace"}
               </h2>
-              <p className="text-[13px] text-muted-foreground">
+              <p style={{ fontSize: 14, color: "#64748B", lineHeight: 1.6 }}>
                 {mode === "signin"
-                  ? "Sign in to your Vectorbea workspace."
-                  : "Start running AI agent workflows reliably."}
+                  ? "Continue building, running, and debugging durable agentic workflows."
+                  : "Start building reliable AI workflows with approvals, retries, event history, and clear execution visibility."}
               </p>
             </div>
 
             {/* Error banner */}
             {error && (
-              <div className="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-[13px] font-medium text-red-400">
+              <div
+                className="rounded-xl px-4 py-3"
+                style={{
+                  background: "#FEF2F2",
+                  border: "1px solid #FECACA",
+                  color: "#B91C1C",
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
                 {error}
               </div>
             )}
 
             {/* Form card */}
-            <div className="rounded-2xl border border-border bg-card p-7 shadow-sm">
-
+            <div
+              className="rounded-2xl"
+              style={{
+                background: "#FFFFFF",
+                border: "1px solid #E2E8F0",
+                boxShadow: "0 18px 48px rgba(15,23,42,0.08)",
+                padding: "28px",
+              }}
+            >
               {/* SSO section */}
               <div className="space-y-3">
                 <label className="block space-y-1.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  <span
+                    className="block"
+                    style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "#475569" }}
+                  >
                     Work email
                   </span>
-                  <Input
+                  <input
                     type="email"
                     value={workEmail}
                     onChange={(e) => setWorkEmail(e.target.value)}
                     placeholder="name@company.com"
                     disabled={disabled}
-                    className="h-10 text-[13px] placeholder:text-muted-foreground/35"
                     onKeyDown={(e) => e.key === "Enter" && void startSso()}
+                    className="w-full rounded-xl px-3 transition-all disabled:opacity-50"
+                    style={{
+                      height: 42,
+                      background: "#FFFFFF",
+                      border: "1px solid #CBD5E1",
+                      fontSize: 13,
+                      color: "#0F172A",
+                      outline: "none",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#2563EB";
+                      e.target.style.boxShadow = "0 0 0 4px #DBEAFE";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#CBD5E1";
+                      e.target.style.boxShadow = "none";
+                    }}
                   />
                 </label>
 
-                <Button
-                  variant="outline"
+                <button
+                  type="button"
                   disabled={disabled}
                   onClick={() => void startSso()}
-                  className="h-10 w-full justify-between rounded-xl text-[13px] font-medium"
+                  className="flex h-10 w-full items-center justify-between rounded-xl px-3.5 transition-all disabled:opacity-50"
+                  style={{
+                    background: "#FFFFFF",
+                    border: "1px solid #CBD5E1",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#334155",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#FFFFFF"; }}
                 >
                   <span className="inline-flex items-center gap-2">
-                    <EnterpriseSsoMark className="h-4 w-4 text-muted-foreground" />
+                    <EnterpriseSsoMark className="h-4 w-4 text-slate-500" />
                     Continue with SSO
                   </span>
                   {loading === "sso"
-                    ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    : <ArrowRight className="h-4 w-4 text-muted-foreground" />}
-                </Button>
+                    ? <Loader2 className="h-4 w-4 animate-spin" style={{ color: "#64748B" }} />
+                    : <ArrowRight className="h-4 w-4" style={{ color: "#94A3B8" }} />}
+                </button>
               </div>
 
               {/* Divider */}
               <div className="my-5 flex items-center gap-3">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-[11px] text-muted-foreground">or continue with</span>
-                <span className="h-px flex-1 bg-border" />
+                <span className="h-px flex-1" style={{ background: "#E2E8F0" }} />
+                <span style={{ fontSize: 11, color: "#94A3B8" }}>or continue with</span>
+                <span className="h-px flex-1" style={{ background: "#E2E8F0" }} />
               </div>
 
               {/* OAuth providers */}
@@ -357,25 +430,36 @@ export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
             </div>
 
             {/* Switch mode */}
-            <div className="flex items-center justify-between px-1 text-[13px] text-muted-foreground">
-              <p>
-                {mode === "signin" ? "No account?" : "Already have an account?"}
+            <div className="flex items-center justify-between px-1">
+              <p style={{ fontSize: 13, color: "#64748B" }}>
+                {mode === "signin" ? "Don't have an account?" : "Already have an account?"}
                 {" "}
-                <Link href={alternateHref}
-                  className="font-semibold text-foreground underline-offset-4 hover:underline">
+                <Link
+                  href={alternateHref}
+                  style={{ fontWeight: 600, color: "#2563EB" }}
+                  className="hover:underline underline-offset-4"
+                >
                   {alternateLabel}
                 </Link>
               </p>
-              <Link href={"/docs/security" as never} target="_blank" rel="noopener noreferrer"
-                className="text-[12px] transition-colors hover:text-foreground">
+              <Link
+                href={"/docs/security" as never}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 12, color: "#94A3B8" }}
+                className="transition-colors hover:text-slate-600"
+              >
                 Privacy
               </Link>
             </div>
 
             {/* Back to home */}
             <div className="text-center">
-              <Link href="/"
-                className="inline-flex items-center gap-1 text-[12px] text-muted-foreground/50 transition-colors hover:text-muted-foreground">
+              <Link
+                href="/"
+                style={{ fontSize: 12, color: "#94A3B8" }}
+                className="inline-flex items-center gap-1 transition-colors hover:text-slate-600"
+              >
                 ← Back to homepage
               </Link>
             </div>
@@ -397,18 +481,28 @@ function ProviderButton({ icon, label, loading, disabled, onClick }: {
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        "group flex h-10 w-full items-center justify-between rounded-xl border border-border bg-background px-3.5 text-[13px] font-medium text-foreground",
-        "transition-all hover:border-border/80 hover:bg-accent/50",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
-      )}
+      className="group flex h-10 w-full items-center justify-between rounded-xl px-3.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      style={{
+        background: "#FFFFFF",
+        border: "1px solid #E2E8F0",
+        fontSize: 13,
+        fontWeight: 600,
+        color: "#334155",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC";
+        (e.currentTarget as HTMLButtonElement).style.borderColor = "#CBD5E1";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = "#FFFFFF";
+        (e.currentTarget as HTMLButtonElement).style.borderColor = "#E2E8F0";
+      }}
     >
       <span className="inline-flex items-center gap-2.5">
-        {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : icon}
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" style={{ color: "#64748B" }} /> : icon}
         Continue with {label}
       </span>
-      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5" />
+      <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" style={{ color: "#CBD5E1" }} />
     </button>
   );
 }
