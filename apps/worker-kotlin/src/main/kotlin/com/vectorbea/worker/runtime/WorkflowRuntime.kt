@@ -535,9 +535,16 @@ class WorkflowRuntime(
             else -> {}
         }
 
-        // Get the immediate branch entry nodes (direct successors of PARALLEL node)
-        val branchEntryEdges = ctx.graph.edgesFrom(parallelNode.id)
-            .filter { it.edgeType == EdgeType.PARALLEL || it.edgeType == EdgeType.DEFAULT }
+        // Get ALL outgoing edges of the PARALLEL node — every edge is a branch entry.
+        // Previously filtered to PARALLEL/DEFAULT only, which silently dropped edges
+        // whose type resolved to SUCCESS, APPROVED, or any other non-default value,
+        // causing some branches to never be created.
+        val allOutEdges    = ctx.graph.edgesFrom(parallelNode.id)
+        val branchEntryEdges = allOutEdges  // no type filter — all edges are branches
+
+        log.info("[runtime] parallel fan-out [nodeId={}, totalEdges={}, edgeTypes={}]",
+            parallelNode.id, allOutEdges.size,
+            allOutEdges.joinToString { "${it.id}:${it.type}→${it.target}" })
 
         // Fork contexts and execute each branch concurrently
         val futures = branchEntryEdges.map { edge ->
@@ -547,6 +554,8 @@ class WorkflowRuntime(
 
             val branchScheduler = GraphScheduler(ctx.graph)
 
+            log.info("[runtime] creating branch for node={} edge={} type={} [parallelId={}]",
+                entryNodeId, edge.id, edge.type, parallelNode.id)
             emitEvent(ctx, EventType.PARALLEL_BRANCH_STARTED, "running", source,
                 title  = "Branch started: $entryNodeId",
                 stepId = entryNodeId)
