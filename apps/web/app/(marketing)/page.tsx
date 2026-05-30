@@ -16,40 +16,43 @@ import {
   Play,
   Loader2,
   PauseCircle,
+  ChevronRight,
+  Database,
+  Lock,
 } from "lucide-react";
-import { Logo } from "@/components/ui/Logo";
+import { BeeLogo } from "@/components/brand/bee-logo";
 
-// ─── Shared styles (hardcoded — marketing page is theme-independent) ──────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
 
-const S = {
-  bg:        "#070A11",
-  s1:        "#0D1424",
-  s2:        "#111A2B",
-  s3:        "#162033",
-  border:    "rgba(148,163,184,0.10)",
-  borderMd:  "rgba(148,163,184,0.18)",
-  t1:        "#F8FAFC",
-  t2:        "#CBD5E1",
-  t3:        "#94A3B8",
-  t4:        "#64748B",
-  sky:       "#38BDF8",
-  skyBg:     "rgba(56,189,248,0.09)",
-  skyBorder: "rgba(56,189,248,0.18)",
+const C = {
+  bg:       "#05080F",
+  s1:       "#080D18",
+  s2:       "#0C1220",
+  s3:       "#111827",
+  border:   "rgba(148,163,184,0.08)",
+  borderMd: "rgba(148,163,184,0.15)",
+  t1:       "#F1F5F9",
+  t2:       "#CBD5E1",
+  t3:       "#94A3B8",
+  t4:       "#475569",
+  sky:      "#38BDF8",
+  skyD:     "#0EA5E9",
+  skyBg:    "rgba(56,189,248,0.08)",
+  skyBdr:   "rgba(56,189,248,0.20)",
+  emerald:  "#34D399",
+  violet:   "#A78BFA",
+  amber:    "#FCD34D",
 } as const;
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── StatusPill ───────────────────────────────────────────────────────────────
 
-function StatusPill({
-  status,
-}: {
-  status: "SUCCEEDED" | "RUNNING" | "WAITING" | "FAILED" | "QUEUED";
-}) {
+function StatusPill({ status }: { status: "SUCCEEDED"|"RUNNING"|"WAITING"|"FAILED"|"QUEUED" }) {
   const map = {
-    SUCCEEDED: { label: "Succeeded",       bg: "rgba(16,185,129,0.12)",  border: "rgba(16,185,129,0.22)",  color: "#34D399" },
-    RUNNING:   { label: "Running",         bg: "rgba(56,189,248,0.12)",  border: "rgba(56,189,248,0.22)",  color: "#38BDF8" },
-    WAITING:   { label: "Awaiting approval", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.22)", color: "#FCD34D" },
-    FAILED:    { label: "Failed",           bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.22)",   color: "#F87171" },
-    QUEUED:    { label: "Queued",           bg: "rgba(148,163,184,0.10)", border: "rgba(148,163,184,0.18)", color: "#94A3B8" },
+    SUCCEEDED: { label: "Succeeded",         bg: "rgba(52,211,153,0.10)", border: "rgba(52,211,153,0.22)", color: "#34D399" },
+    RUNNING:   { label: "Running",           bg: "rgba(56,189,248,0.10)", border: "rgba(56,189,248,0.22)", color: "#38BDF8" },
+    WAITING:   { label: "Awaiting approval", bg: "rgba(252,211,77,0.10)", border: "rgba(252,211,77,0.22)", color: "#FCD34D" },
+    FAILED:    { label: "Failed",            bg: "rgba(248,113,113,0.10)",border: "rgba(248,113,113,0.22)",color: "#F87171" },
+    QUEUED:    { label: "Queued",            bg: "rgba(148,163,184,0.08)",border: "rgba(148,163,184,0.16)",color: "#94A3B8" },
   };
   const { label, bg, border, color } = map[status];
   const icons = {
@@ -60,46 +63,31 @@ function StatusPill({
     QUEUED:    <Clock className="h-3 w-3" />,
   };
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-      style={{ background: bg, border: `1px solid ${border}`, color }}
-    >
-      {icons[status]}
-      {label}
+    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+      style={{ background: bg, border: `1px solid ${border}`, color }}>
+      {icons[status]}{label}
     </span>
   );
 }
 
-// Dot–line–dot mini span bar for the hero mockup
-function MiniSpan({
-  color, startPct, widthPct, label, indent = 0,
-}: {
+// ─── MiniSpan — horizontal trace bar ─────────────────────────────────────────
+
+function MiniSpan({ color, startPct, widthPct, label, indent = 0 }: {
   color: string; startPct: number; widthPct: number; label: string; indent?: number;
 }) {
   return (
-    <div className="flex items-center gap-0" style={{ height: 26 }}>
-      <div
-        className="shrink-0 truncate text-[10px]"
-        style={{ width: 148, paddingLeft: 4 + indent * 14, color: S.t4, fontSize: 10 }}
-      >
+    <div className="flex items-center" style={{ height: 24 }}>
+      <div className="shrink-0 truncate text-[10px]" style={{ width: 150, paddingLeft: 4 + indent * 14, color: C.t4 }}>
         {label}
       </div>
-      <div className="relative flex-1" style={{ height: 26 }}>
-        <div
-          style={{
-            position: "absolute",
-            left:  `${startPct}%`,
-            width: `${widthPct}%`,
-            top: "50%",
-            transform: "translateY(-50%)",
-            display: "flex",
-            alignItems: "center",
-            minWidth: 28,
-          }}
-        >
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 5px ${color}80` }} />
-          <span style={{ flex: 1, height: 2, background: `linear-gradient(90deg, ${color}70, ${color}bb)` }} />
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 6px ${color}99` }} />
+      <div className="relative flex-1" style={{ height: 24 }}>
+        <div style={{
+          position: "absolute", left: `${startPct}%`, width: `${widthPct}%`,
+          top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", minWidth: 24,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 4px ${color}80` }} />
+          <span style={{ flex: 1, height: 2, background: `linear-gradient(90deg,${color}60,${color}b0)` }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 5px ${color}90` }} />
         </div>
       </div>
     </div>
@@ -110,51 +98,40 @@ function MiniSpan({
 
 export default function LandingPage() {
   return (
-    <div style={{ background: S.bg, color: S.t2, minHeight: "100vh" }}>
+    <div style={{ background: C.bg, color: C.t2, minHeight: "100vh" }}>
 
-      {/* ── Nav ────────────────────────────────────────────────────────────── */}
-      <header
-        className="sticky top-0 z-50 backdrop-blur-sm"
-        style={{ borderBottom: `1px solid ${S.border}`, background: "rgba(7,10,17,0.92)" }}
-      >
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5 lg:px-8">
+      {/* ── Nav ─────────────────────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-50 backdrop-blur-md"
+        style={{ borderBottom: `1px solid ${C.border}`, background: "rgba(5,8,15,0.88)" }}>
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3 lg:px-8">
           <Link href="/" className="flex items-center gap-2.5">
-            <span
-              className="flex h-8 w-8 items-center justify-center rounded-lg"
-              style={{ background: S.s2, border: `1px solid ${S.border}` }}
-            >
-              <Logo className="h-4 w-4" />
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg"
+              style={{ background: C.s2, border: `1px solid ${C.borderMd}` }}>
+              <BeeLogo className="h-4 w-4" />
             </span>
-            <span className="text-[15px] font-semibold" style={{ color: S.t1 }}>Vectorbee</span>
+            <span className="text-[15px] font-bold tracking-tight" style={{ color: C.t1 }}>Vectorbee</span>
           </Link>
 
           <nav className="hidden items-center gap-0.5 sm:flex">
-            {[["Features", "#features"], ["How it works", "#how"], ["Examples", "#examples"]].map(([label, href]) => (
-              <a
-                key={label}
-                href={href}
-                className="rounded-lg px-3 py-2 text-[13px] transition-colors hover:text-white"
-                style={{ color: S.t3 }}
-              >
+            {(["Features","How it works","Examples","Pricing"] as const).map(label => (
+              <a key={label} href={`#${label.toLowerCase().replace(" ","")}`}
+                className="rounded-lg px-3 py-1.5 text-[13px] transition-colors hover:text-white"
+                style={{ color: C.t3 }}>
                 {label}
               </a>
             ))}
           </nav>
 
           <div className="flex items-center gap-2">
-            <Link
-              href="/runs"
-              className="rounded-lg px-3 py-2 text-[13px] transition-colors hover:text-white"
-              style={{ color: S.t3 }}
-            >
-              Live demo
+            <Link href="/signin"
+              className="rounded-lg px-3 py-1.5 text-[13px] transition-colors hover:text-white"
+              style={{ color: C.t3 }}>
+              Sign in
             </Link>
-            <Link
-              href="/agent-jobs"
-              className="inline-flex h-8 items-center rounded-lg px-4 text-[13px] font-semibold transition-colors hover:opacity-90"
-              style={{ background: S.sky, color: "#070A11" }}
-            >
-              Get started
+            <Link href="/signup"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-4 text-[13px] font-semibold transition-all hover:opacity-90"
+              style={{ background: C.sky, color: "#05080F", boxShadow: "0 0 18px rgba(56,189,248,0.20)" }}>
+              Start free
             </Link>
           </div>
         </div>
@@ -162,167 +139,148 @@ export default function LandingPage() {
 
       <main>
 
-        {/* ── Hero ─────────────────────────────────────────────────────────── */}
-        <section
-          className="relative overflow-hidden"
-          style={{ background: `radial-gradient(ellipse 80% 50% at 50% -10%, rgba(56,189,248,0.08) 0%, transparent 70%), ${S.bg}` }}
-        >
-          {/* Subtle grid */}
-          <div
-            className="pointer-events-none absolute inset-0"
+        {/* ── Hero ────────────────────────────────────────────────────────────── */}
+        <section className="relative overflow-hidden"
+          style={{ background: `radial-gradient(ellipse 80% 45% at 50% -5%, rgba(56,189,248,0.07) 0%, transparent 65%), ${C.bg}` }}>
+          {/* Grid lines */}
+          <div className="pointer-events-none absolute inset-0"
             style={{
-              backgroundImage: `linear-gradient(${S.border} 1px, transparent 1px), linear-gradient(90deg, ${S.border} 1px, transparent 1px)`,
-              backgroundSize: "60px 60px",
-              maskImage: "radial-gradient(ellipse 70% 50% at 50% 0%, black 0%, transparent 100%)",
+              backgroundImage: `linear-gradient(${C.border} 1px, transparent 1px), linear-gradient(90deg, ${C.border} 1px, transparent 1px)`,
+              backgroundSize: "64px 64px",
+              maskImage: "radial-gradient(ellipse 65% 45% at 50% 0%, black, transparent)",
             }}
           />
 
-          <div className="relative mx-auto max-w-6xl px-5 pb-20 pt-20 lg:px-8 lg:pb-24 lg:pt-24">
-            <div className="grid items-center gap-12 lg:grid-cols-[1fr_480px]">
-              {/* Left: copy */}
-              <div className="space-y-7">
+          <div className="relative mx-auto max-w-6xl px-5 pb-20 pt-20 lg:px-8 lg:pb-28 lg:pt-28">
+            <div className="grid items-start gap-14 lg:grid-cols-[1fr_500px]">
+
+              {/* Left — copy */}
+              <div className="space-y-8">
                 {/* Badge */}
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-widest"
-                  style={{ background: S.skyBg, border: `1px solid ${S.skyBorder}`, color: S.sky }}
-                >
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: S.sky }} />
-                  Developer preview
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-widest"
+                    style={{ background: C.skyBg, border: `1px solid ${C.skyBdr}`, color: C.sky }}>
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: C.sky }} />
+                    Open beta
+                  </span>
+                  <a href="/runs" className="inline-flex items-center gap-1 text-[12px] transition-colors hover:text-white"
+                    style={{ color: C.t4 }}>
+                    View a live run <ChevronRight className="h-3 w-3" />
+                  </a>
+                </div>
 
-                <h1
-                  className="text-balance text-4xl font-bold leading-[1.12] tracking-tight md:text-5xl lg:text-[3.5rem]"
-                  style={{ color: S.t1 }}
-                >
-                  Production control plane
-                  <br />
-                  <span style={{ color: S.sky }}>for AI agent jobs</span>
-                </h1>
+                {/* Headline */}
+                <div className="space-y-4">
+                  <h1 className="text-balance text-[2.75rem] font-bold leading-[1.08] tracking-[-0.03em] md:text-[3.25rem] lg:text-[3.5rem]"
+                    style={{ color: C.t1 }}>
+                    AI agents that run
+                    <br />
+                    <span style={{
+                      background: `linear-gradient(135deg, ${C.sky} 0%, ${C.violet} 100%)`,
+                      WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                    }}>
+                      reliably in production.
+                    </span>
+                  </h1>
+                  <p className="max-w-[480px] text-[17px] leading-[1.75]" style={{ color: C.t3 }}>
+                    Durable workflow orchestration for AI agent jobs — with approval gates,
+                    retry policies, cost budgets, and a complete execution timeline.
+                    Built for backend and AI engineering teams.
+                  </p>
+                </div>
 
-                <p className="max-w-xl text-[17px] leading-[1.7]" style={{ color: S.t3 }}>
-                  Schedule, monitor, approve, and audit long-running AI automations
-                  that touch real business systems — without building the infrastructure yourself.
-                </p>
-
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <Link
-                    href="/agent-jobs"
-                    className="inline-flex h-11 items-center gap-2 rounded-xl px-6 text-[14px] font-semibold transition-all hover:opacity-90 hover:shadow-lg"
-                    style={{ background: S.sky, color: "#070A11", boxShadow: "0 0 24px rgba(56,189,248,0.2)" }}
-                  >
-                    Open dashboard
-                    <ArrowRight className="h-4 w-4" />
+                {/* CTAs */}
+                <div className="flex flex-wrap gap-3">
+                  <Link href="/signup"
+                    className="inline-flex h-11 items-center gap-2 rounded-xl px-6 text-[14px] font-bold transition-all hover:opacity-90 hover:shadow-xl"
+                    style={{ background: C.sky, color: "#05080F", boxShadow: "0 0 28px rgba(56,189,248,0.22)" }}>
+                    Start free <ArrowRight className="h-4 w-4" />
                   </Link>
-                  <Link
-                    href="/runs"
+                  <Link href="/runs"
                     className="inline-flex h-11 items-center gap-2 rounded-xl px-6 text-[14px] font-medium transition-colors hover:text-white"
-                    style={{ background: S.s2, border: `1px solid ${S.borderMd}`, color: S.t2 }}
-                  >
-                    <Play className="h-4 w-4" />
-                    View runs
+                    style={{ background: C.s2, border: `1px solid ${C.borderMd}`, color: C.t2 }}>
+                    <Play className="h-4 w-4" /> View demo run
                   </Link>
                 </div>
 
-                {/* Feature pills */}
-                <div className="flex flex-wrap gap-2 pt-1">
+                {/* Trust signals */}
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-6" style={{ borderColor: C.border }}>
                   {[
-                    "Cron + manual triggers",
-                    "Approval gates",
-                    "Token & cost budgets",
-                    "Full event history",
-                    "Retry policies",
-                  ].map(f => (
-                    <span
-                      key={f}
-                      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px]"
-                      style={{ background: "rgba(148,163,184,0.06)", border: `1px solid ${S.border}`, color: S.t3 }}
-                    >
-                      <CheckCircle2 className="h-3 w-3" style={{ color: "#10B981" }} />
-                      {f}
+                    { icon: ShieldCheck, label: "Human approval gates" },
+                    { icon: RefreshCw,   label: "Idempotent retries" },
+                    { icon: Zap,         label: "Per-run cost budgets" },
+                    { icon: ScrollText,  label: "Immutable audit trail" },
+                  ].map(({ icon: Icon, label }) => (
+                    <span key={label} className="flex items-center gap-1.5 text-[12px]" style={{ color: C.t4 }}>
+                      <Icon className="h-3.5 w-3.5" style={{ color: C.t3 }} /> {label}
                     </span>
                   ))}
                 </div>
               </div>
 
-              {/* Right: UI mockup */}
-              <div
-                className="rounded-2xl overflow-hidden shadow-2xl"
-                style={{ background: S.s1, border: `1px solid ${S.borderMd}`, boxShadow: "0 0 0 1px rgba(56,189,248,0.06), 0 40px 80px rgba(0,0,0,0.5)" }}
-              >
-                {/* Mockup chrome */}
-                <div
-                  className="flex items-center gap-2 px-4 py-3"
-                  style={{ borderBottom: `1px solid ${S.border}`, background: S.s2 }}
-                >
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#EF4444" }} />
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} />
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#10B981" }} />
-                  <span className="ml-2 text-[11px]" style={{ color: S.t4 }}>Customer Renewal Intelligence · Run #47</span>
+              {/* Right — product mockup */}
+              <div className="rounded-2xl overflow-hidden shadow-2xl"
+                style={{
+                  background: C.s1, border: `1px solid ${C.borderMd}`,
+                  boxShadow: `0 0 0 1px ${C.skyBdr}, 0 40px 80px rgba(0,0,0,0.55)`,
+                }}>
+                {/* Chrome */}
+                <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${C.border}`, background: C.s2 }}>
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]/80" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#F59E0B]/80" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#10B981]/80" />
+                  <span className="ml-3 text-[11px]" style={{ color: C.t4 }}>
+                    Customer Renewal Intelligence · Run #47
+                  </span>
                   <span className="ml-auto"><StatusPill status="SUCCEEDED" /></span>
                 </div>
 
                 {/* Stats row */}
-                <div
-                  className="flex gap-0 divide-x px-0"
-                  style={{ borderBottom: `1px solid ${S.border}`, divideColor: S.border } as React.CSSProperties}
-                >
+                <div className="grid grid-cols-4" style={{ borderBottom: `1px solid ${C.border}` }}>
                   {[
-                    { label: "Agents", value: "5" },
-                    { label: "Events", value: "40" },
-                    { label: "Duration", value: "2m 38s" },
-                    { label: "Cost", value: "$0.061" },
+                    { label: "Agents",   value: "5",       color: C.violet },
+                    { label: "Events",   value: "40",      color: C.sky },
+                    { label: "Duration", value: "2m 38s",  color: C.t2 },
+                    { label: "Cost",     value: "$0.061",  color: C.emerald },
                   ].map(stat => (
-                    <div
-                      key={stat.label}
-                      className="flex-1 px-4 py-2.5 text-center"
-                      style={{ borderRight: `1px solid ${S.border}` }}
-                    >
-                      <div className="text-[13px] font-bold" style={{ color: S.t1 }}>{stat.value}</div>
-                      <div className="text-[10px] uppercase tracking-wide" style={{ color: S.t4 }}>{stat.label}</div>
+                    <div key={stat.label} className="px-3 py-3 text-center" style={{ borderRight: `1px solid ${C.border}` }}>
+                      <div className="text-[14px] font-bold tabular-nums" style={{ color: stat.color }}>{stat.value}</div>
+                      <div className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: C.t4 }}>{stat.label}</div>
                     </div>
                   ))}
                 </div>
 
-                {/* Mini horizontal timeline */}
-                <div className="px-4 py-4">
-                  <div className="mb-2 text-[9px] font-semibold uppercase tracking-widest" style={{ color: S.t4 }}>
-                    Execution trace
-                  </div>
-                  {/* Time ruler */}
-                  <div className="mb-3 flex items-center" style={{ paddingLeft: 152 }}>
-                    {["0", "30s", "1m", "1m30s", "2m38s"].map((t, i) => (
-                      <div key={t} className="flex-1 text-center" style={{ fontSize: 8, color: S.t4 }}>
-                        {t}
-                      </div>
+                {/* Trace */}
+                <div className="px-4 pt-4 pb-3">
+                  <div className="mb-2 text-[9px] font-semibold uppercase tracking-widest" style={{ color: C.t4 }}>Execution trace</div>
+                  <div className="mb-3 flex" style={{ paddingLeft: 154 }}>
+                    {["0","30s","1m","1m30s","2m38s"].map(t => (
+                      <div key={t} className="flex-1 text-center" style={{ fontSize: 8, color: C.t4 }}>{t}</div>
                     ))}
                   </div>
-                  <MiniSpan label="Run"                    color="#38BDF8" startPct={0}   widthPct={100} indent={0} />
-                  <MiniSpan label="Orchestrator Agent"     color="#A78BFA" startPct={1}   widthPct={10}  indent={1} />
-                  <MiniSpan label="Customer Data Agent"    color="#A78BFA" startPct={12}  widthPct={28}  indent={1} />
-                  <MiniSpan label="  Tool: crm-api"        color="#22D3EE" startPct={13}  widthPct={5}   indent={2} />
-                  <MiniSpan label="  LLM: gpt-4.1-mini"   color="#C084FC" startPct={20}  widthPct={18}  indent={2} />
-                  <MiniSpan label="Risk Assessment Agent"  color="#A78BFA" startPct={41}  widthPct={22}  indent={1} />
-                  <MiniSpan label="Compliance Scoring"     color="#A78BFA" startPct={64}  widthPct={17}  indent={1} />
-                  <MiniSpan label="CRM Update Agent"       color="#A78BFA" startPct={82}  widthPct={12}  indent={1} />
+                  <MiniSpan label="Run"                   color={C.sky}     startPct={0}  widthPct={100} indent={0} />
+                  <MiniSpan label="Orchestrator Agent"    color={C.violet}  startPct={1}  widthPct={10}  indent={1} />
+                  <MiniSpan label="Customer Data Agent"   color={C.violet}  startPct={12} widthPct={28}  indent={1} />
+                  <MiniSpan label="  Tool: crm-api"       color="#22D3EE"   startPct={13} widthPct={5}   indent={2} />
+                  <MiniSpan label="  LLM: gpt-4.1-mini"  color="#C084FC"   startPct={20} widthPct={18}  indent={2} />
+                  <MiniSpan label="Risk Assessment Agent" color={C.violet}  startPct={41} widthPct={22}  indent={1} />
+                  <MiniSpan label="Compliance Scoring"    color={C.violet}  startPct={64} widthPct={17}  indent={1} />
+                  <MiniSpan label="CRM Update Agent"      color={C.violet}  startPct={82} widthPct={12}  indent={1} />
                 </div>
 
-                {/* Approval badge */}
-                <div
-                  className="mx-4 mb-4 rounded-lg px-3 py-2.5"
-                  style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.16)" }}
-                >
+                {/* Approval card */}
+                <div className="mx-4 mb-4 rounded-xl px-3.5 py-3"
+                  style={{ background: "rgba(252,211,77,0.05)", border: "1px solid rgba(252,211,77,0.18)" }}>
                   <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-semibold" style={{ color: "#FCD34D" }}>
-                      ◉ Approval gate passed
+                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: C.amber }}>
+                      <ShieldCheck className="h-3.5 w-3.5" /> Approval gate passed
                     </span>
-                    <span
-                      className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                      style={{ background: "rgba(16,185,129,0.12)", color: "#34D399" }}
-                    >
+                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                      style={{ background: "rgba(52,211,153,0.12)", color: C.emerald }}>
                       Approved
                     </span>
                   </div>
-                  <p className="mt-0.5 text-[11px]" style={{ color: S.t4 }}>
+                  <p className="mt-1 text-[11px]" style={{ color: C.t4 }}>
                     CRM update · 12 records · decided by Demo Owner
                   </p>
                 </div>
@@ -331,268 +289,193 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ── Problem ──────────────────────────────────────────────────────── */}
-        <section style={{ borderTop: `1px solid ${S.border}`, background: S.s1 }}>
+        {/* ── Stat bar ────────────────────────────────────────────────────────── */}
+        <div style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.s1 }}>
+          <div className="mx-auto max-w-6xl px-5 lg:px-8">
+            <div className="grid grid-cols-2 divide-x md:grid-cols-4" style={{ divideColor: C.border } as React.CSSProperties}>
+              {[
+                { value: "40+",   label: "Event types tracked per run" },
+                { value: "100%",  label: "Idempotent retry on failure" },
+                { value: "<1ms",  label: "Trigger-to-queue latency" },
+                { value: "∞",     label: "Run history retained" },
+              ].map(stat => (
+                <div key={stat.label} className="py-5 px-6 text-center" style={{ borderRight: `1px solid ${C.border}` }}>
+                  <div className="text-[22px] font-bold tabular-nums" style={{ color: C.t1 }}>{stat.value}</div>
+                  <div className="mt-0.5 text-[11px]" style={{ color: C.t4 }}>{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Problem ─────────────────────────────────────────────────────────── */}
+        <section style={{ borderTop: `1px solid ${C.border}`, background: C.bg }}>
           <div className="mx-auto max-w-6xl px-5 py-20 lg:px-8">
-            <div className="mb-12 max-w-2xl">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: S.sky }}>
+            <div className="mb-14 max-w-2xl">
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.sky }}>
                 The problem
               </p>
-              <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl" style={{ color: S.t1 }}>
-                AI agent jobs are not cron jobs
+              <h2 className="mb-4 text-[2rem] font-bold tracking-tight md:text-[2.25rem]" style={{ color: C.t1 }}>
+                AI agent jobs are not cron jobs.
               </h2>
-              <p className="text-[16px] leading-7" style={{ color: S.t3 }}>
-                A bash script that fails can be safely re-run. An AI agent that fails
-                may have already written to your CRM, sent an email, or spent $8 on
-                tokens — and a naive retry will do it again.
+              <p className="text-[16px] leading-7" style={{ color: C.t3 }}>
+                A bash script that fails can be safely re-run. An AI agent that fails may have
+                already written to your CRM, sent an email, or spent $8 on tokens — and a naive
+                retry will do it all again.
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[
-                { icon: "⚡", head: "They call LLMs",         body: "Token usage and cost are unpredictable run-to-run with no built-in cap." },
-                { icon: "🔧", head: "They use tools",          body: "File writes, API calls, DB mutations — side effects can't be undone." },
-                { icon: "👤", head: "They wait for humans",    body: "Some steps need approval before the agent can proceed." },
-                { icon: "💸", head: "They can exceed budgets", body: "A single runaway run can cost hundreds of dollars before you notice." },
-                { icon: "↺",  head: "They partially fail",     body: "Step 3 of 7 fails — what do you retry and from where?" },
-                { icon: "📋", head: "They need audit trails",  body: "Who ran what, when, why, and what exactly did it decide?" },
-              ].map(({ icon, head, body }) => (
-                <div
-                  key={head}
-                  className="rounded-xl p-5"
-                  style={{ background: S.s2, border: `1px solid ${S.border}` }}
-                >
-                  <div className="mb-3 text-xl">{icon}</div>
-                  <p className="mb-1.5 text-[13px] font-semibold" style={{ color: S.t1 }}>{head}</p>
-                  <p className="text-[12px] leading-5" style={{ color: S.t3 }}>{body}</p>
+                { icon: Zap,         head: "They call LLMs",         body: "Token usage and cost are unpredictable run-to-run with no built-in cap.", color: C.sky },
+                { icon: Database,    head: "They use tools",          body: "File writes, API calls, DB mutations — side effects that can't be undone.", color: "#22D3EE" },
+                { icon: ShieldCheck, head: "They wait for humans",    body: "Some steps require approval before the agent is allowed to proceed.", color: C.amber },
+                { icon: AlertTriangle,head:"They can exceed budgets", body: "A single runaway run can cost hundreds of dollars before you notice.", color: "#F87171" },
+                { icon: RefreshCw,   head: "They partially fail",     body: "Step 3 of 7 fails — what do you retry, and from which step?", color: C.violet },
+                { icon: ScrollText,  head: "They need audit trails",  body: "Who ran what, when, why, and what exactly did the agent decide?", color: C.emerald },
+              ].map(({ icon: Icon, head, body, color }) => (
+                <div key={head} className="rounded-xl p-5 transition-all hover:-translate-y-px"
+                  style={{ background: C.s1, border: `1px solid ${C.border}` }}>
+                  <span className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg"
+                    style={{ background: `${color}12`, border: `1px solid ${color}20` }}>
+                    <Icon className="h-4 w-4" style={{ color }} />
+                  </span>
+                  <p className="mb-1.5 text-[13px] font-semibold" style={{ color: C.t1 }}>{head}</p>
+                  <p className="text-[12px] leading-5" style={{ color: C.t3 }}>{body}</p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── Features ─────────────────────────────────────────────────────── */}
-        <section id="features" style={{ borderTop: `1px solid ${S.border}` }}>
+        {/* ── Features ────────────────────────────────────────────────────────── */}
+        <section id="features" style={{ borderTop: `1px solid ${C.border}`, background: C.s1 }}>
           <div className="mx-auto max-w-6xl px-5 py-20 lg:px-8">
-            <div className="mb-12 max-w-2xl">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: S.sky }}>
+            <div className="mb-14 max-w-2xl">
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.sky }}>
                 What Vectorbee does
               </p>
-              <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl" style={{ color: S.t1 }}>
-                Everything the operational layer needs
+              <h2 className="mb-4 text-[2rem] font-bold tracking-tight md:text-[2.25rem]" style={{ color: C.t1 }}>
+                Everything the operational layer needs.
               </h2>
-              <p className="text-[16px] leading-7" style={{ color: S.t3 }}>
-                Vectorbee sits between your scheduler and your agents. It handles
-                triggering, monitoring, budgeting, approving, and retrying — so you
-                don&apos;t have to build it.
+              <p className="text-[16px] leading-7" style={{ color: C.t3 }}>
+                Vectorbee sits between your scheduler and your agents — handling triggering,
+                monitoring, budgeting, approving, and retrying so you don&apos;t have to build it.
               </p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[
-                {
-                  icon: Clock,
-                  title: "Scheduled & manual triggers",
-                  body: "Cron expressions, timezones, one-off manual runs, and webhook-driven starts. Define once, run reliably.",
-                  color: "#38BDF8",
-                },
-                {
-                  icon: ShieldCheck,
-                  title: "Human-in-the-loop approvals",
-                  body: "Agent pauses mid-run and requests sign-off. Approvals route to the right person with full context.",
-                  color: "#FCD34D",
-                },
-                {
-                  icon: Timer,
-                  title: "Token & cost budget caps",
-                  body: "Set per-run and daily limits. Runs exceeding budget are blocked before they cost you.",
-                  color: "#A78BFA",
-                },
-                {
-                  icon: RefreshCw,
-                  title: "Safe retry policies",
-                  body: "Per-job retry with configurable backoff. Idempotency keys prevent duplicate side effects on retry.",
-                  color: "#10B981",
-                },
-                {
-                  icon: ScrollText,
-                  title: "Full event history",
-                  body: "Every run: status, agents, steps, token usage, cost, duration, and the exact error trace if it failed.",
-                  color: "#22D3EE",
-                },
-                {
-                  icon: Activity,
-                  title: "Worker fleet monitoring",
-                  body: "Live worker health, queue depths, capacity utilisation, and last heartbeat for every worker.",
-                  color: "#6EE7B7",
-                },
-              ].map(({ icon: Icon, title, body, color }) => (
-                <div
-                  key={title}
-                  className="group rounded-xl p-5 transition-all hover:-translate-y-0.5"
-                  style={{ background: S.s1, border: `1px solid ${S.border}` }}
-                >
-                  <span
-                    className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl"
-                    style={{ background: `${color}14`, border: `1px solid ${color}25` }}
-                  >
-                    <Icon className="h-5 w-5" style={{ color }} />
-                  </span>
-                  <h3 className="mb-2 text-[14px] font-semibold" style={{ color: S.t1 }}>{title}</h3>
-                  <p className="text-[13px] leading-5" style={{ color: S.t3 }}>{body}</p>
+                { icon: Clock,      title: "Cron & manual triggers",        body: "Timezone-aware cron, one-off runs, and webhook starts. Define once, run reliably.",             color: C.sky,     tag: "Scheduling" },
+                { icon: ShieldCheck,title: "Human-in-the-loop approvals",  body: "Agent pauses mid-run and requests sign-off, routed to the right person with full context.",      color: C.amber,   tag: "Governance" },
+                { icon: Timer,      title: "Token & cost budget caps",      body: "Per-run and daily limits. Runs that exceed budget are blocked before they cost you.",            color: C.violet,  tag: "Cost control" },
+                { icon: RefreshCw,  title: "Safe retry policies",           body: "Per-job retry with exponential backoff. Idempotency keys prevent duplicate side-effects.",       color: C.emerald, tag: "Reliability" },
+                { icon: ScrollText, title: "Full execution history",        body: "Every run: agents, steps, token usage, cost, duration, and the exact error trace on failure.",   color: "#22D3EE", tag: "Observability" },
+                { icon: Activity,   title: "Worker fleet monitoring",       body: "Live worker health, queue depths, capacity utilisation, and heartbeat for every worker.",        color: "#6EE7B7", tag: "Infrastructure" },
+              ].map(({ icon: Icon, title, body, color, tag }) => (
+                <div key={title}
+                  className="group relative rounded-xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+                  style={{ background: C.s2, border: `1px solid ${C.border}` }}>
+                  {/* Left accent bar */}
+                  <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-full opacity-0 transition-opacity group-hover:opacity-100"
+                    style={{ background: color }} />
+                  <div className="mb-4 flex items-center justify-between">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl"
+                      style={{ background: `${color}12`, border: `1px solid ${color}22` }}>
+                      <Icon className="h-4.5 w-4.5" style={{ color, width: 18, height: 18 }} />
+                    </span>
+                    <span className="rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      style={{ background: `${color}10`, color, border: `1px solid ${color}20` }}>
+                      {tag}
+                    </span>
+                  </div>
+                  <h3 className="mb-2 text-[14px] font-semibold" style={{ color: C.t1 }}>{title}</h3>
+                  <p className="text-[13px] leading-5" style={{ color: C.t3 }}>{body}</p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── How it works ─────────────────────────────────────────────────── */}
-        <section id="how" style={{ borderTop: `1px solid ${S.border}`, background: S.s1 }}>
+        {/* ── How it works ────────────────────────────────────────────────────── */}
+        <section id="howitworks" style={{ borderTop: `1px solid ${C.border}`, background: C.bg }}>
           <div className="mx-auto max-w-6xl px-5 py-20 lg:px-8">
             <div className="mb-14 max-w-2xl">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: S.sky }}>
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.sky }}>
                 How it works
               </p>
-              <h2 className="text-3xl font-bold tracking-tight md:text-4xl" style={{ color: S.t1 }}>
-                Three steps to production-grade agent jobs
+              <h2 className="text-[2rem] font-bold tracking-tight md:text-[2.25rem]" style={{ color: C.t1 }}>
+                Three steps to production-grade agent jobs.
               </h2>
             </div>
 
             <div className="grid gap-6 md:grid-cols-3">
               {[
-                {
-                  step: "01",
-                  icon: Bot,
-                  title: "Define your job",
-                  body: "Give your job a name, attach an HTTP endpoint (your agent), set a cron schedule or manual trigger, and configure retry policy and budget caps.",
-                  accent: "#38BDF8",
-                },
-                {
-                  step: "02",
-                  icon: Activity,
-                  title: "Agent runs, reports back",
-                  body: "Vectorbee triggers your endpoint, streams the event timeline, tracks token usage and cost in real time, and waits for approval if the agent requests it.",
-                  accent: "#A78BFA",
-                },
-                {
-                  step: "03",
-                  icon: ShieldCheck,
-                  title: "Review, approve, audit",
-                  body: "Approve or reject pending actions, retry failed runs from any step, and inspect the complete immutable audit log of every decision.",
-                  accent: "#10B981",
-                },
+                { step: "01", icon: Bot,        title: "Define your workflow",
+                  body:  "Name your workflow, connect your agent endpoint, set a cron schedule or manual trigger, and configure retry and budget caps.",
+                  accent: C.sky },
+                { step: "02", icon: Activity,    title: "Agent runs, Vectorbee tracks",
+                  body:  "Vectorbee triggers your endpoint, streams the event timeline, tracks token usage and cost in real time, and waits for approval if requested.",
+                  accent: C.violet },
+                { step: "03", icon: ShieldCheck, title: "Inspect, approve, audit",
+                  body:  "Approve or reject pending actions, retry failed runs from any step, and inspect the complete immutable audit log of every agent decision.",
+                  accent: C.emerald },
               ].map(({ step, icon: Icon, title, body, accent }) => (
-                <div key={step} className="relative">
-                  <div
-                    className="rounded-2xl p-6"
-                    style={{ background: S.s2, border: `1px solid ${S.border}` }}
-                  >
-                    <div className="mb-5 flex items-center justify-between">
-                      <span
-                        className="flex h-10 w-10 items-center justify-center rounded-xl"
-                        style={{ background: `${accent}14`, border: `1px solid ${accent}25` }}
-                      >
-                        <Icon className="h-5 w-5" style={{ color: accent }} />
-                      </span>
-                      <span
-                        className="font-mono text-[32px] font-bold leading-none"
-                        style={{ color: `${accent}20` }}
-                      >
-                        {step}
-                      </span>
-                    </div>
-                    <h3 className="mb-2 text-[15px] font-semibold" style={{ color: S.t1 }}>{title}</h3>
-                    <p className="text-[13px] leading-6" style={{ color: S.t3 }}>{body}</p>
+                <div key={step} className="relative rounded-2xl p-6"
+                  style={{ background: C.s1, border: `1px solid ${C.border}` }}>
+                  <div className="mb-5 flex items-center justify-between">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl"
+                      style={{ background: `${accent}12`, border: `1px solid ${accent}22` }}>
+                      <Icon className="h-5 w-5" style={{ color: accent }} />
+                    </span>
+                    <span className="font-mono text-[36px] font-black leading-none" style={{ color: `${accent}18` }}>
+                      {step}
+                    </span>
                   </div>
+                  <h3 className="mb-2 text-[15px] font-semibold" style={{ color: C.t1 }}>{title}</h3>
+                  <p className="text-[13px] leading-6" style={{ color: C.t3 }}>{body}</p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── Example jobs ─────────────────────────────────────────────────── */}
-        <section id="examples" style={{ borderTop: `1px solid ${S.border}` }}>
+        {/* ── Live run examples ────────────────────────────────────────────────── */}
+        <section id="examples" style={{ borderTop: `1px solid ${C.border}`, background: C.s1 }}>
           <div className="mx-auto max-w-6xl px-5 py-20 lg:px-8">
             <div className="mb-10 max-w-2xl">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: S.sky }}>
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.sky }}>
                 Real-world examples
               </p>
-              <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl" style={{ color: S.t1 }}>
-                What teams run on Vectorbee
+              <h2 className="mb-4 text-[2rem] font-bold tracking-tight md:text-[2.25rem]" style={{ color: C.t1 }}>
+                What teams run on Vectorbee.
               </h2>
-              <p className="text-[16px] leading-7" style={{ color: S.t3 }}>
+              <p className="text-[16px] leading-7" style={{ color: C.t3 }}>
                 Any recurring AI task that calls real systems and needs to be reliable enough for production.
               </p>
             </div>
 
-            <div
-              className="overflow-hidden rounded-2xl"
-              style={{ border: `1px solid ${S.borderMd}` }}
-            >
-              {/* Table header */}
-              <div
-                className="grid items-center gap-4 px-5 py-3 text-[10px] font-semibold uppercase tracking-widest"
-                style={{
-                  gridTemplateColumns: "1fr auto auto",
-                  background: S.s2,
-                  borderBottom: `1px solid ${S.border}`,
-                  color: S.t4,
-                }}
-              >
-                <span>Job</span>
-                <span>Trigger</span>
-                <span>Status</span>
+            <div className="overflow-hidden rounded-2xl" style={{ border: `1px solid ${C.borderMd}` }}>
+              <div className="grid items-center gap-4 px-5 py-3 text-[10px] font-bold uppercase tracking-widest"
+                style={{ gridTemplateColumns: "1fr auto auto", background: C.s2, borderBottom: `1px solid ${C.border}`, color: C.t4 }}>
+                <span>Job</span><span>Trigger</span><span>Status</span>
               </div>
-
               {[
-                {
-                  name: "Daily Support Ticket Triage",
-                  desc: "Reads open tickets, classifies by urgency, assigns to the right queue.",
-                  trigger: "0 8 * * *",
-                  status: "SUCCEEDED" as const,
-                },
-                {
-                  name: "Weekly Account Health Summary",
-                  desc: "Aggregates usage data, flags at-risk accounts, sends Slack digest.",
-                  trigger: "0 9 * * 1",
-                  status: "WAITING" as const,
-                },
-                {
-                  name: "Failed Payment Recovery",
-                  desc: "Drafts personalised recovery emails using billing history. Approval required before send.",
-                  trigger: "manual",
-                  status: "RUNNING" as const,
-                },
-                {
-                  name: "CRM Enrichment with Approval Gate",
-                  desc: "Analyses customer records and proposes CRM updates. Pauses for human review before writing.",
-                  trigger: "manual",
-                  status: "SUCCEEDED" as const,
-                },
-                {
-                  name: "Document Processing Exception Review",
-                  desc: "Identifies parsing failures in overnight batch, classifies exceptions, creates issues.",
-                  trigger: "0 7 * * *",
-                  status: "FAILED" as const,
-                },
+                { name: "Daily Support Ticket Triage",     desc: "Reads open tickets, classifies by urgency, assigns to the right queue.",                                   trigger: "0 8 * * *", status: "SUCCEEDED" as const },
+                { name: "Weekly Account Health Summary",   desc: "Aggregates usage data, flags at-risk accounts, sends Slack digest.",                                        trigger: "0 9 * * 1", status: "WAITING"   as const },
+                { name: "Failed Payment Recovery",         desc: "Drafts personalised recovery emails using billing history. Approval required before send.",                  trigger: "manual",    status: "RUNNING"   as const },
+                { name: "CRM Enrichment with Approval",    desc: "Analyses customer records and proposes CRM updates. Pauses for human review before writing.",                trigger: "manual",    status: "SUCCEEDED" as const },
+                { name: "Document Exception Review",       desc: "Identifies parsing failures in overnight batch, classifies exceptions, creates issues.",                      trigger: "0 7 * * *", status: "FAILED"    as const },
               ].map((job, i, arr) => (
-                <div
-                  key={job.name}
+                <div key={job.name}
                   className="grid items-center gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02]"
-                  style={{
-                    gridTemplateColumns: "1fr auto auto",
-                    borderBottom: i < arr.length - 1 ? `1px solid ${S.border}` : undefined,
-                    background: S.s1,
-                  }}
-                >
+                  style={{ gridTemplateColumns: "1fr auto auto", borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : undefined, background: C.s1 }}>
                   <div className="min-w-0">
-                    <p className="mb-0.5 text-[13px] font-semibold" style={{ color: S.t1 }}>{job.name}</p>
-                    <p className="text-[12px]" style={{ color: S.t4 }}>{job.desc}</p>
+                    <p className="mb-0.5 text-[13px] font-semibold" style={{ color: C.t1 }}>{job.name}</p>
+                    <p className="text-[12px]" style={{ color: C.t4 }}>{job.desc}</p>
                   </div>
-                  <code
-                    className="rounded px-2 py-0.5 text-[11px]"
-                    style={{ background: S.s3, color: S.t3, border: `1px solid ${S.border}` }}
-                  >
+                  <code className="rounded-md px-2 py-1 text-[11px] font-mono"
+                    style={{ background: C.s3, color: C.t3, border: `1px solid ${C.border}` }}>
                     {job.trigger}
                   </code>
                   <StatusPill status={job.status} />
@@ -601,124 +484,107 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-6 text-center">
-              <Link
-                href="/runs"
+              <Link href="/runs"
                 className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-[13px] font-medium transition-colors hover:text-white"
-                style={{ background: S.s2, border: `1px solid ${S.borderMd}`, color: S.t2 }}
-              >
-                Explore a live demo run
-                <ArrowRight className="h-4 w-4" />
+                style={{ background: C.s2, border: `1px solid ${C.borderMd}`, color: C.t2 }}>
+                Explore a live demo run <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
           </div>
         </section>
 
-        {/* ── Positioning ──────────────────────────────────────────────────── */}
-        <section style={{ borderTop: `1px solid ${S.border}`, background: S.s1 }}>
+        {/* ── Comparison — what Vectorbee is not ──────────────────────────────── */}
+        <section style={{ borderTop: `1px solid ${C.border}`, background: C.bg }}>
           <div className="mx-auto max-w-6xl px-5 py-20 lg:px-8">
-            <div className="mb-10 max-w-2xl">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: S.t4 }}>
+            <div className="mb-12 max-w-2xl">
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.t4 }}>
                 Scope
               </p>
-              <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl" style={{ color: S.t1 }}>
-                What Vectorbee is not
+              <h2 className="mb-4 text-[2rem] font-bold tracking-tight md:text-[2.25rem]" style={{ color: C.t1 }}>
+                What Vectorbee is not.
               </h2>
-              <p className="text-[16px] leading-7" style={{ color: S.t3 }}>
-                Understanding the boundaries is as important as understanding the capabilities.
+              <p className="text-[16px] leading-7" style={{ color: C.t3 }}>
+                Understanding the boundaries matters as much as understanding the capabilities.
               </p>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            {/* Comparison table */}
+            <div className="overflow-hidden rounded-2xl" style={{ border: `1px solid ${C.borderMd}` }}>
+              <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-0"
+                style={{ background: C.s2, borderBottom: `1px solid ${C.border}` }}>
+                <div className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest" style={{ color: C.t4 }}>Capability</div>
+                {["Temporal","n8n","LangSmith","Vectorbee"].map(tool => (
+                  <div key={tool} className="px-4 py-3 text-center text-[11px] font-semibold"
+                    style={{ color: tool === "Vectorbee" ? C.sky : C.t3, borderLeft: `1px solid ${C.border}` }}>
+                    {tool}
+                  </div>
+                ))}
+              </div>
               {[
-                {
-                  head: "Not an agent framework",
-                  body: "Vectorbee doesn't build or run agents. You bring the agent — LangChain, CrewAI, AutoGen, or your own code. Vectorbee handles the scheduling layer around it.",
-                },
-                {
-                  head: "Not a LangChain replacement",
-                  body: "LangChain builds agents. Vectorbee schedules, monitors, and governs them in production. They are complementary.",
-                },
-                {
-                  head: "Not a Temporal replacement",
-                  body: "Temporal is a general workflow engine. Vectorbee is purpose-built for AI agent job orchestration — approval gates, LLM budgets, and agent-specific run semantics.",
-                },
-                {
-                  head: "Not generic observability",
-                  body: "Datadog and Grafana trace infrastructure. Vectorbee tracks agent run outcomes — jobs, runs, steps, budgets, approvals — not infrastructure spans.",
-                },
-                {
-                  head: "Not prompt evaluation software",
-                  body: "LangSmith and Braintrust evaluate prompt quality. Vectorbee controls when and how agents execute in production — safety, scheduling, and accountability.",
-                },
-                {
-                  head: "Not a job queue",
-                  body: "BullMQ and Celery are task queues. Vectorbee is an agent-aware control plane that understands LLM costs, approval gates, and multi-step agent runs.",
-                },
-              ].map(({ head, body }) => (
-                <div
-                  key={head}
-                  className="rounded-xl p-5"
-                  style={{ background: S.s2, border: `1px solid ${S.border}` }}
-                >
-                  <p className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold" style={{ color: S.t1 }}>
-                    <span style={{ color: S.t4 }}>✕</span>
-                    {head}
-                  </p>
-                  <p className="text-[12px] leading-5" style={{ color: S.t3 }}>{body}</p>
+                { cap: "Durable workflow execution",     vals: [true,  true,  false, true]  },
+                { cap: "AI agent job semantics",         vals: [false, false, false, true]  },
+                { cap: "Human approval gates",           vals: [false, true,  false, true]  },
+                { cap: "Per-run LLM cost budgets",       vals: [false, false, true,  true]  },
+                { cap: "Idempotent safe retry",          vals: [true,  false, false, true]  },
+                { cap: "Step-level event history",       vals: [true,  false, true,  true]  },
+                { cap: "No-code workflow builder",       vals: [false, true,  false, true]  },
+                { cap: "Works with any agent framework", vals: [true,  true,  true,  true]  },
+              ].map(({ cap, vals }, i, arr) => (
+                <div key={cap} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center transition-colors hover:bg-white/[0.015]"
+                  style={{ borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : undefined, background: C.s1 }}>
+                  <div className="px-5 py-3.5 text-[13px]" style={{ color: C.t2 }}>{cap}</div>
+                  {vals.map((v, vi) => (
+                    <div key={vi} className="flex items-center justify-center px-4 py-3.5"
+                      style={{ borderLeft: `1px solid ${C.border}` }}>
+                      {v
+                        ? <CheckCircle2 className="h-4 w-4" style={{ color: vi === 3 ? C.emerald : C.t3 }} />
+                        : <span className="h-4 w-4 flex items-center justify-center text-[14px]" style={{ color: C.t4 }}>—</span>
+                      }
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── CTA ──────────────────────────────────────────────────────────── */}
-        <section style={{ borderTop: `1px solid ${S.border}` }}>
+        {/* ── CTA ─────────────────────────────────────────────────────────────── */}
+        <section style={{ borderTop: `1px solid ${C.border}`, background: C.s1 }}>
           <div className="mx-auto max-w-6xl px-5 py-20 lg:px-8">
-            <div
-              className="relative overflow-hidden rounded-2xl px-8 py-14 text-center md:px-16"
+            <div className="relative overflow-hidden rounded-2xl px-8 py-16 text-center md:px-16"
               style={{
-                background: `radial-gradient(ellipse 70% 60% at 50% 110%, rgba(56,189,248,0.12) 0%, transparent 70%), ${S.s1}`,
-                border: `1px solid ${S.borderMd}`,
-                boxShadow: "0 0 0 1px rgba(56,189,248,0.06)",
-              }}
-            >
-              {/* Glow */}
-              <div
-                className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2"
-                style={{ width: 400, height: 200, background: "radial-gradient(ellipse at center, rgba(56,189,248,0.08) 0%, transparent 70%)" }}
-              />
-
+                background: `radial-gradient(ellipse 70% 60% at 50% 115%, rgba(56,189,248,0.14) 0%, transparent 70%), ${C.s2}`,
+                border: `1px solid ${C.borderMd}`,
+                boxShadow: `0 0 0 1px ${C.skyBdr}`,
+              }}>
+              {/* Bottom glow */}
+              <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2"
+                style={{ width: 480, height: 200, background: "radial-gradient(ellipse at center, rgba(56,189,248,0.10) 0%, transparent 70%)" }} />
               <div className="relative">
-                <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: S.sky }}>
-                  Get started today
+                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.sky }}>
+                  Get started free
                 </p>
-                <h2 className="mb-4 text-balance text-3xl font-bold tracking-tight md:text-4xl" style={{ color: S.t1 }}>
-                  Put your first agent job in production
+                <h2 className="mb-4 text-balance text-[2rem] font-bold tracking-tight md:text-[2.25rem]" style={{ color: C.t1 }}>
+                  Put your first AI agent job in production.
                 </h2>
-                <p className="mx-auto mb-8 max-w-lg text-[16px] leading-7" style={{ color: S.t3 }}>
-                  Open the dashboard, explore the mock runs, and see exactly how
-                  Vectorbee handles scheduling, approvals, and retries end-to-end.
+                <p className="mx-auto mb-10 max-w-lg text-[16px] leading-7" style={{ color: C.t3 }}>
+                  Create a workspace, explore the demo runs, and see how Vectorbee handles
+                  scheduling, approvals, and retries end-to-end.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-3">
-                  <Link
-                    href="/agent-jobs"
-                    className="inline-flex h-11 items-center gap-2 rounded-xl px-7 text-[14px] font-semibold transition-all hover:opacity-90"
-                    style={{ background: S.sky, color: "#070A11", boxShadow: "0 0 28px rgba(56,189,248,0.25)" }}
-                  >
-                    Open dashboard
-                    <ArrowRight className="h-4 w-4" />
+                  <Link href="/signup"
+                    className="inline-flex h-11 items-center gap-2 rounded-xl px-8 text-[14px] font-bold transition-all hover:opacity-90 hover:shadow-xl"
+                    style={{ background: C.sky, color: "#05080F", boxShadow: "0 0 32px rgba(56,189,248,0.28)" }}>
+                    Start free <ArrowRight className="h-4 w-4" />
                   </Link>
-                  <Link
-                    href="/runs"
+                  <Link href="/runs"
                     className="inline-flex h-11 items-center gap-2 rounded-xl px-7 text-[14px] font-medium transition-colors hover:text-white"
-                    style={{ background: "transparent", border: `1px solid ${S.borderMd}`, color: S.t2 }}
-                  >
-                    <Play className="h-4 w-4" />
-                    View demo run
+                    style={{ background: "transparent", border: `1px solid ${C.borderMd}`, color: C.t2 }}>
+                    <Play className="h-4 w-4" /> View demo run
                   </Link>
                 </div>
-                <p className="mt-5 text-[12px]" style={{ color: S.t4 }}>
-                  No account needed in open mode · Three mock scenarios ready to explore
+                <p className="mt-5 text-[12px]" style={{ color: C.t4 }}>
+                  No credit card required · Demo scenarios ready to explore · Works with any agent framework
                 </p>
               </div>
             </div>
@@ -727,38 +593,53 @@ export default function LandingPage() {
 
       </main>
 
-      {/* ── Footer ───────────────────────────────────────────────────────────── */}
-      <footer style={{ borderTop: `1px solid ${S.border}`, background: S.s1 }}>
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-10 md:flex-row md:items-center md:justify-between lg:px-8">
-          <div className="flex items-center gap-3">
-            <span
-              className="flex h-7 w-7 items-center justify-center rounded-lg"
-              style={{ background: S.s2, border: `1px solid ${S.border}` }}
-            >
-              <Logo className="h-3.5 w-3.5" />
-            </span>
-            <span className="text-[14px] font-semibold" style={{ color: S.t2 }}>Vectorbee</span>
-            <span
-              className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-              style={{ background: S.skyBg, border: `1px solid ${S.skyBorder}`, color: S.sky }}
-            >
-              Developer preview
-            </span>
+      {/* ── Footer ──────────────────────────────────────────────────────────────── */}
+      <footer style={{ borderTop: `1px solid ${C.border}`, background: C.s2 }}>
+        <div className="mx-auto max-w-6xl px-5 py-10 lg:px-8">
+          <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
+            {/* Brand */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg"
+                  style={{ background: C.s3, border: `1px solid ${C.border}` }}>
+                  <BeeLogo className="h-3.5 w-3.5" />
+                </span>
+                <span className="text-[14px] font-bold tracking-tight" style={{ color: C.t2 }}>Vectorbee</span>
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{ background: C.skyBg, border: `1px solid ${C.skyBdr}`, color: C.sky }}>
+                  Beta
+                </span>
+              </div>
+              <p className="max-w-xs text-[12px] leading-5" style={{ color: C.t4 }}>
+                Durable AI workflow orchestration for teams that need agent jobs to run reliably in production.
+              </p>
+            </div>
+
+            {/* Nav columns */}
+            <div className="flex flex-wrap gap-x-12 gap-y-6">
+              <div className="space-y-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.t4 }}>Platform</p>
+                {[["Workflows","/workflows"],["Runs","/runs"],["Approvals","/approvals"],["Workers","/workers"]].map(([l,h]) => (
+                  <Link key={l} href={h as never} className="block text-[13px] transition-colors hover:text-white" style={{ color: C.t4 }}>{l}</Link>
+                ))}
+              </div>
+              <div className="space-y-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.t4 }}>Account</p>
+                {[["Sign in","/signin"],["Create account","/signup"],["Dashboard","/dashboard"]].map(([l,h]) => (
+                  <Link key={l} href={h as never} className="block text-[13px] transition-colors hover:text-white" style={{ color: C.t4 }}>{l}</Link>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <nav className="flex flex-wrap gap-x-6 gap-y-2 text-[13px]" style={{ color: S.t4 }}>
-            {[
-              ["Agent Jobs", "/agent-jobs"],
-              ["Runs",       "/agent-runs"],
-              ["Approvals",  "/approvals"],
-              ["Workers",    "/workers"],
-              ["View runs",  "/runs"],
-            ].map(([label, href]) => (
-              <Link key={label} href={href as never} className="transition-colors hover:text-white">
-                {label}
-              </Link>
-            ))}
-          </nav>
+          <div className="mt-10 flex items-center justify-between border-t pt-6" style={{ borderColor: C.border }}>
+            <p className="text-[12px]" style={{ color: C.t4 }}>© 2025 Vectorbee. All rights reserved.</p>
+            <div className="flex items-center gap-4">
+              {[["Privacy","/docs/security"],["Terms","/docs/terms"]].map(([l,h]) => (
+                <Link key={l} href={h as never} className="text-[12px] transition-colors hover:text-white" style={{ color: C.t4 }}>{l}</Link>
+              ))}
+            </div>
+          </div>
         </div>
       </footer>
 

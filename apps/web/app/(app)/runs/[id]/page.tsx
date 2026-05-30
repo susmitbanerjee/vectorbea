@@ -344,7 +344,7 @@ export default function RunDetailPage() {
 
   return (
     <div className="min-h-full p-6 pb-16 lg:p-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6">
 
         {/* Breadcrumb */}
         <Link href={"/runs" as never} className="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors">

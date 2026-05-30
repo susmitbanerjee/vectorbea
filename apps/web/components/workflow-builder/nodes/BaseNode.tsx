@@ -140,20 +140,26 @@ export const BaseNode = memo(function BaseNode({
 
   return (
     <div
-      className="relative rounded-xl border transition-all duration-150"
+      className="relative rounded-xl border transition-all duration-150 overflow-hidden"
       style={{
         width,
-        background: "hsl(var(--card, 220 13% 9%))",
-        borderColor: selected ? meta.color : status === "running" ? "rgba(59,130,246,0.6)" : "rgba(255,255,255,0.08)",
+        background: "hsl(220,13%,11%)",
+        borderColor: selected ? meta.color : status === "running" ? "rgba(59,130,246,0.6)" : "rgba(255,255,255,0.10)",
         boxShadow: selected
-          ? `0 0 0 2px ${meta.color}40, 0 4px 24px rgba(0,0,0,0.4)`
+          ? `0 0 0 2px ${meta.color}40, 0 6px 28px rgba(0,0,0,0.5)`
           : status === "running"
-          ? "0 0 0 2px rgba(59,130,246,0.4), 0 0 16px rgba(59,130,246,0.2)"
+          ? "0 0 0 2px rgba(59,130,246,0.4), 0 0 20px rgba(59,130,246,0.15)"
           : statusCfg.ring !== "transparent"
-          ? `0 0 0 2px ${statusCfg.ring}`
-          : "0 2px 8px rgba(0,0,0,0.3)",
+          ? `0 0 0 2px ${statusCfg.ring}, 0 2px 10px rgba(0,0,0,0.3)`
+          : "0 2px 10px rgba(0,0,0,0.35)",
       }}
     >
+      {/* Left accent bar — node-type color */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl"
+        style={{ background: meta.color, opacity: selected ? 1 : 0.55 }}
+      />
       {/* Running animation — pulsing border glow (no conic ring needed; spinner is on the icon) */}
       {status === "running" && (
         <div
@@ -170,7 +176,7 @@ export const BaseNode = memo(function BaseNode({
       <StatusDot status={status} />
 
       {/* Content — sits above the running-ring overlay layers */}
-      <div className={cn("relative z-10 px-3", compact ? "py-2.5" : "py-3")}>
+      <div className={cn("relative z-10 pl-4 pr-3", compact ? "py-2.5" : "py-3")}>
         {/* Header row */}
         <div className="flex items-center gap-2.5">
           {/* Icon badge — circular arrow spinner overlaid when running */}
@@ -232,6 +238,22 @@ export const BaseNode = memo(function BaseNode({
           </div>
         )}
       </div>
+
+      {/* Bottom status strip */}
+      {status !== "idle" && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 left-[3px] right-0 h-[2px] rounded-b-xl"
+          style={{
+            background:
+              status === "running"  ? "rgba(59,130,246,0.8)" :
+              status === "succeeded"? "rgba(52,211,153,0.8)" :
+              status === "failed"   ? "rgba(248,113,113,0.8)":
+              status === "waiting"  ? "rgba(251,191,36,0.8)" :
+              status === "skipped"  ? "rgba(148,163,184,0.4)": "transparent",
+          }}
+        />
+      )}
 
       {/* Handles */}
       {(handles === "default" || handles === "top-only") && (

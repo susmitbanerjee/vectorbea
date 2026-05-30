@@ -588,75 +588,89 @@ export default function WorkflowBuilderPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-card/80 px-4 py-2 backdrop-blur">
+      <div className="flex shrink-0 items-center gap-0 border-b border-white/8 bg-[hsl(220,13%,8%)] px-4" style={{ minHeight: 44 }}>
         {/* Breadcrumb */}
         <Link
           href={`/workflows/${workflow.id}` as never}
-          className="flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-[12px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          {workflow.name}
+          <span className="max-w-[140px] truncate">{workflow.name}</span>
         </Link>
-        <span className="text-muted-foreground/30">/</span>
-        <span className="text-[12px] font-semibold text-foreground">Builder</span>
+        <span className="mx-2 text-muted-foreground/20">/</span>
+        <span className="text-[12px] font-semibold text-foreground/80">Builder</span>
 
-        {unsaved && (
-          <span className="ml-1 text-[10px] text-amber-600">● unsaved</span>
-        )}
+        {/* Version + saved state */}
+        <div className="ml-3 flex items-center gap-1.5">
+          <span className="rounded border border-white/8 bg-white/4 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">
+            v1
+          </span>
+          {unsaved && (
+            <span className="text-[10px] font-medium text-amber-500/70">● unsaved</span>
+          )}
+        </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center">
           {/* Validation badge */}
-          <ValidationBadge issueCount={validation.issues.length} valid={validation.valid} />
+          <div className="mr-3">
+            <ValidationBadge issueCount={validation.issues.length} valid={validation.valid} />
+          </div>
+
+          {/* Divider */}
+          <div className="h-5 w-px bg-white/8 mr-3" />
 
           {/* History link */}
           <Link
             href={`/workflows/${workflow.id}` as never}
-            className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] text-muted-foreground/50 transition-colors hover:bg-white/5 hover:text-muted-foreground"
           >
             <Clock className="h-3 w-3" />
             History
           </Link>
 
-          {/* Save */}
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={saving || running}
-            className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          >
-            {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-            Save
-          </button>
+          {/* Save + Test grouped */}
+          <div className="ml-1 flex items-center rounded-lg border border-white/10">
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving || running}
+              className="inline-flex h-8 items-center gap-1.5 rounded-l-lg border-r border-white/10 px-3 text-[12px] font-medium text-muted-foreground/60 transition-all hover:bg-white/5 hover:text-muted-foreground disabled:opacity-40"
+            >
+              {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleTestRun()}
+              disabled={testRunning || running}
+              className="inline-flex h-8 items-center gap-1.5 rounded-r-lg px-3 text-[12px] font-medium text-muted-foreground/60 transition-all hover:bg-white/5 hover:text-muted-foreground disabled:opacity-40"
+            >
+              {testRunning ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : (
+                <Zap className="h-3 w-3 text-amber-400/70" />
+              )}
+              Test
+            </button>
+          </div>
 
-          {/* Test Run */}
-          <button
-            type="button"
-            onClick={() => void handleTestRun()}
-            disabled={testRunning || running}
-            className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          >
-            {testRunning ? (
-              <RefreshCw className="h-3 w-3 animate-spin" />
-            ) : (
-              <Zap className="h-3 w-3" />
-            )}
-            Test
-          </button>
+          {/* Divider */}
+          <div className="h-5 w-px bg-white/8 mx-3" />
 
           {/* Run / Live controls */}
           {activeRunId ? (
             <div className="flex items-center gap-2">
               {/* Live status pill */}
               <span className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-                liveRunStatus === "running"  && "bg-blue-50 text-blue-700 border border-blue-200",
-                liveRunStatus === "queued"   && "bg-slate-100 text-slate-600 border border-slate-200",
-                liveRunStatus === "succeeded"&& "bg-emerald-50 text-emerald-700 border border-emerald-200",
-                liveRunStatus === "failed"   && "bg-red-50 text-red-700 border border-red-200",
-                liveRunStatus === "waiting_for_approval" && "bg-amber-50 text-amber-700 border border-amber-200",
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                liveRunStatus === "running"   && "border-blue-500/30 bg-blue-500/10 text-blue-400",
+                liveRunStatus === "queued"    && "border-white/15 bg-white/5 text-muted-foreground",
+                liveRunStatus === "succeeded" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
+                liveRunStatus === "failed"    && "border-red-500/30 bg-red-500/10 text-red-400",
+                liveRunStatus === "waiting_for_approval" && "border-amber-500/30 bg-amber-500/10 text-amber-400",
               )}>
                 {(liveRunStatus === "running" || liveRunStatus === "queued") && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
                 )}
                 {liveRunStatus === "waiting_for_approval" && <ShieldCheck className="h-3 w-3" />}
                 {liveRunStatus === "succeeded" && <CheckCircle2 className="h-3 w-3" />}
@@ -667,7 +681,7 @@ export default function WorkflowBuilderPage() {
                 href={`/runs/${activeRunId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground hover:text-foreground"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-[12px] text-muted-foreground/60 hover:bg-white/5 hover:text-muted-foreground transition-colors"
               >
                 Full run →
               </a>
@@ -675,7 +689,7 @@ export default function WorkflowBuilderPage() {
               <button
                 type="button"
                 onClick={() => stopLiveRun(true)}
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground hover:text-foreground"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-[12px] text-muted-foreground/50 hover:bg-white/5 hover:text-muted-foreground transition-colors"
               >
                 ✕ Stop
               </button>
@@ -685,14 +699,15 @@ export default function WorkflowBuilderPage() {
               type="button"
               onClick={() => void handleRun()}
               disabled={saving || running}
-              className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-4 text-[12px] font-semibold text-white shadow-md transition-all hover:bg-emerald-400 hover:shadow-emerald-500/25 disabled:opacity-40"
+              style={{ boxShadow: "0 0 16px rgba(52,211,153,0.25)" }}
             >
               {running ? (
-                <RefreshCw className="h-3 w-3 animate-spin" />
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Play className="h-3 w-3" />
+                <Play className="h-3.5 w-3.5 fill-white" />
               )}
-              Run Workflow
+              Run
             </button>
           )}
         </div>
@@ -702,7 +717,7 @@ export default function WorkflowBuilderPage() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left: Node Palette */}
-        <div className="w-56 shrink-0 overflow-hidden border-r border-border/40 bg-card/60">
+        <div className="w-[220px] shrink-0 overflow-hidden border-r border-white/6 bg-[hsl(220,13%,8%)]">
           <NodePalette onAddNode={handleAddNode} onApplyTemplate={handleApplyTemplate} />
         </div>
 
@@ -758,7 +773,7 @@ export default function WorkflowBuilderPage() {
               showInteractive={false}
             />
             <MiniMap
-              className="!bottom-4 !right-4 !h-28 !w-40 rounded-xl border border-border/30 !bg-card/80"
+              className="!bottom-4 !right-4 !h-28 !w-40 rounded-xl border border-white/8 !bg-[hsl(220,13%,9%)]/90"
               nodeColor={(node) => {
                 const colors: Record<string, string> = {
                   trigger: "#34D399", agent: "#A78BFA", llm: "#C084FC",
@@ -774,12 +789,23 @@ export default function WorkflowBuilderPage() {
             {/* Empty state */}
             {nodes.length === 0 && (
               <Panel position="top-center">
-                <div className="mt-20 flex flex-col items-center gap-3 rounded-2xl border border-border/40 bg-card/90 px-8 py-8 text-center shadow-2xl backdrop-blur">
-                  <ShieldCheck className="h-10 w-10 text-muted-foreground/20" />
-                  <p className="text-[14px] font-semibold text-foreground/70">Canvas is empty</p>
-                  <p className="max-w-xs text-[12px] text-muted-foreground/50">
-                    Drag nodes from the left palette, or click &quot;Quick Templates&quot; to load a pre-built workflow.
-                  </p>
+                <div className="mt-24 flex flex-col items-center gap-4 rounded-2xl border border-white/8 bg-[hsl(220,13%,9%)]/95 px-10 py-10 text-center shadow-2xl backdrop-blur-sm">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/8 bg-white/4">
+                    <ShieldCheck className="h-7 w-7 text-muted-foreground/25" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[15px] font-semibold text-foreground/60">Canvas is empty</p>
+                    <p className="max-w-[260px] text-[12px] text-muted-foreground/35 leading-relaxed">
+                      Drag nodes from the left palette, or use Quick Templates to start from a pre-built workflow.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/20">
+                    <span className="rounded border border-white/8 px-1.5 py-0.5 font-mono">Delete</span>
+                    <span>to remove selected</span>
+                    <span className="mx-1">·</span>
+                    <span className="rounded border border-white/8 px-1.5 py-0.5 font-mono">Shift</span>
+                    <span>to multi-select</span>
+                  </div>
                 </div>
               </Panel>
             )}
@@ -787,7 +813,7 @@ export default function WorkflowBuilderPage() {
         </div>
 
         {/* Right: Inspector */}
-        <div className="w-80 shrink-0 overflow-hidden border-l border-border/40 bg-card/60">
+        <div className="w-80 shrink-0 overflow-hidden border-l border-white/6 bg-[hsl(220,13%,8%)]">
           <WorkflowInspector
             selectedNode={selectedNode}
             nodes={nodes as Node<WFNodeData>[]}

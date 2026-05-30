@@ -70,11 +70,11 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
       {/* Breadcrumb + mock badge */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link
-          href={`/agent-jobs/${run.jobId}`}
+          href="/runs"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          {run.jobName}
+          Runs
         </Link>
         <div className="flex items-center gap-2">
           <span className="rounded-md border border-border/60 bg-muted/30 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
@@ -134,10 +134,10 @@ export function RunHeaderV2({ model, isMock = false, onRetry, onCancel }: RunHea
               Review approval →
             </Link>
           )}
-          <Link href={`/agent-jobs/${run.jobId}`}
+          <Link href="/runs"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to job
+            All runs
           </Link>
         </div>
       </div>
