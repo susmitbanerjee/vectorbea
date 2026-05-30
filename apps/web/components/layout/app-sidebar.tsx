@@ -430,11 +430,6 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   Sign out
                 </button>
               </div>
-            ) : (
-              /* No user (open/unauthenticated mode) */
-              <div className="rounded-2xl" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", padding: "10px 12px" }}>
-                <p style={{ fontSize: 12, color: "#94A3B8", textAlign: "center" }}>Not signed in</p>
-              </div>
             )}
           </>
         )}
