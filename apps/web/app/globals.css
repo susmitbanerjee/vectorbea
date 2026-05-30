@@ -171,15 +171,23 @@
 @layer utilities {
 
   /* ── Page shell ─────────────────────────────────────────────────────────── */
-  /* Left-aligned, NOT centered — content sits flush against the sidebar
-     with a 24px gutter. On very wide screens caps at 1440px but stays
-     left-aligned so there is no floating-island gap. */
+  /* Full-width, left-aligned workspace container.
+     No max-width cap — the grid columns inside dashboard pages constrain
+     readability. Content fills all available space after the sidebar with
+     a responsive 24px–32px gutter. */
   .page-shell {
     width: 100%;
-    max-width: 1440px;
+    max-width: none;
     margin-left: 0;
     margin-right: 0;
     padding: 24px;
+  }
+
+  /* Wider padding on very large screens so content doesn't hug edges */
+  @media (min-width: 1920px) {
+    .page-shell {
+      padding: 28px 32px;
+    }
   }
 
   /* Narrow shell for forms / settings pages where a tight reading width

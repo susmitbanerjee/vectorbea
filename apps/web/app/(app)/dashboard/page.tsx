@@ -98,14 +98,18 @@ function RunRow({ run }: { run: AgentRun }) {
   return (
     <Link
       href={`/runs/${run.id}` as Route}
-      className="group flex items-center gap-3 px-[18px] transition-colors hover:bg-[#F8FAFC]"
-      style={{ borderBottom: "1px solid #F1F5F9", minHeight: 52 }}
+      className="group grid items-center gap-3 px-[18px] transition-colors hover:bg-[#F8FAFC]"
+      style={{
+        gridTemplateColumns: "8px minmax(0,1fr) 72px 72px",
+        borderBottom: "1px solid #F1F5F9",
+        minHeight: 52,
+      }}
     >
-      {/* Status indicator */}
+      {/* Status dot */}
       <span className={cn("h-2 w-2 shrink-0 rounded-full", cfg.dot)} />
 
       {/* Name + status label */}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         <p className="truncate" style={{ fontSize: 13.5, fontWeight: 600, color: "#0F172A", lineHeight: 1.25 }}>
           {displayName}
         </p>
@@ -115,12 +119,12 @@ function RunRow({ run }: { run: AgentRun }) {
       </div>
 
       {/* Duration */}
-      <span className="shrink-0 font-mono tabular-nums" style={{ fontSize: 12, color: "#475569" }}>
+      <span className="text-right font-mono tabular-nums" style={{ fontSize: 12, color: "#475569" }}>
         {fmtDuration(run.durationMs)}
       </span>
 
       {/* Time ago */}
-      <span className="w-16 shrink-0 text-right" style={{ fontSize: 12, color: "#94A3B8" }}>
+      <span className="text-right" style={{ fontSize: 12, color: "#94A3B8" }}>
         {timeAgo(run.startedAt)}
       </span>
     </Link>
@@ -272,7 +276,7 @@ export default function OverviewPage() {
       )}
 
       {/* ── Metric cards ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4" style={{ marginBottom: 16 }}>
+      <div className="mb-4 grid grid-cols-2 gap-4 xl:grid-cols-4">
         <MetricCard label="Active Workflows" value={summary?.activeWorkflows ?? "—"} sub={`${summary?.totalWorkflows ?? 0} total`}        color="#2563EB" icon={GitBranch}    />
         <MetricCard label="Running Now"       value={summary?.runningRuns ?? 0}      color={summary?.runningRuns ? "#059669" : undefined}    icon={Play}           />
         <MetricCard label="Failed (24h)"      value={summary?.failedRuns24h ?? 0}    sub={`${summary?.succeededRuns24h ?? 0} succeeded`}      color={summary?.failedRuns24h ? "#DC2626" : undefined} icon={AlertTriangle} />
@@ -280,10 +284,8 @@ export default function OverviewPage() {
       </div>
 
       {/* ── Main content grid ────────────────────────────────────────────── */}
-      <div
-        className="grid gap-4"
-        style={{ gridTemplateColumns: "minmax(0,1fr) 360px" }}
-      >
+      {/* xl: two-col (runs + rail at 380px); 2xl: rail widens to 420px */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
 
         {/* ── Recent runs ─────────────────────────────────────────────────── */}
         <div
@@ -311,15 +313,20 @@ export default function OverviewPage() {
               {Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
-                  className="flex items-center gap-3 px-[18px]"
-                  style={{ borderBottom: "1px solid #F1F5F9", minHeight: 52 }}
+                  className="grid items-center gap-3 px-[18px]"
+                  style={{
+                    gridTemplateColumns: "8px minmax(0,1fr) 72px 72px",
+                    borderBottom: "1px solid #F1F5F9",
+                    minHeight: 52,
+                  }}
                 >
                   <div className="h-2 w-2 rounded-full bg-slate-100 animate-pulse shrink-0" />
-                  <div className="flex-1 space-y-1.5">
+                  <div className="space-y-1.5">
                     <div className="h-3 w-2/3 rounded-md bg-slate-100 animate-pulse" />
                     <div className="h-2.5 w-1/4 rounded-md bg-slate-100 animate-pulse" />
                   </div>
-                  <div className="h-3 w-12 rounded-md bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-full rounded-md bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-full rounded-md bg-slate-100 animate-pulse" />
                 </div>
               ))}
             </div>
