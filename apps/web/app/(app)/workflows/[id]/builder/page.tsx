@@ -346,21 +346,44 @@ export default function WorkflowBuilderPage() {
   const validation = validateWorkflowGraph(nodes as Node<WFNodeData>[], edges as Edge<WFEdgeData>[]);
 
   // ── Connect ─────────────────────────────────────────────────────────────────
+  // Auto-assign meaningful edge types based on source node type so that branch
+  // and approval nodes get the right conditional/approval edge labels without
+  // the user needing to manually configure them.
   const onConnect: OnConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            type: "workflow",
-            data: { edgeType: "default" } as WFEdgeData,
-          },
+      const sourceNode = nodes.find((n) => n.id === params.source);
+      const sourceType = sourceNode?.data.nodeType;
+
+      // Count existing outgoing edges from this source to determine which slot to fill
+      setEdges((eds) => {
+        const existingOut = eds.filter((e) => e.source === params.source);
+
+        let edgeType: WFEdgeData["edgeType"] = "default";
+
+        if (sourceType === "branch") {
+          const hasTrue  = existingOut.some((e) => e.data?.edgeType === "conditional_true");
+          const hasFalse = existingOut.some((e) => e.data?.edgeType === "conditional_false");
+          if (!hasTrue)       edgeType = "conditional_true";
+          else if (!hasFalse) edgeType = "conditional_false";
+          else                edgeType = "conditional_true"; // additional edge — default to true
+        } else if (sourceType === "approval") {
+          const hasApproved = existingOut.some((e) => e.data?.edgeType === "approval_approved");
+          const hasRejected = existingOut.some((e) => e.data?.edgeType === "approval_rejected");
+          if (!hasApproved)      edgeType = "approval_approved";
+          else if (!hasRejected) edgeType = "approval_rejected";
+          else                   edgeType = "approval_approved";
+        } else if (sourceType === "parallel") {
+          edgeType = "parallel_branch";
+        }
+
+        return addEdge(
+          { ...params, type: "workflow", data: { edgeType } as WFEdgeData },
           eds,
-        ),
-      );
+        );
+      });
       setUnsaved(true);
     },
-    [setEdges],
+    [nodes, setEdges],
   );
 
   // ── Drag-to-canvas ──────────────────────────────────────────────────────────

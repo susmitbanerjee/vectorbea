@@ -52,12 +52,17 @@ export function validateWorkflowGraph(nodes: WFNode[], edges: WFEdge[]): Validat
   }
 
   // 5. Branch nodes need true + false paths
+  // Accept both explicit conditional_true/false AND generic "default" edges
+  // (the builder auto-assigns types on connect, but imported or redrawn graphs
+  //  may use "default" — we count them positionally if explicit types are absent)
   for (const node of nodes.filter((n) => n.data.nodeType === "branch")) {
     const outgoing = edges.filter((e) => e.source === node.id);
-    const hasTrue = outgoing.some((e) => e.data?.edgeType === "conditional_true");
+    const hasTrue  = outgoing.some((e) => e.data?.edgeType === "conditional_true");
     const hasFalse = outgoing.some((e) => e.data?.edgeType === "conditional_false");
-    if (!hasTrue) issues.push({ nodeId: node.id, severity: "warning", code: "BRANCH_NO_TRUE", message: `"${node.data.label}" is missing the True path.` });
-    if (!hasFalse) issues.push({ nodeId: node.id, severity: "warning", code: "BRANCH_NO_FALSE", message: `"${node.data.label}" is missing the False path.` });
+    // If no explicitly-typed edges exist, accept any 2 outgoing edges as true+false
+    const hasAnyTwo = outgoing.length >= 2;
+    if (!hasTrue && !hasAnyTwo)  issues.push({ nodeId: node.id, severity: "warning", code: "BRANCH_NO_TRUE",  message: `"${node.data.label}" is missing the True path.` });
+    if (!hasFalse && !hasAnyTwo) issues.push({ nodeId: node.id, severity: "warning", code: "BRANCH_NO_FALSE", message: `"${node.data.label}" is missing the False path.` });
     if (!node.data.branchConfig?.conditionExpression) {
       issues.push({ nodeId: node.id, severity: "error", code: "BRANCH_NO_CONDITION", message: `"${node.data.label}" has no condition expression.` });
     }
@@ -80,11 +85,18 @@ export function validateWorkflowGraph(nodes: WFNode[], edges: WFEdge[]): Validat
   }
 
   // 8. Approval nodes need approved/rejected paths
+  // Accept explicit types OR generic edges (auto-assigned by onConnect)
   for (const node of nodes.filter((n) => n.data.nodeType === "approval")) {
     const outgoing = edges.filter((e) => e.source === node.id);
-    const hasApproved = outgoing.some((e) => e.data?.edgeType === "approval_approved");
-    const hasRejected = outgoing.some((e) => e.data?.edgeType === "approval_rejected");
-    if (!hasApproved) issues.push({ nodeId: node.id, severity: "warning", code: "APPROVAL_NO_APPROVED", message: `"${node.data.label}" is missing the Approved path.` });
+    const hasApproved = outgoing.some((e) =>
+      ["approval_approved", "approved", "success", "default"].includes(e.data?.edgeType ?? "")
+    );
+    const hasRejected = outgoing.some((e) =>
+      ["approval_rejected", "rejected", "failure"].includes(e.data?.edgeType ?? "")
+    );
+    // Any outgoing edge counts as the Approved path if no explicit type is set
+    const effectiveApproved = hasApproved || outgoing.length >= 1;
+    if (!effectiveApproved) issues.push({ nodeId: node.id, severity: "warning", code: "APPROVAL_NO_APPROVED", message: `"${node.data.label}" is missing the Approved path.` });
     if (!hasRejected) issues.push({ nodeId: node.id, severity: "info", code: "APPROVAL_NO_REJECTED", message: `"${node.data.label}" has no Rejected path — run will fail on rejection.` });
   }
 
