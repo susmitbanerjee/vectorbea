@@ -7,25 +7,29 @@ interface EmptyStateProps {
   description?: string;
   action?: React.ReactNode;
   className?: string;
+  /** Compact version for inline contexts */
+  compact?: boolean;
 }
 
-export function EmptyState({ icon: Icon, title, description, action, className }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, action, className, compact = false }: EmptyStateProps) {
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/50 px-6 py-14 text-center",
+        "flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed px-6 text-center",
+        compact ? "py-10" : "py-16",
+        "border-slate-200 bg-slate-50/60",
         className,
       )}
     >
       {Icon && (
-        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-border/50 bg-muted/40">
-          <Icon className="h-5 w-5 text-muted-foreground/50" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <Icon className="h-5.5 w-5.5 text-slate-400" />
         </div>
       )}
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
+      <div className="space-y-1.5 max-w-xs">
+        <p className="text-[14px] font-semibold text-slate-800">{title}</p>
         {description && (
-          <p className="max-w-xs text-[12px] leading-5 text-muted-foreground">{description}</p>
+          <p className="text-[13px] leading-[1.6] text-slate-500">{description}</p>
         )}
       </div>
       {action && <div className="mt-1">{action}</div>}

@@ -211,7 +211,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           }}
           className={cn(
             "group relative flex w-full items-center justify-center rounded-lg transition-all duration-150",
-            active ? "nav-active" : "hover:bg-[#ECEFF3]",
+            active ? "nav-active" : "hover:bg-slate-100",
             loading && "opacity-60",
           )}
           style={{ height: 38 }}
@@ -219,7 +219,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           <Icon
             className={cn(
               "h-[16px] w-[16px] shrink-0 transition-colors",
-              active ? "text-[#2563EB]" : "text-[#6B7280] group-hover:text-[#374151]",
+              active ? "text-[#2563EB]" : "text-[#6B7280] group-hover:text-slate-800",
             )}
           />
           {loading && (
@@ -246,7 +246,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             : "px-[10px]",
           active
             ? "nav-active"
-            : "text-[#374151] hover:bg-[#ECEFF3] hover:text-[#111827]",
+            : "text-[#374151] hover:bg-slate-100 hover:text-[#111827]",
           loading && "opacity-60",
         )}
         style={item.isSubItem ? { fontSize: 13 } : { height: 38, fontSize: 14 }}
@@ -255,7 +255,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           className={cn(
             "shrink-0 transition-colors",
             item.isSubItem ? "h-[13px] w-[13px]" : "h-[16px] w-[16px]",
-            active ? "text-[#2563EB]" : "text-[#6B7280] group-hover:text-[#374151]",
+            active ? "text-[#2563EB]" : "text-[#6B7280] group-hover:text-slate-800",
             loading && "opacity-0",
           )}
         />
@@ -286,8 +286,8 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       className="sidebar-scroll hidden h-full shrink-0 overflow-y-auto lg:flex lg:flex-col"
       style={{
         width: sidebarW,
-        backgroundColor: "#F4F5F7",
-        borderRight: "1px solid #DDE3EA",
+        backgroundColor: "#FFFFFF",
+        borderRight: "1px solid #E2E8F0",
         transition: "width 200ms cubic-bezier(0.4,0,0.2,1)",
       }}
     >
@@ -338,7 +338,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           // Collapsed: all items as icons, no labels or groups
           <div className="space-y-0.5">
             {NAV_GROUPS.flatMap(g => g.items).map(item => navLink(item, ALL_NAV_ITEMS))}
-            <div className="my-2 border-t border-[#DDE3EA]" />
+            <div className="my-2 border-t border-slate-200" />
             {filterByRole(SETTINGS_SUB_NAV.filter(i => !i.isSubItem)).map(item => navLink(item, SETTINGS_SUB_NAV))}
           </div>
         ) : (
@@ -369,7 +369,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           onClick={toggleCollapsed}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "mb-2.5 flex w-full items-center rounded-lg px-2 py-1.5 text-[#6B7280] transition-colors hover:bg-[#ECEFF3] hover:text-[#374151]",
+            "mb-2.5 flex w-full items-center rounded-lg px-2 py-1.5 text-[#6B7280] transition-colors hover:bg-slate-100 hover:text-slate-800",
             collapsed ? "justify-center" : "gap-2",
           )}
         >
@@ -404,7 +404,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
             {/* User row */}
             {user && (
-              <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-[#ECEFF3]">
+              <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-100">
                 {user.avatar_url ? (
                   <Image
                     src={user.avatar_url}
@@ -432,7 +432,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   type="button"
                   onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
                   title="Sign out"
-                  className="shrink-0 rounded p-1 text-[#9CA3AF] transition-colors hover:text-[#374151]"
+                  className="shrink-0 rounded p-1 text-[#9CA3AF] transition-colors hover:text-slate-800"
                 >
                   <LogOut className="h-3.5 w-3.5" />
                 </button>
