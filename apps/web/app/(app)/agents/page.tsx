@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/types/platform";
 import { getAgents } from "@/lib/repository";
-import { Select } from "@/components/ui/select";
+import { AppSelect } from "@/components/ui/app-select";
 import { SearchInput } from "@/components/ui/search-input";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -112,26 +112,26 @@ export default function AgentsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Select
+        <AppSelect
           className="w-[150px]"
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as Agent["type"] | "")}
-        >
-          <option value="">All types</option>
-          {(Object.keys(TYPE_LABELS) as Agent["type"][]).map((t) => (
-            <option key={t} value={t}>{TYPE_LABELS[t]}</option>
-          ))}
-        </Select>
-        <Select
+          onValueChange={(v) => setTypeFilter(v as Agent["type"] | "")}
+          options={[
+            { label: "All types", value: "" },
+            ...(Object.keys(TYPE_LABELS) as Agent["type"][]).map((t) => ({ label: TYPE_LABELS[t], value: t })),
+          ]}
+        />
+        <AppSelect
           className="w-[150px]"
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as Agent["status"] | "")}
-        >
-          <option value="">All statuses</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-          <option value="deprecated">Deprecated</option>
-        </Select>
+          onValueChange={(v) => setStatusFilter(v as Agent["status"] | "")}
+          options={[
+            { label: "All statuses", value: "" },
+            { label: "Active",      value: "active" },
+            { label: "Inactive",    value: "inactive" },
+            { label: "Deprecated",  value: "deprecated" },
+          ]}
+        />
       </div>
 
       {/* Table */}

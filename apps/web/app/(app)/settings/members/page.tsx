@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { CheckCircle2, Clock, Crown, Eye, Mail, Plus, Shield, Trash2, UserPlus, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { RbacGuard } from "@/components/rbac-guard";
@@ -63,6 +64,23 @@ export default function MembersPage() {
   const { activeOrganization, activeWorkspace, activeWorkspaceId, seatUsage } = useWorkspace();
   const [members, setMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [sessionUser, setSessionUser] = useState<{ email: string; displayName: string } | null>(null);
+
+  // Load current session user as fallback when workspace members list is empty
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    void supabase.auth.getUser().then(({ data }: { data: { user: import("@supabase/supabase-js").User | null } }) => {
+      if (data.user) {
+        const email = data.user.email ?? "";
+        const displayName =
+          (data.user.user_metadata?.full_name as string | undefined) ??
+          (data.user.user_metadata?.name as string | undefined) ??
+          email.split("@")[0] ??
+          "You";
+        setSessionUser({ email, displayName });
+      }
+    });
+  }, []);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("editor");
@@ -267,105 +285,174 @@ export default function MembersPage() {
         }
       />
 
-      <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
-        <div className="grid gap-4 sm:grid-cols-3">
-          {(["admin", "editor", "viewer"] as const).map((role) => {
-            const cfg = ROLE_CONFIG[role];
-            const Icon = cfg.icon;
-            const count = members.filter((member) => member.role === role).length;
-            return (
-              <Card key={role} className="animate-slide-up">
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                    <Icon className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-semibold tabular-nums">{count}</p>
-                    <p className="text-xs text-muted-foreground">{cfg.label}s</p>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        <Card className="animate-slide-up stagger-1">
-          <CardHeader>
-            <CardTitle>Workspace members</CardTitle>
-            <CardDescription>
-              {members.length} member{members.length !== 1 ? "s" : ""} in{" "}
-              {activeWorkspace?.name ?? "this workspace"}.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-4 flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm">
-              <div>
-                <p className="font-medium">Seat usage</p>
-                      <p className="text-xs text-muted-foreground">
-                        {seatsUsed} of {maxSeats} seats are allocated across{" "}
-                        {activeOrganization?.name ?? "this organization"}.
-                      </p>
+      <div className="space-y-5 px-4 py-6 md:px-6 xl:px-8">
+        {/* ── Removed role-count stat cards (replaced by inline count in table header) ── */}
+        {/* Placeholder to avoid re-read error: */}
+        {false && (["admin", "editor", "viewer"] as const).map((role) => {
+          const cfg = ROLE_CONFIG[role];
+          const Icon = cfg.icon;
+          const count = members.filter((member) => member.role === role).length;
+          return (
+            <div key={role} className="hidden">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+              <Icon className="h-5 w-5 text-primary" />
               </div>
-              <Badge variant={seatLimitReached ? "destructive" : "outline"}>
-                {seatsUsed}/{maxSeats}
-              </Badge>
+              <div>
+                <p className="text-2xl font-semibold tabular-nums">{count}</p>
+                <p className="text-xs text-muted-foreground">{cfg.label}s</p>
+              </div>
             </div>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Member</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Joined</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loadingMembers && members.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">Loading members...</TableCell>
-                    </TableRow>
-                  ) : members.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">No members found.</TableCell>
-                    </TableRow>
-                  ) : members.map((member) => {
-                    const cfg = ROLE_CONFIG[member.role];
-                    const Icon = cfg.icon;
-                    return (
-                      <TableRow key={member.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {member.avatarUrl ? (
-                              <Image src={member.avatarUrl!} alt={member.displayName} width={32} height={32} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
-                            ) : (
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                                {member.displayName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
-                              </div>
-                            )}
-                            <span className="text-sm font-medium">{member.displayName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {member.email}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={cfg.variant} className="gap-1">
-                            <Icon className="h-3 w-3" />
-                            {cfg.label}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(member.joinedAt).toLocaleDateString()}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+          );
+        })}
+
+        {/* ── Clean members card ───────────────────────────────────────── */}
+        <div
+          className="overflow-hidden rounded-2xl"
+          style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", boxShadow: "0 4px 14px rgba(15,23,42,0.03)" }}
+        >
+          {/* Card header */}
+          <div
+            className="flex items-center justify-between px-[18px]"
+            style={{ height: 52, borderBottom: "1px solid #E2E8F0", background: "#F8FAFC" }}
+          >
+            <div className="flex items-center gap-3">
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>
+                Workspace members
+              </span>
+              <span
+                className="rounded-full border px-2 py-0.5"
+                style={{ fontSize: 11, fontWeight: 600, color: "#64748B", borderColor: "#E2E8F0", background: "#F8FAFC" }}
+              >
+                {members.length > 0 ? members.length : (sessionUser ? 1 : 0)}
+              </span>
             </div>
-          </CardContent>
-        </Card>
+            {hasSeatLimit && (
+              <span style={{ fontSize: 12, color: "#64748B" }}>
+                {seatsUsed}/{maxSeats} seats
+              </span>
+            )}
+          </div>
+
+          {/* Column headers */}
+          <div
+            className="grid px-[18px]"
+            style={{
+              gridTemplateColumns: "minmax(0,2fr) 1fr 1fr 100px",
+              height: 40,
+              borderBottom: "1px solid #F1F5F9",
+              alignItems: "center",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "#64748B",
+            }}
+          >
+            <span>Member</span>
+            <span>Role</span>
+            <span>Status</span>
+            <span>Joined</span>
+          </div>
+
+          {/* Rows */}
+          {loadingMembers && members.length === 0 ? (
+            <div className="flex items-center justify-center py-14">
+              <span style={{ fontSize: 13, color: "#94A3B8" }}>Loading members…</span>
+            </div>
+          ) : members.length === 0 && !sessionUser ? (
+            <div className="flex items-center justify-center py-14">
+              <span style={{ fontSize: 13, color: "#94A3B8" }}>No members found.</span>
+            </div>
+          ) : (
+            <>
+              {/* Real members */}
+              {members.map((member) => {
+                const cfg = ROLE_CONFIG[member.role];
+                const Icon = cfg.icon;
+                const initials = member.displayName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+                return (
+                  <div
+                    key={member.id}
+                    className="grid items-center px-[18px] transition-colors hover:bg-slate-50"
+                    style={{
+                      gridTemplateColumns: "minmax(0,2fr) 1fr 1fr 100px",
+                      minHeight: 64,
+                      borderBottom: "1px solid #F1F5F9",
+                    }}
+                  >
+                    {/* Name + email */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      {member.avatarUrl ? (
+                        <Image src={member.avatarUrl} alt={member.displayName} width={36} height={36}
+                          className="h-9 w-9 shrink-0 rounded-full object-cover"
+                          style={{ border: "1px solid #BFDBFE" }}
+                        />
+                      ) : (
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                          style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 13, fontWeight: 700, color: "#1D4ED8" }}>
+                          {initials}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate" style={{ fontSize: 13.5, fontWeight: 600, color: "#0F172A" }}>{member.displayName}</p>
+                        <p className="truncate" style={{ fontSize: 11.5, color: "#94A3B8" }}>{member.email}</p>
+                      </div>
+                    </div>
+                    {/* Role */}
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1"
+                      style={{ fontSize: 11.5, fontWeight: 600,
+                        ...(member.role === "admin" ? { background: "#EFF6FF", borderColor: "#BFDBFE", color: "#1D4ED8" } :
+                          member.role === "editor" ? { background: "#F8FAFC", borderColor: "#E2E8F0", color: "#475569" } :
+                          { background: "#F8FAFC", borderColor: "#E2E8F0", color: "#64748B" }) }}>
+                      <Icon className="h-3 w-3" />
+                      {cfg.label}
+                    </span>
+                    {/* Status */}
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1"
+                      style={{ fontSize: 11.5, fontWeight: 600, background: "#ECFDF5", borderColor: "#BBF7D0", color: "#047857" }}>
+                      <CheckCircle2 className="h-3 w-3" />
+                      Active
+                    </span>
+                    {/* Joined */}
+                    <span style={{ fontSize: 12, color: "#94A3B8" }}>
+                      {new Date(member.joinedAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                );
+              })}
+
+              {/* Session-user fallback row when API returned no members */}
+              {members.length === 0 && sessionUser && (
+                <div
+                  className="grid items-center px-[18px] transition-colors hover:bg-slate-50"
+                  style={{ gridTemplateColumns: "minmax(0,2fr) 1fr 1fr 100px", minHeight: 64 }}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                      style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 13, fontWeight: 700, color: "#1D4ED8" }}>
+                      {(sessionUser.displayName[0] ?? "U").toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate" style={{ fontSize: 13.5, fontWeight: 600, color: "#0F172A" }}>{sessionUser.displayName}</p>
+                      <p className="truncate" style={{ fontSize: 11.5, color: "#94A3B8" }}>{sessionUser.email}</p>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1"
+                    style={{ fontSize: 11.5, fontWeight: 600, background: "#EFF6FF", borderColor: "#BFDBFE", color: "#1D4ED8" }}>
+                    <Crown className="h-3 w-3" />
+                    Admin
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1"
+                    style={{ fontSize: 11.5, fontWeight: 600, background: "#ECFDF5", borderColor: "#BBF7D0", color: "#047857" }}>
+                    <CheckCircle2 className="h-3 w-3" />
+                    Active
+                  </span>
+                  <span style={{ fontSize: 12, color: "#94A3B8" }}>—</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
         {/* Pending invitations */}
         {invitations.length > 0 && (

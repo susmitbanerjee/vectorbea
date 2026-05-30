@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Tool } from "@/types/platform";
 import { getTools } from "@/lib/repository";
-import { Select } from "@/components/ui/select";
+import { AppSelect } from "@/components/ui/app-select";
 import { SearchInput } from "@/components/ui/search-input";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -137,38 +137,39 @@ export default function ToolsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Select
+        <AppSelect
           className="w-[160px]"
           value={riskFilter}
-          onChange={(e) => setRiskFilter(e.target.value as Tool["riskLevel"] | "")}
-        >
-          <option value="">All risk levels</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="critical">Critical</option>
-        </Select>
+          onValueChange={(v) => setRiskFilter(v as Tool["riskLevel"] | "")}
+          options={[
+            { label: "All risk levels", value: "" },
+            { label: "Low",      value: "low" },
+            { label: "Medium",   value: "medium" },
+            { label: "High",     value: "high" },
+            { label: "Critical", value: "critical" },
+          ]}
+        />
         {allTypes.length > 0 && (
-          <Select
+          <AppSelect
             className="w-[160px]"
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-          >
-            <option value="">All types</option>
-            {allTypes.map((t) => (
-              <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
-            ))}
-          </Select>
+            onValueChange={(v) => setTypeFilter(v)}
+            options={[
+              { label: "All types", value: "" },
+              ...allTypes.map((t) => ({ label: t.replace(/_/g, " "), value: t })),
+            ]}
+          />
         )}
-        <Select
+        <AppSelect
           className="w-[150px]"
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as Tool["status"] | "")}
-        >
-          <option value="">All statuses</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </Select>
+          onValueChange={(v) => setStatusFilter(v as Tool["status"] | "")}
+          options={[
+            { label: "All statuses", value: "" },
+            { label: "Active",   value: "active" },
+            { label: "Inactive", value: "inactive" },
+          ]}
+        />
       </div>
 
       {/* Table */}
