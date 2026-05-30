@@ -338,6 +338,14 @@ class ToolNodeExecutor(
             result["body"] = resolvedInputs
         }
 
+        // Diagnostic: log the full config_json keys for HTTP tools when no body was set.
+        // This helps identify where the body template is actually stored.
+        if ((tool.type == "http" || tool.type == "slack" || tool.type == "email") &&
+            result["body"] == null) {
+            log.warn("[tool] NO BODY SET for HTTP tool [toolName={}, configKeys={}]",
+                tool.name, tool.configJson.keys)
+        }
+
         // Log what step outputs are available so the correct label can be identified
         if (ctx.completedNodeIds().isNotEmpty()) {
             val stepSummary = ctx.completedNodeIds().mapNotNull { nodeId ->
