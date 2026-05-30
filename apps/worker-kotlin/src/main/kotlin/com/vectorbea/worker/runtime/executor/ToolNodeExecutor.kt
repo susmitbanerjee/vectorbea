@@ -308,8 +308,24 @@ class ToolNodeExecutor(
             result["body"] = resolvedBody
         } else if (resolvedInputs.isNotEmpty() &&
                    (tool.type == "http" || tool.type == "slack" || tool.type == "email")) {
-            // No explicit body template — pass resolved inputs as the JSON body
+            // No explicit body template — pass resolved inputs as the JSON body.
+            // Log what's being sent so empty-field issues are visible.
+            log.info("[tool] using resolvedInputs as body [toolName={}, type={}, keys={}, preview={}]",
+                tool.name, tool.type, resolvedInputs.keys,
+                resolvedInputs.entries.take(3).joinToString { "${it.key}=${it.value.toString().take(80)}" })
             result["body"] = resolvedInputs
+        }
+
+        // Log what step outputs are available so the correct label can be identified
+        if (ctx.completedNodeIds().isNotEmpty()) {
+            val stepSummary = ctx.completedNodeIds().mapNotNull { nodeId ->
+                val n = ctx.graph.nodes.firstOrNull { it.id == nodeId }
+                val out = ctx.getOutput(nodeId)
+                if (n != null && out.isNotEmpty()) "'${n.label}' (${nodeId}): keys=${out.keys}" else null
+            }
+            if (stepSummary.isNotEmpty()) {
+                log.info("[tool] available step outputs for template resolution: {}", stepSummary)
+            }
         }
 
         // Remap DB tool keys.

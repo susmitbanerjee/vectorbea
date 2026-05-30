@@ -120,11 +120,36 @@ class AgentNodeExecutor(
 
         val result = llmExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
-        val agentStatus = if (result is NodeResult.Completed) "success" else "failed"
-        emitEvent(ctx, node.id, EventType.AGENT_COMPLETED, agentStatus,
-            title = "Agent ${if (result is NodeResult.Completed) "completed" else "failed"}: ${agent.name}")
+        // If the LLM returned valid JSON in `content`, merge the parsed fields into the output.
+        // This lets downstream nodes use {{steps.agentId.output.risk_level}} etc. directly
+        // without needing a separate Transform node to parse the LLM response.
+        val enrichedResult = if (result is NodeResult.Completed) {
+            val content = result.output["content"] as? String
+            if (!content.isNullOrBlank()) {
+                @Suppress("UNCHECKED_CAST")
+                val parsed: Map<String, Any>? = try {
+                    val json = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+                        .readValue(content.trim(), Map::class.java) as? Map<String, Any>
+                    // Only merge if it's a JSON object (not an array or primitive)
+                    json
+                } catch (_: Exception) { null }
 
-        return result
+                if (parsed != null) {
+                    // Merge parsed fields — original LLM metadata (model, tokenCount, etc.)
+                    // is kept but parsed fields take precedence for any overlaps
+                    NodeResult.Completed(
+                        output   = result.output + parsed,
+                        metadata = result.metadata,
+                    )
+                } else result
+            } else result
+        } else result
+
+        val agentStatus = if (enrichedResult is NodeResult.Completed) "success" else "failed"
+        emitEvent(ctx, node.id, EventType.AGENT_COMPLETED, agentStatus,
+            title = "Agent ${if (enrichedResult is NodeResult.Completed) "completed" else "failed"}: ${agent.name}")
+
+        return enrichedResult
     }
 
     // ── Agent row ─────────────────────────────────────────────────────────────
