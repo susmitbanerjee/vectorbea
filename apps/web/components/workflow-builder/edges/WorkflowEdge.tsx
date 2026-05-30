@@ -18,21 +18,21 @@ type WFEdge = Edge<WFEdgeData>;
 
 const EDGE_STYLES: Record<
   WFEdgeType,
-  { stroke: string; labelBg: string; labelColor: string; dasharray: string; speed: string }
+  { stroke: string; labelBg: string; labelColor: string; labelBorder: string; dasharray: string; speed: string }
 > = {
-  default:           { stroke: "rgba(148,163,184,0.65)", dasharray: "6 3",  speed: "1.6s", labelBg: "rgba(30,30,40,0.9)",   labelColor: "#94a3b8" },
-  success:           { stroke: "rgba(52,211,153,0.75)",  dasharray: "6 3",  speed: "1.2s", labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
-  failure:           { stroke: "rgba(248,113,113,0.75)", dasharray: "4 4",  speed: "0.8s", labelBg: "rgba(40,20,20,0.9)",   labelColor: "#f87171" },
-  conditional_true:  { stroke: "rgba(52,211,153,0.8)",   dasharray: "6 3",  speed: "1.2s", labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
-  conditional_false: { stroke: "rgba(251,146,60,0.8)",   dasharray: "4 4",  speed: "1.2s", labelBg: "rgba(40,30,15,0.9)",   labelColor: "#fb923c" },
-  parallel:          { stroke: "rgba(103,232,249,0.75)", dasharray: "5 3",  speed: "1.0s", labelBg: "rgba(15,35,40,0.9)",   labelColor: "#67e8f9" },
-  parallel_branch:   { stroke: "rgba(103,232,249,0.75)", dasharray: "5 3",  speed: "1.0s", labelBg: "rgba(15,35,40,0.9)",   labelColor: "#67e8f9" },
-  approval_approved: { stroke: "rgba(52,211,153,0.85)",  dasharray: "6 3",  speed: "1.2s", labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
-  approved:          { stroke: "rgba(52,211,153,0.85)",  dasharray: "6 3",  speed: "1.2s", labelBg: "rgba(20,40,30,0.9)",   labelColor: "#34d399" },
-  approval_rejected: { stroke: "rgba(248,113,113,0.85)", dasharray: "4 4",  speed: "0.8s", labelBg: "rgba(40,20,20,0.9)",   labelColor: "#f87171" },
-  rejected:          { stroke: "rgba(248,113,113,0.85)", dasharray: "4 4",  speed: "0.8s", labelBg: "rgba(40,20,20,0.9)",   labelColor: "#f87171" },
-  join:              { stroke: "rgba(129,140,248,0.7)",  dasharray: "5 3",  speed: "1.4s", labelBg: "rgba(25,25,45,0.9)",   labelColor: "#818cf8" },
-  timeout:           { stroke: "rgba(251,146,60,0.75)",  dasharray: "3 3",  speed: "0.9s", labelBg: "rgba(40,30,15,0.9)",   labelColor: "#fb923c" },
+  default:           { stroke: "#94A3B8",  dasharray: "6 3",  speed: "1.6s", labelBg: "#FFFFFF", labelColor: "#475569", labelBorder: "#E2E8F0" },
+  success:           { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  failure:           { stroke: "#DC2626",  dasharray: "4 4",  speed: "0.8s", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
+  conditional_true:  { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  conditional_false: { stroke: "#EA580C",  dasharray: "4 4",  speed: "1.2s", labelBg: "#FFF7ED", labelColor: "#C2410C", labelBorder: "#FED7AA" },
+  parallel:          { stroke: "#0891B2",  dasharray: "5 3",  speed: "1.0s", labelBg: "#ECFEFF", labelColor: "#0E7490", labelBorder: "#A5F3FC" },
+  parallel_branch:   { stroke: "#0891B2",  dasharray: "5 3",  speed: "1.0s", labelBg: "#ECFEFF", labelColor: "#0E7490", labelBorder: "#A5F3FC" },
+  approval_approved: { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  approved:          { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  approval_rejected: { stroke: "#DC2626",  dasharray: "4 4",  speed: "0.8s", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
+  rejected:          { stroke: "#DC2626",  dasharray: "4 4",  speed: "0.8s", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
+  join:              { stroke: "#4F46E5",  dasharray: "5 3",  speed: "1.4s", labelBg: "#EEF2FF", labelColor: "#4338CA", labelBorder: "#C7D2FE" },
+  timeout:           { stroke: "#EA580C",  dasharray: "3 3",  speed: "0.9s", labelBg: "#FFF7ED", labelColor: "#C2410C", labelBorder: "#FED7AA" },
 };
 
 // ─── CSS injected once into the document ─────────────────────────────────────
@@ -84,7 +84,7 @@ export const WorkflowEdge = memo(function WorkflowEdge({
     targetX, targetY, targetPosition,
   });
 
-  const strokeWidth = selected ? 2.5 : 1.8;
+  const strokeWidth = selected ? 2.5 : 1.5;
   const strokeColor = style.stroke;
   const markerId = `wf-arrow-${id}`;
 
@@ -148,10 +148,10 @@ export const WorkflowEdge = memo(function WorkflowEdge({
               className="rounded-full border px-2 py-0.5 text-[9px] font-semibold"
               style={{
                 background: style.labelBg,
-                borderColor: strokeColor,
+                borderColor: style.labelBorder,
                 color: style.labelColor,
                 whiteSpace: "nowrap",
-                backdropFilter: "blur(4px)",
+                boxShadow: "0 1px 3px rgba(15,23,42,0.08)",
               }}
             >
               {label}

@@ -24,32 +24,32 @@ const PALETTE_SECTIONS: { label: string; items: PaletteItem[] }[] = [
   {
     label: "Core",
     items: [
-      { nodeType: "trigger", description: "Start workflow" },
-      { nodeType: "end", description: "Finish workflow" },
+      { nodeType: "trigger", description: "Start workflow on schedule or event" },
+      { nodeType: "end", description: "Mark workflow as complete" },
     ],
   },
   {
     label: "AI",
     items: [
-      { nodeType: "agent", description: "Run a Vectorbea agent" },
+      { nodeType: "agent", description: "Reason, plan, and act with your agent" },
       { nodeType: "llm", description: "Direct LLM inference" },
-      { nodeType: "tool", description: "Tool or API call" },
+      { nodeType: "tool", description: "Call a registered tool or API" },
     ],
   },
   {
     label: "Control Flow",
     items: [
-      { nodeType: "branch", description: "Conditional route" },
-      { nodeType: "parallel", description: "Fan-out execution" },
-      { nodeType: "join", description: "Merge branches" },
-      { nodeType: "timer", description: "Sleep / delay" },
+      { nodeType: "branch", description: "Route based on conditions" },
+      { nodeType: "parallel", description: "Fan-out to multiple branches" },
+      { nodeType: "join", description: "Merge and synchronize branches" },
+      { nodeType: "timer", description: "Sleep, delay, or wait" },
     ],
   },
   {
     label: "Governance",
     items: [
-      { nodeType: "approval", description: "Human approval gate" },
-      { nodeType: "checkpoint", description: "Replay boundary" },
+      { nodeType: "approval", description: "Pause for human review" },
+      { nodeType: "checkpoint", description: "Enable replay from this point" },
       { nodeType: "artifact", description: "Store output artifact" },
     ],
   },
@@ -78,26 +78,21 @@ function PaletteItem({ item, onAdd }: { item: PaletteItem; onAdd: () => void }) 
       draggable
       onDragStart={onDragStart}
       onClick={onAdd}
-      className="group relative flex cursor-grab items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 transition-all hover:border-white/8 hover:bg-white/5 active:cursor-grabbing"
+      className="group relative flex cursor-grab items-center gap-2.5 rounded-xl border border-transparent px-2.5 py-2 transition-all duration-150 hover:border-slate-200 hover:bg-slate-50 active:cursor-grabbing active:opacity-80"
       title={`Drag to canvas or click to add — ${item.description}`}
+      style={{ userSelect: "none" }}
     >
-      {/* Left color accent on hover */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-0 top-2 bottom-2 w-[2px] rounded-full opacity-0 transition-opacity group-hover:opacity-100"
-        style={{ background: meta.color }}
-      />
       <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg shadow-sm"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl shadow-sm"
         style={{ background: meta.bgColor, border: `1px solid ${meta.borderColor}` }}
       >
         <Icon className="h-3.5 w-3.5" style={{ color: meta.color }} />
       </span>
       <div className="min-w-0">
-        <p className="text-[12px] font-semibold text-foreground/75 transition-colors group-hover:text-foreground">
+        <p className="text-[12px] font-semibold text-slate-700 transition-colors group-hover:text-slate-900">
           {meta.label}
         </p>
-        <p className="text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/60">{item.description}</p>
+        <p className="text-[10px] text-slate-400 group-hover:text-slate-500 transition-colors line-clamp-1">{item.description}</p>
       </div>
     </div>
   );
@@ -106,9 +101,9 @@ function PaletteItem({ item, onAdd }: { item: PaletteItem; onAdd: () => void }) 
 // ─── Template chip ────────────────────────────────────────────────────────────
 
 const COMPLEXITY_COLORS = {
-  simple: "text-emerald-400",
-  intermediate: "text-amber-400",
-  advanced: "text-violet-400",
+  simple: "text-emerald-600",
+  intermediate: "text-amber-600",
+  advanced: "text-violet-600",
 };
 
 function TemplateItem({ template, onApply }: { template: WorkflowTemplate; onApply: () => void }) {
@@ -116,26 +111,26 @@ function TemplateItem({ template, onApply }: { template: WorkflowTemplate; onApp
     <button
       type="button"
       onClick={onApply}
-      className="w-full rounded-lg border border-border/40 bg-muted/10 px-3 py-2.5 text-left transition-all hover:border-border/70 hover:bg-muted/20"
+      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition-all duration-150 hover:border-slate-300 hover:bg-slate-50"
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[12px] font-medium text-foreground/80">{template.name}</p>
+        <p className="text-[12px] font-semibold text-slate-800">{template.name}</p>
         <span className={cn("shrink-0 text-[9px] font-semibold uppercase tracking-wider", COMPLEXITY_COLORS[template.complexity])}>
           {template.complexity}
         </span>
       </div>
-      <p className="mt-0.5 text-[10px] text-muted-foreground/50 line-clamp-2">{template.description}</p>
+      <p className="mt-0.5 text-[10px] text-slate-500 line-clamp-2">{template.description}</p>
     </button>
   );
 }
 
 // ─── Section (collapsible) ────────────────────────────────────────────────────
 
-const SECTION_COLORS: Record<string, string> = {
+const SECTION_ACCENT: Record<string, string> = {
   Core: "#94a3b8",
-  AI: "#a78bfa",
-  "Control Flow": "#38bdf8",
-  Governance: "#fcd34d",
+  AI: "#7C3AED",
+  "Control Flow": "#0891B2",
+  Governance: "#D97706",
 };
 
 function Section({
@@ -150,24 +145,30 @@ function Section({
   count?: number;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const dot = SECTION_COLORS[label] ?? "#94a3b8";
+  const dot = SECTION_ACCENT[label] ?? "#94a3b8";
   return (
     <div>
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 px-3 py-2 transition-colors hover:bg-white/3"
+        className="flex w-full items-center gap-2 px-3 py-1.5 transition-colors hover:bg-slate-50"
       >
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dot }} />
-        <span className="flex-1 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 hover:text-muted-foreground/70">
+        <span className="flex-1 text-left text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400 hover:text-slate-600">
           {label}
         </span>
         {count !== undefined && (
-          <span className="rounded px-1.5 py-px text-[9px] font-medium tabular-nums" style={{ background: `${dot}18`, color: dot }}>
+          <span
+            className="rounded px-1.5 py-px text-[9px] font-semibold tabular-nums"
+            style={{ background: `${dot}18`, color: dot }}
+          >
             {count}
           </span>
         )}
-        {open ? <ChevronDown className="h-3 w-3 text-muted-foreground/30" /> : <ChevronRight className="h-3 w-3 text-muted-foreground/30" />}
+        {open
+          ? <ChevronDown className="h-3 w-3 text-slate-300" />
+          : <ChevronRight className="h-3 w-3 text-slate-300" />
+        }
       </button>
       {open && <div className="px-1 pb-1">{children}</div>}
     </div>
@@ -192,17 +193,18 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Panel title */}
-      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2.5">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/35">
+      <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: "1px solid #E2E8F0" }}>
+        <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400">
           Node Palette
         </span>
       </div>
+
       {/* Search */}
       <div className="px-3 pt-2.5 pb-2">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/35" />
+          <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
           <input
-            className="w-full rounded-lg border border-white/10 bg-white/5 pl-7 pr-3 py-1.5 text-[12px] text-foreground/80 placeholder:text-muted-foreground/25 focus:outline-none focus:ring-1 focus:ring-violet-400/30 focus:border-violet-400/30 transition-colors"
+            className="w-full rounded-xl border border-slate-200 bg-white pl-7 pr-3 py-1.5 text-[12px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors"
             placeholder="Search nodes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -214,18 +216,21 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
       <button
         type="button"
         onClick={() => setShowTemplates(!showTemplates)}
-        className="mx-3 mb-2 flex items-center gap-2 rounded-lg border border-white/8 bg-white/3 px-3 py-2 text-[11px] font-semibold text-muted-foreground/70 hover:border-white/15 hover:bg-white/6 hover:text-foreground transition-all"
+        className="mx-3 mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 transition-all"
       >
-        <LayoutTemplate className="h-3.5 w-3.5 text-violet-400" />
+        <LayoutTemplate className="h-3.5 w-3.5" style={{ color: "#7C3AED" }} />
         <span className="flex-1 text-left">Quick Templates</span>
-        <span className="rounded px-1.5 py-px text-[9px] font-medium" style={{ background: "rgba(167,139,250,0.12)", color: "#a78bfa" }}>
+        <span
+          className="rounded px-1.5 py-px text-[9px] font-semibold"
+          style={{ background: "#F5F3FF", color: "#7C3AED" }}
+        >
           {WORKFLOW_TEMPLATES.length}
         </span>
-        {showTemplates ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {showTemplates ? <ChevronDown className="h-3 w-3 text-slate-400" /> : <ChevronRight className="h-3 w-3 text-slate-400" />}
       </button>
 
       {showTemplates && (
-        <div className="mx-3 mb-3 space-y-1.5 rounded-xl border border-border/40 bg-muted/5 p-2">
+        <div className="mx-3 mb-3 space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2">
           {WORKFLOW_TEMPLATES.map((t) => (
             <TemplateItem key={t.id} template={t} onApply={() => onApplyTemplate(t)} />
           ))}
@@ -237,7 +242,9 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
         {filtered ? (
           <div className="px-1 pb-2">
             {filtered.length === 0 ? (
-              <p className="px-3 py-4 text-center text-[12px] text-muted-foreground/40">No nodes match &ldquo;{search}&rdquo;</p>
+              <p className="px-3 py-4 text-center text-[12px] text-slate-400">
+                No nodes match &ldquo;{search}&rdquo;
+              </p>
             ) : (
               filtered.map((item) => (
                 <PaletteItem key={item.nodeType} item={item} onAdd={() => onAddNode(item.nodeType)} />
@@ -256,9 +263,9 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
       </div>
 
       {/* Drag hint */}
-      <div className="border-t border-border/20 px-3 py-2.5">
-        <p className="text-[10px] text-muted-foreground/25 text-center tracking-wide">
-          ⠿ drag · click to add
+      <div className="px-3 py-2.5" style={{ borderTop: "1px solid #E2E8F0" }}>
+        <p className="text-[10px] text-slate-400 text-center tracking-wide">
+          ⠿ drag to canvas · click to add
         </p>
       </div>
     </div>

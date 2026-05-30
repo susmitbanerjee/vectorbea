@@ -586,27 +586,35 @@ export default function WorkflowBuilderPage() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-background">
+    <div className="flex h-full flex-col overflow-hidden" style={{ background: "#F8FAFC" }}>
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-0 border-b border-white/8 bg-[hsl(220,13%,8%)] px-4" style={{ minHeight: 44 }}>
+      <div
+        className="flex shrink-0 items-center gap-0 px-4"
+        style={{
+          minHeight: 44,
+          background: "rgba(255,255,255,0.92)",
+          borderBottom: "1px solid #E2E8F0",
+          backdropFilter: "blur(12px)",
+        }}
+      >
         {/* Breadcrumb */}
         <Link
           href={`/workflows/${workflow.id}` as never}
-          className="flex items-center gap-1.5 text-[12px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+          className="flex items-center gap-1.5 text-[12px] text-slate-400 transition-colors hover:text-slate-600"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span className="max-w-[140px] truncate">{workflow.name}</span>
         </Link>
-        <span className="mx-2 text-muted-foreground/20">/</span>
-        <span className="text-[12px] font-semibold text-foreground/80">Builder</span>
+        <span className="mx-2 text-slate-300">/</span>
+        <span className="text-[12px] font-semibold text-slate-700">Builder</span>
 
         {/* Version + saved state */}
         <div className="ml-3 flex items-center gap-1.5">
-          <span className="rounded border border-white/8 bg-white/4 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">
+          <span className="rounded border border-slate-200 bg-slate-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-slate-400">
             v1
           </span>
           {unsaved && (
-            <span className="text-[10px] font-medium text-amber-500/70">● unsaved</span>
+            <span className="text-[10px] font-medium text-amber-600">● unsaved</span>
           )}
         </div>
 
@@ -617,24 +625,24 @@ export default function WorkflowBuilderPage() {
           </div>
 
           {/* Divider */}
-          <div className="h-5 w-px bg-white/8 mr-3" />
+          <div className="h-5 w-px bg-slate-200 mr-3" />
 
           {/* History link */}
           <Link
             href={`/workflows/${workflow.id}` as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] text-muted-foreground/50 transition-colors hover:bg-white/5 hover:text-muted-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
           >
             <Clock className="h-3 w-3" />
             History
           </Link>
 
           {/* Save + Test grouped */}
-          <div className="ml-1 flex items-center rounded-lg border border-white/10">
+          <div className="ml-1 flex items-center rounded-[10px] border border-slate-200">
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={saving || running}
-              className="inline-flex h-8 items-center gap-1.5 rounded-l-lg border-r border-white/10 px-3 text-[12px] font-medium text-muted-foreground/60 transition-all hover:bg-white/5 hover:text-muted-foreground disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-l-[10px] border-r border-slate-200 px-3 text-[12px] font-medium text-slate-500 transition-all hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40"
             >
               {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
               Save
@@ -643,19 +651,19 @@ export default function WorkflowBuilderPage() {
               type="button"
               onClick={() => void handleTestRun()}
               disabled={testRunning || running}
-              className="inline-flex h-8 items-center gap-1.5 rounded-r-lg px-3 text-[12px] font-medium text-muted-foreground/60 transition-all hover:bg-white/5 hover:text-muted-foreground disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-r-[10px] px-3 text-[12px] font-medium text-slate-500 transition-all hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40"
             >
               {testRunning ? (
                 <RefreshCw className="h-3 w-3 animate-spin" />
               ) : (
-                <Zap className="h-3 w-3 text-amber-400/70" />
+                <Zap className="h-3 w-3 text-amber-500" />
               )}
               Test
             </button>
           </div>
 
           {/* Divider */}
-          <div className="h-5 w-px bg-white/8 mx-3" />
+          <div className="h-5 w-px bg-slate-200 mx-3" />
 
           {/* Run / Live controls */}
           {activeRunId ? (
@@ -663,14 +671,14 @@ export default function WorkflowBuilderPage() {
               {/* Live status pill */}
               <span className={cn(
                 "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                liveRunStatus === "running"   && "border-blue-500/30 bg-blue-500/10 text-blue-400",
-                liveRunStatus === "queued"    && "border-white/15 bg-white/5 text-muted-foreground",
-                liveRunStatus === "succeeded" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
-                liveRunStatus === "failed"    && "border-red-500/30 bg-red-500/10 text-red-400",
-                liveRunStatus === "waiting_for_approval" && "border-amber-500/30 bg-amber-500/10 text-amber-400",
+                liveRunStatus === "running"   && "border-blue-200 bg-blue-50 text-blue-700",
+                liveRunStatus === "queued"    && "border-slate-200 bg-slate-100 text-slate-600",
+                liveRunStatus === "succeeded" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+                liveRunStatus === "failed"    && "border-red-200 bg-red-50 text-red-700",
+                liveRunStatus === "waiting_for_approval" && "border-amber-200 bg-amber-50 text-amber-700",
               )}>
                 {(liveRunStatus === "running" || liveRunStatus === "queued") && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
                 )}
                 {liveRunStatus === "waiting_for_approval" && <ShieldCheck className="h-3 w-3" />}
                 {liveRunStatus === "succeeded" && <CheckCircle2 className="h-3 w-3" />}
@@ -681,7 +689,7 @@ export default function WorkflowBuilderPage() {
                 href={`/runs/${activeRunId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-[12px] text-muted-foreground/60 hover:bg-white/5 hover:text-muted-foreground transition-colors"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-slate-200 px-3 text-[12px] text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors"
               >
                 Full run →
               </a>
@@ -689,7 +697,7 @@ export default function WorkflowBuilderPage() {
               <button
                 type="button"
                 onClick={() => stopLiveRun(true)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-[12px] text-muted-foreground/50 hover:bg-white/5 hover:text-muted-foreground transition-colors"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-slate-200 px-3 text-[12px] text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
               >
                 ✕ Stop
               </button>
@@ -699,8 +707,8 @@ export default function WorkflowBuilderPage() {
               type="button"
               onClick={() => void handleRun()}
               disabled={saving || running}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-4 text-[12px] font-semibold text-white shadow-md transition-all hover:bg-emerald-400 hover:shadow-emerald-500/25 disabled:opacity-40"
-              style={{ boxShadow: "0 0 16px rgba(52,211,153,0.25)" }}
+              className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] bg-[#2563EB] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#1D4ED8] disabled:opacity-40"
+              style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.28)" }}
             >
               {running ? (
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -717,7 +725,7 @@ export default function WorkflowBuilderPage() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left: Node Palette */}
-        <div className="w-[220px] shrink-0 overflow-hidden border-r border-white/6 bg-[hsl(220,13%,8%)]">
+        <div className="w-[220px] shrink-0 overflow-hidden" style={{ borderRight: "1px solid #E2E8F0", background: "#FFFFFF" }}>
           <NodePalette onAddNode={handleAddNode} onApplyTemplate={handleApplyTemplate} />
         </div>
 
@@ -725,7 +733,7 @@ export default function WorkflowBuilderPage() {
         <div ref={reactFlowWrapper} className="relative flex-1 overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}>
           {/* Template picker overlay */}
           {showTemplatePicker && (
-            <div className="absolute inset-0 z-20 overflow-y-auto" style={{ background: "hsl(220,13%,7%)" }}>
+            <div className="absolute inset-0 z-20 overflow-y-auto" style={{ background: "#F8FAFC" }}>
               <WorkflowTemplatePicker
                 templates={WORKFLOW_TEMPLATES}
                 workflowName={workflow.name}
@@ -760,50 +768,61 @@ export default function WorkflowBuilderPage() {
             maxZoom={2}
             deleteKeyCode="Delete"
             multiSelectionKeyCode="Shift"
-            className="bg-[hsl(220,13%,7%)]"
+            style={{ background: "#FCFCFD" }}
           >
             <Background
-              variant={BackgroundVariant.Dots}
-              gap={20}
+              variant={BackgroundVariant.Lines}
+              gap={24}
               size={1}
-              color="rgba(255,255,255,0.04)"
+              color="rgba(148,163,184,0.15)"
             />
             <Controls
               className="!bottom-4 !left-4"
               showInteractive={false}
             />
             <MiniMap
-              className="!bottom-4 !right-4 !h-28 !w-40 rounded-xl border border-white/8 !bg-[hsl(220,13%,9%)]/90"
+              className="!bottom-4 !right-4 !h-28 !w-40 rounded-xl"
+              style={{ border: "1px solid #E2E8F0", background: "#FFFFFF" }}
               nodeColor={(node) => {
                 const colors: Record<string, string> = {
-                  trigger: "#34D399", agent: "#A78BFA", llm: "#C084FC",
-                  tool: "#22D3EE", approval: "#FCD34D", branch: "#38BDF8",
-                  parallel: "#67E8F9", join: "#818CF8", timer: "#FB923C",
-                  artifact: "#4ADE80", checkpoint: "#60A5FA", end: "#94A3B8",
+                  trigger: "#059669", agent: "#7C3AED", llm: "#9333EA",
+                  tool: "#0891B2", approval: "#D97706", branch: "#2563EB",
+                  parallel: "#0369A1", join: "#4F46E5", timer: "#D97706",
+                  artifact: "#059669", checkpoint: "#2563EB", end: "#6B7280",
                 };
                 return colors[node.type ?? ""] ?? "#94A3B8";
               }}
-              maskColor="rgba(0,0,0,0.4)"
+              maskColor="rgba(248,250,252,0.7)"
             />
 
             {/* Empty state */}
             {nodes.length === 0 && (
               <Panel position="top-center">
-                <div className="mt-24 flex flex-col items-center gap-4 rounded-2xl border border-white/8 bg-[hsl(220,13%,9%)]/95 px-10 py-10 text-center shadow-2xl backdrop-blur-sm">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/8 bg-white/4">
-                    <ShieldCheck className="h-7 w-7 text-muted-foreground/25" />
+                <div
+                  className="mt-24 flex flex-col items-center gap-4 rounded-2xl px-10 py-10 text-center"
+                  style={{
+                    background: "#FFFFFF",
+                    border: "1px solid #E2E8F0",
+                    boxShadow: "0 12px 32px rgba(15,23,42,0.06)",
+                  }}
+                >
+                  <div
+                    className="flex h-14 w-14 items-center justify-center rounded-2xl"
+                    style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
+                  >
+                    <ShieldCheck className="h-7 w-7" style={{ color: "#2563EB" }} />
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[15px] font-semibold text-foreground/60">Canvas is empty</p>
-                    <p className="max-w-[260px] text-[12px] text-muted-foreground/35 leading-relaxed">
-                      Drag nodes from the left palette, or use Quick Templates to start from a pre-built workflow.
+                    <p className="text-[15px] font-semibold text-slate-800">Start building your workflow</p>
+                    <p className="max-w-[280px] text-[12px] text-slate-500 leading-relaxed">
+                      Add a trigger, agent, tool, approval, or database step to create a durable agentic automation.
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/20">
-                    <span className="rounded border border-white/8 px-1.5 py-0.5 font-mono">Delete</span>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono">Delete</span>
                     <span>to remove selected</span>
                     <span className="mx-1">·</span>
-                    <span className="rounded border border-white/8 px-1.5 py-0.5 font-mono">Shift</span>
+                    <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono">Shift</span>
                     <span>to multi-select</span>
                   </div>
                 </div>
@@ -813,7 +832,7 @@ export default function WorkflowBuilderPage() {
         </div>
 
         {/* Right: Inspector */}
-        <div className="w-80 shrink-0 overflow-hidden border-l border-white/6 bg-[hsl(220,13%,8%)]">
+        <div className="w-80 shrink-0 overflow-hidden" style={{ borderLeft: "1px solid #E2E8F0", background: "#FFFFFF" }}>
           <WorkflowInspector
             selectedNode={selectedNode}
             nodes={nodes as Node<WFNodeData>[]}
