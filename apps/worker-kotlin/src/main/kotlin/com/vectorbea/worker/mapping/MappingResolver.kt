@@ -219,7 +219,7 @@ object MappingResolver {
         ref: String,               // e.g. "fetchCustomer.output.extracted.customer.id"
         ctx: RuntimeContext,
         stepOutputs: StepOutputView,
-    ): Any {
+    ): Any? {
         val parts = ref.split(".", limit = 4)
         if (parts.size < 3 || parts[1] != "output") {
             throw MappingException("Invalid step reference 'steps.$ref'. Format: steps.<nodeId>.output.<path>")
@@ -251,18 +251,23 @@ object MappingResolver {
             "validated" -> stepOutputs.getValidated(nodeId)  ?: stepOutputs.getExtracted(nodeId) ?: ctx.getOutput(nodeId)
             "output"    -> stepOutputs.getValidated(nodeId)  ?: stepOutputs.getExtracted(nodeId) ?: ctx.getOutput(nodeId)
             else        -> {
-                // Treat as path directly into step output (no tier prefix)
+                // `tier` is the fallback "output" sentinel — path holds the full original path.
+                // Do NOT prepend "output." (that creates output.output.rows[0] double-prefix).
                 val allOutput = stepOutputs.getValidated(nodeId) ?: stepOutputs.getExtracted(nodeId) ?: ctx.getOutput(nodeId)
-                val fullPath  = if (path.isNotEmpty()) "$tier.$path" else tier
-                return JsonPathResolver.resolvePathInMap(fullPath, allOutput)
-                    ?: throw MappingException("steps.$nodeId.output.$fullPath resolved to null")
+                // Use `path` (= full rest) directly; if path is empty use `tier` as a key
+                val resolvePath = if (path.isNotEmpty()) path else tier
+                return JsonPathResolver.resolvePathInMap(resolvePath, allOutput)
+                // null is acceptable — caller skips missing fields via ?: continue
             }
         }
 
         if (path.isEmpty()) return data
 
+        // Return null when the path doesn't resolve — don't throw.
+        // Throwing here causes the entire step to fail when a single field is missing
+        // (e.g. a DB column name typo). The caller (resolveMapping) already skips null
+        // values via `?: continue`, so the step simply runs without that specific input.
         return JsonPathResolver.resolvePathInMap(path, data)
-            ?: throw MappingException("steps.$nodeId.output.$tier.$path resolved to null")
     }
 
     /**
