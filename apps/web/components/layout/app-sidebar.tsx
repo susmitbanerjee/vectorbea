@@ -87,7 +87,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "OPERATE",
     items: [
       { href: "/schedules" as never,   label: "Schedules",  icon: CalendarClock },
-      { href: "/workers" as never,     label: "Workers",    icon: Server },
       { href: "/settings" as never,    label: "Settings",   icon: Settings2 },
     ],
   },

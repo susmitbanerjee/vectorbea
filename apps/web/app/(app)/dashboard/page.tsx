@@ -13,7 +13,6 @@ import {
   Plug,
   Plus,
   RefreshCw,
-  Server,
   ShieldCheck,
   Wrench,
 } from "lucide-react";
@@ -236,7 +235,6 @@ export default function OverviewPage() {
             <GetStartedTile icon={GitBranch}  title="Create workflow" description="Build a native AI workflow" href="/workflows/new" color="#2563EB" />
             <GetStartedTile icon={Plug}       title="Add connection"  description="Connect an LLM provider"  href="/connections"   color="#7C3AED" />
             <GetStartedTile icon={Bot}        title="Register agent"  description="Define an agent persona"  href="/agents/new"    color="#059669" />
-            <GetStartedTile icon={Server}     title="Start worker"    description="Run a worker process"     href="/workers"       color="#D97706" />
           </div>
         </div>
       ) : (
@@ -435,7 +433,6 @@ export default function OverviewPage() {
                 { href: "/tools",     label: "Tool Registry",   icon: Wrench,       color: "#0891B2" },
                 { href: "/schedules", label: "Schedules",       icon: Clock,        color: "#D97706" },
                 { href: "/approvals", label: "Approval Queue",  icon: ShieldCheck,  color: "#D97706" },
-                { href: "/workers",   label: "Workers",         icon: Server,       color: "#059669" },
               ].map(({ href, label, icon: Icon, color }) => (
                 <Link
                   key={href}
