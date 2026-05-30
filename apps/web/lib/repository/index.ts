@@ -331,8 +331,10 @@ export async function getRunEvents(runId: string): Promise<RunEvent[]> {
 
 export async function getRunTimeline(runId: string): Promise<import("@/types/agent-run-ui").RunTimelineEventUi[]> {
   try {
+    // Request a large page — parallel workflows emit 50-100+ events; the default
+    // pageSize=20 truncates the list and hides STEP_COMPLETED events for most nodes.
     const page = await api<{ items: import("@/types/agent-run-ui").RunTimelineEventUi[] }>(
-      withWorkspace(`/api/runs/${runId}/events`),
+      withWorkspace(`/api/runs/${runId}/events?pageSize=500`),
     );
     return page.items ?? [];
   } catch {
