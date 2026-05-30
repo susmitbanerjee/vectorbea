@@ -171,11 +171,25 @@
 @layer utilities {
 
   /* ── Page shell ─────────────────────────────────────────────────────────── */
+  /* Left-aligned, NOT centered — content sits flush against the sidebar
+     with a 24px gutter. On very wide screens caps at 1440px but stays
+     left-aligned so there is no floating-island gap. */
   .page-shell {
-    max-width: 1240px;
-    margin-left: auto;
-    margin-right: auto;
-    padding: 28px 32px;
+    width: 100%;
+    max-width: 1440px;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 24px;
+  }
+
+  /* Narrow shell for forms / settings pages where a tight reading width
+     is intentional (login, onboarding, account settings, etc.) */
+  .page-shell-narrow {
+    width: 100%;
+    max-width: 720px;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 24px;
   }
 
   /* ── Surfaces ────────────────────────────────────────────────────────────── */
