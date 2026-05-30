@@ -199,6 +199,25 @@ class HttpNodeExecutor(
             responseBody // raw string if not JSON
         }
 
+        // ── Slack / API soft-failure detection ────────────────────────────────
+        // Slack Web API (chat.postMessage etc.) always returns HTTP 200, but
+        // indicates failures via {"ok": false, "error": "..."} in the JSON body.
+        // Treat these as hard failures so the step shows as failed with the reason.
+        @Suppress("UNCHECKED_CAST")
+        if (parsedBody is Map<*, *>) {
+            val ok = (parsedBody as Map<String, Any?>)["ok"]
+            if (ok == false || ok == "false") {
+                val slackError = parsedBody["error"]?.toString() ?: "unknown Slack error"
+                val needed     = parsedBody["needed"]?.toString()  // missing OAuth scope
+                val reason = if (needed != null)
+                    "Slack API error: $slackError (needed scope: $needed)"
+                else
+                    "Slack API error: $slackError"
+                log.warn("[http] Slack soft-failure [nodeId={}, error={}]", node.id, slackError)
+                return NodeResult.Failed("HTTP node '${node.id}': $reason")
+            }
+        }
+
         return NodeResult.Completed(
             output = mapOf(
                 "statusCode"  to statusCode,
