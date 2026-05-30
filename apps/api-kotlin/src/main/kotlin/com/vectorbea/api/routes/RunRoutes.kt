@@ -277,7 +277,14 @@ class RunRoutes(
         val runId = req.pathUUID("id")
         runRepo.findById(runId, ctx.workspaceId) ?: throw ApiError.NotFound("Run")
 
-        val params = req.pageParams()
+        // Allow up to 500 events per page for the monitoring/live-run endpoint.
+        // The generic pageParams() caps at 100 which truncates parallel runs that
+        // emit 100+ events, causing the frontend to miss STEP_COMPLETED events.
+        val requestedSize = req.query("pageSize")?.toIntOrNull()?.coerceIn(1, 500) ?: 20
+        val params = com.vectorbea.api.repository.PageParams(
+            page     = req.query("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1,
+            pageSize = requestedSize,
+        )
         val afterSequence = req.query("afterSequence")?.toIntOrNull()
         val typeFilter = req.query("type")
 
