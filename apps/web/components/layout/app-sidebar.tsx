@@ -376,7 +376,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         {!collapsed && (
           <>
             {user ? (
-              /* ── Signed-in user block ──────────────────────────────────── */
+              /* ── Signed-in user block ─────────────────────────────────── */
               <div
                 className="rounded-2xl"
                 style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", padding: "10px 12px" }}
@@ -430,7 +430,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   Sign out
                 </button>
               </div>
-            )}
+            ) : null}
           </>
         )}
 
