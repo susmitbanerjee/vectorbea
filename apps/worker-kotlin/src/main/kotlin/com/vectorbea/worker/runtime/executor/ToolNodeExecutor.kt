@@ -213,12 +213,29 @@ class ToolNodeExecutor(
                         ?: resolvedInputs[expr]
                         ?: resolvedInputs[expr.replace(".", "_")]
                     when (value) {
-                        is Number  -> value.toString()
-                        null       -> ""   // empty string rather than "NULL" for message bodies
-                        else       -> value.toString().replace("\"", "\\\"")  // escape for JSON
+                        null          -> ""
+                        is Number     -> value.toString()
+                        is Boolean    -> value.toString()
+                        is String     -> value.replace("\\", "\\\\")
+                                              .replace("\"", "\\\"")
+                                              .replace("\n", "\\n")
+                                              .replace("\r", "")
+                        // Maps/Lists from agent output: serialize as compact JSON so
+                        // Slack receives readable content rather than Kotlin's {key=value}
+                        else          -> try {
+                            mapper.writeValueAsString(value)
+                        } catch (_: Exception) {
+                            value.toString()
+                        }
                     }
                 }
             } else rawBody
+
+            // Log the resolved body (first 200 chars) for debugging — helps diagnose
+            // empty messages or template resolution issues without logging secrets
+            log.debug("[tool] resolved body for [toolId={}, type={}]: {}",
+                tool.id, tool.type, resolvedBody.take(200))
+
             result["body"] = resolvedBody
         } else if (resolvedInputs.isNotEmpty() &&
                    (tool.type == "http" || tool.type == "slack" || tool.type == "email")) {
