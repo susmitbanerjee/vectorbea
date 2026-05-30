@@ -273,6 +273,15 @@ class ToolNodeExecutor(
         val rawBody = tool.configJson["bodyTemplate"] as? String
             ?: tool.configJson["body"] as? String
         if (rawBody != null) {
+            // Log available step outputs to help diagnose which node labels to use in templates
+            if (rawBody.contains("steps.")) {
+                val available = ctx.completedNodeIds().mapNotNull { nodeId ->
+                    val n = ctx.graph.nodes.firstOrNull { it.id == nodeId }
+                    val out = ctx.getOutput(nodeId)
+                    if (n != null && out.isNotEmpty()) "'${n.label}' (${nodeId}): keys=${out.keys}" else null
+                }
+                log.info("[tool] body template step outputs available: {}", available)
+            }
             val resolvedBody = if (rawBody.contains("{{")) {
                 val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
                 TEMPLATE_REGEX.replace(rawBody) { match ->
@@ -292,10 +301,9 @@ class ToolNodeExecutor(
                 }
             } else rawBody
 
-            // Log the resolved body (first 200 chars) for debugging — helps diagnose
-            // empty messages or template resolution issues without logging secrets
-            log.debug("[tool] resolved body for [toolId={}, type={}]: {}",
-                tool.id, tool.type, resolvedBody.take(200))
+            // Log at INFO so it's visible in production — helps diagnose empty messages
+            log.info("[tool] resolved body for [toolId={}, toolName={}, type={}]: {}",
+                tool.id, tool.name, tool.type, resolvedBody.take(300))
 
             result["body"] = resolvedBody
         } else if (resolvedInputs.isNotEmpty() &&
