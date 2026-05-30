@@ -6,11 +6,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
-  BarChart3,
   Bot,
   CalendarClock,
   CheckCircle2,
-  CreditCard,
   GitBranch,
   KeyRound,
   LayoutDashboard,
@@ -98,11 +96,9 @@ const NAV_GROUPS: NavGroup[] = [
 // All nav items flat (for active detection)
 const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items);
 
-// Settings sub-nav
+// Settings sub-nav — Billing and Usage hidden (not yet available)
 const SETTINGS_SUB_NAV: NavItem[] = [
   { href: "/settings/members" as never, label: "Members",  icon: Users,      isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/billing" as never, label: "Billing",  icon: CreditCard, isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/settings/usage" as never,   label: "Usage",    icon: BarChart3,  isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/api-keys" as never,         label: "API Keys", icon: KeyRound,   isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
@@ -277,8 +273,6 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
     );
   }
 
-  const connectedWorkers = workspaceSummary?.activeAgents ?? 0;
-  const isConnected = connectedWorkers > 0;
   const sidebarW = collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED;
 
   return (
@@ -381,27 +375,6 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
 
         {!collapsed && (
           <>
-            {/* Worker status card */}
-            <div
-              className="mb-2.5 flex items-center gap-2.5 rounded-[10px] px-3 py-2.5"
-              style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", minHeight: 52 }}
-            >
-              <span className={cn(
-                "h-2 w-2 rounded-full shrink-0",
-                isConnected ? "bg-emerald-500" : "bg-red-400",
-              )} />
-              <div className="flex-1 min-w-0">
-                <p style={{ fontSize: 13, fontWeight: 650, color: "#111827", lineHeight: 1.2 }} className="truncate">
-                  {isConnected
-                    ? `${connectedWorkers} worker${connectedWorkers === 1 ? "" : "s"} active`
-                    : "No workers connected"}
-                </p>
-                <p className="mt-0.5 truncate" style={{ fontSize: 12, color: "#6B7280" }}>
-                  {isConnected ? "Scheduler active" : "Start a worker to run jobs"}
-                </p>
-              </div>
-            </div>
-
             {/* User row */}
             {user && (
               <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-100">
@@ -441,12 +414,21 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           </>
         )}
 
-        {collapsed && (
+        {collapsed && user && (
           <div className="flex justify-center mt-1">
-            <span
-              className={cn("h-2 w-2 rounded-full", isConnected ? "bg-emerald-500" : "bg-red-400")}
-              title={isConnected ? `${connectedWorkers} worker(s) active` : "No workers connected"}
-            />
+            {user.avatar_url ? (
+              <Image
+                src={user.avatar_url}
+                alt={user.full_name ?? user.email ?? "User"}
+                width={20}
+                height={20}
+                className="h-5 w-5 rounded-full border border-slate-200 object-cover"
+              />
+            ) : (
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
+                {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
+              </div>
+            )}
           </div>
         )}
       </div>

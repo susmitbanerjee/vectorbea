@@ -129,10 +129,10 @@ export default function ToolsPage() {
         </div>
       </div>
 
-      {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* ── Filters — horizontal row, New Tool stays in header above ── */}
+      <div className="flex flex-wrap items-center gap-2 mt-4 mb-4">
         <SearchInput
-          containerClassName="flex-1 min-w-[220px] max-w-sm"
+          containerClassName="w-[280px] max-w-full"
           placeholder="Search tools…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}

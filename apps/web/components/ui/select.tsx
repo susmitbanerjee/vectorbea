@@ -3,30 +3,41 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Select — styled native <select> wrapper.
+ *
+ * The `className` prop controls the WIDTH of the outer container
+ * (e.g. className="w-[160px]" or className="w-full").
+ * The inner <select> always fills its container via w-full.
+ *
+ * This keeps selects inline in flex toolbars (no w-full blowout).
+ */
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {}
 
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ className, children, ...props }, ref) => {
     return (
-      <div className="relative inline-flex w-full">
+      // className controls container width — do NOT add w-full here
+      <div className={cn("relative inline-flex", className)}>
         <select
           className={cn(
-            // Base
+            // Always fill the container
             "h-9 w-full cursor-pointer appearance-none",
+            // Light-theme surface
             "rounded-xl border border-slate-200 bg-white",
+            // Typography
             "px-3 py-0 pr-8",
             "text-[13.5px] font-medium text-slate-600",
+            // Shadow + transitions
             "shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
             "transition-all duration-150 outline-none",
-            // Hover
+            // States
             "hover:border-slate-300 hover:bg-slate-50",
-            // Focus
             "focus:border-blue-400 focus:ring-4 focus:ring-blue-100",
-            // Option colours (best-effort in browser-rendered selects)
+            // Option colours (best-effort)
             "[&>option]:bg-white [&>option]:text-slate-800",
             // Disabled
             "disabled:cursor-not-allowed disabled:opacity-50",
-            className,
           )}
           ref={ref}
           {...props}

@@ -321,9 +321,9 @@ export default function ConnectionsPage() {
       )}
 
       {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <div className="mb-5 flex flex-wrap items-center gap-3">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <SearchInput
-          containerClassName="flex-1 min-w-48 max-w-sm"
+          containerClassName="w-[280px] max-w-full"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search connections…"
