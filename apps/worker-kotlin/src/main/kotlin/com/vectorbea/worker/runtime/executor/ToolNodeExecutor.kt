@@ -169,13 +169,8 @@ class ToolNodeExecutor(
                 val tier = if (parts.size >= 2) parts[1] else "output"
                 val path = if (parts.size >= 3) parts[2] else ""
 
-                // Resolve node by label OR id (case-insensitive, space/underscore tolerant)
-                val nodeId = ctx.graph.nodes.firstOrNull { node ->
-                    node.id == ref ||
-                    node.label.equals(ref, ignoreCase = true) ||
-                    node.label.replace(" ", "").equals(ref, ignoreCase = true) ||
-                    node.label.replace(" ", "_").equals(ref, ignoreCase = true)
-                }?.id ?: ref  // fall back to treating ref as a literal node ID
+                // Resolve node using the same multi-strategy matcher as MappingResolver
+                val nodeId = resolveNodeRef(ref, ctx) ?: ref  // fall back to ref as literal ID
 
                 val output = ctx.getOutput(nodeId)
                 if (output.isNotEmpty()) {
@@ -450,6 +445,27 @@ class ToolNodeExecutor(
         }
 
         return result
+    }
+
+    // ── Node reference resolver (mirrors MappingResolver.resolveNodeRef) ────────
+
+    /**
+     * Resolve a step reference to a node ID using multiple strategies.
+     * Handles abbreviated names like "fetch_renewals" → "Fetch Upcoming Renewals".
+     */
+    private fun resolveNodeRef(rawRef: String, ctx: com.vectorbea.worker.runtime.graph.RuntimeContext): String? {
+        if (rawRef.isBlank()) return null
+        val refSlug  = rawRef.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+        val refWords = refSlug.split('_').filter { it.length > 1 }
+        return ctx.graph.nodes.firstOrNull { node ->
+            val labelSlug  = node.label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            val labelWords = labelSlug.split('_').filter { it.isNotEmpty() }
+            node.id == rawRef ||
+            node.label.lowercase() == rawRef.lowercase() ||
+            labelSlug == refSlug ||
+            (refWords.size >= 2 && refWords.all { w -> labelWords.any { lw -> lw.startsWith(w) || w.startsWith(lw) } }) ||
+            (refWords.size == 1 && labelWords.firstOrNull()?.startsWith(refWords[0]) == true)
+        }?.id
     }
 
     // ── Event helper ──────────────────────────────────────────────────────────

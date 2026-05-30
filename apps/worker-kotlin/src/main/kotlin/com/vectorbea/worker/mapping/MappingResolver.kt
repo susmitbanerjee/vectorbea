@@ -158,6 +158,51 @@ object MappingResolver {
         }
     }
 
+    /**
+     * Resolve a step reference string to a node ID using multiple strategies (in priority order):
+     *
+     *  1. Exact node ID match             "n1001"
+     *  2. Exact label match               "Fetch Upcoming Renewals"
+     *  3. Case-insensitive, no spaces     "fetchupcomingrenwals"
+     *  4. Spaces → underscores            "fetch_upcoming_renewals"
+     *  5. Slug (non-alnum→underscore)     handles "Risk Score & Recommendation" → "risk_score_recommendation"
+     *  6. All reference words present     "fetch_renewals" → ["fetch","renewals"] ⊆ label words
+     *     This handles abbreviated names where users omit filler words like "upcoming".
+     *  7. Label starts with the reference "fetch" matches "Fetch Upcoming Renewals"
+     *
+     * Returns null when no node matches so the caller can provide a diagnostic error.
+     */
+    private fun resolveNodeRef(rawRef: String, ctx: RuntimeContext): String? {
+        if (rawRef.isBlank()) return null
+
+        val refLower = rawRef.lowercase()
+        // Normalise ref: non-alphanumeric → "_", collapse runs, trim
+        val refSlug  = refLower.replace(Regex("[^a-z0-9]+"), "_").trim('_')
+        // Words in the reference (split on underscore/space/hyphen)
+        val refWords = refSlug.split('_').filter { it.length > 1 }  // skip single chars
+
+        return ctx.graph.nodes.firstOrNull { node ->
+            val id    = node.id
+            val label = node.label
+            val labelLower = label.lowercase()
+            val labelSlug  = labelLower.replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            val labelWords = labelSlug.split('_').filter { it.isNotEmpty() }
+
+            // Strategy 1-5: exact and slug matches
+            id         == rawRef  ||
+            labelLower == refLower ||
+            labelLower.replace(" ", "")  == refLower.replace("_", "") ||
+            labelSlug  == refSlug  ||
+
+            // Strategy 6: all reference words appear in the label words
+            // "fetch_renewals" → ["fetch","renewals"] — both appear in ["fetch","upcoming","renewals"]
+            (refWords.size >= 2 && refWords.all { w -> labelWords.any { lw -> lw.startsWith(w) || w.startsWith(lw) } }) ||
+
+            // Strategy 7: label starts with the reference (handles "crm" → "CRM Analysis")
+            (refWords.size == 1 && labelWords.firstOrNull()?.startsWith(refWords[0]) == true)
+        }?.id
+    }
+
     private fun resolveRunField(field: String, ctx: RuntimeContext): Any = when (field) {
         "id"                -> ctx.runId.toString()
         "workspaceId"       -> ctx.workspaceId.toString()
@@ -182,16 +227,10 @@ object MappingResolver {
 
         val rawRef = parts[0]
 
-        // Resolve the step reference by node ID first, then by node label (case-insensitive).
-        // Users often write {{ steps.FetchUpcomingRenewals.output.rows }} using the node's
-        // display label rather than its auto-generated ID (n1001). Both are supported.
-        val nodeId = ctx.graph.nodes
-            .firstOrNull { node ->
-                node.id == rawRef ||
-                node.label.equals(rawRef, ignoreCase = true) ||
-                node.label.replace(" ", "").equals(rawRef, ignoreCase = true) ||
-                node.label.replace(" ", "_").equals(rawRef, ignoreCase = true)
-            }?.id
+        // Resolve the step reference to a node using a multi-strategy matcher.
+        // Users write references like "fetch_renewals" (short) for node "Fetch Upcoming Renewals",
+        // or "collect_parallel_results" for "Collect Parallel Results". Support all common patterns.
+        val nodeId = resolveNodeRef(rawRef, ctx)
             ?: throw MappingException(
                 "steps.$rawRef does not exist in the workflow graph. " +
                 "Available steps: ${ctx.graph.nodes.joinToString { "'${it.id}' (${it.label})" }}"
