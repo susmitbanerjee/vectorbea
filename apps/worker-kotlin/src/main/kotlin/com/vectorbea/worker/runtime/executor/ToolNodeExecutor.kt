@@ -398,10 +398,16 @@ class ToolNodeExecutor(
                     val value = resolvedInputs[key]
                         ?: resolvedInputs[expr]
                         ?: resolvedInputs[expr.replace(".", "_")]
-                    // Convert to SQL literal — numbers inline as-is, strings are quoted
+                    // Convert to SQL literal. Null means workflow input not provided —
+                    // use safe keyword defaults so LIMIT/OFFSET don't become NULL.
                     when (value) {
                         is Number  -> value.toString()
-                        null       -> "NULL"
+                        null       -> when (key.lowercase()) {
+                            "limit", "max_rows", "page_size", "count" -> "100"
+                            "days_ahead", "days", "lookback_days"     -> "30"
+                            "offset", "skip"                          -> "0"
+                            else                                       -> "NULL"
+                        }
                         else       -> "'${value.toString().replace("'", "''")}'"
                     }
                 }

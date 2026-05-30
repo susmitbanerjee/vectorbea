@@ -59,7 +59,7 @@ object MappingResolver {
     ): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
         for ((targetKey, template) in mapping) {
-            val value = resolveTemplateString(template, ctx, stepOutputs)
+            val value = resolveTemplateString(template, ctx, stepOutputs) ?: continue
             result[targetKey] = value
         }
         return result
@@ -75,7 +75,7 @@ object MappingResolver {
         template: String,
         ctx: RuntimeContext,
         stepOutputs: StepOutputView,
-    ): Any {
+    ): Any? {
         val matches = TEMPLATE_REGEX.findAll(template).toList()
         if (matches.isEmpty()) return template // plain literal
 
@@ -120,7 +120,7 @@ object MappingResolver {
         expr: String,
         ctx: RuntimeContext,
         stepOutputs: StepOutputView,
-    ): Any {
+    ): Any? {
         // Security: reject forbidden namespaces immediately
         for (forbidden in FORBIDDEN_PREFIXES) {
             if (expr.startsWith(forbidden)) {
@@ -132,15 +132,15 @@ object MappingResolver {
             // Full form: {{workflow.input.key}}
             expr.startsWith("workflow.input.") -> {
                 val path = expr.removePrefix("workflow.input.")
+                // Return null for missing keys rather than throwing — the caller can
+                // supply defaults or use NULL in SQL params when the trigger has no input
                 JsonPathResolver.resolvePathInMap(path, ctx.workflowInput)
-                    ?: throw MappingException("workflow.input.$path is not defined in the workflow input")
             }
 
             // Short form alias: {{input.key}} → same as {{workflow.input.key}}
             expr.startsWith("input.") -> {
                 val path = expr.removePrefix("input.")
                 JsonPathResolver.resolvePathInMap(path, ctx.workflowInput)
-                    ?: throw MappingException("input.$path is not defined in the workflow input")
             }
 
             expr.startsWith("run.") -> {
