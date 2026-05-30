@@ -163,10 +163,10 @@ export default function LandingPage() {
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: C.sky }} />
                     Open beta
                   </span>
-                  <a href="/runs" className="inline-flex items-center gap-1 text-[12px] transition-colors hover:text-white"
+                  <Link href="/runs" className="inline-flex items-center gap-1 text-[12px] transition-colors hover:text-white"
                     style={{ color: C.t4 }}>
                     View a live run <ChevronRight className="h-3 w-3" />
-                  </a>
+                  </Link>
                 </div>
 
                 {/* Headline */}
