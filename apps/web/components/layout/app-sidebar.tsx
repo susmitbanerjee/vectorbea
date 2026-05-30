@@ -374,64 +374,55 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         </button>
 
         {!collapsed && (
-          <>
-            {user ? (
-              /* ── Signed-in user block ─────────────────────────────────── */
-              <div
-                className="rounded-2xl"
-                style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", padding: "10px 12px" }}
-              >
-                {/* Avatar + name row */}
-                <div className="flex items-center gap-2.5 mb-2.5">
-                  {user.avatar_url ? (
-                    <Image
-                      src={user.avatar_url}
-                      alt={user.full_name ?? user.email ?? "User"}
-                      width={32}
-                      height={32}
-                      className="h-8 w-8 shrink-0 rounded-full object-cover"
-                      style={{ border: "1px solid #BFDBFE" }}
-                    />
-                  ) : (
-                    <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                      style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 13, fontWeight: 700, color: "#1D4ED8" }}
-                    >
-                      {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate leading-none" style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
-                      {user.full_name ?? user.email?.split("@")[0] ?? "Signed in"}
-                    </p>
-                    {user.email && (
-                      <p className="mt-0.5 truncate" style={{ fontSize: 11, color: "#94A3B8" }}>
-                        {user.email}
-                      </p>
-                    )}
+          <div
+            className="rounded-2xl"
+            style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", padding: "10px 12px" }}
+          >
+            {/* Avatar + name row — only when Supabase session present */}
+            {user && (
+              <div className="flex items-center gap-2.5 mb-2.5">
+                {user.avatar_url ? (
+                  <Image
+                    src={user.avatar_url}
+                    alt={user.full_name ?? user.email ?? "User"}
+                    width={32}
+                    height={32}
+                    className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    style={{ border: "1px solid #BFDBFE" }}
+                  />
+                ) : (
+                  <div
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                    style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 13, fontWeight: 700, color: "#1D4ED8" }}
+                  >
+                    {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
                   </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate leading-none" style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
+                    {user.full_name ?? user.email?.split("@")[0] ?? "Signed in"}
+                  </p>
+                  {user.email && (
+                    <p className="mt-0.5 truncate" style={{ fontSize: 11, color: "#94A3B8" }}>
+                      {user.email}
+                    </p>
+                  )}
                 </div>
-                {/* Sign out button */}
-                <button
-                  type="button"
-                  onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
-                  className="flex h-9 w-full items-center justify-center gap-2 rounded-xl transition-colors"
-                  style={{
-                    background: "#F8FAFC",
-                    border: "1px solid #E2E8F0",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#334155",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F1F5F9"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC"; }}
-                >
-                  <LogOut className="h-4 w-4" style={{ color: "#64748B" }} />
-                  Sign out
-                </button>
               </div>
-            ) : null}
-          </>
+            )}
+            {/* Sign out — always visible */}
+            <button
+              type="button"
+              onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
+              className="flex h-9 w-full items-center justify-center gap-2 rounded-xl transition-colors"
+              style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", fontSize: 13, fontWeight: 600, color: "#334155" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F1F5F9"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC"; }}
+            >
+              <LogOut className="h-4 w-4" style={{ color: "#64748B" }} />
+              Sign out
+            </button>
+          </div>
         )}
 
         {collapsed && user && (
