@@ -35,8 +35,12 @@ import java.util.UUID
  */
 object MappingResolver {
 
-    /** Compiled once: matches {{ ... }} expressions */
-    private val TEMPLATE_REGEX = Regex("""\{\{\s*([\w.\[\]]+)\s*\}\}""")
+    /**
+     * Compiled once: matches {{ ... }} expressions.
+     * The inner group accepts any characters except }} so that node labels
+     * with spaces and special chars (e.g. "Risk Score & Recommendation") work.
+     */
+    private val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
 
     /** Forbidden namespace prefixes — checked before any resolution */
     private val FORBIDDEN_PREFIXES = listOf("secret.", "env.", "system.", "process.")
