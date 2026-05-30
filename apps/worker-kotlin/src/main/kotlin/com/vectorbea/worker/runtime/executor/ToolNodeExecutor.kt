@@ -196,13 +196,30 @@ class ToolNodeExecutor(
         // Remap HTTP tool keys.
         // urlTemplate / bodyTemplate are the stored forms; HttpNodeExecutor reads "url" / "body".
         (tool.configJson["urlTemplate"] as? String)?.let { result["url"] = it }
-        (tool.configJson["url"] as? String)?.let { result["url"] = it }  // also accept plain "url"
-        // For body: prefer the bodyTemplate from config; if absent and there are resolved
-        // inputs, pass them as the body so POST tools receive their mapped parameters.
-        val bodyTemplate = tool.configJson["bodyTemplate"] as? String
+        (tool.configJson["url"] as? String)?.let { result["url"] = it }
+
+        // Resolve {{ expr }} placeholders in the body template using resolvedInputs.
+        // Without this, Slack/HTTP tools receive literal "{{message}}" text in the body
+        // instead of the actual workflow values — the call returns 200 but nothing is posted.
+        val rawBody = tool.configJson["bodyTemplate"] as? String
             ?: tool.configJson["body"] as? String
-        if (bodyTemplate != null) {
-            result["body"] = bodyTemplate
+        if (rawBody != null) {
+            val resolvedBody = if (rawBody.contains("{{")) {
+                val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
+                TEMPLATE_REGEX.replace(rawBody) { match ->
+                    val expr  = match.groupValues[1].trim()
+                    val key   = expr.substringAfterLast('.')
+                    val value = resolvedInputs[key]
+                        ?: resolvedInputs[expr]
+                        ?: resolvedInputs[expr.replace(".", "_")]
+                    when (value) {
+                        is Number  -> value.toString()
+                        null       -> ""   // empty string rather than "NULL" for message bodies
+                        else       -> value.toString().replace("\"", "\\\"")  // escape for JSON
+                    }
+                }
+            } else rawBody
+            result["body"] = resolvedBody
         } else if (resolvedInputs.isNotEmpty() &&
                    (tool.type == "http" || tool.type == "slack" || tool.type == "email")) {
             // No explicit body template — pass resolved inputs as the JSON body
