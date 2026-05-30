@@ -771,10 +771,10 @@ export default function WorkflowBuilderPage() {
             style={{ background: "#FCFCFD" }}
           >
             <Background
-              variant={BackgroundVariant.Lines}
-              gap={24}
-              size={1}
-              color="rgba(148,163,184,0.15)"
+              variant={BackgroundVariant.Dots}
+              gap={40}
+              size={1.5}
+              color="rgba(148,163,184,0.35)"
             />
             <Controls
               className="!bottom-4 !left-4"
