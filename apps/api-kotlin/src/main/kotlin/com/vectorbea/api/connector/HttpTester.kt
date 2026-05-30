@@ -80,11 +80,68 @@ object HttpTester {
     }
 
     private fun performRequest(url: String, input: HttpTestInput, start: Long): ConnectionTestResult {
+        // Slack-specific: use auth.test to validate the token, not just reachability.
+        // A HEAD to slack.com/api/ returns 200 even with an invalid token.
+        if (url.contains("slack.com") && !input.apiKey.isNullOrBlank()) {
+            return testSlackAuth(input, start)
+        }
+
         // Try HEAD first (no response body), fall back to GET
         return try {
             doRequest(url, "HEAD", input, start)
         } catch (_: Exception) {
             doRequest(url, "GET", input, start)
+        }
+    }
+
+    /**
+     * Validate a Slack Bearer token via api/auth.test.
+     * Returns connected if ok=true (token valid + bot info returned),
+     * failed with the specific Slack error if ok=false.
+     */
+    private fun testSlackAuth(input: HttpTestInput, start: Long): ConnectionTestResult {
+        val authTestUrl = "https://slack.com/api/auth.test"
+        return try {
+            SsrfGuard.validate(authTestUrl)
+            val conn = java.net.URL(authTestUrl).openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = READ_TIMEOUT_MS
+            conn.setRequestProperty("Authorization", "Bearer ${input.apiKey}")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.outputStream.write("{}".toByteArray())
+
+            val status  = conn.responseCode
+            val latency = System.currentTimeMillis() - start
+            val body    = conn.inputStream.bufferedReader().readText().take(MAX_RESPONSE_BYTES)
+            conn.disconnect()
+
+            @Suppress("UNCHECKED_CAST")
+            val json = try {
+                com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+                    .readValue(body, Map::class.java) as Map<String, Any?>
+            } catch (_: Exception) { emptyMap<String, Any?>() }
+
+            when {
+                json["ok"] == true -> {
+                    val botName = json["user"]?.toString() ?: "bot"
+                    val team    = json["team"]?.toString() ?: ""
+                    ConnectionTestResult.connected(latency,
+                        "Slack token valid — $botName @ $team (chat:write scope required to post)")
+                }
+                json["ok"] == false -> {
+                    val error = json["error"]?.toString() ?: "unknown"
+                    ConnectionTestResult.failed(latency, "SLACK_AUTH_FAILED",
+                        "Slack token invalid: $error — check your Bot Token in the connection settings")
+                }
+                else ->
+                    ConnectionTestResult.failed(latency, "SLACK_UNEXPECTED",
+                        "Unexpected Slack response (HTTP $status)")
+            }
+        } catch (e: Exception) {
+            val (code, msg) = classifyException(e)
+            ConnectionTestResult.failed(System.currentTimeMillis() - start, code, msg)
         }
     }
 

@@ -58,7 +58,7 @@ tasks.test {
 // Shadow's mergeServiceFiles() appends all service declarations correctly.
 tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
     archiveClassifier = "all"
-    mergeServiceFiles()   // ← critical: merges META-INF/services/* from all jars
+    mergeServiceFiles()
 }
 
 // Keep a "fatJar" alias so the Dockerfile's `gradle fatJar` command still works
