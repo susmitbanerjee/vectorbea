@@ -115,6 +115,33 @@ class ToolNodeExecutor(
         return result
     }
 
+    // ── Body string resolver ──────────────────────────────────────────────────
+
+    /** Resolve all {{expr}} placeholders in a body/URL string. */
+    private fun resolveBodyString(
+        raw: String,
+        resolvedInputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): String {
+        if (!raw.contains("{{")) return raw
+        val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
+        return TEMPLATE_REGEX.replace(raw) { match ->
+            val expr  = match.groupValues[1].trim()
+            val value = resolveBodyExpr(expr, resolvedInputs, ctx)
+            when (value) {
+                null       -> ""
+                is Number  -> value.toString()
+                is Boolean -> value.toString()
+                is String  -> value.replace("\\", "\\\\")
+                                   .replace("\"", "\\\"")
+                                   .replace("\n", "\\n")
+                                   .replace("\r", "")
+                else       -> try { mapper.writeValueAsString(value) }
+                              catch (_: Exception) { value.toString() }
+            }
+        }
+    }
+
     // ── Template expression resolver ─────────────────────────────────────────
 
     /**
@@ -272,47 +299,42 @@ class ToolNodeExecutor(
         // instead of the actual workflow values — the call returns 200 but nothing is posted.
         val rawBody = tool.configJson["bodyTemplate"] as? String
             ?: tool.configJson["body"] as? String
+        // ── Body resolution ───────────────────────────────────────────────────────
+        // Body may be stored as a String (bodyTemplate / body string) OR as a Map
+        // (JSON object already parsed — common when the tool editor saves body as JSON).
+        // In both cases we need to resolve {{expr}} placeholders.
+
+        // Case A: body stored as a plain String in config_json
         if (rawBody != null) {
-            // Log available step outputs to help diagnose which node labels to use in templates
-            if (rawBody.contains("steps.")) {
-                val available = ctx.completedNodeIds().mapNotNull { nodeId ->
-                    val n = ctx.graph.nodes.firstOrNull { it.id == nodeId }
-                    val out = ctx.getOutput(nodeId)
-                    if (n != null && out.isNotEmpty()) "'${n.label}' (${nodeId}): keys=${out.keys}" else null
-                }
-                log.info("[tool] body template step outputs available: {}", available)
-            }
-            val resolvedBody = if (rawBody.contains("{{")) {
-                val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
-                TEMPLATE_REGEX.replace(rawBody) { match ->
-                    val expr  = match.groupValues[1].trim()
-                    val value = resolveBodyExpr(expr, resolvedInputs, ctx)
-                    when (value) {
-                        null          -> ""
-                        is Number     -> value.toString()
-                        is Boolean    -> value.toString()
-                        is String     -> value.replace("\\", "\\\\")
-                                              .replace("\"", "\\\"")
-                                              .replace("\n", "\\n")
-                                              .replace("\r", "")
-                        else          -> try { mapper.writeValueAsString(value) }
-                                         catch (_: Exception) { value.toString() }
-                    }
-                }
-            } else rawBody
-
-            // Log at INFO so it's visible in production — helps diagnose empty messages
-            log.info("[tool] resolved body for [toolId={}, toolName={}, type={}]: {}",
-                tool.id, tool.name, tool.type, resolvedBody.take(300))
-
+            val resolvedBody = resolveBodyString(rawBody, resolvedInputs, ctx)
+            log.info("[tool] resolved body (string) [toolName={}, type={}]: {}",
+                tool.name, tool.type, resolvedBody.take(300))
             result["body"] = resolvedBody
+        }
+
+        // Case B: body stored as a Map in config_json (common for HTTP tools configured via UI)
+        // putAll(tool.configJson) already copied it to result["body"], but expressions are unresolved.
+        @Suppress("UNCHECKED_CAST")
+        val bodyFromConfig = tool.configJson["body"] as? Map<String, Any?>
+        if (bodyFromConfig != null) {
+            // Walk the Map and resolve {{expr}} in every String value
+            val resolved = bodyFromConfig.mapValues { (_, v) ->
+                when (v) {
+                    is String -> resolveBodyString(v, resolvedInputs, ctx)
+                    else -> v
+                }
+            }
+            val resolvedJson = try { mapper.writeValueAsString(resolved) } catch (_: Exception) { null }
+            if (resolvedJson != null) {
+                log.info("[tool] resolved body (map) [toolName={}, type={}]: {}",
+                    tool.name, tool.type, resolvedJson.take(300))
+                result["body"] = resolvedJson
+            }
         } else if (resolvedInputs.isNotEmpty() &&
                    (tool.type == "http" || tool.type == "slack" || tool.type == "email")) {
-            // No explicit body template — pass resolved inputs as the JSON body.
-            // Log what's being sent so empty-field issues are visible.
-            log.info("[tool] using resolvedInputs as body [toolName={}, type={}, keys={}, preview={}]",
-                tool.name, tool.type, resolvedInputs.keys,
-                resolvedInputs.entries.take(3).joinToString { "${it.key}=${it.value.toString().take(80)}" })
+            // No explicit body — pass resolved inputs (from node input mapping) as JSON body
+            log.info("[tool] using resolvedInputs as body [toolName={}, type={}, keys={}]",
+                tool.name, tool.type, resolvedInputs.keys)
             result["body"] = resolvedInputs
         }
 
