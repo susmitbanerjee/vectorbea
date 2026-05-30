@@ -711,7 +711,7 @@ export function WorkflowInspector({
   if (!selectedNode) {
     const nodeCount = nodes.length;
     const edgeCount = edges.length;
-    const issueCount = validation.issues.length;
+    const issueCount = validation?.issues?.length ?? 0;
     return (
       <div className="flex h-full flex-col overflow-hidden">
         {/* Panel header */}
