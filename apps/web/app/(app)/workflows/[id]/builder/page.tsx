@@ -768,13 +768,15 @@ export default function WorkflowBuilderPage() {
             maxZoom={2}
             deleteKeyCode="Delete"
             multiSelectionKeyCode="Shift"
-            style={{ background: "#FCFCFD" }}
+            style={{
+              background: "linear-gradient(160deg, #E8EEFF 0%, #EEF3FF 12%, #F2F6FF 25%, #F6F8FF 42%, #F9FAFD 62%, #FCFCFE 100%)",
+            }}
           >
             <Background
-              variant={BackgroundVariant.Dots}
+              variant={BackgroundVariant.Lines}
               gap={40}
-              size={1.5}
-              color="rgba(148,163,184,0.35)"
+              size={1}
+              color="rgba(140,155,220,0.18)"
             />
             <Controls
               className="!bottom-4 !left-4"
