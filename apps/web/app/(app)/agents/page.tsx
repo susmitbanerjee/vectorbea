@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, Plus, RefreshCw, Search } from "lucide-react";
+import { Bot, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/types/platform";
 import { getAgents } from "@/lib/repository";
+import { Select } from "@/components/ui/select";
+import { SearchInput } from "@/components/ui/search-input";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -94,27 +96,24 @@ export default function AgentsPage() {
           </button>
           <Link
             href={"/agents/new" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white shadow-sm transition-all hover:bg-[#1E293B]"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" />
             New Agent
           </Link>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* ── Filters ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
-          <input
-            className="h-8 w-full rounded-lg border border-border/60 bg-background pl-8 pr-3 text-[12px] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-            placeholder="Search agents…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <select
-          className="h-8 rounded-lg border border-border/60 bg-background px-3 text-[12px] text-muted-foreground focus:outline-none"
+        <SearchInput
+          containerClassName="flex-1 min-w-[220px] max-w-sm"
+          placeholder="Search agents…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Select
+          className="w-[150px]"
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as Agent["type"] | "")}
         >
@@ -122,9 +121,9 @@ export default function AgentsPage() {
           {(Object.keys(TYPE_LABELS) as Agent["type"][]).map((t) => (
             <option key={t} value={t}>{TYPE_LABELS[t]}</option>
           ))}
-        </select>
-        <select
-          className="h-8 rounded-lg border border-border/60 bg-background px-3 text-[12px] text-muted-foreground focus:outline-none"
+        </Select>
+        <Select
+          className="w-[150px]"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as Agent["status"] | "")}
         >
@@ -132,7 +131,7 @@ export default function AgentsPage() {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="deprecated">Deprecated</option>
-        </select>
+        </Select>
       </div>
 
       {/* Table */}
@@ -155,7 +154,7 @@ export default function AgentsPage() {
             {agents.length === 0 && (
               <Link
                 href={"/agents/new" as never}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13px] font-semibold text-white hover:bg-[#1E293B]"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Register first agent

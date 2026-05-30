@@ -72,13 +72,16 @@ function ITextarea({ value, onChange, placeholder, rows = 3, mono }: { value: st
 
 function ISelect({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: React.ReactNode }) {
   return (
-    <select
-      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {children}
-    </select>
+    <div className="relative">
+      <select
+        className="w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2 pr-8 text-[12px] text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all outline-none hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 [&>option]:bg-white [&>option]:text-slate-800"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+    </div>
   );
 }
 

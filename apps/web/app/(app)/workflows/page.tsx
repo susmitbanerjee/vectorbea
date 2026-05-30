@@ -80,12 +80,11 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 transition-colors",
+        "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-colors",
         active
-          ? "border-[#111827] bg-[#111827] text-white"
-          : "border-[#E5E7EB] bg-white text-[#6B7280] hover:border-[#374151] hover:text-[#374151]",
+          ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+          : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
       )}
-      style={{ height: 30, fontSize: 13, fontWeight: 600 }}
     >
       {label}
     </button>
@@ -145,16 +144,14 @@ export default function WorkflowsPage() {
         <div className="flex items-center gap-2 mt-1">
           <Link
             href={"/workflows/import" as never}
-            className="inline-flex h-[34px] items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-3.5 text-[#374151] transition-colors hover:bg-[#F1F3F5]"
-            style={{ fontSize: 13.5, fontWeight: 600 }}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-[13.5px] font-semibold text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:bg-slate-50 hover:border-slate-300"
           >
             <Upload className="h-3.5 w-3.5" />
             Import
           </Link>
           <Link
             href={"/workflows/new" as never}
-            className="inline-flex h-[34px] items-center gap-1.5 rounded-lg bg-[#111827] px-3.5 text-white transition-all hover:bg-[#1F2937]"
-            style={{ fontSize: 13.5, fontWeight: 650 }}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white shadow-sm transition-all hover:bg-[#1E293B]"
           >
             <Plus className="h-3.5 w-3.5" />
             New Workflow
@@ -163,18 +160,17 @@ export default function WorkflowsPage() {
       </div>
 
       {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2.5" style={{ marginBottom: 16 }}>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative" style={{ width: 340 }}>
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             placeholder="Search workflows…"
-            className="w-full rounded-lg border border-[#D1D5DB] bg-white pl-8 pr-3 text-[#111827] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-shadow"
-            style={{ height: 36, fontSize: 13.5 }}
+            className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-[13.5px] text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 outline-none transition-all hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {statusFilters.map((f) => (
             <FilterChip
               key={f.value}
@@ -188,7 +184,7 @@ export default function WorkflowsPage() {
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          className="ml-auto flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#6B7280] transition-colors hover:text-[#374151] disabled:opacity-40"
+          className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-slate-300 hover:text-slate-600 disabled:opacity-40"
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </button>
@@ -367,7 +363,7 @@ function EmptyWorkflows({ hasFilters }: { hasFilters: boolean }) {
         <div className="flex items-center gap-2 mt-1">
           <Link
             href={"/workflows/new" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#111827] px-3.5 text-white hover:bg-[#1F2937]"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-white hover:bg-[#1E293B]"
             style={{ fontSize: 13, fontWeight: 650 }}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -375,7 +371,7 @@ function EmptyWorkflows({ hasFilters }: { hasFilters: boolean }) {
           </Link>
           <Link
             href={"/workflows/import" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F1F3F5]"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-slate-600 hover:bg-slate-50"
             style={{ fontSize: 13, fontWeight: 600 }}
           >
             <Upload className="h-3.5 w-3.5" />

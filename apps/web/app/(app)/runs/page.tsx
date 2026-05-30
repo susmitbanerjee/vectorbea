@@ -21,8 +21,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { SearchInput } from "@/components/ui/search-input";
 import { RunsHealthBar } from "@/components/runs/RunsHealthBar";
 import { cn } from "@/lib/utils";
 import type { AgentRun, PaginatedResult, RunStatus } from "@/types/platform";
@@ -291,7 +291,7 @@ export default function RunsPage() {
         </div>
         <Link
           href={"/workflows/new" as Route}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#111827] px-3.5 text-[13px] font-medium text-white shadow-sm transition-all hover:bg-[#1f2937]"
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white shadow-sm transition-all hover:bg-[#1E293B]"
         >
           <Plus className="h-3.5 w-3.5" />
           New Workflow
@@ -305,21 +305,18 @@ export default function RunsPage() {
       <div className="h-px bg-[#E5E7EB]" />
 
       {/* ── Filters row ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
 
         {/* Search */}
-        <div className="relative min-w-[200px] max-w-xs flex-1">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9CA3AF]" />
-          <Input
-            placeholder="Search workflow name…"
-            className="h-8 pl-8 text-[13px]"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+        <SearchInput
+          containerClassName="min-w-[200px] max-w-xs flex-1"
+          placeholder="Search workflow name…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
 
         {/* Status filter chips */}
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {statusFilters.map((f) => {
             const active = statusFilter === f.value;
             return (
@@ -328,10 +325,10 @@ export default function RunsPage() {
                 type="button"
                 onClick={() => setStatusFilter(f.value)}
                 className={cn(
-                  "h-7 rounded-md border px-3 text-[11px] font-medium transition-colors",
+                  "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-colors",
                   active
-                    ? "border-[#111827] bg-[#111827] text-white"
-                    : "border-[#E5E7EB] bg-white text-[#6B7280] hover:border-[#D1D5DB] hover:text-[#374151]",
+                    ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
                 )}
               >
                 {f.label}
@@ -341,7 +338,7 @@ export default function RunsPage() {
         </div>
 
         {/* Time range chips */}
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {TIME_RANGES.map((t) => {
             const active = timeRange === t.value;
             return (
@@ -350,10 +347,10 @@ export default function RunsPage() {
                 type="button"
                 onClick={() => setTimeRange(t.value)}
                 className={cn(
-                  "h-7 rounded-md border px-2.5 text-[11px] font-medium transition-colors",
+                  "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-colors",
                   active
-                    ? "border-[#BFDBFE] bg-[#EFF6FF] text-[#1D4ED8]"
-                    : "border-[#E5E7EB] bg-white text-[#9CA3AF] hover:text-[#6B7280]",
+                    ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                    : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-600",
                 )}
               >
                 {t.label}
@@ -367,11 +364,11 @@ export default function RunsPage() {
           type="button"
           onClick={() => void load(page)}
           disabled={loading}
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-md border border-[#E5E7EB] bg-white text-[#9CA3AF] transition-colors hover:text-[#374151] disabled:opacity-50"
+          className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-slate-300 hover:text-slate-600 disabled:opacity-50"
         >
           {loading
-            ? <Loader2 className="h-3 w-3 animate-spin" />
-            : <RefreshCw className="h-3 w-3" />
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <RefreshCw className="h-3.5 w-3.5" />
           }
         </button>
       </div>

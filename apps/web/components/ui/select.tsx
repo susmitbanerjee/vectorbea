@@ -8,10 +8,24 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ className, children, ...props }, ref) => {
     return (
-      <div className="relative">
+      <div className="relative inline-flex w-full">
         <select
           className={cn(
-            "flex h-9 w-full cursor-pointer appearance-none rounded-xl border border-border bg-card bg-none px-3 py-1 pr-9 text-sm text-foreground shadow-xs transition-all duration-200 hover:border-[#D8CFC2] hover:bg-[#FFFCF7] focus:border-primary/50 focus:bg-card focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 [&>option]:bg-card [&>option]:text-foreground",
+            // Base
+            "h-9 w-full cursor-pointer appearance-none",
+            "rounded-xl border border-slate-200 bg-white",
+            "px-3 py-0 pr-8",
+            "text-[13.5px] font-medium text-slate-600",
+            "shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+            "transition-all duration-150 outline-none",
+            // Hover
+            "hover:border-slate-300 hover:bg-slate-50",
+            // Focus
+            "focus:border-blue-400 focus:ring-4 focus:ring-blue-100",
+            // Option colours (best-effort in browser-rendered selects)
+            "[&>option]:bg-white [&>option]:text-slate-800",
+            // Disabled
+            "disabled:cursor-not-allowed disabled:opacity-50",
             className,
           )}
           ref={ref}
@@ -19,7 +33,9 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         >
           {children}
         </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <ChevronDown
+          className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+        />
       </div>
     );
   },

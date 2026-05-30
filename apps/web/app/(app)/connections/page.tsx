@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Connection, ConnectionType, ConnectionStatus } from "@/types/connections";
 import { getConnections, getConnection, testConnection, deleteConnection } from "@/lib/repository";
+import { SearchInput } from "@/components/ui/search-input";
 
 // ─── Connection type meta ─────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ export default function ConnectionsPage() {
           </button>
           <Link
             href={"/connections/new" as never}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-[13px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1E293B]"
           >
             <Plus className="h-3.5 w-3.5" />
             New Connection
@@ -319,17 +320,14 @@ export default function ConnectionsPage() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* ── Filters ─────────────────────────────────────────────────────── */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-48">
-          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/40" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search connections…"
-            className="h-9 w-full rounded-lg border border-border/50 bg-background pl-9 pr-3 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30"
-          />
-        </div>
+        <SearchInput
+          containerClassName="flex-1 min-w-48 max-w-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search connections…"
+        />
         <div className="flex flex-wrap gap-1.5">
           {TYPE_FILTERS.map((f) => (
             <button
@@ -337,10 +335,10 @@ export default function ConnectionsPage() {
               type="button"
               onClick={() => setTypeFilter(f.value as ConnectionType | "all")}
               className={cn(
-                "rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-all",
+                "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-all",
                 typeFilter === f.value
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground",
+                  ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
               )}
             >
               {f.label}
@@ -379,7 +377,7 @@ export default function ConnectionsPage() {
           </p>
           <Link
             href={"/connections/new" as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground hover:bg-primary/90"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13px] font-semibold text-white hover:bg-[#1E293B]"
           >
             <Plus className="h-3 w-3" />
             New Connection
