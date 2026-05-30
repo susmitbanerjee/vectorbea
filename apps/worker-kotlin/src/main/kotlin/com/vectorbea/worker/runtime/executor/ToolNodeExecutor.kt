@@ -289,6 +289,28 @@ class ToolNodeExecutor(
         // Base from tool's stored config
         result.putAll(tool.configJson)
 
+        // ── SaaS tool defaults (when config_json only has uiToolType) ────────────
+        // Tools created via the SaaS connector UI only store the display type.
+        // Inject known API endpoints and methods so the HTTP executor has something to call.
+        val uiType = (tool.configJson["uiToolType"] as? String)?.lowercase()
+        if (result["url"] == null && result["urlTemplate"] == null) {
+            when (uiType) {
+                "slack" -> {
+                    result["url"]    = "https://slack.com/api/chat.postMessage"
+                    result["method"] = "POST"
+                }
+                "email", "gmail" -> {
+                    // GMail REST API — caller must supply auth via connection
+                    result["url"]    = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+                    result["method"] = "POST"
+                }
+            }
+        }
+        // Default method to POST for SaaS tools if not already set
+        if (uiType != null && result["method"] == null) {
+            result["method"] = "POST"
+        }
+
         // Remap HTTP tool keys.
         // urlTemplate / bodyTemplate are the stored forms; HttpNodeExecutor reads "url" / "body".
         (tool.configJson["urlTemplate"] as? String)?.let { result["url"] = it }
@@ -330,11 +352,11 @@ class ToolNodeExecutor(
                     tool.name, tool.type, resolvedJson.take(300))
                 result["body"] = resolvedJson
             }
-        } else if (resolvedInputs.isNotEmpty() &&
-                   (tool.type == "http" || tool.type == "slack" || tool.type == "email")) {
-            // No explicit body — pass resolved inputs (from node input mapping) as JSON body
-            log.info("[tool] using resolvedInputs as body [toolName={}, type={}, keys={}]",
-                tool.name, tool.type, resolvedInputs.keys)
+        } else if (resolvedInputs.isNotEmpty()) {
+            // No explicit body — pass resolved inputs (from node input mapping) as JSON body.
+            // Applies to http, slack, email, and any SaaS tool type.
+            log.info("[tool] using resolvedInputs as body [toolName={}, type={}, uiType={}, keys={}]",
+                tool.name, tool.type, uiType, resolvedInputs.keys)
             result["body"] = resolvedInputs
         }
 
