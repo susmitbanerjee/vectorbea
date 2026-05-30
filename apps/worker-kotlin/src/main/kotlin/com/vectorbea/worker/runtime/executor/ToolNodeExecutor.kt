@@ -73,7 +73,7 @@ class ToolNodeExecutor(
 
         // Build a synthetic WorkflowNode with the tool's resolved config so existing
         // executor implementations (HttpNodeExecutor, etc.) work without modification.
-        val syntheticConfig = buildSyntheticConfig(tool, node.config, resolvedInputs)
+        val syntheticConfig = buildSyntheticConfig(tool, node.config, resolvedInputs, ctx)
         val syntheticNode   = node.copy(config = syntheticConfig)
 
         val result: NodeResult = when (tool.type) {
@@ -113,6 +113,74 @@ class ToolNodeExecutor(
             durationMs = durationMs)
 
         return result
+    }
+
+    // ── Template expression resolver ─────────────────────────────────────────
+
+    /**
+     * Resolve a single {{expr}} from the body/URL template.
+     *
+     * Resolution order:
+     *  1. `steps.NodeLabel.output.field` or `steps.nodeId.output.field`
+     *     → look up the completed step's output in RuntimeContext
+     *  2. `workflow.input.key` → workflow input
+     *  3. bare `key` or `path.key` → resolvedInputs lookup
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun resolveBodyExpr(
+        expr: String,
+        resolvedInputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): Any? {
+        // 1. steps.X.output.field[.nested...]
+        if (expr.startsWith("steps.")) {
+            val rest  = expr.removePrefix("steps.")
+            val parts = rest.split(".", limit = 3)
+            // parts[0] = node label/id, parts[1] = "output", parts[2...] = field path
+            if (parts.size >= 2) {
+                val ref  = parts[0]
+                val tier = if (parts.size >= 2) parts[1] else "output"
+                val path = if (parts.size >= 3) parts[2] else ""
+
+                // Resolve node by label OR id (case-insensitive, space/underscore tolerant)
+                val nodeId = ctx.graph.nodes.firstOrNull { node ->
+                    node.id == ref ||
+                    node.label.equals(ref, ignoreCase = true) ||
+                    node.label.replace(" ", "").equals(ref, ignoreCase = true) ||
+                    node.label.replace(" ", "_").equals(ref, ignoreCase = true)
+                }?.id ?: ref  // fall back to treating ref as a literal node ID
+
+                val output = ctx.getOutput(nodeId)
+                if (output.isNotEmpty()) {
+                    // Resolve nested path e.g. "account_name" or "nested.field"
+                    val data = when (tier) {
+                        "output" -> output
+                        else     -> output
+                    }
+                    val resolved = if (path.isEmpty()) data
+                    else {
+                        var current: Any? = data
+                        for (segment in path.split(".")) {
+                            current = (current as? Map<String, Any?>)?.get(segment) ?: break
+                        }
+                        current
+                    }
+                    if (resolved != null) return resolved
+                }
+            }
+        }
+
+        // 2. workflow.input.key
+        if (expr.startsWith("workflow.input.")) {
+            val key = expr.removePrefix("workflow.input.")
+            return ctx.workflowInput[key]
+        }
+
+        // 3. bare key or path.key — check resolvedInputs
+        val key = expr.substringAfterLast('.')
+        return resolvedInputs[key]
+            ?: resolvedInputs[expr]
+            ?: resolvedInputs[expr.replace(".", "_")]
     }
 
     // ── Tool row ──────────────────────────────────────────────────────────────
@@ -184,6 +252,7 @@ class ToolNodeExecutor(
         tool: ToolRow,
         nodeConfig: Map<String, Any>,
         resolvedInputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
     ): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
 
@@ -208,10 +277,7 @@ class ToolNodeExecutor(
                 val TEMPLATE_REGEX = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
                 TEMPLATE_REGEX.replace(rawBody) { match ->
                     val expr  = match.groupValues[1].trim()
-                    val key   = expr.substringAfterLast('.')
-                    val value = resolvedInputs[key]
-                        ?: resolvedInputs[expr]
-                        ?: resolvedInputs[expr.replace(".", "_")]
+                    val value = resolveBodyExpr(expr, resolvedInputs, ctx)
                     when (value) {
                         null          -> ""
                         is Number     -> value.toString()
@@ -220,13 +286,8 @@ class ToolNodeExecutor(
                                               .replace("\"", "\\\"")
                                               .replace("\n", "\\n")
                                               .replace("\r", "")
-                        // Maps/Lists from agent output: serialize as compact JSON so
-                        // Slack receives readable content rather than Kotlin's {key=value}
-                        else          -> try {
-                            mapper.writeValueAsString(value)
-                        } catch (_: Exception) {
-                            value.toString()
-                        }
+                        else          -> try { mapper.writeValueAsString(value) }
+                                         catch (_: Exception) { value.toString() }
                     }
                 }
             } else rawBody
