@@ -31,6 +31,12 @@ open class RunEventStore(
     private val log = logger()
 
     /**
+     * Per-run in-memory locks for serializing event sequence assignment.
+     * Acquired before requesting a DB connection to avoid pool exhaustion.
+     */
+    private val runLocks = java.util.concurrent.ConcurrentHashMap<UUID, java.util.concurrent.locks.ReentrantLock>()
+
+    /**
      * Immutable event to persist and publish.
      *
      * Only [title], [summary], [metadataJsonSanitized], and [errorJsonSanitized]
@@ -156,29 +162,36 @@ open class RunEventStore(
     // ── DB insert ─────────────────────────────────────────────────────────────
 
     /**
-     * Insert the event, serialized per run via a PostgreSQL advisory lock.
+     * Insert the event, serialized per run via an in-memory ReentrantLock.
      *
-     * WHY advisory locks are needed:
-     * Parallel workflow branches emit events concurrently on separate threads.
-     * `SELECT MAX(sequence)+1` is not atomic — two threads can read the same
-     * MAX value before either commits, causing a unique-constraint violation on
-     * `(run_id, sequence)`.
+     * WHY in-memory locks instead of advisory locks or retries:
      *
-     * `pg_advisory_xact_lock(key)` holds an exclusive lock for the duration of
-     * the transaction, serializing sequence assignment for events with the same
-     * run_id without requiring a separate lock table or SERIALIZABLE isolation.
+     * - Retries: `SELECT MAX(sequence)+1` races under concurrency; 5 retries at
+     *   10-50ms are insufficient when 4 branches emit events simultaneously.
      *
-     * Effect: events from 4 concurrent parallel branches are still all written,
-     * just not simultaneously — the lock ensures correct sequence numbers with
-     * zero dropped events even under high concurrency.
+     * - Advisory locks (pg_advisory_xact_lock): holds a DB connection while
+     *   waiting for the lock. With a 5-connection pool and 4 parallel branches
+     *   each trying to acquire the same advisory lock, the pool exhausts before
+     *   all branches get connections — causing connection-timeout failures that
+     *   silently kill 3 of 4 parallel agent branches.
+     *
+     * - In-memory ReentrantLock per run_id: the lock is acquired BEFORE a
+     *   DB connection is requested. Only one thread needs a connection at a time
+     *   for events from the same run, so the 5-connection pool is never
+     *   exhausted by event writes. Zero dropped events, no deadlock.
      */
     private fun insertEvent(event: RunEvent): Int {
-        return try {
-            doInsert(event)
+        // Get (or create) the per-run lock — ~48 bytes per entry, negligible
+        val lock = runLocks.computeIfAbsent(event.runId) { java.util.concurrent.locks.ReentrantLock() }
+        lock.lock()
+        try {
+            return doInsert(event)
         } catch (e: Exception) {
             log.error("[events] failed to insert event [runId={}, type={}]: {}",
                 event.runId, event.type.value, e.message)
             throw e
+        } finally {
+            lock.unlock()
         }
     }
 
@@ -186,15 +199,6 @@ open class RunEventStore(
         return dataSource.connection.use { conn ->
             conn.autoCommit = false
             try {
-                // Advisory lock: serializes ALL event inserts for this run_id.
-                // hashtext(uuid) → int4; cast to bigint for pg_advisory_xact_lock(bigint).
-                // Lock is automatically released when the transaction commits/rolls back.
-                conn.prepareStatement(
-                    "SELECT pg_advisory_xact_lock(hashtext(?::text)::bigint)"
-                ).use { lock ->
-                    lock.setString(1, event.runId.toString())
-                    lock.execute()
-                }
                 val seq = nextSequence(conn, event.runId)
                 conn.prepareStatement(INSERT_SQL).use { stmt ->
                     bindInsert(stmt, event, seq)
