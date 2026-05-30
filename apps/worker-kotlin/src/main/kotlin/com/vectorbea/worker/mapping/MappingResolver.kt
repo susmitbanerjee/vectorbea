@@ -129,10 +129,18 @@ object MappingResolver {
         }
 
         return when {
+            // Full form: {{workflow.input.key}}
             expr.startsWith("workflow.input.") -> {
                 val path = expr.removePrefix("workflow.input.")
                 JsonPathResolver.resolvePathInMap(path, ctx.workflowInput)
                     ?: throw MappingException("workflow.input.$path is not defined in the workflow input")
+            }
+
+            // Short form alias: {{input.key}} → same as {{workflow.input.key}}
+            expr.startsWith("input.") -> {
+                val path = expr.removePrefix("input.")
+                JsonPathResolver.resolvePathInMap(path, ctx.workflowInput)
+                    ?: throw MappingException("input.$path is not defined in the workflow input")
             }
 
             expr.startsWith("run.") -> {
@@ -143,7 +151,10 @@ object MappingResolver {
                 resolveStepReference(expr.removePrefix("steps."), ctx, stepOutputs)
             }
 
-            else -> throw MappingException("Unknown mapping namespace in expression '$expr'. Valid namespaces: workflow.input, run, steps")
+            else -> throw MappingException(
+                "Unknown mapping namespace in expression '$expr'. " +
+                "Valid namespaces: workflow.input (or just input), run, steps"
+            )
         }
     }
 
