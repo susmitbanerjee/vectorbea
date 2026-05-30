@@ -272,7 +272,11 @@ export default function WorkflowBuilderPage() {
       setNodes((nds) =>
         nds.map((n) => {
           const newStatus = statusMap[n.id];
-          if (!newStatus || n.data.previewStatus === newStatus) return n;
+          if (!newStatus) return n;
+          // Always create a new node object when statusMap has an entry —
+          // the equality check was causing React to skip re-renders when the
+          // computed status matched the previous status (both "succeeded"),
+          // leaving some nodes stale at "running".
           return { ...n, data: { ...n.data, previewStatus: newStatus } };
         })
       );
