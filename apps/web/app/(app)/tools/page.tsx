@@ -20,7 +20,6 @@ const TOOL_TYPE_LABELS: Record<string, string> = {
   database_read:    "Database (Read)",
   database_write:   "Database (Write)",
   database:         "Database",
-  slack:            "Slack",
   email:            "Email",
   crm:              "CRM",
   mcp_tool:         "MCP",

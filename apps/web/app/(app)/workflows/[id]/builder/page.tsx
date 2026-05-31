@@ -167,22 +167,66 @@ function ValidationBadge({ issueCount, valid }: { issueCount: number; valid: boo
 // ─── Custom connection line (shown while dragging to connect nodes) ───────────
 
 function ConnectionLine({ fromX, fromY, toX, toY }: ConnectionLineComponentProps) {
-  // Bezier-style cubic approximation for the in-progress connection
-  const midX = (fromX + toX) / 2;
-  const d = `M${fromX},${fromY} C${midX},${fromY} ${midX},${toY} ${toX},${toY}`;
+  // Smart path: straight when aligned, elbow otherwise — matches committed edge style
+  const TOLERANCE = 10;
+  const CORNER_R = 8;
+  let d: string;
+
+  if (Math.abs(fromY - toY) <= TOLERANCE) {
+    // Horizontal straight
+    d = `M ${fromX} ${fromY} L ${toX} ${toY}`;
+  } else if (Math.abs(fromX - toX) <= TOLERANCE) {
+    // Vertical straight
+    d = `M ${fromX} ${fromY} L ${toX} ${toY}`;
+  } else if (fromX < toX - 60 && Math.abs(fromY - toY) < 80) {
+    // Horizontal elbow (source to the left)
+    const midX = (fromX + toX) / 2;
+    const dy = toY - fromY;
+    const dirY = dy >= 0 ? 1 : -1;
+    const r = Math.min(CORNER_R, Math.abs(midX - fromX) / 2, Math.abs(dy) / 2);
+    d = r < 3
+      ? `M ${fromX} ${fromY} L ${midX} ${fromY} L ${midX} ${toY} L ${toX} ${toY}`
+      : [
+          `M ${fromX} ${fromY}`,
+          `L ${midX - r} ${fromY}`,
+          `Q ${midX} ${fromY} ${midX} ${fromY + dirY * r}`,
+          `L ${midX} ${toY - dirY * r}`,
+          `Q ${midX} ${toY} ${midX + r} ${toY}`,
+          `L ${toX} ${toY}`,
+        ].join(" ");
+  } else {
+    // Vertical elbow (default Bottom→Top flow)
+    const midY = (fromY + toY) / 2;
+    const dx = toX - fromX;
+    const dirX = dx >= 0 ? 1 : -1;
+    const r = Math.min(CORNER_R, Math.abs(dx) / 2, Math.abs(midY - fromY));
+    d = r < 3
+      ? `M ${fromX} ${fromY} L ${fromX} ${midY} L ${toX} ${midY} L ${toX} ${toY}`
+      : [
+          `M ${fromX} ${fromY}`,
+          `L ${fromX} ${midY - r}`,
+          `Q ${fromX} ${midY} ${fromX + dirX * r} ${midY}`,
+          `L ${toX - dirX * r} ${midY}`,
+          `Q ${toX} ${midY} ${toX} ${midY + r}`,
+          `L ${toX} ${toY}`,
+        ].join(" ");
+  }
+
   return (
     <g>
-      {/* Glowing solid line while dragging */}
+      {/* Ghost/preview connector while dragging */}
       <path
         d={d}
         fill="none"
-        stroke="rgba(99,179,237,0.9)"
-        strokeWidth={2}
+        stroke="#3B82F6"
+        strokeWidth={1.75}
         strokeLinecap="round"
-        style={{ filter: "drop-shadow(0 0 4px rgba(99,179,237,0.8))" }}
+        strokeLinejoin="round"
+        strokeDasharray="5 4"
+        style={{ filter: "drop-shadow(0 0 3px rgba(59,130,246,0.5))" }}
       />
-      {/* Target dot */}
-      <circle cx={toX} cy={toY} r={4} fill="rgba(99,179,237,0.9)" />
+      {/* Landing dot at target end */}
+      <circle cx={toX} cy={toY} r={4} fill="#3B82F6" opacity={0.9} />
     </g>
   );
 }
@@ -760,21 +804,23 @@ export default function WorkflowBuilderPage() {
             edgeTypes={edgeTypes}
             defaultEdgeOptions={{ type: "workflow", data: { edgeType: "default" } }}
             connectionLineComponent={ConnectionLine}
-            connectionLineType={ConnectionLineType.Bezier}
+            connectionLineType={ConnectionLineType.Straight}
             selectionMode={SelectionMode.Partial}
+            snapToGrid
+            snapGrid={[20, 20]}
             fitView
             fitViewOptions={{ padding: 0.15 }}
             minZoom={0.2}
             maxZoom={2}
             deleteKeyCode="Delete"
             multiSelectionKeyCode="Shift"
-            style={{ background: "#f0f2f5" }}
+            style={{ background: "#F8FAFC" }}
           >
             <Background
               variant={BackgroundVariant.Dots}
               gap={20}
-              size={1}
-              color="rgba(100,116,139,0.28)"
+              size={1.2}
+              color="rgba(148,163,184,0.35)"
             />
             <Controls
               className="!bottom-4 !left-4"

@@ -19,7 +19,6 @@ const TOOL_TYPES: { type: ToolType; label: string }[] = [
   { type: "mcp_tool",        label: "MCP" },
   { type: "database_read",   label: "Database (Read)" },
   { type: "database_write",  label: "Database (Write)" },
-  { type: "slack",           label: "Slack" },
   { type: "email",           label: "Email" },
   { type: "crm",             label: "CRM" },
   { type: "custom_function", label: "Custom Function" },

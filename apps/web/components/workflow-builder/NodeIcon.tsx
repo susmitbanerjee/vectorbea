@@ -26,7 +26,6 @@ import {
   Package,
   PlayCircle,
   RotateCcw,
-  Send,
   Server,
   ShieldCheck,
   Split,
@@ -220,14 +219,6 @@ export function getNodeMeta(type: WFNodeType): NodeMeta {
 // When a node is of type "tool", use the toolType to pick a richer icon.
 
 export const TOOL_TYPE_META: Record<string, NodeMeta> = {
-  slack: {
-    icon: Send,
-    color: "#4A154B",
-    bgColor: "#F4EDF7",
-    borderColor: "#C9A8D4",
-    label: "Slack",
-    description: "Send or read Slack messages",
-  },
   email: {
     icon: Mail,
     color: "#0072C6",

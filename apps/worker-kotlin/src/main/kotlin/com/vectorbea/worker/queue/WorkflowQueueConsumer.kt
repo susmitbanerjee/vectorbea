@@ -7,11 +7,13 @@ import io.lettuce.core.Consumer
 import io.lettuce.core.RedisBusyException
 import io.lettuce.core.StreamMessage
 import io.lettuce.core.XReadArgs
+import io.lettuce.core.XAutoClaimArgs
 import io.lettuce.core.api.sync.RedisCommands
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Redis Streams consumer group worker.
@@ -63,6 +65,12 @@ class WorkflowQueueConsumer(
 
     /** Consumer identity in the Redis Streams consumer group. */
     private val consumer = Consumer.from(config.queueGroup, config.workerId)
+
+    /** How long a message can be in the PEL before we reclaim it (ms). */
+    private val pendingIdleMs = (System.getenv("WORKER_PENDING_JOB_IDLE_MS") ?: "60000").toLong()
+    /** How often to run the reclaim scan (ms). */
+    private val reclaimIntervalMs = (System.getenv("WORKER_RECLAIM_INTERVAL_MS") ?: "30000").toLong()
+    private val lastReclaimAt = AtomicLong(0L)
 
     // ── Startup ───────────────────────────────────────────────────────────────
 
@@ -116,6 +124,24 @@ class WorkflowQueueConsumer(
      *   2. Wait for the poll thread to exit.
      *   3. Shut down the job pool, waiting up to [drainTimeoutSeconds] for in-flight jobs.
      */
+    /**
+     * Enqueue a synthesized job (from crash recovery or timer scheduler).
+     * Unlike normal Redis Stream jobs, these are submitted directly to the job pool.
+     */
+    fun enqueueRecovery(job: WorkflowRunJob) {
+        if (!running.get()) throw IllegalStateException("Consumer stopped")
+        inFlight.incrementAndGet()
+        jobPool.submit {
+            try {
+                processor.process(job)
+            } catch (e: Exception) {
+                log.error("[queue] recovery job failed [runId={}]: {}", job.runId, e.message)
+            } finally {
+                inFlight.decrementAndGet()
+            }
+        }
+    }
+
     fun stop(drainTimeoutSeconds: Long = 30L) {
         log.info("[queue] stopping consumer (drain timeout={}s)…", drainTimeoutSeconds)
         running.set(false)
@@ -145,6 +171,13 @@ class WorkflowQueueConsumer(
                 if (inFlight.get() >= config.concurrency) {
                     Thread.sleep(200)
                     continue
+                }
+
+                // Periodically reclaim pending messages from dead workers (XAUTOCLAIM)
+                val now = System.currentTimeMillis()
+                if (now - lastReclaimAt.get() > reclaimIntervalMs) {
+                    lastReclaimAt.set(now)
+                    reclaimPendingMessages()
                 }
 
                 val messages = readMessages()
@@ -222,6 +255,38 @@ class WorkflowQueueConsumer(
             log.debug("[queue] XACK [msgId={}]", messageId)
         } catch (e: Exception) {
             log.warn("[queue] XACK failed [msgId={}]: {}", messageId, e.message)
+        }
+    }
+
+    /**
+     * Reclaim messages that have been in the Pending Entries List longer than
+     * [pendingIdleMs]. This recovers jobs that were claimed by a crashed worker.
+     *
+     * Uses XAUTOCLAIM (Redis 6.2+) to atomically claim and return idle messages.
+     * Reclaimed messages are processed by this worker — idempotency guards
+     * in RunProcessor/StepExecutionGuard prevent duplicate side effects.
+     */
+    private fun reclaimPendingMessages() {
+        try {
+            // XAUTOCLAIM: claim messages idle for pendingIdleMs, starting from 0-0
+            val claimed = redis.xautoclaim(
+                config.queueStream,
+                XAutoClaimArgs.Builder
+                    .xautoclaim(consumer, pendingIdleMs, "0-0")
+                    .count(config.pollBatchSize.toLong()),
+            )
+            val messages = claimed?.claimedMessages ?: return
+            if (messages.isNotEmpty()) {
+                log.info("[queue] reclaimed {} pending message(s) from idle workers", messages.size)
+                messages.forEach { msg -> dispatchMessage(msg) }
+            }
+        } catch (e: Exception) {
+            if (e.message?.contains("XAUTOCLAIM") == true || e.message?.contains("unknown command") == true) {
+                // Redis < 6.2 — XAUTOCLAIM not available, skip reclaim
+                log.debug("[queue] XAUTOCLAIM not available (Redis < 6.2) — pending recovery disabled")
+            } else {
+                log.warn("[queue] reclaimPendingMessages failed: {}", e.message)
+            }
         }
     }
 }

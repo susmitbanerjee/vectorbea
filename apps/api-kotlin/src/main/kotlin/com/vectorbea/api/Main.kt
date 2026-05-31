@@ -1,6 +1,8 @@
 package com.vectorbea.api
 
 import com.vectorbea.api.auth.AuthMiddleware
+import com.vectorbea.api.recovery.FailureIncidentRepository
+import com.vectorbea.api.recovery.FailureIncidentRoutes
 import com.vectorbea.api.auth.JwtVerifier
 import com.vectorbea.api.cache.NoOpCacheService
 import com.vectorbea.api.users.AppUserRepository
@@ -36,6 +38,8 @@ import com.vectorbea.api.routes.VersionRoutes
 import com.vectorbea.api.routes.BootstrapRoutes
 import com.vectorbea.api.routes.SchemaPreviewRoutes
 import com.vectorbea.api.routes.WorkerRoutes
+import com.vectorbea.api.routes.AgentIterationRoutes
+import com.vectorbea.api.routes.DurableRunRoutes
 import com.vectorbea.api.routes.MeRoutes
 import com.vectorbea.api.routes.WorkflowRoutes
 import com.vectorbea.api.secrets.EncryptedSecretService
@@ -268,6 +272,12 @@ fun main() {
     if (appUserRepo != null) {
         MeRoutes(appUserRepo).register(router)
     } else log.warn("MeRoutes disabled — no database")
+
+    if (ds != null) {
+        FailureIncidentRoutes(FailureIncidentRepository(ds)).register(router)
+        DurableRunRoutes(ds, workflowQueue).register(router)
+        AgentIterationRoutes(ds).register(router)
+    } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
     // 8. HTTP server
     val server = HttpServer(config, router, authMiddleware)

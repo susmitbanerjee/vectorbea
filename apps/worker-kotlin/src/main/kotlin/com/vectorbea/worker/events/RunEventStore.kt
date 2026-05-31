@@ -143,6 +143,41 @@ open class RunEventStore(
         NODE_FAILED("NODE_FAILED"),
         NODE_SKIPPED("NODE_SKIPPED"),
         WORKER_CLAIMED("WORKER_CLAIMED"),
+        // Durable execution — history limits
+        HISTORY_LIMIT_WARNING("HISTORY_LIMIT_WARNING"),
+        CONTINUE_AS_NEW_RECOMMENDED("CONTINUE_AS_NEW_RECOMMENDED"),
+        CONTINUE_AS_NEW_REQUESTED("CONTINUE_AS_NEW_REQUESTED"),
+        CONTINUE_AS_NEW_STARTED("CONTINUE_AS_NEW_STARTED"),
+        CONTINUE_AS_NEW_COMPLETED("CONTINUE_AS_NEW_COMPLETED"),
+        RUN_CONTINUED_AS_NEW("RUN_CONTINUED_AS_NEW"),
+        // Durable execution — timers
+        TIMER_SCHEDULED("TIMER_SCHEDULED"),
+        TIMER_FIRED("TIMER_FIRED"),
+        TIMER_CANCELLED("TIMER_CANCELLED"),
+        // Durable execution — leases + crash recovery
+        RUN_LEASE_ACQUIRED("RUN_LEASE_ACQUIRED"),
+        RUN_LEASE_RENEWED("RUN_LEASE_RENEWED"),
+        RUN_LEASE_EXPIRED("RUN_LEASE_EXPIRED"),
+        RUN_RECOVERY_STARTED("RUN_RECOVERY_STARTED"),
+        RUN_RECOVERY_COMPLETED("RUN_RECOVERY_COMPLETED"),
+        // Durable execution — failure incidents
+        FAILURE_INCIDENT_CREATED("FAILURE_INCIDENT_CREATED"),
+        // Agent Brain — iterative loop events
+        AGENT_ITERATION_STARTED("AGENT_ITERATION_STARTED"),
+        AGENT_ACTION_SELECTED("AGENT_ACTION_SELECTED"),
+        AGENT_TOOL_SELECTED("AGENT_TOOL_SELECTED"),
+        AGENT_TOOL_NOT_ALLOWED("AGENT_TOOL_NOT_ALLOWED"),
+        AGENT_OBSERVATION_RECORDED("AGENT_OBSERVATION_RECORDED"),
+        AGENT_MEMORY_UPDATED("AGENT_MEMORY_UPDATED"),
+        AGENT_REFLECTION_CREATED("AGENT_REFLECTION_CREATED"),
+        AGENT_FINAL_OUTPUT_CREATED("AGENT_FINAL_OUTPUT_CREATED"),
+        AGENT_OUTPUT_VALIDATED("AGENT_OUTPUT_VALIDATED"),
+        AGENT_OUTPUT_SCHEMA_INVALID("AGENT_OUTPUT_SCHEMA_INVALID"),
+        AGENT_BUDGET_EXCEEDED("AGENT_BUDGET_EXCEEDED"),
+        AGENT_MAX_ITERATIONS_REACHED("AGENT_MAX_ITERATIONS_REACHED"),
+        AGENT_INVALID_ACTION("AGENT_INVALID_ACTION"),
+        AGENT_APPROVAL_REQUESTED("AGENT_APPROVAL_REQUESTED"),
+        AGENT_PLAN_CREATED("AGENT_PLAN_CREATED"),
     }
 
     /**
@@ -204,9 +239,22 @@ open class RunEventStore(
                     bindInsert(stmt, event, seq)
                     stmt.executeUpdate()
                 }
+                // Update history tracking counters on agent_runs
+                val estimatedSize = estimateEventSize(event)
+                conn.prepareStatement("""
+                    UPDATE agent_runs
+                    SET history_event_count = history_event_count + 1,
+                        history_size_bytes  = history_size_bytes + ?,
+                        updated_at          = now()
+                    WHERE id = ?
+                """.trimIndent()).use { stmt ->
+                    stmt.setLong(1, estimatedSize)
+                    stmt.setObject(2, event.runId)
+                    stmt.executeUpdate()
+                }
                 conn.commit()
-                log.debug("[events] inserted event [runId={}, type={}, seq={}]",
-                    event.runId, event.type.value, seq)
+                log.debug("[events] inserted event [runId={}, type={}, seq={}, estimatedSize={}]",
+                    event.runId, event.type.value, seq, estimatedSize)
                 seq
             } catch (e: Exception) {
                 conn.rollback()
@@ -215,6 +263,21 @@ open class RunEventStore(
                 conn.autoCommit = true
             }
         }
+    }
+
+    /**
+     * Rough estimate of the serialized size of an event in bytes.
+     * Used for history_size_bytes tracking — precision not required.
+     */
+    private fun estimateEventSize(event: RunEvent): Long {
+        var size = 200L  // base overhead: column names, types, timestamps, UUID fields
+        size += event.type.value.length
+        size += event.status.length
+        size += event.title?.length ?: 0
+        size += event.summary?.length ?: 0
+        size += event.metadataJsonSanitized?.length ?: 0
+        size += event.errorJsonSanitized?.length ?: 0
+        return size.coerceAtLeast(100)
     }
 
     private fun nextSequence(conn: java.sql.Connection, runId: UUID): Int {

@@ -1,61 +1,167 @@
 /**
- * WorkflowEdge — custom edge with:
- *  • Directed arrowhead per edge type
- *  • Animated flowing dash (stroke-dashoffset animation)
- *  • Color-coded per edge semantics (success, failure, conditional, etc.)
- *  • Label chip rendered via EdgeLabelRenderer
+ * WorkflowEdge — premium connector with smart path routing.
+ *
+ * Routing logic:
+ *  • Right→Left handles: straight horizontal when |Δy| ≤ tolerance; else orthogonal elbow
+ *  • Bottom→Top handles: straight vertical when |Δx| ≤ tolerance; else orthogonal elbow
+ *  • Smooth rounded elbows using SVG Q (quadratic bezier) for corners
+ *
+ * Visuals:
+ *  • Static solid stroke by default (no always-on animation — clean canvas)
+ *  • Animated flowing dash ONLY when edge.data.isRunning === true
+ *  • Clean concave arrowhead aligned to path direction
+ *  • Selected: blue accent, wider stroke, subtle glow
+ *  • Edge type colors: success=green, failure=red, conditional=appropriate
  */
 
 "use client";
 
 import { memo } from "react";
-import { EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from "@xyflow/react";
+import {
+  EdgeLabelRenderer,
+  Position,
+  type Edge,
+  type EdgeProps,
+} from "@xyflow/react";
 import type { WFEdgeData, WFEdgeType } from "@/types/workflow-graph";
 
 type WFEdge = Edge<WFEdgeData>;
 
+// ─── Routing constants ────────────────────────────────────────────────────────
+
+/** px: within this Δ the connector snaps to a perfectly straight line */
+const ALIGNMENT_TOLERANCE = 10;
+/** px: radius for elbow rounded corners */
+const CORNER_RADIUS = 10;
+
 // ─── Per-edge-type style config ───────────────────────────────────────────────
 
-const EDGE_STYLES: Record<
-  WFEdgeType,
-  { stroke: string; labelBg: string; labelColor: string; labelBorder: string; dasharray: string; speed: string }
-> = {
-  default:           { stroke: "#94A3B8",  dasharray: "6 3",  speed: "1.6s", labelBg: "#FFFFFF", labelColor: "#475569", labelBorder: "#E2E8F0" },
-  success:           { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
-  failure:           { stroke: "#DC2626",  dasharray: "4 4",  speed: "0.8s", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
-  conditional_true:  { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
-  conditional_false: { stroke: "#EA580C",  dasharray: "4 4",  speed: "1.2s", labelBg: "#FFF7ED", labelColor: "#C2410C", labelBorder: "#FED7AA" },
-  parallel:          { stroke: "#0891B2",  dasharray: "5 3",  speed: "1.0s", labelBg: "#ECFEFF", labelColor: "#0E7490", labelBorder: "#A5F3FC" },
-  parallel_branch:   { stroke: "#0891B2",  dasharray: "5 3",  speed: "1.0s", labelBg: "#ECFEFF", labelColor: "#0E7490", labelBorder: "#A5F3FC" },
-  approval_approved: { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
-  approved:          { stroke: "#16A34A",  dasharray: "6 3",  speed: "1.2s", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
-  approval_rejected: { stroke: "#DC2626",  dasharray: "4 4",  speed: "0.8s", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
-  rejected:          { stroke: "#DC2626",  dasharray: "4 4",  speed: "0.8s", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
-  join:              { stroke: "#4F46E5",  dasharray: "5 3",  speed: "1.4s", labelBg: "#EEF2FF", labelColor: "#4338CA", labelBorder: "#C7D2FE" },
-  timeout:           { stroke: "#EA580C",  dasharray: "3 3",  speed: "0.9s", labelBg: "#FFF7ED", labelColor: "#C2410C", labelBorder: "#FED7AA" },
+type EdgeStyleCfg = {
+  stroke: string;
+  labelBg: string;
+  labelColor: string;
+  labelBorder: string;
 };
 
-// ─── CSS injected once into the document ─────────────────────────────────────
-// We use a SVG <defs><style> approach so it stays scoped to the SVG context.
+const EDGE_STYLES: Record<WFEdgeType, EdgeStyleCfg> = {
+  default:           { stroke: "#94A3B8", labelBg: "#FFFFFF", labelColor: "#475569", labelBorder: "#E2E8F0" },
+  success:           { stroke: "#16A34A", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  failure:           { stroke: "#DC2626", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
+  conditional_true:  { stroke: "#16A34A", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  conditional_false: { stroke: "#EA580C", labelBg: "#FFF7ED", labelColor: "#C2410C", labelBorder: "#FED7AA" },
+  parallel:          { stroke: "#0891B2", labelBg: "#ECFEFF", labelColor: "#0E7490", labelBorder: "#A5F3FC" },
+  parallel_branch:   { stroke: "#0891B2", labelBg: "#ECFEFF", labelColor: "#0E7490", labelBorder: "#A5F3FC" },
+  approval_approved: { stroke: "#16A34A", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  approved:          { stroke: "#16A34A", labelBg: "#ECFDF5", labelColor: "#15803D", labelBorder: "#BBF7D0" },
+  approval_rejected: { stroke: "#DC2626", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
+  rejected:          { stroke: "#DC2626", labelBg: "#FEF2F2", labelColor: "#B91C1C", labelBorder: "#FECACA" },
+  join:              { stroke: "#4F46E5", labelBg: "#EEF2FF", labelColor: "#4338CA", labelBorder: "#C7D2FE" },
+  timeout:           { stroke: "#EA580C", labelBg: "#FFF7ED", labelColor: "#C2410C", labelBorder: "#FED7AA" },
+};
 
-const ANIM_CSS = `
-@keyframes wfDashFlow {
-  from { stroke-dashoffset: 36; }
-  to   { stroke-dashoffset: 0;  }
-}
-@keyframes wfNodeSpin {
-  from { --wf-spin-angle: 0deg; transform: rotate(0deg); }
-  to   { --wf-spin-angle: 360deg; transform: rotate(360deg); }
-}
-`;
+// ─── Running animation CSS (injected once) ────────────────────────────────────
 
 let _cssInjected = false;
-function injectCSS() {
+function injectAnimCSS() {
   if (_cssInjected || typeof document === "undefined") return;
   _cssInjected = true;
   const el = document.createElement("style");
-  el.textContent = ANIM_CSS;
+  el.textContent = `
+    @keyframes wfDashFlow {
+      from { stroke-dashoffset: 30; }
+      to   { stroke-dashoffset: 0;  }
+    }
+  `;
   document.head.appendChild(el);
+}
+
+// ─── Path routing helpers ─────────────────────────────────────────────────────
+
+type PathResult = [path: string, labelX: number, labelY: number];
+
+/**
+ * Horizontal elbow — source exits Right, target enters Left.
+ * Routes: right → turn → down/up → turn → left
+ */
+function horizontalElbow(sx: number, sy: number, tx: number, ty: number): PathResult {
+  const midX = (sx + tx) / 2;
+  const dy   = ty - sy;
+  const dirY = dy >= 0 ? 1 : -1;
+  const r    = Math.min(CORNER_RADIUS, Math.abs(midX - sx) / 2, Math.abs(dy) / 2);
+
+  const path = r < 3
+    ? `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
+    : [
+        `M ${sx} ${sy}`,
+        `L ${midX - r} ${sy}`,
+        `Q ${midX} ${sy} ${midX} ${sy + dirY * r}`,
+        `L ${midX} ${ty - dirY * r}`,
+        `Q ${midX} ${ty} ${midX + r} ${ty}`,
+        `L ${tx} ${ty}`,
+      ].join(" ");
+
+  return [path, midX, (sy + ty) / 2];
+}
+
+/**
+ * Vertical elbow — source exits Bottom, target enters Top.
+ * Routes: down → turn → left/right → turn → up
+ */
+function verticalElbow(sx: number, sy: number, tx: number, ty: number): PathResult {
+  const midY = (sy + ty) / 2;
+  const dx   = tx - sx;
+  const dirX = dx >= 0 ? 1 : -1;
+  const r    = Math.min(CORNER_RADIUS, Math.abs(dx) / 2, Math.abs(midY - sy));
+
+  const path = r < 3
+    ? `M ${sx} ${sy} L ${sx} ${midY} L ${tx} ${midY} L ${tx} ${ty}`
+    : [
+        `M ${sx} ${sy}`,
+        `L ${sx} ${midY - r}`,
+        `Q ${sx} ${midY} ${sx + dirX * r} ${midY}`,
+        `L ${tx - dirX * r} ${midY}`,
+        `Q ${tx} ${midY} ${tx} ${midY + r}`,
+        `L ${tx} ${ty}`,
+      ].join(" ");
+
+  return [path, (sx + tx) / 2, midY];
+}
+
+/**
+ * Main path selector.
+ * Picks the cleanest route based on handle positions and endpoint alignment.
+ */
+function getWorkflowPath(
+  sourceX: number, sourceY: number,
+  targetX: number, targetY: number,
+  sourcePosition: Position,
+  targetPosition: Position,
+): PathResult {
+  const labelX = (sourceX + targetX) / 2;
+  const labelY = (sourceY + targetY) / 2;
+
+  // Decide flow orientation from handle positions, with heuristic fallback
+  const isHorizontalFlow =
+    sourcePosition === Position.Right  ||
+    targetPosition === Position.Left   ||
+    // Heuristic: source is clearly left of target and Δy is small → likely horizontal
+    (sourceX < targetX - 60 && Math.abs(sourceY - targetY) < 80 &&
+      sourcePosition !== Position.Bottom && targetPosition !== Position.Top);
+
+  if (isHorizontalFlow) {
+    if (Math.abs(sourceY - targetY) <= ALIGNMENT_TOLERANCE) {
+      // Perfect horizontal alignment → straight line
+      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, labelX, sourceY];
+    }
+    return horizontalElbow(sourceX, sourceY, targetX, targetY);
+  }
+
+  // Vertical flow (default: Bottom→Top)
+  if (Math.abs(sourceX - targetX) <= ALIGNMENT_TOLERANCE) {
+    // Perfect vertical alignment → straight line
+    return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, sourceX, labelY];
+  }
+  return verticalElbow(sourceX, sourceY, targetX, targetY);
 }
 
 // ─── Edge component ───────────────────────────────────────────────────────────
@@ -71,69 +177,85 @@ export const WorkflowEdge = memo(function WorkflowEdge({
   data,
   selected,
 }: EdgeProps<WFEdge>) {
-  // Inject CSS keyframes on first render (client only)
-  injectCSS();
+  injectAnimCSS();
 
-  const edgeData = data as WFEdgeData | undefined;
-  const edgeType = edgeData?.edgeType ?? "default";
-  const style = EDGE_STYLES[edgeType] ?? EDGE_STYLES.default;
-  const label = edgeData?.label;
+  const edgeData  = data as WFEdgeData | undefined;
+  const edgeType  = edgeData?.edgeType ?? "default";
+  const styleCfg  = EDGE_STYLES[edgeType] ?? EDGE_STYLES.default;
+  const label     = edgeData?.label;
+  const isRunning = (edgeData as unknown as Record<string, unknown>)?.isRunning === true;
 
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX, sourceY, sourcePosition,
-    targetX, targetY, targetPosition,
-  });
+  const [edgePath, labelX, labelY] = getWorkflowPath(
+    sourceX, sourceY,
+    targetX, targetY,
+    sourcePosition,
+    targetPosition,
+  );
 
-  const strokeWidth = selected ? 2.5 : 1.5;
-  const strokeColor = style.stroke;
-  const markerId = `wf-arrow-${id}`;
+  // Stroke state
+  const strokeColor = selected ? "#3B82F6" : styleCfg.stroke;
+  const strokeWidth = selected ? 2.5 : 1.75;
+  const markerId    = `wf-arrow-${id}`;
+
+  // Only animate when explicitly running
+  const dashArray = isRunning ? "6 4" : "none";
+  const animation = isRunning ? "wfDashFlow 0.6s linear infinite" : "none";
+  const filter    = selected
+    ? `drop-shadow(0 0 4px ${strokeColor}50)`
+    : isRunning
+      ? `drop-shadow(0 0 3px ${strokeColor}70)`
+      : undefined;
 
   return (
     <>
-      {/* SVG defs: arrowhead marker per edge (unique id so color matches) */}
+      {/* Per-edge arrowhead (unique id so color tracks strokeColor) */}
       <defs>
         <marker
           id={markerId}
           markerWidth="7"
           markerHeight="7"
-          refX="6"
+          refX="5.5"
           refY="3.5"
           orient="auto"
           markerUnits="strokeWidth"
         >
-          <polygon
-            points="0,0 7,3.5 0,7"
+          {/* Slightly concave filled arrowhead — clean and professional */}
+          <path
+            d="M 0 0.75 L 5.5 3.5 L 0 6.25 L 1.5 3.5 Z"
             fill={strokeColor}
-            opacity="0.9"
+            opacity={selected ? 1 : 0.85}
           />
         </marker>
       </defs>
 
-      {/* Invisible wider hit-area for click/hover */}
+      {/* Invisible wider hit zone for comfortable click/hover */}
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
-        strokeWidth={12}
+        strokeWidth={14}
         className="react-flow__edge-interaction"
       />
 
-      {/* Animated dashed path */}
+      {/* Main connector */}
       <path
         id={id}
         d={edgePath}
         fill="none"
         stroke={strokeColor}
         strokeWidth={strokeWidth}
-        strokeDasharray={style.dasharray}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={dashArray}
         markerEnd={`url(#${markerId})`}
         style={{
-          animation: `wfDashFlow ${style.speed} linear infinite`,
-          transition: "stroke-width 0.1s, stroke 0.2s",
-          filter: selected ? `drop-shadow(0 0 3px ${strokeColor})` : undefined,
+          transition: "stroke 0.15s ease, stroke-width 0.15s ease",
+          animation,
+          filter,
         }}
       />
 
+      {/* Label chip — rendered outside SVG via EdgeLabelRenderer */}
       {label && (
         <EdgeLabelRenderer>
           <div
@@ -147,11 +269,11 @@ export const WorkflowEdge = memo(function WorkflowEdge({
             <span
               className="rounded-full border px-2 py-0.5 text-[9px] font-semibold"
               style={{
-                background: style.labelBg,
-                borderColor: style.labelBorder,
-                color: style.labelColor,
+                background: styleCfg.labelBg,
+                borderColor: styleCfg.labelBorder,
+                color: styleCfg.labelColor,
                 whiteSpace: "nowrap",
-                boxShadow: "0 1px 3px rgba(15,23,42,0.08)",
+                boxShadow: "0 1px 4px rgba(15,23,42,0.07)",
               }}
             >
               {label}

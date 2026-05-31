@@ -9,6 +9,7 @@ import com.vectorbea.worker.metrics.WorkerMetrics
 import com.vectorbea.worker.observability.MdcKeys
 import com.vectorbea.worker.observability.mdcClearAll
 import com.vectorbea.worker.queue.WorkflowRunJob
+import com.vectorbea.worker.recovery.WorkerRecoveryService
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.runtime.graph.WorkflowGraph
 import org.slf4j.MDC
@@ -36,6 +37,7 @@ class RunProcessor(
     private val workerId: String,
     private val runtime: WorkflowRuntime,
     private val checkpointStore: CheckpointStore = CheckpointStore(dataSource),
+    private val recoveryService: WorkerRecoveryService? = try { WorkerRecoveryService(dataSource) } catch (_: Exception) { null },
 ) {
     private val log = logger()
 
@@ -639,26 +641,36 @@ class RunProcessor(
         runCatching {
             val run = loadRun(job.runId)
             updateRunCompleted(
-                runId = job.runId,
-                status = "failed",
-                completedAt = Instant.now(),
-                durationMs = durationMs,
-                outputJson = null,
+                runId = job.runId, status = "failed",
+                completedAt = Instant.now(), durationMs = durationMs, outputJson = null,
                 errorJson = """{"code":"WORKER_ERROR","message":${jsonString(sanitizedMessage)}}""",
             )
             if (run != null) {
                 eventStore.appendEvent(RunEvent(
-                    runId = job.runId,
-                    workspaceId = run.workspaceId,
-                    environmentId = run.environmentId,
-                    type = EventType.RUN_FAILED,
-                    status = "failed",
-                    source = "worker:$workerId",
-                    title = "Run failed",
-                    summary = sanitizedMessage.take(200),
-                    durationMs = durationMs,
+                    runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
+                    type = EventType.RUN_FAILED, status = "failed", source = "worker:$workerId",
+                    title = "Run failed", summary = sanitizedMessage.take(200), durationMs = durationMs,
                     errorJsonSanitized = """{"message":${jsonString(sanitizedMessage)}}""",
                 ))
+
+                // Recovery Engine: classify failure and persist incident
+                val incidentId = recoveryService?.classifyAndPersist(
+                    WorkerRecoveryService.TerminalFailureContext(
+                        runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
+                        workflowId = run.workflowId, workflowVersionId = run.workflowVersionId,
+                        errorMessage = sanitizedMessage, errorCode = "WORKER_ERROR",
+                        retryAttempt = job.retryCount, recentEventTypes = emptyList(),
+                    )
+                )
+                if (incidentId != null) {
+                    eventStore.appendEvent(RunEvent(
+                        runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
+                        type = EventType.RUN_FAILED, status = "failed", source = "worker:$workerId",
+                        title = "Failure incident created",
+                        summary = "Recovery Engine diagnosed the failure. incident_id=$incidentId",
+                        correlationId = incidentId.toString(),
+                    ))
+                }
             }
         }.onFailure { e ->
             log.error("[processor] could not write failure event [runId={}]: {}", job.runId, e.message)

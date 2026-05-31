@@ -29,6 +29,7 @@ const TYPE_LABELS: Record<Agent["type"], string> = {
   router_agent:                 "Router",
   approval_agent:               "Approval",
   imported_langgraph_node:      "LangGraph Node",
+  iterative_agent:              "Iterative Agent",
   external_instrumented_agent:  "External",
 };
 
@@ -37,6 +38,7 @@ const TYPE_COLORS: Record<Agent["type"], string> = {
   tool_agent:                   "bg-cyan-50 text-cyan-700 border-cyan-200",
   router_agent:                 "bg-sky-50 text-sky-700 border-sky-200",
   approval_agent:               "bg-amber-50 text-amber-700 border-amber-200",
+  iterative_agent:              "bg-violet-50 text-violet-700 border-violet-200",
   imported_langgraph_node:      "bg-purple-50 text-purple-700 border-purple-200",
   external_instrumented_agent:  "bg-teal-50 text-teal-700 border-teal-200",
 };

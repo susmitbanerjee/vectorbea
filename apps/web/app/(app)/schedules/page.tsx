@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, ExternalLink, Pause, Play } from "lucide-react";
+import { CalendarClock, ExternalLink, Pause, Play, RefreshCw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/lib/workspace-context";
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+const API_BASE = process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Schedule {
   id: string;
@@ -16,69 +19,11 @@ interface Schedule {
   cron: string;
   humanReadable: string;
   timezone: string;
-  nextRun: string;
+  nextRun: string | null;
   lastRun: string | null;
   status: "ACTIVE" | "PAUSED";
   jobId: string;
 }
-
-const MOCK_SCHEDULES: Schedule[] = [
-  {
-    id: "sch_001",
-    jobName: "Customer Renewal Intelligence",
-    cron: "0 2 * * 1",
-    humanReadable: "Weekly — Mondays at 2:00 AM",
-    timezone: "UTC",
-    nextRun: "Mon, 26 May · 2:00 AM UTC",
-    lastRun: "Mon, 19 May · 2:00 AM UTC",
-    status: "ACTIVE",
-    jobId: "job_001",
-  },
-  {
-    id: "sch_002",
-    jobName: "Payment Recovery Sweep",
-    cron: "0 */4 * * *",
-    humanReadable: "Every 4 hours",
-    timezone: "UTC",
-    nextRun: "Today · in 2h 14m",
-    lastRun: "Today · 4:00 AM UTC",
-    status: "ACTIVE",
-    jobId: "job_002",
-  },
-  {
-    id: "sch_003",
-    jobName: "Contract Compliance Review",
-    cron: "0 9 * * 1-5",
-    humanReadable: "Weekdays at 9:00 AM",
-    timezone: "UTC",
-    nextRun: "—",
-    lastRun: "Fri, 16 May · 9:00 AM UTC",
-    status: "PAUSED",
-    jobId: "job_003",
-  },
-  {
-    id: "sch_004",
-    jobName: "Data Quality Audit",
-    cron: "30 8 * * *",
-    humanReadable: "Daily at 8:30 AM",
-    timezone: "UTC",
-    nextRun: "Tomorrow · 8:30 AM UTC",
-    lastRun: "Today · 8:30 AM UTC",
-    status: "ACTIVE",
-    jobId: "job_004",
-  },
-  {
-    id: "sch_005",
-    jobName: "SLA Breach Detector",
-    cron: "*/15 * * * *",
-    humanReadable: "Every 15 minutes",
-    timezone: "UTC",
-    nextRun: "Today · in 7m",
-    lastRun: "Today · just now",
-    status: "ACTIVE",
-    jobId: "job_005",
-  },
-];
 
 // ─── Filter chip ─────────────────────────────────────────────────────────────
 
@@ -102,15 +47,41 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function SchedulesPage() {
+  const { activeWorkspaceId } = useWorkspace();
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "ACTIVE" | "PAUSED">("ALL");
 
-  const filtered = MOCK_SCHEDULES.filter((s) => {
-    if (filter === "ALL") return true;
-    return s.status === filter;
-  });
+  async function load() {
+    setLoading(true);
+    try {
+      if (!activeWorkspaceId) { setSchedules([]); return; }
+      const token = typeof window !== "undefined" ? localStorage.getItem("vectorbea-access-token") : null;
+      const res = await fetch(
+        `${API_BASE}/api/schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
+        {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            "X-Workspace-Id": activeWorkspaceId,
+          },
+        },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: unknown = await res.json();
+      setSchedules(Array.isArray(data) ? (data as Schedule[]) : []);
+    } catch {
+      // API may not be wired yet — show empty state silently
+      setSchedules([]);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const activeCount = MOCK_SCHEDULES.filter((s) => s.status === "ACTIVE").length;
-  const pausedCount = MOCK_SCHEDULES.filter((s) => s.status === "PAUSED").length;
+  useEffect(() => { void load(); }, [activeWorkspaceId]);
+
+  const filtered = schedules.filter((s) => filter === "ALL" || s.status === filter);
+  const activeCount = schedules.filter((s) => s.status === "ACTIVE").length;
+  const pausedCount = schedules.filter((s) => s.status === "PAUSED").length;
 
   return (
     <div className="page-shell">
@@ -119,46 +90,77 @@ export default function SchedulesPage() {
         <div>
           <h1 className="page-title">Schedules</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Upcoming and recurring agent job triggers.
+            {loading ? "Loading…" : `${schedules.length} schedule${schedules.length !== 1 ? "s" : ""} configured`}
           </p>
         </div>
-        <Link
-          href={"/agent-jobs/new" as never}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
-        >
-          <CalendarClock className="h-3.5 w-3.5" />
-          New Schedule
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 transition-colors hover:bg-muted disabled:opacity-40"
+            style={{ background: "var(--surface-1)" }}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 text-muted-foreground", loading && "animate-spin")} />
+          </button>
+          <Link
+            href={"/agent-jobs/new" as never}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white shadow-sm transition-all hover:bg-[#1E293B]"
+          >
+            <CalendarClock className="h-4 w-4" />
+            New Schedule
+          </Link>
+        </div>
       </div>
 
-      {/* Summary strip */}
-      <div className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 px-4 py-2.5 text-[12px] text-muted-foreground">
-        <span><span className="font-semibold text-foreground">{MOCK_SCHEDULES.length}</span> schedules configured</span>
-        <span className="text-border">·</span>
-        <span><span className="font-semibold text-emerald-600">{activeCount}</span> active</span>
-        <span className="text-border">·</span>
-        <span><span className="font-semibold text-amber-600">{pausedCount}</span> paused</span>
-      </div>
+      {/* Summary strip — only when there are schedules */}
+      {schedules.length > 0 && (
+        <div className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 px-4 py-2.5 text-[12px] text-muted-foreground">
+          <span><span className="font-semibold text-foreground">{schedules.length}</span> schedules</span>
+          <span className="text-border">·</span>
+          <span><span className="font-semibold text-emerald-600">{activeCount}</span> active</span>
+          <span className="text-border">·</span>
+          <span><span className="font-semibold text-amber-600">{pausedCount}</span> paused</span>
+        </div>
+      )}
 
-      {/* Filter chips */}
-      <div className="flex items-center gap-1.5">
-        {(["ALL", "ACTIVE", "PAUSED"] as const).map((f) => (
-          <FilterChip
-            key={f}
-            label={f === "ALL" ? "All" : f === "ACTIVE" ? "Active" : "Paused"}
-            active={filter === f}
-            onClick={() => setFilter(f)}
-          />
-        ))}
-      </div>
+      {/* Filter chips — only when there are schedules */}
+      {schedules.length > 0 && (
+        <div className="flex items-center gap-1.5">
+          {(["ALL", "ACTIVE", "PAUSED"] as const).map((f) => (
+            <FilterChip
+              key={f}
+              label={f === "ALL" ? "All" : f === "ACTIVE" ? "Active" : "Paused"}
+              active={filter === f}
+              onClick={() => setFilter(f)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Table */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          {filtered.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-16 text-center">
-              <CalendarClock className="h-8 w-8 text-muted-foreground/20" />
-              <p className="text-sm font-medium text-muted-foreground">No schedules match this filter</p>
+          {loading ? (
+            <div className="divide-y divide-border/60">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 px-5 py-4">
+                  <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+                  <div className="h-4 w-24 animate-pulse rounded bg-muted ml-auto" />
+                </div>
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-20 text-center">
+              <CalendarClock className="h-10 w-10 text-muted-foreground/20" />
+              <p className="text-sm font-medium text-muted-foreground">
+                {schedules.length === 0 ? "No schedules configured" : "No schedules match this filter"}
+              </p>
+              {schedules.length === 0 && (
+                <p className="text-xs text-muted-foreground/60 max-w-xs">
+                  Schedules trigger agent jobs on a recurring cron or interval. Create a job first, then attach a schedule to it.
+                </p>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -200,7 +202,7 @@ export default function SchedulesPage() {
                           "text-[12px]",
                           s.status === "ACTIVE" ? "text-foreground" : "text-muted-foreground/50",
                         )}>
-                          {s.nextRun}
+                          {s.nextRun ?? "—"}
                         </span>
                       </td>
                       <td className="px-5 py-3.5">

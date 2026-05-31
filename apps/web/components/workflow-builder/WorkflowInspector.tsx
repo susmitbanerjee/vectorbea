@@ -6,14 +6,17 @@
  * or workflow-level stats + validation when nothing is selected.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { Node, Edge } from "@xyflow/react";
 import {
   AlertTriangle,
   Bot,
   CheckCircle2,
   ChevronDown,
+  Code2,
   Info,
+  List,
+  Settings2,
   Shield,
   X,
   XCircle,
@@ -21,6 +24,11 @@ import {
 import { cn } from "@/lib/utils";
 import { AppSelectFromChildren } from "@/components/ui/app-select";
 import { getNodeMeta } from "./NodeIcon";
+import { InputMappingRow } from "./mapping/InputMappingRow";
+import { ConditionBuilder } from "./mapping/ConditionBuilder";
+import { buildAvailableFieldsForNode, getNodeOutputFields } from "@/lib/workflows/field-discovery";
+import { decompileExpression, compileMapping, compileConditionGroup } from "@/lib/workflows/mapping-compiler";
+import type { VisualMapping, VisualConditionGroup, NodeInputField, FieldType } from "@/types/workflow-mapping";
 import type {
   WFNodeData,
   WFEdgeData,
@@ -129,6 +137,8 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
   const cfg: AgentNodeConfig = data.agentConfig ?? {};
   function set(patch: Partial<AgentNodeConfig>) { onChange({ ...data, agentConfig: { ...cfg, ...patch } }); }
   const retry = cfg.retryPolicy ?? { maxAttempts: 2, backoffType: "exponential" as const, backoffMs: 2000 };
+  const selectedAgent = agents.find(a => a.id === cfg.agentId);
+  const isIterative = selectedAgent?.type === "iterative_agent";
 
   return (
     <div className="space-y-3">
@@ -142,7 +152,7 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
             set({ agentId: v || undefined, agentName: agent?.name, modelName: agent?.modelName });
           }}>
             <option value="">— select agent —</option>
-            {agents.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.modelName})</option>)}
+            {agents.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.modelName ?? a.type})</option>)}
           </ISelect>
         </div>
         {cfg.agentName && (
@@ -150,11 +160,70 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
             <Bot className="h-3.5 w-3.5 text-violet-600 shrink-0" />
             <div>
               <p className="text-[11px] font-semibold text-violet-800">{cfg.agentName}</p>
-              {cfg.modelName && <p className="text-[10px] text-slate-500">{cfg.modelName}</p>}
+              <p className="text-[10px] text-slate-500">
+                {cfg.modelName && <span>{cfg.modelName}</span>}
+                {isIterative && <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold text-violet-700 uppercase tracking-wide">Iterative</span>}
+              </p>
             </div>
           </div>
         )}
       </ISection>
+
+      {/* Task instruction (what this workflow step should achieve) */}
+      <IDivider />
+      <ISection title="Task">
+        <div>
+          <ILabel>Task instruction for this step</ILabel>
+          <ITextarea
+            rows={3}
+            value={(cfg as Record<string, unknown>).taskInstruction as string ?? ""}
+            onChange={(v) => set({ ...cfg, taskInstruction: v } as Partial<AgentNodeConfig>)}
+            placeholder="Describe what this agent should accomplish in this workflow step…"
+          />
+          <p className="mt-1 text-[11px] text-slate-400">This overrides the agent&apos;s default instructions for this specific step.</p>
+        </div>
+      </ISection>
+
+      {/* Agent Brain limits — only shown for iterative agents */}
+      {isIterative && (
+        <>
+          <IDivider />
+          <ISection title="Brain Limits">
+            <div
+              className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5"
+              style={{ fontSize: 11.5, color: "#5B21B6" }}
+            >
+              This agent can iterate through plan, tool use, observation, and final answer.
+              Vectorbea enforces all budget limits — the agent cannot exceed them.
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <ILabel>Max iterations</ILabel>
+                <INumber value={(cfg as Record<string, unknown>).maxIterations as number ?? 5}
+                  onChange={(v) => set({ maxIterations: v } as Partial<AgentNodeConfig>)} min={1} />
+              </div>
+              <div>
+                <ILabel>Max tool calls</ILabel>
+                <INumber value={(cfg as Record<string, unknown>).maxToolCalls as number ?? 5}
+                  onChange={(v) => set({ maxToolCalls: v } as Partial<AgentNodeConfig>)} min={0} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <ILabel>Max tokens</ILabel>
+                <INumber value={(cfg as Record<string, unknown>).maxTotalTokens as number ?? 16384}
+                  onChange={(v) => set({ maxTotalTokens: v } as Partial<AgentNodeConfig>)} min={256} />
+              </div>
+              <div>
+                <ILabel>Max cost (cents)</ILabel>
+                <INumber value={(cfg as Record<string, unknown>).maxCostCents as number ?? 50}
+                  onChange={(v) => set({ maxCostCents: v } as Partial<AgentNodeConfig>)} min={1} />
+              </div>
+            </div>
+          </ISection>
+        </>
+      )}
+
       <IDivider />
       <ISection title="Retry Policy">
         <div className="grid grid-cols-2 gap-2">
@@ -170,23 +239,11 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
       </ISection>
       <IDivider />
       <ISection title="Input Mapping">
-        <MappingEditor
-          label=""
-          mapping={cfg.inputMapping ?? {}}
-          onChange={(m) => set({ inputMapping: m })}
-          keyPlaceholder="param_name"
-          valuePlaceholder="{{input.field}}"
-        />
+        <MappingEditor label="" mapping={cfg.inputMapping ?? {}} onChange={(m) => set({ inputMapping: m })} keyPlaceholder="param_name" valuePlaceholder="{{input.field}}" />
       </ISection>
       <IDivider />
       <ISection title="Output Mapping">
-        <MappingEditor
-          label=""
-          mapping={cfg.outputMapping ?? {}}
-          onChange={(m) => set({ outputMapping: m })}
-          keyPlaceholder="output_key"
-          valuePlaceholder="{{steps.N.output.field}}"
-        />
+        <MappingEditor label="" mapping={cfg.outputMapping ?? {}} onChange={(m) => set({ outputMapping: m })} keyPlaceholder="output_key" valuePlaceholder="{{steps.N.output.field}}" />
       </ISection>
       <IDivider />
       <ICheck id={`ckpt-${data.label}`} checked={cfg.checkpointEnabled ?? false} onChange={(v) => set({ checkpointEnabled: v })} label="Enable checkpoint (allows replay from here)" />
@@ -695,17 +752,18 @@ interface WorkflowInspectorProps {
   onDeleteNode: (id: string) => void;
 }
 
-export function WorkflowInspector({
-  selectedNode,
+export function WorkflowInspector(props: WorkflowInspectorProps) {
+  if (!props.selectedNode) {
+    return <EmptyInspector {...props} />;
+  }
+  return <NodeInspector {...props} selectedNode={props.selectedNode} />;
+}
+
+function EmptyInspector({
   nodes,
   edges,
-  agents,
-  tools,
   validation,
-  onUpdateNode,
-  onDeleteNode,
 }: WorkflowInspectorProps) {
-  if (!selectedNode) {
     const nodeCount = nodes.length;
     const edgeCount = edges.length;
     const issueCount = validation?.issues?.length ?? 0;
@@ -741,26 +799,155 @@ export function WorkflowInspector({
         </div>
       </div>
     );
-  }
+}
 
+// ─── NodeInspector (separate component so hooks run unconditionally) ───────────
+
+function NodeInspector({
+  selectedNode,
+  nodes,
+  edges,
+  agents,
+  tools,
+  validation,
+  onUpdateNode,
+  onDeleteNode,
+}: WorkflowInspectorProps & { selectedNode: WFNode }) {
   const { data } = selectedNode;
   const meta = getNodeMeta(data.nodeType as WFNodeType);
   const Icon = meta.icon;
-
   const nodeId = selectedNode.id;
+
+  // Tab state
+  type InspectorTab = "configure" | "inputs" | "conditions" | "advanced";
+  const [activeTab, setActiveTab] = useState<InspectorTab>("configure");
+
+  // Visual mappings state (keyed by input field name)
+  const [visualMappings, setVisualMappings] = useState<Record<string, VisualMapping>>(() => {
+    // Initialise from existing inputMapping expressions
+    const existing = data.agentConfig?.inputMapping ?? data.toolConfig?.inputMapping ?? {};
+    return Object.fromEntries(
+      Object.entries(existing).map(([k, v]) => [k, decompileExpression(v as string)])
+    );
+  });
+
+  // Visual condition for branch nodes
+  const [visualCondition, setVisualCondition] = useState<VisualConditionGroup>(() => {
+    const raw = data.branchConfig?.conditionExpression ?? "";
+    return {
+      id: "root",
+      logic: "and",
+      conditions: [{
+        id: crypto.randomUUID(),
+        left: { type: "field", sourceId: "workflow_input", path: "input" },
+        operator: "equals",
+        rightLiteral: "",
+      }],
+    };
+  });
+
+  // Discover upstream field sources
+  const fieldSources = useMemo(() =>
+    buildAvailableFieldsForNode(nodeId, nodes as Node<WFNodeData>[], edges),
+    [nodeId, nodes, edges]
+  );
+
+  // Build input fields for the current node type
+  const inputFields = useMemo((): NodeInputField[] => {
+    const cfg = data;
+    const nt = cfg.nodeType as WFNodeType;
+    const base = (key: string, label: string, type: FieldType, required = false, desc?: string): NodeInputField => ({
+      key, label, type, required, description: desc,
+      mapping: visualMappings[key] ?? { type: "unset" },
+    });
+    switch (nt) {
+      case "agent":
+        return [
+          base("agentId", "Agent",      "string",  true,  "The registered Vectorbea agent to run"),
+          base("task",    "Task / Goal", "string",  false, "Override the default task instruction"),
+        ];
+      case "llm":
+        return [
+          base("prompt",  "Prompt",     "string",  true,  "The prompt to send to the LLM"),
+          base("context", "Context",    "object",  false, "Additional context data"),
+        ];
+      case "tool":
+        return [
+          base("toolId",  "Tool",       "string",  true,  "The registered tool to call"),
+          ...Object.keys(data.toolConfig?.inputMapping ?? {}).map(k =>
+            base(k, k, "any", false)
+          ),
+        ];
+      case "db_read":
+        return Object.keys(data.dbReadConfig?.parameters ?? {}).map(k =>
+          base(k, `Parameter: $${k}`, "string", false, "SQL parameter")
+        );
+      case "db_write":
+        return Object.keys(data.dbWriteConfig?.parameters ?? {}).map(k =>
+          base(k, `Parameter: $${k}`, "string", false, "SQL parameter")
+        );
+      case "http_tool":
+        return [
+          ...Object.keys(data.httpToolConfig?.queryParams ?? {}).map(k =>
+            base(k, `Query: ${k}`, "string", false)
+          ),
+          ...Object.keys(data.httpToolConfig?.headers ?? {}).map(k =>
+            base(k, `Header: ${k}`, "string", false)
+          ),
+        ];
+      case "approval":
+        return [
+          base("title",   "Title",   "string", false, "Approval gate title shown to approver"),
+          base("message", "Message", "string", false, "Explanation for the approver"),
+        ];
+      default:
+        return [];
+    }
+  }, [data, visualMappings]);
+
   function handleChange(updated: WFNodeData) {
     onUpdateNode(nodeId, updated);
   }
 
+  function handleMappingChange(key: string, mapping: VisualMapping) {
+    const updated = { ...visualMappings, [key]: mapping };
+    setVisualMappings(updated);
+    // Compile visual mappings to runtime expressions and persist
+    const compiled = Object.fromEntries(
+      Object.entries(updated)
+        .map(([k, m]) => [k, compileMapping(m)])
+        .filter(([, v]) => v)
+    );
+    // Apply to the appropriate node config
+    const cfg = data;
+    if (cfg.nodeType === "agent") {
+      handleChange({ ...cfg, agentConfig: { ...cfg.agentConfig, inputMapping: compiled } });
+    } else if (cfg.nodeType === "tool") {
+      handleChange({ ...cfg, toolConfig: { ...cfg.toolConfig, inputMapping: compiled } });
+    }
+  }
+
+  function handleConditionChange(group: VisualConditionGroup) {
+    setVisualCondition(group);
+    const expr = compileConditionGroup(group);
+    handleChange({ ...data, branchConfig: { ...data.branchConfig, conditionExpression: expr } });
+  }
+
+  const tabs: { id: InspectorTab; label: string; icon: React.ElementType }[] = [
+    { id: "configure",  label: "Configure",  icon: Settings2 },
+    ...(inputFields.length > 0 ? [{ id: "inputs" as InspectorTab, label: "Inputs", icon: List }] : []),
+    ...(data.nodeType === "branch" ? [{ id: "conditions" as InspectorTab, label: "Conditions", icon: GitBranchIcon }] : []),
+    { id: "advanced", label: "Advanced", icon: Code2 },
+  ];
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Node header — colored accent top bar + node identity */}
+      {/* Node header */}
       <div className="shrink-0" style={{ borderBottom: "1px solid #E2E8F0" }}>
-        {/* Color accent strip */}
         <div className="h-[3px] w-full" style={{ background: meta.color }} />
         <div className="flex items-center gap-2.5 px-4 py-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg shadow-md"
-            style={{ background: meta.bgColor, border: `1px solid ${meta.borderColor}`, boxShadow: `0 0 12px ${meta.color}30` }}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+            style={{ background: meta.bgColor, border: `1px solid ${meta.borderColor}` }}>
             <Icon className="h-4 w-4" style={{ color: meta.color }} />
           </span>
           <div className="min-w-0 flex-1">
@@ -768,41 +955,125 @@ export function WorkflowInspector({
             <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: meta.color }}>{meta.label}</p>
           </div>
           <button type="button" onClick={() => onDeleteNode(selectedNode.id)}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-            title="Delete node">
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
+
+        {/* Tabs */}
+        <div className="flex gap-0 border-b border-slate-100 px-4">
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              className={cn(
+                "inline-flex h-8 items-center gap-1.5 border-b-2 px-2.5 text-[11px] font-semibold transition-colors",
+                activeTab === t.id
+                  ? "border-blue-500 text-blue-700"
+                  : "border-transparent text-slate-400 hover:text-slate-700",
+              )}
+            >
+              <t.icon className="h-3 w-3" />
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Config */}
+      {/* Tab content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {data.nodeType === "trigger" && <TriggerConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "agent" && <AgentConfig data={data} onChange={handleChange} agents={agents} />}
-        {data.nodeType === "llm" && <LlmConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "tool" && <ToolConfig data={data} onChange={handleChange} tools={tools} />}
-        {data.nodeType === "approval" && <ApprovalConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "branch" && <BranchConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "parallel" && <ParallelConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "join" && <JoinConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "timer" && <TimerConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "checkpoint" && <CheckpointConfig data={data} onChange={handleChange} />}
-        {data.nodeType === "end" && <EndConfig data={data} onChange={handleChange} />}
-        {(data.nodeType === "artifact") && (
-          <div className="space-y-3">
-            <div><ILabel>Label</ILabel><IInput value={data.label} onChange={(v) => handleChange({ ...data, label: v })} /></div>
-            <div><ILabel>Description</ILabel><ITextarea rows={2} value={data.description ?? ""} onChange={(v) => handleChange({ ...data, description: v })} /></div>
+        {activeTab === "configure" && (
+          <>
+            {data.nodeType === "trigger"    && <TriggerConfig    data={data} onChange={handleChange} />}
+            {data.nodeType === "agent"      && <AgentConfig      data={data} onChange={handleChange} agents={agents} />}
+            {data.nodeType === "llm"        && <LlmConfig        data={data} onChange={handleChange} />}
+            {data.nodeType === "tool"       && <ToolConfig       data={data} onChange={handleChange} tools={tools} />}
+            {data.nodeType === "approval"   && <ApprovalConfig   data={data} onChange={handleChange} />}
+            {data.nodeType === "branch"     && <BranchConfig     data={data} onChange={handleChange} />}
+            {data.nodeType === "parallel"   && <ParallelConfig   data={data} onChange={handleChange} />}
+            {data.nodeType === "join"       && <JoinConfig       data={data} onChange={handleChange} />}
+            {data.nodeType === "timer"      && <TimerConfig      data={data} onChange={handleChange} />}
+            {data.nodeType === "checkpoint" && <CheckpointConfig data={data} onChange={handleChange} />}
+            {data.nodeType === "end"        && <EndConfig        data={data} onChange={handleChange} />}
+            {data.nodeType === "artifact"   && (
+              <div className="space-y-3">
+                <div><ILabel>Label</ILabel><IInput value={data.label} onChange={(v) => handleChange({ ...data, label: v })} /></div>
+                <div><ILabel>Description</ILabel><ITextarea rows={2} value={data.description ?? ""} onChange={(v) => handleChange({ ...data, description: v })} /></div>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === "inputs" && (
+          <div className="space-y-2">
+            <p style={{ fontSize: 11, fontWeight: 700, color: "#64748B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
+              Input Mappings
+            </p>
+            {inputFields.length === 0 ? (
+              <p style={{ fontSize: 12, color: "#94A3B8", textAlign: "center", paddingTop: 24 }}>
+                No configurable inputs for this node type.
+              </p>
+            ) : inputFields.map(field => (
+              <InputMappingRow
+                key={field.key}
+                field={field}
+                sources={fieldSources}
+                onChange={handleMappingChange}
+              />
+            ))}
+            <div className="pt-3" style={{ borderTop: "1px solid #F1F5F9", marginTop: 12 }}>
+              <p style={{ fontSize: 11, color: "#94A3B8" }}>
+                Click <strong>Map</strong> on any field to connect it to an output from a previous node or the workflow input.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "conditions" && data.nodeType === "branch" && (
+          <ConditionBuilder
+            group={visualCondition}
+            sources={fieldSources}
+            onChange={handleConditionChange}
+          />
+        )}
+
+        {activeTab === "advanced" && (
+          <div className="space-y-4">
+            <div
+              className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5"
+              style={{ fontSize: 12, color: "#92400E" }}
+            >
+              Advanced expressions bypass type checking and visual mapping. Use with care.
+            </div>
+            <div className="space-y-2">
+              <ILabel>Input Mapping JSON</ILabel>
+              <ITextarea
+                mono rows={6}
+                value={JSON.stringify(
+                  Object.fromEntries(
+                    Object.entries(visualMappings).map(([k, m]) => [k, compileMapping(m)])
+                  ), null, 2)}
+                onChange={() => {/* read-only in this view */}}
+              />
+            </div>
+            {data.nodeType === "branch" && (
+              <div className="space-y-2">
+                <ILabel>Compiled Condition Expression</ILabel>
+                <ITextarea mono rows={3}
+                  value={compileConditionGroup(visualCondition)}
+                  onChange={() => {}}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      {/* Delete button */}
-      <div className="shrink-0 border-t border-white/5 px-4 py-3">
-        <button type="button" onClick={() => onDeleteNode(selectedNode.id)}
-          className="w-full rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-[12px] font-semibold text-red-400/90 hover:border-red-500/40 hover:bg-red-500/15 hover:text-red-400 transition-all">
-          Delete Node
-        </button>
-      </div>
     </div>
   );
+}
+
+// ─── Needed: GitBranch icon alias ─────────────────────────────────────────────
+function GitBranchIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>;
 }

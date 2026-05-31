@@ -16,6 +16,11 @@ import com.vectorbea.worker.runtime.StepOutputStore
 import com.vectorbea.worker.runtime.WorkflowRuntime
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
+import com.vectorbea.worker.durable.CrashRecoveryLoop
+import com.vectorbea.worker.durable.HistoryLimitChecker
+import com.vectorbea.worker.durable.RunLeaseManager
+import com.vectorbea.worker.durable.StepExecutionGuard
+import com.vectorbea.worker.durable.TimerScheduler
 import java.util.concurrent.CountDownLatch
 import kotlin.system.exitProcess
 
@@ -145,6 +150,28 @@ fun main() {
     }
     consumer.start()
 
+    // ── Durable execution services ────────────────────────────────────────────
+    val leaseManager = RunLeaseManager(database.dataSource)
+    val historyChecker = HistoryLimitChecker(database.dataSource)
+    val stepGuard = StepExecutionGuard(database.dataSource)
+
+    // Timer scheduler — fires durable timers without blocking workers
+    val timerScheduler = TimerScheduler(
+        dataSource = database.dataSource,
+        enqueueJob = { job -> try { consumer.enqueueRecovery(job) } catch (e: Exception) { log.warn("[timers] enqueue failed: {}", e.message) } },
+        redisCommands = redis.commands,
+    )
+    timerScheduler.start()
+
+    // Crash recovery loop — detects stale leases and re-enqueues runs
+    val crashRecovery = CrashRecoveryLoop(
+        dataSource = database.dataSource,
+        eventStore = eventStore,
+        leaseManager = leaseManager,
+        enqueueJob = { job -> try { consumer.enqueueRecovery(job) } catch (e: Exception) { log.warn("[crash-recovery] enqueue failed: {}", e.message) } },
+    )
+    crashRecovery.start()
+
     // ── Metrics server ────────────────────────────────────────────────────────
     val metricsPort = System.getenv("METRICS_PORT")?.toIntOrNull() ?: 9090
     WorkerMetrics.startServer(metricsPort)
@@ -157,6 +184,8 @@ fun main() {
 
         // Stop accepting new jobs
         heartbeat.drain()
+        timerScheduler.stop()
+        crashRecovery.stop()
         consumer.stop(drainTimeoutSeconds = 30L)
 
         // Final heartbeat as stopped

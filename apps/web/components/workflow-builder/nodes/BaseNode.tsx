@@ -307,16 +307,16 @@ export const BaseNode = memo(function BaseNode({
         />
       )}
 
-      {/* Handles */}
+      {/* Handles — tinted with node accent color for visual cohesion */}
       {(handles === "default" || handles === "top-only") && (
         <Handle
           type="target"
           position={Position.Top}
           style={{
             background: "#FFFFFF",
-            border: "2px solid #94A3B8",
+            border: `2px solid ${meta.color}55`,
             width: 10, height: 10,
-            boxShadow: "0 1px 3px rgba(15,23,42,0.12)",
+            boxShadow: `0 0 0 2.5px ${meta.color}18, 0 1px 3px rgba(15,23,42,0.10)`,
           }}
         />
       )}
@@ -326,9 +326,9 @@ export const BaseNode = memo(function BaseNode({
           position={Position.Bottom}
           style={{
             background: "#FFFFFF",
-            border: "2px solid #94A3B8",
+            border: `2px solid ${meta.color}55`,
             width: 10, height: 10,
-            boxShadow: "0 1px 3px rgba(15,23,42,0.12)",
+            boxShadow: `0 0 0 2.5px ${meta.color}18, 0 1px 3px rgba(15,23,42,0.10)`,
           }}
         />
       )}
@@ -337,12 +337,22 @@ export const BaseNode = memo(function BaseNode({
           <Handle
             type="target"
             position={Position.Left}
-            style={{ background: "#FFFFFF", border: "2px solid #94A3B8", width: 10, height: 10 }}
+            style={{
+              background: "#FFFFFF",
+              border: `2px solid ${meta.color}55`,
+              width: 10, height: 10,
+              boxShadow: `0 0 0 2.5px ${meta.color}18`,
+            }}
           />
           <Handle
             type="source"
             position={Position.Right}
-            style={{ background: "#FFFFFF", border: "2px solid #94A3B8", width: 10, height: 10 }}
+            style={{
+              background: "#FFFFFF",
+              border: `2px solid ${meta.color}55`,
+              width: 10, height: 10,
+              boxShadow: `0 0 0 2.5px ${meta.color}18`,
+            }}
           />
         </>
       )}
@@ -355,9 +365,9 @@ export const BaseNode = memo(function BaseNode({
           position={Position.Bottom}
           style={{
             background: "#FFFFFF",
-            border: "2px solid #94A3B8",
+            border: `2px solid ${meta.color}55`,
             width: 10, height: 10,
-            boxShadow: "0 1px 3px rgba(15,23,42,0.12)",
+            boxShadow: `0 0 0 2.5px ${meta.color}18`,
             left: `${((i + 1) / (extraBottomHandles.length + 1)) * 100}%`,
           }}
         />
@@ -373,7 +383,7 @@ export const BaseNode = memo(function BaseNode({
             background: "#FFFFFF",
             border: "2px solid #818CF8",
             width: 10, height: 10,
-            boxShadow: "0 1px 3px rgba(15,23,42,0.12)",
+            boxShadow: "0 0 0 2.5px rgba(129,140,248,0.2)",
             left: `${((i + 1) / (extraTopHandles.length + 1)) * 100}%`,
           }}
         />

@@ -1,6 +1,10 @@
 package com.vectorbea.worker.runtime.executor
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.vectorbea.worker.agents.brain.model.AgentBrainConfig
+import com.vectorbea.worker.agents.brain.model.AgentLoopState
+import com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner
+import com.vectorbea.worker.agents.brain.runtime.BudgetExceededException
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
@@ -60,6 +64,12 @@ class AgentNodeExecutor(
         // Load agent definition — workspace-scoped
         val agent = loadAgent(agentId, ctx.workspaceId)
             ?: return NodeResult.Failed("Agent '$agentIdStr' not found or not accessible for node '${node.id}'")
+
+        // ── Route iterative_agent type to AgentBrainRunner ────────────────────
+        if (agent.agentType == "iterative_agent") {
+            return executeIterativeAgent(agent, node, resolvedInputs, ctx)
+        }
+        // All other types fall through to the single-shot LLM path below
 
         val connectionId = agent.llmConnectionId
             ?: return NodeResult.Failed(
@@ -157,18 +167,26 @@ class AgentNodeExecutor(
     private data class AgentRow(
         val id: String,
         val name: String,
+        val agentType: String,
         val instructions: String?,
         val llmConnectionId: String?,
         val modelName: String?,
         val temperature: Double?,
         val maxTokens: Int?,
+        val maxIterations: Int,
+        val maxToolCalls: Int,
+        val maxCostCents: Int,
+        val allowedToolIds: List<String>,
     )
 
     private fun loadAgent(agentId: UUID, workspaceId: UUID): AgentRow? = try {
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                """SELECT id, name, instructions, llm_connection_id,
-                   model_name, temperature, max_tokens
+                """SELECT id, name, type, instructions, llm_connection_id,
+                   model_name, temperature, max_tokens, max_iterations,
+                   COALESCE((SELECT (value::int) FROM jsonb_each_text(timeout_policy_json) WHERE key='maxToolCalls'), '5') AS max_tool_calls_str,
+                   COALESCE((SELECT (value::int) FROM jsonb_each_text(timeout_policy_json) WHERE key='maxCostCents'), '50') AS max_cost_cents_str,
+                   COALESCE(allowed_tool_ids, '[]'::jsonb) AS allowed_tool_ids_json
                    FROM agents
                    WHERE id = ? AND workspace_id = ? AND status = 'active'"""
             ).use { stmt ->
@@ -176,18 +194,23 @@ class AgentNodeExecutor(
                 stmt.setObject(2, workspaceId)
                 stmt.executeQuery().use { rs ->
                     if (!rs.next()) return@use null
+                    @Suppress("UNCHECKED_CAST")
+                    val toolIds = try {
+                        mapper.readValue(rs.getString("allowed_tool_ids_json") ?: "[]", List::class.java) as List<String>
+                    } catch (_: Exception) { emptyList() }
                     AgentRow(
                         id              = rs.getString("id"),
                         name            = rs.getString("name"),
+                        agentType       = rs.getString("type") ?: "native_llm_agent",
                         instructions    = rs.getString("instructions"),
                         llmConnectionId = rs.getString("llm_connection_id"),
                         modelName       = rs.getString("model_name"),
-                        temperature     = rs.getObject("temperature")?.let {
-                            (it as? Number)?.toDouble()
-                        },
-                        maxTokens       = rs.getObject("max_tokens")?.let {
-                            (it as? Number)?.toInt()
-                        },
+                        temperature     = rs.getObject("temperature")?.let { (it as? Number)?.toDouble() },
+                        maxTokens       = rs.getObject("max_tokens")?.let { (it as? Number)?.toInt() },
+                        maxIterations   = rs.getObject("max_iterations")?.let { (it as? Number)?.toInt() } ?: 5,
+                        maxToolCalls    = rs.getString("max_tool_calls_str")?.toIntOrNull() ?: 5,
+                        maxCostCents    = rs.getString("max_cost_cents_str")?.toIntOrNull() ?: 50,
+                        allowedToolIds  = toolIds,
                     )
                 }
             }
@@ -196,6 +219,69 @@ class AgentNodeExecutor(
         log.warn("[agent-executor] failed to load agent [agentId={}, workspaceId={}]: {}",
             agentId, workspaceId, e.javaClass.simpleName)
         null
+    }
+
+    // ── Iterative agent execution via AgentBrainRunner ────────────────────────
+
+    private fun executeIterativeAgent(
+        agent: AgentRow,
+        node: WorkflowNode,
+        resolvedInputs: Map<String, Any>,
+        ctx: RuntimeContext,
+    ): NodeResult {
+        val connectionId = agent.llmConnectionId
+            ?: return NodeResult.Failed("Iterative agent '${agent.name}' has no LLM connection configured.")
+
+        val brainRunner = AgentBrainRunner(
+            dataSource         = dataSource,
+            eventStore         = eventStore,
+            connectionResolver = connectionResolver,
+        )
+
+        val config = AgentBrainConfig(
+            agentId         = UUID.fromString(agent.id),
+            workspaceId     = ctx.workspaceId,
+            environmentId   = ctx.environmentId,
+            runId           = ctx.runId,
+            stepId          = node.id,
+            agentName       = agent.name,
+            role            = null,
+            instructions    = agent.instructions ?: "Complete the task.",
+            llmConnectionId = UUID.fromString(connectionId),
+            modelName       = agent.modelName ?: "gpt-4o-mini",
+            temperature     = agent.temperature ?: 0.2,
+            maxTokens       = agent.maxTokens ?: 2048,
+            maxIterations   = agent.maxIterations,
+            maxToolCalls    = agent.maxToolCalls,
+            maxCostCents    = agent.maxCostCents,
+            taskInstruction = node.config["taskInstruction"] as? String,
+            allowedToolIds  = agent.allowedToolIds.mapNotNull {
+                try { UUID.fromString(it) } catch (_: Exception) { null }
+            }.toSet(),
+            resolvedInput   = resolvedInputs,
+        )
+
+        return try {
+            val result = brainRunner.run(config, ctx)
+            if (result.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) {
+                NodeResult.Completed(
+                    output = result.finalOutput + mapOf(
+                        "_brainIterations"  to result.iterationsUsed,
+                        "_brainTokens"      to result.tokensUsed,
+                        "_brainStopReason"  to result.stopReason.name,
+                    ),
+                )
+            } else {
+                NodeResult.Failed(
+                    "Agent '${agent.name}' stopped with reason: ${result.stopReason} " +
+                    "after ${result.iterationsUsed} iterations."
+                )
+            }
+        } catch (e: BudgetExceededException) {
+            NodeResult.Failed("Agent '${agent.name}' budget exceeded: ${e.message}")
+        } catch (e: Exception) {
+            NodeResult.Failed("Agent '${agent.name}' error: ${e.message?.take(300)}")
+        }
     }
 
     // ── Event helper ──────────────────────────────────────────────────────────

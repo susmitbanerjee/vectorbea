@@ -21,6 +21,9 @@ import { toast } from "sonner";
 import { RunHeaderV2 } from "@/components/agent-runs/v2/RunHeader";
 import { RunSummaryCards } from "@/components/agent-runs/v2/RunSummaryCards";
 import { RunDetailTabsV2 } from "@/components/agent-runs/v2/RunDetailTabsV2";
+import { FailureDiagnosisPanel } from "@/components/agent-runs/FailureDiagnosisPanel";
+import { RunHistoryStats } from "@/components/agent-runs/RunHistoryStats";
+import { AgentBrainTrace } from "@/components/agent-runs/AgentBrainTrace";
 import {
   getRun,
   getRunTimeline,
@@ -481,6 +484,14 @@ export default function RunDetailPage() {
           onCancel={handleCancel}
         />
         <RunSummaryCards model={model} />
+        {/* Durable execution: history stats + continuation chain */}
+        <RunHistoryStats runId={id} workflowId={model.run.jobId ?? ""} />
+        {/* Agent Brain Trace — shown for runs that used iterative agents */}
+        <AgentBrainTrace runId={id} />
+        {/* Failure Diagnosis — shown above timeline if run failed and incident exists */}
+        {(model.run.status === "FAILED" || model.run.status === "TIMEOUT") && (
+          <FailureDiagnosisPanel runId={id} workflowId={model.run.jobId ?? ""} />
+        )}
         <RunDetailTabsV2
           model={model}
           onApprove={isLocalRun ? handleApprove : undefined}

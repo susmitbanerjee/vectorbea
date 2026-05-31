@@ -9,6 +9,7 @@
 
 export type AgentType =
   | "native_llm_agent"
+  | "iterative_agent"
   | "tool_agent"
   | "router_agent"
   | "approval_agent"

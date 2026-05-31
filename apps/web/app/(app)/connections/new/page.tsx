@@ -40,7 +40,7 @@ const TYPE_CARDS: {
   { type: "llm_provider",   label: "LLM Provider",   icon: BrainCircuit, color: "#7C3AED", description: "Connect to an AI model API to power native agents and LLM steps.", examples: "OpenAI, Anthropic, Azure OpenAI, Gemini, Bedrock" },
   { type: "database",       label: "Database",        icon: Database,     color: "#0369A1", description: "Read from or write to SQL and NoSQL databases safely.", examples: "PostgreSQL, MySQL, MongoDB, Snowflake, BigQuery" },
   { type: "http_api",       label: "HTTP / API",      icon: Globe,        color: "#2563EB", description: "Call internal or third-party REST APIs from tools.", examples: "CRM API, Billing API, Internal microservices" },
-  { type: "saas",           label: "SaaS Integration",icon: MessageSquare,color: "#059669", description: "Connect to SaaS platforms for notifications and data sync.", examples: "Slack, Gmail, Salesforce, HubSpot, Jira, GitHub" },
+  { type: "saas",           label: "SaaS Integration",icon: MessageSquare,color: "#059669", description: "Connect to SaaS platforms for notifications and data sync.", examples: "Gmail, Salesforce, HubSpot, Jira, GitHub" },
   { type: "mcp_server",     label: "MCP Server",      icon: Cable,        color: "#D97706", description: "Connect to an MCP server to expose its tools to agents.", examples: "Remote MCP server, Local MCP bridge" },
   { type: "vector_store",   label: "Vector Store",    icon: DatabaseZap,  color: "#DB2777", description: "Long-term semantic memory and retrieval for agents.", examples: "Pinecone, Weaviate, Qdrant, pgvector, Redis" },
   { type: "object_storage", label: "Object Storage",  icon: HardDrive,    color: "#6B7280", description: "Store and retrieve workflow artifacts and files.", examples: "S3, GCS, Azure Blob, Cloudflare R2" },
@@ -338,11 +338,10 @@ function SaasForm({ name, setName, saasProvider, setSaasProvider, token, setToke
     <div className="space-y-5">
       <Section title="Identity">
         <Field label="Connection name" required>
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Slack" />
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Gmail" />
         </Field>
         <Field label="Provider" required>
           <select className={selectCls} value={saasProvider} onChange={(e) => setSaasProvider(e.target.value as SaasProvider)}>
-            <option value="slack">Slack</option>
             <option value="gmail">Gmail / Email</option>
             <option value="salesforce">Salesforce</option>
             <option value="hubspot">HubSpot</option>
@@ -479,7 +478,7 @@ export default function NewConnectionPage() {
   const [secret, setSecret] = useState("");
 
   // SaaS
-  const [saasProvider, setSaasProvider] = useState<SaasProvider>("slack");
+  const [saasProvider, setSaasProvider] = useState<SaasProvider>("gmail");
   const [saasToken, setSaasToken] = useState("");
   const [workspace, setWorkspace] = useState("");
 
@@ -524,7 +523,6 @@ export default function NewConnectionPage() {
         // baseUrl is required by the HTTP connection tester — map each SaaS provider
         // to its canonical API base so "Test connection" can reach a health endpoint.
         const SAAS_BASE_URLS: Record<string, string> = {
-          slack:       "https://slack.com/api",
           gmail:       "https://gmail.googleapis.com",
           salesforce:  "https://login.salesforce.com/services/data/v59.0",
           hubspot:     "https://api.hubapi.com",
@@ -534,10 +532,9 @@ export default function NewConnectionPage() {
         };
         config = {
           provider: saasProvider,
-          baseUrl: SAAS_BASE_URLS[saasProvider] ?? "https://api.slack.com",
+          baseUrl: SAAS_BASE_URLS[saasProvider] ?? "",
           workspace,
           allowedResources: [],
-          healthPath: saasProvider === "slack" ? "/api.test" : undefined,
         };
       } else if (type === "mcp_server") {
         provider = "mcp";

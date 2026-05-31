@@ -86,8 +86,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "OPERATE",
     items: [
-      { href: "/schedules" as never,   label: "Schedules",  icon: CalendarClock },
-      { href: "/settings" as never,    label: "Settings",   icon: Settings2 },
+      { href: "/schedules" as never,        label: "Schedules",  icon: CalendarClock },
+      { href: "/settings/members" as never, label: "Members",    icon: Users },
+      { href: "/settings" as never,         label: "Settings",   icon: Settings2 },
     ],
   },
 ];
@@ -95,10 +96,9 @@ const NAV_GROUPS: NavGroup[] = [
 // All nav items flat (for active detection)
 const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items);
 
-// Settings sub-nav — Billing and Usage hidden (not yet available)
+// Settings sub-nav — API Keys visible only to admins
 const SETTINGS_SUB_NAV: NavItem[] = [
-  { href: "/settings/members" as never, label: "Members",  icon: Users,      isSubItem: true, subItemGroup: isSettingsRoute },
-  { href: "/api-keys" as never,         label: "API Keys", icon: KeyRound,   isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
+  { href: "/api-keys" as never, label: "API Keys", icon: KeyRound, isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
 type SidebarUser = {

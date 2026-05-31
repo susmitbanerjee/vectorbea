@@ -36,7 +36,6 @@ export type DatabaseProvider =
   | "redshift";
 
 export type SaasProvider =
-  | "slack"
   | "gmail"
   | "salesforce"
   | "hubspot"
