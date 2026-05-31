@@ -64,18 +64,26 @@ class EncryptedSecretService(
     }
 
     override fun resolveSecretForRuntime(secretRef: String): String {
+        // Unscoped fallback — prefer the workspace-scoped overload for all new code.
         val id = parseRef(secretRef)
-        val row = repo.findById(id)
-            ?: throw SecretNotFoundException(secretRef)
+        val row = repo.findById(id) ?: throw SecretNotFoundException(secretRef)
+        return decryptRow(row)
+    }
 
-        return try {
-            // SECURITY: return value must NOT be logged by caller
-            Encryption.decrypt(row.secretCiphertext, keyBytes)
-        } catch (e: Exception) {
-            // Do not include ciphertext or key details in the exception
-            log.warn("Failed to decrypt secret [id={}]: {}", id, e.javaClass.simpleName)
-            throw SecretDecryptionException(e)
-        }
+    override fun resolveSecretForRuntime(secretRef: String, workspaceId: java.util.UUID): String {
+        val id = parseRef(secretRef)
+        // Workspace-scoped: null if secret exists but belongs to a different workspace.
+        // Treats cross-workspace access as not-found — no timing difference to attacker.
+        val row = repo.findByIdScoped(id, workspaceId) ?: throw SecretNotFoundException(secretRef)
+        return decryptRow(row)
+    }
+
+    private fun decryptRow(row: SecretRow): String = try {
+        // SECURITY: return value must NOT be logged by caller
+        Encryption.decrypt(row.secretCiphertext, keyBytes)
+    } catch (e: Exception) {
+        log.warn("Failed to decrypt secret [id={}]: {}", row.id, e.javaClass.simpleName)
+        throw SecretDecryptionException(e)
     }
 
     override fun deleteSecret(secretRef: String) {
@@ -110,6 +118,10 @@ class NoOpSecretService : SecretService {
     }
 
     override fun resolveSecretForRuntime(secretRef: String): String {
+        throw SecretServiceUnavailableException()
+    }
+
+    override fun resolveSecretForRuntime(secretRef: String, workspaceId: java.util.UUID): String {
         throw SecretServiceUnavailableException()
     }
 

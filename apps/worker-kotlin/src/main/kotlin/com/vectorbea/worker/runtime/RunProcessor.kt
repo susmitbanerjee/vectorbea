@@ -93,6 +93,9 @@ class RunProcessor(
                 return
             }
 
+        // 1b. SECURITY: verify job workspace matches run workspace
+        if (!verifyWorkspaceMatch(job, run)) return
+
         // 2. Transition: queued → running
         val updated = updateRunStatus(
             runId      = job.runId,
@@ -169,6 +172,7 @@ class RunProcessor(
             log.error("[processor] RESUME_RUN — run not found [runId={}]", job.runId)
             return
         }
+        if (!verifyWorkspaceMatch(job, run)) return
 
         // Load the checkpoint to resume from
         val snapshot = if (job.checkpointId != null) {
@@ -250,6 +254,7 @@ class RunProcessor(
             log.error("[processor] RETRY_NODE — run not found [runId={}]", job.runId)
             return
         }
+        if (!verifyWorkspaceMatch(job, run)) return
 
         val nodeId = job.nodeId
         if (nodeId == null) {
@@ -329,6 +334,7 @@ class RunProcessor(
             log.error("[processor] REPLAY_RUN — run not found [runId={}]", job.runId)
             return
         }
+        if (!verifyWorkspaceMatch(job, run)) return
 
         updateRunStatus(
             runId      = job.runId,
@@ -377,6 +383,69 @@ class RunProcessor(
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
         handleExecResult(job, run, execResult, start, durationMs)
         log.info("[processor] REPLAY_RUN complete [runId={}, durationMs={}]", job.runId, durationMs)
+    }
+
+    // ── Workspace isolation guard ─────────────────────────────────────────────
+
+    /**
+     * Verify that [job.workspaceId] (from the Redis job payload) matches
+     * [run.workspaceId] (loaded from the database).
+     *
+     * A mismatch indicates a corrupted or forged job message.  The job is
+     * rejected immediately — no workflow code runs, and a SECURITY_CONTEXT_MISMATCH
+     * event is emitted so the incident is visible in the run timeline.
+     *
+     * Returns true if validation passed (or if job.workspaceId is null, which
+     * means the job was enqueued before this field existed — allow with warning).
+     * Returns false if there is a mismatch (caller must return without executing).
+     */
+    private fun verifyWorkspaceMatch(job: WorkflowRunJob, run: RunRow): Boolean {
+        val jobWs = job.workspaceId
+        if (jobWs == null) {
+            // Job pre-dates workspaceId field — warn but allow (backward compat)
+            log.warn(
+                "[processor] SECURITY: job has no workspaceId field — cannot verify workspace " +
+                "match [runId={}, run.workspaceId={}]. Consider re-enqueueing the job.",
+                job.runId, run.workspaceId,
+            )
+            return true
+        }
+
+        if (jobWs != run.workspaceId) {
+            // SECURITY MISMATCH — do not execute
+            log.error(
+                "[processor] SECURITY_CONTEXT_MISMATCH: job.workspaceId={} != run.workspaceId={} " +
+                "[runId={}] — refusing to execute. Job may be corrupted or forged.",
+                jobWs, run.workspaceId, job.runId,
+            )
+            // Emit a security event so it appears in the run timeline
+            runCatching {
+                eventStore.appendEvent(RunEventStore.RunEvent(
+                    runId         = job.runId,
+                    workspaceId   = run.workspaceId,  // use DB value — the authoritative one
+                    environmentId = run.environmentId,
+                    type          = RunEventStore.EventType.RUN_FAILED,
+                    status        = "failed",
+                    source        = "worker:$workerId",
+                    title         = "SECURITY_CONTEXT_MISMATCH",
+                    summary       = "Job workspace (${jobWs}) does not match run workspace (${run.workspaceId}). Execution refused.",
+                    errorJsonSanitized = """{"code":"SECURITY_CONTEXT_MISMATCH","message":"job.workspaceId does not match run.workspaceId"}""",
+                ))
+                updateRunCompleted(
+                    runId       = job.runId,
+                    status      = "failed",
+                    completedAt = java.time.Instant.now(),
+                    durationMs  = 0,
+                    outputJson  = null,
+                    errorJson   = """{"code":"SECURITY_CONTEXT_MISMATCH","message":"Workspace mismatch — execution refused"}""",
+                )
+            }.onFailure { e ->
+                log.error("[processor] could not persist security mismatch event [runId={}]: {}", job.runId, e.message)
+            }
+            return false
+        }
+
+        return true
     }
 
     // ── Shared execution result handler ──────────────────────────────────────

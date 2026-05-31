@@ -76,6 +76,18 @@ open class SecretRepository(dataSource: DataSource) : BaseRepository(dataSource)
         ::mapRow,
     )
 
+    /**
+     * Workspace-scoped lookup — PREFERRED for all runtime secret resolution.
+     * Returns null (not-found, not an error) if the secret exists but belongs
+     * to a different workspace, preventing cross-tenant secret leakage.
+     */
+    open fun findByIdScoped(id: UUID, workspaceId: UUID): SecretRow? = queryOne(
+        "SELECT id, workspace_id, connection_id, secret_ciphertext, key_version, masked_preview " +
+        "FROM encrypted_secrets WHERE id = ? AND workspace_id = ?",
+        { setObject(1, id); setObject(2, workspaceId) },
+        ::mapRow,
+    )
+
     open fun delete(id: UUID) {
         execute("DELETE FROM encrypted_secrets WHERE id = ?") { setObject(1, id) }
     }

@@ -32,6 +32,19 @@ data class WorkflowRunJob(
     val nodeId: String?,
     /** For RESUME_RUN: checkpoint to resume from */
     val checkpointId: UUID?,
+    /**
+     * Workspace that enqueued this job — included for security validation.
+     * After loading the run from DB, the worker must verify:
+     *   run.workspaceId == job.workspaceId
+     * A mismatch indicates a corrupted or forged job and must fail immediately.
+     * Nullable for backward-compatibility with jobs enqueued before this field existed.
+     */
+    val workspaceId: UUID? = null,
+    /**
+     * App user ID who triggered this run (from verified JWT, not from user-supplied input).
+     * Used for audit trail only — does not affect execution.
+     */
+    val requestedByUserId: String? = null,
 ) {
     enum class JobType {
         START_RUN,
@@ -69,6 +82,9 @@ data class WorkflowRunJob(
                 nodeId = fields["nodeId"] ?: fields["node_id"] ?: fields["resumeFromNodeId"],
                 checkpointId = (fields["checkpointId"] ?: fields["checkpoint_id"])
                     ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                workspaceId = (fields["workspaceId"] ?: fields["workspace_id"])
+                    ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                requestedByUserId = fields["requestedByUserId"] ?: fields["requested_by_user_id"],
             )
         }
 

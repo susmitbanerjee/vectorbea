@@ -52,6 +52,18 @@ interface SecretService {
     fun resolveSecretForRuntime(secretRef: String): String
 
     /**
+     * Workspace-scoped secret resolution — PREFERRED for all new code.
+     *
+     * Verifies that the secret belongs to [workspaceId] before decrypting.
+     * Returns null if the secret exists but belongs to a different workspace
+     * (treat as not-found; do NOT throw — avoids timing-based workspace enumeration).
+     *
+     * @throws SecretNotFoundException if [secretRef] does not exist in any workspace.
+     * @throws SecretDecryptionException if decryption fails (bad key, tampered data).
+     */
+    fun resolveSecretForRuntime(secretRef: String, workspaceId: UUID): String
+
+    /**
      * Permanently delete the secret referenced by [secretRef].
      * No-op if the ref does not exist.
      */

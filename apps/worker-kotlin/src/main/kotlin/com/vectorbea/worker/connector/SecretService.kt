@@ -57,7 +57,14 @@ open class SecretService(
      * Returns null if [secretRef] is null or blank.
      * Throws [SecretException] on decryption failure.
      */
-    fun resolve(secretRef: String?): SecretValue? {
+    fun resolve(secretRef: String?): SecretValue? = resolve(secretRef, workspaceId = null)
+
+    /**
+     * Workspace-scoped resolve — PREFERRED for all runtime execution paths.
+     * Verifies that the secret belongs to [workspaceId] before decrypting.
+     * Returns null if the secret exists but belongs to a different workspace.
+     */
+    fun resolve(secretRef: String?, workspaceId: java.util.UUID?): SecretValue? {
         if (secretRef.isNullOrBlank()) return null
 
         // Mode 1: direct encrypted value
@@ -66,8 +73,8 @@ open class SecretService(
             return decrypt(encrypted, "direct secret ref")
         }
 
-        // Mode 2: table lookup
-        val encryptedValue = lookupInTable(secretRef)
+        // Mode 2: table lookup (workspace-scoped when workspaceId provided)
+        val encryptedValue = lookupInTable(secretRef, workspaceId)
             ?: if (aesKey == null) {
                 // Dev mode: treat secretRef as cleartext (no key)
                 log.warn("[secrets] No encryption key — returning secretRef as plaintext (dev mode only)")
@@ -140,13 +147,18 @@ open class SecretService(
      * This method strips the version prefix before returning, so the caller
      * receives the raw base64url blob that [decrypt] expects.
      */
-    private fun lookupInTable(ref: String): String? =
+    private fun lookupInTable(ref: String, workspaceId: java.util.UUID? = null): String? =
         try {
             dataSource.connection.use { conn ->
-                conn.prepareStatement(
+                // Workspace-scoped query when workspaceId is provided — prevents
+                // cross-tenant secret access even if secretRef UUID is guessed.
+                val sql = if (workspaceId != null)
+                    "SELECT secret_ciphertext FROM encrypted_secrets WHERE id = ?::uuid AND workspace_id = ?"
+                else
                     "SELECT secret_ciphertext FROM encrypted_secrets WHERE id = ?::uuid"
-                ).use { stmt ->
+                conn.prepareStatement(sql).use { stmt ->
                     stmt.setString(1, ref)
+                    if (workspaceId != null) stmt.setObject(2, workspaceId)
                     stmt.executeQuery().use { rs ->
                         if (!rs.next()) return@use null
                         val raw = rs.getString("secret_ciphertext") ?: return@use null

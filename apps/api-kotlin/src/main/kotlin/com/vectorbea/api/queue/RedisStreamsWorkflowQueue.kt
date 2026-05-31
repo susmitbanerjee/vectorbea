@@ -82,6 +82,8 @@ class RedisStreamsWorkflowQueue(
             put("nodeId", job.resumeFromNodeId)  // worker reads "nodeId"; keep both for compatibility
         }
         put("inputJson", job.inputJson)  // must already have secrets stripped by caller
+        // Audit: who triggered this run (app_users.id, verified server-side from JWT)
+        if (job.requestedByUserId != null) put("requestedByUserId", job.requestedByUserId)
     }
 
     companion object {

@@ -74,9 +74,9 @@ open class ConnectionResolver(
             )
         }
 
-        // Resolve secret
+        // Resolve secret — scoped to the connection's workspace to prevent cross-tenant leakage
         val secret = try {
-            secretService.resolve(record.secretRef)
+            secretService.resolve(record.secretRef, record.workspaceId)
         } catch (e: SecretException) {
             throw ConnectionException("Secret resolution failed for connection '${record.name}': ${e.message}")
         }

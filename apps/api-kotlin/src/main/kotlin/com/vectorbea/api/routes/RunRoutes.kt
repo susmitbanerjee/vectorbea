@@ -215,6 +215,8 @@ class RunRoutes(
             workflowVersionId = versionId.toString(),
             jobType = JobType.START_RUN,
             inputJson = inputJson,
+            // Audit trail: identity derived from verified JWT, never from user-supplied headers
+            requestedByUserId = req.principal?.appUserId?.toString(),
         )
 
         val messageId = try {

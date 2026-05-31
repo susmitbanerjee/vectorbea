@@ -26,8 +26,8 @@ class ConnectionTester(private val secretService: SecretService) {
         log.info("Testing connection [id={}, type={}, provider={}]",
             connection.id, connection.type, connection.provider)
 
-        // Resolve secret — plaintext held only in this scope
-        val resolvedSecret: String? = resolveSecret(connection.secretRef)
+        // Resolve secret — scoped to connection's workspace to prevent cross-tenant leakage
+        val resolvedSecret: String? = resolveSecret(connection.secretRef, connection.workspaceId)
             ?: return ConnectionTestResult.failed(
                 0, "SECRET_MISSING",
                 "No secret configured for this connection. Add credentials first."
@@ -71,10 +71,11 @@ class ConnectionTester(private val secretService: SecretService) {
 
     // ── Secret resolution ─────────────────────────────────────────────────────
 
-    private fun resolveSecret(secretRef: String?): String? {
+    private fun resolveSecret(secretRef: String?, workspaceId: java.util.UUID): String? {
         if (secretRef.isNullOrBlank()) return null
         return try {
-            secretService.resolveSecretForRuntime(secretRef)
+            // Use workspace-scoped resolution to prevent cross-tenant secret access
+            secretService.resolveSecretForRuntime(secretRef, workspaceId)
         } catch (e: SecretServiceUnavailableException) {
             log.warn("Secret service unavailable — cannot resolve secret")
             null

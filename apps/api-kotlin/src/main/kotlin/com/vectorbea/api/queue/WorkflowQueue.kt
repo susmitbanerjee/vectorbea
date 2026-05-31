@@ -30,6 +30,12 @@ data class WorkflowRunJob(
      * Use placeholder references, resolved server-side at runtime.
      */
     val inputJson: String = "{}",
+    /**
+     * App user ID (UUID from app_users.id) of the user who triggered this run.
+     * Derived from the verified AuthPrincipal — never from user-supplied headers.
+     * Used for audit trail; does not affect execution.
+     */
+    val requestedByUserId: String? = null,
 )
 
 enum class JobType {

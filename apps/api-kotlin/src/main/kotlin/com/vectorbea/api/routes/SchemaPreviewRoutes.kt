@@ -89,10 +89,10 @@ class SchemaPreviewRoutes(
             throw ApiError.ValidationError("Schema preview is only available for database connections")
         }
 
-        // Resolve secret — plaintext held only in this scope
+        // Resolve secret — workspace-scoped to prevent cross-tenant leakage
         val secret: String? = conn.secretRef?.let { ref ->
             try {
-                secretService.resolveSecretForRuntime(ref)
+                secretService.resolveSecretForRuntime(ref, ctx.workspaceId)
             } catch (e: SecretServiceUnavailableException) {
                 throw ApiError.ServiceUnavailable("Secret service not configured — cannot resolve connection credentials")
             } catch (e: Exception) {
