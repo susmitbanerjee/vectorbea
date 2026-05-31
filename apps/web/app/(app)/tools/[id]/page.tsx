@@ -180,7 +180,7 @@ export default function ToolDetailPage() {
       {/* Tab bar */}
       <div
         className="sticky top-0 z-10 mt-4 px-6 lg:px-8"
-        style={{ borderBottom: "1px solid rgba(148,163,184,0.09)", background: "rgba(9,14,24,0.96)" }}
+        style={{ borderBottom: "1px solid #E2E8F0", background: "#FFFFFF" }}
       >
         <div className="flex gap-0 overflow-x-auto">
           {TABS.map(({ id: tid, label, icon: Icon }) => (
@@ -198,7 +198,7 @@ export default function ToolDetailPage() {
               <Icon className="h-3.5 w-3.5" />
               {label}
               {tid === "calls" && calls.length > 0 && (
-                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "rgba(148,163,184,0.12)", color: "var(--text-faint)" }}>
+                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "#F1F5F9", color: "#64748B" }}>
                   {calls.length}
                 </span>
               )}
