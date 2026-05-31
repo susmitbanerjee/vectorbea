@@ -182,18 +182,17 @@ fun main() {
     // 6. Repositories (require DB)
     val ds = database?.dataSource
 
-    // 6a. Authentication — Supabase JWT verifier + user repository
-    // SECURITY: jwtVerifier is null only when SUPABASE_URL is not configured (dev/local mode).
-    // In production SUPABASE_URL must be set; all API requests will require a valid JWT.
-    val jwtVerifier: JwtVerifier? = if (config.supabaseUrl != null) {
-        log.info("JWT auth: enabled (supabase_url=present, hs256_secret={})",
-            if (config.supabaseJwtSecret != null) "present" else "absent (JWKS-only mode)")
-        JwtVerifier(
-            supabaseUrl = config.supabaseUrl,
-            jwtSecret   = config.supabaseJwtSecret,  // null = only JWKS/asymmetric accepted
-        )
+    // 6a. Authentication — HS256 JWT verifier + user repository
+    // JWT_SECRET is the shared secret used by Next.js to sign tokens.
+    // Null = open/dev mode: workspace headers are trusted without a JWT.
+    val jwtVerifier: JwtVerifier? = if (config.jwtSecret != null) {
+        log.info("JWT auth: enabled (HS256)")
+        JwtVerifier(secret = config.jwtSecret)
     } else {
-        log.warn("JWT auth: DISABLED — SUPABASE_URL not set. Running in open/dev mode (all workspace headers trusted).")
+        if (config.isProduction) {
+            throw IllegalStateException("JWT_SECRET is required in production")
+        }
+        log.warn("JWT auth: DISABLED — JWT_SECRET not set. Running in open/dev mode.")
         null
     }
 
@@ -202,9 +201,6 @@ fun main() {
     val authMiddleware = if (jwtVerifier != null && appUserRepo != null) {
         AuthMiddleware(jwtVerifier = jwtVerifier, userRepo = appUserRepo)
     } else {
-        if (config.isProduction && jwtVerifier == null) {
-            throw IllegalStateException("SUPABASE_URL is required in production for JWT authentication")
-        }
         log.warn("AuthMiddleware: disabled (dev mode)")
         null
     }
