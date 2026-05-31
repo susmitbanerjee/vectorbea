@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 import { signToken } from "@/lib/auth/jwt";
 import { createUser, getUserWorkspaces } from "@/lib/auth/neon-auth";
-import { Pool } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,47 +72,42 @@ export async function GET(request: NextRequest) {
     ?? undefined;
 
   // ── 2. Upsert into Neon app_users ─────────────────────────────────────────
-  // supabase_user_id = oauthUser.id (Supabase UUID, stable per provider account)
+  // Uses neon() HTTP client — more reliable than Pool on serverless/Railway.
   let neonUserId: string;
   try {
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO app_users (supabase_user_id, email, full_name, avatar_url, status, email_verified)
-       VALUES ($1, $2, $3, $4, 'active', TRUE)
-       ON CONFLICT (supabase_user_id) DO UPDATE
-         SET email      = COALESCE(EXCLUDED.email,      app_users.email),
-             full_name  = COALESCE(EXCLUDED.full_name,  app_users.full_name),
-             avatar_url = COALESCE(EXCLUDED.avatar_url, app_users.avatar_url),
-             updated_at = now()
-       RETURNING id`,
-      [oauthUser.id, email, fullName ?? null, avatarUrl ?? null],
-    );
-    neonUserId = rows[0]!.id;
+    const sql = neon(process.env.DATABASE_URL!);
+
+    const userRows = await sql`
+      INSERT INTO app_users (supabase_user_id, email, full_name, avatar_url, status, email_verified)
+      VALUES (${oauthUser.id}, ${email}, ${fullName ?? null}, ${avatarUrl ?? null}, 'active', TRUE)
+      ON CONFLICT (supabase_user_id) DO UPDATE
+        SET email      = COALESCE(EXCLUDED.email,      app_users.email),
+            full_name  = COALESCE(EXCLUDED.full_name,  app_users.full_name),
+            avatar_url = COALESCE(EXCLUDED.avatar_url, app_users.avatar_url),
+            updated_at = now()
+      RETURNING id`;
+
+    neonUserId = userRows[0]!.id;
 
     // Auto-create workspace if the user has none
     const workspaces = await getUserWorkspaces(neonUserId);
     if (workspaces.length === 0) {
-      // Reuse createUser's workspace setup logic by importing directly
       const slug = email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 40);
-      const wsResult = await pool.query<{ id: string }>(
-        `INSERT INTO workspaces (name, slug, owner_user_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (slug) DO UPDATE SET slug = $2 || '-' || substr(md5(random()::text), 1, 6)
-         RETURNING id`,
-        [`${fullName ?? email.split("@")[0]}'s Workspace`, slug, neonUserId],
-      );
-      const wsId = wsResult.rows[0]!.id;
-      await pool.query(
-        `INSERT INTO environments (workspace_id, name, slug, type) VALUES ($1, 'Development', 'development', 'development') ON CONFLICT DO NOTHING`,
-        [wsId],
-      );
-      await pool.query(
-        `INSERT INTO workspace_members (workspace_id, user_id, role, status) VALUES ($1, $2, 'owner', 'active') ON CONFLICT DO NOTHING`,
-        [wsId, neonUserId],
-      );
-    }
+      const wsName = `${fullName ?? email.split("@")[0]}'s Workspace`;
 
-    await pool.end();
+      const wsRows = await sql`
+        INSERT INTO workspaces (name, slug, owner_user_id)
+        VALUES (${wsName}, ${slug}, ${neonUserId})
+        ON CONFLICT (slug) DO UPDATE SET slug = ${slug} || '-' || substr(md5(random()::text), 1, 6)
+        RETURNING id`;
+      const wsId = wsRows[0]!.id;
+
+      await sql`INSERT INTO environments (workspace_id, name, slug, type)
+        VALUES (${wsId}, 'Development', 'development', 'development') ON CONFLICT DO NOTHING`;
+
+      await sql`INSERT INTO workspace_members (workspace_id, user_id, role, status)
+        VALUES (${wsId}, ${neonUserId}, 'owner', 'active') ON CONFLICT DO NOTHING`;
+    }
   } catch (err) {
     console.error("[auth/callback] Neon upsert failed:", err);
     return NextResponse.redirect(new URL("/signin?error=callback_failed", request.url));
