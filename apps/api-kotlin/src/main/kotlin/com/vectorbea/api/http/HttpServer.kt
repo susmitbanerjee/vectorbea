@@ -79,17 +79,16 @@ class HttpServer(
             // Parse request (may throw ApiError.ValidationError for body-too-large)
             val rawRequest = Request.from(exchange, requestId, config.maxRequestBodyBytes)
 
-            // Apply authentication BEFORE routing.
-            // AuthMiddleware verifies the Supabase JWT and attaches an AuthPrincipal
-            // to the request.  Throws ApiError.Unauthorized / Forbidden on failure.
-            val request = authMiddleware?.authenticate(rawRequest) ?: rawRequest
-
-            // OPTIONS preflight — answer without hitting the router
-            if (request.method == "OPTIONS") {
-                val allowed = router.allowedMethods(request.path)
+            // OPTIONS preflight MUST bypass auth — browsers never send credentials
+            // on preflight requests, so auth middleware would always return 401.
+            if (rawRequest.method == "OPTIONS") {
+                val allowed = router.allowedMethods(rawRequest.path)
                     .plus("OPTIONS").joinToString(", ")
                 response = Response.options(allowed, corsHeaders(exchange))
             } else {
+                // Apply authentication before routing for all non-OPTIONS requests.
+                val request = authMiddleware?.authenticate(rawRequest) ?: rawRequest
+
                 // Check for SSE route before normal dispatch
                 val sseMatch = router.findSseRoute(request.method, request.path)
                 if (sseMatch != null) {
