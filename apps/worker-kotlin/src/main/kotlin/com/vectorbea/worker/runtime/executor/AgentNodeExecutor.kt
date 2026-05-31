@@ -265,7 +265,8 @@ class AgentNodeExecutor(
             val result = brainRunner.run(config, ctx)
             if (result.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) {
                 NodeResult.Completed(
-                    output = result.finalOutput + mapOf(
+                    // result.finalOutput is Map<String,Any?> — filter nulls to satisfy Map<String,Any>
+                    output = result.finalOutput.filterValues { it != null }.mapValues { it.value!! } + mapOf(
                         "_brainIterations"  to result.iterationsUsed,
                         "_brainTokens"      to result.tokensUsed,
                         "_brainStopReason"  to result.stopReason.name,

@@ -268,17 +268,18 @@ class WorkflowQueueConsumer(
      */
     private fun reclaimPendingMessages() {
         try {
-            // XAUTOCLAIM: claim messages idle for pendingIdleMs, starting from 0-0
-            val claimed = redis.xautoclaim(
+            // XAUTOCLAIM: claim messages idle for pendingIdleMs, starting from 0-0.
+            // Lettuce 6.3.x returns List<StreamMessage<K,V>> directly (no wrapper object).
+            @Suppress("UNCHECKED_CAST")
+            val messages = redis.xautoclaim(
                 config.queueStream,
                 XAutoClaimArgs.Builder
                     .xautoclaim(consumer, pendingIdleMs, "0-0")
                     .count(config.pollBatchSize.toLong()),
-            )
-            val messages = claimed?.claimedMessages ?: return
+            ) as? List<StreamMessage<String, String>> ?: return
             if (messages.isNotEmpty()) {
                 log.info("[queue] reclaimed {} pending message(s) from idle workers", messages.size)
-                messages.forEach { msg -> dispatchMessage(msg) }
+                messages.forEach { msg: StreamMessage<String, String> -> dispatchMessage(msg) }
             }
         } catch (e: Exception) {
             if (e.message?.contains("XAUTOCLAIM") == true || e.message?.contains("unknown command") == true) {

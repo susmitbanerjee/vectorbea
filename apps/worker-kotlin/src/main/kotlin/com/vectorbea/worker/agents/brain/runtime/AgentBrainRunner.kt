@@ -6,8 +6,10 @@ import com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.logging.logger
-import com.vectorbea.worker.runtime.RuntimeContext
-import com.vectorbea.worker.runtime.executor.ToolNodeExecutor
+import com.vectorbea.worker.runtime.executor.HttpNodeExecutor
+import com.vectorbea.worker.runtime.executor.NodeResult
+import com.vectorbea.worker.runtime.graph.RuntimeContext
+import com.vectorbea.worker.runtime.graph.WorkflowNode
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
@@ -128,7 +130,7 @@ class AgentBrainRunner(
 
                     AgentAction.ActionType.CALL_TOOL -> {
                         budget.toolCallUsed()
-                        emitEvent(config, RunEventStore.EventType.AGENT_TOOL_CALL_STARTED, "running",
+                        emitEvent(config, RunEventStore.EventType.AGENT_TOOL_SELECTED, "running",
                             "Calling tool: ${action.toolId}")
                         val obs = executeTool(action, config, runtimeCtx, state)
                         state.addObservation(obs)
@@ -210,7 +212,7 @@ class AgentBrainRunner(
         // Use the existing HTTP infrastructure to call the LLM via its connection
         try {
             val resolved = connectionResolver.resolve(config.llmConnectionId, config.workspaceId)
-            val apiKey   = resolved.secret?.toCharArray()?.let { String(it) } ?: throw RuntimeException("LLM connection secret missing")
+            val apiKey   = resolved.secret?.useOnce { it } ?: throw RuntimeException("LLM connection secret missing")
 
             val requestBody = mapper.writeValueAsString(mapOf(
                 "model"       to config.modelName,
@@ -222,7 +224,7 @@ class AgentBrainRunner(
                 ),
             ))
 
-            val baseUrl = resolved.record.config_json?.get("baseUrl")?.toString()
+            val baseUrl = resolved.record.configJson["baseUrl"]?.toString()
                 ?: inferBaseUrl(resolved.record.provider)
             val url = "$baseUrl/chat/completions"
 
@@ -305,23 +307,74 @@ class AgentBrainRunner(
         runtimeCtx: RuntimeContext,
         state: AgentLoopState,
     ): AgentObservation {
-        val toolId = UUID.fromString(action.toolId!!)
+        val toolId = try { UUID.fromString(action.toolId!!) }
+        catch (_: Exception) {
+            return AgentObservation(state.iteration, "CALL_TOOL", action.toolId, "Invalid tool ID format", false)
+        }
+
         return try {
-            // Delegate to existing ToolNodeExecutor infrastructure
-            val toolExec = ToolNodeExecutor(
-                workspaceId    = config.workspaceId,
-                dataSource     = dataSource!!,
-                connectionResolver = connectionResolver,
+            // Load tool config from DB (gets connectionId and HTTP config)
+            val toolCfg = loadToolConfig(toolId, config.workspaceId)
+                ?: return AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                    "Tool $toolId not found or not accessible", false)
+
+            // Build a synthetic HTTP node from the tool config
+            val syntheticNode = WorkflowNode(
+                id     = "brain-tool-${state.iteration}-$toolId",
+                type   = "http",
+                config = toolCfg,
             )
-            val result = toolExec.executeTool(toolId, action.toolInput, runtimeCtx)
-            val summary = buildToolObservationSummary(toolId, result)
-            emitEvent(config, RunEventStore.EventType.AGENT_TOOL_CALL_COMPLETED, "running",
-                "Tool $toolId: $summary")
-            AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), summary, true)
+
+            // Delegate to HttpNodeExecutor — no dbPoolManager needed for HTTP tools
+            val httpExec = HttpNodeExecutor(connectionResolver, eventStore)
+            @Suppress("UNCHECKED_CAST")
+            val inputs = (action.toolInput ?: emptyMap<String, Any?>()) as Map<String, Any>
+
+            when (val execResult = httpExec.execute(syntheticNode, inputs, runtimeCtx)) {
+                is NodeResult.Completed -> {
+                    val summary = buildToolObservationSummary(toolId, execResult.output)
+                    emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED, "running",
+                        "Tool $toolId: $summary")
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), summary, true)
+                }
+                is NodeResult.Failed -> {
+                    val errSummary = "Tool $toolId failed: ${execResult.reason.take(200)}"
+                    log.warn("[brain] tool execution failed toolId={}: {}", toolId, execResult.reason)
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false)
+                }
+                else -> AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                    "Tool $toolId returned unexpected result type", false)
+            }
         } catch (e: Exception) {
             val errSummary = "Tool $toolId failed: ${e.message?.take(200)}"
             log.warn("[brain] tool execution failed: {}", errSummary)
             AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false)
+        }
+    }
+
+    /** Load a tool's HTTP-compatible config from the DB for agent brain execution. */
+    private fun loadToolConfig(toolId: UUID, workspaceId: UUID): Map<String, Any>? {
+        if (dataSource == null) return null
+        return try {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    "SELECT config_json, connection_id FROM tools WHERE id=? AND workspace_id=? AND status='active'"
+                ).use { stmt ->
+                    stmt.setObject(1, toolId)
+                    stmt.setObject(2, workspaceId)
+                    val rs = stmt.executeQuery()
+                    if (!rs.next()) return@use null
+                    @Suppress("UNCHECKED_CAST")
+                    val configJson: Map<String, Any> = try {
+                        mapper.readValue(rs.getString("config_json") ?: "{}", Map::class.java) as Map<String, Any>
+                    } catch (_: Exception) { emptyMap() }
+                    val connectionId = rs.getString("connection_id")
+                    if (connectionId != null) configJson + mapOf("connectionId" to connectionId) else configJson
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[brain] loadToolConfig failed toolId={}: {}", toolId, e.message)
+            null
         }
     }
 

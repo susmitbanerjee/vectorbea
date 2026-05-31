@@ -149,7 +149,7 @@ class TimerScheduler(
     )
 
     private fun findDueTimers(limit: Int): List<TimerRow> {
-        dataSource.connection.use { conn ->
+        return dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT t.id, t.run_id, t.workspace_id, t.workflow_id, t.node_id
                    FROM workflow_timers t
