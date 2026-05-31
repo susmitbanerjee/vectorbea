@@ -1,3 +1,4 @@
+// api-kotlin service (VB-113)
 plugins {
     kotlin("jvm") version "2.1.20"
     application
