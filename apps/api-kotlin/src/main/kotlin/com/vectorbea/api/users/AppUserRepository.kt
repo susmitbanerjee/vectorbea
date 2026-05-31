@@ -129,6 +129,9 @@ class AppUserRepository(private val ds: DataSource) {
         fullName: String?,
         avatarUrl: String?,
     ): UUID {
+        // Upsert by supabase_user_id. If the email already exists under a different
+        // supabase_user_id (e.g. email/password row later linked via OAuth), also
+        // handle that conflict by updating the supabase_user_id on the existing row.
         conn.prepareStatement(
             """
             INSERT INTO app_users (supabase_user_id, email, full_name, avatar_url, updated_at)
@@ -145,8 +148,30 @@ class AppUserRepository(private val ds: DataSource) {
             stmt.setString(2, email)
             stmt.setString(3, fullName)
             stmt.setString(4, avatarUrl)
+            runCatching { stmt.executeQuery() }.getOrNull()?.let { rs ->
+                if (rs.next()) return UUID.fromString(rs.getString("id"))
+            }
+        }
+
+        // Fallback: email conflict — another row already has this email.
+        // Update that row's supabase_user_id so it maps to the OAuth identity.
+        conn.prepareStatement(
+            """
+            UPDATE app_users
+            SET supabase_user_id = ?,
+                full_name  = COALESCE(?, full_name),
+                avatar_url = COALESCE(?, avatar_url),
+                updated_at = now()
+            WHERE LOWER(email) = LOWER(?)
+            RETURNING id
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, supabaseUserId)
+            stmt.setString(2, fullName)
+            stmt.setString(3, avatarUrl)
+            stmt.setString(4, email ?: "")
             val rs = stmt.executeQuery()
-            check(rs.next()) { "UPSERT into app_users returned no rows" }
+            check(rs.next()) { "Could not resolve user for supabase_user_id=$supabaseUserId email=$email" }
             return UUID.fromString(rs.getString("id"))
         }
     }
