@@ -181,11 +181,15 @@ class AgentNodeExecutor(
 
     private fun loadAgent(agentId: UUID, workspaceId: UUID): AgentRow? = try {
         dataSource.connection.use { conn ->
+            // V010 added max_tool_calls and max_cost_cents as direct INTEGER columns.
+            // The old COALESCE over jsonb_each_text(timeout_policy_json) was broken:
+            // it mixed integer (value::int) and text ('5') in the same COALESCE,
+            // causing PSQLException: "COALESCE types integer and text cannot be matched".
             conn.prepareStatement(
                 """SELECT id, name, type, instructions, llm_connection_id,
                    model_name, temperature, max_tokens, max_iterations,
-                   COALESCE((SELECT (value::int) FROM jsonb_each_text(timeout_policy_json) WHERE key='maxToolCalls'), '5') AS max_tool_calls_str,
-                   COALESCE((SELECT (value::int) FROM jsonb_each_text(timeout_policy_json) WHERE key='maxCostCents'), '50') AS max_cost_cents_str,
+                   COALESCE(max_tool_calls, 5)  AS max_tool_calls_val,
+                   COALESCE(max_cost_cents, 50) AS max_cost_cents_val,
                    COALESCE(allowed_tool_ids, '[]'::jsonb) AS allowed_tool_ids_json
                    FROM agents
                    WHERE id = ? AND workspace_id = ? AND status = 'active'"""
@@ -208,8 +212,8 @@ class AgentNodeExecutor(
                         temperature     = rs.getObject("temperature")?.let { (it as? Number)?.toDouble() },
                         maxTokens       = rs.getObject("max_tokens")?.let { (it as? Number)?.toInt() },
                         maxIterations   = rs.getObject("max_iterations")?.let { (it as? Number)?.toInt() } ?: 5,
-                        maxToolCalls    = rs.getString("max_tool_calls_str")?.toIntOrNull() ?: 5,
-                        maxCostCents    = rs.getString("max_cost_cents_str")?.toIntOrNull() ?: 50,
+                        maxToolCalls    = rs.getObject("max_tool_calls_val")?.let { (it as? Number)?.toInt() } ?: 5,
+                        maxCostCents    = rs.getObject("max_cost_cents_val")?.let { (it as? Number)?.toInt() } ?: 50,
                         allowedToolIds  = toolIds,
                     )
                 }
