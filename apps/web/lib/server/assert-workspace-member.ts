@@ -4,10 +4,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
-import {
-  getAuthenticatedUserForAccessToken,
-} from "@/lib/auth/server";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { verifyToken } from "@/lib/auth/jwt";
+import { getUserById } from "@/lib/auth/neon-auth";
 
 /**
  * P0 Tenant Isolation Guard
@@ -62,12 +60,7 @@ export async function assertWorkspaceMember(
   request: NextRequest,
   workspaceId: string,
 ): Promise<AssertResult> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseConfigured =
-    !!supabaseUrl &&
-    supabaseUrl !== "https://your-project.supabase.co" &&
-    !supabaseUrl.includes("placeholder");
-  const requireAuth = process.env.REQUIRE_AUTH === "true" || supabaseConfigured;
+  const requireAuth = !!process.env.JWT_SECRET;
 
   // Open/mock-session mode: skip Supabase token+membership enforcement.
   // This keeps local MVP flows functional when running without Supabase auth.
@@ -93,8 +86,9 @@ export async function assertWorkspaceMember(
     };
   }
 
-  // ── 2. Validate the token against Supabase Auth ────────────────────────────
-  const user = await getAuthenticatedUserForAccessToken(accessToken);
+  // ── 2. Validate the JWT ────────────────────────────────────────────────────
+  const payload = await verifyToken(accessToken);
+  const user = payload ? await getUserById(payload.sub) : null;
   if (!user) {
     return {
       error: NextResponse.json(
@@ -104,37 +98,23 @@ export async function assertWorkspaceMember(
     };
   }
 
-  // ── 3. Verify workspace membership (admin client, but explicit row check) ──
-  //
-  // We use the admin client here intentionally: the membership table itself
-  // has RLS, and we need a trusted read to enforce the isolation boundary.
-  // The result of this query is the authorization decision — not a shortcut
-  // around it.
-  const supabase = createVectorBeaAdminClient();
-  const { data: membership, error: membershipError } = await supabase
-    .from("workspace_members")
-    .select("role")
-    .eq("workspace_id", workspaceId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (membershipError) {
-    console.error("[assertWorkspaceMember] membership query error:", membershipError.message);
-    // Invalid workspace id format should be treated as a client error, not server fault.
-    if (membershipError.code === "22P02") {
-      return {
-        error: NextResponse.json(
-          { error: "Invalid workspaceId format" },
-          { status: 400 },
-        ),
-      };
-    }
+  // ── 3. Verify workspace membership via Neon ───────────────────────────────
+  const { Pool } = await import("@neondatabase/serverless");
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+  let membership: { role: string } | null = null;
+  try {
+    const { rows } = await pool.query<{ role: string }>(
+      "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND status = 'active' LIMIT 1",
+      [workspaceId, user.id],
+    );
+    membership = rows[0] ?? null;
+  } catch (e) {
+    console.error("[assertWorkspaceMember] membership query error:", e);
     return {
-      error: NextResponse.json(
-        { error: "Failed to verify workspace access" },
-        { status: 500 },
-      ),
+      error: NextResponse.json({ error: "Failed to verify workspace access" }, { status: 500 }),
     };
+  } finally {
+    await pool.end();
   }
 
   if (!membership) {
