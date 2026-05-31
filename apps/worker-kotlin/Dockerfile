@@ -1,6 +1,9 @@
 # =============================================================================
 # vectorbea-worker — Kotlin workflow worker
 # Multi-stage build: Gradle fat-jar → JRE runtime
+#
+# Build context: apps/worker-kotlin/  (Railway Root Directory = apps/worker-kotlin)
+# recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
 # =============================================================================
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
@@ -26,7 +29,7 @@ RUN gradle dependencies --no-daemon --console=plain -q 2>/dev/null || true
 
 # Copy source and build fat jar
 COPY src ./src
-RUN gradle fatJar --no-daemon --console=plain -q
+RUN gradle fatJar --no-daemon --console=plain
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime
@@ -46,20 +49,11 @@ COPY --from=builder /build/build/libs/*-all.jar app.jar
 RUN chown worker:worker /app/app.jar
 USER worker
 
-# Metrics HTTP server (Prometheus /metrics endpoint)
 EXPOSE 9090
 
-# JVM flags:
-#   UseContainerSupport  — respect cgroup memory/CPU limits
-#   MaxRAMPercentage=75  — use up to 75 % of container RAM for heap
-#   UseG1GC              — good for mixed throughput / latency workloads
 ENV JAVA_OPTS="-Xms64m -Xmx384m -XX:+UseG1GC -XX:+UseContainerSupport"
 
-# The worker has no HTTP health endpoint — use the metrics server for liveness.
-# Platforms that require a health check can probe GET /metrics on METRICS_PORT.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=4 \
   CMD wget -qO- http://localhost:${METRICS_PORT:-9090}/metrics | grep -q "worker_" || exit 1
 
-# Secrets are injected at runtime via platform env vars — NEVER baked into the image.
-# Required: DATABASE_URL, REDIS_URL, SECRET_ENCRYPTION_KEY
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

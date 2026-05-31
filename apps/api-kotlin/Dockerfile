@@ -1,6 +1,9 @@
 # =============================================================================
 # vectorbea-api — Kotlin API service
 # Multi-stage build: Gradle fat-jar → JRE runtime
+#
+# Build context: apps/api-kotlin/   (Railway Root Directory = apps/api-kotlin)
+# recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
 # =============================================================================
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
@@ -27,7 +30,7 @@ RUN gradle dependencies --no-daemon --console=plain -q 2>/dev/null || true
 
 # Copy source and build fat jar
 COPY src ./src
-RUN gradle fatJar --no-daemon --console=plain -q
+RUN gradle fatJar --no-daemon --console=plain
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime
@@ -50,16 +53,8 @@ USER vectorbea
 # API port (overridable via PORT env var)
 EXPOSE 8080
 
-# JVM flags:
-#   Xms / Xmx  — explicit heap bounds (safe on Railway / shared-host containers
-#                where UseContainerSupport may read host RAM instead of cgroup limit)
-#   UseG1GC    — well-tested, low memory-mapping footprint (ZGC needs
-#                vm.max_map_count >> 65530 and is unsafe on shared kernels)
-#   Override at runtime: set JAVA_OPTS env var in Railway Variables.
 ENV JAVA_OPTS="-Xms64m -Xmx256m -XX:+UseG1GC -XX:+UseContainerSupport"
 
-# Liveness probe: GET /health returns 200 when the JVM is up.
-# Readiness probe: GET /ready returns 200 when DB + Redis are reachable.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
   CMD wget -qO- http://localhost:${PORT:-8080}/health || exit 1
 

@@ -25,9 +25,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.8")
 
     // DB connection pool — HikariCP
-    // Recovery Engine — shared deterministic failure classification
-    implementation("com.vectorbea:recovery-kotlin")
-
+    // Note: recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
     implementation("com.zaxxer:HikariCP:5.1.0")
 
     // Postgres JDBC driver
