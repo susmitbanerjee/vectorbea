@@ -24,6 +24,7 @@ import type {
 } from "@/types/platform";
 import type { WorkflowGraph } from "@/types/workflow-graph";
 import { apiFetch, getActiveWorkspaceId, withWorkspace } from "@/lib/api/client";
+export { apiFetch } from "@/lib/api/client";
 
 // Re-export SSE streaming helper so call sites import from a single place
 export { streamRunEvents } from "@/lib/api/client";
@@ -52,6 +53,39 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...(parsedBody !== undefined ? { json: parsedBody } : {}),
     headers: headers as Record<string, string> | undefined,
     ...rest,
+  });
+}
+
+// ─── Me / workspace bootstrap ─────────────────────────────────────────────────
+
+export interface MeWorkspace {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
+export interface MeResponse {
+  user: { id: string; supabaseUserId: string; email: string | null };
+  workspaces: MeWorkspace[];
+  defaultWorkspaceId: string | null;
+}
+
+/**
+ * Fetch the current user's identity + workspace memberships from the Kotlin API.
+ * Call this after every login to discover authorized workspaces.
+ */
+export async function getMe(): Promise<MeResponse> {
+  return apiFetch<MeResponse>("/api/me");
+}
+
+/**
+ * Create a new workspace. The authenticated user becomes the owner.
+ */
+export async function createWorkspace(name: string, slug?: string): Promise<MeWorkspace> {
+  return apiFetch<MeWorkspace>("/api/workspaces", {
+    method: "POST",
+    json: { name, slug },
   });
 }
 

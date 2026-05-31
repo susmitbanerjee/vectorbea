@@ -65,14 +65,24 @@ inline fun <reified T : Any> CacheService.getOrSet(
 /** Inline helper so callers can write `get<MyType>(...)` without `.class`. */
 inline fun <reified T> CacheService.get(key: String): T? = get(key, T::class.java)
 
-/** Well-known key builders — use these to avoid typos in key strings. */
+/**
+ * Well-known key builders.
+ *
+ * SECURITY: every key that stores tenant data MUST include workspaceId so
+ * cross-workspace cache poisoning is impossible.  Single-item keys use
+ * workspace:$wsId:resource:$id to ensure User A's cached data is never
+ * served to User B even if they know the resource UUID.
+ */
 object CacheKeys {
     fun workflowList(workspaceId: String, environmentId: String) =
         "workflow:list:$workspaceId:$environmentId"
 
-    fun workflow(workflowId: String) = "workflow:$workflowId"
+    /** Single-item keys are workspace-scoped to prevent cross-tenant cache hits. */
+    fun workflow(workspaceId: String, workflowId: String) =
+        "workflow:$workspaceId:$workflowId"
 
-    fun workflowVersion(versionId: String) = "workflow-version:$versionId"
+    fun workflowVersion(workspaceId: String, versionId: String) =
+        "workflow-version:$workspaceId:$versionId"
 
     fun agentList(workspaceId: String, environmentId: String) =
         "agents:list:$workspaceId:$environmentId"
@@ -83,7 +93,9 @@ object CacheKeys {
     fun connectionList(workspaceId: String, environmentId: String) =
         "connections:list:$workspaceId:$environmentId"
 
-    fun connectionTest(connectionId: String) = "connection-test:$connectionId"
+    fun connectionTest(workspaceId: String, connectionId: String) =
+        "connection-test:$workspaceId:$connectionId"
 
-    fun runSummary(runId: String) = "run-summary:$runId"
+    fun runSummary(workspaceId: String, runId: String) =
+        "run-summary:$workspaceId:$runId"
 }

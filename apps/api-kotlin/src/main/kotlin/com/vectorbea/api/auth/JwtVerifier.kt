@@ -120,11 +120,19 @@ class JwtVerifier(
         val sub = verified.subject
             ?: throw AuthException("JWT missing 'sub' claim — cannot derive user identity")
 
-        val email = verified.getClaim("email").asString()
-        val role  = verified.getClaim("role").asString()
+        val email    = verified.getClaim("email").asString()
+        val role     = verified.getClaim("role").asString()
+
+        // Extract user_metadata (Supabase stores name/avatar set during sign-up)
+        val userMeta = verified.getClaim("user_metadata").asMap()
+        val fullName  = userMeta?.get("full_name")  as? String
+            ?: userMeta?.get("name") as? String
+        val avatarUrl = userMeta?.get("avatar_url") as? String
+            ?: userMeta?.get("picture") as? String
 
         log.debug("[jwt] verified sub={} alg={}", sub, alg)
-        return JwtClaims(sub = sub, email = email, role = role)
+        return JwtClaims(sub = sub, email = email, role = role,
+            fullName = fullName, avatarUrl = avatarUrl)
     }
 }
 
@@ -139,6 +147,10 @@ data class JwtClaims(
     val email: String?,
     /** Supabase role claim (usually "authenticated"). */
     val role: String?,
+    /** Full name from user_metadata claim — may be null. */
+    val fullName: String?,
+    /** Avatar URL from user_metadata claim — may be null. */
+    val avatarUrl: String?,
 )
 
 /** Thrown when a JWT cannot be verified for any reason. Maps to HTTP 401. */

@@ -36,6 +36,7 @@ import com.vectorbea.api.routes.VersionRoutes
 import com.vectorbea.api.routes.BootstrapRoutes
 import com.vectorbea.api.routes.SchemaPreviewRoutes
 import com.vectorbea.api.routes.WorkerRoutes
+import com.vectorbea.api.routes.MeRoutes
 import com.vectorbea.api.routes.WorkflowRoutes
 import com.vectorbea.api.secrets.EncryptedSecretService
 import com.vectorbea.api.secrets.NoOpSecretService
@@ -265,6 +266,10 @@ fun main() {
         WorkerRoutes(ds).register(router)
         BootstrapRoutes(ds).register(router)
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
+
+    if (appUserRepo != null) {
+        MeRoutes(appUserRepo).register(router)
+    } else log.warn("MeRoutes disabled — no database")
 
     // 8. HTTP server
     val server = HttpServer(config, router, authMiddleware)

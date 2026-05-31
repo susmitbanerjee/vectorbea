@@ -73,7 +73,13 @@ class AuthMiddleware(
 
         // Upsert user + load workspace memberships from database
         val (appUserId, workspaceIds) = try {
-            userRepo.resolveUser(claims.sub, claims.email)
+            val profile = userRepo.resolveUser(
+                supabaseUserId = claims.sub,
+                email          = claims.email,
+                fullName       = claims.fullName,
+                avatarUrl      = claims.avatarUrl,
+            )
+            Pair(profile.id, profile.authorizedWorkspaceIds)
         } catch (e: Exception) {
             log.error("[auth] Failed to resolve user sub={}: {}", claims.sub, e.message)
             throw ApiError.Unauthorized("Failed to resolve user identity")

@@ -161,7 +161,7 @@ class WorkflowRoutes(
         ) ?: throw ApiError.NotFound("Workflow")
 
         invalidateListCache(ctx.workspaceId.toString(), wf.environmentId.toString())
-        cache.del(CacheKeys.workflow(id.toString()))
+        cache.del(CacheKeys.workflow(ctx.workspaceId.toString(), id.toString()))
         return Response.ok(wf.toResponse())
     }
 
@@ -171,7 +171,7 @@ class WorkflowRoutes(
         val existing = repo.findById(id, ctx.workspaceId) ?: throw ApiError.NotFound("Workflow")
         repo.delete(id, ctx.workspaceId)
         invalidateListCache(ctx.workspaceId.toString(), existing.environmentId.toString())
-        cache.del(CacheKeys.workflow(id.toString()))
+        cache.del(CacheKeys.workflow(ctx.workspaceId.toString(), id.toString()))
         return Response.noContent()
     }
 
@@ -201,7 +201,7 @@ class WorkflowRoutes(
 
         // update workflow.current_version_id to point to the new version
         repo.setCurrentVersion(workflowId, ctx.workspaceId, version.id)
-        cache.del(CacheKeys.workflowVersion(version.id.toString()))
+        cache.del(CacheKeys.workflowVersion(ctx.workspaceId.toString(), version.id.toString()))
 
         return Response.created(version.toResponse())
     }

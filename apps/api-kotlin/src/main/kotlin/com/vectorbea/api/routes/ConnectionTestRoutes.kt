@@ -54,7 +54,7 @@ class ConnectionTestRoutes(
             ?: throw ApiError.NotFound("Connection")
 
         // Check brief cache (30s) — avoids hammering providers with rapid re-tests
-        val cacheKey = CacheKeys.connectionTest(id.toString())
+        val cacheKey = CacheKeys.connectionTest(ctx.workspaceId.toString(), id.toString())
         val cached = cache.get<Map<String, Any?>>(cacheKey)
         if (cached != null) {
             log.debug("Returning cached test result [connectionId={}]", id)
@@ -152,7 +152,7 @@ class ConnectionTestRoutes(
         }
 
         // Invalidate cached test result
-        cache.del(CacheKeys.connectionTest(id.toString()))
+        cache.del(CacheKeys.connectionTest(ctx.workspaceId.toString(), id.toString()))
 
         log.info("Secret rotated [connectionId={}, workspaceId={}]", id, ctx.workspaceId)
 

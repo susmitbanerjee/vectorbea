@@ -30,8 +30,21 @@ object Migrations {
     fun run(dataSource: DataSource) {
         log.info("[migrations] scanning for pending migrations...")
 
+        // Set GUC used by V006 data-safety migration.
+        // Read from env; default: 'truncate' in dev, 'fail' in production.
+        val dataMigrationMode = System.getenv("MIGRATE_INSECURE_PUBLIC_DATA")?.lowercase()
+            ?: System.getenv("APP_ENV")?.let { env ->
+                if (env == "production") "fail" else "truncate"
+            } ?: "truncate"
+
+        log.info("[migrations] data migration mode: {}", dataMigrationMode)
+
         val flyway = Flyway.configure()
             .dataSource(dataSource)
+            // Pass migration mode to PL/pgSQL via PostgreSQL GUC
+            .placeholders(mapOf("dataMigrationMode" to dataMigrationMode))
+            // Use initSql to set the GUC before each migration script
+            .initSql("SET vectorbea.data_migration_mode = '$dataMigrationMode';")
             // Migration SQL lives in resources/db/migration/
             .locations("classpath:db/migration")
             // Flyway stores its version table in the public schema

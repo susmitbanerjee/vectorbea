@@ -178,6 +178,14 @@ export async function apiFetch<T = unknown>(
     } catch {
       message = (await res.text().catch(() => message)) || message;
     }
+
+    // Handle auth failures at the client boundary
+    if (res.status === 401 && typeof window !== "undefined") {
+      // Token expired or invalid — redirect to login
+      window.location.assign("/login");
+    }
+    // 403 is handled by the calling component (show "access denied" / workspace switcher)
+
     throw new ApiError(res.status, message, body);
   }
 

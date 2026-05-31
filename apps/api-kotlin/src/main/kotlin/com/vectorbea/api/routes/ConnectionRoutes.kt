@@ -227,7 +227,7 @@ class ConnectionRoutes(
         ) ?: throw ApiError.NotFound("Connection")
 
         if (secretRef != null) {
-            cache.del(CacheKeys.connectionTest(id.toString()))
+            cache.del(CacheKeys.connectionTest(ctx.workspaceId.toString(), id.toString()))
         }
         invalidateListCache(ctx.workspaceId, conn.environmentId)
         return Response.ok(conn.toResponse())
