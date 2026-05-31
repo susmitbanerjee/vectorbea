@@ -6,26 +6,19 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import {
   getAuthenticatedUserFromCookies,
   getPostLoginRedirectForUser,
+  loadProfileForUser,
 } from "@/lib/auth/server";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 import { WorkspaceProvider } from "@/lib/workspace-context";
 
 export const dynamic = "force-dynamic";
 
-// ─── Auth bypass flag ─────────────────────────────────────────────────────────
-// When NEXT_PUBLIC_SUPABASE_URL is not configured the app runs in
-// "open / mock-session mode": no login required, all API routes use the
-// seeded acme-corp org. Set REQUIRE_AUTH=true in env vars to enforce login.
-const SUPABASE_CONFIGURED =
-  !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
-  process.env.NEXT_PUBLIC_SUPABASE_URL !== "https://your-project.supabase.co";
-
-const REQUIRE_AUTH = process.env.REQUIRE_AUTH === "true" || SUPABASE_CONFIGURED;
+// Auth is always required — JWT_SECRET controls it.
+// If JWT_SECRET is not set the app degrades gracefully (shows UI without data).
+const REQUIRE_AUTH = !!process.env.JWT_SECRET;
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
 
-  // ── Authenticated path ───────────────────────────────────────────────────
   if (REQUIRE_AUTH) {
     let user;
     try {
@@ -35,34 +28,25 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
 
     if (!user) {
-      redirect("/login");
+      redirect("/signin");
     }
 
-    let organizations: Awaited<ReturnType<typeof getPostLoginRedirectForUser>>["organizations"] = [];
+    let organizations: { id: string; name: string }[] = [];
     let profile: { email: string | null; full_name: string | null; avatar_url: string | null } | null = null;
 
     try {
-      const [orgData, profileResult] = await Promise.all([
+      const [orgData, profileData] = await Promise.all([
         getPostLoginRedirectForUser(user.id),
-        createVectorBeaAdminClient()
-          .from("profiles")
-          .select("email, full_name, avatar_url")
-          .eq("id", user.id)
-          .single(),
+        loadProfileForUser(user.id),
       ]);
-      const profileData = profileResult.data ?? null;
-
       organizations = orgData.organizations;
       profile = profileData;
-
-      // Skip /onboarding redirect — the scheduler dashboard is the entry point.
-      // Users without a Supabase org still land on the dashboard (mock session handles data).
     } catch {
-      // Supabase call failed; degrade gracefully rather than crash
+      // DB call failed — degrade gracefully
     }
 
     return (
-      <WorkspaceProvider organizations={organizations}>
+      <WorkspaceProvider organizations={organizations as never[]}>
         <div className="flex h-screen overflow-hidden" style={{ background: "#F8FAFC" }}>
           <AppSidebar summary={null} user={profile} />
           <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "#F8FAFC" }}>{children}</main>
@@ -71,9 +55,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // ── Open / mock-session path (no Supabase configured) ────────────────────
+  // No JWT_SECRET — open/dev mode
   return (
-    <WorkspaceProvider organizations={[]}>
+    <WorkspaceProvider organizations={[] as never[]}>
       <div className="flex h-screen overflow-hidden" style={{ background: "#F8FAFC" }}>
         <AppSidebar summary={null} user={null} />
         <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "#F8FAFC" }}>{children}</main>

@@ -412,7 +412,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
             {/* Sign out — always visible */}
             <button
               type="button"
-              onClick={() => void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/login"))}
+              onClick={() => { localStorage.removeItem("vectorbea-access-token"); void fetch("/api/auth/session", { method: "DELETE" }).then(() => window.location.assign("/signin")); }}
               className="flex h-9 w-full items-center justify-center gap-2 rounded-xl transition-colors"
               style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", fontSize: 13, fontWeight: 600, color: "#334155" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F1F5F9"; }}

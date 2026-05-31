@@ -51,23 +51,22 @@ export class ApiError extends Error {
  * from the Supabase browser client which stores the session in localStorage.
  * The backend re-verifies the JWT cryptographically on every request regardless.
  */
+/** localStorage key where we store the JWT after sign-in. */
+const TOKEN_KEY = "vectorbea-access-token";
+
+/** Store the access token after a successful sign-in. */
+export function setAccessToken(token: string) {
+  if (typeof window !== "undefined") localStorage.setItem(TOKEN_KEY, token);
+}
+
+/** Clear the stored access token on sign-out. */
+export function clearAccessToken() {
+  if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
+}
+
 async function getAccessToken(): Promise<string | null> {
-  if (typeof window === "undefined") return null; // server-side — no Supabase client
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl || supabaseUrl === "https://your-project.supabase.co") {
-    return null; // Supabase not configured — open/dev mode
-  }
-
-  try {
-    // Dynamic import avoids the "Missing env var" throw when Supabase is not configured
-    const { getSupabaseBrowserClient } = await import("@/lib/supabase-browser");
-    const supabase = getSupabaseBrowserClient();
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
-  } catch {
-    return null;
-  }
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 // ─── Workspace resolution ─────────────────────────────────────────────────────
