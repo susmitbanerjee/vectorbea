@@ -179,50 +179,112 @@ class AgentNodeExecutor(
         val allowedToolIds: List<String>,
     )
 
-    private fun loadAgent(agentId: UUID, workspaceId: UUID): AgentRow? = try {
-        dataSource.connection.use { conn ->
-            // V010 added max_tool_calls and max_cost_cents as direct INTEGER columns.
-            // The old COALESCE over jsonb_each_text(timeout_policy_json) was broken:
-            // it mixed integer (value::int) and text ('5') in the same COALESCE,
-            // causing PSQLException: "COALESCE types integer and text cannot be matched".
-            conn.prepareStatement(
-                """SELECT id, name, type, instructions, llm_connection_id,
-                   model_name, temperature, max_tokens, max_iterations,
-                   COALESCE(max_tool_calls, 5)  AS max_tool_calls_val,
-                   COALESCE(max_cost_cents, 50) AS max_cost_cents_val,
-                   COALESCE(allowed_tool_ids, '[]'::jsonb) AS allowed_tool_ids_json
-                   FROM agents
-                   WHERE id = ? AND workspace_id = ? AND status = 'active'"""
-            ).use { stmt ->
-                stmt.setObject(1, agentId)
-                stmt.setObject(2, workspaceId)
-                stmt.executeQuery().use { rs ->
-                    if (!rs.next()) return@use null
-                    @Suppress("UNCHECKED_CAST")
-                    val toolIds = try {
-                        mapper.readValue(rs.getString("allowed_tool_ids_json") ?: "[]", List::class.java) as List<String>
-                    } catch (_: Exception) { emptyList() }
-                    AgentRow(
-                        id              = rs.getString("id"),
-                        name            = rs.getString("name"),
-                        agentType       = rs.getString("type") ?: "native_llm_agent",
-                        instructions    = rs.getString("instructions"),
-                        llmConnectionId = rs.getString("llm_connection_id"),
-                        modelName       = rs.getString("model_name"),
-                        temperature     = rs.getObject("temperature")?.let { (it as? Number)?.toDouble() },
-                        maxTokens       = rs.getObject("max_tokens")?.let { (it as? Number)?.toInt() },
-                        maxIterations   = rs.getObject("max_iterations")?.let { (it as? Number)?.toInt() } ?: 5,
-                        maxToolCalls    = rs.getObject("max_tool_calls_val")?.let { (it as? Number)?.toInt() } ?: 5,
-                        maxCostCents    = rs.getObject("max_cost_cents_val")?.let { (it as? Number)?.toInt() } ?: 50,
-                        allowedToolIds  = toolIds,
-                    )
+    /**
+     * Load agent row from DB.
+     *
+     * Uses a two-stage approach to handle schema version skew between deployments:
+     *   Stage 1: Query with V010 columns (max_tool_calls, max_cost_cents, allowed_tool_ids).
+     *   Stage 2: If that fails (columns not yet present), fall back to V001 base columns
+     *            and derive limits from timeout_policy_json with correct integer casts.
+     *
+     * This makes the worker resilient to the window between API deployment
+     * (which runs Flyway migrations) and worker deployment.
+     */
+    private fun loadAgent(agentId: UUID, workspaceId: UUID): AgentRow? {
+        // ── Stage 1: V010 schema (preferred) ─────────────────────────────────
+        try {
+            return dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT id, name, type, instructions, llm_connection_id,
+                       model_name, temperature, max_tokens, max_iterations,
+                       COALESCE(max_tool_calls, 5)  AS max_tool_calls_val,
+                       COALESCE(max_cost_cents, 50) AS max_cost_cents_val,
+                       COALESCE(allowed_tool_ids, '[]'::jsonb) AS allowed_tool_ids_json
+                       FROM agents
+                       WHERE id = ? AND workspace_id = ? AND status = 'active'"""
+                ).use { stmt ->
+                    stmt.setObject(1, agentId)
+                    stmt.setObject(2, workspaceId)
+                    stmt.executeQuery().use { rs ->
+                        if (!rs.next()) return@use null
+                        @Suppress("UNCHECKED_CAST")
+                        val toolIds = try {
+                            mapper.readValue(rs.getString("allowed_tool_ids_json") ?: "[]", List::class.java) as List<String>
+                        } catch (_: Exception) { emptyList() }
+                        AgentRow(
+                            id              = rs.getString("id"),
+                            name            = rs.getString("name"),
+                            agentType       = rs.getString("type") ?: "native_llm_agent",
+                            instructions    = rs.getString("instructions"),
+                            llmConnectionId = rs.getString("llm_connection_id"),
+                            modelName       = rs.getString("model_name"),
+                            temperature     = rs.getObject("temperature")?.let { (it as? Number)?.toDouble() },
+                            maxTokens       = rs.getObject("max_tokens")?.let { (it as? Number)?.toInt() },
+                            maxIterations   = rs.getObject("max_iterations")?.let { (it as? Number)?.toInt() } ?: 5,
+                            maxToolCalls    = rs.getObject("max_tool_calls_val")?.let { (it as? Number)?.toInt() } ?: 5,
+                            maxCostCents    = rs.getObject("max_cost_cents_val")?.let { (it as? Number)?.toInt() } ?: 50,
+                            allowedToolIds  = toolIds,
+                        )
+                    }
                 }
             }
+        } catch (e: Exception) {
+            // Log with full message so we can diagnose the exact SQL error
+            log.warn("[agent-executor] V010 query failed ({}): {} — retrying with V001 fallback",
+                agentId, e.message?.take(200))
         }
-    } catch (e: Exception) {
-        log.warn("[agent-executor] failed to load agent [agentId={}, workspaceId={}]: {}",
-            agentId, workspaceId, e.javaClass.simpleName)
-        null
+
+        // ── Stage 2: V001 base schema fallback ───────────────────────────────
+        // Used when V010 columns (max_tool_calls, max_cost_cents, allowed_tool_ids)
+        // don't exist yet because the API migration hasn't run on this environment.
+        return try {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT id, name, type, instructions, llm_connection_id,
+                       model_name, temperature, max_tokens, max_iterations,
+                       COALESCE(
+                           (SELECT value::integer
+                            FROM jsonb_each_text(timeout_policy_json)
+                            WHERE key = 'maxToolCalls'
+                            LIMIT 1),
+                           5
+                       ) AS max_tool_calls_val,
+                       COALESCE(
+                           (SELECT value::integer
+                            FROM jsonb_each_text(timeout_policy_json)
+                            WHERE key = 'maxCostCents'
+                            LIMIT 1),
+                           50
+                       ) AS max_cost_cents_val
+                       FROM agents
+                       WHERE id = ? AND workspace_id = ? AND status = 'active'"""
+                ).use { stmt ->
+                    stmt.setObject(1, agentId)
+                    stmt.setObject(2, workspaceId)
+                    stmt.executeQuery().use { rs ->
+                        if (!rs.next()) return@use null
+                        AgentRow(
+                            id              = rs.getString("id"),
+                            name            = rs.getString("name"),
+                            agentType       = rs.getString("type") ?: "native_llm_agent",
+                            instructions    = rs.getString("instructions"),
+                            llmConnectionId = rs.getString("llm_connection_id"),
+                            modelName       = rs.getString("model_name"),
+                            temperature     = rs.getObject("temperature")?.let { (it as? Number)?.toDouble() },
+                            maxTokens       = rs.getObject("max_tokens")?.let { (it as? Number)?.toInt() },
+                            maxIterations   = rs.getObject("max_iterations")?.let { (it as? Number)?.toInt() } ?: 5,
+                            maxToolCalls    = rs.getObject("max_tool_calls_val")?.let { (it as? Number)?.toInt() } ?: 5,
+                            maxCostCents    = rs.getObject("max_cost_cents_val")?.let { (it as? Number)?.toInt() } ?: 50,
+                            allowedToolIds  = emptyList(),
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[agent-executor] V001 fallback also failed [agentId={}, workspaceId={}]: {} — {}",
+                agentId, workspaceId, e.javaClass.simpleName, e.message?.take(300))
+            null
+        }
     }
 
     // ── Iterative agent execution via AgentBrainRunner ────────────────────────
