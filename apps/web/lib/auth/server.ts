@@ -48,4 +48,4 @@ export async function upsertProfile(_user: unknown): Promise<void> { return; }
 /** @deprecated Supabase SSO removed — use getAuthenticatedUserFromCookies */
 export const getAuthenticatedUserForAccessToken = getAuthenticatedUserFromCookies;
 /** @deprecated Supabase org model removed */
-export async function loadOrganizationsForUser(_userId: string) { return []; }
+export async function loadOrganizationsForUser(_userId: string): Promise<{ id: string; name: string; planTier: string }[]> { return []; }
