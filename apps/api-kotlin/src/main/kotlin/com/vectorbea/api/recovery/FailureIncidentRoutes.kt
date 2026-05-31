@@ -24,7 +24,7 @@ class FailureIncidentRoutes(private val repo: FailureIncidentRepository) {
         val ctx = req.context()
         val runId = req.pathUUID("runId")
         val incident = repo.findByRunId(runId, ctx.workspaceId)
-            ?: return Response.ok(null)
+            ?: return Response.noContent()   // no failure incident for this run — not an error
         return Response.ok(incident.toResponse())
     }
 
