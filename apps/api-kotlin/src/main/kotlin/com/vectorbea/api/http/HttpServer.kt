@@ -2,6 +2,7 @@ package com.vectorbea.api.http
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer as JdkHttpServer
+import com.vectorbea.api.auth.AuthMiddleware
 import com.vectorbea.api.config.AppConfig
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.errors.ErrorResponse
@@ -29,6 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class HttpServer(
     private val config: AppConfig,
     private val router: Router,
+    /** Null = auth disabled (no SUPABASE_URL configured, dev/local mode). */
+    private val authMiddleware: AuthMiddleware? = null,
 ) {
     private val log = LoggerFactory.getLogger(HttpServer::class.java)
     private lateinit var server: JdkHttpServer
@@ -74,7 +77,12 @@ class HttpServer(
         var response: Response? = null
         try {
             // Parse request (may throw ApiError.ValidationError for body-too-large)
-            val request = Request.from(exchange, requestId, config.maxRequestBodyBytes)
+            val rawRequest = Request.from(exchange, requestId, config.maxRequestBodyBytes)
+
+            // Apply authentication BEFORE routing.
+            // AuthMiddleware verifies the Supabase JWT and attaches an AuthPrincipal
+            // to the request.  Throws ApiError.Unauthorized / Forbidden on failure.
+            val request = authMiddleware?.authenticate(rawRequest) ?: rawRequest
 
             // OPTIONS preflight — answer without hitting the router
             if (request.method == "OPTIONS") {

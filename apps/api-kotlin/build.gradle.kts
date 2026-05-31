@@ -37,6 +37,11 @@ dependencies {
     // Redis client — Lettuce (wired up in Phase 2)
     implementation("io.lettuce:lettuce-core:6.3.2.RELEASE")
 
+    // JWT verification — Auth0 java-jwt + JWKS provider
+    // Used to verify Supabase-issued JWTs (RS256 via JWKS, HS256 legacy fallback)
+    implementation("com.auth0:java-jwt:4.4.0")
+    implementation("com.auth0:jwks-rsa:0.22.1")
+
     // Test
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")

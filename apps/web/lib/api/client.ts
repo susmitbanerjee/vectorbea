@@ -45,13 +45,32 @@ export class ApiError extends Error {
 // ─── Session / auth headers ───────────────────────────────────────────────────
 
 /**
- * Returns auth headers to attach to every request.
- * Currently empty — session is handled via httpOnly cookies set by /api/auth/set-session.
- * When the Kotlin API requires a Bearer token, populate it here from a
- * cookie/session store (never from localStorage or user-visible state).
+ * Returns auth headers to attach to every request to the Kotlin API.
+ *
+ * The Supabase access token is read from the httpOnly cookie named "sb-access-token"
+ * that was set by /api/auth/session.  The cookie is NOT accessible from JavaScript
+ * (httpOnly) — browsers send it automatically.  Here we read it client-side only
+ * when the Kotlin API is an external origin (NEXT_PUBLIC_VECTORBEA_API_URL is set),
+ * in which case the cross-origin request needs an explicit Authorization header.
+ *
+ * When calling relative /api/* paths (Next.js internal API routes), cookies are
+ * forwarded automatically by the browser — no header needed.
+ *
+ * SECURITY: we never read the token from localStorage or any user-visible state.
+ * The token is read from document.cookie only when strictly needed for cross-origin
+ * requests; the backend re-verifies the JWT cryptographically regardless.
  */
 function authHeaders(): Record<string, string> {
-  return {};
+  // Only needed when calling the Kotlin API at a different origin
+  const base = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_VECTORBEA_API_URL) ?? "";
+  if (!base) return {}; // Same-origin: browser forwards cookies automatically
+
+  // Read Supabase access token from the httpOnly cookie if available in JS context.
+  // In server-side code this will be empty (cookies() API should be used instead).
+  if (typeof document === "undefined") return {};
+  const match = document.cookie.match(/(?:^|;\s*)sb-access-token=([^;]+)/);
+  const token = match?.[1];
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 // ─── Workspace resolution ─────────────────────────────────────────────────────

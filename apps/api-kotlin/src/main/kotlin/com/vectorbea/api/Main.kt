@@ -1,6 +1,9 @@
 package com.vectorbea.api
 
+import com.vectorbea.api.auth.AuthMiddleware
+import com.vectorbea.api.auth.JwtVerifier
 import com.vectorbea.api.cache.NoOpCacheService
+import com.vectorbea.api.users.AppUserRepository
 import com.vectorbea.api.cache.RedisCacheService
 import com.vectorbea.api.config.AppConfig
 import com.vectorbea.api.db.Database
@@ -175,6 +178,33 @@ fun main() {
         NoOpSecretService()
     }
 
+    // 6a. Authentication — Supabase JWT verifier + user repository
+    // SECURITY: jwtVerifier is null only when SUPABASE_URL is not configured (dev/local mode).
+    // In production SUPABASE_URL must be set; all API requests will require a valid JWT.
+    val jwtVerifier: JwtVerifier? = if (config.supabaseUrl != null) {
+        log.info("JWT auth: enabled (supabase_url=present, hs256_secret={})",
+            if (config.supabaseJwtSecret != null) "present" else "absent (JWKS-only mode)")
+        JwtVerifier(
+            supabaseUrl = config.supabaseUrl,
+            jwtSecret   = config.supabaseJwtSecret,  // null = only JWKS/asymmetric accepted
+        )
+    } else {
+        log.warn("JWT auth: DISABLED — SUPABASE_URL not set. Running in open/dev mode (all workspace headers trusted).")
+        null
+    }
+
+    val appUserRepo: AppUserRepository? = ds?.let { AppUserRepository(it) }
+
+    val authMiddleware = if (jwtVerifier != null && appUserRepo != null) {
+        AuthMiddleware(jwtVerifier = jwtVerifier, userRepo = appUserRepo)
+    } else {
+        if (config.isProduction && jwtVerifier == null) {
+            throw IllegalStateException("SUPABASE_URL is required in production for JWT authentication")
+        }
+        log.warn("AuthMiddleware: disabled (dev mode)")
+        null
+    }
+
     // 6. Repositories (require DB)
     val ds = database?.dataSource
     val connectionRepo = ds?.let { ConnectionRepository(it) }
@@ -237,7 +267,7 @@ fun main() {
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
 
     // 8. HTTP server
-    val server = HttpServer(config, router)
+    val server = HttpServer(config, router, authMiddleware)
 
     // 9. Graceful shutdown
     Runtime.getRuntime().addShutdownHook(Thread {

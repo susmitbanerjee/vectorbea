@@ -9,6 +9,8 @@ import java.net.URI
  * Parsed from JDK [HttpExchange] by [Request.from].
  * Body is read eagerly and capped at [maxBodyBytes] to prevent large-payload attacks.
  */
+import com.vectorbea.api.auth.AuthPrincipal
+
 data class Request(
     val method: String,
     val path: String,
@@ -22,6 +24,8 @@ data class Request(
     val body: String = "",
     /** Per-request unique ID — generated before routing */
     val requestId: String = "",
+    /** Verified auth principal — null when auth is disabled (dev mode) or for public endpoints. */
+    val principal: com.vectorbea.api.auth.AuthPrincipal? = null,
 ) {
     companion object {
         private const val DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024 // 2 MB

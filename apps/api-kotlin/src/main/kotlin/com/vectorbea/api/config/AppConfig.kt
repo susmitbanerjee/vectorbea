@@ -22,6 +22,10 @@ data class AppConfig(
     val secretEncryptionKey: String? = null,
     val secretKeyVersion: String = "1",
     val corsAllowedOrigins: Set<String>,
+    /** Supabase project URL — used to fetch JWKS for JWT verification. Null = auth disabled (dev mode). */
+    val supabaseUrl: String? = null,
+    /** Supabase JWT secret — HS256 legacy fallback only. Never log. */
+    val supabaseJwtSecret: String? = null,
     val logLevel: String,
     val version: String,
     val commit: String?,
@@ -84,6 +88,12 @@ data class AppConfig(
             val corsOrigins = corsRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
             if ("*" in corsOrigins) {
                 log.warn("[config] CORS_ALLOWED_ORIGINS=* — accepting all origins (not safe for production)")
+n            // ── Supabase auth ────────────────────────────────────────────────────
+            val supabaseUrl = env("SUPABASE_URL") ?: env("NEXT_PUBLIC_SUPABASE_URL")
+            if (supabaseUrl == null) {
+                log.warn("[config] SUPABASE_URL not set — JWT auth disabled (open/dev mode)")
+            }
+            val supabaseJwtSecret = env("SUPABASE_JWT_SECRET")
             }
 
             val logLevel = env("LOG_LEVEL") ?: "INFO"
@@ -104,6 +114,8 @@ data class AppConfig(
                 version = version,
                 commit = commit,
                 maxRequestBodyBytes = maxBody,
+                supabaseUrl = supabaseUrl,
+                supabaseJwtSecret = supabaseJwtSecret,
             )
 
             config.logSummary()
@@ -130,7 +142,9 @@ data class AppConfig(
         log.info("  secret key    : ${if (secretEncryptionKeyPresent) "present" else "NOT SET"}")
         log.info("  cors origins  : $corsAllowedOrigins")
         log.info("  log level     : $logLevel")
+        log.info("  supabase auth : ${if (supabaseUrl != null) "enabled ($supabaseUrl)" else "DISABLED (dev mode)"}")
         log.info("  max body      : ${maxRequestBodyBytes / 1024} KB")
+        // suppressed: log.info("  max body.*")
         // !! NEVER log: DATABASE_URL, REDIS_URL, SECRET_ENCRYPTION_KEY, or any key material !!
     }
 }
