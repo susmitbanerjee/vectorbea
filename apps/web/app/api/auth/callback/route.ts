@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 import { signToken } from "@/lib/auth/jwt";
-import { createUser, getUserWorkspaces } from "@/lib/auth/neon-auth";
-import { neon } from "@neondatabase/serverless";
+import { upsertOAuthUser } from "@/lib/auth/oauth-upsert";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,51 +71,17 @@ export async function GET(request: NextRequest) {
     ?? undefined;
 
   // ── 2. Upsert into Neon app_users ─────────────────────────────────────────
-  // Uses neon() HTTP client — more reliable than Pool on serverless/Railway.
-  let neonUserId: string;
+  // Handles: new user, returning user same provider, same email different provider
+  let jwtSub: string;
   try {
-    const sql = neon(process.env.DATABASE_URL!);
-
-    const userRows = await sql`
-      INSERT INTO app_users (supabase_user_id, email, full_name, avatar_url, status, email_verified)
-      VALUES (${oauthUser.id}, ${email}, ${fullName ?? null}, ${avatarUrl ?? null}, 'active', TRUE)
-      ON CONFLICT (supabase_user_id) DO UPDATE
-        SET email      = COALESCE(EXCLUDED.email,      app_users.email),
-            full_name  = COALESCE(EXCLUDED.full_name,  app_users.full_name),
-            avatar_url = COALESCE(EXCLUDED.avatar_url, app_users.avatar_url),
-            updated_at = now()
-      RETURNING id`;
-
-    neonUserId = userRows[0]!.id;
-
-    // Auto-create workspace if the user has none
-    const workspaces = await getUserWorkspaces(neonUserId);
-    if (workspaces.length === 0) {
-      const slug = email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 40);
-      const wsName = `${fullName ?? email.split("@")[0]}'s Workspace`;
-
-      const wsRows = await sql`
-        INSERT INTO workspaces (name, slug, owner_user_id)
-        VALUES (${wsName}, ${slug}, ${neonUserId})
-        ON CONFLICT (slug) DO UPDATE SET slug = ${slug} || '-' || substr(md5(random()::text), 1, 6)
-        RETURNING id`;
-      const wsId = wsRows[0]!.id;
-
-      await sql`INSERT INTO environments (workspace_id, name, slug, type)
-        VALUES (${wsId}, 'Development', 'development', 'development') ON CONFLICT DO NOTHING`;
-
-      await sql`INSERT INTO workspace_members (workspace_id, user_id, role, status)
-        VALUES (${wsId}, ${neonUserId}, 'owner', 'active') ON CONFLICT DO NOTHING`;
-    }
+    jwtSub = await upsertOAuthUser(oauthUser.id, email, fullName, avatarUrl);
   } catch (err) {
     console.error("[auth/callback] Neon upsert failed:", err);
     return NextResponse.redirect(new URL("/signin?error=callback_failed", request.url));
   }
 
   // ── 3. Issue our own JWT ──────────────────────────────────────────────────
-  // Use oauthUser.id as sub — this equals app_users.supabase_user_id,
-  // which is what the Kotlin API looks up in AppUserRepository.
-  const ourToken = await signToken({ sub: oauthUser.id, email });
+  const ourToken = await signToken({ sub: jwtSub, email });
 
   // ── 4. Redirect with our JWT cookie ──────────────────────────────────────
   const destination = explicitNext?.startsWith("/") ? explicitNext : "/dashboard";
