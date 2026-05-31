@@ -53,6 +53,9 @@ object Migrations {
             .outOfOrder(false)
             // Validate applied migrations against classpath (detects drift)
             .validateOnMigrate(true)
+            // Auto-repair description/checksum mismatches caused by manual baseline.
+            // This is safe: repair only updates metadata, never re-runs migrations.
+            .repairOnMigrate(true)
             // Baseline on migrate if the schema already has tables (useful
             // when taking over an existing DB without Flyway history)
             .baselineOnMigrate(false)
