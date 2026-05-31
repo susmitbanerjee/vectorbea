@@ -98,9 +98,11 @@ CREATE TABLE IF NOT EXISTS run_leases (
     UNIQUE (run_id)   -- one lease per run at a time
 );
 
+-- Partial index predicates must use IMMUTABLE functions; now() is STABLE.
+-- A plain index on expires_at is equally efficient for the crash-recovery
+-- query: WHERE expires_at < now().
 CREATE INDEX IF NOT EXISTS idx_run_leases_expires
-    ON run_leases (expires_at)
-    WHERE expires_at < now() + INTERVAL '5 minutes';
+    ON run_leases (expires_at);
 CREATE INDEX IF NOT EXISTS idx_run_leases_worker
     ON run_leases (worker_id);
 
