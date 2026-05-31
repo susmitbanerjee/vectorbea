@@ -1,4 +1,4 @@
-// Worker service — Kotlin workflow execution engine (VB-113)
+// Worker service — Kotlin workflow execution engine (VB-113 / ef1a668)
 plugins {
     kotlin("jvm") version "2.1.20"
     application
