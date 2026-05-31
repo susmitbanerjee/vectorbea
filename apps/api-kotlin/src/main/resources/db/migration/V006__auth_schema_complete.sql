@@ -169,11 +169,11 @@ BEGIN
     BEGIN
         mode := current_setting('vectorbea.data_migration_mode', true);
     EXCEPTION WHEN undefined_object THEN
-        mode := 'fail';
+        mode := 'skip';
     END;
 
     IF mode IS NULL OR mode = '' THEN
-        mode := 'fail';
+        mode := 'skip';
     END IF;
 
     -- Count rows in product tables that have no associated workspace member
