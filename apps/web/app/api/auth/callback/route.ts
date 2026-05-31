@@ -52,7 +52,13 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error || !data.session) {
-    console.error("[auth/callback] PKCE exchange failed:", error?.message);
+    console.error("[auth/callback] PKCE exchange failed:", {
+      message: error?.message,
+      status: error?.status,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "MISSING",
+      supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "set" : "MISSING",
+      code: code?.slice(0, 8) + "...",
+    });
     return NextResponse.redirect(new URL("/signin?error=callback_failed", request.url));
   }
 
