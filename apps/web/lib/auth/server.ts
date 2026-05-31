@@ -22,16 +22,30 @@ export async function getAuthenticatedUserFromCookies(
 
 export async function getPostLoginRedirectForUser(
   userId: string,
-): Promise<{ redirectTo: string; organizations: { id: string; name: string }[] }> {
+): Promise<{ redirectTo: string; organizations: import("@/lib/api").OrganizationView[] }> {
   const workspaces = await getUserWorkspaces(userId);
   const first = workspaces[0];
   const redirectTo = first
     ? `/dashboard?org=${encodeURIComponent(first.id)}`
     : "/dashboard";
-  return {
-    redirectTo,
-    organizations: workspaces.map((w: { id: string; name: string; slug: string; role: string }) => ({ id: w.id, name: w.name })),
-  };
+
+  // Map each Neon workspace into OrganizationView shape so the WorkspaceSwitcher
+  // can list and switch between all workspaces the user belongs to.
+  const organizations: import("@/lib/api").OrganizationView[] = workspaces.map((w) => ({
+    id:         w.id,
+    name:       w.name,
+    createdAt:  null,
+    role:       w.role as import("@/lib/api").WorkspaceRole,
+    workspaces: [{
+      id:               w.id,
+      name:             w.name,
+      role:             w.role as import("@/lib/api").WorkspaceRole,
+      organizationId:   w.id,
+      organizationName: w.name,
+    }],
+  }));
+
+  return { redirectTo, organizations };
 }
 
 export async function loadProfileForUser(
