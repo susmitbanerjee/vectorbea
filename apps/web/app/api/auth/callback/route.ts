@@ -114,7 +114,9 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 3. Issue our own JWT ──────────────────────────────────────────────────
-  const ourToken = await signToken({ sub: neonUserId, email });
+  // Use oauthUser.id as sub — this equals app_users.supabase_user_id,
+  // which is what the Kotlin API looks up in AppUserRepository.
+  const ourToken = await signToken({ sub: oauthUser.id, email });
 
   // ── 4. Redirect with our JWT cookie ──────────────────────────────────────
   const destination = explicitNext?.startsWith("/") ? explicitNext : "/dashboard";
