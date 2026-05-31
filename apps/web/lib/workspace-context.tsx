@@ -114,12 +114,17 @@ export function WorkspaceProvider({
     () => searchParams.get("org"),
   );
 
+  // Sync URL → state when the user navigates directly (e.g. browser back/forward).
+  // Does NOT depend on activeWorkspaceId to avoid resetting state before the URL
+  // has been updated by the state→URL effect (race condition that caused switching loop).
   useEffect(() => {
     const queryWorkspaceId = searchParams.get("org");
-    if (queryWorkspaceId && queryWorkspaceId !== activeWorkspaceId) {
-      setActiveWorkspaceIdState(queryWorkspaceId);
-    }
-  }, [activeWorkspaceId, searchParams]);
+    if (!queryWorkspaceId) return;
+    setActiveWorkspaceIdState((prev) =>
+      prev === queryWorkspaceId ? prev : queryWorkspaceId,
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (workspaces.length === 0) {
