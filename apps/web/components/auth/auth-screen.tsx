@@ -4,6 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { BeeLogo } from "@/components/brand/bee-logo";
+import {
+  GitHubMark,
+  GoogleMark,
+  MicrosoftMark,
+} from "@/components/auth/oauth-provider-icons";
 import { setAccessToken } from "@/lib/api/client";
 
 type Mode = "signin" | "signup";
@@ -266,6 +271,33 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                     : isSignup ? "Create account" : "Sign in"
                   }
                 </button>
+
+                {/* OAuth divider */}
+                <div className="flex items-center gap-3">
+                  <span className="h-px flex-1" style={{ background: "#E2E8F0" }} />
+                  <span style={{ fontSize: 11, color: "#94A3B8" }}>or continue with</span>
+                  <span className="h-px flex-1" style={{ background: "#E2E8F0" }} />
+                </div>
+
+                {/* OAuth buttons */}
+                <div className="space-y-2">
+                  {[
+                    { label: "GitHub",    href: "/api/auth/github",    icon: <GitHubMark    className="h-[18px] w-[18px]" /> },
+                    { label: "Google",    href: "/api/auth/google",    icon: <GoogleMark    className="h-[18px] w-[18px]" /> },
+                    { label: "Microsoft", href: "/api/auth/microsoft", icon: <MicrosoftMark className="h-[18px] w-[18px]" /> },
+                  ].map(({ label, href, icon }) => (
+                    <a
+                      key={label}
+                      href={href}
+                      className="flex h-10 w-full items-center justify-between rounded-xl border px-3.5 transition-all"
+                      style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", fontSize: 13, fontWeight: 600, color: "#334155", textDecoration: "none" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#F8FAFC"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#CBD5E1"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#FFFFFF"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#E2E8F0"; }}
+                    >
+                      <span className="inline-flex items-center gap-2.5">{icon} Continue with {label}</span>
+                    </a>
+                  ))}
+                </div>
               </div>
 
               {/* Switch mode */}

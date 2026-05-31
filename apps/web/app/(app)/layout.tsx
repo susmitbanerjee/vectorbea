@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { OAuthTokenTransfer } from "@/components/layout/OAuthTokenTransfer";
 import {
   getAuthenticatedUserFromCookies,
   getPostLoginRedirectForUser,
@@ -48,6 +49,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     return (
       <WorkspaceProvider organizations={organizations as never[]}>
         <div className="flex h-screen overflow-hidden" style={{ background: "#F8FAFC" }}>
+          <OAuthTokenTransfer />
           <AppSidebar summary={null} user={profile} />
           <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "#F8FAFC" }}>{children}</main>
         </div>

@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-
-import { AUTH_COOKIE_NAME, SESSION_ID_COOKIE_NAME } from "@/lib/auth/cookies";
-import { upsertProfile, getPostLoginRedirectForUser } from "@/lib/auth/server";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+import { signToken } from "@/lib/auth/jwt";
+import { createUser, getUserWorkspaces } from "@/lib/auth/neon-auth";
+import { Pool } from "@neondatabase/serverless";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,56 +12,34 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/auth/callback
  *
- * Server-side PKCE exchange handler. This URL is registered as the OAuth
- * redirect URI in Google, Microsoft, and GitHub — replacing the old
- * Supabase project URL (wdbhcmrvzbnkwcglixbr.supabase.co). The OAuth
- * consent screen now shows your own domain instead of supabase.co.
+ * Handles the OAuth redirect from GitHub / Google / Microsoft via Supabase PKCE.
  *
- * Flow
- * ────
- * 1. Provider (Google / Microsoft / GitHub) redirects here with ?code=...
- * 2. createServerClient reads the PKCE code_verifier from the cookie that
- *    @supabase/ssr stored in the browser before the OAuth redirect started.
- * 3. exchangeCodeForSession(code) verifies the code + verifier with Supabase,
- *    returning a fully validated session — no client-side token handling needed.
- * 4. We upsert the user profile, rotate the session ID for seat-sharing
- *    prevention, write our own httpOnly cookies, and redirect into the app.
+ * Supabase is used ONLY as an OAuth identity federation layer:
+ *   1. Exchange OAuth code for Supabase session (get verified user email/name)
+ *   2. Upsert that user into our Neon app_users table
+ *   3. Issue our own HS256 JWT — this is what the app uses from here on
+ *   4. Store our JWT in an httpOnly cookie and redirect to the dashboard
  *
- * Error handling
- * ──────────────
- * Any failure redirects to /login?error=<reason> so the user sees a clear
- * message rather than a blank page or an uncaught exception.
+ * Supabase's access_token is discarded after step 1 — we never store it.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
-  // `next` from the query string (Google / SSO deep-links) OR from the
-  // oauth_next cookie (GitHub server-side flow, which can't carry query params
-  // through the provider round-trip because the redirectTo has no next param).
   const cookieStore = await cookies();
   const cookieNext = cookieStore.get("oauth_next")?.value ?? null;
   const explicitNext = searchParams.get("next") ?? (cookieNext?.startsWith("/") ? cookieNext : null);
 
-  // If there is no code param the user navigated here directly or the
-  // provider sent an error — send them back to the login page.
   if (!code) {
-    const url = new URL("/login", request.url);
-    url.searchParams.set("error", "oauth");
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL("/signin?error=oauth", request.url));
   }
 
-  // ── PKCE exchange ─────────────────────────────────────────────────────────
-  // createServerClient needs read/write access to the request cookies so it
-  // can find the code_verifier that was stored by the browser client during
-  // signInWithOAuth, and then clear it after a successful exchange.
+  // ── 1. PKCE exchange with Supabase ────────────────────────────────────────
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
+        getAll() { return cookieStore.getAll(); },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
@@ -75,58 +53,85 @@ export async function GET(request: NextRequest) {
 
   if (error || !data.session) {
     console.error("[auth/callback] PKCE exchange failed:", error?.message);
-    const url = new URL("/login", request.url);
-    url.searchParams.set("error", "callback_failed");
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL("/signin?error=callback_failed", request.url));
   }
 
-  const { access_token, user } = data.session;
+  const oauthUser = data.session.user;
+  const email    = oauthUser.email ?? "";
+  const fullName = (oauthUser.user_metadata?.full_name as string | undefined)
+    ?? (oauthUser.user_metadata?.name as string | undefined)
+    ?? undefined;
+  const avatarUrl = (oauthUser.user_metadata?.avatar_url as string | undefined)
+    ?? (oauthUser.user_metadata?.picture as string | undefined)
+    ?? undefined;
 
-  // ── Persist profile ───────────────────────────────────────────────────────
-  // On the very first login there is no profile row yet. upsertProfile is
-  // idempotent so calling it on every login is safe.
-  await upsertProfile(user);
+  // ── 2. Upsert into Neon app_users ─────────────────────────────────────────
+  // supabase_user_id = oauthUser.id (Supabase UUID, stable per provider account)
+  let neonUserId: string;
+  try {
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO app_users (supabase_user_id, email, full_name, avatar_url, status, email_verified)
+       VALUES ($1, $2, $3, $4, 'active', TRUE)
+       ON CONFLICT (supabase_user_id) DO UPDATE
+         SET email      = COALESCE(EXCLUDED.email,      app_users.email),
+             full_name  = COALESCE(EXCLUDED.full_name,  app_users.full_name),
+             avatar_url = COALESCE(EXCLUDED.avatar_url, app_users.avatar_url),
+             updated_at = now()
+       RETURNING id`,
+      [oauthUser.id, email, fullName ?? null, avatarUrl ?? null],
+    );
+    neonUserId = rows[0]!.id;
 
-  // ── Rotate session ID (seat-sharing prevention) ───────────────────────────
-  const sessionId = crypto.randomUUID();
-
-  await createVectorBeaAdminClient()
-    .from("profiles")
-    .update({ current_session_id: sessionId })
-    .eq("id", user.id);
-
-  // ── Resolve redirect destination ─────────────────────────────────────────
-  // For first-time users (no workspace membership) send to /onboarding.
-  // For returning users, send to their first workspace dashboard.
-  // An explicit `next` query param overrides this (used by deep-link flows).
-  let destination: string;
-  if (explicitNext && explicitNext.startsWith("/")) {
-    destination = explicitNext;
-  } else {
-    try {
-      const { redirectTo } = await getPostLoginRedirectForUser(user.id);
-      destination = redirectTo;
-    } catch (err) {
-      console.error("[auth/callback] post-login redirect lookup failed:", err);
-      destination = "/dashboard";
+    // Auto-create workspace if the user has none
+    const workspaces = await getUserWorkspaces(neonUserId);
+    if (workspaces.length === 0) {
+      // Reuse createUser's workspace setup logic by importing directly
+      const slug = email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 40);
+      const wsResult = await pool.query<{ id: string }>(
+        `INSERT INTO workspaces (name, slug, owner_user_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (slug) DO UPDATE SET slug = $2 || '-' || substr(md5(random()::text), 1, 6)
+         RETURNING id`,
+        [`${fullName ?? email.split("@")[0]}'s Workspace`, slug, neonUserId],
+      );
+      const wsId = wsResult.rows[0]!.id;
+      await pool.query(
+        `INSERT INTO environments (workspace_id, name, slug, type) VALUES ($1, 'Development', 'development', 'development') ON CONFLICT DO NOTHING`,
+        [wsId],
+      );
+      await pool.query(
+        `INSERT INTO workspace_members (workspace_id, user_id, role, status) VALUES ($1, $2, 'owner', 'active') ON CONFLICT DO NOTHING`,
+        [wsId, neonUserId],
+      );
     }
+
+    await pool.end();
+  } catch (err) {
+    console.error("[auth/callback] Neon upsert failed:", err);
+    return NextResponse.redirect(new URL("/signin?error=callback_failed", request.url));
   }
 
-  // ── Write httpOnly session cookies ────────────────────────────────────────
-  const cookieOptions = {
-    httpOnly: true,
-    sameSite: "lax" as const,
+  // ── 3. Issue our own JWT ──────────────────────────────────────────────────
+  const ourToken = await signToken({ sub: neonUserId, email });
+
+  // ── 4. Redirect with our JWT cookie ──────────────────────────────────────
+  const destination = explicitNext?.startsWith("/") ? explicitNext : "/dashboard";
+  const cookieOpts = {
+    httpOnly: true, sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    path: "/", maxAge: 60 * 60 * 24 * 7,
   };
 
-  const redirectUrl = new URL(destination, request.url);
-  const response = NextResponse.redirect(redirectUrl);
-  response.cookies.set(AUTH_COOKIE_NAME, access_token, cookieOptions);
-  response.cookies.set(SESSION_ID_COOKIE_NAME, sessionId, cookieOptions);
-  // Clear the oauth_next cookie that the GitHub server-side flow stores
-  response.cookies.set("oauth_next", "", { ...cookieOptions, maxAge: 0 });
+  const response = NextResponse.redirect(new URL(destination, request.url));
+  response.cookies.set(AUTH_COOKIE_NAME, ourToken, cookieOpts);
+  // Also expose the token via a short-lived readable cookie so the client can
+  // store it in localStorage for Kotlin API Authorization headers.
+  // This cookie is NOT httpOnly so JS can read and move it to localStorage.
+  response.cookies.set("vb-token-transfer", ourToken, {
+    ...cookieOpts, httpOnly: false, maxAge: 60,  // expires in 60 seconds
+  });
+  response.cookies.set("oauth_next", "", { ...cookieOpts, maxAge: 0 });
 
   return response;
 }
