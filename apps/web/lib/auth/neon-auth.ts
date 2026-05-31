@@ -5,7 +5,15 @@ import bcrypt from "bcryptjs";
 function getPool(): Pool {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL not set");
-  return new Pool({ connectionString: url });
+  const pool = new Pool({ connectionString: url });
+  // Set search_path if NEON_SCHEMA is specified (e.g. "vectorbea")
+  const schema = process.env.NEON_SCHEMA;
+  if (schema) {
+    pool.on("connect", (client: import("pg").PoolClient) => {
+      void client.query(`SET search_path TO ${schema}, public`);
+    });
+  }
+  return pool;
 }
 
 export interface NeonUser {
