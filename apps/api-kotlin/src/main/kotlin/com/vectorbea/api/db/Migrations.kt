@@ -53,23 +53,21 @@ object Migrations {
             .outOfOrder(false)
             // Validate applied migrations against classpath (detects drift)
             .validateOnMigrate(true)
-            // Auto-repair description/checksum mismatches caused by manual baseline.
-            // This is safe: repair only updates metadata, never re-runs migrations.
-            .repairOnMigrate(true)
             // Baseline on migrate if the schema already has tables (useful
             // when taking over an existing DB without Flyway history)
             .baselineOnMigrate(false)
             .load()
+
+        // Repair before migrate to fix any description/checksum mismatches
+        // caused by manual baselines (safe: only updates metadata, never re-runs)
+        flyway.repair()
 
         val result = flyway.migrate()
 
         if (result.migrationsExecuted == 0) {
             log.info("[migrations] schema is up-to-date (no migrations needed)")
         } else {
-            log.info("[migrations] applied ${result.migrationsExecuted} migration(s)")
-            result.migrations.forEach { m ->
-                log.info("[migrations]   ✓ ${m.version} — ${m.description} (${m.executionTime}ms)")
-            }
+            log.info("[migrations] applied {} migration(s)", result.migrationsExecuted)
         }
     }
 
