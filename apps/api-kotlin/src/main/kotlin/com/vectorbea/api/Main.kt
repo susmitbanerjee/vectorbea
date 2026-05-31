@@ -179,6 +179,9 @@ fun main() {
         NoOpSecretService()
     }
 
+    // 6. Repositories (require DB)
+    val ds = database?.dataSource
+
     // 6a. Authentication — Supabase JWT verifier + user repository
     // SECURITY: jwtVerifier is null only when SUPABASE_URL is not configured (dev/local mode).
     // In production SUPABASE_URL must be set; all API requests will require a valid JWT.
@@ -206,8 +209,7 @@ fun main() {
         null
     }
 
-    // 6. Repositories (require DB)
-    val ds = database?.dataSource
+    // 6b. Repositories (require DB) — ds already declared above
     val connectionRepo = ds?.let { ConnectionRepository(it) }
     val agentRepo = ds?.let { AgentRepository(it) }
     val toolRepo = ds?.let { ToolRepository(it) }

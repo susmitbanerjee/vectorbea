@@ -67,7 +67,7 @@ class EncryptedSecretService(
         // Unscoped fallback — prefer the workspace-scoped overload for all new code.
         val id = parseRef(secretRef)
         val row = repo.findById(id) ?: throw SecretNotFoundException(secretRef)
-        return decryptRow(row)
+        return decryptCiphertext(row.secretCiphertext, row.id)
     }
 
     override fun resolveSecretForRuntime(secretRef: String, workspaceId: java.util.UUID): String {
@@ -75,14 +75,14 @@ class EncryptedSecretService(
         // Workspace-scoped: null if secret exists but belongs to a different workspace.
         // Treats cross-workspace access as not-found — no timing difference to attacker.
         val row = repo.findByIdScoped(id, workspaceId) ?: throw SecretNotFoundException(secretRef)
-        return decryptRow(row)
+        return decryptCiphertext(row.secretCiphertext, row.id)
     }
 
-    private fun decryptRow(row: SecretRow): String = try {
+    private fun decryptCiphertext(ciphertext: String, secretId: java.util.UUID): String = try {
         // SECURITY: return value must NOT be logged by caller
-        Encryption.decrypt(row.secretCiphertext, keyBytes)
+        Encryption.decrypt(ciphertext, keyBytes)
     } catch (e: Exception) {
-        log.warn("Failed to decrypt secret [id={}]: {}", row.id, e.javaClass.simpleName)
+        log.warn("Failed to decrypt secret [id={}]: {}", secretId, e.javaClass.simpleName)
         throw SecretDecryptionException(e)
     }
 

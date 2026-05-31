@@ -88,13 +88,14 @@ data class AppConfig(
             val corsOrigins = corsRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
             if ("*" in corsOrigins) {
                 log.warn("[config] CORS_ALLOWED_ORIGINS=* — accepting all origins (not safe for production)")
-n            // ── Supabase auth ────────────────────────────────────────────────────
+            }
+
+            // ── Supabase auth ─────────────────────────────────────────────────
             val supabaseUrl = env("SUPABASE_URL") ?: env("NEXT_PUBLIC_SUPABASE_URL")
             if (supabaseUrl == null) {
                 log.warn("[config] SUPABASE_URL not set — JWT auth disabled (open/dev mode)")
             }
             val supabaseJwtSecret = env("SUPABASE_JWT_SECRET")
-            }
 
             val logLevel = env("LOG_LEVEL") ?: "INFO"
             val version = env("APP_VERSION") ?: DEFAULT_VERSION

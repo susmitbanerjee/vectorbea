@@ -66,7 +66,8 @@ class JwtVerifier(
             throw AuthException("Malformed JWT: ${e.message}")
         }
 
-        val algorithm: Algorithm = when (val alg = decoded.algorithm) {
+        val alg = decoded.algorithm   // captured for logging after the when block
+        val algorithm: Algorithm = when (alg) {
             "RS256" -> {
                 val kid = decoded.keyId
                     ?: throw AuthException("RS256 JWT missing 'kid' — cannot look up JWKS key")
