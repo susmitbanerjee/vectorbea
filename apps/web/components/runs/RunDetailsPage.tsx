@@ -33,7 +33,13 @@ const ENGINEERING_TABS: { id: TabId; label: string }[] = [
   { id: "recovery",      label: "Recovery" },
 ];
 
-export function RunDetailsPage({ run }: { run: WorkflowRun }) {
+export function RunDetailsPage({
+  run,
+  onAction,
+}: {
+  run: WorkflowRun;
+  onAction?: (action: string, payload?: Record<string, string>) => void;
+}) {
   const [viewMode, setViewMode]         = useState<ViewMode>("business");
   const [selectedStepId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab]       = useState<TabId>("logs");
@@ -42,19 +48,22 @@ export function RunDetailsPage({ run }: { run: WorkflowRun }) {
   const tabs = viewMode === "business" ? BUSINESS_TABS : ENGINEERING_TABS;
 
   function handleAction(action: string) {
+    if (onAction) {
+      // Wire into the approval ID from the run if the action needs it
+      const pendingApproval = run.approvals.find(a => a.status === "requested");
+      onAction(action, pendingApproval ? { approvalId: pendingApproval.id } : undefined);
+      return;
+    }
+    // Fallback toast when no external handler provided
     const messages: Record<string, string> = {
-      approve:          "Approving run — connecting to API…",
-      reject:           "Rejecting — connecting to API…",
-      resume:           "Resuming from checkpoint — connecting to API…",
-      retry:            "Retrying failed step — connecting to API…",
-      retry_step:       "Retrying step — connecting to API…",
-      cancel:           "Cancelling run — connecting to API…",
-      continue_as_new:  "Starting continue-as-new run — connecting to API…",
-      open_workflow:    "Opening workflow builder…",
+      approve:         "Approving run…",
+      reject:          "Rejecting…",
+      retry:           "Retrying failed step…",
+      retry_step:      "Retrying step…",
+      cancel:          "Cancelling run…",
+      open_workflow:   "Opening workflow builder…",
     };
-    toast.info(messages[action] ?? "Action will be connected to backend API.", {
-      description: "Placeholder — backend integration pending.",
-    });
+    toast.info(messages[action] ?? "Action triggered.", { description: action });
   }
 
   // Badge counts for tabs

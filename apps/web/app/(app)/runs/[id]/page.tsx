@@ -1,150 +1,262 @@
 "use client";
 
 /**
- * /runs/[id] — canonical run detail page.
+ * /runs/[id] — Run Execution Timeline
  *
- * Live updates strategy:
- *   1. Primary: SSE stream via GET /api/runs/:id/stream.
- *      Events arrive in real-time without polling.
- *   2. Fallback: polling every 4 s if SSE is unavailable (no Redis, old browser, etc.)
- *
- * Local (native) runs get full approval, retry, and replay support.
- * API-backed runs use remote endpoints.
+ * Loads run data from the Kotlin API and renders with RunDetailsPage —
+ * the premium Business View + Engineering View toggle with execution
+ * timeline, step details panel, and tabbed details.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, RefreshCw, RotateCcw } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
-import { RunHeaderV2 } from "@/components/agent-runs/v2/RunHeader";
-import { RunSummaryCards } from "@/components/agent-runs/v2/RunSummaryCards";
-import { RunDetailTabsV2 } from "@/components/agent-runs/v2/RunDetailTabsV2";
-import { FailureDiagnosisPanel } from "@/components/agent-runs/FailureDiagnosisPanel";
-import { RunHistoryStats } from "@/components/agent-runs/RunHistoryStats";
-import { AgentBrainTrace } from "@/components/agent-runs/AgentBrainTrace";
+import { RunDetailsPage } from "@/components/runs/RunDetailsPage";
 import {
-  getRun,
-  getRunTimeline,
-  approveRunGate,
-  rejectRunGate,
-  retryRunFailedStep,
-  replayWorkflowRun,
-  cancelRun,
-  listRunCheckpoints,
+  getRun, getRunTimeline,
+  approveRunGate, rejectRunGate,
+  retryRunFailedStep, cancelRun,
   streamRunEvents,
 } from "@/lib/repository";
 import { getActiveWorkspaceId } from "@/lib/api/client";
-import type { AgentRunUiModel, RunTimelineEventUi } from "@/types/agent-run-ui";
-import type { RunCheckpoint } from "@/types/platform";
+import type { AgentRun } from "@/types/platform";
+import type { RunTimelineEventUi } from "@/types/agent-run-ui";
+import type {
+  WorkflowRun, RunStep, RunLog, RunEvent,
+  ApprovalEvent, ToolCall, RunStatus, StepStatus, StepType,
+} from "@/types/runs";
 
-function buildPlatformRunModel(
-  run: import("@/types/platform").AgentRun,
-  events: RunTimelineEventUi[],
-): AgentRunUiModel {
-  const statusMap: Record<string, AgentRunUiModel["run"]["status"]> = {
-    queued: "QUEUED", running: "RUNNING", waiting_for_approval: "WAITING_FOR_APPROVAL",
-    paused: "RUNNING", succeeded: "SUCCEEDED", failed: "FAILED",
-    cancelled: "CANCELLED", timed_out: "TIMEOUT",
+// ─── Mappers ──────────────────────────────────────────────────────────────────
+
+function apiStatusToRunStatus(s: string): RunStatus {
+  const m: Record<string, RunStatus> = {
+    queued: "queued", running: "running",
+    waiting_for_approval: "waiting_for_approval",
+    paused: "waiting", succeeded: "completed",
+    failed: "failed", cancelled: "cancelled", timed_out: "timed_out",
   };
+  return m[s] ?? "queued";
+}
 
-  // Derive agent summaries from timeline events
-  const agentNames = [...new Set(events.filter((e) => e.agentName).map((e) => e.agentName!))];
-  const agents = agentNames.map((name) => {
-    const ae = events.filter((e) => e.agentName === name);
-    const started = ae.find((e) => e.type === "AGENT_STARTED");
-    const ended = ae.find((e) => e.type === "AGENT_COMPLETED" || e.type === "AGENT_FAILED");
-    return {
-      id: `agent-${name.toLowerCase().replace(/\s+/g, "-")}`,
-      name, role: name,
-      status: (ended?.type === "AGENT_FAILED" ? "FAILED" : ended ? "SUCCEEDED" : "RUNNING") as "RUNNING" | "SUCCEEDED" | "FAILED",
-      startedAt: started?.timestamp,
-      finishedAt: ended?.timestamp,
-      durationMs: ended?.durationMs,
-      stepsCount: ae.length,
-      tokensUsed: ae.reduce((s, e) => s + (e.tokensUsed ?? 0), 0) || undefined,
-      estimatedCostUsd: ae.reduce((s, e) => s + (e.estimatedCostUsd ?? 0), 0) || undefined,
-      toolsUsed: [...new Set(ae.filter((e) => e.toolName).map((e) => e.toolName!))],
-    };
+function evStatusToStepStatus(s: string): StepStatus {
+  const m: Record<string, StepStatus> = {
+    PENDING: "queued", RUNNING: "running", SUCCEEDED: "completed",
+    FAILED: "failed", WAITING: "waiting", CANCELLED: "cancelled", SKIPPED: "skipped",
+  };
+  return m[s] ?? "queued";
+}
+
+function evTypeToStepType(t: string): StepType {
+  if (t.startsWith("AGENT")) return "llm_agent";
+  if (t.startsWith("TOOL"))  return "tool_agent";
+  if (t.startsWith("HTTP"))  return "http_call";
+  if (t.startsWith("LLM"))   return "llm_agent";
+  if (t.startsWith("APPROVAL")) return "approval";
+  if (t === "RUN_CREATED" || t === "RUN_STARTED") return "trigger";
+  if (t === "RUN_SUCCEEDED" || t === "RUN_FAILED") return "system";
+  return "system";
+}
+
+/**
+ * Maps the Kotlin API AgentRun + timeline events into the WorkflowRun shape
+ * that RunDetailsPage/ExecutionTimeline/StepDetailsPanel consume.
+ */
+function mapToWorkflowRun(run: AgentRun, events: RunTimelineEventUi[]): WorkflowRun {
+  const startedAt = run.startedAt ?? run.createdAt;
+  const endedAt   = run.completedAt ?? undefined;
+  const durationMs = run.durationMs
+    ?? (endedAt ? new Date(endedAt).getTime() - new Date(startedAt).getTime() : 0);
+
+  // ── Steps: one step per unique stepId (or per isolated event for system steps) ──
+  const stepBuckets = new Map<string, RunTimelineEventUi[]>();
+  for (const ev of events) {
+    const key = ev.stepId ?? `_sys_${ev.id}`;
+    if (!stepBuckets.has(key)) stepBuckets.set(key, []);
+    stepBuckets.get(key)!.push(ev);
+  }
+
+  const steps: RunStep[] = [];
+  let offsetMs = 0;
+  stepBuckets.forEach((evs, stepId) => {
+    const first = evs[0]!;
+    const last  = evs[evs.length - 1]!;
+    const start = first.startedAt ?? first.timestamp;
+    const end   = last.finishedAt ?? last.timestamp;
+    const dur   = last.durationMs
+      ?? (start && end ? Math.max(0, new Date(end).getTime() - new Date(start).getTime()) : undefined);
+
+    const terminal = [...evs].reverse().find(e =>
+      e.status === "SUCCEEDED" || e.status === "FAILED" || e.status === "CANCELLED",
+    );
+    const status = evStatusToStepStatus(terminal?.status ?? last.status);
+    const errorEv = evs.find(e => e.status === "FAILED" || e.errorMessage);
+
+    const businessName = first.agentName ?? first.stepName ?? first.toolName ?? first.title ?? stepId;
+    const techName     = first.stepName ?? first.agentName ?? first.toolName ?? first.type ?? stepId;
+
+    steps.push({
+      id:                  stepId,
+      name:                techName,
+      businessName,
+      description:         first.summary ?? first.title ?? "",
+      businessDescription: first.summary ?? first.title ?? "",
+      type:                evTypeToStepType(first.type),
+      status,
+      startedAt:           start || undefined,
+      endedAt:             end || undefined,
+      durationMs:          dur,
+      offsetMs,
+      attemptCount:        evs.filter(e => e.type === "RETRY_STARTED").length + 1,
+      model:               first.modelName ?? undefined,
+      tokens:              first.tokensUsed ?? undefined,
+      costUsd:             first.estimatedCostUsd ?? undefined,
+      input:               first.inputJson !== undefined ? first.inputJson : undefined,
+      output:              last.outputJson  !== undefined ? last.outputJson  : undefined,
+      isReplaySafe:        !errorEv,
+      error:               errorEv ? {
+        code:      errorEv.type,
+        message:   errorEv.errorMessage ?? errorEv.summary ?? "Step failed",
+        retryable: true,
+      } : undefined,
+    });
+    offsetMs += dur ?? 0;
   });
 
-  return {
-    run: {
-      id: run.id,
-      jobId: run.workflowId,
-      jobName: run.workflowName,
-      title: run.workflowName,
-      status: statusMap[run.status] ?? "QUEUED",
-      triggerSource: run.triggerType === "cron" ? "SCHEDULE" : "MANUAL",
-      attemptNumber: 1,
-      environment: "Production",
-      idempotencyKey: run.idempotencyKey ?? `idem-${run.id}`,
-      startedAt: run.startedAt ?? run.createdAt,
-      finishedAt: run.completedAt ?? undefined,
-      durationMs: run.durationMs ?? undefined,
-      totalTokens: run.totalTokens ?? undefined,
-      estimatedCostUsd: run.estimatedCostUsd ?? undefined,
-      errorMessage: run.error ?? undefined,
+  // ── Logs ──────────────────────────────────────────────────────────────────
+  const logs: RunLog[] = events.map(ev => ({
+    id:        ev.id,
+    timestamp: ev.timestamp,
+    level:     ev.status === "FAILED" ? "error" : ev.type.includes("RETRY") ? "warn" : "info",
+    stepId:    ev.stepId,
+    message:   [ev.title, ev.summary].filter(Boolean).join(" — "),
+    metadata:  ev.metadataJson as Record<string, unknown> | undefined,
+  }));
+
+  // ── Events ────────────────────────────────────────────────────────────────
+  const runEvents: RunEvent[] = events.map(ev => ({
+    id:            ev.id,
+    timestamp:     ev.timestamp,
+    type:          ev.type,
+    stepId:        ev.stepId,
+    correlationId: ev.id,
+    payload:       {
+      status:     ev.status,
+      source:     ev.source,
+      agentName:  ev.agentName,
+      toolName:   ev.toolName,
+      modelName:  ev.modelName,
+      summary:    ev.summary,
+      durationMs: ev.durationMs,
     },
-    agents,
-    timelineEvents: events,
-    steps: [],
-    approvals: [],
-    artifacts: [],
-    auditLogs: [],
-    input: run.input,
-    output: run.output,
-    runMetadata: {
-      searchAttributes: {
-        workflowId: run.workflowId,
-        workflowVersion: run.workflowVersion,
-        creationMode: run.creationMode,
-      },
-      aiMetadata: { primaryModel: agents[0]?.name ?? "gpt-4.1-mini" },
-      budgetMetadata: {},
-      retryPolicy: { maxAttempts: 2 },
-      executionMetadata: { workerId: "worker-001" },
+  }));
+
+  // ── Approvals ─────────────────────────────────────────────────────────────
+  const approvals: ApprovalEvent[] = [
+    ...run.approvalGates.map(g => ({
+      id:          g.id,
+      stepId:      (g as unknown as Record<string, string>).nodeId ?? "",
+      status:      (g.status === "approved" ? "approved"
+                  : g.status === "rejected" ? "rejected"
+                  : "requested") as ApprovalEvent["status"],
+      requestedAt: (g as unknown as Record<string, string>).requestedAt ?? startedAt,
+      decidedAt:   (g as unknown as Record<string, string>).decidedAt ?? undefined,
+      requestedBy: "system",
+      assignedTo:  (g as unknown as Record<string, string>).assignedTo ?? "reviewer",
+      decidedBy:   (g as unknown as Record<string, string>).decidedBy ?? undefined,
+    })),
+    ...events
+      .filter(ev => ev.approval && !run.approvalGates.some(g => g.id === ev.approval!.id))
+      .map(ev => ({
+        id:          ev.approval!.id,
+        stepId:      ev.stepId ?? "",
+        status:      (ev.approval!.status === "APPROVED" ? "approved"
+                    : ev.approval!.status === "REJECTED" ? "rejected"
+                    : "requested") as ApprovalEvent["status"],
+        requestedAt: ev.timestamp,
+        requestedBy: "system",
+        assignedTo:  "reviewer",
+      })),
+  ];
+
+  // ── Tool calls ────────────────────────────────────────────────────────────
+  const toolCalls: ToolCall[] = events
+    .filter(ev => ev.toolName && ["TOOL_CALL_STARTED", "TOOL_CALL_COMPLETED", "TOOL_CALL_FAILED"].includes(ev.type))
+    .map(ev => ({
+      id:             ev.id,
+      stepId:         ev.stepId ?? "",
+      toolName:       ev.toolName!,
+      toolType:       "internal" as ToolCall["toolType"],
+      status:         ev.status === "SUCCEEDED" ? "completed"
+                    : ev.status === "FAILED"    ? "failed"
+                    : "started" as ToolCall["status"],
+      startedAt:      ev.startedAt ?? ev.timestamp,
+      endedAt:        ev.finishedAt ?? undefined,
+      durationMs:     ev.durationMs ?? undefined,
+      attempt:        1,
+      requestSummary: ev.summary ?? ev.title,
+      costUsd:        ev.estimatedCostUsd ?? undefined,
+      error:          ev.errorMessage ?? undefined,
+    }));
+
+  const retryCount = events.filter(e => e.type === "RETRY_STARTED").length;
+
+  return {
+    id:               run.id,
+    workflowId:       run.workflowId,
+    workflowName:     run.workflowName,
+    workflowVersion:  run.workflowVersion,
+    status:           apiStatusToRunStatus(run.status),
+    triggerType:      run.triggerType === "cron"    ? "schedule"
+                    : run.triggerType === "webhook" ? "webhook"
+                    : run.triggerType === "api"     ? "api"
+                    : "manual",
+    environment:      "production",
+    startedAt,
+    endedAt,
+    durationMs,
+    totalCostUsd:     run.estimatedCostUsd ?? 0,
+    budgetUsd:        0,
+    totalTokens:      run.totalTokens ?? 0,
+    retryCount,
+    recoveredFailureCount: retryCount,
+    workerQueue:      "default",
+    createdBy:        "user",
+    steps,
+    logs,
+    events:           runEvents,
+    approvals,
+    toolCalls,
+    recoverySummary: {
+      recoveredFailures:         retryCount,
+      retryAttempts:             retryCount,
+      rateLimitEvents:           0,
+      workerHeartbeatMisses:     0,
+      selfCorrectionAttempts:    0,
+      unresolvedBlockers:        run.status === "failed" ? ["Run failed — check error details"] : [],
+      replaySafeResumeAvailable: run.replayAvailable,
     },
   };
 }
 
+// ─── Page component ───────────────────────────────────────────────────────────
+
 export default function RunDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const router = useRouter();
-  const [model, setModel] = useState<AgentRunUiModel | null>(null);
-  const [isLocalRun, setIsLocalRun] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState(false);
-  const [forcePausedPending, setForcePausedPending] = useState(false);
-  const [retryWarnings, setRetryWarnings] = useState<string[]>([]);
-  const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
-  /** true while SSE connection is healthy — used to avoid double-open only */
-  const [sseActive, setSseActive] = useState(false);
+  const { id }  = useParams<{ id: string }>();
+  const router  = useRouter();
+  const [workflowRun, setWorkflowRun] = useState<WorkflowRun | null>(null);
+  const [loading, setLoading]         = useState(true);
   const sseCloseRef = useRef<(() => void) | null>(null);
-  /** consecutive SSE error count — fall back to polling-only after threshold */
-  const sseErrorCountRef = useRef(0);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
-    if (!id || id === "undefined") {
-      toast.error("Invalid run ID.");
-      setLoading(false);
-      return;
-    }
+    if (!id || id === "undefined") { setLoading(false); return; }
     if (!opts.silent) setLoading(true);
     try {
-      const [platformRun, timelineEvents] = await Promise.all([getRun(id), getRunTimeline(id)]);
-
-      if (platformRun) {
-        setModel(buildPlatformRunModel(platformRun, timelineEvents));
-        setIsLocalRun(true);
-        const ckpts = await listRunCheckpoints(id);
-        setCheckpoints(ckpts as RunCheckpoint[]);
-        return;
-      }
-
-      // Run not found in Kotlin API
-      throw new Error("Run not found");
+      const [run, events] = await Promise.all([getRun(id), getRunTimeline(id)]);
+      if (!run) throw new Error("not found");
+      setWorkflowRun(mapToWorkflowRun(run, events));
     } catch {
       if (!opts.silent) toast.error("Failed to load run details.");
     } finally {
@@ -154,350 +266,106 @@ export default function RunDetailPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // ── SSE live stream ────────────────────────────────────────────────────────
-  // Open an SSE connection once we know the run is live (RUNNING or QUEUED).
-  // On run_event: silently reload the run to get updated state.
-  // On run_complete: do a final load and stop SSE.
-  // On stream_unavailable or error: fall back to polling.
+  // SSE live updates for active runs
   useEffect(() => {
-    if (!id || id === "undefined") return;
-    if (!model) return;
+    if (!workflowRun || !id) return;
+    const live = ["queued", "running", "waiting_for_approval"].includes(workflowRun.status);
+    if (!live) { sseCloseRef.current?.(); return; }
 
-    const live = ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(model.run.status);
-    if (!live) {
-      // Run is already terminal — close any open SSE connection
-      sseCloseRef.current?.();
-      sseCloseRef.current = null;
-      setSseActive(false);
-      return;
-    }
-
-    // Don't open a second connection if one is already active
-    if (sseActive && sseCloseRef.current) return;
-
-    const workspaceId = getActiveWorkspaceId();
-    const environmentId =
-      new URLSearchParams(window.location.search).get("environmentId") ?? "";
-
-    sseErrorCountRef.current = 0;
-
-    const close = streamRunEvents(id, workspaceId, environmentId, {
-      onEvent: () => {
-        // A new event arrived — silently reload to pick up status changes
-        sseErrorCountRef.current = 0;
-        void load({ silent: true });
-      },
-      onComplete: () => {
-        // Run reached terminal state — do a final load then stop SSE
-        void load({ silent: true });
-        setSseActive(false);
-        sseCloseRef.current = null;
-      },
-      onHeartbeat: () => {
-        sseErrorCountRef.current = 0;
-      },
-      onUnavailable: () => {
-        // Redis/SSE unavailable — polling covers it
-        setSseActive(false);
-        sseCloseRef.current = null;
-      },
-      onError: () => {
-        // Count consecutive errors. After 3 failures with no successful event,
-        // treat SSE as unavailable and let polling take over.
-        sseErrorCountRef.current += 1;
-        if (sseErrorCountRef.current >= 3) {
-          setSseActive(false);
-          sseCloseRef.current = null;
-          close();
-        }
-      },
+    const wsId  = getActiveWorkspaceId();
+    const envId = new URLSearchParams(window.location.search).get("environmentId") ?? "";
+    const close = streamRunEvents(id, wsId, envId, {
+      onEvent:       () => void load({ silent: true }),
+      onComplete:    () => { void load({ silent: true }); sseCloseRef.current = null; },
+      onUnavailable: () => { sseCloseRef.current = null; },
     });
-
     sseCloseRef.current = close;
-    setSseActive(true);
+    return () => { close(); sseCloseRef.current = null; };
+  }, [id, workflowRun?.status]);
 
-    return () => {
-      close();
-      sseCloseRef.current = null;
-      setSseActive(false);
-    };
-  }, [id, model?.run.status]);
-
-  // ── Polling for live runs ──────────────────────────────────────────────────
-  // Always poll every 4 s while the run is live, regardless of SSE state.
-  // SSE provides faster real-time pushes when available; polling is the
-  // guaranteed baseline that works even when the SSE endpoint is absent.
-  // The status string is the only dep needed — avoids re-creating the interval
-  // on every silent load (which would reset the 4 s countdown each time).
-  const runStatus = model?.run.status;
+  // Polling fallback
   useEffect(() => {
-    const live = runStatus && ["RUNNING", "QUEUED", "WAITING_FOR_APPROVAL"].includes(runStatus);
+    const live = workflowRun && ["queued", "running", "waiting_for_approval"].includes(workflowRun.status);
     if (!live) return;
-    const interval = setInterval(() => void load({ silent: true }), 4000);
-    return () => clearInterval(interval);
-  }, [runStatus, load]);
+    const t = setInterval(() => void load({ silent: true }), 4000);
+    return () => clearInterval(t);
+  }, [workflowRun?.status, load]);
 
-
-  // ── Local approval handlers ────────────────────────────────────────────────
-
-  async function handleApprove(approvalId: string) {
-    setActing(true);
+  // Action handler passed into RunDetailsPage
+  async function handleAction(action: string, payload?: Record<string, string>) {
+    if (!id) return;
     try {
-      await approveRunGate(id, approvalId);
-      toast.success("Approved — run resumed.");
-      await load();
-    } catch {
-      toast.error("Failed to approve.");
-    } finally {
-      setActing(false);
+      switch (action) {
+        case "approve":
+          if (payload?.approvalId) { await approveRunGate(id, payload.approvalId); toast.success("Approved."); void load(); }
+          break;
+        case "reject":
+          if (payload?.approvalId) { await rejectRunGate(id, payload.approvalId); toast.success("Rejected."); void load(); }
+          break;
+        case "retry":
+        case "retry_step":
+          await retryRunFailedStep(id, ""); toast.success("Retry queued."); void load();
+          break;
+        case "cancel":
+          await cancelRun(id); toast.success("Cancelled."); void load({ silent: true });
+          break;
+        case "open_workflow":
+          if (workflowRun) router.push(`/workflows/${workflowRun.workflowId}/builder` as never);
+          break;
+        default:
+          toast.info(`${action} will be connected shortly.`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Action failed.");
     }
   }
 
-  async function handleReject(approvalId: string) {
-    setActing(true);
-    try {
-      await rejectRunGate(id, approvalId);
-      toast.success("Rejected — run failed.");
-      await load();
-    } catch {
-      toast.error("Failed to reject.");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  // ── Retry handler ─────────────────────────────────────────────────────────
-
-  async function handleRetry(_forcePaused = false) {
-    setActing(true);
-    setRetryWarnings([]);
-    setForcePausedPending(false);
-    try {
-      await retryRunFailedStep(id, "");
-      toast.success("Retry queued.");
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to retry.");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  // ── Cancel handler ────────────────────────────────────────────────────────
-
-  async function handleCancel() {
-    setActing(true);
-    try {
-      await cancelRun(id);
-      toast.success("Run cancelled.");
-      void load({ silent: true });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to cancel.");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  // ── Replay handler ────────────────────────────────────────────────────────
-
-  async function handleReplay(checkpointId?: string) {
-    setActing(true);
-    try {
-      const newRun = await replayWorkflowRun(id, checkpointId);
-      if (!newRun) throw new Error("Replay unavailable");
-      toast.success("Replay started.");
-      router.push(`/runs/${newRun.id}` as never);
-    } catch {
-      toast.error("Failed to start replay.");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-
-  if (loading && !model) {
+  // ── Loading / not found ───────────────────────────────────────────────────
+  if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center gap-3 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin" />
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
-  if (!model) {
+  if (!workflowRun) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-center">
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
         <p className="text-sm font-medium text-muted-foreground">Run not found</p>
         <Link href={"/runs" as never} className="flex items-center gap-1 text-[12px] text-primary hover:underline">
-          <ArrowLeft className="h-3 w-3" />
-          Back to Runs
+          <ArrowLeft className="h-3 w-3" /> Back to Runs
         </Link>
       </div>
     );
   }
 
-  const displayModel: AgentRunUiModel = forcePausedPending
-    ? { ...model, run: { ...model.run, errorMessage: (model.run.errorMessage ? model.run.errorMessage + " · " : "") + "Workflow paused — confirm retry to proceed" } }
-    : model;
-
-  const pendingApprovals = model.approvals.filter((a) => a.status === "PENDING");
-  const canReplay = isLocalRun && model.run.status !== "RUNNING" && model.run.status !== "QUEUED" && checkpoints.length > 0;
-  const isFailed = model.run.status === "FAILED";
-  const isWaitingApproval = model.run.status === "WAITING_FOR_APPROVAL";
-
   return (
-    <div className="min-h-full p-6 pb-16 lg:p-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-
-        {/* Breadcrumb */}
-        <Link href={"/runs" as never} className="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors">
+    <div className="min-h-full" style={{ background: "#F8FAFC" }}>
+      {/* Top nav bar */}
+      <div
+        className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 px-6 py-3"
+        style={{ background: "#FFFFFF" }}
+      >
+        <Link
+          href={"/runs" as never}
+          className="flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-800 transition-colors"
+        >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Runs
+          All Runs
         </Link>
-
-        {retryWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 space-y-1">
-            {retryWarnings.map((w, i) => <p key={i}><span className="font-semibold">Warning:</span> {w}</p>)}
-          </div>
-        )}
-
-        {forcePausedPending && (
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-sm text-amber-800">The workflow is paused. Retry anyway?</p>
-            <div className="flex gap-2 shrink-0">
-              <button type="button" onClick={() => setForcePausedPending(false)}
-                className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium hover:bg-muted">Cancel</button>
-              <button type="button" disabled={acting} onClick={() => void handleRetry(true)}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-red-700 disabled:opacity-50">
-                {acting ? "Retrying…" : "Retry anyway"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Approval Banner */}
-        {isWaitingApproval && pendingApprovals.length > 0 && isLocalRun && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 space-y-3">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-amber-800">Approval Required</p>
-                <p className="mt-0.5 text-xs text-amber-700">
-                  This run is paused waiting for human approval before continuing.
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button
-                  type="button"
-                  disabled={acting}
-                  onClick={() => void handleApprove(pendingApprovals[0]!.id)}
-                  className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-                >
-                  {acting ? "…" : "Approve"}
-                </button>
-                <button
-                  type="button"
-                  disabled={acting}
-                  onClick={() => void handleReject(pendingApprovals[0]!.id)}
-                  className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                >
-                  {acting ? "…" : "Reject"}
-                </button>
-              </div>
-            </div>
-            <p className="text-xs text-amber-700">
-              Step: <span className="font-mono">{pendingApprovals[0]!.relatedStep}</span>
-            </p>
-          </div>
-        )}
-
-        {/* Failed — local retry banner */}
-        {isFailed && isLocalRun && (
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-5 py-4">
-            <div>
-              <p className="text-sm font-semibold text-red-700">Run Failed</p>
-              {model.run.errorMessage && (
-                <p className="mt-0.5 text-xs text-red-600">{model.run.errorMessage}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              disabled={acting}
-              onClick={() => void handleRetry()}
-              className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              {acting ? "Retrying…" : "Retry from failed step"}
-            </button>
-          </div>
-        )}
-
-        {/* Replay section */}
-        {canReplay && (
-          <div className="rounded-xl border border-border bg-muted/10 px-5 py-4 space-y-3">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold">Replay Available</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {checkpoints.length} checkpoint{checkpoints.length !== 1 ? "s" : ""} — replay from start or a specific checkpoint.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={acting}
-                onClick={() => void handleReplay()}
-                className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 transition-colors"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {acting ? "Starting…" : "Replay from start"}
-              </button>
-            </div>
-            {checkpoints.length > 0 && (
-              <div className="flex flex-wrap gap-2 border-t border-border/30 pt-3">
-                {checkpoints.map((ckpt) => (
-                  <button
-                    key={ckpt.id}
-                    type="button"
-                    disabled={acting}
-                    onClick={() => void handleReplay(ckpt.id)}
-                    className="rounded-lg border border-border px-3 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50 transition-colors"
-                  >
-                    After step <span className="font-mono">{ckpt.stepId}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Replay unavailable notice for non-native runs */}
-        {!isLocalRun && model.run.status === "FAILED" && (
-          <div className="rounded-xl border border-border bg-muted/10 px-5 py-3">
-            <p className="text-xs text-muted-foreground">
-              <span className="font-semibold">Replay unavailable</span> — replay is only supported for native workflow runs.
-            </p>
-          </div>
-        )}
-
-        <RunHeaderV2
-          model={displayModel}
-          onRetry={!forcePausedPending ? () => void handleRetry(false) : undefined}
-          onCancel={handleCancel}
-        />
-        <RunSummaryCards model={model} />
-        {/* Durable execution: history stats + continuation chain */}
-        <RunHistoryStats runId={id} workflowId={model.run.jobId ?? ""} />
-        {/* Agent Brain Trace — shown for runs that used iterative agents */}
-        <AgentBrainTrace runId={id} />
-        {/* Failure Diagnosis — shown above timeline if run failed and incident exists */}
-        {(model.run.status === "FAILED" || model.run.status === "TIMEOUT") && (
-          <FailureDiagnosisPanel runId={id} workflowId={model.run.jobId ?? ""} />
-        )}
-        <RunDetailTabsV2
-          model={model}
-          onApprove={isLocalRun ? handleApprove : undefined}
-          onReject={isLocalRun ? handleReject : undefined}
-        />
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-700 transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Refresh
+        </button>
       </div>
+
+      {/* Run Details — Business View / Engineering View */}
+      <RunDetailsPage run={workflowRun} onAction={handleAction} />
     </div>
   );
 }
