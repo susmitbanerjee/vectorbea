@@ -616,10 +616,21 @@ class RunProcessor(
         errorJson: String? = null,
     ) {
         dataSource.connection.use { conn ->
+            // Aggregate token_count and estimated_cost from run_events so the
+            // agent_runs row reflects total usage for the entire run.
+            // run_events stores per-LLM-call tokens; SUM collapses them here.
             conn.prepareStatement(
                 """UPDATE agent_runs SET
                    status = ?, completed_at = ?, duration_ms = ?,
-                   output_json = ?::jsonb, error_json = ?::jsonb, updated_at = now()
+                   output_json = ?::jsonb, error_json = ?::jsonb, updated_at = now(),
+                   token_count = (
+                       SELECT COALESCE(SUM(token_count), 0)
+                       FROM run_events WHERE run_id = ? AND token_count IS NOT NULL
+                   ),
+                   estimated_cost = (
+                       SELECT COALESCE(SUM(estimated_cost), 0.0)
+                       FROM run_events WHERE run_id = ? AND estimated_cost IS NOT NULL
+                   )
                    WHERE id = ?"""
             ).use { stmt ->
                 stmt.setString(1, status)
@@ -627,7 +638,9 @@ class RunProcessor(
                 stmt.setLong(3, durationMs)
                 stmt.setString(4, outputJson)
                 stmt.setString(5, errorJson)
-                stmt.setObject(6, runId)
+                stmt.setObject(6, runId)   // token_count subquery
+                stmt.setObject(7, runId)   // estimated_cost subquery
+                stmt.setObject(8, runId)   // WHERE id
                 stmt.executeUpdate()
             }
         }
