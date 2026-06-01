@@ -58,20 +58,20 @@ class DashboardRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                   AND status = 'succeeded'
                   AND updated_at >= NOW() - INTERVAL '24 hours'
               ),
-              -- Sum tokens/cost from run_events (not agent_runs) because:
-              -- agent_runs.token_count is only populated AFTER updateRunCompleted()
-              -- which was only fixed in this PR. Existing runs have NULL there.
-              -- run_events has per-LLM-call token data for ALL past runs.
+              -- Sum tokens/cost directly from agent_runs (not run_events).
+              -- agent_runs.token_count and estimated_cost are now correctly
+              -- populated by updateRunCompleted() + V012 backfill migration.
+              -- run_events.token_count/estimated_cost is still NULL for many
+              -- historical brain events, making the JOIN approach unreliable.
               usage_24h AS (
                 SELECT
-                  COALESCE(SUM(e.token_count), 0)     AS tokens,
-                  COALESCE(SUM(e.estimated_cost), 0.0) AS cost
-                FROM run_events e
-                JOIN agent_runs r ON r.id = e.run_id
-                WHERE r.workspace_id = ?
-                  ${if (environmentId != null) "AND r.environment_id = ?" else ""}
-                  AND e.created_at >= NOW() - INTERVAL '24 hours'
-                  AND (e.token_count IS NOT NULL OR e.estimated_cost IS NOT NULL)
+                  COALESCE(SUM(token_count), 0)      AS tokens,
+                  COALESCE(SUM(estimated_cost), 0.0)  AS cost
+                FROM agent_runs
+                WHERE workspace_id = ? $envFilter
+                  AND (started_at  >= NOW() - INTERVAL '24 hours'
+                    OR created_at  >= NOW() - INTERVAL '24 hours')
+                  AND token_count > 0
               ),
               pending_approvals AS (
                 SELECT COUNT(*) AS cnt
