@@ -21,7 +21,6 @@ import {
   Server,
   Settings2,
   Wrench,
-  Users,
 } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
@@ -86,9 +85,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "OPERATE",
     items: [
-      { href: "/schedules" as never,        label: "Schedules",  icon: CalendarClock },
-      { href: "/settings/members" as never, label: "Members",    icon: Users },
-      { href: "/settings" as never,         label: "Settings",   icon: Settings2 },
+      { href: "/schedules" as never, label: "Schedules", icon: CalendarClock },
+      { href: "/settings" as never,  label: "Settings",  icon: Settings2 },
     ],
   },
 ];
