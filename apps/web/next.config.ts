@@ -1,4 +1,4 @@
-// build: 62b8841+
+// build: ecaaf60+
 import createMDX from "@next/mdx";
 import remarkGfm from "remark-gfm";
 import type { NextConfig } from "next";

@@ -187,16 +187,16 @@ export default function RunsPage() {
   // Debounce search
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const PAGE_SIZE = 15;
+
   const load = useCallback(async (p = 1) => {
     setLoading(true);
     try {
-      // Fetch a larger page when time-filtering so client-side filter has enough items
-      const pageSize = timeRange !== "all" ? 60 : 15;
       const data = await getRuns({
         search:   search || undefined,
         status:   statusFilter || undefined,
         page:     p,
-        pageSize,
+        pageSize: PAGE_SIZE,
       });
       setResult(data);
     } catch {
@@ -559,42 +559,39 @@ export default function RunsPage() {
         )}
       </div>
 
-      {/* ── Pagination ──────────────────────────────────────────────────── */}
-      {pagination && pagination.totalPages > 1 && timeRange === "all" && (
-        <div className="flex items-center justify-between text-[12px] text-[#6B7280]">
-          <span>
-            Showing {(pagination.page - 1) * pagination.pageSize + 1}–
-            {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{" "}
+      {/* ── Pagination — always shown when there are multiple pages ────── */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] text-[#6B7280]">
+            Showing {(pagination.page - 1) * PAGE_SIZE + 1}–
+            {Math.min(pagination.page * PAGE_SIZE, pagination.total)} of{" "}
             {pagination.total.toLocaleString()} runs
+            {timeRange !== "all" && (
+              <span className="ml-1 text-[#9CA3AF]">· filtered by time range</span>
+            )}
           </span>
           <div className="flex items-center gap-1">
             <button
               type="button"
               disabled={pagination.page <= 1}
               onClick={() => { const p = pagination.page - 1; setPage(p); void load(p); }}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-[#E5E7EB] bg-white hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="h-4 w-4" />
             </button>
-            <span className="px-3 text-[11px]">
+            <span className="px-3 text-[12px] text-[#374151] font-medium">
               Page {pagination.page} of {pagination.totalPages}
             </span>
             <button
               type="button"
               disabled={pagination.page >= pagination.totalPages}
               onClick={() => { const p = pagination.page + 1; setPage(p); void load(p); }}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-[#E5E7EB] bg-white hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
         </div>
-      )}
-      {pagination && timeRange !== "all" && (
-        <p className="text-[11px] text-[#9CA3AF]">
-          Showing {displayRuns.length} run{displayRuns.length !== 1 ? "s" : ""} within time range
-          {" "}(from {pagination.total.toLocaleString()} total)
-        </p>
       )}
     </div>
   );
