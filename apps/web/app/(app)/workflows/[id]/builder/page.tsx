@@ -58,6 +58,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  ReactFlowProvider,
   addEdge,
   type Connection,
   type Node,
@@ -270,7 +271,19 @@ function ConnectionLine({ fromX, fromY, toX, toY }: ConnectionLineComponentProps
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// ── ReactFlowProvider wrapper ─────────────────────────────────────────────────
+// useReactFlow() must be called INSIDE a ReactFlow provider.
+// WorkflowBuilderInner renders <ReactFlow> AND calls useReactFlow(), so it
+// needs a parent ReactFlowProvider to avoid Error #001.
 export default function WorkflowBuilderPage() {
+  return (
+    <ReactFlowProvider>
+      <WorkflowBuilderInner />
+    </ReactFlowProvider>
+  );
+}
+
+function WorkflowBuilderInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
