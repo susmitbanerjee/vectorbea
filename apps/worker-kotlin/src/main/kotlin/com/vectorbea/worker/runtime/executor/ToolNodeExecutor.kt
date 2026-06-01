@@ -518,6 +518,59 @@ class ToolNodeExecutor(
      *   emailSubject — subject line (supports {{template}} expressions resolved by caller)
      *   emailBody    — HTML body    (supports {{template}} expressions resolved by caller)
      */
+    /**
+     * Resolve {{expression}} template placeholders in email fields.
+     *
+     * Supported patterns:
+     *   {{steps.nodeLabel.output.fieldName}}  — step output by node label
+     *   {{steps.nodeLabel.fieldName}}          — same (output. prefix optional)
+     *   {{steps.nodeId.output.fieldName}}      — step output by node ID (n1008)
+     *   {{input.key}}                          — workflow trigger input
+     *   {{input.key.nested}}                   — nested input field
+     *
+     * Node labels are normalised: "Price Analyst" → "price_analyst" for matching.
+     * If a placeholder cannot be resolved it is left as-is.
+     */
+    private fun resolveEmailTemplate(template: String, ctx: RuntimeContext): String {
+        if (!template.contains("{{")) return template
+
+        // Build a label → nodeId lookup (normalise: lowercase + spaces→underscore)
+        val labelToId: Map<String, String> = ctx.graph.nodes.associate { node ->
+            node.label.lowercase().replace(Regex("[^a-z0-9]+"), "_") to node.id
+        }
+        val allOutputs: Map<String, Map<String, Any>> = ctx.allOutputs()
+
+        val placeholderRegex = Regex("\\{\\{([^}]+)\\}\\}")
+        return placeholderRegex.replace(template) { match ->
+            val expr = match.groupValues[1].trim()
+            val resolved: Any? = when {
+                // {{steps.name.output.field}} or {{steps.name.field}}
+                expr.startsWith("steps.") -> {
+                    val parts = expr.removePrefix("steps.").split(".")
+                    if (parts.isEmpty()) null else {
+                        val nameOrId  = parts[0]
+                        val nodeId    = labelToId[nameOrId.lowercase()] ?: nameOrId
+                        val outputs   = allOutputs[nodeId] ?: emptyMap()
+                        // Skip "output" segment if present (steps.name.output.field)
+                        val fieldParts = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
+                        fieldParts.fold(outputs as Any?) { acc, key ->
+                            (acc as? Map<*, *>)?.get(key)
+                        }
+                    }
+                }
+                // {{input.key}} or {{input.key.nested}}
+                expr.startsWith("input.") -> {
+                    val parts = expr.removePrefix("input.").split(".")
+                    parts.fold(ctx.workflowInput as Any?) { acc, key ->
+                        (acc as? Map<*, *>)?.get(key)
+                    }
+                }
+                else -> null
+            }
+            resolved?.toString() ?: match.value   // keep original if unresolvable
+        }
+    }
+
     private fun sendBuiltinEmail(
         config: Map<String, Any>,
         resolvedInputs: Map<String, Any>,
@@ -534,9 +587,14 @@ class ToolNodeExecutor(
 
         val platformSecret = System.getenv("VECTORBEA_INGEST_SECRET") ?: ""
 
-        val toRaw   = (config["emailTo"]      as? String ?: resolvedInputs["to"]      as? String ?: "").trim()
-        val subject = (config["emailSubject"] as? String ?: resolvedInputs["subject"] as? String ?: "(no subject)").trim()
-        val html    = (config["emailBody"]    as? String ?: resolvedInputs["html"]    as? String ?: "").trim()
+        val rawTo      = (config["emailTo"]      as? String ?: resolvedInputs["to"]      as? String ?: "").trim()
+        val rawSubject = (config["emailSubject"] as? String ?: resolvedInputs["subject"] as? String ?: "(no subject)").trim()
+        val rawHtml    = (config["emailBody"]    as? String ?: resolvedInputs["html"]    as? String ?: "").trim()
+
+        // Resolve {{steps.nodeName.output.field}} and {{input.key}} templates
+        val toRaw   = resolveEmailTemplate(rawTo,      ctx)
+        val subject = resolveEmailTemplate(rawSubject, ctx)
+        val html    = resolveEmailTemplate(rawHtml,    ctx)
 
         if (toRaw.isEmpty()) {
             return NodeResult.Failed(
