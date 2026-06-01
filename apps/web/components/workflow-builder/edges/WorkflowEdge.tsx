@@ -207,13 +207,27 @@ function getWorkflowPath(
 
   // ── Sequential vertical flow ──────────────────────────────────────────────
   if (dx <= ALIGNMENT_TOLERANCE) {
-    // Handles close enough — straight line (looks vertical at canvas zoom)
+    // Very close — straight line
     return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
   }
 
-  // Any offset beyond tolerance → smooth bezier curve.
-  // This makes BOTH fan-out (parallel) AND fan-in (join) look identical:
-  // clean arcs that feel intentional, whether spreading out or converging.
+  if (dx <= 300) {
+    // Medium offset (same-size nodes not perfectly centred).
+    // Use a gentle S-curve with control points close to the endpoints so the
+    // connector looks nearly straight: the deviation at the midpoint is only
+    // dx/2 pixels wide over the full dy height — barely visible.
+    // Crucially it connects FROM the real source handle TO the real target handle.
+    const tension = Math.min(dy * 0.35, 80); // control point offset — small = straighter
+    const path = [
+      `M ${sourceX} ${sourceY}`,
+      `C ${sourceX} ${sourceY + tension}`,   // control 1 — pulls down from source
+      `  ${targetX} ${targetY - tension}`,   // control 2 — pulls up to target
+      `  ${targetX} ${targetY}`,
+    ].join(" ");
+    return [path, cx, cy];
+  }
+
+  // Wide offset → full arc (fan-out / fan-in style)
   const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
   return [path, cx, cy];
 }
