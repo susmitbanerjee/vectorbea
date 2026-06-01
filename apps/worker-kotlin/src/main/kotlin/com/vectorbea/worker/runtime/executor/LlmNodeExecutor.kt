@@ -129,13 +129,16 @@ class LlmNodeExecutor(
         }
 
         val durationMs = System.currentTimeMillis() - startMs
+        val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }
         emitEvent(context, node.id, EventType.LLM_CALL_COMPLETED, "success",
             title = "LLM call completed",
             summary = "provider=$provider model=$model durationMs=$durationMs" +
-                    (result.tokenCount?.let { " tokens=$it" } ?: ""),
+                    (result.tokenCount?.let { " tokens=$it" } ?: "") +
+                    (estimatedCostUsd?.let { " cost=\$${"%.6f".format(it)}" } ?: ""),
             durationMs = durationMs,
             modelName = model,
-            tokenCount = result.tokenCount)
+            tokenCount = result.tokenCount,
+            estimatedCost = estimatedCostUsd)
 
         return NodeResult.Completed(
             output = mapOf(
@@ -417,6 +420,31 @@ class LlmNodeExecutor(
 
     // ── Event helper ──────────────────────────────────────────────────────────
 
+    /**
+     * Estimate USD cost from token count and model name.
+     * Rates are conservative approximations — accurate billing requires provider invoices.
+     */
+    private fun estimateCostUsd(tokens: Int, model: String): Double {
+        val usdPerMillion = when {
+            model.contains("gpt-4o-mini", ignoreCase = true) -> 0.60   // $0.60/M
+            model.contains("gpt-4o",  ignoreCase = true)    -> 5.00   // $5.00/M
+            model.contains("gpt-4.1-mini", ignoreCase = true)-> 0.40
+            model.contains("gpt-4.1", ignoreCase = true)    -> 2.00
+            model.contains("gpt-4",   ignoreCase = true)    -> 30.00  // gpt-4 turbo
+            model.contains("gpt-3.5", ignoreCase = true)    -> 0.50
+            model.contains("claude-3-5-haiku", ignoreCase = true) -> 0.80
+            model.contains("claude-3-5", ignoreCase = true) -> 3.00
+            model.contains("claude-3-haiku", ignoreCase = true) -> 0.25
+            model.contains("claude-3-opus",  ignoreCase = true) -> 15.00
+            model.contains("claude",  ignoreCase = true)    -> 3.00
+            model.contains("gemini-1.5-flash", ignoreCase = true) -> 0.075
+            model.contains("gemini-1.5-pro",   ignoreCase = true) -> 3.50
+            model.contains("gemini",  ignoreCase = true)    -> 1.00
+            else                                             -> 2.00   // safe default
+        }
+        return (tokens / 1_000_000.0) * usdPerMillion
+    }
+
     private fun emitEvent(
         ctx: RuntimeContext,
         nodeId: String,
@@ -427,6 +455,7 @@ class LlmNodeExecutor(
         durationMs: Long? = null,
         modelName: String? = null,
         tokenCount: Int? = null,
+        estimatedCost: Double? = null,
     ) = try {
         eventStore.appendEvent(RunEvent(
             runId          = ctx.runId,
@@ -440,6 +469,7 @@ class LlmNodeExecutor(
             durationMs     = durationMs,
             modelName      = modelName,
             tokenCount     = tokenCount,
+            estimatedCost  = estimatedCost,
         ))
     } catch (_: Exception) { /* events are best-effort */ }
 

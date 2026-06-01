@@ -41,9 +41,11 @@ function fmtDuration(ms: number | null) {
 
 function fmtCost(usd: number | null) {
   if (usd == null) return null;
-  if (usd === 0) return "$0";
-  if (usd < 0.001) return `<$0.001`;
-  return `$${usd.toFixed(4)}`;
+  if (usd === 0)        return null;       // treat 0 as "not computed" → show —
+  if (usd < 0.000001)   return "<$0.0001";
+  if (usd < 0.001)      return `$${usd.toFixed(5)}`;
+  if (usd < 0.01)       return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(3)}`;
 }
 
 function timeAgo(ts: string | null): { rel: string; abs: string } {
