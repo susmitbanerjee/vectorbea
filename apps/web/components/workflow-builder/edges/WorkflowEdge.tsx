@@ -207,18 +207,13 @@ function getWorkflowPath(
 
   // ── Sequential vertical flow ──────────────────────────────────────────────
   if (dx <= ALIGNMENT_TOLERANCE) {
-    // Handles are close enough — draw a direct line from source to target.
-    // For dx ≤ 80px this looks visually straight at normal canvas zoom.
-    // Goes from the ACTUAL source handle to the ACTUAL target handle.
+    // Handles close enough — straight line (looks vertical at canvas zoom)
     return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
   }
 
-  if (dx <= 400) {
-    // Slightly offset — rounded orthogonal step (Z-shape with smooth corners)
-    return [roundedOrthogonal(sourceX, sourceY, targetX, targetY), cx, cy];
-  }
-
-  // Very wide offset (fan-in like agents → join) — smooth bezier arc
+  // Any offset beyond tolerance → smooth bezier curve.
+  // This makes BOTH fan-out (parallel) AND fan-in (join) look identical:
+  // clean arcs that feel intentional, whether spreading out or converging.
   const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
   return [path, cx, cy];
 }
