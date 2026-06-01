@@ -246,14 +246,19 @@ export const BaseNode = memo(function BaseNode({
             <LucideIcon
               style={{ color: meta.color, width: compact ? 13 : 16, height: compact ? 13 : 16 }}
             />
-            {/* Small provider pill badge — bottom-right corner of icon */}
+            {/* Provider logo badge — bottom-right corner, shows actual brand icon */}
             {llmProvider && !compact && (
               <span
-                className="absolute -bottom-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-white px-0.5 text-[7px] font-bold leading-none"
-                style={{ background: llmProvider.color, color: "#fff" }}
+                className="absolute -bottom-1.5 -right-1.5 flex items-center justify-center rounded-lg overflow-hidden"
+                style={{
+                  width: 16, height: 16,
+                  border: "1.5px solid white",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
+                  borderRadius: 5,
+                }}
                 title={llmProvider.label}
               >
-                {llmProvider.label.slice(0, 2).toUpperCase()}
+                <llmProvider.Icon size={16} />
               </span>
             )}
           </span>
