@@ -246,7 +246,12 @@ class RunRoutes(
 
     private fun list(req: Request): Response {
         val ctx = req.context()
-        val params = req.pageParams()
+        // Frontend sends page/pageSize; req.pageParams() reads limit/offset → mismatch.
+        // Read page/pageSize directly so pagination works correctly.
+        val params = com.vectorbea.api.repository.PageParams(
+            page     = req.query("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1,
+            pageSize = req.query("pageSize")?.toIntOrNull()?.coerceIn(1, 100) ?: 15,
+        )
         val statusFilter = req.query("status")
         val workflowIdStr = req.query("workflowId")
         val workflowId = workflowIdStr?.let {
