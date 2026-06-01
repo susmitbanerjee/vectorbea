@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { IconBadge, AgentIcon, BrainIcon, ToolIcon, type IconTone } from "@/components/icons/vectorbea-icons";
 import type { Agent } from "@/types/platform";
 import { getAgents } from "@/lib/repository";
 import { AppSelect } from "@/components/ui/app-select";
@@ -149,7 +150,7 @@ export default function AgentsPage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-20 text-center">
-            <Bot className="h-10 w-10 text-muted-foreground/20" />
+            <IconBadge icon={AgentIcon} tone="agent" size="lg" />
             <p className="text-sm font-medium text-muted-foreground">
               {agents.length === 0 ? "No agents registered" : "No agents match your filters"}
             </p>
@@ -179,18 +180,28 @@ export default function AgentsPage() {
                 {filtered.map((agent) => (
                   <tr key={agent.id} className="group transition-colors hover:bg-muted/20">
                     <td className="px-4 py-3.5">
-                      <Link
-                        href={`/agents/${agent.id}` as never}
-                        className="block text-[13px] font-medium hover:underline"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {agent.name}
-                      </Link>
-                      {agent.description && (
-                        <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted-foreground">
-                          {agent.description}
-                        </p>
-                      )}
+                      <div className="flex items-center gap-2.5">
+                        <IconBadge
+                          icon={agent.type === "iterative_agent" || agent.type === "native_llm_agent" ? BrainIcon : agent.type === "tool_agent" ? ToolIcon : AgentIcon}
+                          tone={agent.type === "iterative_agent" || agent.type === "native_llm_agent" ? "agent" : agent.type === "tool_agent" ? "tool" : "agent"}
+                          size="sm"
+                          className="shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <Link
+                            href={`/agents/${agent.id}` as never}
+                            className="block text-[13px] font-medium hover:underline"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {agent.name}
+                          </Link>
+                          {agent.description && (
+                            <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted-foreground">
+                              {agent.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium", TYPE_COLORS[agent.type])}>

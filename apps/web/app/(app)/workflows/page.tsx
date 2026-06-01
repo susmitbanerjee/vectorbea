@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { IconBadge, WorkflowIcon } from "@/components/icons/vectorbea-icons";
 import type { PaginatedResult, Workflow, WorkflowStatus } from "@/types/platform";
 import { getWorkflows } from "@/lib/repository";
 
@@ -223,16 +224,26 @@ export default function WorkflowsPage() {
                   <tr key={wf.id} className="group transition-colors hover:bg-[#F9FAFB]">
                     {/* Name */}
                     <td className="px-5 py-3">
-                      <Link
-                        href={`/workflows/${wf.id}` as never}
-                        className="block font-medium hover:underline"
-                        style={{ fontSize: 14, color: "#111827" }}
-                      >
-                        {wf.name}
-                      </Link>
-                      <p className="mt-0.5 max-w-[260px] truncate" style={{ fontSize: 12, color: "#9CA3AF" }}>
-                        {wf.description}
-                      </p>
+                      <div className="flex items-center gap-2.5">
+                        <IconBadge
+                          icon={WorkflowIcon}
+                          tone={wf.status === "active" ? "workflow" : wf.status === "paused" ? "warning" : "muted"}
+                          size="sm"
+                          className="shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <Link
+                            href={`/workflows/${wf.id}` as never}
+                            className="block font-medium hover:underline"
+                            style={{ fontSize: 14, color: "#111827" }}
+                          >
+                            {wf.name}
+                          </Link>
+                          <p className="mt-0.5 max-w-[260px] truncate" style={{ fontSize: 12, color: "#9CA3AF" }}>
+                            {wf.description}
+                          </p>
+                        </div>
+                      </div>
                     </td>
 
                     {/* Mode */}
@@ -346,9 +357,7 @@ export default function WorkflowsPage() {
 function EmptyWorkflows({ hasFilters }: { hasFilters: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 text-center" style={{ height: 280 }}>
-      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5E7EB] bg-[#F9FAFB]">
-        <GitBranch className="h-5 w-5" style={{ color: "#D1D5DB" }} />
-      </div>
+      <IconBadge icon={WorkflowIcon} tone="workflow" size="lg" />
       <div>
         <p style={{ fontSize: 15, fontWeight: 650, color: "#374151" }}>
           {hasFilters ? "No workflows match your filters" : "No workflows yet"}

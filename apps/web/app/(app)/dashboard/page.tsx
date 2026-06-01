@@ -17,6 +17,7 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { IconBadge, type IconTone } from "@/components/icons/vectorbea-icons";
 import { getPlatformSummary, getRuns } from "@/lib/repository";
 import type { AgentRun } from "@/types/platform";
 import { cn } from "@/lib/utils";
@@ -51,13 +52,14 @@ const STATUS_CONFIG: Record<string, { dot: string; label: string; labelColor: st
 // ─── Metric card ──────────────────────────────────────────────────────────────
 
 function MetricCard({
-  label, value, sub, color, icon: Icon,
+  label, value, sub, color, icon: Icon, tone,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   color?: string;
-  icon: React.ElementType;
+  icon: import("lucide-react").LucideIcon;
+  tone?: IconTone;
 }) {
   return (
     <div
@@ -71,7 +73,7 @@ function MetricCard({
     >
       <div className="flex items-center justify-between">
         <p className="card-label">{label}</p>
-        <Icon className="h-[14px] w-[14px]" style={{ color: color ?? "#94A3B8" }} />
+        <IconBadge icon={Icon} tone={tone ?? "default"} size="xs" />
       </div>
       <div>
         <p style={{
@@ -275,10 +277,10 @@ export default function OverviewPage() {
 
       {/* ── Metric cards ─────────────────────────────────────────────────── */}
       <div className="mb-4 grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <MetricCard label="Active Workflows" value={summary?.activeWorkflows ?? "—"} sub={`${summary?.totalWorkflows ?? 0} total`}        color="#2563EB" icon={GitBranch}    />
-        <MetricCard label="Running Now"       value={summary?.runningRuns ?? 0}      color={summary?.runningRuns ? "#059669" : undefined}    icon={Play}           />
-        <MetricCard label="Failed (24h)"      value={summary?.failedRuns24h ?? 0}    sub={`${summary?.succeededRuns24h ?? 0} succeeded`}      color={summary?.failedRuns24h ? "#DC2626" : undefined} icon={AlertTriangle} />
-        <MetricCard label="Pending Approvals" value={summary?.waitingApprovals ?? 0} color={summary?.waitingApprovals ? "#D97706" : undefined} icon={ShieldCheck}    />
+        <MetricCard label="Active Workflows" value={summary?.activeWorkflows ?? "—"} sub={`${summary?.totalWorkflows ?? 0} total`}        color="#2563EB" icon={GitBranch}    tone="workflow"  />
+        <MetricCard label="Running Now"       value={summary?.runningRuns ?? 0}      color={summary?.runningRuns ? "#059669" : undefined}    icon={Play}           tone={summary?.runningRuns ? "success" : "muted"} />
+        <MetricCard label="Failed (24h)"      value={summary?.failedRuns24h ?? 0}    sub={`${summary?.succeededRuns24h ?? 0} succeeded`}      color={summary?.failedRuns24h ? "#DC2626" : undefined} icon={AlertTriangle} tone={summary?.failedRuns24h ? "danger" : "muted"} />
+        <MetricCard label="Pending Approvals" value={summary?.waitingApprovals ?? 0} color={summary?.waitingApprovals ? "#D97706" : undefined} icon={ShieldCheck}    tone={summary?.waitingApprovals ? "approval" : "muted"} />
       </div>
 
       {/* ── Main content grid ────────────────────────────────────────────── */}

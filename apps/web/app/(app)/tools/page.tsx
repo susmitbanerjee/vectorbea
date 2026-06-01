@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw, Wrench } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { IconBadge, ToolIcon, HttpIcon, DatabaseIcon, EmailIcon, CodeIcon } from "@/components/icons/vectorbea-icons";
 import type { Tool } from "@/types/platform";
 import { getTools } from "@/lib/repository";
 import { AppSelect } from "@/components/ui/app-select";
@@ -184,7 +185,7 @@ export default function ToolsPage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-20 text-center">
-            <Wrench className="h-10 w-10 text-muted-foreground/20" />
+            <IconBadge icon={ToolIcon} tone="tool" size="lg" />
             <p className="text-sm font-medium text-muted-foreground">
               {tools.length === 0 ? "No tools registered" : "No tools match your filters"}
             </p>
@@ -214,16 +215,37 @@ export default function ToolsPage() {
                 {filtered.map((tool) => (
                   <tr key={tool.id} className="group transition-colors hover:bg-muted/20">
                     <td className="px-4 py-3.5">
-                      <Link
-                        href={`/tools/${tool.id}` as never}
-                        className="block font-mono text-[13px] font-medium hover:underline"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {tool.name}
-                      </Link>
-                      {tool.description && (
-                        <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted-foreground">{tool.description}</p>
-                      )}
+                      <div className="flex items-center gap-2.5">
+                        <IconBadge
+                          icon={
+                            tool.type.includes("http") || tool.type.includes("graphql") ? HttpIcon :
+                            tool.type.includes("database") || tool.type.includes("db") ? DatabaseIcon :
+                            tool.type.includes("email") ? EmailIcon :
+                            tool.type.includes("code") || tool.type.includes("function") ? CodeIcon :
+                            ToolIcon
+                          }
+                          tone={
+                            tool.type.includes("http") ? "http" :
+                            tool.type.includes("database") || tool.type.includes("db") ? "database" :
+                            tool.type.includes("email") ? "email" :
+                            "tool"
+                          }
+                          size="sm"
+                          className="shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <Link
+                            href={`/tools/${tool.id}` as never}
+                            className="block text-[13px] font-medium hover:underline"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {tool.name}
+                          </Link>
+                          {tool.description && (
+                            <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted-foreground">{tool.description}</p>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 capitalize">
