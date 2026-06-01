@@ -534,40 +534,71 @@ class ToolNodeExecutor(
     private fun resolveEmailTemplate(template: String, ctx: RuntimeContext): String {
         if (!template.contains("{{")) return template
 
-        // Build a label → nodeId lookup (normalise: lowercase + spaces→underscore)
-        val labelToId: Map<String, String> = ctx.graph.nodes.associate { node ->
-            node.label.lowercase().replace(Regex("[^a-z0-9]+"), "_") to node.id
-        }
         val allOutputs: Map<String, Map<String, Any>> = ctx.allOutputs()
+
+        // Build multiple lookup maps so users can reference nodes flexibly:
+        //   steps.nodeId            → direct node ID  (n1008)
+        //   steps.node_label        → node label normalised
+        //   steps.agent_name        → registered agent name from config
+        val nameToId = mutableMapOf<String, String>()
+        for (node in ctx.graph.nodes) {
+            // By node ID directly
+            nameToId[node.id] = node.id
+            // By normalised label ("Agent Step" → "agent_step")
+            val labelKey = node.label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            nameToId[labelKey] = node.id
+            // By agent name stored in config ("Price Analyst" → "price_analyst")
+            val agentName = (node.config["agentName"] as? String ?: "")
+                .lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            if (agentName.isNotEmpty()) nameToId[agentName] = node.id
+        }
+
+        // Log available outputs so users can see what keys to use in templates
+        if (allOutputs.isNotEmpty()) {
+            val available = allOutputs.entries.joinToString(", ") { (id, out) ->
+                val label = ctx.graph.nodes.find { it.id == id }?.label ?: id
+                "$id('$label'): ${out.keys.joinToString("+")}"
+            }
+            log.debug("[email-template] available step outputs: $available")
+            log.info("[email-template] available step outputs for template resolution: [${
+                allOutputs.entries.joinToString(", ") { (id, out) ->
+                    "'${ctx.graph.nodes.find { it.id == id }?.label ?: id}' ($id): keys=[${out.keys.joinToString(", ")}]"
+                }
+            }]")
+        }
 
         val placeholderRegex = Regex("\\{\\{([^}]+)\\}\\}")
         return placeholderRegex.replace(template) { match ->
             val expr = match.groupValues[1].trim()
             val resolved: Any? = when {
-                // {{steps.name.output.field}} or {{steps.name.field}}
+                // {{steps.nameOrId.output.field}} or {{steps.nameOrId.field}}
                 expr.startsWith("steps.") -> {
                     val parts = expr.removePrefix("steps.").split(".")
                     if (parts.isEmpty()) null else {
-                        val nameOrId  = parts[0]
-                        val nodeId    = labelToId[nameOrId.lowercase()] ?: nameOrId
-                        val outputs   = allOutputs[nodeId] ?: emptyMap()
-                        // Skip "output" segment if present (steps.name.output.field)
-                        val fieldParts = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
-                        fieldParts.fold(outputs as Any?) { acc, key ->
-                            (acc as? Map<*, *>)?.get(key)
+                        val ref     = parts[0]
+                        val nodeId  = nameToId[ref] ?: nameToId[ref.lowercase()] ?: ref
+                        val outputs = allOutputs[nodeId] ?: emptyMap()
+                        // Skip "output" segment (steps.name.output.field → same as steps.name.field)
+                        val fields  = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
+                        if (fields.isEmpty()) {
+                            // {{steps.name}} without field → return content or first value
+                            outputs["content"] ?: outputs["summary"] ?: outputs.values.firstOrNull()
+                        } else {
+                            fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
                         }
                     }
                 }
                 // {{input.key}} or {{input.key.nested}}
                 expr.startsWith("input.") -> {
                     val parts = expr.removePrefix("input.").split(".")
-                    parts.fold(ctx.workflowInput as Any?) { acc, key ->
-                        (acc as? Map<*, *>)?.get(key)
-                    }
+                    parts.fold(ctx.workflowInput as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
                 }
                 else -> null
             }
-            resolved?.toString() ?: match.value   // keep original if unresolvable
+            if (resolved == null) {
+                log.warn("[email-template] could not resolve '{{$expr}}' — available: ${nameToId.keys.take(10)}")
+            }
+            resolved?.toString() ?: match.value
         }
     }
 

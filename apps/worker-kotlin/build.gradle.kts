@@ -1,4 +1,4 @@
-// Worker service — Kotlin workflow execution engine (builtin-email-template-resolve)
+// Worker service — Kotlin workflow execution engine (email-template-v2)
 plugins {
     kotlin("jvm") version "2.1.20"
     application
