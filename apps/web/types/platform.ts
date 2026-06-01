@@ -280,6 +280,10 @@ export interface Workflow {
   slug: string;
   description: string;
   status: WorkflowStatus;
+  // Derived counts from graph_json (added by API in VB-113+)
+  stepCount?:  number;
+  agentCount?: number;
+  toolCount?:  number;
   creationMode: WorkflowCreationMode;
   currentVersion: string;
   triggerType: TriggerType;

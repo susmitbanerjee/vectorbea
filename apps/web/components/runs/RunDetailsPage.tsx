@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import type { WorkflowRun, ViewMode, RunStep } from "@/types/runs";
 import { RunSummaryHeader } from "./RunSummaryHeader";
 import { RunViewToggle } from "./RunViewToggle";
-import { ExecutionTimeline } from "./ExecutionTimeline";
-import { StepDetailsPanel } from "./StepDetailsPanel";
+import { RunTimeline } from "./RunTimeline";
+import type { RunTimelineEventUi } from "@/types/agent-run-ui";
 import { LogsTab } from "./tabs/LogsTab";
 import { ToolCallsTab } from "./tabs/ToolCallsTab";
 import { ApprovalsTab } from "./tabs/ApprovalsTab";
@@ -36,16 +36,20 @@ const ENGINEERING_TABS: { id: TabId; label: string }[] = [
 export function RunDetailsPage({
   run,
   onAction,
+  rawEvents,
+  isLive,
 }: {
   run: WorkflowRun;
   onAction?: (action: string, payload?: Record<string, string>) => void;
+  rawEvents?: RunTimelineEventUi[];
+  isLive?: boolean;
 }) {
   const [viewMode, setViewMode]         = useState<ViewMode>("business");
-  const [selectedStepId, setSelectedId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab]       = useState<TabId>("logs");
 
-  const selectedStep: RunStep | undefined = run.steps.find(s => s.id === selectedStepId);
   const tabs = viewMode === "business" ? BUSINESS_TABS : ENGINEERING_TABS;
+  const timelineEvents = rawEvents ?? [];
 
   function handleAction(action: string) {
     if (onAction) {
@@ -86,21 +90,25 @@ export function RunDetailsPage({
         </p>
       </div>
 
-      {/* Main area: Timeline + Details */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(0,1fr) 380px" }}>
-        {/* Timeline */}
-        <ExecutionTimeline
-          run={run}
-          selectedStepId={selectedStepId}
-          onSelectStep={id => { setSelectedId(id); setActiveTab("logs"); }}
-          viewMode={viewMode}
-        />
-        {/* Step details */}
-        <StepDetailsPanel
-          run={run}
-          stepId={selectedStepId}
-          viewMode={viewMode}
-          onAction={handleAction}
+      {/* Vertical timeline — Business View or Engineering View */}
+      <div
+        className="rounded-2xl overflow-hidden bg-white"
+        style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>
+            {viewMode === "business" ? "Execution Summary" : "Event Timeline"}
+          </span>
+          <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
+            {viewMode === "business" ? "Key steps only" : `${timelineEvents.length} events`}
+          </span>
+        </div>
+        <RunTimeline
+          events={timelineEvents}
+          variant={viewMode}
+          selectedId={selectedEventId ?? undefined}
+          onSelect={id => { setSelectedId(id); setActiveTab("logs"); }}
+          isLive={isLive}
         />
       </div>
 
@@ -144,7 +152,7 @@ export function RunDetailsPage({
         {/* Tab content */}
         <div className="p-4 min-h-[300px]">
           {activeTab === "logs" && <LogsTab run={run} viewMode={viewMode} />}
-          {activeTab === "inputs_outputs" && <InputsOutputsTab run={run} selectedStep={selectedStep} />}
+          {activeTab === "inputs_outputs" && <InputsOutputsTab run={run} selectedStep={undefined} />}
           {activeTab === "tool_calls" && <ToolCallsTab run={run} />}
           {activeTab === "approvals" && <ApprovalsTab run={run} onAction={handleAction} />}
           {activeTab === "events" && <EventHistoryTab run={run} />}

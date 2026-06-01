@@ -22,10 +22,12 @@ import com.vectorbea.api.repository.AgentRepository
 import com.vectorbea.api.repository.ApprovalRepository
 import com.vectorbea.api.repository.ConnectionRepository
 import com.vectorbea.api.repository.RunEventRepository
+import com.vectorbea.api.repository.DashboardRepository
 import com.vectorbea.api.repository.RunRepository
 import com.vectorbea.api.repository.ToolRepository
 import com.vectorbea.api.repository.WorkflowRepository
 import com.vectorbea.api.routes.AgentRoutes
+import com.vectorbea.api.routes.DashboardRoutes
 import com.vectorbea.api.routes.ApprovalRoutes
 import com.vectorbea.api.routes.ConnectionRoutes
 import com.vectorbea.api.routes.ConnectionTestRoutes
@@ -242,6 +244,11 @@ fun main() {
     if (workflowRepo != null) {
         WorkflowRoutes(workflowRepo, cacheService).register(router)
     } else log.warn("WorkflowRoutes disabled — no database")
+
+    // Dashboard summary — requires DB for metric queries
+    if (ds != null) {
+        DashboardRoutes(DashboardRepository(ds), cacheService).register(router)
+    } else log.warn("DashboardRoutes disabled — no database")
 
     if (runRepo != null && runEventRepo != null) {
         RunRoutes(

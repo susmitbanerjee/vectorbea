@@ -255,9 +255,10 @@ function mapToWorkflowRun(run: AgentRun, events: RunTimelineEventUi[]): Workflow
 export default function RunDetailPage() {
   const { id }  = useParams<{ id: string }>();
   const router  = useRouter();
-  const [workflowRun, setWorkflowRun] = useState<WorkflowRun | null>(null);
-  const [loadError, setLoadError]     = useState<string | null>(null);
-  const [loading, setLoading]         = useState(true);
+  const [workflowRun, setWorkflowRun]   = useState<WorkflowRun | null>(null);
+  const [rawEvents, setRawEvents]       = useState<RunTimelineEventUi[]>([]);
+  const [loadError, setLoadError]       = useState<string | null>(null);
+  const [loading, setLoading]           = useState(true);
   const sseCloseRef = useRef<(() => void) | null>(null);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
@@ -290,6 +291,7 @@ export default function RunDetailPage() {
 
     try {
       setWorkflowRun(mapToWorkflowRun(run, events));
+      setRawEvents(events);
       setLoadError(null);
     } catch (e) {
       // mapToWorkflowRun had a runtime error — show raw fallback
@@ -429,7 +431,12 @@ export default function RunDetailPage() {
       </div>
 
       {/* Business View / Engineering View */}
-      <RunDetailsPage run={workflowRun} onAction={handleAction} />
+      <RunDetailsPage
+        run={workflowRun}
+        onAction={handleAction}
+        rawEvents={rawEvents}
+        isLive={["queued","running","waiting_for_approval"].includes(workflowRun.status)}
+      />
     </div>
   );
 }

@@ -577,49 +577,108 @@ export async function retryRunFailedStep(runId: string, stepId: string): Promise
 
 // ─── Platform summary ─────────────────────────────────────────────────────────
 
-const PLATFORM_SUMMARY_ZERO = {
-  totalWorkflows: 0, activeWorkflows: 0,
-  totalAgents: 0, totalTools: 0, totalRuns: 0,
-  runningRuns: 0, waitingApprovals: 0,
-  failedRuns24h: 0, succeededRuns24h: 0,
-  totalTokens24h: 0, totalCost24h: 0,
-  connectedWorkers: 0,
+export interface DashboardSummary {
+  activeWorkflows:   number;
+  runningNow:        number;
+  failedLast24h:     number;
+  succeededLast24h:  number;
+  pendingApprovals:  number;
+  usageLast24h:      { tokens: number; estimatedCost: number };
+  recentRunsTotal:   number;
+  // Side-channel metrics (from separate endpoints, used for backwards compat)
+  totalWorkflows:    number;
+  totalAgents:       number;
+  totalTools:        number;
+  connectedWorkers:  number;
+  // Backwards-compat aliases
+  waitingApprovals:  number;
+  failedRuns24h:     number;
+  succeededRuns24h:  number;
+  totalTokens24h:    number;
+  totalCost24h:      number;
+  runningRuns:       number;
+  totalRuns:         number;
+}
+
+const SUMMARY_ZERO: DashboardSummary = {
+  activeWorkflows: 0, runningNow: 0, failedLast24h: 0,
+  succeededLast24h: 0, pendingApprovals: 0,
+  usageLast24h: { tokens: 0, estimatedCost: 0 },
+  recentRunsTotal: 0, totalWorkflows: 0, totalAgents: 0,
+  totalTools: 0, connectedWorkers: 0,
+  waitingApprovals: 0, failedRuns24h: 0, succeededRuns24h: 0,
+  totalTokens24h: 0, totalCost24h: 0, runningRuns: 0, totalRuns: 0,
 };
 
-export async function getPlatformSummary() {
+/**
+ * Fetch dashboard metrics.
+ * Primary source: GET /api/dashboard/summary (single efficient query in Kotlin API).
+ * Falls back to side-channel API calls if the summary endpoint is unavailable.
+ */
+export async function getPlatformSummary(): Promise<DashboardSummary> {
   const wsId = getActiveWorkspaceId();
-  if (!wsId) return PLATFORM_SUMMARY_ZERO;
+  if (!wsId) return SUMMARY_ZERO;
 
-  // Aggregate from multiple Kotlin API calls in parallel
-  const [workflowsResult, agentsResult, toolsResult, runsResult, approvalsResult, workersResult] =
+  // Primary: new efficient dashboard summary endpoint
+  const summaryResult = await apiFetch<{
+    activeWorkflows: number;
+    runningNow: number;
+    failedLast24h: number;
+    succeededLast24h: number;
+    pendingApprovals: number;
+    usageLast24h: { tokens: number; estimatedCost: number };
+    recentRunsTotal: number;
+  }>(withWorkspace("/api/dashboard/summary")).catch(() => null);
+
+  // Side-channel: workers and total counts (not in summary endpoint)
+  const [workersResult, agentsResult, toolsResult, workflowsResult] =
     await Promise.allSettled([
-      api<PaginatedResult<Workflow>>(withWorkspace("/api/workflows?page=1&pageSize=1")),
+      api<WorkerItem[]>(withWorkspace("/api/workers")),
       api<Agent[]>(withWorkspace("/api/agents")),
       api<Tool[]>(withWorkspace("/api/tools")),
-      api<PaginatedResult<AgentRun>>(withWorkspace("/api/runs?page=1&pageSize=1")),
-      api<ApprovalPage>(withWorkspace("/api/approvals?status=PENDING&page=1&pageSize=1")),
-      api<WorkerItem[]>(withWorkspace("/api/workers")),
+      api<PaginatedResult<Workflow>>(withWorkspace("/api/workflows?page=1&pageSize=1")),
     ]);
 
-  const workflows = workflowsResult.status === "fulfilled" ? workflowsResult.value : null;
+  const workers   = workersResult.status === "fulfilled" ? workersResult.value : [];
   const agents    = agentsResult.status === "fulfilled" ? agentsResult.value : [];
   const tools     = toolsResult.status === "fulfilled" ? toolsResult.value : [];
+  const workflows = workflowsResult.status === "fulfilled" ? workflowsResult.value : null;
+
+  if (summaryResult) {
+    return {
+      ...summaryResult,
+      totalWorkflows:   workflows?.total ?? 0,
+      totalAgents:      Array.isArray(agents) ? agents.length : 0,
+      totalTools:       Array.isArray(tools) ? tools.length : 0,
+      connectedWorkers: Array.isArray(workers) ? workers.filter(w => w.status === "CONNECTED").length : 0,
+      // Backwards-compat aliases
+      waitingApprovals: summaryResult.pendingApprovals,
+      failedRuns24h:    summaryResult.failedLast24h,
+      succeededRuns24h: summaryResult.succeededLast24h,
+      totalTokens24h:   summaryResult.usageLast24h?.tokens ?? 0,
+      totalCost24h:     summaryResult.usageLast24h?.estimatedCost ?? 0,
+      runningRuns:      summaryResult.runningNow,
+      totalRuns:        summaryResult.recentRunsTotal,
+    };
+  }
+
+  // Fallback: aggregate from individual endpoints (old behaviour)
+  const [runsResult, approvalsResult] = await Promise.allSettled([
+    api<PaginatedResult<AgentRun>>(withWorkspace("/api/runs?page=1&pageSize=1")),
+    api<ApprovalPage>(withWorkspace("/api/approvals?status=PENDING&page=1&pageSize=1")),
+  ]);
   const runs      = runsResult.status === "fulfilled" ? runsResult.value : null;
   const approvals = approvalsResult.status === "fulfilled" ? approvalsResult.value : null;
-  const workers   = workersResult.status === "fulfilled" ? workersResult.value : [];
 
   return {
+    ...SUMMARY_ZERO,
     totalWorkflows:   workflows?.total ?? 0,
-    activeWorkflows:  0, // Kotlin API doesn't expose active count separately
+    activeWorkflows:  0,
     totalAgents:      Array.isArray(agents) ? agents.length : 0,
     totalTools:       Array.isArray(tools) ? tools.length : 0,
     totalRuns:        runs?.total ?? 0,
-    runningRuns:      0, // Future: add status=running filter
+    pendingApprovals: approvals?.total ?? 0,
     waitingApprovals: approvals?.total ?? 0,
-    failedRuns24h:    0, // Future: add since query param
-    succeededRuns24h: 0,
-    totalTokens24h:   0,
-    totalCost24h:     0,
     connectedWorkers: Array.isArray(workers) ? workers.filter(w => w.status === "CONNECTED").length : 0,
   };
 }

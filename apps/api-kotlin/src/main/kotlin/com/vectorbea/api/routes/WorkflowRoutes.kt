@@ -52,18 +52,44 @@ private data class CreateVersionBody(
 
 // ── Response shapes ───────────────────────────────────────────────────────────
 
-private fun Workflow.toResponse(): Map<String, Any?> = mapOf(
-    "id" to id.toString(),
-    "workspaceId" to workspaceId.toString(),
-    "environmentId" to environmentId.toString(),
-    "name" to name,
-    "slug" to slug,
-    "description" to description,
-    "status" to status,
-    "currentVersionId" to currentVersionId?.toString(),
-    "createdAt" to createdAt.toString(),
-    "updatedAt" to updatedAt.toString(),
-)
+// Node types that count as "agents" in the workflow graph
+private val AGENT_NODE_TYPES = setOf("agent", "llm", "iterative_agent")
+// Node types that count as "tools"
+private val TOOL_NODE_TYPES  = setOf("tool", "http_tool", "graphql_tool", "db_read", "db_write", "mcp_tool", "grpc_tool", "transform")
+
+/**
+ * Counts step/agent/tool nodes from a graph_json string.
+ * Returns Triple(stepCount, agentCount, toolCount).
+ * Returns (0, 0, 0) on any parse error.
+ */
+@Suppress("UNCHECKED_CAST")
+private fun countGraphNodes(graphJson: String): Triple<Int, Int, Int> = runCatching {
+    val graph = mapper.readValue(graphJson, Map::class.java) as Map<String, Any>
+    val nodes = graph["nodes"] as? List<*> ?: return@runCatching Triple(0, 0, 0)
+    val steps  = nodes.size
+    val agents = nodes.count { n -> (n as? Map<*, *>)?.get("type") as? String in AGENT_NODE_TYPES }
+    val tools  = nodes.count { n -> (n as? Map<*, *>)?.get("type") as? String in TOOL_NODE_TYPES }
+    Triple(steps, agents, tools)
+}.getOrDefault(Triple(0, 0, 0))
+
+private fun Workflow.toResponse(graphJson: String? = null): Map<String, Any?> {
+    val (stepCount, agentCount, toolCount) = if (graphJson != null) countGraphNodes(graphJson) else Triple(0, 0, 0)
+    return mapOf(
+        "id" to id.toString(),
+        "workspaceId" to workspaceId.toString(),
+        "environmentId" to environmentId.toString(),
+        "name" to name,
+        "slug" to slug,
+        "description" to description,
+        "status" to status,
+        "currentVersionId" to currentVersionId?.toString(),
+        "stepCount"  to stepCount,
+        "agentCount" to agentCount,
+        "toolCount"  to toolCount,
+        "createdAt" to createdAt.toString(),
+        "updatedAt" to updatedAt.toString(),
+    )
+}
 
 @Suppress("UNCHECKED_CAST")
 private fun WorkflowVersion.toResponse(): Map<String, Any?> = mapOf(
@@ -106,7 +132,9 @@ class WorkflowRoutes(
 
         val cacheKey = "${CacheKeys.workflowList(ctx.workspaceId.toString(), envId?.toString() ?: "all")}:${statusFilter.orEmpty()}:${params.page}:${params.pageSize}"
         val page = cache.getOrSet(cacheKey, ttlSeconds = 60L) {
-            repo.list(ctx.workspaceId, envId, statusFilter, params).mapItems { it.toResponse() }
+            // listWithGraph LEFT JOINs workflow_versions to compute step/agent/tool counts
+            repo.listWithGraph(ctx.workspaceId, envId, statusFilter, params)
+                .mapItems { (wf, gj) -> wf.toResponse(gj) }
         }
         return Response.ok(page)
     }
@@ -140,7 +168,8 @@ class WorkflowRoutes(
         val ctx = req.context()
         val id = req.pathUUID("id")
         val wf = repo.findById(id, ctx.workspaceId) ?: throw ApiError.NotFound("Workflow")
-        return Response.ok(wf.toResponse())
+        val graphJson = wf.currentVersionId?.let { repo.findVersionById(it)?.graphJson }
+        return Response.ok(wf.toResponse(graphJson))
     }
 
     private fun update(req: Request): Response {

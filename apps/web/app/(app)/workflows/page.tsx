@@ -239,9 +239,35 @@ export default function WorkflowsPage() {
                           >
                             {wf.name}
                           </Link>
-                          <p className="mt-0.5 max-w-[260px] truncate" style={{ fontSize: 12, color: "#9CA3AF" }}>
-                            {wf.description}
-                          </p>
+                          {/* Step / agent / tool counts from graph */}
+                          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            {(wf.stepCount ?? 0) > 0 && (
+                              <span style={{ fontSize: 11, color: "#6B7280" }}>
+                                {wf.stepCount} step{wf.stepCount !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                            {(wf.agentCount ?? 0) > 0 && (
+                              <>
+                                <span style={{ fontSize: 11, color: "#D1D5DB" }}>·</span>
+                                <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 600 }}>
+                                  {wf.agentCount} agent{wf.agentCount !== 1 ? "s" : ""}
+                                </span>
+                              </>
+                            )}
+                            {(wf.toolCount ?? 0) > 0 && (
+                              <>
+                                <span style={{ fontSize: 11, color: "#D1D5DB" }}>·</span>
+                                <span style={{ fontSize: 11, color: "#0891B2", fontWeight: 600 }}>
+                                  {wf.toolCount} tool{wf.toolCount !== 1 ? "s" : ""}
+                                </span>
+                              </>
+                            )}
+                            {!(wf.stepCount ?? 0) && !(wf.agentCount ?? 0) && !(wf.toolCount ?? 0) && wf.description && (
+                              <span className="truncate max-w-[240px]" style={{ fontSize: 11, color: "#9CA3AF" }}>
+                                {wf.description}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>

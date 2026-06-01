@@ -172,28 +172,44 @@ interface Summary {
   totalTools: number;
   totalRuns: number;
   runningRuns: number;
+  runningNow: number;
   waitingApprovals: number;
+  pendingApprovals: number;
   failedRuns24h: number;
+  failedLast24h: number;
   succeededRuns24h: number;
+  succeededLast24h: number;
   totalTokens24h: number;
   totalCost24h: number;
+  usageLast24h?: { tokens: number; estimatedCost: number };
   connectedWorkers: number;
+  recentRunsTotal: number;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
 }
 
 export default function OverviewPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [recentRuns, setRecentRuns] = useState<AgentRun[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [runsTotal, setRunsTotal]   = useState(0);
+  const [loading, setLoading]       = useState(true);
+
+  const RECENT_RUNS_LIMIT = 5;
 
   async function load() {
     setLoading(true);
     try {
       const [s, runsResult] = await Promise.all([
         getPlatformSummary(),
-        getRuns({ pageSize: 8 }),
+        getRuns({ pageSize: RECENT_RUNS_LIMIT }),
       ]);
       setSummary(s as Summary);
       setRecentRuns(runsResult.items);
+      setRunsTotal(runsResult.total);
     } catch { /* silently fallback */ }
     finally { setLoading(false); }
   }
@@ -277,10 +293,31 @@ export default function OverviewPage() {
 
       {/* ── Metric cards ─────────────────────────────────────────────────── */}
       <div className="mb-4 grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <MetricCard label="Active Workflows" value={summary?.activeWorkflows ?? "—"} sub={`${summary?.totalWorkflows ?? 0} total`}        color="#2563EB" icon={GitBranch}    tone="workflow"  />
-        <MetricCard label="Running Now"       value={summary?.runningRuns ?? 0}      color={summary?.runningRuns ? "#059669" : undefined}    icon={Play}           tone={summary?.runningRuns ? "success" : "muted"} />
-        <MetricCard label="Failed (24h)"      value={summary?.failedRuns24h ?? 0}    sub={`${summary?.succeededRuns24h ?? 0} succeeded`}      color={summary?.failedRuns24h ? "#DC2626" : undefined} icon={AlertTriangle} tone={summary?.failedRuns24h ? "danger" : "muted"} />
-        <MetricCard label="Pending Approvals" value={summary?.waitingApprovals ?? 0} color={summary?.waitingApprovals ? "#D97706" : undefined} icon={ShieldCheck}    tone={summary?.waitingApprovals ? "approval" : "muted"} />
+        <MetricCard
+          label="Active Workflows"
+          value={loading ? "…" : (summary?.activeWorkflows ?? 0)}
+          sub={`${summary?.totalWorkflows ?? 0} total`}
+          color="#2563EB" icon={GitBranch} tone="workflow"
+        />
+        <MetricCard
+          label="Running Now"
+          value={loading ? "…" : (summary?.runningNow ?? summary?.runningRuns ?? 0)}
+          color={(summary?.runningNow ?? summary?.runningRuns ?? 0) > 0 ? "#059669" : undefined}
+          icon={Play} tone={(summary?.runningNow ?? 0) > 0 ? "success" : "muted"}
+        />
+        <MetricCard
+          label="Failed (24h)"
+          value={loading ? "…" : (summary?.failedLast24h ?? summary?.failedRuns24h ?? 0)}
+          sub={`${summary?.succeededLast24h ?? summary?.succeededRuns24h ?? 0} succeeded`}
+          color={(summary?.failedLast24h ?? 0) > 0 ? "#DC2626" : undefined}
+          icon={AlertTriangle} tone={(summary?.failedLast24h ?? 0) > 0 ? "danger" : "muted"}
+        />
+        <MetricCard
+          label="Pending Approvals"
+          value={loading ? "…" : (summary?.pendingApprovals ?? summary?.waitingApprovals ?? 0)}
+          color={(summary?.pendingApprovals ?? 0) > 0 ? "#D97706" : undefined}
+          icon={ShieldCheck} tone={(summary?.pendingApprovals ?? 0) > 0 ? "approval" : "muted"}
+        />
       </div>
 
       {/* ── Main content grid ────────────────────────────────────────────── */}
@@ -355,9 +392,29 @@ export default function OverviewPage() {
               </Link>
             </div>
           ) : (
-            <div>
-              {recentRuns.map((run) => <RunRow key={run.id} run={run} />)}
-            </div>
+            <>
+              <div>
+                {recentRuns.map((run) => <RunRow key={run.id} run={run} />)}
+              </div>
+              {/* Footer — shows count and View all link */}
+              <div
+                className="flex items-center justify-between px-[18px]"
+                style={{ height: 44, borderTop: "1px solid #F1F5F9" }}
+              >
+                <span style={{ fontSize: 12, color: "#94A3B8" }}>
+                  {runsTotal > RECENT_RUNS_LIMIT
+                    ? `Showing ${Math.min(recentRuns.length, RECENT_RUNS_LIMIT)} of ${runsTotal.toLocaleString()} runs`
+                    : `${recentRuns.length} run${recentRuns.length !== 1 ? "s" : ""}`}
+                </span>
+                <Link
+                  href={"/runs" as Route}
+                  style={{ fontSize: 12, color: "#2563EB", fontWeight: 600 }}
+                  className="hover:underline"
+                >
+                  View all →
+                </Link>
+              </div>
+            </>
           )}
         </div>
 
@@ -374,8 +431,8 @@ export default function OverviewPage() {
             </p>
             <div className="space-y-3">
               {[
-                { label: "Tokens",    value: summary != null ? (summary.totalTokens24h ?? 0).toLocaleString() : "—" },
-                { label: "Est. cost", value: summary != null ? `$${(summary.totalCost24h ?? 0).toFixed(4)}` : "—" },
+                { label: "Tokens",    value: loading ? "…" : summary != null ? fmtTokens(summary.usageLast24h?.tokens ?? summary.totalTokens24h ?? 0) : "—" },
+                { label: "Est. cost", value: loading ? "…" : summary != null ? `$${(summary.usageLast24h?.estimatedCost ?? summary.totalCost24h ?? 0).toFixed(3)}` : "—" },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-center justify-between">
                   <span style={{ fontSize: 12.5, color: "#64748B" }}>{label}</span>

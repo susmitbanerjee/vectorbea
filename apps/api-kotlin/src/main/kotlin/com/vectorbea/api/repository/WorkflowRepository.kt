@@ -101,6 +101,54 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
         ::mapRow,
     )
 
+    /**
+     * Workflow row enriched with current-version graph_json for node counting.
+     * graphJson is null when there is no current version.
+     */
+    data class WorkflowWithGraph(val workflow: Workflow, val graphJson: String?)
+
+    /**
+     * Same as [list] but LEFT JOINs workflow_versions to retrieve graph_json.
+     * Used by the list API to compute step/agent/tool counts in one query.
+     */
+    fun listWithGraph(
+        workspaceId: UUID,
+        environmentId: UUID? = null,
+        status: String? = null,
+        params: PageParams = PageParams(),
+    ): Page<WorkflowWithGraph> {
+        val filters = buildList {
+            add("w.workspace_id = ?")
+            if (environmentId != null) add("w.environment_id = ?")
+            if (status != null) add("w.status = ?")
+        }
+        val where = "WHERE ${filters.joinToString(" AND ")}"
+        val bindBase: (java.sql.PreparedStatement) -> Unit = {
+            var i = 1
+            it.setUuid(i++, workspaceId)
+            if (environmentId != null) it.setUuid(i++, environmentId)
+            if (status != null) it.setString(i++, status)
+        }
+        val colsAliased = cols.split(",").joinToString(", ") { "w.${it.trim()}" }
+        return queryPage(
+            sql = """
+                SELECT $colsAliased, v.graph_json AS graph_json_v
+                FROM workflows w
+                LEFT JOIN workflow_versions v ON v.id = w.current_version_id
+                $where ORDER BY w.created_at DESC
+            """.trimIndent(),
+            countSql = "SELECT COUNT(*) FROM workflows w $where",
+            params = params,
+            bind = { bindBase(this) },
+            mapRow = { rs ->
+                WorkflowWithGraph(
+                    workflow  = mapRow(rs),
+                    graphJson = runCatching { rs.getString("graph_json_v") }.getOrNull(),
+                )
+            },
+        )
+    }
+
     fun list(
         workspaceId: UUID,
         environmentId: UUID? = null,
