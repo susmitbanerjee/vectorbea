@@ -112,6 +112,20 @@ let _nodeIdCounter = 1000;
 function nextNodeId() {
   return `n${++_nodeIdCounter}`;
 }
+/**
+ * After loading an existing graph, advance the counter past all existing
+ * node IDs so new nodes never collide with existing ones.
+ * Existing IDs are like "n1001", "n1002" — extract the numeric suffix.
+ */
+function syncNodeIdCounter(nodeIds: string[]) {
+  for (const id of nodeIds) {
+    const match = id.match(/^n(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num >= _nodeIdCounter) _nodeIdCounter = num;
+    }
+  }
+}
 
 function graphToFlow(graph: WorkflowGraph): { nodes: Node<WFNodeData>[]; edges: Edge<WFEdgeData>[] } {
   const nodes: Node<WFNodeData>[] = graph.nodes.map((n) => ({
@@ -425,6 +439,8 @@ function WorkflowBuilderInner() {
         const savedGraph = await getWorkflowGraph(wf.id);
         if (savedGraph) {
           const { nodes: n, edges: e } = graphToFlow(savedGraph);
+          // Sync counter so new nodes get IDs higher than any existing node
+          syncNodeIdCounter(n.map(nd => nd.id));
           setNodes(n);
           setEdges(e);
         } else {
@@ -515,6 +531,7 @@ function WorkflowBuilderInner() {
   // ── Apply template ──────────────────────────────────────────────────────────
   function handleApplyTemplate(template: WorkflowTemplate) {
     const { nodes: n, edges: e } = graphToFlow(template.graph);
+    syncNodeIdCounter(n.map(nd => nd.id));
     setNodes(n);
     setEdges(e);
     setSelectedNodeId(null);
