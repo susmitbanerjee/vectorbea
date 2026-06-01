@@ -251,8 +251,11 @@ class AgentBrainRunner(
             val tokens  = (usage["total_tokens"] as? Int) ?: 0
             val cost    = estimateCostCents(tokens, config.modelName)
 
+            val costUsd = cost / 100.0   // estimateCostCents returns cents → convert to USD
             emitEvent(config, RunEventStore.EventType.LLM_CALL_COMPLETED, "running",
-                "LLM call completed tokens=$tokens")
+                "LLM call completed tokens=$tokens cost=\$${"%.5f".format(costUsd)}",
+                tokenCount    = tokens,
+                estimatedCost = costUsd)
             return LlmCallResult(msg, tokens, cost)
         } catch (e: Exception) {
             log.error("[brain] LLM call failed iter={}: {}", state.iteration, e.message)
@@ -474,7 +477,14 @@ class AgentBrainRunner(
 
     // ── Event emission ────────────────────────────────────────────────────────
 
-    private fun emitEvent(config: AgentBrainConfig, type: RunEventStore.EventType, status: String, summary: String) {
+    private fun emitEvent(
+        config: AgentBrainConfig,
+        type: RunEventStore.EventType,
+        status: String,
+        summary: String,
+        tokenCount: Int? = null,
+        estimatedCost: Double? = null,
+    ) {
         try {
             eventStore.appendEvent(RunEventStore.RunEvent(
                 runId         = config.runId,
@@ -488,6 +498,8 @@ class AgentBrainRunner(
                 summary       = summary.take(300),
                 stepId        = config.stepId,
                 agentId       = config.agentId,
+                tokenCount    = tokenCount,
+                estimatedCost = estimatedCost,
             ))
         } catch (e: Exception) { log.warn("[brain] event emit failed type={}: {}", type, e.message) }
     }
