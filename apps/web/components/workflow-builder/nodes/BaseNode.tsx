@@ -145,17 +145,18 @@ export const BaseNode = memo(function BaseNode({
     ? getToolNodeMeta(data)
     : getNodeMeta(data.nodeType as WFNodeType);
 
-  // For agent/llm nodes, check if a specific LLM provider is configured
+  // For agent/llm nodes, detect the LLM provider for the small provider badge.
+  // We NO LONGER replace the main icon with the provider icon — the node type
+  // icon (robot/neural hub) is always shown as the primary visual identity.
+  // Provider (OpenAI/Anthropic/Gemini) appears as a small labeled badge below.
   const llmProvider = (data.nodeType === "agent" || data.nodeType === "llm")
     ? getLLMProviderForNode(data)
     : null;
 
-  const meta = llmProvider
-    ? { ...baseMeta, color: llmProvider.color, bgColor: llmProvider.bgColor, borderColor: llmProvider.borderColor }
-    : baseMeta;
+  // meta always uses the node type colors/icon (not provider colors)
+  const meta = baseMeta;
 
-  // Resolved icon: LLM provider SVG component (size-aware) or lucide Icon
-  const ProviderIcon = llmProvider?.Icon ?? null;
+  // Always use the node type icon — custom SVGs from NodeIcons.tsx
   const LucideIcon = meta.icon;
 
   const status = data.previewStatus ?? "idle";
@@ -228,25 +229,32 @@ export const BaseNode = memo(function BaseNode({
       <div className={cn("relative z-10 pl-4 pr-3", compact ? "py-2.5" : "py-3")}>
         {/* Header row */}
         <div className="flex items-center gap-2.5">
-          {/* Icon badge — arc spinner overlaid when running */}
+          {/* Icon badge — always shows node type icon (robot, neural hub, etc.) */}
           <span
             className="relative flex shrink-0 items-center justify-center rounded-xl overflow-visible"
             style={{
               width: compact ? 28 : 36,
               height: compact ? 28 : 36,
-              background: ProviderIcon ? "transparent" : meta.bgColor,
-              border: ProviderIcon ? "none" : `1px solid ${meta.borderColor}`,
+              background: meta.bgColor,
+              border: `1.5px solid ${meta.borderColor}`,
+              boxShadow: `0 1px 4px ${meta.color}15`,
             }}
           >
             {status === "running" && (
               <RunningSpinner size={compact ? 28 : 36} />
             )}
-            {ProviderIcon ? (
-              <ProviderIcon size={compact ? 28 : 36} />
-            ) : (
-              <LucideIcon
-                style={{ color: meta.color, width: compact ? 13 : 16, height: compact ? 13 : 16 }}
-              />
+            <LucideIcon
+              style={{ color: meta.color, width: compact ? 13 : 16, height: compact ? 13 : 16 }}
+            />
+            {/* Small provider pill badge — bottom-right corner of icon */}
+            {llmProvider && !compact && (
+              <span
+                className="absolute -bottom-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-white px-0.5 text-[7px] font-bold leading-none"
+                style={{ background: llmProvider.color, color: "#fff" }}
+                title={llmProvider.label}
+              >
+                {llmProvider.label.slice(0, 2).toUpperCase()}
+              </span>
             )}
           </span>
 
