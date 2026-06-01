@@ -395,7 +395,7 @@ function TimelineRow({
 
 interface RunTimelineProps {
   events:      RunTimelineEventUi[];
-  variant:     "business" | "engineering";
+  variant:     "business" | "engineering" | "logs";
   selectedId?: string;
   onSelect?:   (rawEventId: string) => void;
   isLive?:     boolean;
@@ -403,7 +403,7 @@ interface RunTimelineProps {
 
 export function RunTimeline({ events, variant, selectedId, onSelect, isLive }: RunTimelineProps) {
   const items = useMemo(
-    () => variant === "business" ? buildBusinessItems(events) : buildEngineeringItems(events),
+    () => variant === "business" ? buildBusinessItems(events) : buildEngineeringItems(events), // "logs" never reaches RunTimeline
     [events, variant],
   );
 
@@ -424,19 +424,25 @@ export function RunTimeline({ events, variant, selectedId, onSelect, isLive }: R
 
   return (
     <div className="space-y-0 px-4 py-4">
-      {/* Inject CSS animation once */}
-      <style>{`
-        @keyframes tl-fade-up {
-          from { opacity: 0; transform: translateY(6px); }
-          to   { opacity: 1; transform: translateY(0);   }
-        }
-        .tl-item {
-          animation: tl-fade-up 0.22s ease-out both;
-        }
-      `}</style>
+      {/* Animation only for engineering view (business view is static) */}
+      {variant === "engineering" && (
+        <style>{`
+          @keyframes tl-fade-up {
+            from { opacity: 0; transform: translateY(5px); }
+            to   { opacity: 1; transform: translateY(0);   }
+          }
+          .tl-item-eng {
+            animation: tl-fade-up 0.18s ease-out both;
+          }
+        `}</style>
+      )}
 
       {items.map((item, i) => (
-        <div key={item.id} className="tl-item" style={{ animationDelay: `${i * 40}ms` }}>
+        <div
+          key={item.id}
+          className={variant === "engineering" ? "tl-item-eng" : undefined}
+          style={variant === "engineering" ? { animationDelay: `${i * 35}ms` } : undefined}
+        >
           <TimelineRow
             item={item}
             isLast={i === items.length - 1}

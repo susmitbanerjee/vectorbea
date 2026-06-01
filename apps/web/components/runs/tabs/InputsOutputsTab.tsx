@@ -2,8 +2,24 @@
 import type { WorkflowRun, RunStep } from "@/types/runs";
 import { JsonViewer } from "../JsonViewer";
 
+function NoData({ label }: { label: string }) {
+  return (
+    <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 py-8 text-center">
+      <p style={{ fontSize: 12, color: "#94A3B8" }}>{label}</p>
+    </div>
+  );
+}
+
 export function InputsOutputsTab({ run, selectedStep }: { run: WorkflowRun; selectedStep?: RunStep }) {
   const step = selectedStep;
+
+  // Workflow-level: use run input/output (from the WorkflowRun object directly)
+  const workflowInput  = (run as unknown as Record<string, unknown>).input;
+  const workflowOutput = (run as unknown as Record<string, unknown>).output;
+
+  // Last step with output (fallback)
+  const lastOutput = run.steps.filter(s => s.output !== undefined).at(-1)?.output;
+
   return (
     <div className="space-y-4">
       {step ? (
@@ -14,18 +30,30 @@ export function InputsOutputsTab({ run, selectedStep }: { run: WorkflowRun; sele
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            {step.input !== undefined ? <JsonViewer data={step.input} label="Step input" /> : <div style={{ fontSize: 12, color: "#94A3B8" }}>No input recorded</div>}
-            {step.output !== undefined ? <JsonViewer data={step.output} label="Step output" /> : <div style={{ fontSize: 12, color: "#94A3B8" }}>No output recorded</div>}
+            {step.input !== undefined
+              ? <JsonViewer data={step.input} label="Step input" />
+              : <NoData label="No input recorded for this step" />
+            }
+            {step.output !== undefined
+              ? <JsonViewer data={step.output} label="Step output" />
+              : <NoData label="No output recorded for this step" />
+            }
           </div>
         </>
       ) : (
         <>
-          <p style={{ fontSize: 12, color: "#64748B" }}>Workflow-level input and current output</p>
+          <p style={{ fontSize: 12, color: "#64748B" }}>Workflow-level trigger input and final output</p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <JsonViewer data={run.steps[0]?.input} label="Workflow input" />
-            {run.steps.filter(s => s.output).slice(-1).map(s =>
-              <JsonViewer key={s.id} data={s.output} label="Latest output" />
-            )}
+            {workflowInput !== undefined
+              ? <JsonViewer data={workflowInput} label="Workflow input" />
+              : <NoData label="No workflow input" />
+            }
+            {workflowOutput !== undefined
+              ? <JsonViewer data={workflowOutput} label="Workflow output" />
+              : lastOutput !== undefined
+                ? <JsonViewer data={lastOutput} label="Latest step output" />
+                : <NoData label="No output yet" />
+            }
           </div>
         </>
       )}

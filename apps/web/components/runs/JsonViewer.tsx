@@ -11,7 +11,8 @@ export function JsonViewer({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [copied, setCopied]     = useState(false);
   const safe   = redact ? redactSensitiveData(data) : data;
-  const json   = JSON.stringify(safe, null, 2);
+  // JSON.stringify(undefined) returns undefined (not a string) — guard it
+  const json   = safe !== undefined ? (JSON.stringify(safe, null, 2) ?? "null") : "null";
 
   function copy() {
     void navigator.clipboard.writeText(json);

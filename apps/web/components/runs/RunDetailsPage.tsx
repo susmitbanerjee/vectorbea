@@ -84,36 +84,52 @@ export function RunDetailsPage({
 
       {/* View toggle */}
       <div className="flex items-center justify-between">
-        <RunViewToggle mode={viewMode} onChange={setViewMode} />
+        <RunViewToggle mode={viewMode} onChange={v => { setViewMode(v); }} />
         <p style={{ fontSize: 12, color: "#94A3B8" }}>
-          {viewMode === "business" ? "Simplified view — technical details hidden" : "Engineering view — full debug access"}
+          {viewMode === "business" ? "Key steps — technical details hidden"
+            : viewMode === "engineering" ? "Full event trace — all technical details"
+            : "Raw execution logs — search and filter"}
         </p>
       </div>
 
-      {/* Vertical timeline — Business View or Engineering View */}
-      <div
-        className="rounded-2xl overflow-hidden bg-white"
-        style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>
-            {viewMode === "business" ? "Execution Summary" : "Event Timeline"}
-          </span>
-          <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
-            {viewMode === "business" ? "Key steps only" : `${timelineEvents.length} events`}
-          </span>
+      {/* ── Logs view — full-height dedicated logs panel ─────────────────── */}
+      {viewMode === "logs" && (
+        <div
+          className="rounded-2xl bg-white overflow-hidden"
+          style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
+        >
+          <div className="px-4 pt-4 pb-4 min-h-[480px]">
+            <LogsTab run={run} viewMode="engineering" />
+          </div>
         </div>
-        <RunTimeline
-          events={timelineEvents}
-          variant={viewMode}
-          selectedId={selectedEventId ?? undefined}
-          onSelect={id => { setSelectedId(id); setActiveTab("logs"); }}
-          isLive={isLive}
-        />
-      </div>
+      )}
 
-      {/* Bottom tabs */}
-      <div
+      {/* ── Timeline — Business or Engineering view ───────────────────────── */}
+      {viewMode !== "logs" && (
+        <div
+          className="rounded-2xl overflow-hidden bg-white"
+          style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>
+              {viewMode === "business" ? "Execution Summary" : "Event Timeline"}
+            </span>
+            <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
+              {viewMode === "business" ? "Key steps only" : `${timelineEvents.length} events`}
+            </span>
+          </div>
+          <RunTimeline
+            events={timelineEvents}
+            variant={viewMode}
+            selectedId={selectedEventId ?? undefined}
+            onSelect={id => { setSelectedId(id); setActiveTab("logs"); }}
+            isLive={isLive}
+          />
+        </div>
+      )}
+
+      {/* Bottom tabs — hidden when Logs view is active (logs view has its own full-height panel above) */}
+      {viewMode !== "logs" && <div
         className="rounded-2xl bg-white overflow-hidden"
         style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
       >
@@ -158,7 +174,7 @@ export function RunDetailsPage({
           {activeTab === "events" && <EventHistoryTab run={run} />}
           {activeTab === "recovery" && <RecoveryTab run={run} viewMode={viewMode} onAction={handleAction} />}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

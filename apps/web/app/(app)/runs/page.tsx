@@ -191,7 +191,7 @@ export default function RunsPage() {
     setLoading(true);
     try {
       // Fetch a larger page when time-filtering so client-side filter has enough items
-      const pageSize = timeRange !== "all" ? 100 : 25;
+      const pageSize = timeRange !== "all" ? 60 : 15;
       const data = await getRuns({
         search:   search || undefined,
         status:   statusFilter || undefined,

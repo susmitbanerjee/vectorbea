@@ -19,7 +19,7 @@ export type StepType =
   | "approval" | "parallel_branch" | "condition" | "timer"
   | "email" | "webhook" | "system";
 
-export type ViewMode = "business" | "engineering";
+export type ViewMode = "business" | "engineering" | "logs";
 
 export interface WorkflowRun {
   id: string;
