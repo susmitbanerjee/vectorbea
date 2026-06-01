@@ -523,18 +523,26 @@ class ToolNodeExecutor(
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
     ): NodeResult {
-        val appUrl = System.getenv("NEXT_PUBLIC_APP_URL")
-            ?: System.getenv("APP_URL")
-            ?: "https://app.vectorbea.com"   // fallback — override via env
+        // APP_URL must be set in Railway to point at the Vercel Next.js app.
+        // Without it we cannot reach /api/email/send.
+        val appUrl = System.getenv("APP_URL")
+            ?: System.getenv("NEXT_PUBLIC_APP_URL")
+            ?: return NodeResult.Failed(
+                "Built-in email: APP_URL environment variable is not set in the worker. " +
+                "Add APP_URL=https://dev.vectorbea.com (your Vercel app URL) to Railway Variables."
+            )
 
         val platformSecret = System.getenv("VECTORBEA_INGEST_SECRET") ?: ""
 
-        val toRaw     = (config["emailTo"]      as? String ?: resolvedInputs["to"]      as? String ?: "").trim()
-        val subject   = (config["emailSubject"] as? String ?: resolvedInputs["subject"] as? String ?: "(no subject)").trim()
-        val html      = (config["emailBody"]    as? String ?: resolvedInputs["html"]    as? String ?: "").trim()
+        val toRaw   = (config["emailTo"]      as? String ?: resolvedInputs["to"]      as? String ?: "").trim()
+        val subject = (config["emailSubject"] as? String ?: resolvedInputs["subject"] as? String ?: "(no subject)").trim()
+        val html    = (config["emailBody"]    as? String ?: resolvedInputs["html"]    as? String ?: "").trim()
 
         if (toRaw.isEmpty()) {
-            return NodeResult.Failed("Built-in email: 'emailTo' is not configured. Set it in the tool node inspector.")
+            return NodeResult.Failed(
+                "Built-in email: 'To (recipient emails)' is empty. " +
+                "Open the workflow builder, click the email tool node, and fill in the To field."
+            )
         }
 
         val payload = mapper.writeValueAsString(mapOf(
@@ -543,10 +551,13 @@ class ToolNodeExecutor(
             "html"    to html,
         ))
 
+        val emailUrl = "$appUrl/api/email/send"
+        log.info("[builtin-email] POST $emailUrl to=$toRaw subject='$subject'")
+
         return try {
-            val http     = java.net.http.HttpClient.newHttpClient()
-            val request  = java.net.http.HttpRequest.newBuilder()
-                .uri(java.net.URI.create("$appUrl/api/email/send"))
+            val http    = java.net.http.HttpClient.newHttpClient()
+            val request = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(emailUrl))
                 .header("Content-Type", "application/json")
                 .header("X-Platform-Secret", platformSecret)
                 .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
@@ -554,12 +565,19 @@ class ToolNodeExecutor(
                 .build()
 
             val response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+            val body = response.body() ?: ""
+
             if (response.statusCode() !in 200..299) {
-                return NodeResult.Failed("Built-in email failed: HTTP ${response.statusCode()} — ${response.body().take(300)}")
+                log.warn("[builtin-email] HTTP ${response.statusCode()}: $body")
+                return NodeResult.Failed(
+                    "Built-in email HTTP ${response.statusCode()}: $body".take(400)
+                )
             }
 
+            log.info("[builtin-email] sent successfully to=$toRaw")
+
             @Suppress("UNCHECKED_CAST")
-            val parsed = mapper.readValue(response.body(), Map::class.java) as Map<String, Any?>
+            val parsed = runCatching { mapper.readValue(body, Map::class.java) as Map<String, Any?> }.getOrDefault(emptyMap())
             NodeResult.Completed(output = mapOf(
                 "sent"       to true,
                 "messageId"  to (parsed["messageId"] ?: ""),
@@ -567,7 +585,10 @@ class ToolNodeExecutor(
                 "provider"   to "resend",
             ))
         } catch (e: Exception) {
-            NodeResult.Failed("Built-in email error: ${e.message?.take(300)}")
+            // Show exception class + message so "null" never appears
+            val detail = "${e::class.simpleName}: ${e.message ?: "no message"}"
+            log.error("[builtin-email] failed: $detail")
+            NodeResult.Failed("Built-in email failed ($detail). Check that APP_URL=$appUrl is reachable from Railway.")
         }
     }
 }
