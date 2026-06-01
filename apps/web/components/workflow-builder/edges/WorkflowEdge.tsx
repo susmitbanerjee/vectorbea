@@ -30,8 +30,11 @@ type WFEdge = Edge<WFEdgeData>;
 // ─── Routing constants ────────────────────────────────────────────────────────
 
 /** px: within this Δ the connector snaps to a perfectly straight line.
- *  20px gives comfortable straight-line snapping when nodes are nearly aligned. */
-const ALIGNMENT_TOLERANCE = 20;
+ *  60px — generous tolerance so that nodes that look visually aligned
+ *  (even if their handle centers differ by up to 60px) get a straight line.
+ *  Nodes of different widths (Trigger=200px, DBRead=230px) can have centers
+ *  that differ by ~15px; 60px covers this plus reasonable manual misalignment. */
+const ALIGNMENT_TOLERANCE = 60;
 /** px: radius for elbow rounded corners */
 const CORNER_RADIUS = 10;
 
@@ -112,13 +115,26 @@ function horizontalElbow(sx: number, sy: number, tx: number, ty: number): PathRe
 
 /**
  * Vertical elbow — source exits Bottom, target enters Top.
- * Routes: down → turn → left/right → turn → up
+ * Routes: down → turn → left/right → turn → up.
+ *
+ * When the horizontal offset is small (< 120px), uses a cubic bezier
+ * instead of a hard elbow so the line looks nearly-straight rather than
+ * making a jarring 90° detour.
  */
 function verticalElbow(sx: number, sy: number, tx: number, ty: number): PathResult {
+  const dx    = tx - sx;
+  const absDx = Math.abs(dx);
+
+  // For small offsets use a smooth S-curve (barely visible deflection)
+  if (absDx < 120) {
+    const cy = (sy + ty) / 2;
+    const path = `M ${sx} ${sy} C ${sx} ${cy} ${tx} ${cy} ${tx} ${ty}`;
+    return [path, (sx + tx) / 2, cy];
+  }
+
   const midY = (sy + ty) / 2;
-  const dx   = tx - sx;
   const dirX = dx >= 0 ? 1 : -1;
-  const r    = Math.min(CORNER_RADIUS, Math.abs(dx) / 2, Math.abs(midY - sy));
+  const r    = Math.min(CORNER_RADIUS, absDx / 2, Math.abs(midY - sy));
 
   const path = r < 3
     ? `M ${sx} ${sy} L ${sx} ${midY} L ${tx} ${midY} L ${tx} ${ty}`

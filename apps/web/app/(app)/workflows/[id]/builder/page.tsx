@@ -807,7 +807,7 @@ export default function WorkflowBuilderPage() {
             connectionLineType={ConnectionLineType.Straight}
             selectionMode={SelectionMode.Partial}
             snapToGrid
-            snapGrid={[20, 20]}
+            snapGrid={[40, 40]}
             fitView
             fitViewOptions={{ padding: 0.15 }}
             minZoom={0.2}
