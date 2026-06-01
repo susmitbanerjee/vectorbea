@@ -73,6 +73,87 @@ const STATUS_MAP: Record<string, string> = {
   paused:               "RUNNING", // closest visual
 };
 
+// ─── Shared numbered pagination ──────────────────────────────────────────────
+
+function Pagination({
+  current, total, totalItems, pageSize, onPage,
+}: {
+  current: number;
+  total: number;
+  totalItems: number;
+  pageSize: number;
+  onPage: (p: number) => void;
+}) {
+  // Build visible page numbers with ellipsis: [1] … [4 5 6] … [10]
+  function pageNumbers(): (number | "…")[] {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    const pages: (number | "…")[] = [1];
+    if (current > 3) pages.push("…");
+    for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) {
+      pages.push(p);
+    }
+    if (current < total - 2) pages.push("…");
+    pages.push(total);
+    return pages;
+  }
+
+  const from = (current - 1) * pageSize + 1;
+  const to   = Math.min(current * pageSize, totalItems);
+
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[12px] text-[#6B7280]">
+        Showing {from}–{to} of {totalItems.toLocaleString()} runs
+      </span>
+
+      <div className="flex items-center gap-1">
+        {/* Prev */}
+        <button
+          type="button"
+          disabled={current <= 1}
+          onClick={() => onPage(current - 1)}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        {/* Numbered pages */}
+        {pageNumbers().map((p, i) =>
+          p === "…" ? (
+            <span key={`ellipsis-${i}`} className="flex h-8 w-8 items-center justify-center text-[12px] text-[#9CA3AF]">
+              …
+            </span>
+          ) : (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onPage(p as number)}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg border text-[12px] font-medium transition-colors",
+                p === current
+                  ? "border-[#111827] bg-[#111827] text-white"
+                  : "border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB]",
+              )}
+            >
+              {p}
+            </button>
+          ),
+        )}
+
+        {/* Next */}
+        <button
+          type="button"
+          disabled={current >= total}
+          onClick={() => onPage(current + 1)}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function CopyId({ id }: { id: string }) {
@@ -198,7 +279,8 @@ export default function RunsPage() {
         page:     p,
         pageSize: PAGE_SIZE,
       });
-      setResult(data);
+      // Hard-cap items to PAGE_SIZE even if API returns more (stale build safety)
+      setResult({ ...data, items: data.items.slice(0, PAGE_SIZE) });
     } catch {
       toast.error("Failed to load runs.");
     } finally {
@@ -559,39 +641,15 @@ export default function RunsPage() {
         )}
       </div>
 
-      {/* ── Pagination — always shown when there are multiple pages ────── */}
+      {/* ── Pagination ── */}
       {pagination && pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] text-[#6B7280]">
-            Showing {(pagination.page - 1) * PAGE_SIZE + 1}–
-            {Math.min(pagination.page * PAGE_SIZE, pagination.total)} of{" "}
-            {pagination.total.toLocaleString()} runs
-            {timeRange !== "all" && (
-              <span className="ml-1 text-[#9CA3AF]">· filtered by time range</span>
-            )}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={pagination.page <= 1}
-              onClick={() => { const p = pagination.page - 1; setPage(p); void load(p); }}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="px-3 text-[12px] text-[#374151] font-medium">
-              Page {pagination.page} of {pagination.totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={pagination.page >= pagination.totalPages}
-              onClick={() => { const p = pagination.page + 1; setPage(p); void load(p); }}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+        <Pagination
+          current={pagination.page}
+          total={pagination.totalPages}
+          totalItems={pagination.total}
+          pageSize={PAGE_SIZE}
+          onPage={p => { setPage(p); void load(p); }}
+        />
       )}
     </div>
   );

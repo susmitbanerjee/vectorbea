@@ -1,4 +1,4 @@
-// build: 20e3580+ runs-limit-15
+// build: numbered-pagination-both-pages
 import createMDX from "@next/mdx";
 import remarkGfm from "remark-gfm";
 import type { NextConfig } from "next";

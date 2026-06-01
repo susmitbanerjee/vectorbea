@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   GitBranch,
   Play,
@@ -193,30 +195,32 @@ function fmtTokens(n: number): string {
 }
 
 export default function OverviewPage() {
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summary, setSummary]     = useState<Summary | null>(null);
   const [recentRuns, setRecentRuns] = useState<AgentRun[]>([]);
   const [runsTotal, setRunsTotal]   = useState(0);
+  const [runsTotalPages, setRunsTotalPages] = useState(1);
+  const [runsPage, setRunsPage]     = useState(1);
   const [loading, setLoading]       = useState(true);
 
   const RECENT_RUNS_LIMIT = 15;
 
-  async function load() {
+  async function load(p = 1) {
     setLoading(true);
     try {
       const [s, runsResult] = await Promise.all([
         getPlatformSummary(),
-        getRuns({ pageSize: RECENT_RUNS_LIMIT }),
+        getRuns({ pageSize: RECENT_RUNS_LIMIT, page: p }),
       ]);
       setSummary(s as Summary);
-      // Hard-slice to RECENT_RUNS_LIMIT — belt-and-suspenders in case
-      // a stale CDN/build returns more items than requested.
       setRecentRuns(runsResult.items.slice(0, RECENT_RUNS_LIMIT));
+      setRunsTotal(runsResult.total);
+      setRunsTotalPages(runsResult.totalPages ?? Math.ceil(runsResult.total / RECENT_RUNS_LIMIT));
       setRunsTotal(runsResult.total);
     } catch { /* silently fallback */ }
     finally { setLoading(false); }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(1); }, []);
 
   const isConnected = (summary?.connectedWorkers ?? 0) > 0;
   const isEmpty = !loading && (summary?.totalWorkflows ?? 0) === 0 && (summary?.totalAgents ?? 0) === 0;
@@ -398,23 +402,62 @@ export default function OverviewPage() {
               <div>
                 {recentRuns.slice(0, RECENT_RUNS_LIMIT).map((run) => <RunRow key={run.id} run={run} />)}
               </div>
-              {/* Footer — shows count and View all link */}
+              {/* Pagination footer */}
               <div
                 className="flex items-center justify-between px-[18px]"
-                style={{ height: 44, borderTop: "1px solid #F1F5F9" }}
+                style={{ borderTop: "1px solid #F1F5F9", paddingTop: 10, paddingBottom: 10 }}
               >
                 <span style={{ fontSize: 12, color: "#94A3B8" }}>
-                  {(runsTotal > 0 ? runsTotal : recentRuns.length) > RECENT_RUNS_LIMIT
-                    ? `Showing ${recentRuns.length} of ${(runsTotal || recentRuns.length).toLocaleString()} runs`
+                  {runsTotal > 0
+                    ? `${((runsPage - 1) * RECENT_RUNS_LIMIT) + 1}–${Math.min(runsPage * RECENT_RUNS_LIMIT, runsTotal)} of ${runsTotal.toLocaleString()} runs`
                     : `${recentRuns.length} run${recentRuns.length !== 1 ? "s" : ""}`}
                 </span>
-                <Link
-                  href={"/runs" as Route}
-                  style={{ fontSize: 12, color: "#2563EB", fontWeight: 600 }}
-                  className="hover:underline"
-                >
-                  View all →
-                </Link>
+
+                <div className="flex items-center gap-1">
+                  {/* Prev */}
+                  <button
+                    type="button"
+                    disabled={runsPage <= 1}
+                    onClick={() => { const p = runsPage - 1; setRunsPage(p); void load(p); }}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+
+                  {/* Page numbers */}
+                  {Array.from({ length: Math.min(runsTotalPages, 5) }, (_, i) => {
+                    // Show up to 5 page buttons, centered on current page
+                    const half = 2;
+                    let start = Math.max(1, runsPage - half);
+                    const end = Math.min(runsTotalPages, start + 4);
+                    start = Math.max(1, end - 4);
+                    return start + i;
+                  }).filter(p => p <= runsTotalPages).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => { setRunsPage(p); void load(p); }}
+                      className={cn(
+                        "flex h-7 w-7 items-center justify-center rounded-md border text-[12px] font-medium transition-colors",
+                        p === runsPage
+                          ? "border-[#111827] bg-[#111827] text-white"
+                          : "border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB]",
+                      )}
+                    >
+                      {p}
+                    </button>
+                  ))}
+
+                  {/* Next */}
+                  <button
+                    type="button"
+                    disabled={runsPage >= runsTotalPages}
+                    onClick={() => { const p = runsPage + 1; setRunsPage(p); void load(p); }}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             </>
           )}
