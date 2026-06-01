@@ -5,44 +5,43 @@
 
 import {
   AlertTriangle,
-  BadgeCheck,
-  BookmarkCheck,
-  Bot,
+  Braces,
   BotMessageSquare,
   BrainCircuit,
-  Braces,
-  CheckCircle2,
-  CircleCheck,
-  Clock,
   Code2,
-  Cpu,
   Database,
-  FileText,
-  Flag,
-  GitBranch,
-  GitMerge,
   Globe2,
-  Hash,
-  Mail,
   MessageSquareText,
-  MousePointerClick,
   Package,
-  PlayCircle,
   RotateCcw,
   Server,
-  ShieldAlert,
-  ShieldCheck,
-  Sparkles,
-  Split,
   Table2,
-  Timer,
   TriangleAlert,
   UserCheck,
   Users,
-  Webhook,
-  Wrench,
   Zap,
 } from "lucide-react";
+import {
+  TriggerIcon,
+  AgentIcon,
+  LlmIcon,
+  BrainChipIcon,
+  DatabaseIcon,
+  HttpIcon,
+  WebhookIcon,
+  EmailIcon,
+  ApprovalIcon,
+  EndIcon,
+  CheckpointIcon,
+  BranchIcon,
+  ParallelIcon,
+  JoinIcon,
+  TimerIcon,
+  ArtifactIcon,
+  McpIcon,
+  GraphqlIcon,
+  ToolIcon,
+} from "./NodeIcons";
 import type { WFNodeType, WFNodeData } from "@/types/workflow-graph";
 
 export interface NodeMeta {
@@ -64,7 +63,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Starts the workflow on schedule or event",
   },
   agent: {
-    icon: BrainCircuit,               // 🧠 brain — AI reasoning
+    icon: AgentIcon,
     color: "#7C3AED",
     bgColor: "#F5F3FF",
     borderColor: "#DDD6FE",
@@ -72,15 +71,15 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Reason, plan, and act with your agent",
   },
   llm: {
-    icon: Sparkles,                   // ✨ sparkles — LLM magic
-    color: "#9333EA",
+    icon: LlmIcon,
+    color: "#7C3AED",
     bgColor: "#FAF5FF",
     borderColor: "#E9D5FF",
     label: "LLM Call",
     description: "Direct LLM inference with a configured model",
   },
   tool: {
-    icon: Wrench,
+    icon: ToolIcon,
     color: "#0891B2",
     bgColor: "#ECFEFF",
     borderColor: "#A5F3FC",
@@ -88,7 +87,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Calls a registered tool or API",
   },
   approval: {
-    icon: BadgeCheck,                 // badge check — human decision gate
+    icon: ApprovalIcon,
     color: "#D97706",
     bgColor: "#FFFBEB",
     borderColor: "#FDE68A",
@@ -96,7 +95,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Pauses for human approval",
   },
   branch: {
-    icon: GitBranch,
+    icon: BranchIcon,
     color: "#0369A1",
     bgColor: "#F0F9FF",
     borderColor: "#BAE6FD",
@@ -104,7 +103,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Conditional routing based on rules",
   },
   parallel: {
-    icon: Split,
+    icon: ParallelIcon,
     color: "#4F46E5",
     bgColor: "#EEF2FF",
     borderColor: "#C7D2FE",
@@ -112,7 +111,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Fan-out to multiple branches",
   },
   join: {
-    icon: GitMerge,
+    icon: JoinIcon,
     color: "#4F46E5",
     bgColor: "#EEF2FF",
     borderColor: "#C7D2FE",
@@ -120,7 +119,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Merges parallel branches",
   },
   timer: {
-    icon: Timer,                      // ⏱ timer — more precise than Clock
+    icon: TimerIcon,
     color: "#D97706",
     bgColor: "#FFFBEB",
     borderColor: "#FDE68A",
@@ -128,7 +127,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Sleep, wait, or delay execution",
   },
   artifact: {
-    icon: FileText,
+    icon: ArtifactIcon,
     color: "#475569",
     bgColor: "#F8FAFC",
     borderColor: "#E2E8F0",
@@ -136,7 +135,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Creates or stores output data",
   },
   checkpoint: {
-    icon: BookmarkCheck,
+    icon: CheckpointIcon,
     color: "#2563EB",
     bgColor: "#EFF6FF",
     borderColor: "#BFDBFE",
@@ -144,7 +143,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Enables replay from this point",
   },
   end: {
-    icon: CircleCheck,                // solid circle-check — definitive end
+    icon: EndIcon,
     color: "#059669",
     bgColor: "#ECFDF5",
     borderColor: "#A7F3D0",
@@ -152,7 +151,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Completes the workflow",
   },
   http_tool: {
-    icon: Globe2,
+    icon: HttpIcon,
     color: "#059669",
     bgColor: "#ECFDF5",
     borderColor: "#A7F3D0",
@@ -160,7 +159,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Call an external API endpoint",
   },
   graphql_tool: {
-    icon: Braces,
+    icon: GraphqlIcon,
     color: "#E11D48",
     bgColor: "#FFF1F2",
     borderColor: "#FECDD3",
@@ -168,7 +167,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "GraphQL query or mutation",
   },
   db_read: {
-    icon: Database,
+    icon: DatabaseIcon,
     color: "#0369A1",
     bgColor: "#F0F9FF",
     borderColor: "#BAE6FD",
@@ -176,7 +175,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Read from database",
   },
   db_write: {
-    icon: Database,
+    icon: DatabaseIcon,
     color: "#DC2626",
     bgColor: "#FEF2F2",
     borderColor: "#FECACA",
@@ -184,7 +183,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Write to database",
   },
   mcp_tool: {
-    icon: Wrench,
+    icon: McpIcon,
     color: "#7C3AED",
     bgColor: "#F5F3FF",
     borderColor: "#DDD6FE",
@@ -192,7 +191,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Model Context Protocol tool",
   },
   grpc_tool: {
-    icon: Server,
+    icon: HttpIcon,
     color: "#1D4ED8",
     bgColor: "#EFF6FF",
     borderColor: "#BFDBFE",
@@ -200,7 +199,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "gRPC service call",
   },
   transform: {
-    icon: Braces,
+    icon: BrainChipIcon,
     color: "#059669",
     bgColor: "#ECFDF5",
     borderColor: "#A7F3D0",
@@ -208,7 +207,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Shape or map data between steps",
   },
   webhook_wait: {
-    icon: Webhook,
+    icon: WebhookIcon,
     color: "#0284C7",
     bgColor: "#F0F9FF",
     borderColor: "#BAE6FD",
@@ -226,10 +225,10 @@ export function getNodeMeta(type: WFNodeType): NodeMeta {
 
 export const TOOL_TYPE_META: Record<string, NodeMeta> = {
   email: {
-    icon: Mail,
-    color: "#0072C6",
-    bgColor: "#EFF6FF",
-    borderColor: "#BFDBFE",
+    icon: EmailIcon,
+    color: "#EA4335",
+    bgColor: "#FEF2F2",
+    borderColor: "#FECACA",
     label: "Email",
     description: "Send or receive email",
   },
