@@ -29,8 +29,8 @@ type WFEdge = Edge<WFEdgeData>;
 
 // ─── Routing constants ────────────────────────────────────────────────────────
 
-/** px: within this Δ the connector is considered "aligned" — use straight line */
-const ALIGNMENT_TOLERANCE = 12;
+/** px: within this Δ use a straight line (handles this close look aligned visually) */
+const ALIGNMENT_TOLERANCE = 80;
 /** px: radius for elbow rounded corners */
 const CORNER_RADIUS = 10;
 
@@ -207,9 +207,10 @@ function getWorkflowPath(
 
   // ── Sequential vertical flow ──────────────────────────────────────────────
   if (dx <= ALIGNMENT_TOLERANCE) {
-    // Handles are aligned — pure straight vertical
-    const midX = (sourceX + targetX) / 2;
-    return [`M ${midX} ${sourceY} L ${midX} ${targetY}`, midX, cy];
+    // Handles are close enough — draw a direct line from source to target.
+    // For dx ≤ 80px this looks visually straight at normal canvas zoom.
+    // Goes from the ACTUAL source handle to the ACTUAL target handle.
+    return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
   }
 
   if (dx <= 400) {
