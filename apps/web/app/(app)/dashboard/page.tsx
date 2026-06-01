@@ -198,7 +198,7 @@ export default function OverviewPage() {
   const [runsTotal, setRunsTotal]   = useState(0);
   const [loading, setLoading]       = useState(true);
 
-  const RECENT_RUNS_LIMIT = 5;
+  const RECENT_RUNS_LIMIT = 15;
 
   async function load() {
     setLoading(true);
@@ -347,7 +347,7 @@ export default function OverviewPage() {
           {/* Skeleton */}
           {loading ? (
             <div>
-              {Array.from({ length: 6 }).map((_, i) => (
+              {Array.from({ length: RECENT_RUNS_LIMIT }).map((_, i) => (
                 <div
                   key={i}
                   className="grid items-center gap-3 px-[18px]"
