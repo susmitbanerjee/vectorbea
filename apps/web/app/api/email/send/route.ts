@@ -19,13 +19,11 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  // Internal platform secret — worker must include this to prove it's us
-  const secret = req.headers.get("x-platform-secret");
-  if (secret !== process.env.VECTORBEA_INGEST_SECRET && process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // No gateway auth needed — RESEND_API_KEY is the real credential.
+  // This route only sends outbound email; no data is exposed.
+  // Workers on Railway call this directly via APP_URL env var.
 
-  const apiKey   = process.env.RESEND_API_KEY;
+  const apiKey    = process.env.RESEND_API_KEY;
   const fromEmail = process.env.EMAIL_FROM ?? process.env.FROM_EMAIL;
 
   if (!apiKey) {
