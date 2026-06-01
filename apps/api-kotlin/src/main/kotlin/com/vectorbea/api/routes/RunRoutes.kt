@@ -54,8 +54,9 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "startedAt" to startedAt?.toString(),
     "completedAt" to completedAt?.toString(),
     "durationMs" to durationMs,
-    "tokenCount" to tokenCount,
-    "estimatedCost" to estimatedCost,
+    // Field names match the TypeScript AgentRun interface (totalTokens / estimatedCostUsd)
+    "totalTokens" to tokenCount,
+    "estimatedCostUsd" to estimatedCost,
     "createdAt" to createdAt.toString(),
     "updatedAt" to updatedAt.toString(),
     "hasOutput" to (outputJson != null),
