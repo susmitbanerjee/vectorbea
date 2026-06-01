@@ -7,7 +7,7 @@
 
 import { memo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Bot, Clock, GitBranch, Layers, RotateCcw, ShieldCheck, Zap } from "lucide-react";
+import { Bot, BrainCircuit, Clock, GitBranch, Layers, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { BaseNode, Chip } from "./BaseNode";
 import { TOOL_TYPE_META } from "@/components/workflow-builder/NodeIcon";
 import { detectLLMProvider } from "@/components/workflow-builder/LLMProviderIcon";
@@ -36,13 +36,45 @@ export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<W
   const cfg = data.agentConfig;
   const provider = detectLLMProvider(cfg?.modelName);
   const accentColor = provider?.color ?? "#7C3AED";
+  const brainEnabled = (cfg as Record<string, unknown> | undefined)?.brainEnabled === true;
+
   return (
-    <BaseNode data={data} selected={selected} width={240}>
+    <BaseNode data={data} selected={selected} width={brainEnabled ? 260 : 240}>
+      {/* Brain badge — shown when iterative loop is enabled */}
+      {brainEnabled && (
+        <div
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1 mb-0.5"
+          style={{
+            background: "linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)",
+            border: "1px solid #C4B5FD",
+            boxShadow: "0 0 8px rgba(124,58,237,0.15)",
+          }}
+        >
+          <BrainCircuit className="h-3 w-3 shrink-0" style={{ color: "#7C3AED" }} />
+          <span className="text-[9.5px] font-bold uppercase tracking-wider" style={{ color: "#6D28D9" }}>
+            Iterative Brain
+          </span>
+          <Sparkles className="h-2.5 w-2.5 shrink-0" style={{ color: "#A78BFA" }} />
+        </div>
+      )}
+
+      {/* Agent name chip */}
       {cfg?.agentName && <Chip color={accentColor}><Bot className="h-2.5 w-2.5" />{cfg.agentName}</Chip>}
+
+      {/* Model/provider */}
       {provider
         ? <Chip color={provider.color}>{provider.label}</Chip>
         : cfg?.modelName && <Chip>{cfg.modelName}</Chip>
       }
+
+      {/* Brain limits when enabled */}
+      {brainEnabled && (cfg as Record<string, unknown> | undefined)?.maxIterations != null && (
+        <Chip color="#7C3AED">
+          <BrainCircuit className="h-2.5 w-2.5" />
+          {`${(cfg as Record<string, unknown>).maxIterations} iters`}
+        </Chip>
+      )}
+
       {cfg?.retryPolicy?.maxAttempts && cfg.retryPolicy.maxAttempts > 1 && (
         <Chip color="#FB923C"><RotateCcw className="h-2.5 w-2.5" />×{cfg.retryPolicy.maxAttempts}</Chip>
       )}

@@ -29,8 +29,9 @@ type WFEdge = Edge<WFEdgeData>;
 
 // ─── Routing constants ────────────────────────────────────────────────────────
 
-/** px: within this Δ the connector snaps to a perfectly straight line */
-const ALIGNMENT_TOLERANCE = 10;
+/** px: within this Δ the connector snaps to a perfectly straight line.
+ *  20px gives comfortable straight-line snapping when nodes are nearly aligned. */
+const ALIGNMENT_TOLERANCE = 20;
 /** px: radius for elbow rounded corners */
 const CORNER_RADIUS = 10;
 
@@ -67,8 +68,14 @@ function injectAnimCSS() {
   _cssInjected = true;
   const el = document.createElement("style");
   el.textContent = `
-    @keyframes wfDashFlow {
-      from { stroke-dashoffset: 30; }
+    /* Slow ambient flow — always on, shows data direction */
+    @keyframes wfDashSlow {
+      from { stroke-dashoffset: 24; }
+      to   { stroke-dashoffset: 0;  }
+    }
+    /* Fast flow — active/running state */
+    @keyframes wfDashFast {
+      from { stroke-dashoffset: 20; }
       to   { stroke-dashoffset: 0;  }
     }
   `;
@@ -197,13 +204,17 @@ export const WorkflowEdge = memo(function WorkflowEdge({
   const strokeWidth = selected ? 2.5 : 1.75;
   const markerId    = `wf-arrow-${id}`;
 
-  // Only animate when explicitly running
-  const dashArray = isRunning ? "6 4" : "none";
-  const animation = isRunning ? "wfDashFlow 0.6s linear infinite" : "none";
-  const filter    = selected
-    ? `drop-shadow(0 0 4px ${strokeColor}50)`
+  // Always animate — slow ambient flow shows data direction.
+  // Running state: brighter color, faster flow.
+  const dashArray = isRunning ? "5 3" : "8 5";
+  const animation = isRunning
+    ? "wfDashFast 0.45s linear infinite"
+    : "wfDashSlow 2.2s linear infinite";
+  const strokeOpacity = selected ? 1 : isRunning ? 0.9 : 0.65;
+  const filter = selected
+    ? `drop-shadow(0 0 4px ${strokeColor}60)`
     : isRunning
-      ? `drop-shadow(0 0 3px ${strokeColor}70)`
+      ? `drop-shadow(0 0 3px ${strokeColor}80)`
       : undefined;
 
   return (
@@ -247,6 +258,7 @@ export const WorkflowEdge = memo(function WorkflowEdge({
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeDasharray={dashArray}
+        strokeOpacity={strokeOpacity}
         markerEnd={`url(#${markerId})`}
         style={{
           transition: "stroke 0.15s ease, stroke-width 0.15s ease",
