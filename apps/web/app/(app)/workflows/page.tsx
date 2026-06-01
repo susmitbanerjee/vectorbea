@@ -292,17 +292,23 @@ export default function WorkflowsPage() {
 
                     {/* Agents */}
                     <td className="px-4 py-3">
-                      <span className="flex items-center gap-1" style={{ fontSize: 13, color: "#6B7280" }}>
+                      <span
+                        className="flex items-center gap-1 font-semibold"
+                        style={{ fontSize: 13, color: (wf.agentCount ?? 0) > 0 ? "#7C3AED" : "#9CA3AF" }}
+                      >
                         <Bot className="h-3.5 w-3.5 shrink-0" />
-                        {(wf.agentIds ?? []).length}
+                        {wf.agentCount ?? 0}
                       </span>
                     </td>
 
                     {/* Tools */}
                     <td className="px-4 py-3">
-                      <span className="flex items-center gap-1" style={{ fontSize: 13, color: "#6B7280" }}>
+                      <span
+                        className="flex items-center gap-1 font-semibold"
+                        style={{ fontSize: 13, color: (wf.toolCount ?? 0) > 0 ? "#0891B2" : "#9CA3AF" }}
+                      >
                         <Wrench className="h-3.5 w-3.5 shrink-0" />
-                        {(wf.toolIds ?? []).length}
+                        {wf.toolCount ?? 0}
                       </span>
                     </td>
 

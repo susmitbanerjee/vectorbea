@@ -402,8 +402,8 @@ export default function OverviewPage() {
                 style={{ height: 44, borderTop: "1px solid #F1F5F9" }}
               >
                 <span style={{ fontSize: 12, color: "#94A3B8" }}>
-                  {runsTotal > RECENT_RUNS_LIMIT
-                    ? `Showing ${Math.min(recentRuns.length, RECENT_RUNS_LIMIT)} of ${runsTotal.toLocaleString()} runs`
+                  {(runsTotal > 0 ? runsTotal : recentRuns.length) > RECENT_RUNS_LIMIT
+                    ? `Showing ${recentRuns.length} of ${(runsTotal || recentRuns.length).toLocaleString()} runs`
                     : `${recentRuns.length} run${recentRuns.length !== 1 ? "s" : ""}`}
                 </span>
                 <Link

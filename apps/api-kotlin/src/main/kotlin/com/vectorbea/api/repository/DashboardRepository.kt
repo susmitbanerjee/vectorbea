@@ -68,9 +68,11 @@ class DashboardRepository(dataSource: DataSource) : BaseRepository(dataSource) {
               ),
               pending_approvals AS (
                 SELECT COUNT(*) AS cnt
-                FROM approval_gates
-                WHERE workspace_id = ? $envFilter
-                  AND status = 'pending'
+                FROM approvals a
+                JOIN agent_runs r ON r.id = a.run_id
+                WHERE r.workspace_id = ?
+                  ${if (environmentId != null) "AND r.environment_id = ?" else ""}
+                  AND a.status = 'pending'
               ),
               total_runs AS (
                 SELECT COUNT(*) AS cnt
