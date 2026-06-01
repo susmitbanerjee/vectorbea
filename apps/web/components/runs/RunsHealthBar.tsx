@@ -42,7 +42,7 @@ async function fetchCounts(): Promise<Counts> {
 
 function SkeletonPill({ w = 80 }: { w?: number }) {
   return (
-    <div className="h-[28px] animate-pulse rounded-md bg-[#E5E7EB]" style={{ width: w }} />
+    <div className="h-[38px] animate-pulse rounded-xl bg-[#E5E7EB]" style={{ width: w }} />
   );
 }
 
@@ -58,14 +58,14 @@ interface StatPillProps {
 function StatPill({ label, value, dot, dotPulse, valueClass, hide }: StatPillProps) {
   if (hide) return null;
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    <div className="flex items-center gap-2 rounded-xl border border-[#E5E7EB] bg-white px-4 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
       {dot && (
         <span className={cn("h-2 w-2 shrink-0 rounded-full", dot, dotPulse && "animate-pulse")} />
       )}
-      <span className={cn("tabular-nums text-[13px] font-semibold", valueClass ?? "text-[#111827]")}>
+      <span className={cn("tabular-nums text-[14px] font-bold", valueClass ?? "text-[#111827]")}>
         {value.toLocaleString()}
       </span>
-      <span className="text-[12px] text-[#6B7280]">{label}</span>
+      <span className="text-[13px] font-medium text-[#6B7280]">{label}</span>
     </div>
   );
 }
@@ -97,9 +97,9 @@ export function RunsHealthBar() {
       : null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-3">
       <StatPill label="total" value={counts.total} />
-      <div className="h-4 w-px bg-[#E5E7EB]" />
+      <div className="h-5 w-px bg-[#E5E7EB]" />
       <StatPill label="running"   value={counts.running}   dot="bg-blue-500"    dotPulse valueClass="text-[#1D4ED8]" />
       <StatPill label="queued"    value={counts.queued}    dot="bg-slate-400"   hide={counts.queued === 0} />
       <StatPill label="waiting"   value={counts.waiting}   dot="bg-amber-500"   dotPulse valueClass="text-amber-700" hide={counts.waiting === 0} />
@@ -107,9 +107,9 @@ export function RunsHealthBar() {
       <StatPill label="failed"    value={counts.failed}    dot="bg-red-500"     valueClass="text-red-700" />
       {successRate !== null && (
         <>
-          <div className="h-4 w-px bg-[#E5E7EB]" />
+          <div className="h-5 w-px bg-[#E5E7EB]" />
           <div className={cn(
-            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+            "inline-flex items-center rounded-xl border px-4 py-2 text-[13px] font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.05)]",
             successRate >= 95 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
               : successRate >= 80 ? "border-amber-200 bg-amber-50 text-amber-700"
               : "border-red-200 bg-red-50 text-red-700",
