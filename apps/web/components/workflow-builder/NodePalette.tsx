@@ -78,21 +78,31 @@ function PaletteItem({ item, onAdd }: { item: PaletteItem; onAdd: () => void }) 
       draggable
       onDragStart={onDragStart}
       onClick={onAdd}
-      className="group relative flex cursor-grab items-center gap-2.5 rounded-xl border border-transparent px-2.5 py-2 transition-all duration-150 hover:border-slate-200 hover:bg-slate-50 active:cursor-grabbing active:opacity-80"
+      className="group relative flex cursor-grab items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-all duration-150 hover:border-slate-200 hover:bg-white hover:shadow-sm active:cursor-grabbing active:scale-[0.98] active:opacity-80"
       title={`Drag to canvas or click to add — ${item.description}`}
       style={{ userSelect: "none" }}
     >
+      {/* Premium icon badge — larger with deeper color */}
       <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl shadow-sm"
-        style={{ background: meta.bgColor, border: `1px solid ${meta.borderColor}` }}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+        style={{
+          background: meta.bgColor,
+          border: `1.5px solid ${meta.borderColor}`,
+          boxShadow: `0 1px 4px ${meta.color}18`,
+        }}
       >
-        <Icon className="h-3.5 w-3.5" style={{ color: meta.color }} />
+        <Icon
+          strokeWidth={1.75}
+          style={{ color: meta.color, width: 16, height: 16 }}
+        />
       </span>
-      <div className="min-w-0">
-        <p className="text-[12px] font-semibold text-slate-700 transition-colors group-hover:text-slate-900">
+      <div className="min-w-0 flex-1">
+        <p className="text-[12.5px] font-semibold leading-snug text-slate-800 transition-colors group-hover:text-slate-900">
           {meta.label}
         </p>
-        <p className="text-[10px] text-slate-400 group-hover:text-slate-500 transition-colors line-clamp-1">{item.description}</p>
+        <p className="mt-0.5 text-[10.5px] leading-snug text-slate-400 group-hover:text-slate-500 transition-colors line-clamp-1">
+          {item.description}
+        </p>
       </div>
     </div>
   );

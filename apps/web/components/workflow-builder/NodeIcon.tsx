@@ -5,12 +5,14 @@
 
 import {
   AlertTriangle,
+  BadgeCheck,
   BookmarkCheck,
   Bot,
   BotMessageSquare,
   BrainCircuit,
   Braces,
   CheckCircle2,
+  CircleCheck,
   Clock,
   Code2,
   Cpu,
@@ -23,13 +25,17 @@ import {
   Hash,
   Mail,
   MessageSquareText,
+  MousePointerClick,
   Package,
   PlayCircle,
   RotateCcw,
   Server,
+  ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Split,
   Table2,
+  Timer,
   TriangleAlert,
   UserCheck,
   Users,
@@ -50,7 +56,7 @@ export interface NodeMeta {
 
 export const NODE_META: Record<WFNodeType, NodeMeta> = {
   trigger: {
-    icon: PlayCircle,
+    icon: Zap,                         // ⚡ lightning — instant, reactive start
     color: "#2563EB",
     bgColor: "#EFF6FF",
     borderColor: "#BFDBFE",
@@ -58,7 +64,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Starts the workflow on schedule or event",
   },
   agent: {
-    icon: BrainCircuit,
+    icon: BrainCircuit,               // 🧠 brain — AI reasoning
     color: "#7C3AED",
     bgColor: "#F5F3FF",
     borderColor: "#DDD6FE",
@@ -66,7 +72,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Reason, plan, and act with your agent",
   },
   llm: {
-    icon: MessageSquareText,
+    icon: Sparkles,                   // ✨ sparkles — LLM magic
     color: "#9333EA",
     bgColor: "#FAF5FF",
     borderColor: "#E9D5FF",
@@ -82,7 +88,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Calls a registered tool or API",
   },
   approval: {
-    icon: ShieldCheck,
+    icon: BadgeCheck,                 // badge check — human decision gate
     color: "#D97706",
     bgColor: "#FFFBEB",
     borderColor: "#FDE68A",
@@ -91,17 +97,17 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
   },
   branch: {
     icon: GitBranch,
-    color: "#7C3AED",
-    bgColor: "#F5F3FF",
-    borderColor: "#DDD6FE",
+    color: "#0369A1",
+    bgColor: "#F0F9FF",
+    borderColor: "#BAE6FD",
     label: "Branch",
     description: "Conditional routing based on rules",
   },
   parallel: {
     icon: Split,
-    color: "#0369A1",
-    bgColor: "#F0F9FF",
-    borderColor: "#BAE6FD",
+    color: "#4F46E5",
+    bgColor: "#EEF2FF",
+    borderColor: "#C7D2FE",
     label: "Parallel",
     description: "Fan-out to multiple branches",
   },
@@ -114,7 +120,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Merges parallel branches",
   },
   timer: {
-    icon: Clock,
+    icon: Timer,                      // ⏱ timer — more precise than Clock
     color: "#D97706",
     bgColor: "#FFFBEB",
     borderColor: "#FDE68A",
@@ -138,7 +144,7 @@ export const NODE_META: Record<WFNodeType, NodeMeta> = {
     description: "Enables replay from this point",
   },
   end: {
-    icon: CheckCircle2,
+    icon: CircleCheck,                // solid circle-check — definitive end
     color: "#059669",
     bgColor: "#ECFDF5",
     borderColor: "#A7F3D0",

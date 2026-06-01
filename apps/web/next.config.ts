@@ -1,4 +1,4 @@
-// build: numbered-pagination-both-pages
+// build: premium-builder-icons-agent-brain
 import createMDX from "@next/mdx";
 import remarkGfm from "remark-gfm";
 import type { NextConfig } from "next";
