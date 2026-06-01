@@ -29,12 +29,10 @@ type WFEdge = Edge<WFEdgeData>;
 
 // ─── Routing constants ────────────────────────────────────────────────────────
 
-/** px: within this Δ the connector snaps to a perfectly straight line.
- *  60px — generous tolerance so that nodes that look visually aligned
- *  (even if their handle centers differ by up to 60px) get a straight line.
- *  Nodes of different widths (Trigger=200px, DBRead=230px) can have centers
- *  that differ by ~15px; 60px covers this plus reasonable manual misalignment. */
-const ALIGNMENT_TOLERANCE = 60;
+/** px: within this Δ the connector renders as a straight line.
+ *  Set very high — draw.io style: if nodes are in the same rough column
+ *  the connector ALWAYS goes straight. Only genuinely offset nodes get elbows. */
+const ALIGNMENT_TOLERANCE = 200;
 /** px: radius for elbow rounded corners */
 const CORNER_RADIUS = 10;
 
@@ -151,8 +149,16 @@ function verticalElbow(sx: number, sy: number, tx: number, ty: number): PathResu
 }
 
 /**
- * Main path selector.
- * Picks the cleanest route based on handle positions and endpoint alignment.
+ * Draw.io-style path routing.
+ *
+ * For VERTICAL flow (Bottom→Top — the default for sequential workflows):
+ *   • Within ALIGNMENT_TOLERANCE (200px): route through the SHARED CENTERLINE
+ *     so the connector always appears perfectly straight regardless of the
+ *     exact handle positions. This is exactly how draw.io handles "straight"
+ *     connections — it snaps to the center column, not the raw handle coords.
+ *   • Beyond 200px: orthogonal elbow (genuinely offset nodes).
+ *
+ * For HORIZONTAL flow (Right→Left): same logic on the Y axis.
  */
 function getWorkflowPath(
   sourceX: number, sourceY: number,
@@ -162,28 +168,50 @@ function getWorkflowPath(
 ): PathResult {
   const labelX = (sourceX + targetX) / 2;
   const labelY = (sourceY + targetY) / 2;
+  const dx = Math.abs(sourceX - targetX);
+  const dy = Math.abs(sourceY - targetY);
 
-  // Decide flow orientation from handle positions, with heuristic fallback
+  // Detect horizontal flow (Left/Right handles)
   const isHorizontalFlow =
-    sourcePosition === Position.Right  ||
-    targetPosition === Position.Left   ||
-    // Heuristic: source is clearly left of target and Δy is small → likely horizontal
-    (sourceX < targetX - 60 && Math.abs(sourceY - targetY) < 80 &&
-      sourcePosition !== Position.Bottom && targetPosition !== Position.Top);
+    sourcePosition === Position.Right ||
+    targetPosition === Position.Left;
 
+  // ── Horizontal flow (Left→Right or Right→Left) ─────────────────────────────
   if (isHorizontalFlow) {
-    if (Math.abs(sourceY - targetY) <= ALIGNMENT_TOLERANCE) {
-      // Perfect horizontal alignment → straight line
-      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, labelX, sourceY];
+    if (dy <= ALIGNMENT_TOLERANCE) {
+      // Route through shared center Y — always looks straight
+      const cy = (sourceY + targetY) / 2;
+      const path = `M ${sourceX} ${sourceY} L ${sourceX} ${cy} L ${targetX} ${cy} L ${targetX} ${targetY}`;
+      return [path, labelX, cy];
     }
     return horizontalElbow(sourceX, sourceY, targetX, targetY);
   }
 
-  // Vertical flow (default: Bottom→Top)
-  if (Math.abs(sourceX - targetX) <= ALIGNMENT_TOLERANCE) {
-    // Perfect vertical alignment → straight line
-    return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, sourceX, labelY];
+  // ── Vertical flow (Bottom→Top — sequential workflow nodes) ─────────────────
+  if (dx <= ALIGNMENT_TOLERANCE) {
+    // ★ Draw.io straight connector:
+    // Route through the shared center X so the line is perfectly vertical
+    // regardless of how far off the actual handle positions are.
+    const cx = (sourceX + targetX) / 2;
+    // Short horizontal jogs at source and target to exit/enter handles cleanly,
+    // then a long perfectly vertical segment down the center column.
+    const jog = Math.min(dx / 2, 8); // tiny jog, invisible at normal zoom
+    if (dx < 4) {
+      // Handles are essentially identical — pure straight line
+      return [`M ${cx} ${sourceY} L ${cx} ${targetY}`, cx, labelY];
+    }
+    const path = [
+      `M ${sourceX} ${sourceY}`,
+      `L ${sourceX} ${sourceY + jog}`,
+      `L ${cx} ${sourceY + jog}`,
+      `L ${cx} ${targetY - jog}`,
+      `L ${targetX} ${targetY - jog}`,
+      `L ${targetX} ${targetY}`,
+    ].join(" ");
+    return [path, cx, labelY];
   }
+
+  // Genuinely offset nodes — full orthogonal elbow
   return verticalElbow(sourceX, sourceY, targetX, targetY);
 }
 
