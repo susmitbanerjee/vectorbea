@@ -195,10 +195,13 @@ export const BaseNode = memo(function BaseNode({
         borderColor,
         boxShadow: status === "running" ? undefined : boxShadow,
         animation: status === "running" ? "vb-soft-pulse 1.6s ease-in-out infinite" : undefined,
-        // overflow-visible so handles extend outside the node and are fully clickable.
-        // Inner content div handles its own overflow clipping.
-        overflow: "visible",
+        overflow: "visible",   // lets handles extend outside for clickability
       }}
+      // Nodes must NOT absorb drag-over/drop events from the palette.
+      // Without these, dropping a palette item onto a node would
+      // fall into the node's event target and not reach the canvas wrapper.
+      onDragOver={e => e.preventDefault()}
+      onDrop={e => e.stopPropagation()}
     >
       {/* Inner clip wrapper — keeps shimmer/accent visuals contained */}
       <div className="relative rounded-2xl overflow-hidden" style={{ background: "transparent" }}>

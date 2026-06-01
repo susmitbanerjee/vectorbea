@@ -57,6 +57,7 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   addEdge,
   type Connection,
   type Node,
@@ -288,6 +289,7 @@ export default function WorkflowBuilderPage() {
   const liveRunRef = useRef<NodeJS.Timeout | null>(null);
 
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const { screenToFlowPosition } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<WFNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<WFEdgeData>>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -474,18 +476,17 @@ export default function WorkflowBuilderPage() {
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
+    e.stopPropagation(); // prevent existing nodes from consuming the event
     const type = e.dataTransfer.getData("application/reactflow-node") as WFNodeType;
-    if (!type || !reactFlowWrapper.current) return;
+    if (!type) return;
 
-    const bounds = reactFlowWrapper.current.getBoundingClientRect();
-    // Get position relative to the wrapper — React Flow handles the pan/zoom transform
-    const position = {
-      x: e.clientX - bounds.left - 120,
-      y: e.clientY - bounds.top - 40,
-    };
+    // screenToFlowPosition accounts for pan, zoom, and any CSS transforms.
+    // This is the correct way to map screen → canvas coordinates in React Flow v12.
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
     const node = makeDefaultNode(type, position);
     setNodes((nds) => [...nds, node]);
+    setSelectedNodeId(node.id);
     setUnsaved(true);
   }
 
