@@ -188,15 +188,20 @@ export const BaseNode = memo(function BaseNode({
 
   return (
     <div
-      className="relative rounded-2xl border transition-all duration-[160ms] ease-out overflow-hidden"
+      className="relative rounded-2xl border transition-all duration-[160ms] ease-out"
       style={{
         width,
         background: "#FFFFFF",
         borderColor,
         boxShadow: status === "running" ? undefined : boxShadow,
         animation: status === "running" ? "vb-soft-pulse 1.6s ease-in-out infinite" : undefined,
+        // overflow-visible so handles extend outside the node and are fully clickable.
+        // Inner content div handles its own overflow clipping.
+        overflow: "visible",
       }}
     >
+      {/* Inner clip wrapper — keeps shimmer/accent visuals contained */}
+      <div className="relative rounded-2xl overflow-hidden" style={{ background: "transparent" }}>
       {/* Left accent bar — node-type color */}
       <div
         aria-hidden
@@ -304,7 +309,10 @@ export const BaseNode = memo(function BaseNode({
         )}
       </div>
 
-      {/* Bottom status strip */}
+      {/* ↑ close inner overflow-hidden wrapper */}
+      </div>
+
+      {/* Bottom status strip — outside clip wrapper so it sits on the border */}
       {status !== "idle" && (
         <div
           aria-hidden
