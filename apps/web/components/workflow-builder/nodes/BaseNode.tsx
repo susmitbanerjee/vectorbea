@@ -320,16 +320,19 @@ export const BaseNode = memo(function BaseNode({
         />
       )}
 
-      {/* Handles — tinted with node accent color for visual cohesion */}
+      {/* ── Handles — large, always visible, easy to grab ─────────────────── */}
+      {/* React Flow handle hover/connect styles injected globally */}
       {(handles === "default" || handles === "top-only") && (
         <Handle
           type="target"
           position={Position.Top}
+          className="vb-handle vb-handle-target"
           style={{
             background: "#FFFFFF",
-            border: `2px solid ${meta.color}55`,
-            width: 10, height: 10,
-            boxShadow: `0 0 0 2.5px ${meta.color}18, 0 1px 3px rgba(15,23,42,0.10)`,
+            border: `2.5px solid ${meta.color}`,
+            width: 14, height: 14,
+            boxShadow: `0 0 0 3px ${meta.color}22`,
+            transition: "transform 0.15s, box-shadow 0.15s",
           }}
         />
       )}
@@ -337,11 +340,13 @@ export const BaseNode = memo(function BaseNode({
         <Handle
           type="source"
           position={Position.Bottom}
+          className="vb-handle vb-handle-source"
           style={{
-            background: "#FFFFFF",
-            border: `2px solid ${meta.color}55`,
-            width: 10, height: 10,
-            boxShadow: `0 0 0 2.5px ${meta.color}18, 0 1px 3px rgba(15,23,42,0.10)`,
+            background: meta.color,
+            border: `2px solid white`,
+            width: 14, height: 14,
+            boxShadow: `0 0 0 3px ${meta.color}30`,
+            transition: "transform 0.15s, box-shadow 0.15s",
           }}
         />
       )}
@@ -350,21 +355,23 @@ export const BaseNode = memo(function BaseNode({
           <Handle
             type="target"
             position={Position.Left}
+            className="vb-handle vb-handle-target"
             style={{
               background: "#FFFFFF",
-              border: `2px solid ${meta.color}55`,
-              width: 10, height: 10,
-              boxShadow: `0 0 0 2.5px ${meta.color}18`,
+              border: `2.5px solid ${meta.color}`,
+              width: 14, height: 14,
+              boxShadow: `0 0 0 3px ${meta.color}22`,
             }}
           />
           <Handle
             type="source"
             position={Position.Right}
+            className="vb-handle vb-handle-source"
             style={{
-              background: "#FFFFFF",
-              border: `2px solid ${meta.color}55`,
-              width: 10, height: 10,
-              boxShadow: `0 0 0 2.5px ${meta.color}18`,
+              background: meta.color,
+              border: `2px solid white`,
+              width: 14, height: 14,
+              boxShadow: `0 0 0 3px ${meta.color}30`,
             }}
           />
         </>

@@ -9,6 +9,42 @@
  */
 
 import "@xyflow/react/dist/style.css";
+// ── Handle visibility + hover styles injected as global CSS ──────────────────
+// Must be a module-level <style> to target React Flow's shadow DOM handles.
+const HANDLE_CSS = `
+  /* Source handle (filled dot) — always visible */
+  .vb-handle-source {
+    cursor: crosshair !important;
+  }
+  /* Target handle (ring) — always visible */
+  .vb-handle-target {
+    cursor: crosshair !important;
+  }
+  /* Both handles grow + glow on hover so users know where to grab */
+  .vb-handle:hover,
+  .vb-handle.react-flow__handle-connecting {
+    transform: scale(1.45) !important;
+    box-shadow: 0 0 0 5px rgba(59,130,246,0.35) !important;
+    border-color: #3B82F6 !important;
+    background: #3B82F6 !important;
+    z-index: 100;
+  }
+  /* Larger invisible hit area so handles are easy to click */
+  .vb-handle::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+  }
+  /* Green ring when a connection is being drawn and user hovers valid target */
+  .react-flow__handle.connectingfrom,
+  .react-flow__handle.react-flow__handle-connecting {
+    background: #22C55E !important;
+    border-color: white !important;
+    transform: scale(1.5) !important;
+    box-shadow: 0 0 0 6px rgba(34,197,94,0.3) !important;
+  }
+`;
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -631,6 +667,8 @@ export default function WorkflowBuilderPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden" style={{ background: "#F8FAFC" }}>
+      {/* ── Handle CSS injected once ─────────────────────────────────────────── */}
+      <style dangerouslySetInnerHTML={{ __html: HANDLE_CSS }} />
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
       <div
         className="flex shrink-0 items-center gap-0 px-4"

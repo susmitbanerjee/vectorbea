@@ -149,70 +149,56 @@ function verticalElbow(sx: number, sy: number, tx: number, ty: number): PathResu
 }
 
 /**
- * Draw.io-style path routing.
+ * Path routing — sequential nodes always straight, parallel keeps curves.
  *
- * For VERTICAL flow (Bottom→Top — the default for sequential workflows):
- *   • Within ALIGNMENT_TOLERANCE (200px): route through the SHARED CENTERLINE
- *     so the connector always appears perfectly straight regardless of the
- *     exact handle positions. This is exactly how draw.io handles "straight"
- *     connections — it snaps to the center column, not the raw handle coords.
- *   • Beyond 200px: orthogonal elbow (genuinely offset nodes).
+ * SEQUENTIAL (Bottom→Top, same column):
+ *   Always routes through the shared centerline (cx = avg of sourceX, targetX).
+ *   The result is a PERFECTLY VERTICAL line regardless of handle X offset.
+ *   No jogs, no elbows — just a clean straight line.
  *
- * For HORIZONTAL flow (Right→Left): same logic on the Y axis.
+ * PARALLEL fan-out / genuinely offset nodes:
+ *   Uses smooth cubic bezier S-curve (looks intentional, not broken).
+ *
+ * HORIZONTAL flow (Right→Left handles):
+ *   Straight line when Y-aligned, smooth curve otherwise.
  */
 function getWorkflowPath(
   sourceX: number, sourceY: number,
   targetX: number, targetY: number,
   sourcePosition: Position,
   targetPosition: Position,
+  edgeType?: string,
 ): PathResult {
-  const labelX = (sourceX + targetX) / 2;
-  const labelY = (sourceY + targetY) / 2;
-  const dx = Math.abs(sourceX - targetX);
-  const dy = Math.abs(sourceY - targetY);
+  const cx   = (sourceX + targetX) / 2;
+  const cy   = (sourceY + targetY) / 2;
+  const dx   = Math.abs(sourceX - targetX);
+  const dy   = Math.abs(sourceY - targetY);
 
-  // Detect horizontal flow (Left/Right handles)
+  // ── Horizontal flow (side handles) ────────────────────────────────────────
   const isHorizontalFlow =
     sourcePosition === Position.Right ||
     targetPosition === Position.Left;
 
-  // ── Horizontal flow (Left→Right or Right→Left) ─────────────────────────────
   if (isHorizontalFlow) {
-    if (dy <= ALIGNMENT_TOLERANCE) {
-      // Route through shared center Y — always looks straight
-      const cy = (sourceY + targetY) / 2;
-      const path = `M ${sourceX} ${sourceY} L ${sourceX} ${cy} L ${targetX} ${cy} L ${targetX} ${targetY}`;
-      return [path, labelX, cy];
+    if (dy < 8) {
+      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
     }
     return horizontalElbow(sourceX, sourceY, targetX, targetY);
   }
 
-  // ── Vertical flow (Bottom→Top — sequential workflow nodes) ─────────────────
-  if (dx <= ALIGNMENT_TOLERANCE) {
-    // ★ Draw.io straight connector:
-    // Route through the shared center X so the line is perfectly vertical
-    // regardless of how far off the actual handle positions are.
-    const cx = (sourceX + targetX) / 2;
-    // Short horizontal jogs at source and target to exit/enter handles cleanly,
-    // then a long perfectly vertical segment down the center column.
-    const jog = Math.min(dx / 2, 8); // tiny jog, invisible at normal zoom
-    if (dx < 4) {
-      // Handles are essentially identical — pure straight line
-      return [`M ${cx} ${sourceY} L ${cx} ${targetY}`, cx, labelY];
-    }
-    const path = [
-      `M ${sourceX} ${sourceY}`,
-      `L ${sourceX} ${sourceY + jog}`,
-      `L ${cx} ${sourceY + jog}`,
-      `L ${cx} ${targetY - jog}`,
-      `L ${targetX} ${targetY - jog}`,
-      `L ${targetX} ${targetY}`,
-    ].join(" ");
-    return [path, cx, labelY];
+  // ── Parallel / branch fan-out — keep intentional curve ───────────────────
+  const isParallel = edgeType === "parallel" || edgeType === "parallel_branch";
+  if (isParallel || dx > 300) {
+    // Smooth S-curve: looks like a clean fan-out, not an error
+    const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
+    return [path, cx, cy];
   }
 
-  // Genuinely offset nodes — full orthogonal elbow
-  return verticalElbow(sourceX, sourceY, targetX, targetY);
+  // ── Sequential vertical flow — ALWAYS perfectly straight ─────────────────
+  // Route through the shared center X column.
+  // Both the source exit and target entry happen at cx, so the line
+  // is 100% vertical regardless of how far the handles are offset.
+  return [`M ${cx} ${sourceY} L ${cx} ${targetY}`, cx, cy];
 }
 
 // ─── Edge component ───────────────────────────────────────────────────────────
@@ -241,6 +227,7 @@ export const WorkflowEdge = memo(function WorkflowEdge({
     targetX, targetY,
     sourcePosition,
     targetPosition,
+    edgeType,          // pass edge type so parallel keeps its curve
   );
 
   // Stroke state
