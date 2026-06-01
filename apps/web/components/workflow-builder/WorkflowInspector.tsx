@@ -138,7 +138,15 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
   function set(patch: Partial<AgentNodeConfig>) { onChange({ ...data, agentConfig: { ...cfg, ...patch } }); }
   const retry = cfg.retryPolicy ?? { maxAttempts: 2, backoffType: "exponential" as const, backoffMs: 2000 };
   const selectedAgent = agents.find(a => a.id === cfg.agentId);
-  const isIterative = selectedAgent?.type === "iterative_agent";
+
+  // Brain loop: enabled when agent type is iterative_agent OR explicitly toggled on at node level
+  const agentIsIterative = selectedAgent?.type === "iterative_agent";
+  const brainEnabled = (cfg as Record<string, unknown>).brainEnabled as boolean | undefined
+    ?? agentIsIterative;
+
+  function setBrainEnabled(v: boolean) {
+    set({ brainEnabled: v } as Partial<AgentNodeConfig>);
+  }
 
   return (
     <div className="space-y-3">
@@ -149,7 +157,8 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
           <ILabel>Registered Agent</ILabel>
           <ISelect value={cfg.agentId ?? ""} onChange={(v) => {
             const agent = agents.find((a) => a.id === v);
-            set({ agentId: v || undefined, agentName: agent?.name, modelName: agent?.modelName });
+            const iterative = agent?.type === "iterative_agent";
+            set({ agentId: v || undefined, agentName: agent?.name, modelName: agent?.modelName, brainEnabled: iterative } as Partial<AgentNodeConfig>);
           }}>
             <option value="">— select agent —</option>
             {agents.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.modelName ?? a.type})</option>)}
@@ -162,14 +171,14 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
               <p className="text-[11px] font-semibold text-violet-800">{cfg.agentName}</p>
               <p className="text-[10px] text-slate-500">
                 {cfg.modelName && <span>{cfg.modelName}</span>}
-                {isIterative && <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold text-violet-700 uppercase tracking-wide">Iterative</span>}
+                {agentIsIterative && <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold text-violet-700 uppercase tracking-wide">Iterative</span>}
               </p>
             </div>
           </div>
         )}
       </ISection>
 
-      {/* Task instruction (what this workflow step should achieve) */}
+      {/* Task instruction */}
       <IDivider />
       <ISection title="Task">
         <div>
@@ -184,45 +193,103 @@ function AgentConfig({ data, onChange, agents }: { data: WFNodeData; onChange: (
         </div>
       </ISection>
 
-      {/* Agent Brain limits — only shown for iterative agents */}
-      {isIterative && (
-        <>
-          <IDivider />
-          <ISection title="Brain Limits">
-            <div
-              className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5"
-              style={{ fontSize: 11.5, color: "#5B21B6" }}
-            >
-              This agent can iterate through plan, tool use, observation, and final answer.
-              Vectorbea enforces all budget limits — the agent cannot exceed them.
-            </div>
+      {/* ── Agent Brain ─────────────────────────────────────────────────────── */}
+      <IDivider />
+      <ISection title="Agent Brain">
+        {/* Toggle — always visible so users can discover the brain feature */}
+        <div
+          className="flex items-center justify-between rounded-xl border px-3 py-2.5 cursor-pointer"
+          style={{
+            borderColor: brainEnabled ? "#DDD6FE" : "#E2E8F0",
+            background:  brainEnabled ? "#F5F3FF" : "#F8FAFC",
+          }}
+          onClick={() => setBrainEnabled(!brainEnabled)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && setBrainEnabled(!brainEnabled)}
+        >
+          <div>
+            <p className="text-[12px] font-semibold" style={{ color: brainEnabled ? "#5B21B6" : "#334155" }}>
+              Iterative brain loop
+            </p>
+            <p className="text-[10.5px] mt-0.5" style={{ color: brainEnabled ? "#7C3AED" : "#94A3B8" }}>
+              {brainEnabled
+                ? "Agent will plan → act → observe → decide across multiple iterations"
+                : "Enable to let this agent iterate with tools until it produces a final answer"}
+            </p>
+          </div>
+          <div
+            className="relative ml-3 h-5 w-9 shrink-0 rounded-full transition-colors"
+            style={{ background: brainEnabled ? "#7C3AED" : "#CBD5E1" }}
+          >
+            <span
+              className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
+              style={{ transform: brainEnabled ? "translateX(16px)" : "translateX(2px)" }}
+            />
+          </div>
+        </div>
+
+        {/* Brain limits — expanded when brain is enabled */}
+        {brainEnabled && (
+          <div className="mt-2 space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <ILabel>Max iterations</ILabel>
-                <INumber value={(cfg as Record<string, unknown>).maxIterations as number ?? 5}
-                  onChange={(v) => set({ maxIterations: v } as Partial<AgentNodeConfig>)} min={1} />
+                <INumber
+                  value={(cfg as Record<string, unknown>).maxIterations as number ?? 5}
+                  onChange={(v) => set({ maxIterations: v } as Partial<AgentNodeConfig>)}
+                  min={1}
+                />
               </div>
               <div>
                 <ILabel>Max tool calls</ILabel>
-                <INumber value={(cfg as Record<string, unknown>).maxToolCalls as number ?? 5}
-                  onChange={(v) => set({ maxToolCalls: v } as Partial<AgentNodeConfig>)} min={0} />
+                <INumber
+                  value={(cfg as Record<string, unknown>).maxToolCalls as number ?? 10}
+                  onChange={(v) => set({ maxToolCalls: v } as Partial<AgentNodeConfig>)}
+                  min={0}
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <ILabel>Max tokens</ILabel>
-                <INumber value={(cfg as Record<string, unknown>).maxTotalTokens as number ?? 16384}
-                  onChange={(v) => set({ maxTotalTokens: v } as Partial<AgentNodeConfig>)} min={256} />
+                <INumber
+                  value={(cfg as Record<string, unknown>).maxTotalTokens as number ?? 16384}
+                  onChange={(v) => set({ maxTotalTokens: v } as Partial<AgentNodeConfig>)}
+                  min={256}
+                />
               </div>
               <div>
-                <ILabel>Max cost (cents)</ILabel>
-                <INumber value={(cfg as Record<string, unknown>).maxCostCents as number ?? 50}
-                  onChange={(v) => set({ maxCostCents: v } as Partial<AgentNodeConfig>)} min={1} />
+                <ILabel>Max cost (¢)</ILabel>
+                <INumber
+                  value={(cfg as Record<string, unknown>).maxCostCents as number ?? 50}
+                  onChange={(v) => set({ maxCostCents: v } as Partial<AgentNodeConfig>)}
+                  min={1}
+                />
               </div>
             </div>
-          </ISection>
-        </>
-      )}
+            <div>
+              <ILabel>Output schema (JSON)</ILabel>
+              <ITextarea
+                rows={3}
+                mono
+                value={(cfg as Record<string, unknown>).outputSchemaJson as string ?? "{}"}
+                onChange={(v) => set({ outputSchemaJson: v } as Partial<AgentNodeConfig>)}
+                placeholder='{ "required": ["summary", "action"] }'
+              />
+              <p className="mt-1 text-[10.5px] text-slate-400">
+                JSON Schema the final output must satisfy. Leave <code className="font-mono">{"{}"}</code> to skip validation.
+              </p>
+            </div>
+            <div
+              className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2"
+              style={{ fontSize: 11, color: "#5B21B6" }}
+            >
+              Budget limits are enforced by the worker — the agent cannot exceed them regardless of LLM responses.
+            </div>
+          </div>
+        )}
+      </ISection>
 
       <IDivider />
       <ISection title="Retry Policy">
