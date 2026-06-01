@@ -199,7 +199,9 @@ class AgentNodeExecutor(
                        model_name, temperature, max_tokens, max_iterations,
                        COALESCE(max_tool_calls, 5)  AS max_tool_calls_val,
                        COALESCE(max_cost_cents, 50) AS max_cost_cents_val,
-                       COALESCE(allowed_tool_ids, '[]'::jsonb) AS allowed_tool_ids_json
+                       -- allowed_tool_ids is TEXT[] (added by V003), not JSONB.
+                       -- to_jsonb() converts text[] → ["id1","id2"] as jsonb safely.
+                       COALESCE(to_jsonb(allowed_tool_ids), '[]'::jsonb) AS allowed_tool_ids_json
                        FROM agents
                        WHERE id = ? AND workspace_id = ? AND status = 'active'"""
                 ).use { stmt ->
