@@ -53,6 +53,13 @@ class ToolNodeExecutor(
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
     ): NodeResult {
+        // ── Built-in email: check BEFORE toolId validation (no toolId needed) ──
+        val toolType = (node.config["toolType"] as? String)?.lowercase()
+        if (toolType == "builtin_email" ||
+            (node.config["builtinEmail"] as? Boolean) == true) {
+            return sendBuiltinEmail(node.config, resolvedInputs, ctx)
+        }
+
         val toolIdStr = node.config["toolId"] as? String
             ?: return NodeResult.Failed("Tool node '${node.id}' missing required config: toolId")
 

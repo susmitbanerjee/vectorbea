@@ -1,4 +1,4 @@
-// Worker service — Kotlin workflow execution engine (1648d09 cost-fix)
+// Worker service — Kotlin workflow execution engine (builtin-email-fix)
 plugins {
     kotlin("jvm") version "2.1.20"
     application
