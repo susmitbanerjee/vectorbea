@@ -271,7 +271,7 @@ export default function RunsPage() {
   const liveCount = displayRuns.filter(r => r.status === "running").length;
 
   return (
-    <div className="page-shell">
+    <div className="page-shell space-y-5">
 
       {/* ── Page header ─────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
@@ -410,32 +410,44 @@ export default function RunsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            {/* table-fixed + explicit col widths keeps every column predictable */}
+            <table className="w-full table-fixed min-w-[800px]">
+              <colgroup>
+                <col className="w-[28%]" />   {/* Workflow */}
+                <col className="w-[13%]" />   {/* Status   */}
+                <col className="w-[11%]" />   {/* Trigger  */}
+                <col className="w-[14%]" />   {/* Duration */}
+                <col className="w-[10%]" />   {/* Tokens   */}
+                <col className="w-[9%]"  />   {/* Cost     */}
+                <col className="w-[11%]" />   {/* Started  */}
+                <col className="w-[4%]"  />   {/* Arrow    */}
+              </colgroup>
+
               {/* Column headers */}
               <thead>
                 <tr className="border-b border-[#F3F4F6] bg-[#FAFAFA]">
-                  <th className="px-6 py-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
+                  <th className="px-6 py-3.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
                     Workflow
                   </th>
-                  <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
+                  <th className="px-4 py-3.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
                     Status
                   </th>
-                  <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
+                  <th className="px-4 py-3.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
                     Trigger
                   </th>
-                  <th className="px-5 py-4 text-left">
+                  <th className="px-4 py-3.5 text-left">
                     <SortableHeader label="Duration" sortKey="duration" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   </th>
-                  <th className="px-5 py-4 text-left">
+                  <th className="px-4 py-3.5 text-left">
                     <SortableHeader label="Tokens" sortKey="tokens" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   </th>
-                  <th className="px-5 py-4 text-left">
+                  <th className="px-4 py-3.5 text-left">
                     <SortableHeader label="Cost" sortKey="cost" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   </th>
-                  <th className="px-5 py-4 text-left">
+                  <th className="px-4 py-3.5 text-left">
                     <SortableHeader label="Started" sortKey="started" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   </th>
-                  <th className="w-12 px-5 py-4" />
+                  <th className="px-4 py-3.5" />
                 </tr>
               </thead>
 
@@ -456,11 +468,11 @@ export default function RunsPage() {
                         isFailed && "bg-red-50/40 hover:bg-red-50/60",
                       )}
                     >
-                      {/* Workflow name + ID */}
+                      {/* Workflow name + copy-ID */}
                       <td className="px-6 py-4">
                         <Link
                           href={`/runs/${run.id}` as Route}
-                          className="block text-[13px] font-semibold text-[#111827] hover:underline"
+                          className="block truncate text-[13.5px] font-semibold text-[#111827] hover:underline"
                         >
                           {run.workflowName?.trim() || `Run ${run.id.slice(0, 8)}`}
                         </Link>
@@ -468,7 +480,7 @@ export default function RunsPage() {
                       </td>
 
                       {/* Status */}
-                      <td className="px-5 py-4">
+                      <td className="px-4 py-4">
                         {uiStatus ? (
                           <StatusBadge status={uiStatus} dot />
                         ) : (
@@ -477,10 +489,12 @@ export default function RunsPage() {
                       </td>
 
                       {/* Trigger + Mode */}
-                      <td className="px-5 py-4">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[12px] capitalize text-[#374151]">{run.triggerType}</span>
-                          <span className="flex items-center gap-1 text-[10px] text-[#9CA3AF]">
+                      <td className="px-4 py-4">
+                        <div className="space-y-0.5">
+                          <span className="block text-[13px] capitalize text-[#374151]">
+                            {run.triggerType === "manual" ? "Manual" : run.triggerType}
+                          </span>
+                          <span className="flex items-center gap-1 text-[11px] text-[#9CA3AF]">
                             <GitBranch className="h-2.5 w-2.5 shrink-0" />
                             {run.creationMode === "native" ? "Native" : run.creationMode}
                           </span>
@@ -488,11 +502,11 @@ export default function RunsPage() {
                       </td>
 
                       {/* Duration + mini bar */}
-                      <td className="px-5 py-4">
+                      <td className="px-4 py-4">
                         {isRunning ? (
-                          <span className="flex items-center gap-1.5 text-[12px] text-[#1D4ED8]">
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#1D4ED8]">
                             <Loader2 className="h-3 w-3 animate-spin" />
-                            <span className="font-mono">in progress</span>
+                            In progress
                           </span>
                         ) : (
                           <DurationBar ms={run.durationMs} maxMs={maxDurationMs} />
@@ -500,7 +514,7 @@ export default function RunsPage() {
                       </td>
 
                       {/* Tokens */}
-                      <td className="px-5 py-4">
+                      <td className="px-4 py-4">
                         {run.totalTokens ? (
                           <span className="flex items-center gap-1 font-mono text-[12px] text-[#374151]">
                             <Zap className="h-2.5 w-2.5 text-[#9CA3AF]" />
@@ -512,28 +526,28 @@ export default function RunsPage() {
                       </td>
 
                       {/* Cost */}
-                      <td className="px-5 py-4 font-mono text-[12px] text-[#374151]">
+                      <td className="px-4 py-4 font-mono text-[12px] text-[#374151]">
                         {cost ?? <span className="text-[#9CA3AF]">—</span>}
                       </td>
 
                       {/* Started */}
-                      <td className="px-5 py-4">
+                      <td className="px-4 py-4">
                         <span
                           title={abs}
-                          className="flex items-center gap-1 text-[12px] text-[#6B7280] cursor-default"
+                          className="flex items-center gap-1.5 text-[12px] text-[#6B7280] cursor-default"
                         >
                           <Clock className="h-3 w-3 shrink-0 text-[#D1D5DB]" />
                           {rel}
                         </span>
                       </td>
 
-                      {/* Chevron link */}
-                      <td className="px-5 py-4">
+                      {/* Chevron */}
+                      <td className="px-4 py-4">
                         <Link
                           href={`/runs/${run.id}` as Route}
-                          className="flex h-6 w-6 items-center justify-center rounded-md text-[#9CA3AF] opacity-0 transition-all group-hover:opacity-100 hover:bg-[#F3F4F6] hover:text-[#374151]"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9CA3AF] opacity-0 transition-all group-hover:opacity-100 hover:bg-[#F3F4F6] hover:text-[#374151]"
                         >
-                          <ChevronRight className="h-3.5 w-3.5" />
+                          <ChevronRight className="h-4 w-4" />
                         </Link>
                       </td>
                     </tr>
