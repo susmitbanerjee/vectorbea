@@ -208,7 +208,9 @@ export default function OverviewPage() {
         getRuns({ pageSize: RECENT_RUNS_LIMIT }),
       ]);
       setSummary(s as Summary);
-      setRecentRuns(runsResult.items);
+      // Hard-slice to RECENT_RUNS_LIMIT — belt-and-suspenders in case
+      // a stale CDN/build returns more items than requested.
+      setRecentRuns(runsResult.items.slice(0, RECENT_RUNS_LIMIT));
       setRunsTotal(runsResult.total);
     } catch { /* silently fallback */ }
     finally { setLoading(false); }
@@ -394,7 +396,7 @@ export default function OverviewPage() {
           ) : (
             <>
               <div>
-                {recentRuns.map((run) => <RunRow key={run.id} run={run} />)}
+                {recentRuns.slice(0, RECENT_RUNS_LIMIT).map((run) => <RunRow key={run.id} run={run} />)}
               </div>
               {/* Footer — shows count and View all link */}
               <div
