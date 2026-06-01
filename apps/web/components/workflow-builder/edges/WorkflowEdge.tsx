@@ -29,10 +29,8 @@ type WFEdge = Edge<WFEdgeData>;
 
 // ─── Routing constants ────────────────────────────────────────────────────────
 
-/** px: within this Δ the connector renders as a straight line.
- *  Set very high — draw.io style: if nodes are in the same rough column
- *  the connector ALWAYS goes straight. Only genuinely offset nodes get elbows. */
-const ALIGNMENT_TOLERANCE = 200;
+/** px: within this Δ the connector is considered "aligned" — use straight line */
+const ALIGNMENT_TOLERANCE = 12;
 /** px: radius for elbow rounded corners */
 const CORNER_RADIUS = 10;
 
@@ -149,19 +147,37 @@ function verticalElbow(sx: number, sy: number, tx: number, ty: number): PathResu
 }
 
 /**
- * Path routing — sequential nodes always straight, parallel keeps curves.
+ * Proper draw.io-style routing.
  *
- * SEQUENTIAL (Bottom→Top, same column):
- *   Always routes through the shared centerline (cx = avg of sourceX, targetX).
- *   The result is a PERFECTLY VERTICAL line regardless of handle X offset.
- *   No jogs, no elbows — just a clean straight line.
- *
- * PARALLEL fan-out / genuinely offset nodes:
- *   Uses smooth cubic bezier S-curve (looks intentional, not broken).
- *
- * HORIZONTAL flow (Right→Left handles):
- *   Straight line when Y-aligned, smooth curve otherwise.
+ * Rules:
+ *  PARALLEL/BRANCH fan-out → smooth bezier curves (intentional wide arcs)
+ *  SEQUENTIAL aligned (dx ≤ 12px) → pure straight vertical line
+ *  SEQUENTIAL offset (12px < dx ≤ 400px) → rounded orthogonal step
+ *     M sx,sy → down to midY → across to tx → down to ty
+ *     This always starts at the real source handle and ends at the real target.
+ *  SEQUENTIAL far-offset (dx > 400) → smooth bezier (fan-in/merge)
  */
+function roundedOrthogonal(
+  sx: number, sy: number, tx: number, ty: number, r = CORNER_RADIUS,
+): string {
+  const midY  = (sy + ty) / 2;
+  const dx    = tx - sx;
+  const dirX  = dx >= 0 ? 1 : -1;
+  const absDx = Math.abs(dx);
+  const safeR = Math.min(r, absDx / 2, Math.abs(midY - sy), Math.abs(ty - midY));
+  if (safeR < 2) {
+    return `M ${sx} ${sy} L ${sx} ${midY} L ${tx} ${midY} L ${tx} ${ty}`;
+  }
+  return [
+    `M ${sx} ${sy}`,
+    `L ${sx} ${midY - safeR}`,
+    `Q ${sx} ${midY} ${sx + dirX * safeR} ${midY}`,
+    `L ${tx - dirX * safeR} ${midY}`,
+    `Q ${tx} ${midY} ${tx} ${midY + safeR}`,
+    `L ${tx} ${ty}`,
+  ].join(" ");
+}
+
 function getWorkflowPath(
   sourceX: number, sourceY: number,
   targetX: number, targetY: number,
@@ -169,36 +185,41 @@ function getWorkflowPath(
   targetPosition: Position,
   edgeType?: string,
 ): PathResult {
-  const cx   = (sourceX + targetX) / 2;
-  const cy   = (sourceY + targetY) / 2;
-  const dx   = Math.abs(sourceX - targetX);
-  const dy   = Math.abs(sourceY - targetY);
+  const cx = (sourceX + targetX) / 2;
+  const cy = (sourceY + targetY) / 2;
+  const dx = Math.abs(sourceX - targetX);
+  const dy = Math.abs(sourceY - targetY);
 
   // ── Horizontal flow (side handles) ────────────────────────────────────────
-  const isHorizontalFlow =
-    sourcePosition === Position.Right ||
-    targetPosition === Position.Left;
-
-  if (isHorizontalFlow) {
-    if (dy < 8) {
-      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
+  if (sourcePosition === Position.Right || targetPosition === Position.Left) {
+    if (dy <= ALIGNMENT_TOLERANCE) {
+      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, sourceY];
     }
     return horizontalElbow(sourceX, sourceY, targetX, targetY);
   }
 
-  // ── Parallel / branch fan-out — keep intentional curve ───────────────────
+  // ── Parallel / branch fan-out → smooth bezier (keep the arcs) ────────────
   const isParallel = edgeType === "parallel" || edgeType === "parallel_branch";
-  if (isParallel || dx > 300) {
-    // Smooth S-curve: looks like a clean fan-out, not an error
+  if (isParallel) {
     const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
     return [path, cx, cy];
   }
 
-  // ── Sequential vertical flow — ALWAYS perfectly straight ─────────────────
-  // Route through the shared center X column.
-  // Both the source exit and target entry happen at cx, so the line
-  // is 100% vertical regardless of how far the handles are offset.
-  return [`M ${cx} ${sourceY} L ${cx} ${targetY}`, cx, cy];
+  // ── Sequential vertical flow ──────────────────────────────────────────────
+  if (dx <= ALIGNMENT_TOLERANCE) {
+    // Handles are aligned — pure straight vertical
+    const midX = (sourceX + targetX) / 2;
+    return [`M ${midX} ${sourceY} L ${midX} ${targetY}`, midX, cy];
+  }
+
+  if (dx <= 400) {
+    // Slightly offset — rounded orthogonal step (Z-shape with smooth corners)
+    return [roundedOrthogonal(sourceX, sourceY, targetX, targetY), cx, cy];
+  }
+
+  // Very wide offset (fan-in like agents → join) — smooth bezier arc
+  const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
+  return [path, cx, cy];
 }
 
 // ─── Edge component ───────────────────────────────────────────────────────────
@@ -237,7 +258,8 @@ export const WorkflowEdge = memo(function WorkflowEdge({
 
   // Always animate — slow ambient flow shows data direction.
   // Running state: brighter color, faster flow.
-  const dashArray = isRunning ? "5 3" : "8 5";
+  // Smaller dashes on static connectors — less visual noise on orthogonal paths
+  const dashArray = isRunning ? "5 3" : "5 6";
   const animation = isRunning
     ? "wfDashFast 0.45s linear infinite"
     : "wfDashSlow 2.2s linear infinite";
