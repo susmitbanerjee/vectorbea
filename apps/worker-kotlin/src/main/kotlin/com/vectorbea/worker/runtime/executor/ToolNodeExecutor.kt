@@ -96,6 +96,13 @@ class ToolNodeExecutor(
 
             "database_write" -> dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
+            "builtin_email" -> {
+                // Built-in email — calls the platform's /api/email/send route
+                // which uses RESEND_API_KEY configured in Vercel.
+                // No connection needed; worker calls the Next.js API directly.
+                sendBuiltinEmail(node.config, resolvedInputs, ctx)
+            }
+
             "slack", "email", "crm" -> {
                 // Slack/Email/CRM tools are stored as HTTP tools under the hood
                 httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
@@ -491,4 +498,69 @@ class ToolNodeExecutor(
             durationMs    = durationMs,
         ))
     } catch (_: Exception) {}
+
+    // ── Built-in email via platform /api/email/send ───────────────────────────
+
+    /**
+     * Sends email using the platform's built-in Resend integration.
+     * Calls the Next.js /api/email/send route which uses RESEND_API_KEY
+     * configured in Vercel — no separate tool connection required.
+     *
+     * node.config fields read:
+     *   emailTo      — recipient(s): string | comma-separated string
+     *   emailSubject — subject line (supports {{template}} expressions resolved by caller)
+     *   emailBody    — HTML body    (supports {{template}} expressions resolved by caller)
+     */
+    private fun sendBuiltinEmail(
+        config: Map<String, Any>,
+        resolvedInputs: Map<String, Any>,
+        ctx: RuntimeContext,
+    ): NodeResult {
+        val appUrl = System.getenv("NEXT_PUBLIC_APP_URL")
+            ?: System.getenv("APP_URL")
+            ?: "https://app.vectorbea.com"   // fallback — override via env
+
+        val platformSecret = System.getenv("VECTORBEA_INGEST_SECRET") ?: ""
+
+        val toRaw     = (config["emailTo"]      as? String ?: resolvedInputs["to"]      as? String ?: "").trim()
+        val subject   = (config["emailSubject"] as? String ?: resolvedInputs["subject"] as? String ?: "(no subject)").trim()
+        val html      = (config["emailBody"]    as? String ?: resolvedInputs["html"]    as? String ?: "").trim()
+
+        if (toRaw.isEmpty()) {
+            return NodeResult.Failed("Built-in email: 'emailTo' is not configured. Set it in the tool node inspector.")
+        }
+
+        val payload = mapper.writeValueAsString(mapOf(
+            "to"      to toRaw,
+            "subject" to subject,
+            "html"    to html,
+        ))
+
+        return try {
+            val http     = java.net.http.HttpClient.newHttpClient()
+            val request  = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create("$appUrl/api/email/send"))
+                .header("Content-Type", "application/json")
+                .header("X-Platform-Secret", platformSecret)
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
+                .timeout(java.time.Duration.ofSeconds(30))
+                .build()
+
+            val response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+            if (response.statusCode() !in 200..299) {
+                return NodeResult.Failed("Built-in email failed: HTTP ${response.statusCode()} — ${response.body().take(300)}")
+            }
+
+            @Suppress("UNCHECKED_CAST")
+            val parsed = mapper.readValue(response.body(), Map::class.java) as Map<String, Any?>
+            NodeResult.Completed(output = mapOf(
+                "sent"       to true,
+                "messageId"  to (parsed["messageId"] ?: ""),
+                "recipients" to toRaw,
+                "provider"   to "resend",
+            ))
+        } catch (e: Exception) {
+            NodeResult.Failed("Built-in email error: ${e.message?.take(300)}")
+        }
+    }
 }

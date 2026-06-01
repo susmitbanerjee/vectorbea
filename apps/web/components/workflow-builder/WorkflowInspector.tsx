@@ -443,52 +443,143 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
   function set(patch: Partial<ToolNodeConfig>) { onChange({ ...data, toolConfig: { ...cfg, ...patch } }); }
   const tool = cfg.toolId ? tools.find((t) => t.id === cfg.toolId) : null;
 
+  // Detect built-in email — user chose "Email" from the tool dropdown
+  // OR the node was created as a built-in email node directly.
+  const isBuiltinEmail =
+    (cfg as Record<string, unknown>).builtinEmail === true ||
+    cfg.toolType === "builtin_email";
+
   return (
     <div className="space-y-3">
       <div><ILabel>Step Label</ILabel><IInput value={data.label} onChange={(v) => onChange({ ...data, label: v })} /></div>
 
-      <div><ILabel>Registered Tool</ILabel>
-        <ISelect value={cfg.toolId ?? ""} onChange={(v) => {
-          const t = tools.find((x) => x.id === v);
-          const uiToolType = (t?.config as Record<string, unknown> | undefined)?.uiToolType as string | undefined;
+      {/* ── Built-in email toggle at the top ── */}
+      <div
+        className="flex items-center justify-between rounded-xl border px-3 py-2.5 cursor-pointer"
+        style={{
+          borderColor: isBuiltinEmail ? "#BBF7D0" : "#E2E8F0",
+          background:  isBuiltinEmail ? "#F0FDF4" : "#F8FAFC",
+        }}
+        onClick={() => {
+          const next = !isBuiltinEmail;
           set({
-            toolId: v || undefined,
-            toolName: t?.name,
-            toolType: uiToolType ?? t?.type,
-            riskLevel: t?.riskLevel,
-            ...(uiToolType ? { uiToolType } : {}),
+            builtinEmail: next,
+            toolType: next ? "builtin_email" : undefined,
+            toolId: next ? undefined : cfg.toolId,
           } as Parameters<typeof set>[0]);
-        }}>
-          <option value="">— select tool —</option>
-          {tools.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
-        </ISelect>
+        }}
+        role="button" tabIndex={0}
+        onKeyDown={e => e.key === "Enter" && set({ builtinEmail: !isBuiltinEmail, toolType: !isBuiltinEmail ? "builtin_email" : undefined } as Parameters<typeof set>[0])}
+      >
+        <div>
+          <p className="text-[12px] font-semibold" style={{ color: isBuiltinEmail ? "#15803D" : "#334155" }}>
+            📧 Use built-in email (Resend)
+          </p>
+          <p className="text-[10.5px] mt-0.5" style={{ color: isBuiltinEmail ? "#16A34A" : "#94A3B8" }}>
+            {isBuiltinEmail
+              ? "Uses RESEND_API_KEY from platform config — no connection needed"
+              : "Enable to send email without configuring a tool connection"}
+          </p>
+        </div>
+        <div
+          className="relative ml-3 h-5 w-9 shrink-0 rounded-full transition-colors"
+          style={{ background: isBuiltinEmail ? "#16A34A" : "#CBD5E1" }}
+        >
+          <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
+            style={{ transform: isBuiltinEmail ? "translateX(16px)" : "translateX(2px)" }} />
+        </div>
       </div>
 
-      {tool && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] space-y-1">
-          <div className="flex justify-between"><span className="text-slate-500">Risk</span><span className="font-semibold text-slate-700 capitalize">{(tool.riskLevel ?? "").replace(/_/g, " ")}</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Idempotent</span><span className={tool.idempotent ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{tool.idempotent ? "yes" : "no"}</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Timeout</span><span className="text-slate-700">{tool.timeoutMs}ms</span></div>
+      {/* ── Built-in email fields ── */}
+      {isBuiltinEmail && (
+        <div className="space-y-2">
+          <div>
+            <ILabel>To (recipient emails)</ILabel>
+            <IInput
+              value={(cfg as Record<string, unknown>).emailTo as string ?? ""}
+              onChange={v => set({ emailTo: v } as Parameters<typeof set>[0])}
+              placeholder="you@email.com or comma-separated list or {{input.email}}"
+            />
+            <p className="mt-1 text-[10.5px] text-slate-400">
+              Single address, comma-separated list, or a template like{" "}
+              <code className="font-mono">{"{{input.recipients}}"}</code>
+            </p>
+          </div>
+          <div>
+            <ILabel>Subject</ILabel>
+            <IInput
+              value={(cfg as Record<string, unknown>).emailSubject as string ?? ""}
+              onChange={v => set({ emailSubject: v } as Parameters<typeof set>[0])}
+              placeholder="✈️ Daily Travel Price Alert — {{input.travelDate}}"
+            />
+          </div>
+          <div>
+            <ILabel>Body (HTML or plain text)</ILabel>
+            <ITextarea
+              rows={5}
+              value={(cfg as Record<string, unknown>).emailBody as string ?? ""}
+              onChange={v => set({ emailBody: v } as Parameters<typeof set>[0])}
+              placeholder={"{{steps.price_analyst.output.summary}}\n\nor write HTML directly:\n<h2>Price alert</h2><p>…</p>"}
+            />
+            <p className="mt-1 text-[10.5px] text-slate-400">
+              Use <code className="font-mono">{"{{steps.nodeName.output.field}}"}</code> to insert step output.
+            </p>
+          </div>
+          <div
+            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10.5px] text-emerald-700"
+          >
+            ✓ Sends via Resend using platform RESEND_API_KEY + EMAIL_FROM — no connection required.
+          </div>
         </div>
       )}
 
-      {/* ── Input Mapping ── */}
-      <MappingEditor
-        label="Input Mapping"
-        mapping={cfg.inputMapping ?? {}}
-        onChange={(m) => set({ inputMapping: m })}
-        keyPlaceholder="param_name"
-        valuePlaceholder="{{input.field}}"
-      />
+      {/* ── Registered tool selector (hidden when built-in email is on) ── */}
+      {!isBuiltinEmail && (
+        <>
+          <div><ILabel>Registered Tool</ILabel>
+            <ISelect value={cfg.toolId ?? ""} onChange={(v) => {
+              const t = tools.find((x) => x.id === v);
+              const uiToolType = (t?.config as Record<string, unknown> | undefined)?.uiToolType as string | undefined;
+              set({
+                toolId: v || undefined,
+                toolName: t?.name,
+                toolType: uiToolType ?? t?.type,
+                riskLevel: t?.riskLevel,
+                ...(uiToolType ? { uiToolType } : {}),
+              } as Parameters<typeof set>[0]);
+            }}>
+              <option value="">— select tool —</option>
+              {tools.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
+            </ISelect>
+          </div>
 
-      {/* ── Output Mapping ── */}
-      <MappingEditor
-        label="Output Mapping"
-        mapping={cfg.outputMapping ?? {}}
-        onChange={(m) => set({ outputMapping: m })}
-        keyPlaceholder="output_key"
-        valuePlaceholder="{{steps.N.output.field}}"
-      />
+          {tool && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] space-y-1">
+              <div className="flex justify-between"><span className="text-slate-500">Risk</span><span className="font-semibold text-slate-700 capitalize">{(tool.riskLevel ?? "").replace(/_/g, " ")}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Idempotent</span><span className={tool.idempotent ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{tool.idempotent ? "yes" : "no"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Timeout</span><span className="text-slate-700">{tool.timeoutMs}ms</span></div>
+            </div>
+          )}
+
+          {/* ── Input Mapping ── */}
+          <MappingEditor
+            label="Input Mapping"
+            mapping={cfg.inputMapping ?? {}}
+            onChange={(m) => set({ inputMapping: m })}
+            keyPlaceholder="param_name"
+            valuePlaceholder="{{input.field}}"
+          />
+
+          {/* ── Output Mapping ── */}
+          <MappingEditor
+            label="Output Mapping"
+            mapping={cfg.outputMapping ?? {}}
+            onChange={(m) => set({ outputMapping: m })}
+            keyPlaceholder="output_key"
+            valuePlaceholder="{{steps.N.output.field}}"
+          />
+        </>
+      )}
 
       <ICheck id={`approval-tool-${data.label}`} checked={cfg.requireApproval ?? false} onChange={(v) => set({ requireApproval: v })} label="Require approval before executing" />
     </div>
