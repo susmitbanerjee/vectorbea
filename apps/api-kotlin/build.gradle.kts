@@ -64,7 +64,7 @@ tasks.test {
 // report "Unsupported Database" even for well-supported PostgreSQL versions.
 // Shadow's mergeServiceFiles() appends all service declarations correctly.
 tasks.named<com.gradleup.shadow.tasks.ShadowJar>("shadowJar") {
-    archiveClassifier = "all"
+    archiveClassifier.set("all")
     mergeServiceFiles()
 }
 
