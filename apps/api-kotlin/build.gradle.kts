@@ -63,7 +63,7 @@ tasks.test {
 // causes Flyway's PostgreSQL database-type provider to disappear and Flyway to
 // report "Unsupported Database" even for well-supported PostgreSQL versions.
 // Shadow's mergeServiceFiles() appends all service declarations correctly.
-tasks.named<com.gradleup.shadow.tasks.ShadowJar>("shadowJar") {
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
     archiveClassifier.set("all")
     mergeServiceFiles()
 }
