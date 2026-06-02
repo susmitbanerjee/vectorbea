@@ -96,7 +96,20 @@ class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
         val session = service.repo.findById(id, ctx.workspaceId)
             ?: throw ApiError.NotFound("Architect session")
 
-        val planJson = service.generatePlan(session, answers)
+        val planJson = try {
+            service.generatePlan(session, answers)
+        } catch (e: IllegalStateException) {
+            // No API key configured
+            return Response.json(503, mapOf(
+                "error"   to "ARCHITECT_LLM_UNAVAILABLE",
+                "message" to (e.message ?: "AI Architect LLM is not configured. Set AI_ARCHITECT_API_KEY or OPENAI_API_KEY."),
+            ))
+        } catch (e: Exception) {
+            return Response.json(500, mapOf(
+                "error"   to "PLAN_GENERATION_FAILED",
+                "message" to (e.message ?: "Plan generation failed. Please try again."),
+            ))
+        }
 
         // Re-fetch to get animation steps
         val updated = service.repo.findById(id, ctx.workspaceId)!!
@@ -129,7 +142,13 @@ class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
         val session = service.repo.findById(id, ctx.workspaceId)
             ?: throw ApiError.NotFound("Architect session")
 
-        val revised = service.revisePlan(session, instruction)
+        val revised = try {
+            service.revisePlan(session, instruction)
+        } catch (e: IllegalStateException) {
+            return Response.json(503, mapOf("error" to "ARCHITECT_LLM_UNAVAILABLE", "message" to (e.message ?: "LLM not configured.")))
+        } catch (e: Exception) {
+            return Response.json(500, mapOf("error" to "REVISION_FAILED", "message" to (e.message ?: "Revision failed.")))
+        }
         val updated = service.repo.findById(id, ctx.workspaceId)!!
 
         return Response.ok(mapOf(

@@ -67,7 +67,10 @@ class WorkflowArchitectService(
     fun checkClarification(session: ArchitectSession): List<String> {
         if (!config.architectEnabled) return emptyList()
         val prompt = WorkflowArchitectPromptBuilder.buildClarificationPrompt(session.userGoal)
-        val raw    = callPlanningLlm(prompt, maxTokens = 500) ?: return emptyList()
+        val raw    = try { callPlanningLlm(prompt, maxTokens = 500) } catch (e: Exception) {
+            log.warn("[architect] clarification LLM call failed: {}", e.message)
+            return emptyList()
+        }
         return try {
             @Suppress("UNCHECKED_CAST")
             val parsed = mapper.readValue(raw, Map::class.java) as Map<String, Any>
@@ -221,7 +224,8 @@ class WorkflowArchitectService(
         systemPrompt: String? = null,
         maxTokens: Int = 2000,
     ): String? {
-        val apiKey = config.architectApiKey ?: return null
+        val apiKey = config.architectApiKey
+            ?: throw IllegalStateException("AI Architect LLM is not configured. Set AI_ARCHITECT_API_KEY or OPENAI_API_KEY environment variable.")
         val model  = config.architectModel  ?: "gpt-4o-mini"
         val url    = "https://api.openai.com/v1/chat/completions"
 
