@@ -1,125 +1,145 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import {
-  ArrowRight, CheckCircle2, Clock, RefreshCw, Shield, Zap,
-  Activity, Bot, ShieldCheck, GitBranch, Play, Loader2,
+  ArrowRight, CheckCircle2, RefreshCw, Shield, Zap,
+  Activity, Bot, ShieldCheck, GitBranch, Play,
   ChevronRight, Database, AlertTriangle, RotateCcw, Eye,
-  Layers, PauseCircle, ListChecks, Timer, TrendingUp,
+  Layers, ListChecks,
 } from "lucide-react";
 import { BeeLogo } from "@/components/brand/bee-logo";
 
+// ─── Bee SVG ─────────────────────────────────────────────────────────────────
+function BeeSVG({ size = 24, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className={className}>
+      {/* Body */}
+      <ellipse cx="16" cy="18" rx="7" ry="9" fill="#F59E0B" />
+      {/* Stripes */}
+      <ellipse cx="16" cy="16" rx="7" ry="3.5" fill="#1C1917" opacity="0.8" />
+      <ellipse cx="16" cy="21" rx="6" ry="2.5" fill="#1C1917" opacity="0.7" />
+      <ellipse cx="16" cy="25.5" rx="4.5" ry="2" fill="#92400E" opacity="0.6" />
+      {/* Head */}
+      <circle cx="16" cy="9" r="4" fill="#1C1917" />
+      {/* Antennae */}
+      <line x1="14" y1="6" x2="11" y2="3" stroke="#1C1917" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="11" cy="3" r="1" fill="#F59E0B" />
+      <line x1="18" y1="6" x2="21" y2="3" stroke="#1C1917" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="21" cy="3" r="1" fill="#F59E0B" />
+      {/* Wings */}
+      <ellipse cx="8" cy="13" rx="6" ry="3" fill="white" opacity="0.85" transform="rotate(-20 8 13)" />
+      <ellipse cx="24" cy="13" rx="6" ry="3" fill="white" opacity="0.85" transform="rotate(20 24 13)" />
+    </svg>
+  );
+}
+
+// ─── Animated bee ─────────────────────────────────────────────────────────────
+function FlyingBee({ delay = 0, y = 20, size = 28, speed = 18 }: { delay?: number; y?: number; size?: number; speed?: number }) {
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        top: `${y}%`,
+        left: "-60px",
+        animation: `flyBee ${speed}s ${delay}s linear infinite`,
+        zIndex: 2,
+      }}
+    >
+      <div style={{ animation: `wiggle 0.4s ease-in-out infinite alternate` }}>
+        <BeeSVG size={size} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Hex cell ─────────────────────────────────────────────────────────────────
+function HexCell({ x, y, opacity = 0.06 }: { x: number; y: number; opacity?: number }) {
+  return (
+    <polygon
+      points="30,0 60,17 60,52 30,69 0,52 0,17"
+      fill="none"
+      stroke="#D97706"
+      strokeWidth="1"
+      opacity={opacity}
+      transform={`translate(${x},${y})`}
+    />
+  );
+}
+
 // ─── Status pill ──────────────────────────────────────────────────────────────
-function StatusPill({ status }: { status: "succeeded" | "running" | "waiting" | "failed" | "queued" }) {
-  const variants = {
-    succeeded: { label: "Succeeded",         bg: "rgba(22,163,74,0.12)",  border: "rgba(22,163,74,0.3)",  color: "#4ADE80", dot: "#22C55E" },
-    running:   { label: "Running",           bg: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.3)", color: "#93C5FD", dot: "#3B82F6" },
-    waiting:   { label: "Awaiting approval", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", color: "#FCD34D", dot: "#F59E0B" },
-    failed:    { label: "Failed",            bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.3)",  color: "#FCA5A5", dot: "#EF4444" },
-    queued:    { label: "Queued",            bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.3)",color: "#94A3B8", dot: "#64748B" },
-  };
-  const v = variants[status];
+function StatusPill({ status }: { status: "succeeded" | "running" | "waiting" }) {
+  const v = {
+    succeeded: { label: "Succeeded", bg: "#ECFDF5", border: "#BBF7D0", color: "#15803D", dot: "#22C55E" },
+    running:   { label: "Running",   bg: "#EFF6FF", border: "#BFDBFE", color: "#1D4ED8", dot: "#3B82F6" },
+    waiting:   { label: "Awaiting",  bg: "#FFFBEB", border: "#FDE68A", color: "#92400E", dot: "#F59E0B" },
+  }[status];
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
       style={{ background: v.bg, border: `1px solid ${v.border}`, color: v.color }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: v.dot }} />
-      {v.label}
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: v.dot }} />{v.label}
     </span>
   );
 }
 
 // ─── Timeline event ───────────────────────────────────────────────────────────
-function TimelineEvent({
-  icon, title, sub, time, status, last = false,
-}: {
-  icon: React.ReactNode; title: string; sub: string; time: string;
-  status: "success" | "blue" | "amber" | "red" | "gray"; last?: boolean;
+function TEvent({ icon, title, sub, time, color, last = false }: {
+  icon: React.ReactNode; title: string; sub: string; time: string; color: string; last?: boolean;
 }) {
-  const colors = {
-    success: { ring: "rgba(34,197,94,0.5)",   bg: "rgba(34,197,94,0.08)",   text: "#4ADE80" },
-    blue:    { ring: "rgba(59,130,246,0.5)",  bg: "rgba(59,130,246,0.08)",  text: "#93C5FD" },
-    amber:   { ring: "rgba(245,158,11,0.5)",  bg: "rgba(245,158,11,0.08)",  text: "#FCD34D" },
-    red:     { ring: "rgba(239,68,68,0.5)",   bg: "rgba(239,68,68,0.08)",   text: "#FCA5A5" },
-    gray:    { ring: "rgba(148,163,184,0.4)", bg: "rgba(148,163,184,0.06)", text: "#94A3B8" },
-  };
-  const c = colors[status];
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-          style={{ background: c.bg, border: `1px solid ${c.ring}`, color: c.text }}>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2"
+          style={{ borderColor: color + "40", background: color + "10", color }}>
           {icon}
         </div>
-        {!last && <div className="mt-1 w-px flex-1" style={{ background: "rgba(255,255,255,0.08)", minHeight: 20 }} />}
+        {!last && <div className="mt-1 w-px flex-1 bg-amber-100" style={{ minHeight: 18 }} />}
       </div>
-      <div className="pb-3.5 min-w-0 flex-1" style={{ paddingTop: 4 }}>
+      <div className="pb-3 flex-1 min-w-0" style={{ paddingTop: 4 }}>
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-[12.5px] font-semibold text-white/90 leading-tight">{title}</p>
-          <span className="shrink-0 font-mono text-[10.5px] text-white/30 tabular-nums">{time}</span>
+          <p className="text-[12.5px] font-semibold text-slate-800">{title}</p>
+          <span className="shrink-0 font-mono text-[10px] text-slate-400">{time}</span>
         </div>
-        <p className="mt-0.5 text-[11.5px] text-white/40 leading-relaxed">{sub}</p>
+        <p className="text-[11.5px] text-slate-500 mt-0.5">{sub}</p>
       </div>
     </div>
   );
 }
 
 // ─── Canvas node ──────────────────────────────────────────────────────────────
-function CanvasNode({
-  icon, label, type, badge, accent = "#3B82F6", selected = false,
-}: {
-  icon: React.ReactNode; label: string; type: string;
-  badge?: string; accent?: string; selected?: boolean;
+function WNode({ icon, label, type, badge, accent = "#2563EB", active }: {
+  icon: React.ReactNode; label: string; type: string; badge?: string; accent?: string; active?: boolean;
 }) {
   return (
-    <div className="relative rounded-xl px-3 py-2.5 min-w-[160px]"
+    <div className="rounded-xl px-3 py-2.5 min-w-[150px]"
       style={{
-        background: selected ? `${accent}14` : "rgba(255,255,255,0.04)",
-        border: `1px solid ${selected ? accent + "40" : "rgba(255,255,255,0.08)"}`,
-        boxShadow: selected ? `0 0 0 1px ${accent}20, 0 4px 16px ${accent}14` : "none",
+        background: active ? accent + "0f" : "#FAFAFA",
+        border: `1.5px solid ${active ? accent + "40" : "#E5E7EB"}`,
+        boxShadow: active ? `0 0 0 3px ${accent}12` : "none",
       }}>
       <div className="flex items-center gap-2 mb-1">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-          style={{ background: `${accent}18`, color: accent }}>
-          {icon}
-        </span>
-        <span className="text-[11.5px] font-bold text-white/90 leading-tight">{label}</span>
+          style={{ background: accent + "15", color: accent }}>{icon}</span>
+        <span className="text-[11.5px] font-bold text-slate-800 leading-tight">{label}</span>
       </div>
-      <div className="flex items-center justify-between gap-1">
-        <span className="text-[9.5px] font-mono uppercase tracking-wider" style={{ color: accent + "99" }}>{type}</span>
-        {badge && (
-          <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
-            style={{ background: `${accent}18`, color: accent, border: `1px solid ${accent}30` }}>
-            {badge}
-          </span>
-        )}
+      <div className="flex items-center justify-between">
+        <span className="text-[9.5px] font-mono uppercase tracking-wider" style={{ color: accent + "aa" }}>{type}</span>
+        {badge && <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
+          style={{ background: accent + "15", color: accent, border: `1px solid ${accent}30` }}>{badge}</span>}
       </div>
     </div>
   );
 }
 
 // ─── Feature card ─────────────────────────────────────────────────────────────
-function FeatureCard({ icon, title, desc, accent }: { icon: React.ReactNode; title: string; desc: string; accent: string }) {
+function FCard({ icon, title, desc, accent }: { icon: React.ReactNode; title: string; desc: string; accent: string }) {
   return (
-    <div className="group rounded-2xl p-6 transition-all duration-200 hover:bg-white/[0.04]"
-      style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+    <div className="rounded-2xl p-6 bg-white border border-amber-100 hover:border-amber-200 transition-all hover:shadow-md"
+      style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
       <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl"
-        style={{ background: `${accent}15`, border: `1px solid ${accent}25`, color: accent }}>
-        {icon}
-      </div>
-      <h3 className="text-[15px] font-bold text-white/90 mb-2">{title}</h3>
-      <p className="text-[13.5px] text-white/45 leading-relaxed">{desc}</p>
-    </div>
-  );
-}
-
-// ─── Problem card ─────────────────────────────────────────────────────────────
-function ProblemCard({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
-  return (
-    <div className="rounded-2xl p-6 bg-white border border-slate-100"
-      style={{ boxShadow: "0 1px 3px rgba(15,23,42,0.04)" }}>
-      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-red-50 text-red-500">
-        {icon}
-      </div>
-      <h3 className="text-[14.5px] font-bold text-slate-800 mb-1.5">{title}</h3>
-      <p className="text-[13px] text-slate-500 leading-relaxed">{desc}</p>
+        style={{ background: accent + "12", border: `1.5px solid ${accent}25`, color: accent }}>{icon}</div>
+      <h3 className="text-[15px] font-bold text-slate-900 mb-2">{title}</h3>
+      <p className="text-[13.5px] text-slate-500 leading-relaxed">{desc}</p>
     </div>
   );
 }
@@ -127,333 +147,365 @@ function ProblemCard({ icon, title, desc }: { icon: React.ReactNode; title: stri
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function MarketingPage() {
   return (
-    <div className="min-h-screen bg-[#08080F] text-white">
+    <>
+      {/* Bee animation keyframes */}
+      <style>{`
+        @keyframes flyBee {
+          0%   { transform: translateX(-60px) translateY(0px); }
+          20%  { transform: translateX(20vw) translateY(-30px); }
+          40%  { transform: translateX(40vw) translateY(15px); }
+          60%  { transform: translateX(60vw) translateY(-20px); }
+          80%  { transform: translateX(80vw) translateY(10px); }
+          100% { transform: translateX(110vw) translateY(-5px); }
+        }
+        @keyframes wiggle {
+          from { transform: translateY(0px) rotate(-5deg); }
+          to   { transform: translateY(-6px) rotate(5deg); }
+        }
+        @keyframes floatBee {
+          0%,100% { transform: translateY(0px) rotate(-3deg); }
+          50%     { transform: translateY(-12px) rotate(3deg); }
+        }
+        @keyframes hexPulse {
+          0%,100% { opacity: 0.04; }
+          50%     { opacity: 0.12; }
+        }
+        .hex-pulse { animation: hexPulse 3s ease-in-out infinite; }
+        .float-bee { animation: floatBee 3s ease-in-out infinite; }
+      `}</style>
 
-      {/* ── NAV ─────────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-50 w-full" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(8,8,15,0.85)", backdropFilter: "blur(20px)" }}>
-        <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-6 py-4 lg:px-16">
-          <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.12)" }}>
-              <BeeLogo className="h-4 w-4 text-white" />
-            </div>
-            <span className="text-[15px] font-bold tracking-tight text-white">Vectorbea</span>
-          </Link>
+      <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "#FFFBF0", color: "#1C1917" }}>
 
-          <nav className="hidden items-center gap-1 sm:flex">
-            {["Features", "How it works", "Pricing"].map(label => (
-              <a key={label} href={`#${label.toLowerCase().replace(/\s/g, "")}`}
-                className="rounded-lg px-4 py-2 text-[13.5px] font-medium transition-colors text-white/55 hover:text-white/90">
-                {label}
-              </a>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-3 shrink-0">
-            <Link href="/signin" className="rounded-lg px-4 py-2 text-[13.5px] font-medium transition-colors"
-              style={{ color: "rgba(255,255,255,0.55)" }}>
-              Sign in
+        {/* ── NAV ─────────────────────────────────────────────────────────── */}
+        <header className="sticky top-0 z-50 w-full" style={{ background: "rgba(255,251,240,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(217,119,6,0.12)" }}>
+          <div className="flex w-full items-center justify-between gap-4 px-6 py-4 lg:px-16 xl:px-24">
+            <Link href="/" className="flex items-center gap-2.5 shrink-0">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#FEF3C7", border: "1.5px solid #FDE68A" }}>
+                <BeeLogo className="h-4 w-4" />
+              </div>
+              <span className="text-[15px] font-bold tracking-tight text-slate-900">Vectorbea</span>
             </Link>
-            <Link href="/signup"
-              className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13.5px] font-bold text-white transition-all"
-              style={{ background: "#2563EB", boxShadow: "0 0 0 1px rgba(37,99,235,0.5), 0 4px 16px rgba(37,99,235,0.35)" }}>
-              Start building →
-            </Link>
-          </div>
-        </div>
-      </header>
 
-      {/* ── HERO ────────────────────────────────────────────────────────────── */}
-      <section className="relative w-full overflow-hidden" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        {/* Full-bleed dramatic background */}
-        <div className="absolute inset-0 -z-10">
-          {/* Grid pattern like Neon */}
-          <div className="absolute inset-0" style={{
-            backgroundImage: `linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)`,
-            backgroundSize: "64px 64px",
-          }} />
-          {/* Large glow spots */}
-          <div className="absolute top-[-20%] left-1/2 -translate-x-1/2 w-[1200px] h-[800px]"
-            style={{ background: "radial-gradient(ellipse, rgba(37,99,235,0.18) 0%, rgba(124,58,237,0.08) 40%, transparent 70%)" }} />
-          <div className="absolute bottom-0 left-0 w-[600px] h-[400px]"
-            style={{ background: "radial-gradient(ellipse, rgba(124,58,237,0.12) 0%, transparent 60%)" }} />
-          <div className="absolute bottom-0 right-0 w-[500px] h-[350px]"
-            style={{ background: "radial-gradient(ellipse, rgba(5,150,105,0.10) 0%, transparent 60%)" }} />
-        </div>
+            <nav className="hidden items-center gap-1 sm:flex">
+              {["Features", "How it works", "Pricing"].map(label => (
+                <a key={label} href={`#${label.toLowerCase().replace(/\s/g, "")}`}
+                  className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-slate-600 hover:text-amber-700 hover:bg-amber-50 transition-colors">
+                  {label}
+                </a>
+              ))}
+            </nav>
 
-        <div className="w-full max-w-[1440px] mx-auto px-6 lg:px-16 pt-28 pb-12">
-          {/* Top badge */}
-          <div className="flex justify-center mb-8">
-            <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-[12px] font-semibold tracking-widest uppercase"
-              style={{ background: "rgba(37,99,235,0.12)", border: "1px solid rgba(37,99,235,0.3)", color: "#93C5FD" }}>
-              <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
-              Agentic Automation Platform
+            <div className="flex items-center gap-3 shrink-0">
+              <Link href="/signin" className="px-4 py-2 text-[13.5px] font-medium text-slate-600 hover:text-slate-900 transition-colors">
+                Sign in
+              </Link>
+              <Link href="/signup"
+                className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13.5px] font-bold text-white transition-all hover:opacity-90"
+                style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 100%)", boxShadow: "0 4px 16px rgba(217,119,6,0.35)" }}>
+                Start building →
+              </Link>
             </div>
           </div>
+        </header>
 
-          {/* Headline — full width, dramatic */}
-          <h1 className="text-center font-black tracking-[-0.04em] text-white leading-[1.0] mb-6"
-            style={{ fontSize: "clamp(48px, 7.5vw, 96px)", textShadow: "0 0 80px rgba(37,99,235,0.2)" }}>
-            Durable automation<br />
-            <span style={{ background: "linear-gradient(135deg, #60A5FA 0%, #A78BFA 50%, #34D399 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-              for AI agents
-            </span>
-            <br />
-            that must actually finish.
-          </h1>
+        {/* ── HERO — full-screen with bees ─────────────────────────────────── */}
+        <section className="relative w-full overflow-hidden" style={{ minHeight: "100vh" }}>
+          {/* Honeycomb SVG background — full bleed */}
+          <svg className="absolute inset-0 w-full h-full" style={{ opacity: 1 }} preserveAspectRatio="xMidYMid slice">
+            {/* Tiled hex grid */}
+            {Array.from({ length: 12 }).map((_, row) =>
+              Array.from({ length: 20 }).map((_, col) => {
+                const x = col * 90 - (row % 2 === 0 ? 0 : 45);
+                const y = row * 60;
+                return <HexCell key={`${row}-${col}`} x={x} y={y} opacity={0.06 + (col + row) % 3 * 0.02} />;
+              })
+            )}
+          </svg>
 
-          <p className="text-center mx-auto max-w-2xl mb-10 leading-[1.7]"
-            style={{ fontSize: "clamp(16px, 1.5vw, 19px)", color: "rgba(255,255,255,0.5)" }}>
-            Vectorbea gives AI workflows the execution layer they&apos;re missing — durable runs,
-            human approval gates, automatic retries, event history, and clean debugging.
-            Without hiding your automation inside a black box.
-          </p>
+          {/* Amber radial glow top-center */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] pointer-events-none"
+            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251,191,36,0.22) 0%, transparent 70%)" }} />
 
-          {/* CTAs */}
-          <div className="flex flex-wrap items-center justify-center gap-4 mb-8">
-            <Link href="/signup"
-              className="flex items-center gap-2 rounded-xl px-8 py-4 text-[15px] font-bold text-white transition-all"
-              style={{ background: "#2563EB", boxShadow: "0 0 0 1px rgba(37,99,235,0.5), 0 8px 32px rgba(37,99,235,0.40)" }}>
-              Start building free
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link href="/signin"
-              className="flex items-center gap-2 rounded-xl px-8 py-4 text-[15px] font-bold transition-all"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.8)" }}>
-              View run timeline
-              <ChevronRight className="h-4 w-4 opacity-50" />
-            </Link>
-          </div>
+          {/* Flying bees */}
+          <FlyingBee delay={0}  y={15} size={28} speed={22} />
+          <FlyingBee delay={4}  y={55} size={20} speed={28} />
+          <FlyingBee delay={9}  y={30} size={24} speed={20} />
+          <FlyingBee delay={14} y={70} size={18} speed={32} />
+          <FlyingBee delay={2}  y={80} size={22} speed={25} />
 
-          {/* Trust hints */}
-          <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 mb-16">
-            {["BYOK models", "Human approvals", "Durable retries", "Event-sourced runs", "No vendor lock-in"].map(hint => (
-              <span key={hint} className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "rgba(255,255,255,0.35)" }}>
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500/60" />
-                {hint}
+          {/* Content */}
+          <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 lg:px-16 xl:px-24 pt-28 pb-16" style={{ minHeight: "100vh" }}>
+            {/* Badge */}
+            <div className="mb-8 inline-flex items-center gap-2 rounded-full px-5 py-2"
+              style={{ background: "#FEF3C7", border: "1.5px solid #FDE68A", color: "#92400E" }}>
+              <span className="text-base">🐝</span>
+              <span className="text-[12px] font-bold tracking-widest uppercase">Agentic Automation Platform</span>
+            </div>
+
+            {/* Headline — big and full-width */}
+            <h1 className="w-full font-black tracking-[-0.045em] text-stone-900 leading-[1.0] mb-6"
+              style={{ fontSize: "clamp(52px, 9vw, 110px)" }}>
+              Durable automation<br />
+              <span style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 40%, #22C55E 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                for AI agents
               </span>
-            ))}
-          </div>
+              <br />
+              that must finish.
+            </h1>
 
-          {/* ── Full-width product preview ───────────────────────────────────── */}
-          <div className="w-full grid grid-cols-1 gap-4 lg:grid-cols-[1fr_420px]"
-            style={{ border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, overflow: "hidden", background: "rgba(255,255,255,0.02)", backdropFilter: "blur(10px)" }}>
+            <p className="max-w-3xl mx-auto mb-10 text-stone-600 leading-[1.7]"
+              style={{ fontSize: "clamp(16px, 1.8vw, 21px)" }}>
+              Like a hive where every worker bee knows its job —
+              Vectorbea gives AI workflows durable execution, human approval gates,
+              automatic retries, and full observability. No black boxes.
+            </p>
 
-            {/* Canvas preview */}
-            <div style={{ borderRight: "1px solid rgba(255,255,255,0.07)" }}>
-              <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+            {/* CTAs */}
+            <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
+              <Link href="/signup"
+                className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-black text-white transition-all hover:scale-[1.02] active:scale-[0.99]"
+                style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 100%)", boxShadow: "0 8px 32px rgba(217,119,6,0.40), 0 0 0 1px rgba(217,119,6,0.2)" }}>
+                Start building free <ArrowRight className="h-5 w-5" />
+              </Link>
+              <Link href="/signin"
+                className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-bold text-stone-700 bg-white border border-stone-200 hover:border-amber-300 hover:bg-amber-50/50 transition-all"
+                style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+                View run timeline <ChevronRight className="h-4 w-4 text-stone-400" />
+              </Link>
+            </div>
+
+            {/* Trust hints */}
+            <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 mb-16">
+              {["BYOK models", "Human approvals", "Durable retries", "Event-sourced runs", "No vendor lock-in"].map(hint => (
+                <span key={hint} className="flex items-center gap-1.5 text-[13px] text-stone-500">
+                  <span className="text-amber-500">🐝</span> {hint}
+                </span>
+              ))}
+            </div>
+
+            {/* ── Full-width product preview ─────────────────────────────── */}
+            <div className="w-full max-w-none rounded-3xl overflow-hidden"
+              style={{ border: "1.5px solid rgba(217,119,6,0.2)", background: "white", boxShadow: "0 40px 120px rgba(217,119,6,0.12), 0 8px 32px rgba(0,0,0,0.08)" }}>
+
+              {/* Window chrome */}
+              <div className="flex items-center justify-between px-5 py-4" style={{ background: "#FFFBF0", borderBottom: "1px solid rgba(217,119,6,0.12)" }}>
                 <div className="flex items-center gap-2">
                   <div className="flex gap-1.5">
-                    <div className="h-3 w-3 rounded-full bg-red-500/60" />
-                    <div className="h-3 w-3 rounded-full bg-yellow-500/60" />
-                    <div className="h-3 w-3 rounded-full bg-green-500/60" />
+                    <div className="h-3 w-3 rounded-full bg-red-400" />
+                    <div className="h-3 w-3 rounded-full bg-yellow-400" />
+                    <div className="h-3 w-3 rounded-full bg-green-400" />
                   </div>
-                  <span className="text-[12.5px] font-semibold ml-2" style={{ color: "rgba(255,255,255,0.6)" }}>Customer Renewal Intelligence</span>
+                  <span className="ml-3 text-[13px] font-semibold text-stone-600">Customer Renewal Intelligence</span>
                 </div>
                 <StatusPill status="running" />
               </div>
-              <div className="p-6 space-y-4" style={{ background: "rgba(0,0,0,0.3)" }}>
-                <div className="flex items-center gap-4">
-                  <CanvasNode icon={<Play className="h-3.5 w-3.5" />} label="Schedule Trigger" type="TRIGGER" badge="Daily" accent="#3B82F6" />
-                  <div className="flex items-center flex-1">
-                    <div className="flex-1 border-t border-dashed" style={{ borderColor: "rgba(255,255,255,0.12)" }} />
-                    <div className="h-1.5 w-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }} />
+
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px]">
+                {/* Canvas */}
+                <div className="p-8 space-y-5" style={{ background: "#FAFAF7", borderRight: "1px solid rgba(217,119,6,0.08)" }}>
+                  {/* Row 1 */}
+                  <div className="flex items-center gap-6 flex-wrap">
+                    <WNode icon={<Play className="h-3.5 w-3.5" />} label="Schedule Trigger" type="TRIGGER" badge="Daily" accent="#2563EB" />
+                    <div className="flex-1 min-w-[60px] flex items-center gap-1">
+                      <div className="flex-1 border-t-2 border-dashed border-stone-200" />
+                      <span className="text-stone-300 text-xs">→</span>
+                    </div>
+                    <WNode icon={<Database className="h-3.5 w-3.5" />} label="Fetch Renewals" type="DB READ" accent="#059669" active />
                   </div>
-                  <CanvasNode icon={<Database className="h-3.5 w-3.5" />} label="Fetch Renewals" type="DB READ" accent="#10B981" selected />
-                </div>
-                <div className="flex items-center gap-4 ml-8">
-                  <CanvasNode icon={<Bot className="h-3.5 w-3.5" />} label="Risk Scoring Agent" type="LLM · gpt-4o" badge="running" accent="#8B5CF6" selected />
-                  <div className="flex items-center flex-1">
-                    <div className="flex-1 border-t border-dashed" style={{ borderColor: "rgba(255,255,255,0.12)" }} />
-                    <div className="h-1.5 w-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }} />
+                  {/* Row 2 */}
+                  <div className="flex items-center gap-6 flex-wrap pl-8">
+                    <WNode icon={<Bot className="h-3.5 w-3.5" />} label="Risk Scoring Agent" type="LLM · gpt-4o" badge="running" accent="#7C3AED" active />
+                    <div className="flex-1 min-w-[60px] flex items-center gap-1">
+                      <div className="flex-1 border-t-2 border-dashed border-stone-200" />
+                      <span className="text-stone-300 text-xs">→</span>
+                    </div>
+                    <WNode icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approval Gate" type="HUMAN APPROVAL" badge="pending" accent="#D97706" />
                   </div>
-                  <CanvasNode icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approval Gate" type="HUMAN APPROVAL" badge="pending" accent="#F59E0B" />
+                  {/* Row 3 */}
+                  <div className="flex items-center gap-6 flex-wrap pl-16">
+                    <WNode icon={<Activity className="h-3.5 w-3.5" />} label="Notify & Archive" type="HTTP · TOOL" accent="#0891B2" />
+                  </div>
+                  {/* Little bee workers */}
+                  <div className="flex items-center gap-3 pt-2 border-t border-stone-100">
+                    <span className="text-[11px] text-stone-400">Hive workers:</span>
+                    <div className="flex gap-1">
+                      {[0.2, 0.4, 0.6].map((d, i) => (
+                        <div key={i} style={{ animation: `floatBee 2.5s ${d}s ease-in-out infinite` }}>
+                          <BeeSVG size={20} />
+                        </div>
+                      ))}
+                    </div>
+                    <span className="text-[11px] text-stone-400">3 agents active</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4 ml-16">
-                  <CanvasNode icon={<Activity className="h-3.5 w-3.5" />} label="Notify & Archive" type="HTTP · TOOL" accent="#0EA5E9" />
-                </div>
-              </div>
-            </div>
 
-            {/* Timeline preview */}
-            <div>
-              <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                <span className="text-[12.5px] font-semibold" style={{ color: "rgba(255,255,255,0.6)" }}>Run timeline</span>
-                <span className="font-mono text-[11px] tabular-nums" style={{ color: "rgba(255,255,255,0.3)" }}>2m 14s</span>
-              </div>
-              <div className="p-5" style={{ background: "rgba(0,0,0,0.2)" }}>
-                <TimelineEvent icon={<Play className="h-3 w-3" />} title="Run started" sub="Schedule trigger · daily 09:00" time="09:00:01" status="blue" />
-                <TimelineEvent icon={<Database className="h-3 w-3" />} title="Fetched 34 renewals" sub="DB read · 284ms" time="09:00:02" status="success" />
-                <TimelineEvent icon={<Bot className="h-3 w-3" />} title="Agent completed" sub="Risk scored 34 accounts · 6.2k tokens" time="09:01:18" status="blue" />
-                <TimelineEvent icon={<ShieldCheck className="h-3 w-3" />} title="Approval requested" sub="Waiting for Finance Ops · 3 high-risk" time="09:01:20" status="amber" last />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── PROBLEM — light section ──────────────────────────────────────────── */}
-      <section id="features" className="w-full bg-white py-24">
-        <div className="mx-auto max-w-[1440px] px-6 lg:px-16">
-          <div className="mb-16 max-w-2xl">
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-blue-600 mb-4">The problem</p>
-            <h2 className="font-black tracking-[-0.03em] text-slate-900 leading-[1.1] mb-5"
-              style={{ fontSize: "clamp(28px, 4vw, 52px)" }}>
-              AI workflows break when they leave the demo.
-            </h2>
-            <p className="text-[16px] text-slate-500 leading-relaxed">
-              LLM calls are probabilistic. Networks fail. APIs rate-limit.
-              Humans need to approve. Most frameworks don&apos;t handle any of this.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <ProblemCard icon={<Eye className="h-4 w-4" />} title="Hidden tool calls" desc="No visibility into what your agent called, when, or what it returned." />
-            <ProblemCard icon={<RotateCcw className="h-4 w-4" />} title="Manual retries" desc="Failed steps require human intervention. No automatic retry with backoff." />
-            <ProblemCard icon={<ShieldCheck className="h-4 w-4" />} title="No approval trail" desc="Critical decisions happen inside the agent with no way to pause for a human." />
-            <ProblemCard icon={<AlertTriangle className="h-4 w-4" />} title="Hard to debug" desc="When something fails at step 7 of 12, you start the whole thing over." />
-            <ProblemCard icon={<Layers className="h-4 w-4" />} title="Lost state" desc="Long-running workflows lose intermediate results on failure or restart." />
-            <ProblemCard icon={<TrendingUp className="h-4 w-4" />} title="Unclear costs" desc="No per-run breakdown of tokens, latency, tool calls, or estimated spend." />
-          </div>
-        </div>
-      </section>
-
-      {/* ── CAPABILITIES — dark section ──────────────────────────────────────── */}
-      <section id="howItWorks" className="w-full py-24" style={{ background: "#0D0D18", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-        <div className="mx-auto max-w-[1440px] px-6 lg:px-16">
-          <div className="mb-16 max-w-2xl">
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] mb-4" style={{ color: "#60A5FA" }}>Platform</p>
-            <h2 className="font-black tracking-[-0.03em] text-white leading-[1.1] mb-5"
-              style={{ fontSize: "clamp(28px, 4vw, 52px)" }}>
-              Everything an agentic workflow needs in production.
-            </h2>
-            <p className="text-[16px] leading-relaxed" style={{ color: "rgba(255,255,255,0.45)" }}>
-              Built for the workflows that actually matter — the ones that need to finish.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <FeatureCard accent="#3B82F6" icon={<GitBranch className="h-5 w-5" />} title="Visual workflow canvas" desc="Drag-and-drop builder for multi-step agentic workflows. Connect agents, tools, and approval gates visually." />
-            <FeatureCard accent="#8B5CF6" icon={<Bot className="h-5 w-5" />} title="Durable agent runs" desc="Runs checkpoint at every step. Failures retry from the last checkpoint, not the beginning." />
-            <FeatureCard accent="#F59E0B" icon={<ShieldCheck className="h-5 w-5" />} title="Human approval gates" desc="Pause mid-workflow for a human decision with full context, audit trail, and timeout handling." />
-            <FeatureCard accent="#10B981" icon={<ListChecks className="h-5 w-5" />} title="Immutable event history" desc="Every tool call, LLM response, retry, and approval is recorded in a structured event log." />
-            <FeatureCard accent="#0EA5E9" icon={<RotateCcw className="h-5 w-5" />} title="Automatic retry & resume" desc="Configure backoff policies per step. Failed runs resume from the last successful checkpoint." />
-            <FeatureCard accent="#F97316" icon={<Zap className="h-5 w-5" />} title="BYOK connections" desc="Connect your own OpenAI, Anthropic, or Gemini keys. Your own databases and APIs too." />
-          </div>
-        </div>
-      </section>
-
-      {/* ── TIMELINE SHOWCASE — alternating ──────────────────────────────────── */}
-      <section className="w-full py-24 bg-white" style={{ borderTop: "1px solid #F1F5F9" }}>
-        <div className="mx-auto max-w-[1440px] px-6 lg:px-16">
-          <div className="grid grid-cols-1 gap-16 lg:grid-cols-2 lg:items-center">
-            <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-blue-600 mb-4">Run timeline</p>
-              <h2 className="font-black tracking-[-0.03em] text-slate-900 leading-[1.1] mb-5"
-                style={{ fontSize: "clamp(28px, 3.5vw, 48px)" }}>
-                Debug every run without reading raw logs first.
-              </h2>
-              <p className="text-[16px] text-slate-500 leading-relaxed mb-8">
-                Every workflow run produces a structured execution trace — grouped by agent, annotated with timing, tokens, and cost. Find the failure in seconds, not minutes.
-              </p>
-              <ul className="space-y-3.5">
-                {[
-                  "Agent-grouped swimlane view with precise timing",
-                  "Expandable events: input, output, error, metadata",
-                  "Retry history with attempt count and backoff",
-                  "Approval audit trail with decision and timestamp",
-                ].map(item => (
-                  <li key={item} className="flex items-center gap-3 text-[14.5px] text-slate-600">
-                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Timeline mockup — dark card */}
-            <div className="rounded-2xl overflow-hidden"
-              style={{ background: "#0D0D18", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 32px 80px rgba(0,0,0,0.3)" }}>
-              <div className="border-b px-5 py-4 flex items-center justify-between" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
+                {/* Timeline */}
                 <div>
-                  <p className="text-[13px] font-bold text-white">Run #1,847</p>
-                  <p className="text-[11px] mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>Customer Renewal Intelligence</p>
+                  <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid rgba(217,119,6,0.08)" }}>
+                    <span className="text-[13px] font-bold text-stone-700">Run timeline</span>
+                    <span className="font-mono text-[11px] text-stone-400">2m 14s</span>
+                  </div>
+                  <div className="p-5 space-y-0">
+                    <TEvent icon={<Play className="h-3 w-3" />} title="Run started" sub="Schedule trigger · daily 09:00" time="09:00:01" color="#3B82F6" />
+                    <TEvent icon={<Database className="h-3 w-3" />} title="Fetched 34 renewals" sub="DB read · 284ms" time="09:00:02" color="#22C55E" />
+                    <TEvent icon={<Bot className="h-3 w-3" />} title="Agent completed" sub="Risk scored · 6.2k tokens" time="09:01:18" color="#8B5CF6" />
+                    <TEvent icon={<ShieldCheck className="h-3 w-3" />} title="Approval requested" sub="Waiting Finance Ops · 3 high-risk" time="09:01:20" color="#F59E0B" last />
+                  </div>
                 </div>
-                <StatusPill status="succeeded" />
-              </div>
-              <div className="p-5">
-                <TimelineEvent icon={<Play className="h-3 w-3" />} title="Run started" sub="Manual trigger by admin@acme.com" time="10:30:01" status="blue" />
-                <TimelineEvent icon={<Database className="h-3 w-3" />} title="Tool call: fetchCustomers" sub="GET /customers · 200 OK · 34 records" time="10:30:02" status="success" />
-                <TimelineEvent icon={<Bot className="h-3 w-3" />} title="LLM agent completed" sub="gpt-4o-mini · 2,430 tokens · $0.0042" time="10:31:18" status="blue" />
-                <TimelineEvent icon={<ShieldCheck className="h-3 w-3" />} title="Approval: approved" sub="Finance Ops approved within 14 min" time="10:45:22" status="success" />
-                <TimelineEvent icon={<RefreshCw className="h-3 w-3" />} title="Retry attempted (2/3)" sub="HTTP 429 rate limit · backoff 30s" time="10:45:25" status="amber" />
-                <TimelineEvent icon={<CheckCircle2 className="h-3 w-3" />} title="Run completed" sub="All 34 accounts processed · 15m 24s total" time="10:45:25" status="success" last />
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ── FINAL CTA — full-bleed dark ──────────────────────────────────────── */}
-      <section id="pricing" className="relative w-full py-32 overflow-hidden"
-        style={{ background: "#08080F", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-        {/* Background glow */}
-        <div className="absolute inset-0 -z-10">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[600px]"
-            style={{ background: "radial-gradient(ellipse, rgba(37,99,235,0.15) 0%, rgba(124,58,237,0.08) 40%, transparent 70%)" }} />
-        </div>
-        <div className="mx-auto max-w-[800px] px-6 text-center">
-          <h2 className="font-black tracking-[-0.035em] text-white leading-[1.05] mb-6"
-            style={{ fontSize: "clamp(36px, 5vw, 64px)", textShadow: "0 0 60px rgba(37,99,235,0.2)" }}>
-            Build workflows your<br />team can trust.
-          </h2>
-          <p className="mb-10 leading-relaxed" style={{ fontSize: "clamp(16px, 1.5vw, 19px)", color: "rgba(255,255,255,0.45)" }}>
-            Not another AI demo. Vectorbea is the production execution layer for agentic automation —
-            durable, observable, and debuggable from day one.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
-            <Link href="/signup"
-              className="flex items-center gap-2 rounded-xl px-8 py-4 text-[15px] font-bold text-white transition-all"
-              style={{ background: "#2563EB", boxShadow: "0 0 0 1px rgba(37,99,235,0.5), 0 8px 32px rgba(37,99,235,0.45)" }}>
-              Create your first workflow
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link href="/signin"
-              className="flex items-center gap-2 rounded-xl px-8 py-4 text-[15px] font-bold transition-all"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)" }}>
-              Sign in
-            </Link>
+        {/* ── PROBLEM — warm white full bleed ──────────────────────────────── */}
+        <section id="features" className="w-full py-28" style={{ background: "white", borderTop: "1px solid #FEF3C7" }}>
+          <div className="w-full px-6 lg:px-16 xl:px-24">
+            <div className="mb-16">
+              <div className="flex items-center gap-2 mb-4">
+                <BeeSVG size={22} />
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-600">The problem</p>
+              </div>
+              <h2 className="font-black tracking-[-0.035em] text-stone-900 leading-[1.05] mb-5"
+                style={{ fontSize: "clamp(32px, 5vw, 64px)" }}>
+                AI workflows break when<br />they leave the demo.
+              </h2>
+              <p className="max-w-xl text-[17px] text-stone-500 leading-relaxed">
+                LLM calls are probabilistic. Networks fail. APIs rate-limit.
+                Humans need to approve. Most frameworks don&apos;t handle any of this.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {[
+                { icon: <Eye className="h-4 w-4" />, title: "Hidden tool calls", desc: "No visibility into what your agent called." },
+                { icon: <RotateCcw className="h-4 w-4" />, title: "Manual retries", desc: "Failed steps require human intervention." },
+                { icon: <ShieldCheck className="h-4 w-4" />, title: "No approval trail", desc: "Decisions happen inside the agent silently." },
+                { icon: <AlertTriangle className="h-4 w-4" />, title: "Hard to debug", desc: "Failure at step 7? Start from scratch." },
+                { icon: <Layers className="h-4 w-4" />, title: "Lost state", desc: "Intermediate results vanish on failure." },
+                { icon: <Activity className="h-4 w-4" />, title: "Unclear costs", desc: "No per-run token or spend breakdown." },
+              ].map(({ icon, title, desc }) => (
+                <div key={title} className="rounded-2xl p-5 border border-red-100 bg-red-50/50">
+                  <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-xl bg-red-100 text-red-500">{icon}</div>
+                  <h3 className="text-[13.5px] font-bold text-stone-800 mb-1">{title}</h3>
+                  <p className="text-[12.5px] text-stone-500 leading-relaxed">{desc}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
-            {["Free to start", "Bring your own model keys", "No usage-based lock-in", "Cancel anytime"].map(hint => (
-              <span key={hint} className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "rgba(255,255,255,0.3)" }}>
-                <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "rgba(255,255,255,0.2)" }} />
-                {hint}
+        </section>
+
+        {/* ── CAPABILITIES — honey amber full bleed ────────────────────────── */}
+        <section id="howItWorks" className="w-full py-28 relative overflow-hidden" style={{ background: "linear-gradient(180deg, #FFFBF0 0%, #FEF3C7 100%)", borderTop: "1px solid #FDE68A" }}>
+          {/* Honeycomb decorative */}
+          <svg className="absolute right-0 top-0 h-full opacity-[0.07]" width="400" viewBox="0 0 300 800">
+            {Array.from({ length: 6 }).map((_, row) =>
+              Array.from({ length: 4 }).map((_, col) => (
+                <HexCell key={`d-${row}-${col}`} x={col * 90 - (row % 2 === 0 ? 0 : 45)} y={row * 60} />
+              ))
+            )}
+          </svg>
+
+          <div className="relative z-10 w-full px-6 lg:px-16 xl:px-24">
+            <div className="mb-16">
+              <div className="flex items-center gap-2 mb-4">
+                <BeeSVG size={22} />
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">The hive</p>
+              </div>
+              <h2 className="font-black tracking-[-0.035em] text-stone-900 leading-[1.05] mb-5"
+                style={{ fontSize: "clamp(32px, 5vw, 64px)" }}>
+                Every bee knows its role.<br />
+                <span style={{ color: "#D97706" }}>Every step gets done.</span>
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <FCard accent="#2563EB" icon={<GitBranch className="h-5 w-5" />} title="Visual workflow canvas" desc="Drag-and-drop builder for multi-step agentic workflows. Connect agents, tools, and approval gates." />
+              <FCard accent="#7C3AED" icon={<Bot className="h-5 w-5" />} title="Durable agent runs" desc="Runs checkpoint at every step. Failures retry from the last checkpoint, not the beginning." />
+              <FCard accent="#D97706" icon={<ShieldCheck className="h-5 w-5" />} title="Human approval gates" desc="Pause mid-workflow for a human decision with full context and audit trail." />
+              <FCard accent="#059669" icon={<ListChecks className="h-5 w-5" />} title="Immutable event history" desc="Every tool call, LLM response, retry, and approval is recorded in a structured log." />
+              <FCard accent="#0891B2" icon={<RotateCcw className="h-5 w-5" />} title="Automatic retry & resume" desc="Configure backoff per step. Failed runs resume from the last successful checkpoint." />
+              <FCard accent="#F97316" icon={<Zap className="h-5 w-5" />} title="BYOK connections" desc="Connect your own OpenAI, Anthropic, or Gemini keys. Your own databases and APIs too." />
+            </div>
+          </div>
+        </section>
+
+        {/* ── FINAL CTA — full bleed warm ──────────────────────────────────── */}
+        <section id="pricing" className="relative w-full py-36 overflow-hidden" style={{ background: "#1C1917", borderTop: "1px solid rgba(217,119,6,0.3)" }}>
+          {/* Honeycomb bg */}
+          <svg className="absolute inset-0 w-full h-full opacity-[0.05]" preserveAspectRatio="xMidYMid slice">
+            {Array.from({ length: 10 }).map((_, row) =>
+              Array.from({ length: 18 }).map((_, col) => (
+                <HexCell key={`cta-${row}-${col}`} x={col * 90 - (row % 2 === 0 ? 0 : 45)} y={row * 60} />
+              ))
+            )}
+          </svg>
+          {/* Glow */}
+          <div className="absolute inset-0 pointer-events-none"
+            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251,191,36,0.15) 0%, transparent 70%)" }} />
+
+          {/* Floating bee cluster */}
+          <div className="absolute right-16 top-1/3 flex gap-3 opacity-40">
+            {[0, 0.8, 1.6].map((d, i) => (
+              <div key={i} style={{ animation: `floatBee 3s ${d}s ease-in-out infinite` }}>
+                <BeeSVG size={32} />
+              </div>
+            ))}
+          </div>
+
+          <div className="relative z-10 w-full text-center px-6 lg:px-16 xl:px-24">
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2"
+              style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.3)", color: "#FCD34D" }}>
+              <BeeSVG size={18} /> <span className="text-[12px] font-bold">Join the hive</span>
+            </div>
+            <h2 className="font-black tracking-[-0.04em] text-white leading-[1.0] mb-6"
+              style={{ fontSize: "clamp(40px, 6vw, 80px)" }}>
+              Build workflows your<br />
+              <span style={{ background: "linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                team can trust.
               </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── FOOTER ───────────────────────────────────────────────────────────── */}
-      <footer className="w-full py-10" style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "#08080F" }}>
-        <div className="mx-auto max-w-[1440px] px-6 lg:px-16 flex flex-col items-center justify-between gap-4 sm:flex-row">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <BeeLogo className="h-3.5 w-3.5 text-white/50" />
+            </h2>
+            <p className="max-w-2xl mx-auto mb-12 leading-relaxed"
+              style={{ fontSize: "clamp(16px, 1.5vw, 20px)", color: "rgba(255,255,255,0.5)" }}>
+              Not another AI demo. Vectorbea is the production execution layer for agentic automation.
+              Durable, observable, and debuggable from day one.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
+              <Link href="/signup"
+                className="flex items-center gap-2 rounded-2xl px-10 py-5 text-[16px] font-black text-stone-900 transition-all hover:scale-[1.02]"
+                style={{ background: "linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%)", boxShadow: "0 8px 32px rgba(251,191,36,0.35)" }}>
+                Create your first workflow <ArrowRight className="h-5 w-5" />
+              </Link>
+              <Link href="/signin"
+                className="rounded-2xl px-10 py-5 text-[16px] font-bold transition-all"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)" }}>
+                Sign in
+              </Link>
             </div>
-            <span className="text-[14px] font-semibold" style={{ color: "rgba(255,255,255,0.35)" }}>Vectorbea</span>
+            <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
+              {["Free to start", "Bring your own keys", "No usage lock-in", "Cancel anytime"].map(hint => (
+                <span key={hint} className="flex items-center gap-1.5 text-[13px]" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-amber-500/50" /> {hint}
+                </span>
+              ))}
+            </div>
           </div>
-          <p className="text-[12.5px]" style={{ color: "rgba(255,255,255,0.2)" }}>
-            Durable agentic automation. Built for production.
-          </p>
-          <div className="flex items-center gap-6">
-            {["Privacy", "Terms", "Docs"].map(link => (
-              <a key={link} href={`/${link.toLowerCase()}`}
-                className="text-[12.5px] text-white/25 transition-colors hover:text-white/50">
-                {link}
-              </a>
-            ))}
+        </section>
+
+        {/* ── FOOTER ───────────────────────────────────────────────────────── */}
+        <footer className="w-full py-10" style={{ background: "#1C1917", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="flex w-full flex-col items-center justify-between gap-4 px-6 sm:flex-row lg:px-16 xl:px-24">
+            <div className="flex items-center gap-2.5">
+              <BeeSVG size={22} />
+              <span className="text-[14px] font-semibold text-stone-400">Vectorbea</span>
+            </div>
+            <p className="text-[12.5px] text-stone-600">Durable agentic automation. Built for production.</p>
+            <div className="flex items-center gap-6">
+              {["Privacy", "Terms", "Docs"].map(link => (
+                <a key={link} href={`/${link.toLowerCase()}`}
+                  className="text-[12.5px] text-stone-600 hover:text-stone-400 transition-colors">{link}</a>
+              ))}
+            </div>
           </div>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </>
   );
 }
