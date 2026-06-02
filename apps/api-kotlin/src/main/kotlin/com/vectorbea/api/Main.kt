@@ -26,6 +26,9 @@ import com.vectorbea.api.repository.DashboardRepository
 import com.vectorbea.api.repository.RunRepository
 import com.vectorbea.api.repository.ToolRepository
 import com.vectorbea.api.repository.WorkflowRepository
+import com.vectorbea.api.architect.WorkflowArchitectRepository
+import com.vectorbea.api.architect.WorkflowArchitectRoutes
+import com.vectorbea.api.architect.WorkflowArchitectService
 import com.vectorbea.api.routes.AgentRoutes
 import com.vectorbea.api.routes.DashboardRoutes
 import com.vectorbea.api.routes.ApprovalRoutes
@@ -248,6 +251,14 @@ fun main() {
     // Dashboard summary — requires DB for metric queries
     if (ds != null) {
         DashboardRoutes(DashboardRepository(ds), cacheService).register(router)
+
+    // AI Workflow Architect
+    if (workflowRepo != null) {
+        val architectRepo = WorkflowArchitectRepository(ds)
+        val architectService = WorkflowArchitectService(architectRepo, workflowRepo, ds, config)
+        WorkflowArchitectRoutes(architectService).register(router)
+        log.info("AI Workflow Architect: enabled={} model={}", config.architectEnabled, config.architectModel)
+    } else log.warn("WorkflowArchitectRoutes disabled — no database")
     } else log.warn("DashboardRoutes disabled — no database")
 
     if (runRepo != null && runEventRepo != null) {

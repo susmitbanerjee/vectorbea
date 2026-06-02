@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Bot, CalendarClock, GitBranch, Play, RefreshCw, Save, Shield, Wrench } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, CalendarClock, GitBranch, Play, RefreshCw, Save, Shield, Wrench } from "lucide-react";
 import { toast } from "sonner";
 
 import type { TriggerType, WorkflowCreationMode } from "@/types/platform";
@@ -92,6 +92,51 @@ export default function NewWorkflowPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Choose how this workflow will be created and executed.
         </p>
+      </div>
+
+      {/* ── AI Architect hero card ─────────────────────────────────────── */}
+      <Link href={"/workflows/new/architect" as never}
+        className="group block rounded-2xl overflow-hidden transition-all hover:scale-[1.01] hover:shadow-xl"
+        style={{ background: "linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 50%, #FDE68A 100%)", border: "2px solid #FDE68A", boxShadow: "0 4px 20px rgba(217,119,6,0.12)" }}
+      >
+        <div className="p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500">
+                  <Bot className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[15px] font-black text-stone-900">AI Workflow Architect</span>
+                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800 uppercase tracking-wider">New</span>
+                  </div>
+                  <p className="text-[11.5px] text-amber-700 font-medium">Recommended for new workflows</p>
+                </div>
+              </div>
+              <p className="text-[13.5px] text-stone-700 leading-relaxed mb-3">
+                Describe your automation goal in plain English. Vectorbea designs the agents, tools,
+                approvals, and workflow graph for you — then animates it onto the canvas.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {["Auto-generates workflow", "Reviews before creating", "Simulation-first", "Full canvas control"].map(tag => (
+                  <span key={tag} className="rounded-full bg-amber-100 border border-amber-200 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                    ✓ {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="shrink-0 flex items-center justify-center h-10 w-10 rounded-xl bg-amber-500 group-hover:bg-amber-600 transition-colors">
+              <ArrowRight className="h-5 w-5 text-white" />
+            </div>
+          </div>
+        </div>
+      </Link>
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-border/50" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">or build manually</span>
+        <div className="flex-1 h-px bg-border/50" />
       </div>
 
       {/* Creation mode */}

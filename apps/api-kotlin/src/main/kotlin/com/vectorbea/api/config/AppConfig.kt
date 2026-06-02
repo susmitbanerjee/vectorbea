@@ -27,6 +27,10 @@ data class AppConfig(
     val logLevel: String,
     val version: String,
     val commit: String?,
+    // AI Workflow Architect config
+    val architectEnabled: Boolean = false,
+    val architectApiKey: String? = null,
+    val architectModel: String? = "gpt-4o-mini",
     /** Max request body size in bytes (default: 2 MB) */
     val maxRequestBodyBytes: Int,
 ) {
@@ -100,6 +104,9 @@ data class AppConfig(
             val version = env("APP_VERSION") ?: DEFAULT_VERSION
             val commit = env("GIT_COMMIT")
             val maxBody = env("MAX_REQUEST_BODY_BYTES")?.toIntOrNull() ?: DEFAULT_MAX_BODY_BYTES
+            val architectEnabled = env("AI_ARCHITECT_ENABLED")?.lowercase() == "true"
+            val architectApiKey  = env("AI_ARCHITECT_API_KEY") ?: env("OPENAI_API_KEY")
+            val architectModel   = env("AI_ARCHITECT_MODEL") ?: "gpt-4o-mini"
 
             val config = AppConfig(
                 port = port,
@@ -115,6 +122,9 @@ data class AppConfig(
                 commit = commit,
                 maxRequestBodyBytes = maxBody,
                 jwtSecret = jwtSecret,
+                architectEnabled = architectEnabled,
+                architectApiKey  = architectApiKey,
+                architectModel   = architectModel,
             )
 
             config.logSummary()

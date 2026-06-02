@@ -47,7 +47,7 @@ const HANDLE_CSS = `
 `;
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ReactFlow,
@@ -300,8 +300,14 @@ export default function WorkflowBuilderPage() {
 function WorkflowBuilderInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const shouldAnimate = searchParams.get("animate") === "true";
+  const architectSessionId = searchParams.get("architectSessionId");
 
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
+  const [animatingArchitect, setAnimatingArchitect] = useState(shouldAnimate);
+  const [animationProgress, setAnimationProgress] = useState(0);
+  const [animationLabel, setAnimationLabel] = useState("Building your workflow…");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
@@ -452,6 +458,26 @@ function WorkflowBuilderInner() {
     }
     void load();
   }, [id, setNodes, setEdges]);
+
+  // ── Architect animation reveal ────────────────────────────────────────────
+  useEffect(() => {
+    if (!shouldAnimate || !nodes.length) return;
+    const msgs = [
+      "Building your workflow…", "Adding trigger node…", "Connecting agents…",
+      "Adding approval gates…", "Finalizing connections…", "Workflow ready!",
+    ];
+    let i = 0;
+    const t = setInterval(() => {
+      i++;
+      setAnimationLabel(msgs[Math.min(i, msgs.length - 1)]);
+      setAnimationProgress(Math.min(100, (i / msgs.length) * 100));
+      if (i >= msgs.length) {
+        clearInterval(t);
+        setTimeout(() => setAnimatingArchitect(false), 600);
+      }
+    }, 800);
+    return () => clearInterval(t);
+  }, [shouldAnimate, nodes.length]);
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validation = validateWorkflowGraph(nodes as Node<WFNodeData>[], edges as Edge<WFEdgeData>[]);
@@ -700,6 +726,29 @@ function WorkflowBuilderInner() {
     <div className="flex h-full flex-col overflow-hidden" style={{ background: "#F8FAFC" }}>
       {/* ── Handle CSS injected once ─────────────────────────────────────────── */}
       <style dangerouslySetInnerHTML={{ __html: HANDLE_CSS }} />
+
+      {/* ── AI Architect creation animation overlay ──────────────────────────── */}
+      {animatingArchitect && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-6"
+          style={{ background: "rgba(255,251,240,0.97)", backdropFilter: "blur(8px)" }}>
+          <div className="relative flex h-20 w-20 items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-4 border-amber-100" />
+            <div className="absolute inset-0 rounded-full border-4 border-t-amber-500 animate-spin" />
+            <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="1.75">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8Z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div className="text-center space-y-2">
+            <p className="text-[16px] font-bold text-stone-900">{animationLabel}</p>
+            <p className="text-[13px] text-stone-500">AI Workflow Architect is building your workflow…</p>
+          </div>
+          <button type="button"
+            onClick={() => setAnimatingArchitect(false)}
+            className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-[13px] font-medium text-stone-600 hover:bg-stone-50 transition-colors">
+            Skip animation
+          </button>
+        </div>
+      )}
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
       <div
         className="flex shrink-0 items-center gap-0 px-4"
