@@ -18,7 +18,7 @@ import javax.sql.DataSource
  * Security: never logs or returns secrets. All LLM calls sanitized.
  */
 class WorkflowArchitectService(
-    private val repo: WorkflowArchitectRepository,
+    internal val repo: WorkflowArchitectRepository,
     private val workflowRepo: WorkflowRepository,
     private val dataSource: DataSource,
     private val config: AppConfig,
@@ -190,7 +190,7 @@ class WorkflowArchitectService(
                 com.vectorbea.api.repository.CreateWorkflowVersionRequest(
                     workflowId  = workflow.id,
                     graph       = mapper.readValue(session.generatedGraphJson, Map::class.java) as Map<String, Any>,
-                    triggerConfig = mapOf("type" to (planMap["trigger"] as? Map<*, *>)?.get("type") ?: "manual"),
+                    triggerConfig = mapOf<String, Any>("type" to ((planMap["trigger"] as? Map<*, *>)?.get("type") ?: "manual")),
                 )
             )
 
