@@ -21,16 +21,21 @@ RUN apk add --no-cache curl unzip && \
     rm /tmp/gradle.zip
 ENV PATH="/opt/gradle/bin:${PATH}"
 
+# Limit JVM heap for Gradle + Kotlin compiler to stay within Railway build limits.
+# --no-daemon already prevents a second JVM, but the single Gradle JVM still needs
+# explicit caps or it will try to use ~25% of total RAM and OOM-kill silently.
+ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false"
+
 # Copy build scripts first — maximises Docker layer cache.
 # Source code changes won't invalidate the dependency resolution layer.
 COPY settings.gradle.kts build.gradle.kts ./
 
 # Pre-resolve Gradle dependencies (separate cached layer)
-RUN gradle dependencies --no-daemon --console=plain -q 2>/dev/null || true
+RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
 
 # Copy source and build fat jar
 COPY src ./src
-RUN gradle fatJar --no-daemon --console=plain
+RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime
