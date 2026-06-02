@@ -33,6 +33,8 @@ class WorkflowArchitectService(
         const val MAX_REVISIONS      = 5
     }
 
+    fun isEnabled(): Boolean = config.architectEnabled
+
     // ── Workspace limits (can be extended from DB in future) ──────────────────
     private fun defaultLimits(): Map<String, Any> = mapOf(
         "maxSteps" to 20,
@@ -268,17 +270,49 @@ class WorkflowArchitectService(
     }
 
     // ── Plan validation ───────────────────────────────────────────────────────
+    @Suppress("UNCHECKED_CAST")
     private fun validatePlanJson(json: String): String? {
         return try {
-            @Suppress("UNCHECKED_CAST")
             val plan = mapper.readValue(json, Map::class.java) as Map<String, Any?>
-            when {
-                plan["workflowName"] == null  -> "Missing workflowName"
-                plan["steps"] == null         -> "Missing steps"
-                plan["edges"] == null         -> "Missing edges"
-                (plan["steps"] as? List<*>)?.isEmpty() == true -> "Steps array is empty"
-                else -> null
+
+            // Required top-level fields
+            if (plan["workflowName"] == null)  return "Missing workflowName"
+            if (plan["goalSummary"]  == null)  return "Missing goalSummary"
+            if (plan["confidence"]   == null)  return "Missing confidence"
+            if (plan["trigger"]      == null)  return "Missing trigger"
+
+            val confidence = (plan["confidence"] as? Number)?.toDouble() ?: return "confidence must be a number"
+            if (confidence < 0 || confidence > 1) return "confidence must be 0-1"
+
+            val trigger = plan["trigger"] as? Map<*, *> ?: return "trigger must be an object"
+            if (trigger["type"] == null) return "trigger.type is required"
+
+            val steps = plan["steps"] as? List<*> ?: return "steps must be an array"
+            if (steps.isEmpty()) return "steps array is empty"
+
+            val edges = plan["edges"] as? List<*> ?: return "edges must be an array"
+
+            // Verify all steps have tempId and type
+            val tempIds = mutableSetOf<String>()
+            for ((i, step) in steps.withIndex()) {
+                val s = step as? Map<*, *> ?: return "steps[$i] must be an object"
+                val tid = s["tempId"]?.toString() ?: return "steps[$i].tempId is required"
+                if (tid in tempIds) return "Duplicate tempId: $tid"
+                tempIds.add(tid)
+                if (s["name"] == null) return "steps[$i].name is required"
+                if (s["type"] == null) return "steps[$i].type is required"
             }
+
+            // Verify edges reference real tempIds
+            for ((i, edge) in edges.withIndex()) {
+                val e = edge as? Map<*, *> ?: return "edges[$i] must be an object"
+                val from = e["from"]?.toString() ?: return "edges[$i].from is required"
+                val to   = e["to"]?.toString()   ?: return "edges[$i].to is required"
+                if (from !in tempIds) return "edges[$i].from='$from' does not match any step tempId"
+                if (to   !in tempIds) return "edges[$i].to='$to' does not match any step tempId"
+            }
+
+            null // valid
         } catch (e: Exception) {
             "Invalid JSON: ${e.message?.take(100)}"
         }

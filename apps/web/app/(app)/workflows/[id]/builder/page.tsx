@@ -460,24 +460,50 @@ function WorkflowBuilderInner() {
   }, [id, setNodes, setEdges]);
 
   // ── Architect animation reveal ────────────────────────────────────────────
+  // Uses server-provided animationSteps from sessionStorage if available.
+  // Falls back to time-based reveal with generic messages.
+  // Critically: animation is purely cosmetic — it does NOT make API calls.
+  // The full graph is already loaded; we just progressively show it.
   useEffect(() => {
-    if (!shouldAnimate || !nodes.length) return;
-    const msgs = [
-      "Building your workflow…", "Adding trigger node…", "Connecting agents…",
-      "Adding approval gates…", "Finalizing connections…", "Workflow ready!",
-    ];
-    let i = 0;
-    const t = setInterval(() => {
-      i++;
-      setAnimationLabel(msgs[Math.min(i, msgs.length - 1)]);
-      setAnimationProgress(Math.min(100, (i / msgs.length) * 100));
-      if (i >= msgs.length) {
-        clearInterval(t);
-        setTimeout(() => setAnimatingArchitect(false), 600);
-      }
-    }, 800);
-    return () => clearInterval(t);
-  }, [shouldAnimate, nodes.length]);
+    if (!animatingArchitect || !nodes.length) return;
+
+    // Try to load animationSteps stored in sessionStorage by architect page
+    let steps: Array<{ type: string; title: string; delayMs: number }> = [];
+    try {
+      const stored = sessionStorage.getItem(`architect-anim-${id}`);
+      if (stored) steps = JSON.parse(stored) as typeof steps;
+    } catch { /* ignore */ }
+
+    if (steps.length > 0) {
+      // Server-driven animation: use actual step titles + delays
+      steps.forEach((step, i) => {
+        setTimeout(() => {
+          setAnimationLabel(step.title);
+          setAnimationProgress(Math.round(((i + 1) / steps.length) * 100));
+          if (i === steps.length - 1) {
+            setTimeout(() => setAnimatingArchitect(false), 400);
+          }
+        }, step.delayMs);
+      });
+    } else {
+      // Fallback: time-based with generic messages
+      const msgs = [
+        "Building your workflow…", "Adding trigger node…", "Connecting agents…",
+        "Adding approval gates…", "Finalizing connections…", "Workflow ready!",
+      ];
+      let i = 0;
+      const t = setInterval(() => {
+        setAnimationLabel(msgs[Math.min(i, msgs.length - 1)]);
+        setAnimationProgress(Math.min(100, ((i + 1) / msgs.length) * 100));
+        i++;
+        if (i >= msgs.length) {
+          clearInterval(t);
+          setTimeout(() => setAnimatingArchitect(false), 600);
+        }
+      }, 800);
+      return () => clearInterval(t);
+    }
+  }, [animatingArchitect, nodes.length, id]);
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validation = validateWorkflowGraph(nodes as Node<WFNodeData>[], edges as Edge<WFEdgeData>[]);
@@ -742,11 +768,13 @@ function WorkflowBuilderInner() {
             <p className="text-[16px] font-bold text-stone-900">{animationLabel}</p>
             <p className="text-[13px] text-stone-500">AI Workflow Architect is building your workflow…</p>
           </div>
-          <button type="button"
-            onClick={() => setAnimatingArchitect(false)}
-            className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-[13px] font-medium text-stone-600 hover:bg-stone-50 transition-colors">
-            Skip animation
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button"
+              onClick={() => setAnimatingArchitect(false)}
+              className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-[13px] font-medium text-stone-600 hover:bg-stone-50 transition-colors">
+              Skip animation
+            </button>
+          </div>
         </div>
       )}
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
@@ -799,6 +827,16 @@ function WorkflowBuilderInner() {
           </Link>
 
           {/* Save + Test grouped */}
+          {/* Replay animation button — only shown for architect-created workflows */}
+          {architectSessionId && !animatingArchitect && (
+            <button type="button"
+              onClick={() => setAnimatingArchitect(true)}
+              className="flex items-center gap-1.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3 h-8 text-[11.5px] font-semibold text-amber-700 hover:bg-amber-100 transition-colors"
+              title="Replay build animation">
+              <RefreshCw className="h-3 w-3" /> Replay
+            </button>
+          )}
+
           <div className="ml-1 flex items-center rounded-[10px] border border-slate-200">
             <button
               type="button"

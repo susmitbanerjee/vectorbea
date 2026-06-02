@@ -226,6 +226,15 @@ export default function ArchitectPage() {
     setStep("creating");
     try {
       const result = await createWorkflowFromPlan(session.id, bindings);
+      // Store animation steps so builder can use server-provided timing
+      if (result.animationSteps?.length) {
+        try {
+          sessionStorage.setItem(
+            `architect-anim-${result.workflowId}`,
+            JSON.stringify(result.animationSteps),
+          );
+        } catch { /* ignore quota errors */ }
+      }
       setStep("done");
       toast.success("Workflow created from your plan!");
       setTimeout(() => {
@@ -489,6 +498,52 @@ export default function ArchitectPage() {
                         <p className="text-[11px] text-amber-700 mt-1">Approver: {a.approverRole}</p>
                       </div>
                       <RiskBadge level={a.riskLevel as "low" | "medium" | "high"} />
+                    </div>
+                  </div>
+                ))}
+              </PlanCard>
+            )}
+
+            {/* Workflow Steps — ordered list */}
+            {plan.steps.length > 0 && (
+              <PlanCard title="Workflow Steps" count={plan.steps.length} icon={GitBranch}>
+                <div className="space-y-1.5">
+                  {plan.steps.map((s, i) => (
+                    <div key={s.tempId} className="flex items-start gap-3 rounded-lg border border-stone-100 bg-stone-50 px-3 py-2.5">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-200 text-[10px] font-black text-stone-600">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-[12.5px] font-bold text-stone-800">{s.name}</p>
+                          <span className="rounded bg-stone-100 px-1.5 py-px text-[9px] font-mono uppercase tracking-wider text-stone-500">{s.type}</span>
+                        </div>
+                        <p className="text-[11.5px] text-stone-500 mt-0.5 line-clamp-1">{s.description}</p>
+                        {s.dependsOn?.length > 0 && (
+                          <p className="text-[10.5px] text-stone-400 mt-0.5">depends on: {s.dependsOn.join(", ")}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </PlanCard>
+            )}
+
+            {/* Required connections — shown in plan review with status */}
+            {plan.requiredConnections?.length > 0 && (
+              <PlanCard title="Required Connections" count={plan.requiredConnections.length} icon={Globe2}>
+                {plan.requiredConnections.map(conn => (
+                  <div key={conn.tempId} className="flex items-start justify-between gap-3 rounded-xl border border-stone-100 bg-stone-50 px-4 py-3">
+                    <div className="flex-1">
+                      <p className="text-[13px] font-bold text-stone-800">{conn.name}</p>
+                      <p className="text-[11.5px] text-stone-500 mt-0.5">{conn.setupInstructions}</p>
+                      <p className="text-[11px] text-stone-400 mt-1">Used by: {conn.usedBy.join(", ")}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {conn.requiredForSimulation ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9.5px] font-bold text-amber-700">SIM REQUIRED</span>
+                      ) : (
+                        <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[9.5px] font-bold text-stone-500">OPTIONAL FOR SIM</span>
+                      )}
+                      <span className="rounded-full bg-red-50 border border-red-200 px-2 py-0.5 text-[9.5px] font-bold text-red-600">NOT CONNECTED</span>
                     </div>
                   </div>
                 ))}

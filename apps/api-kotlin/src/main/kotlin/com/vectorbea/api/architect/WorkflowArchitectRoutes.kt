@@ -42,13 +42,24 @@ class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
             ))
         }
 
-        val envId = ctx.environmentId
+        // Fix: use real appUserId from authenticated principal
+        val envId  = ctx.environmentId
             ?: throw ApiError.ValidationError("X-Environment-Id header is required")
+        val userId = req.principal?.appUserId
+            ?: throw ApiError.Unauthorized("Authentication required for AI Architect")
+
+        // Fix: gate on config flag
+        if (!service.isEnabled()) {
+            return Response.json(403, mapOf(
+                "error" to "ARCHITECT_DISABLED",
+                "message" to "AI Workflow Architect is not enabled for this environment.",
+            ))
+        }
 
         val session = service.createSession(
             workspaceId   = ctx.workspaceId,
             environmentId = envId,
-            userId        = ctx.workspaceId, // use workspaceId as proxy — replace with real userId when available
+            userId        = userId,
             goal          = goal,
         )
 
@@ -104,6 +115,16 @@ class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
         val body = req.bodyAs<Map<String, Any?>>()
         val instruction = body["instruction"]?.toString()?.trim()
             ?: throw ApiError.ValidationError("'instruction' is required")
+        // Fix: enforce revision limit
+        val session0 = service.repo.findById(id, ctx.workspaceId)
+            ?: throw ApiError.NotFound("Architect session")
+        val revCount = service.repo.getRevisionCount(id)
+        if (revCount >= WorkflowArchitectService.MAX_REVISIONS) {
+            return Response.json(429, mapOf(
+                "error" to "REVISION_LIMIT_EXCEEDED",
+                "message" to "Maximum revisions (${WorkflowArchitectService.MAX_REVISIONS}) reached for this session.",
+            ))
+        }
 
         val session = service.repo.findById(id, ctx.workspaceId)
             ?: throw ApiError.NotFound("Architect session")

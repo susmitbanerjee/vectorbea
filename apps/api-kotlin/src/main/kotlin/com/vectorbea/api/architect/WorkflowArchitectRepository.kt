@@ -106,6 +106,12 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         { rs -> rs.getInt(1) },
     ) ?: 0
 
+    fun getRevisionCount(sessionId: UUID): Int = queryOne(
+        "SELECT COUNT(*) FROM workflow_architect_events WHERE session_id=? AND event_type='ARCHITECT_PLAN_REVISED'",
+        { setObject(1, sessionId) },
+        { rs -> rs.getInt(1) },
+    ) ?: 0
+
     fun appendEvent(workspaceId: UUID, sessionId: UUID, eventType: String, title: String, message: String? = null) {
         execute("""
             INSERT INTO workflow_architect_events (workspace_id, session_id, sequence, event_type, title, message)
