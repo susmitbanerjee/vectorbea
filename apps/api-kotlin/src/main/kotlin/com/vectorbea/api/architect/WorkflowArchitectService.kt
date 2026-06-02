@@ -18,7 +18,7 @@ import javax.sql.DataSource
  * Security: never logs or returns secrets. All LLM calls sanitized.
  */
 class WorkflowArchitectService(
-    internal val repo: WorkflowArchitectRepository,
+    val repo: WorkflowArchitectRepository,
     private val workflowRepo: WorkflowRepository,
     private val dataSource: DataSource,
     private val config: AppConfig,
