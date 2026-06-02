@@ -1,12 +1,12 @@
 "use client";
 import type { ViewMode } from "@/types/runs";
-import { Briefcase, Code2, ScrollText } from "lucide-react";
+import { Briefcase, Code2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Logs is now a tab beside the timeline, not a separate view mode.
 const VIEW_OPTIONS: { id: ViewMode; label: string; Icon: React.ElementType }[] = [
-  { id: "business",    label: "Business",    Icon: Briefcase  },
-  { id: "engineering", label: "Engineering", Icon: Code2      },
-  { id: "logs",        label: "Logs",        Icon: ScrollText },
+  { id: "business",    label: "Business",    Icon: Briefcase },
+  { id: "engineering", label: "Engineering", Icon: Code2     },
 ];
 
 export function RunViewToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }) {
