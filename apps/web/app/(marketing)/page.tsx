@@ -142,10 +142,7 @@ export default function MarketingPage() {
           <nav className="hidden items-center gap-1 sm:flex">
             {["Features", "How it works", "Pricing"].map(label => (
               <a key={label} href={`#${label.toLowerCase().replace(/\s/g, "")}`}
-                className="rounded-lg px-4 py-2 text-[13.5px] font-medium transition-colors"
-                style={{ color: "rgba(255,255,255,0.55)" }}
-                onMouseEnter={e => (e.currentTarget.style.color = "rgba(255,255,255,0.9)")}
-                onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.55)")}>
+                className="rounded-lg px-4 py-2 text-[13.5px] font-medium transition-colors text-white/55 hover:text-white/90">
                 {label}
               </a>
             ))}
@@ -450,8 +447,7 @@ export default function MarketingPage() {
           <div className="flex items-center gap-6">
             {["Privacy", "Terms", "Docs"].map(link => (
               <a key={link} href={`/${link.toLowerCase()}`}
-                className="text-[12.5px] transition-colors"
-                style={{ color: "rgba(255,255,255,0.25)" }}>
+                className="text-[12.5px] text-white/25 transition-colors hover:text-white/50">
                 {link}
               </a>
             ))}
