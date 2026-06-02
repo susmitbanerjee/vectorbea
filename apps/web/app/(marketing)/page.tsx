@@ -34,24 +34,6 @@ function BeeSVG({ size = 24, className = "" }: { size?: number; className?: stri
   );
 }
 
-// ─── Animated bee ─────────────────────────────────────────────────────────────
-function FlyingBee({ delay = 0, y = 20, size = 28, speed = 18 }: { delay?: number; y?: number; size?: number; speed?: number }) {
-  return (
-    <div
-      className="pointer-events-none absolute"
-      style={{
-        top: `${y}%`,
-        left: "-60px",
-        animation: `flyBee ${speed}s ${delay}s linear infinite`,
-        zIndex: 2,
-      }}
-    >
-      <div style={{ animation: `wiggle 0.4s ease-in-out infinite alternate` }}>
-        <BeeSVG size={size} />
-      </div>
-    </div>
-  );
-}
 
 // ─── Hex cell ─────────────────────────────────────────────────────────────────
 function HexCell({ x, y, opacity = 0.06 }: { x: number; y: number; opacity?: number }) {
@@ -150,27 +132,10 @@ export default function MarketingPage() {
     <>
       {/* Bee animation keyframes */}
       <style>{`
-        @keyframes flyBee {
-          0%   { transform: translateX(-60px) translateY(0px); }
-          20%  { transform: translateX(20vw) translateY(-30px); }
-          40%  { transform: translateX(40vw) translateY(15px); }
-          60%  { transform: translateX(60vw) translateY(-20px); }
-          80%  { transform: translateX(80vw) translateY(10px); }
-          100% { transform: translateX(110vw) translateY(-5px); }
-        }
-        @keyframes wiggle {
-          from { transform: translateY(0px) rotate(-5deg); }
-          to   { transform: translateY(-6px) rotate(5deg); }
-        }
         @keyframes floatBee {
           0%,100% { transform: translateY(0px) rotate(-3deg); }
-          50%     { transform: translateY(-12px) rotate(3deg); }
+          50%     { transform: translateY(-8px) rotate(3deg); }
         }
-        @keyframes hexPulse {
-          0%,100% { opacity: 0.04; }
-          50%     { opacity: 0.12; }
-        }
-        .hex-pulse { animation: hexPulse 3s ease-in-out infinite; }
         .float-bee { animation: floatBee 3s ease-in-out infinite; }
       `}</style>
 
@@ -226,12 +191,6 @@ export default function MarketingPage() {
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] pointer-events-none"
             style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251,191,36,0.22) 0%, transparent 70%)" }} />
 
-          {/* Flying bees */}
-          <FlyingBee delay={0}  y={15} size={28} speed={22} />
-          <FlyingBee delay={4}  y={55} size={20} speed={28} />
-          <FlyingBee delay={9}  y={30} size={24} speed={20} />
-          <FlyingBee delay={14} y={70} size={18} speed={32} />
-          <FlyingBee delay={2}  y={80} size={22} speed={25} />
 
           {/* Content */}
           <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 lg:px-16 xl:px-24 pt-28 pb-16" style={{ minHeight: "100vh" }}>
@@ -325,17 +284,15 @@ export default function MarketingPage() {
                   <div className="flex items-center gap-6 flex-wrap pl-16">
                     <WNode icon={<Activity className="h-3.5 w-3.5" />} label="Notify & Archive" type="HTTP · TOOL" accent="#0891B2" />
                   </div>
-                  {/* Little bee workers */}
+                  {/* Active agents indicator */}
                   <div className="flex items-center gap-3 pt-2 border-t border-stone-100">
-                    <span className="text-[11px] text-stone-400">Hive workers:</span>
+                    <span className="text-[11px] text-stone-400">Active agents:</span>
                     <div className="flex gap-1">
-                      {[0.2, 0.4, 0.6].map((d, i) => (
-                        <div key={i} style={{ animation: `floatBee 2.5s ${d}s ease-in-out infinite` }}>
-                          <BeeSVG size={20} />
-                        </div>
+                      {[0,1,2].map(i => (
+                        <span key={i} className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" style={{ animationDelay: `${i * 0.3}s` }} />
                       ))}
                     </div>
-                    <span className="text-[11px] text-stone-400">3 agents active</span>
+                    <span className="text-[11px] text-stone-400">3 workers running</span>
                   </div>
                 </div>
 
@@ -441,14 +398,6 @@ export default function MarketingPage() {
           <div className="absolute inset-0 pointer-events-none"
             style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251,191,36,0.15) 0%, transparent 70%)" }} />
 
-          {/* Floating bee cluster */}
-          <div className="absolute right-16 top-1/3 flex gap-3 opacity-40">
-            {[0, 0.8, 1.6].map((d, i) => (
-              <div key={i} style={{ animation: `floatBee 3s ${d}s ease-in-out infinite` }}>
-                <BeeSVG size={32} />
-              </div>
-            ))}
-          </div>
 
           <div className="relative z-10 w-full text-center px-6 lg:px-16 xl:px-24">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2"
