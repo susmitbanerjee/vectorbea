@@ -2,7 +2,7 @@
 plugins {
     kotlin("jvm") version "2.1.20"
     application
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "8.3.6"
 }
 
 group = "com.vectorbea"
@@ -63,7 +63,7 @@ tasks.test {
 // causes Flyway's PostgreSQL database-type provider to disappear and Flyway to
 // report "Unsupported Database" even for well-supported PostgreSQL versions.
 // Shadow's mergeServiceFiles() appends all service declarations correctly.
-tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
+tasks.named<com.github.johnrengelman.shadow.tasks.ShadowJar>("shadowJar") {
     archiveClassifier = "all"
     mergeServiceFiles()
 }
