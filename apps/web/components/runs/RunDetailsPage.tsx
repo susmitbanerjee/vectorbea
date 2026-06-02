@@ -15,22 +15,20 @@ import { InputsOutputsTab } from "./tabs/InputsOutputsTab";
 import { RecoveryTab } from "./tabs/RecoveryTab";
 import { cn } from "@/lib/utils";
 
-type TabId = "logs" | "inputs_outputs" | "tool_calls" | "approvals" | "events" | "recovery";
+// Tabs: Logs | Recovery | Tool Calls | Event History (engineering)
+// Removed: Activity (renamed to Logs), Approvals, Outputs
+type TabId = "logs" | "recovery" | "tool_calls" | "events";
 
 const BUSINESS_TABS: { id: TabId; label: string }[] = [
-  { id: "logs",          label: "Activity" },
-  { id: "approvals",     label: "Approvals" },
-  { id: "inputs_outputs",label: "Outputs" },
-  { id: "recovery",      label: "Recovery" },
+  { id: "logs",     label: "Logs" },
+  { id: "recovery", label: "Recovery" },
 ];
 
 const ENGINEERING_TABS: { id: TabId; label: string }[] = [
-  { id: "logs",          label: "Logs" },
-  { id: "inputs_outputs",label: "Inputs & Outputs" },
-  { id: "tool_calls",    label: "Tool Calls" },
-  { id: "approvals",     label: "Approvals" },
-  { id: "events",        label: "Event History" },
-  { id: "recovery",      label: "Recovery" },
+  { id: "logs",       label: "Logs" },
+  { id: "recovery",   label: "Recovery" },
+  { id: "tool_calls", label: "Tool Calls" },
+  { id: "events",     label: "Event History" },
 ];
 
 export function RunDetailsPage({
@@ -72,9 +70,9 @@ export function RunDetailsPage({
 
   // Badge counts for tabs
   const badgeCounts: Partial<Record<TabId, number>> = {
-    approvals:  run.approvals.filter(a => a.status === "requested").length || undefined,
     tool_calls: run.toolCalls.length || undefined,
     events:     run.events.length || undefined,
+    logs:       run.logs.length || undefined,
   };
 
   return (
@@ -166,13 +164,11 @@ export function RunDetailsPage({
         </div>
 
         {/* Tab content */}
-        <div className="p-4 min-h-[300px]">
-          {activeTab === "logs" && <LogsTab run={run} viewMode={viewMode} />}
-          {activeTab === "inputs_outputs" && <InputsOutputsTab run={run} selectedStep={undefined} />}
+        <div className={activeTab === "logs" ? "" : "p-4 min-h-[300px]"}>
+          {activeTab === "logs"       && <LogsTab run={run} viewMode={viewMode} rawEvents={rawEvents} />}
+          {activeTab === "recovery"   && <RecoveryTab run={run} viewMode={viewMode} onAction={handleAction} />}
           {activeTab === "tool_calls" && <ToolCallsTab run={run} />}
-          {activeTab === "approvals" && <ApprovalsTab run={run} onAction={handleAction} />}
-          {activeTab === "events" && <EventHistoryTab run={run} />}
-          {activeTab === "recovery" && <RecoveryTab run={run} viewMode={viewMode} onAction={handleAction} />}
+          {activeTab === "events"     && <EventHistoryTab run={run} />}
         </div>
       </div>}
     </div>
