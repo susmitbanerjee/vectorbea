@@ -373,7 +373,9 @@ class WorkflowArchitectRoutes(
             (p.contains("http") && (s == "http" || s == "http_api" || s == "rest" || s == "api")) ||
             (p.contains("email") && (s == "email" || s == "smtp" || s == "sendgrid" || s == "resend")) ||
             (p.contains("database") && (s == "database" || s == "db" || s == "postgres" || s == "mysql")) ||
-            (p.contains("llm") && (s == "llm" || s == "openai" || s == "anthropic" || s == "ai")) ||
+            ((p.contains("llm") || p.contains("provider")) &&
+                (s == "llm" || s == "openai" || s == "anthropic" || s == "ai" ||
+                 s.contains("llm") || s.contains("openai") || s.contains("anthropic") || s.contains("claude"))) ||
             (p.contains("slack") && s == "slack") ||
             s.contains(p) || p.contains(s)
     }

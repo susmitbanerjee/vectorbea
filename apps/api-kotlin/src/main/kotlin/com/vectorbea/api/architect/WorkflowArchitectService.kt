@@ -320,6 +320,24 @@ class WorkflowArchitectService(
         val genTools = repo.listGeneratedTools(session.id).associateBy { it.tempToolId }
         val workflowName = plan["workflowName"]?.toString() ?: "AI Workflow"
 
+        // Build tempConnectionId → boundConnectionId map from session requirements
+        val connReqsByTempId = repo.listConnectionRequirements(session.id)
+            .filter { it.boundConnectionId != null }
+            .associateBy { it.tempConnectionId }
+
+        // Find a workspace-level LLM connection as fallback
+        // (any connection whose type contains "llm", "openai", "anthropic", "ai")
+        val llmFallbackConnectionId: UUID? = connectionRepo.list(
+            workspaceId = session.workspaceId, environmentId = null, type = null, status = null
+        ).items.firstOrNull { conn ->
+            val t = conn.type.lowercase()
+            t.contains("llm") || t.contains("openai") || t.contains("anthropic") ||
+            t.contains("ai") || t.contains("claude") || t.contains("gemini") ||
+            conn.provider.lowercase().let { p ->
+                p.contains("openai") || p.contains("anthropic") || p.contains("llm")
+            }
+        }?.id
+
         var seq = 50
         val result = mutableListOf<GeneratedAgent>()
 
@@ -348,6 +366,17 @@ class WorkflowArchitectService(
                     outputSchemaJson = outputSchema,
                 )
 
+            // Resolve LLM connection: plan tempId → bound connection → workspace fallback
+            val llmTempId = a["llmConnectionTempId"]?.toString()
+            val llmConnectionId: UUID? = llmTempId?.let { connReqsByTempId[it]?.boundConnectionId }
+                ?: llmFallbackConnectionId
+
+            if (llmConnectionId == null) {
+                log.warn("[architect] agent '{}' has no LLM connection — will use platform default if configured", name)
+            } else {
+                log.info("[architect] agent '{}' → llmConnectionId={}", name, llmConnectionId)
+            }
+
             val status = if (!allToolsReady) "blocked_missing_tools" else "planned"
 
             val genAgent = repo.upsertGeneratedAgent(
@@ -364,21 +393,22 @@ class WorkflowArchitectService(
                         "-" + session.id.toString().take(6)
                     val modelHints = a["modelHints"] as? Map<*, *>
                     val agent = agentRepo.create(CreateAgentRequest(
-                        workspaceId   = session.workspaceId,
-                        environmentId = session.environmentId,
-                        name          = name,
-                        slug          = slug,
-                        type          = type,
-                        role          = role,
-                        instructions  = systemPrompt,
-                        modelName     = config.architectModel ?: "gpt-4o-mini",
-                        temperature   = (modelHints?.get("temperature") as? Number)?.toDouble() ?: 0.2,
-                        maxTokens     = (modelHints?.get("maxTokens") as? Number)?.toInt() ?: 1200,
-                        allowedToolIds = boundToolIds,
-                        outputSchema  = runCatching {
+                        workspaceId      = session.workspaceId,
+                        environmentId    = session.environmentId,
+                        name             = name,
+                        slug             = slug,
+                        type             = type,
+                        role             = role,
+                        instructions     = systemPrompt,
+                        llmConnectionId  = llmConnectionId,   // ← resolved LLM connection
+                        modelName        = config.architectModel ?: "gpt-4o-mini",
+                        temperature      = (modelHints?.get("temperature") as? Number)?.toDouble() ?: 0.2,
+                        maxTokens        = (modelHints?.get("maxTokens") as? Number)?.toInt() ?: 1200,
+                        allowedToolIds   = boundToolIds,
+                        outputSchema     = runCatching {
                             mapper.readValue(outputSchema, Map::class.java) as Map<String, Any>
                         }.getOrDefault(emptyMap()),
-                        status        = "active",
+                        status           = "active",
                     ))
                     repo.updateGeneratedAgentId(genAgent.id, agent.id, mapper.writeValueAsString(boundToolIds), "created")
                     log.info("[architect] created agent '{}' → {}", name, agent.id)
