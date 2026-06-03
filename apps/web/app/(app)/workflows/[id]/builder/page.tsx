@@ -308,6 +308,13 @@ function WorkflowBuilderInner() {
   const [animatingArchitect, setAnimatingArchitect] = useState(shouldAnimate);
   const [animationProgress, setAnimationProgress] = useState(0);
   const [animationLabel, setAnimationLabel] = useState("Building your workflow…");
+  // Track which node/edge IDs are currently revealed during architect animation
+  const [visibleNodeIds, setVisibleNodeIds] = useState<Set<string> | null>(
+    shouldAnimate ? new Set() : null   // null = no animation mode (show all)
+  );
+  const [visibleEdgeIds, setVisibleEdgeIds] = useState<Set<string> | null>(
+    shouldAnimate ? new Set() : null
+  );
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
@@ -459,51 +466,77 @@ function WorkflowBuilderInner() {
     void load();
   }, [id, setNodes, setEdges]);
 
-  // ── Architect animation reveal ────────────────────────────────────────────
-  // Uses server-provided animationSteps from sessionStorage if available.
-  // Falls back to time-based reveal with generic messages.
-  // Critically: animation is purely cosmetic — it does NOT make API calls.
-  // The full graph is already loaded; we just progressively show it.
+  // ── Architect animation — real node/edge reveal ──────────────────────────
+  // When animate=true the canvas starts with ALL nodes hidden (visibleNodeIds=empty Set).
+  // Animation steps progressively add IDs to visibleNodeIds / visibleEdgeIds so nodes
+  // and edges appear one by one. Skipping sets both sets to null = show everything.
+  // Replaying resets sets to empty and re-runs the sequence.
+  // The full graph is already in React Flow state — we only filter what is rendered.
   useEffect(() => {
-    if (!animatingArchitect || !nodes.length) return;
+    if (!animatingArchitect) return;
+    // Reset visible sets so canvas starts empty
+    setVisibleNodeIds(new Set());
+    setVisibleEdgeIds(new Set());
 
-    // Try to load animationSteps stored in sessionStorage by architect page
-    let steps: Array<{ type: string; title: string; delayMs: number }> = [];
+    // Load server-provided steps from sessionStorage (written by architect page on workflow creation)
+    let steps: Array<{ type: string; title: string; nodeId?: string; edgeId?: string; delayMs?: number; durationMs?: number }> = [];
     try {
       const stored = sessionStorage.getItem(`architect-anim-${id}`);
       if (stored) steps = JSON.parse(stored) as typeof steps;
     } catch { /* ignore */ }
 
-    if (steps.length > 0) {
-      // Server-driven animation: use actual step titles + delays
-      steps.forEach((step, i) => {
-        setTimeout(() => {
-          setAnimationLabel(step.title);
-          setAnimationProgress(Math.round(((i + 1) / steps.length) * 100));
-          if (i === steps.length - 1) {
-            setTimeout(() => setAnimatingArchitect(false), 400);
-          }
-        }, step.delayMs);
-      });
-    } else {
-      // Fallback: time-based with generic messages
-      const msgs = [
-        "Building your workflow…", "Adding trigger node…", "Connecting agents…",
-        "Adding approval gates…", "Finalizing connections…", "Workflow ready!",
-      ];
-      let i = 0;
-      const t = setInterval(() => {
-        setAnimationLabel(msgs[Math.min(i, msgs.length - 1)]);
-        setAnimationProgress(Math.min(100, ((i + 1) / msgs.length) * 100));
-        i++;
-        if (i >= msgs.length) {
-          clearInterval(t);
-          setTimeout(() => setAnimatingArchitect(false), 600);
-        }
-      }, 800);
-      return () => clearInterval(t);
+    if (steps.length === 0) {
+      // Fallback: build reveal steps from current nodes/edges with generic timing
+      let delay = 300;
+      steps = [{ type: "thinking", title: "Building your workflow…", delayMs: 0 }];
+      for (const node of nodes) {
+        steps.push({ type: "add_node", title: `Adding ${(node.data as { label?: string }).label ?? node.id}`, nodeId: node.id, delayMs: delay });
+        delay += 380;
+      }
+      for (const edge of edges) {
+        steps.push({ type: "add_edge", title: "Connecting…", edgeId: edge.id, delayMs: delay });
+        delay += 270;
+      }
+      steps.push({ type: "complete", title: "Workflow ready!", delayMs: delay + 600 });
     }
-  }, [animatingArchitect, nodes.length, id]);
+
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    steps.forEach((step, i) => {
+      const delay = step.delayMs ?? step.durationMs ?? i * 400;
+      timers.push(setTimeout(() => {
+        setAnimationLabel(step.title);
+        setAnimationProgress(Math.round(((i + 1) / steps.length) * 100));
+
+        if (step.type === "add_node" && step.nodeId) {
+          setVisibleNodeIds(prev => prev ? new Set([...prev, step.nodeId!]) : null);
+        }
+        if (step.type === "add_edge" && step.edgeId) {
+          setVisibleEdgeIds(prev => prev ? new Set([...prev, step.edgeId!]) : null);
+        }
+        if (step.type === "complete") {
+          // Reveal any remaining nodes/edges (safety net)
+          setVisibleNodeIds(null);
+          setVisibleEdgeIds(null);
+          setTimeout(() => setAnimatingArchitect(false), 700);
+        }
+      }, delay));
+    });
+
+    return () => timers.forEach(clearTimeout);
+  }, [animatingArchitect, id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When animation is skipped, reveal everything immediately
+  function skipAnimation() {
+    setVisibleNodeIds(null);
+    setVisibleEdgeIds(null);
+    setAnimatingArchitect(false);
+  }
+
+  // When replayed, reset and re-run
+  function replayAnimation() {
+    setAnimatingArchitect(false);
+    setTimeout(() => setAnimatingArchitect(true), 50);
+  }
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validation = validateWorkflowGraph(nodes as Node<WFNodeData>[], edges as Edge<WFEdgeData>[]);
@@ -755,27 +788,33 @@ function WorkflowBuilderInner() {
 
       {/* ── AI Architect creation animation overlay ──────────────────────────── */}
       {animatingArchitect && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-6"
-          style={{ background: "rgba(255,251,240,0.97)", backdropFilter: "blur(8px)" }}>
-          <div className="relative flex h-20 w-20 items-center justify-center">
-            <div className="absolute inset-0 rounded-full border-4 border-amber-100" />
-            <div className="absolute inset-0 rounded-full border-4 border-t-amber-500 animate-spin" />
-            <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="1.75">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8Z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+        <>
+          {/* Progress panel — bottom right */}
+          <div className="absolute bottom-5 right-5 z-50 w-64 rounded-2xl border border-amber-200 bg-white/95 shadow-xl backdrop-blur-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-amber-100 flex items-center gap-2">
+              <div className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <span className="text-[12px] font-bold text-amber-900 truncate">{animationLabel}</span>
+            </div>
+            <div className="px-4 py-2.5">
+              <div className="h-1.5 w-full rounded-full bg-amber-100 overflow-hidden">
+                <div className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                  style={{ width: `${animationProgress}%` }} />
+              </div>
+              <p className="mt-2 text-[10.5px] text-stone-400">Vectorbea is building your workflow step by step</p>
+            </div>
+            <div className="px-4 pb-3">
+              <button type="button" onClick={skipAnimation}
+                className="w-full rounded-xl border border-stone-200 bg-stone-50 py-1.5 text-[12px] font-medium text-stone-500 hover:bg-stone-100 transition-colors">
+                Skip animation
+              </button>
+            </div>
           </div>
-          <div className="text-center space-y-2">
-            <p className="text-[16px] font-bold text-stone-900">{animationLabel}</p>
-            <p className="text-[13px] text-stone-500">AI Workflow Architect is building your workflow…</p>
+          {/* Top-center status banner */}
+          <div className="absolute top-3 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-2 shadow-sm backdrop-blur-sm flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="text-[12.5px] font-semibold text-amber-800">Vectorbea is building your workflow…</span>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button"
-              onClick={() => setAnimatingArchitect(false)}
-              className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-[13px] font-medium text-stone-600 hover:bg-stone-50 transition-colors">
-              Skip animation
-            </button>
-          </div>
-        </div>
+        </>
       )}
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
       <div
@@ -830,7 +869,7 @@ function WorkflowBuilderInner() {
           {/* Replay animation button — only shown for architect-created workflows */}
           {architectSessionId && !animatingArchitect && (
             <button type="button"
-              onClick={() => setAnimatingArchitect(true)}
+              onClick={replayAnimation}
               className="flex items-center gap-1.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3 h-8 text-[11.5px] font-semibold text-amber-700 hover:bg-amber-100 transition-colors"
               title="Replay build animation">
               <RefreshCw className="h-3 w-3" /> Replay
@@ -943,8 +982,12 @@ function WorkflowBuilderInner() {
           )}
 
           <ReactFlow
-            nodes={nodes}
-            edges={edges}
+            nodes={visibleNodeIds !== null
+              ? nodes.map(n => ({ ...n, hidden: !visibleNodeIds.has(n.id) }))
+              : nodes}
+            edges={visibleEdgeIds !== null
+              ? edges.map(e => ({ ...e, hidden: !visibleEdgeIds.has(e.id) }))
+              : edges}
             onNodesChange={(changes) => {
               onNodesChange(changes);
               setUnsaved(true);

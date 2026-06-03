@@ -7,6 +7,7 @@ import com.vectorbea.api.repository.CreateAgentRequest
 import com.vectorbea.api.repository.CreateToolRequest
 import com.vectorbea.api.repository.CreateWorkflowRequest
 import com.vectorbea.api.repository.CreateWorkflowVersionRequest
+import com.vectorbea.api.repository.ConnectionRepository
 import com.vectorbea.api.repository.ToolRepository
 import com.vectorbea.api.repository.WorkflowRepository
 import org.slf4j.LoggerFactory
@@ -29,6 +30,7 @@ class WorkflowArchitectService(
     private val workflowRepo: WorkflowRepository,
     private val toolRepo: ToolRepository,
     private val agentRepo: AgentRepository,
+    private val connectionRepo: ConnectionRepository,
     @Suppress("unused") private val dataSource: DataSource,
     private val config: AppConfig,
 ) {
@@ -175,9 +177,9 @@ class WorkflowArchitectService(
     fun bindExistingConnection(session: ArchitectSession, requirementId: UUID, connectionId: UUID) {
         val req = repo.findConnectionRequirement(requirementId, session.id)
             ?: throw IllegalArgumentException("Connection requirement not found")
-        // Verify connection belongs to workspace (security check)
-        // We do a simple ownership check via ConnectionRepository would go here;
-        // for now we trust the workspace-scoped API
+        // Security: verify the connection belongs to this workspace — prevents cross-tenant binding
+        connectionRepo.findById(connectionId, session.workspaceId)
+            ?: throw IllegalArgumentException("Connection $connectionId not found in workspace ${session.workspaceId}")
         repo.updateConnectionRequirementStatus(req.id, "selected_existing", boundConnectionId = connectionId)
         repo.appendEvent(session.workspaceId, session.id, "ARCHITECT_CONNECTION_BOUND",
             "Connection bound: ${req.name}", "requirementId=$requirementId")
@@ -323,12 +325,16 @@ class WorkflowArchitectService(
             val boundToolIds = allowedTempToolIds.mapNotNull { genTools[it]?.toolId?.toString() }
             val allToolsReady = allowedTempToolIds.all { genTools[it]?.status == "created" || genTools[it]?.status == null }
 
-            // Use LLM-generated system prompt if present, otherwise generate one
-            val systemPrompt = a["systemPrompt"]?.toString()?.takeIf { it.isNotBlank() && it != "DETAILED production-quality system prompt (200+ words)" }
-                ?: WorkflowArchitectPromptBuilder.buildClarificationPrompt(
-                    "Generate system prompt for $name: $role working in $workflowName"
-                ).let { role ?: "Analyze and process workflow data, return JSON result." }
-                    .let { buildFallbackSystemPrompt(name, it, allowedTempToolIds.mapNotNull { id -> genTools[id]?.name }, workflowName, outputSchema) }
+            // Use LLM-generated system prompt if present and non-placeholder, else build fallback
+            val systemPrompt = a["systemPrompt"]?.toString()
+                ?.takeIf { it.isNotBlank() && it != "DETAILED production-quality system prompt (200+ words)" }
+                ?: buildFallbackSystemPrompt(
+                    name = name,
+                    role = role ?: "Analyze and process workflow data, return a structured JSON result.",
+                    tools = allowedTempToolIds.mapNotNull { genTools[it]?.name },
+                    workflowName = workflowName,
+                    outputSchemaJson = outputSchema,
+                )
 
             val status = if (!allToolsReady) "blocked_missing_tools" else "planned"
 
@@ -444,11 +450,27 @@ class WorkflowArchitectService(
 
             // Validate before creating
             val readinessIssues = validateGraph(session, toolIdMap, agentIdMap)
+            val connReqsForReadiness = repo.listConnectionRequirements(session.id)
+            val allRealExecReady = connReqsForReadiness
+                .filter { it.requiredForRealExecution }
+                .all { it.status == "test_passed" }
+            val noErrors = readinessIssues.none { (it["severity"] as? String) == "error" }
             val readinessStatus = when {
-                readinessIssues.none { (it["severity"] as? String) == "error" } -> "simulation_ready"
-                else -> "needs_connections"
+                noErrors && allRealExecReady && config.architectEnabled -> "real_ready"
+                noErrors                                                 -> "simulation_ready"
+                else                                                     -> "needs_connections"
             }
-            repo.updateReadiness(session.id, readinessStatus, mapper.writeValueAsString(readinessIssues))
+            // Add real-execution readiness issue if connections are not all tested
+            val finalIssues = readinessIssues.toMutableList()
+            if (!allRealExecReady) {
+                val missing = connReqsForReadiness.filter { it.requiredForRealExecution && it.status != "test_passed" }
+                if (missing.isNotEmpty()) {
+                    finalIssues.add(mapOf("severity" to "info", "code" to "REAL_EXECUTION_LOCKED",
+                        "message" to "Real execution requires ${missing.size} connection(s) to be tested: ${missing.joinToString { it.name }}.",
+                        "targetType" to "workflow"))
+                }
+            }
+            repo.updateReadiness(session.id, readinessStatus, mapper.writeValueAsString(finalIssues))
 
             // Create workflow record
             val workflow = workflowRepo.create(CreateWorkflowRequest(
@@ -646,17 +668,29 @@ class WorkflowArchitectService(
             if (nodeType == "tool") {
                 val toolTempId = s["toolTempId"]?.toString()
                 if (toolTempId != null && toolIdMap[toolTempId] == null) {
-                    issues.add(mapOf("severity" to "warning", "code" to "TOOL_NEEDS_CONFIGURATION",
-                        "message" to "Tool '$name' was not created — missing connection or creation failed.",
+                    // error — workflow cannot execute without a real tool record
+                    issues.add(mapOf("severity" to "error", "code" to "TOOL_NEEDS_CONFIGURATION",
+                        "message" to "Tool '$name' has no backing tool record — missing or failed connection binding.",
                         "targetType" to "tool", "targetId" to toolTempId))
                 }
             }
             if (nodeType == "agent") {
                 val agentTempId = s["agentTempId"]?.toString()
                 if (agentTempId != null && agentIdMap[agentTempId] == null) {
-                    issues.add(mapOf("severity" to "warning", "code" to "AGENT_MISSING",
-                        "message" to "Agent '$name' was not created.",
+                    // error — workflow cannot execute without a real agent record
+                    issues.add(mapOf("severity" to "error", "code" to "AGENT_MISSING",
+                        "message" to "Agent '$name' has no backing agent record — creation failed.",
                         "targetType" to "agent", "targetId" to agentTempId))
+                }
+            }
+            // Point 16: high-risk write tool without requiresApproval flag is a warning
+            if (nodeType == "tool") {
+                val toolTempId = s["toolTempId"]?.toString()
+                val genTool = toolTempId?.let { repo.listGeneratedTools(session.id).find { t -> t.tempToolId == it } }
+                if (genTool != null && genTool.riskLevel == "high" && !genTool.requiresApproval) {
+                    issues.add(mapOf("severity" to "warning", "code" to "HIGH_RISK_NO_APPROVAL",
+                        "message" to "Tool '$name' is high-risk but requiresApproval is false. Consider adding an approval gate.",
+                        "targetType" to "tool", "targetId" to toolTempId))
                 }
             }
         }
@@ -838,6 +872,12 @@ ${if (outputSchemaJson != "{}") "Output schema: $outputSchemaJson" else "Return 
             ?: return "workflowSteps must be an array"
         if (steps.isEmpty()) return "workflowSteps array is empty"
 
+        // Build known tool/agent tempIds from plan for orphan checks
+        @Suppress("UNCHECKED_CAST")
+        val knownToolIds  = (plan["tools"]  as? List<*>)?.mapNotNull { (it as? Map<*, *>)?.get("tempToolId")?.toString() }?.toSet()  ?: emptySet<String>()
+        @Suppress("UNCHECKED_CAST")
+        val knownAgentIds = (plan["agents"] as? List<*>)?.mapNotNull { (it as? Map<*, *>)?.get("tempAgentId")?.toString() }?.toSet() ?: emptySet<String>()
+
         val stepIds = mutableSetOf<String>()
         for ((i, step) in steps.withIndex()) {
             val s   = step as? Map<*, *> ?: return "workflowSteps[$i] must be an object"
@@ -845,6 +885,21 @@ ${if (outputSchemaJson != "{}") "Output schema: $outputSchemaJson" else "Return 
             if (tid in stepIds) return "Duplicate tempStepId: $tid"
             stepIds.add(tid)
             if (s["name"] == null) return "workflowSteps[$i].name is required"
+
+            val nodeType = (s["nodeType"] ?: s["type"])?.toString()
+            // Orphan checks: tool/agent nodes must reference a real plan entry
+            if (nodeType == "tool") {
+                val toolRef = s["toolTempId"]?.toString()
+                    ?: return "workflowSteps[$i] (tool node '${s["name"]}') is missing toolTempId"
+                if (toolRef !in knownToolIds)
+                    return "workflowSteps[$i].toolTempId='$toolRef' not found in plan.tools"
+            }
+            if (nodeType == "agent") {
+                val agentRef = s["agentTempId"]?.toString()
+                    ?: return "workflowSteps[$i] (agent node '${s["name"]}') is missing agentTempId"
+                if (agentRef !in knownAgentIds)
+                    return "workflowSteps[$i].agentTempId='$agentRef' not found in plan.agents"
+            }
         }
 
         val edges = plan["edges"] as? List<*> ?: return "edges must be an array"
