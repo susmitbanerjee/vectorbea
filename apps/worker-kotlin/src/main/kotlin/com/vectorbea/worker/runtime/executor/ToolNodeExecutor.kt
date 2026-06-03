@@ -577,90 +577,97 @@ class ToolNodeExecutor(
             .replace("\n", "<br>")
     }
 
-    /** Format any value (Map/List/String) into readable HTML for email. */
+    /**
+     * Convert any structured value into a clean, readable plain-text email string.
+     * No JSON, no HTML tags, no code blocks — just human-readable lines.
+     */
     @Suppress("UNCHECKED_CAST")
-    private fun formatValueAsHtml(value: Any?): String = when (value) {
-        is Map<*, *> -> {
-            val sb = StringBuilder()
-            // Handle {trip:{...}, days:[...]} structure
-            val trip = value["trip"] as? Map<*, *>
-            if (trip != null) {
-                val dest = trip["destination"]?.toString()
-                val dates = (trip["dates"] as? Map<*, *>)?.let { "${it["start"]} to ${it["end"]}" }
-                val budget = trip["budget"]?.toString()
-                if (dest != null) sb.append("<h2 style='color:#1a1a1a;'>✈️ $dest Trip</h2>")
-                if (dates != null) sb.append("<p>📅 $dates</p>")
-                if (budget != null) sb.append("<p>💰 Budget: $budget</p>")
-                sb.append("<hr style='border:1px solid #eee;margin:12px 0;'>")
-            }
-            // Handle days array
-            val days = value["days"] as? List<*>
-            if (days != null) {
-                for (dayEntry in days) {
-                    val day = dayEntry as? Map<*, *> ?: continue
-                    val date = day["date"]?.toString() ?: ""
-                    sb.append("<h3 style='color:#333;margin-top:18px;border-bottom:1px solid #eee;padding-bottom:4px;'>📅 $date</h3>")
-                    formatActivitiesHtml(day, sb)
-                }
-            } else {
-                // Handle {date: {...activities...}} map or generic map
-                for ((key, details) in value) {
-                    if (key == "trip") continue
-                    sb.append("<h3 style='color:#333;margin-top:18px;'>$key</h3>")
-                    when (details) {
-                        is Map<*, *> -> formatActivitiesHtml(details, sb)
-                        is List<*>   -> details.forEach { sb.append("<p>${it?.toString()?.replace("\n","<br>")}</p>") }
-                        else         -> sb.append("<p>${details?.toString()?.replace("\n","<br>") ?: ""}</p>")
-                    }
-                }
-            }
-            sb.toString()
-        }
-        is List<*> -> {
-            val sb = StringBuilder()
-            value.forEachIndexed { i, item ->
-                when (item) {
-                    is Map<*, *> -> {
-                        val date = item["date"]?.toString()
-                        if (date != null) sb.append("<h3 style='color:#333;margin-top:18px;'>📅 $date</h3>")
-                        formatActivitiesHtml(item, sb)
-                    }
-                    else -> sb.append("<p>${item?.toString()?.replace("\n","<br>")}</p>")
-                }
-            }
-            sb.toString()
-        }
-        is String -> value.replace("\n", "<br>")
-        else      -> value?.toString()?.replace("\n", "<br>") ?: ""
+    private fun formatValueAsHtml(value: Any?): String {
+        val lines = mutableListOf<String>()
+        flattenToLines(value, lines)
+        return lines.joinToString("\n")
     }
 
-    private fun formatActivitiesHtml(day: Map<*, *>, sb: StringBuilder) {
-        val dest = day["destination"]?.toString()
-        if (dest != null) sb.append("<p><strong>📍 $dest</strong></p>")
-        val activities = day["activities"] as? List<*>
-        if (activities != null) {
-            sb.append("<table style='width:100%;border-collapse:collapse;font-size:13px;'>")
-            for (act in activities) {
-                val a = act as? Map<*, *> ?: continue
-                val time     = a["time"]?.toString() ?: ""
-                val place    = a["place"]?.toString()
-                val activity = a["activity"]?.toString() ?: ""
-                val cost     = a["cost"]?.toString() ?: ""
-                val food     = a["food_suggestion"]?.toString()
-                sb.append("<tr style='border-bottom:1px solid #f0f0f0;'>")
-                sb.append("<td style='padding:6px 8px;color:#888;white-space:nowrap;vertical-align:top;'>$time</td>")
-                sb.append("<td style='padding:6px 8px;vertical-align:top;'>")
-                sb.append("<strong>$activity</strong>")
-                if (!place.isNullOrBlank()) sb.append("<br><span style='color:#666;font-size:12px;'>📍 $place</span>")
-                if (!food.isNullOrBlank()) sb.append("<br><span style='color:#888;font-size:12px;'>🍽 $food</span>")
-                sb.append("</td>")
-                sb.append("<td style='padding:6px 8px;color:#555;text-align:right;white-space:nowrap;vertical-align:top;'>$cost</td>")
-                sb.append("</tr>")
+    @Suppress("UNCHECKED_CAST")
+    private fun flattenToLines(value: Any?, out: MutableList<String>, depth: Int = 0) {
+        when (value) {
+            is Map<*, *> -> {
+                val map = value as Map<*, *>
+
+                // Detect a "day" entry: has date/destination/activities
+                val isDay = map.containsKey("date") || map.containsKey("activities") || map.containsKey("destination")
+
+                if (isDay) {
+                    val date = map["date"]?.toString()
+                    val dest = map["destination"]?.toString()
+                    out.add("")
+                    if (date != null || dest != null) {
+                        out.add("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        val header = listOfNotNull(
+                            date?.let { "📅 $it" },
+                            dest?.let { "📍 $it" }
+                        ).joinToString("  |  ")
+                        out.add(header)
+                        out.add("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    }
+                    val activities = map["activities"] as? List<*>
+                    if (activities != null) {
+                        for (act in activities) {
+                            val a = act as? Map<*, *> ?: continue
+                            val time     = a["time"]?.toString()
+                            val activity = a["activity"]?.toString() ?: a["name"]?.toString() ?: continue
+                            val details  = a["details"]?.toString() ?: a["description"]?.toString()
+                            val cost     = a["cost"]?.toString()
+                            val food     = a["food_suggestion"]?.toString()
+                            val place    = a["place"]?.toString()
+                            val line = buildString {
+                                if (time != null) append("$time  ")
+                                append(activity)
+                                if (!place.isNullOrBlank()) append(" (📍 $place)")
+                                if (!details.isNullOrBlank()) append("\n          → $details")
+                                if (!food.isNullOrBlank()) append("\n          🍽 $food")
+                                if (!cost.isNullOrBlank()) append("\n          💰 $cost")
+                            }
+                            out.add(line)
+                        }
+                    }
+                    val tips       = map["photo_tips"]?.toString()
+                    val backup     = map["backup_plan"]?.toString()
+                    val totalCost  = map["total_cost"]?.toString()
+                    if (!tips.isNullOrBlank())      out.add("📸 $tips")
+                    if (!backup.isNullOrBlank())     out.add("🌧 Backup: $backup")
+                    if (!totalCost.isNullOrBlank())  out.add("💰 Day total: $totalCost")
+                    return
+                }
+
+                // Trip summary block: {destination, dates, budget}
+                val dest   = map["destination"]?.toString()
+                val budget = map["budget"]?.toString()
+                val dates  = map["dates"] as? Map<*, *>
+                if (dest != null || budget != null) {
+                    out.add("")
+                    if (dest != null)   out.add("✈️  Destination: $dest")
+                    if (dates != null)  out.add("📅 Dates: ${dates["start"]} → ${dates["end"]}")
+                    if (budget != null) out.add("💰 Budget: $budget")
+                    out.add("")
+                    return
+                }
+
+                // Generic map — recursively process each key
+                for ((k, v) in map) {
+                    val key = k?.toString() ?: continue
+                    // Skip metadata fields
+                    if (key in setOf("model","provider","tokenCount","finishReason","usage")) continue
+                    when (v) {
+                        is Map<*, *>, is List<*> -> flattenToLines(v, out, depth + 1)
+                        else -> if (v != null) out.add("${k}: $v")
+                    }
+                }
             }
-            sb.append("</table>")
+            is List<*> -> value.forEach { flattenToLines(it, out, depth) }
+            is String  -> if (value.isNotBlank()) out.add(value)
+            else       -> if (value != null) out.add(value.toString())
         }
-        val tips   = day["photo_tips"]?.toString();   if (!tips.isNullOrBlank())   sb.append("<p style='color:#888;font-size:12px;'>📸 $tips</p>")
-        val backup = day["backup_plan"]?.toString();  if (!backup.isNullOrBlank()) sb.append("<p style='color:#888;font-size:12px;'>🌧 $backup</p>")
     }
 
     /** Format raw step outputs as HTML (used when specific field lookup fails). */
