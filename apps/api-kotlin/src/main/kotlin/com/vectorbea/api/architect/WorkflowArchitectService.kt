@@ -212,7 +212,19 @@ class WorkflowArchitectService(
             val t = toolEntry as? Map<*, *> ?: continue
             val tempToolId      = t["tempToolId"]?.toString() ?: continue
             val name            = t["name"]?.toString() ?: "Tool"
-            val type            = t["type"]?.toString() ?: "generic_tool"
+            val rawType         = t["type"]?.toString() ?: "generic_tool"
+            // Normalize LLM type names → worker-supported canonical types
+            val type = when (rawType.lowercase()) {
+                "http_api", "rest_api", "api", "rest" -> "http"
+                "database_read", "db_read"             -> "database_read"
+                "database_write", "db_write"           -> "database_write"
+                "database", "db"                       -> "database"
+                "email", "smtp", "sendgrid", "resend",
+                "builtin_email"                        -> "builtin_email"
+                "slack"                                -> "slack"
+                "crm"                                  -> "crm"
+                else                                   -> "http"  // safest fallback for unknown external types
+            }
             val connTempId      = t["connectionTempId"]?.toString()
             val riskLevel       = t["riskLevel"]?.toString() ?: "low"
             val requiresApproval = (t["requiresApproval"] as? Boolean) ?: (riskLevel == "high")
@@ -596,25 +608,52 @@ class WorkflowArchitectService(
         agentIdMap: Map<String, String>,
     ): String {
         val plan  = mapper.readValue(planJson, Map::class.java) as Map<String, Any?>
-        val steps = plan["workflowSteps"] as? List<*>
-            ?: plan["steps"] as? List<*>
-            ?: emptyList<Any>()
-        val edges = plan["edges"] as? List<*> ?: emptyList<Any>()
+        val steps = (plan["workflowSteps"] as? List<*> ?: plan["steps"] as? List<*> ?: emptyList<Any>())
+        val edges = (plan["edges"] as? List<*> ?: emptyList<Any>())
+        val triggerType = (plan["trigger"] as? Map<*, *>)?.get("type")?.toString() ?: "manual"
 
-        val xSpacing = 280; val yStart = 100; val ySpacing = 180
-        val nodes = steps.mapIndexed { i, step ->
-            val s        = step as? Map<*, *> ?: return@mapIndexed null
+        val xCol1 = 120; val xCol2 = 440; val yStart = 60; val ySpacing = 200
+
+        val allNodes = mutableListOf<Map<String, Any?>>()
+        val allEdges = mutableListOf<Map<String, Any?>>()
+
+        // ── 1. Always ensure a trigger node exists ────────────────────────────
+        val hasTrigger = steps.any { (it as? Map<*, *>)?.let { s ->
+            (s["nodeType"] ?: s["type"])?.toString() == "trigger" } == true }
+        val triggerId = "trigger_auto"
+        if (!hasTrigger) {
+            allNodes.add(mapOf(
+                "id"       to triggerId,
+                "type"     to "trigger",
+                "position" to mapOf("x" to xCol1, "y" to yStart),
+                "data"     to mapOf(
+                    "label"               to "Start",
+                    "nodeType"            to "trigger",
+                    "description"         to "Workflow trigger ($triggerType)",
+                    "generatedByArchitect" to true,
+                    "triggerConfig"       to mapOf("type" to triggerType),
+                ),
+            ))
+        }
+
+        // ── 2. Compile plan steps ─────────────────────────────────────────────
+        val stepNodeIds = mutableListOf<String>()
+        steps.forEachIndexed { i, step ->
+            val s        = step as? Map<*, *> ?: return@forEachIndexed
             val tempId   = (s["tempStepId"] ?: s["tempId"])?.toString() ?: "step_$i"
-            val nodeType = (s["nodeType"] ?: s["type"])?.toString() ?: "tool"
+            val nodeType = (s["nodeType"] ?: s["type"])?.toString()?.let {
+                if (it == "trigger") "trigger" else it
+            } ?: "tool"
             val toolTempId  = s["toolTempId"]?.toString()
             val agentTempId = s["agentTempId"]?.toString()
             val realToolId  = toolTempId?.let { toolIdMap[it] }
             val realAgentId = agentTempId?.let { agentIdMap[it] }
+            val col = if (i % 2 == 0) xCol1 else xCol2
 
-            mapOf(
+            allNodes.add(mapOf(
                 "id"       to tempId,
                 "type"     to nodeType,
-                "position" to mapOf("x" to 120 + (i % 2) * xSpacing, "y" to yStart + (i / 1) * ySpacing),
+                "position" to mapOf("x" to col, "y" to yStart + (i + if (!hasTrigger) 1 else 0) * ySpacing),
                 "data"     to mapOf(
                     "label"               to (s["name"] ?: "Step ${i + 1}"),
                     "description"         to (s["description"] ?: ""),
@@ -627,28 +666,93 @@ class WorkflowArchitectService(
                     "outputMappings"      to (s["outputMappings"] ?: emptyMap<String, Any>()),
                     "generatedByArchitect" to true,
                     "status"              to when {
-                        nodeType == "tool" && realToolId == null   -> "missing_tool"
+                        nodeType == "tool"  && realToolId  == null -> "missing_tool"
                         nodeType == "agent" && realAgentId == null -> "missing_agent"
                         else -> "ready"
                     },
                 ).filterValues { it != null },
-            )
-        }.filterNotNull()
+            ))
+            if (nodeType != "trigger") stepNodeIds.add(tempId)
+        }
 
-        val rfEdges = edges.mapIndexed { i, edge ->
-            val e    = edge as? Map<*, *> ?: return@mapIndexed null
-            val from = (e["from"] ?: e["fromStepTempId"])?.toString() ?: return@mapIndexed null
-            val to   = (e["to"] ?: e["toStepTempId"])?.toString() ?: return@mapIndexed null
-            mapOf(
-                "id"     to "e-$from-$to",
-                "source" to from,
-                "target" to to,
-                "type"   to "workflow",
-                "data"   to mapOf("edgeType" to (e["type"] ?: "success"), "label" to e["label"]),
-            )
-        }.filterNotNull()
+        // ── 3. Plan edges ─────────────────────────────────────────────────────
+        val edgeSet = mutableSetOf<String>()
+        for (edge in edges) {
+            val e    = edge as? Map<*, *> ?: continue
+            val from = (e["from"] ?: e["fromStepTempId"])?.toString() ?: continue
+            val to   = (e["to"]   ?: e["toStepTempId"])?.toString()   ?: continue
+            val key  = "$from→$to"
+            if (key !in edgeSet) {
+                edgeSet.add(key)
+                allEdges.add(mapOf("id" to "e-$from-$to", "source" to from, "target" to to,
+                    "type" to "workflow", "data" to mapOf("edgeType" to (e["type"] ?: "success"))))
+            }
+        }
 
-        return mapper.writeValueAsString(mapOf("nodes" to nodes, "edges" to rfEdges, "version" to "2"))
+        // ── 4. Connect trigger to first non-trigger step if disconnected ──────
+        if (!hasTrigger && stepNodeIds.isNotEmpty()) {
+            val firstStep = stepNodeIds.first()
+            val key = "$triggerId→$firstStep"
+            if (key !in edgeSet) {
+                edgeSet.add(key)
+                allEdges.add(mapOf("id" to "e-$triggerId-$firstStep", "source" to triggerId,
+                    "target" to firstStep, "type" to "workflow",
+                    "data" to mapOf("edgeType" to "success")))
+            }
+        }
+
+        // ── 5. Find nodes that have no outgoing edges and no incoming edges ───
+        //       (disconnected nodes) and wire them linearly from the last connected node
+        val allNodeIds = allNodes.map { it["id"].toString() }.toSet()
+        val sourcesWithOut = allEdges.map { it["source"].toString() }.toSet()
+        val targetsWithIn  = allEdges.map { it["target"].toString() }.toSet()
+
+        // Nodes with no incoming connection (except trigger) should connect from previous
+        var prevId: String? = null
+        for (node in allNodes) {
+            val nid  = node["id"].toString()
+            val type = ((node["data"] as? Map<*, *>)?.get("nodeType") as? String) ?: ""
+            if (type == "trigger") { prevId = nid; continue }
+            if (type == "end")     continue
+            if (nid !in targetsWithIn && prevId != null) {
+                val key = "$prevId→$nid"
+                if (key !in edgeSet) {
+                    edgeSet.add(key)
+                    allEdges.add(mapOf("id" to "e-$prevId-$nid", "source" to prevId,
+                        "target" to nid, "type" to "workflow",
+                        "data" to mapOf("edgeType" to "success")))
+                }
+            }
+            prevId = nid
+        }
+
+        // ── 6. Always add an End node and connect the last dangling node ──────
+        val hasEnd = allNodes.any { ((it["data"] as? Map<*, *>)?.get("nodeType") as? String) == "end" }
+        if (!hasEnd) {
+            val endId  = "end_auto"
+            val lastY  = (allNodes.size + 1) * ySpacing + yStart
+            allNodes.add(mapOf(
+                "id"       to endId,
+                "type"     to "end",
+                "position" to mapOf("x" to xCol1, "y" to lastY),
+                "data"     to mapOf("label" to "End", "nodeType" to "end", "generatedByArchitect" to true),
+            ))
+            // Connect every node that has no outgoing edge → End
+            val sourcesAfterLinear = allEdges.map { it["source"].toString() }.toSet()
+            for (nid in allNodeIds) {
+                if (nid !in sourcesAfterLinear) {
+                    val key = "$nid→$endId"
+                    if (key !in edgeSet) {
+                        edgeSet.add(key)
+                        allEdges.add(mapOf("id" to "e-$nid-$endId", "source" to nid,
+                            "target" to endId, "type" to "workflow",
+                            "data" to mapOf("edgeType" to "success")))
+                    }
+                }
+            }
+        }
+
+        return mapper.writeValueAsString(mapOf("nodes" to allNodes, "edges" to allEdges, "version" to "2"))
     }
 
     @Suppress("UNCHECKED_CAST")
