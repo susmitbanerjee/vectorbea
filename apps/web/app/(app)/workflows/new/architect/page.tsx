@@ -11,7 +11,7 @@ import {
 import { toast } from "sonner";
 import {
   createArchitectSession, generatePlan, revisePlan, approvePlan,
-  useSimulationPlaceholder, testConnection,
+  setSimulationPlaceholder, testConnection,
   generateTools, generateAgents, createWorkflowFromPlan,
   type ArchitectSession, type ArchitectPlan, type ConnectionRequirement,
   type GeneratedTool, type GeneratedAgent, type ReadinessIssue,
@@ -382,7 +382,7 @@ export default function ArchitectPage() {
   async function handleUsePlaceholder(reqId: string) {
     if (!session) return;
     try {
-      await useSimulationPlaceholder(session.id, reqId);
+      await setSimulationPlaceholder(session.id, reqId);
       setConnReqs(prev => prev.map(r => r.id === reqId ? { ...r, status: "simulation_placeholder" as const } : r));
       toast.success("Simulation placeholder set");
     } catch (e) {

@@ -202,7 +202,7 @@ export async function bindExistingConnection(
   });
 }
 
-export async function useSimulationPlaceholder(
+export async function setSimulationPlaceholder(
   sessionId: string, requirementId: string,
 ): Promise<{ id: string; status: string }> {
   return apiFetch(withWorkspace(`${BASE}/sessions/${sessionId}/connection-requirements/${requirementId}/use-simulation`), {
