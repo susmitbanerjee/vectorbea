@@ -184,7 +184,7 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         ::mapConnReq,
     )
 
-    fun listConnectionRequirements(sessionId: UUID): List<ConnectionRequirement> = queryList(
+    fun listConnectionRequirements(sessionId: UUID): List<ConnectionRequirement> = query(
         "SELECT * FROM workflow_architect_connection_requirements WHERE session_id=? ORDER BY created_at",
         { setObject(1, sessionId) }, ::mapConnReq,
     )
@@ -235,7 +235,7 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         "UPDATE workflow_architect_generated_tools SET tool_id=?,status=?,updated_at=now() WHERE id=?",
     ) { setObject(1, toolId); setString(2, status); setObject(3, id) }
 
-    fun listGeneratedTools(sessionId: UUID): List<GeneratedTool> = queryList(
+    fun listGeneratedTools(sessionId: UUID): List<GeneratedTool> = query(
         "SELECT * FROM workflow_architect_generated_tools WHERE session_id=? ORDER BY created_at",
         { setObject(1, sessionId) }, ::mapGenTool,
     )
@@ -268,7 +268,7 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         "UPDATE workflow_architect_generated_agents SET agent_id=?,bound_tool_ids=?::jsonb,status=?,updated_at=now() WHERE id=?",
     ) { setObject(1, agentId); setString(2, boundToolIds); setString(3, status); setObject(4, id) }
 
-    fun listGeneratedAgents(sessionId: UUID): List<GeneratedAgent> = queryList(
+    fun listGeneratedAgents(sessionId: UUID): List<GeneratedAgent> = query(
         "SELECT * FROM workflow_architect_generated_agents WHERE session_id=? ORDER BY created_at",
         { setObject(1, sessionId) }, ::mapGenAgent,
     )
@@ -290,7 +290,7 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         setString(7, targetType); setString(8, targetId); setString(9, payloadJson); setInt(10, delayMs)
     }
 
-    fun listBuildSteps(sessionId: UUID): List<BuildStep> = queryList(
+    fun listBuildSteps(sessionId: UUID): List<BuildStep> = query(
         "SELECT * FROM workflow_architect_build_steps WHERE session_id=? ORDER BY sequence",
         { setObject(1, sessionId) }, ::mapBuildStep,
     )

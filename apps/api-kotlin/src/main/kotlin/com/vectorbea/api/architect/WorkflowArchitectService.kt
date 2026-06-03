@@ -859,7 +859,8 @@ ${if (outputSchemaJson != "{}") "Output schema: $outputSchemaJson" else "Return 
     // ── Plan validation ───────────────────────────────────────────────────────
 
     @Suppress("UNCHECKED_CAST")
-    internal fun validatePlanJson(json: String): String? = try {
+    internal fun validatePlanJson(json: String): String? {
+      return try {
         val plan = mapper.readValue(json, Map::class.java) as Map<String, Any?>
         if (plan["workflowName"] == null) return "Missing workflowName"
         if (plan["goalSummary"]  == null) return "Missing goalSummary"
@@ -911,8 +912,9 @@ ${if (outputSchemaJson != "{}") "Output schema: $outputSchemaJson" else "Return 
             if (to   !in stepIds) return "edges[$i].to='$to' does not match any step"
         }
         null
-    } catch (e: Exception) {
+      } catch (e: Exception) {
         "Invalid JSON: ${e.message?.take(100)}"
+      }
     }
 
     // ── LLM call ──────────────────────────────────────────────────────────────

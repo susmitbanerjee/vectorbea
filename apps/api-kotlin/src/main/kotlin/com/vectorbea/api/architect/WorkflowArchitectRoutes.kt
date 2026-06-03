@@ -336,7 +336,7 @@ class WorkflowArchitectRoutes(
 
     private fun listConnections(req: Request): Response {
         val ctx  = req.context()
-        val type = req.queryParam("type")
+        val type = req.query("type")
         val page = connectionRepo.list(
             workspaceId   = ctx.workspaceId,
             environmentId = ctx.environmentId,
