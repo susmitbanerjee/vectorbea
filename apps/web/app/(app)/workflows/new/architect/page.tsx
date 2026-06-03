@@ -1,173 +1,268 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, ArrowRight, Bot, CheckCircle2, ChevronRight,
-  Database, GitBranch, Loader2, RefreshCw, Send, Shield,
-  ShieldCheck, Sparkles, Wrench, Zap, AlertTriangle,
-  Globe2, Check, X, Edit2,
+  ArrowLeft, ArrowRight, Bot, Check, ChevronDown, ChevronRight,
+  Link2, Loader2, RefreshCw, Shield, Sparkles, Wrench, Zap,
+  AlertTriangle, CheckCircle2, XCircle, Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createArchitectSession, generatePlan, revisePlan, approvePlan,
-  createWorkflowFromPlan, type ArchitectPlan, type ArchitectSession,
+  getConnectionRequirements, bindExistingConnection, useSimulationPlaceholder,
+  generateTools, generateAgents, createWorkflowFromPlan,
+  type ArchitectSession, type ArchitectPlan, type ConnectionRequirement,
+  type GeneratedTool, type GeneratedAgent, type ReadinessIssue,
 } from "@/lib/architect";
 
-// ─── Step indicator ───────────────────────────────────────────────────────────
-type Step = "goal" | "clarify" | "generating" | "plan" | "connections" | "creating" | "done";
+// ── Step bar ──────────────────────────────────────────────────────────────────
 
-const STEPS: { id: Step; label: string }[] = [
-  { id: "goal",        label: "Describe goal"     },
-  { id: "plan",        label: "Review plan"        },
-  { id: "connections", label: "Connect systems"    },
-  { id: "done",        label: "Workflow ready"     },
+const STEPS = [
+  { id: "goal",        label: "Goal" },
+  { id: "generating",  label: "Planning" },
+  { id: "plan",        label: "Review Plan" },
+  { id: "connections", label: "Connections" },
+  { id: "building",    label: "Building" },
+  { id: "done",        label: "Ready" },
 ];
 
-function StepBar({ current }: { current: Step }) {
-  const active = ["goal","clarify","generating"].includes(current) ? 0
-    : current === "plan" ? 1
-    : current === "connections" ? 2
-    : 3;
+function StepBar({ current }: { current: string }) {
+  const idx = STEPS.findIndex(s => s.id === current);
   return (
     <div className="flex items-center gap-0">
       {STEPS.map((s, i) => (
         <div key={s.id} className="flex items-center">
-          <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition-all ${
-            i < active ? "bg-amber-500 text-white"
-            : i === active ? "bg-amber-700 text-white ring-4 ring-amber-200"
-            : "bg-stone-100 text-stone-400"
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold transition-all ${
+            i < idx  ? "text-amber-700 bg-amber-50" :
+            i === idx ? "text-amber-800 bg-amber-100 ring-1 ring-amber-300" :
+            "text-slate-400"
           }`}>
-            {i < active ? <Check className="h-3.5 w-3.5" /> : i + 1}
-          </div>
-          <span className={`ml-1.5 text-[12px] font-medium ${i === active ? "text-amber-800" : "text-stone-400"}`}>
+            {i < idx ? <Check className="h-3 w-3" /> : <span className="h-4 w-4 rounded-full border border-current flex items-center justify-center text-[9px]">{i+1}</span>}
             {s.label}
-          </span>
-          {i < STEPS.length - 1 && <div className={`mx-3 h-px w-12 ${i < active ? "bg-amber-400" : "bg-stone-200"}`} />}
+          </div>
+          {i < STEPS.length - 1 && <div className={`h-px w-4 ${i < idx ? "bg-amber-300" : "bg-slate-200"}`} />}
         </div>
       ))}
     </div>
   );
 }
 
-// ─── Risk badge ───────────────────────────────────────────────────────────────
-function RiskBadge({ level }: { level: "low" | "medium" | "high" }) {
-  const styles = {
-    low:    "bg-emerald-50 text-emerald-700 border-emerald-200",
+// ── Connection status badge ───────────────────────────────────────────────────
+
+function ConnStatusBadge({ status }: { status: ConnectionRequirement["status"] }) {
+  const map: Record<string, { label: string; color: string }> = {
+    missing:              { label: "Missing",     color: "bg-red-50 text-red-700 border-red-200" },
+    selected_existing:    { label: "Connected",   color: "bg-green-50 text-green-700 border-green-200" },
+    created:              { label: "Created",     color: "bg-green-50 text-green-700 border-green-200" },
+    test_passed:          { label: "Tested ✓",    color: "bg-green-50 text-green-700 border-green-200" },
+    test_failed:          { label: "Test Failed", color: "bg-red-50 text-red-700 border-red-200" },
+    test_pending:         { label: "Testing…",    color: "bg-blue-50 text-blue-700 border-blue-200" },
+    simulation_placeholder: { label: "Sim Placeholder", color: "bg-amber-50 text-amber-700 border-amber-200" },
+  };
+  const { label, color } = map[status] ?? { label: status, color: "bg-slate-50 text-slate-600 border-slate-200" };
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${color}`}>{label}</span>;
+}
+
+function RiskBadge({ level }: { level: string }) {
+  const map: Record<string, string> = {
+    low:    "bg-green-50 text-green-700 border-green-200",
     medium: "bg-amber-50 text-amber-700 border-amber-200",
     high:   "bg-red-50 text-red-700 border-red-200",
   };
-  return (
-    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${styles[level]}`}>
-      {level} risk
-    </span>
-  );
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${map[level] ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{level}</span>;
 }
 
-// ─── Plan section card ────────────────────────────────────────────────────────
-function PlanCard({ title, count, icon: Icon, children }: {
-  title: string; count?: number; icon: React.ElementType; children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-stone-200 bg-white overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 bg-stone-50 border-b border-stone-100">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-amber-600" />
-          <span className="text-[13px] font-bold text-stone-800">{title}</span>
-        </div>
-        {count !== undefined && (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">{count}</span>
-        )}
-      </div>
-      <div className="p-4 space-y-3">{children}</div>
-    </div>
-  );
-}
+// ── Generating view ───────────────────────────────────────────────────────────
 
-// ─── Generating animation ─────────────────────────────────────────────────────
-const GEN_STEPS = [
-  "Understanding your workflow goal…",
-  "Identifying required agents…",
-  "Planning tools and connections…",
-  "Adding approvals and safety checks…",
-  "Preparing workflow graph…",
+const GEN_MESSAGES = [
+  "Understanding your automation goal…",
+  "Identifying required systems and connections…",
+  "Planning tools for each integration…",
+  "Designing agents with production-grade prompts…",
+  "Structuring workflow steps and approval gates…",
 ];
 
-function GeneratingView() {
-  const [step, setStep] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setStep(s => Math.min(s + 1, GEN_STEPS.length - 1)), 1800);
-    return () => clearInterval(t);
-  }, []);
+function GeneratingView({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-6 py-20">
-      <div className="relative flex h-20 w-20 items-center justify-center">
-        <div className="absolute inset-0 rounded-full border-4 border-amber-100" />
-        <div className="absolute inset-0 rounded-full border-4 border-t-amber-500 animate-spin" />
-        <Sparkles className="h-8 w-8 text-amber-600" />
-      </div>
-      <div className="text-center space-y-2">
-        <p className="text-[15px] font-semibold text-stone-800">{GEN_STEPS[step]}</p>
-        <div className="flex items-center gap-1 justify-center">
-          {GEN_STEPS.map((_, i) => (
-            <div key={i} className={`h-1.5 rounded-full transition-all ${i <= step ? "w-5 bg-amber-500" : "w-1.5 bg-stone-200"}`} />
-          ))}
+    <div className="flex flex-col items-center justify-center py-24 gap-6">
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <div className="absolute inset-0 rounded-full border-4 border-amber-100 animate-ping opacity-40" />
+        <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-amber-500">
+          <Sparkles className="h-6 w-6 text-white" />
         </div>
       </div>
-      <p className="text-[13px] text-stone-400">AI Workflow Architect is designing your automation…</p>
+      <div className="text-center">
+        <p className="text-[15px] font-semibold text-slate-800">{message}</p>
+        <p className="mt-1 text-[12px] text-slate-400">Vectorbea AI is designing your workflow</p>
+      </div>
+      <div className="flex flex-col gap-2 w-full max-w-sm">
+        {GEN_MESSAGES.map((m, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <div className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />
+            <span className="text-[11.5px] text-slate-500">{m}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ── Building view ─────────────────────────────────────────────────────────────
+
+const BUILD_MESSAGES = [
+  { icon: Link2,   text: "Binding connections…" },
+  { icon: Wrench,  text: "Creating tools…" },
+  { icon: Bot,     text: "Creating agents with system prompts…" },
+  { icon: Zap,     text: "Generating workflow graph…" },
+  { icon: Shield,  text: "Validating mappings and permissions…" },
+];
+
+function BuildingView({ phase }: { phase: number }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-6">
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <div className="absolute inset-0 rounded-full bg-amber-100 animate-spin" style={{ borderTopColor: "#D97706", borderWidth: 3, borderStyle: "solid" }} />
+        <Zap className="h-7 w-7 text-amber-600 relative" />
+      </div>
+      <p className="text-[15px] font-semibold text-slate-800">Vectorbea is building your workflow…</p>
+      <div className="flex flex-col gap-3 w-full max-w-sm">
+        {BUILD_MESSAGES.map(({ icon: Icon, text }, i) => (
+          <div key={i} className={`flex items-center gap-3 rounded-xl border p-3 transition-all ${
+            i < phase  ? "border-amber-200 bg-amber-50" :
+            i === phase ? "border-amber-300 bg-amber-50 shadow-sm" :
+            "border-slate-100 bg-white opacity-40"
+          }`}>
+            {i < phase ? (
+              <CheckCircle2 className="h-4 w-4 text-amber-600 shrink-0" />
+            ) : i === phase ? (
+              <Loader2 className="h-4 w-4 text-amber-600 shrink-0 animate-spin" />
+            ) : (
+              <Icon className="h-4 w-4 text-slate-400 shrink-0" />
+            )}
+            <span className={`text-[12.5px] font-medium ${i <= phase ? "text-amber-800" : "text-slate-400"}`}>{text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Connection card ───────────────────────────────────────────────────────────
+
+function ConnectionCard({
+  req, onBindExisting, onUsePlaceholder,
+}: {
+  req: ConnectionRequirement;
+  onBindExisting: (reqId: string) => void;
+  onUsePlaceholder: (reqId: string) => void;
+}) {
+  const isReady = ["selected_existing","created","test_passed","simulation_placeholder"].includes(req.status);
+  return (
+    <div className={`rounded-xl border p-4 transition-all ${isReady ? "border-green-200 bg-green-50/30" : "border-slate-200 bg-white"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[13px] font-semibold text-slate-800">{req.name}</span>
+            <ConnStatusBadge status={req.status} />
+            {req.requiredForSimulation && <span className="rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[9.5px] font-bold text-blue-700">SIM REQUIRED</span>}
+            {!req.requiredForSimulation && <span className="rounded-full bg-slate-50 border border-slate-200 px-2 py-0.5 text-[9.5px] font-bold text-slate-500">OPTIONAL FOR SIM</span>}
+          </div>
+          {req.description && <p className="text-[12px] text-slate-500 mb-2">{req.description}</p>}
+          {req.setupInstructions && <p className="text-[11.5px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mb-2">{req.setupInstructions}</p>}
+        </div>
+        {isReady && <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />}
+      </div>
+      {!isReady && (
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <button type="button" onClick={() => onBindExisting(req.id)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-600 transition-colors">
+            <Link2 className="h-3 w-3" /> Select existing connection
+          </button>
+          <Link href={`/connections/new` as never} target="_blank"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+            Create new connection ↗
+          </Link>
+          {!req.requiredForSimulation && (
+            <button type="button" onClick={() => onUsePlaceholder(req.id)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] font-medium text-amber-700 hover:bg-amber-100 transition-colors">
+              Use simulation placeholder
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+const EXAMPLE_GOALS = [
+  "Monitor customer renewal pipeline and send risk alerts to Slack",
+  "Process new support tickets, classify them with AI, and update CRM",
+  "Daily report: pull sales data, analyze with AI, email summary to team",
+  "When order placed, check inventory, reserve stock, notify warehouse",
+];
+
 export default function ArchitectPage() {
   const router = useRouter();
-  const [step, setStep]             = useState<Step>("goal");
-  const [goal, setGoal]             = useState("");
-  const [session, setSession]       = useState<ArchitectSession | null>(null);
-  const [plan, setPlan]             = useState<ArchitectPlan | null>(null);
-  const [questions, setQuestions]   = useState<string[]>([]);
-  const [answers, setAnswers]       = useState<Record<string, string>>({});
-  const [reviseText, setReviseText] = useState("");
-  const [revising, setRevising]     = useState(false);
-  const [loading, setLoading]       = useState(false);
-  const textRef = useRef<HTMLTextAreaElement>(null);
+  const [step, setStep]                 = useState<string>("goal");
+  const [loading, setLoading]           = useState(false);
+  const [buildPhase, setBuildPhase]     = useState(0);
+  const [genMessage, setGenMessage]     = useState(GEN_MESSAGES[0]);
 
-  const EXAMPLES = [
-    "Check customer renewal risk every morning, fetch CRM data, score with AI, get approval, update CRM",
-    "Monitor failed data syncs, summarise root cause with AI, create Jira tickets automatically",
-    "Fetch competitor pricing daily, generate analysis report, send to Slack with manager approval",
-    "Process incoming invoices, extract key data with AI, match to PO, flag mismatches for review",
-  ];
+  const [goal, setGoal]                 = useState("");
+  const [session, setSession]           = useState<ArchitectSession | null>(null);
+  const [plan, setPlan]                 = useState<ArchitectPlan | null>(null);
+  const [connReqs, setConnReqs]         = useState<ConnectionRequirement[]>([]);
+  const [genTools, setGenTools]         = useState<GeneratedTool[]>([]);
+  const [genAgents, setGenAgents]       = useState<GeneratedAgent[]>([]);
+  const [readinessIssues, setReadinessIssues] = useState<ReadinessIssue[]>([]);
+  const [readinessStatus, setReadinessStatus] = useState("");
+  const [answers, setAnswers]           = useState<Record<string, string>>({});
+  const [clarifyQ, setClarifyQ]         = useState<string[]>([]);
+  const [reviseText, setReviseText]     = useState("");
+  const [showRevise, setShowRevise]     = useState(false);
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
-  // ── Step 1: Submit goal ───────────────────────────────────────────────────
+  // ── Step 1: Submit goal ──────────────────────────────────────────────────
   async function handleGoalSubmit() {
     if (!goal.trim()) return;
     setLoading(true);
     setStep("generating");
+    let msgIdx = 0;
+    const msgInterval = setInterval(() => {
+      msgIdx = (msgIdx + 1) % GEN_MESSAGES.length;
+      setGenMessage(GEN_MESSAGES[msgIdx]);
+    }, 1800);
     try {
-      const sess = await createArchitectSession(goal);
+      const sess = await createArchitectSession(goal.trim());
       setSession(sess);
-      if (sess.needsClarification && sess.clarificationQuestions?.length) {
-        setQuestions(sess.clarificationQuestions);
+      if (sess.needsClarification && (sess.clarificationQuestions?.length ?? 0) > 0) {
+        setClarifyQ(sess.clarificationQuestions!);
         setStep("clarify");
       } else {
-        await doPlanGeneration(sess.id);
+        await doPlanGeneration(sess.id, {});
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start architect session");
       setStep("goal");
     } finally {
+      clearInterval(msgInterval);
       setLoading(false);
     }
   }
 
-  async function doPlanGeneration(sessionId: string, ans: Record<string, string> = {}) {
+  async function doPlanGeneration(sessionId: string, ans: Record<string, string>) {
     setStep("generating");
+    setGenMessage(GEN_MESSAGES[0]);
     try {
       const res = await generatePlan(sessionId, ans);
       setPlan(res.plan);
+      setConnReqs(res.connectionRequirements ?? []);
+      setGenTools(res.generatedTools ?? []);
+      setGenAgents(res.generatedAgents ?? []);
       setStep("plan");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Plan generation failed");
@@ -175,7 +270,7 @@ export default function ArchitectPage() {
     }
   }
 
-  // ── Step 2: Clarification answers ─────────────────────────────────────────
+  // ── Step 2: Clarification ────────────────────────────────────────────────
   async function handleClarifySubmit() {
     if (!session) return;
     setLoading(true);
@@ -183,500 +278,480 @@ export default function ArchitectPage() {
     setLoading(false);
   }
 
-  // ── Revise plan ───────────────────────────────────────────────────────────
+  // ── Revise plan ──────────────────────────────────────────────────────────
   async function handleRevise() {
     if (!session || !reviseText.trim()) return;
-    setRevising(true);
+    setLoading(true);
     try {
-      const res = await revisePlan(session.id, reviseText);
+      const res = await revisePlan(session.id, reviseText.trim());
       setPlan(res.plan);
-      setReviseText("");
-      toast.success("Plan revised");
+      setConnReqs(res.connectionRequirements ?? []);
+      setReviseText(""); setShowRevise(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Revision failed");
-    } finally {
-      setRevising(false);
-    }
+    } finally { setLoading(false); }
   }
 
-  // ── Approve plan ──────────────────────────────────────────────────────────
-  async function handleApprove() {
+  // ── Approve plan → go to connections ────────────────────────────────────
+  async function handleApprovePlan() {
     if (!session) return;
     setLoading(true);
     try {
-      await approvePlan(session.id);
-      // Check if any connections needed
-      const needsConns = plan?.requiredConnections?.some(c => c.requiredForSimulation) ?? false;
-      if (needsConns) {
+      const res = await approvePlan(session.id);
+      setConnReqs(res.connectionRequirements ?? []);
+      if (res.needsConnections && res.connectionRequirements.length > 0) {
         setStep("connections");
       } else {
-        await handleCreateWorkflow();
+        await handleBuild();
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Approval failed");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
-  // ── Create workflow ───────────────────────────────────────────────────────
-  async function handleCreateWorkflow(bindings: Record<string, string> = {}) {
+  // ── Connection actions ───────────────────────────────────────────────────
+  async function handleBindExisting(reqId: string) {
+    // In a real implementation this would open a connection picker modal
+    // For now, show a toast explaining how to use it
+    toast.info("Select an existing connection from your workspace to bind to this requirement.");
+  }
+
+  async function handleUsePlaceholder(reqId: string) {
     if (!session) return;
-    setLoading(true);
-    setStep("creating");
     try {
-      const result = await createWorkflowFromPlan(session.id, bindings);
-      // Store animation steps so builder can use server-provided timing
-      if (result.animationSteps?.length) {
-        try {
-          sessionStorage.setItem(
-            `architect-anim-${result.workflowId}`,
-            JSON.stringify(result.animationSteps),
-          );
-        } catch { /* ignore quota errors */ }
-      }
-      setStep("done");
-      toast.success("Workflow created from your plan!");
-      setTimeout(() => {
-        router.push(
-          `/workflows/${result.workflowId}/builder?architectSessionId=${session.id}&animate=true` as never
-        );
-      }, 1200);
+      await useSimulationPlaceholder(session.id, reqId);
+      setConnReqs(prev => prev.map(r => r.id === reqId ? { ...r, status: "simulation_placeholder" as const } : r));
+      toast.success("Simulation placeholder set");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Workflow creation failed");
-      setStep("plan");
-    } finally {
-      setLoading(false);
+      toast.error(e instanceof Error ? e.message : "Failed to set placeholder");
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  async function handleProceedFromConnections() {
+    const requiredSim = connReqs.filter(r => r.requiredForSimulation);
+    const allSimReady = requiredSim.every(r =>
+      ["test_passed","selected_existing","created","simulation_placeholder"].includes(r.status)
+    );
+    if (!allSimReady && requiredSim.length > 0) {
+      toast.error("Please configure or set simulation placeholders for all simulation-required connections.");
+      return;
+    }
+    await handleBuild();
+  }
+
+  // ── Build: generate tools + agents + workflow ────────────────────────────
+  async function handleBuild() {
+    if (!session) return;
+    setStep("building");
+    setBuildPhase(0);
+
+    const phases: Array<() => Promise<void>> = [
+      async () => { setBuildPhase(1); },
+      async () => {
+        setBuildPhase(2);
+        const toolsRes = await generateTools(session.id);
+        setGenTools(toolsRes.tools);
+      },
+      async () => {
+        setBuildPhase(3);
+        const agentsRes = await generateAgents(session.id);
+        setGenAgents(agentsRes.agents);
+      },
+      async () => {
+        setBuildPhase(4);
+        const result = await createWorkflowFromPlan(session.id, {});
+        setReadinessStatus(result.readinessStatus);
+        setReadinessIssues(result.readinessIssues ?? []);
+        if (result.animationSteps?.length) {
+          try { sessionStorage.setItem(`architect-anim-${result.workflowId}`, JSON.stringify(result.animationSteps)); }
+          catch { /* ignore */ }
+        }
+        setBuildPhase(5);
+        setStep("done");
+        toast.success("Workflow created! Opening canvas…");
+        setTimeout(() => {
+          router.push(`/workflows/${result.workflowId}/builder?architectSessionId=${session.id}&animate=true` as never);
+        }, 1500);
+      },
+    ];
+
+    for (const phase of phases) {
+      try { await phase(); await new Promise(r => setTimeout(r, 600)); }
+      catch (e) {
+        toast.error(e instanceof Error ? e.message : "Build step failed");
+        setStep("connections"); return;
+      }
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <div className="min-h-screen" style={{ background: "#FAFAF7" }}>
+    <div className="mx-auto max-w-3xl p-6 lg:p-8">
+      {/* Back */}
+      <Link href={"/workflows/new" as never}
+        className="mb-5 flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors">
+        <ArrowLeft className="h-3.5 w-3.5" /> Back
+      </Link>
+
       {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-stone-200 bg-white/90 backdrop-blur-sm">
-        <div className="flex items-center justify-between px-6 py-3.5">
-          <div className="flex items-center gap-3">
-            <Link href="/workflows/new" className="flex items-center gap-1 text-[13px] text-stone-500 hover:text-stone-800 transition-colors">
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back
-            </Link>
-            <div className="h-4 w-px bg-stone-200" />
-            <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100">
-                <Sparkles className="h-4 w-4 text-amber-700" />
-              </div>
-              <span className="text-[14px] font-bold text-stone-900">AI Workflow Architect</span>
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700 uppercase tracking-wider">Beta</span>
-            </div>
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500">
+            <Sparkles className="h-4 w-4 text-white" />
           </div>
-          {step !== "goal" && step !== "generating" && (
-            <StepBar current={step} />
-          )}
+          <h1 className="text-[19px] font-black text-stone-900">AI Workflow Architect</h1>
         </div>
+        <p className="text-[12.5px] text-slate-500">
+          Describe your automation — Vectorbea creates connections, tools, agents, and the workflow graph.
+        </p>
       </div>
 
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      {/* Step bar */}
+      {!["generating","building"].includes(step) && (
+        <div className="mb-6 overflow-x-auto pb-1">
+          <StepBar current={step === "clarify" ? "goal" : step} />
+        </div>
+      )}
 
-        {/* ── GOAL INPUT ────────────────────────────────────────────────────── */}
-        {step === "goal" && (
-          <div className="space-y-8">
-            <div className="text-center space-y-3">
-              <div className="flex justify-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-100">
-                  <Sparkles className="h-8 w-8 text-amber-600" />
-                </div>
-              </div>
-              <h1 className="text-[28px] font-black tracking-tight text-stone-900">
-                What do you want to automate?
-              </h1>
-              <p className="text-[15px] text-stone-500 leading-relaxed max-w-lg mx-auto">
-                Describe your automation goal in plain English. Vectorbea will design the agents,
-                tools, approvals, and workflow graph for you.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border-2 border-amber-200 bg-white overflow-hidden"
-              style={{ boxShadow: "0 8px 32px rgba(217,119,6,0.12)" }}>
-              <textarea
-                ref={textRef}
-                value={goal}
-                onChange={e => setGoal(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handleGoalSubmit(); }}
-                placeholder="e.g. Monitor customer renewal risk every morning — fetch CRM data, score with AI, get manager approval, then update the CRM automatically…"
-                rows={5}
-                className="w-full resize-none px-5 py-4 text-[15px] text-stone-800 placeholder:text-stone-300 outline-none leading-relaxed"
-                style={{ fontFamily: "inherit" }}
-                autoFocus
-              />
-              <div className="flex items-center justify-between border-t border-stone-100 px-4 py-3">
-                <span className="text-[12px] text-stone-400">
-                  {goal.length}/4000 · <kbd className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[10px]">⌘ Enter</kbd> to generate
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void handleGoalSubmit()}
-                  disabled={!goal.trim() || loading}
-                  className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-[13.5px] font-bold text-white transition-all disabled:opacity-50 hover:opacity-90"
-                  style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", boxShadow: "0 4px 16px rgba(217,119,6,0.35)" }}
-                >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  Design workflow
-                </button>
-              </div>
-            </div>
-
-            {/* Examples */}
-            <div className="space-y-2">
-              <p className="text-[12px] font-semibold text-stone-400 uppercase tracking-wider">Examples</p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {EXAMPLES.map((ex, i) => (
-                  <button key={i} type="button" onClick={() => { setGoal(ex); textRef.current?.focus(); }}
-                    className="rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-[12.5px] text-stone-600 hover:border-amber-300 hover:bg-amber-50/50 transition-all leading-relaxed">
-                    <ChevronRight className="inline h-3 w-3 text-amber-500 mr-1" />
-                    {ex}
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* ── Screen 1: Goal input ──────────────────────────────────────────── */}
+      {step === "goal" && (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <label className="block text-[13px] font-semibold text-slate-700 mb-2">
+              What do you want to automate?
+            </label>
+            <textarea
+              rows={4}
+              value={goal}
+              onChange={e => setGoal(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGoalSubmit(); }}
+              placeholder="Describe your automation in plain English…"
+              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">⌘ Enter to submit</p>
           </div>
-        )}
 
-        {/* ── GENERATING ────────────────────────────────────────────────────── */}
-        {(step === "generating" || step === "creating") && (
           <div>
-            {step === "creating" ? (
-              <div className="flex flex-col items-center justify-center gap-6 py-20">
-                <div className="relative flex h-20 w-20 items-center justify-center">
-                  <div className="absolute inset-0 rounded-full border-4 border-amber-100" />
-                  <div className="absolute inset-0 rounded-full border-4 border-t-amber-500 animate-spin" />
-                  <GitBranch className="h-8 w-8 text-amber-600" />
-                </div>
-                <p className="text-[15px] font-semibold text-stone-800">Creating your workflow…</p>
-                <p className="text-[13px] text-stone-400">The builder will open with your workflow animated in.</p>
-              </div>
-            ) : (
-              <GeneratingView />
-            )}
-          </div>
-        )}
-
-        {/* ── CLARIFICATION ─────────────────────────────────────────────────── */}
-        {step === "clarify" && (
-          <div className="space-y-6">
-            <div className="space-y-1">
-              <h2 className="text-[22px] font-black text-stone-900">A few quick questions</h2>
-              <p className="text-[14px] text-stone-500">Help me plan more accurately, or skip to use assumptions.</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Example automations</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {EXAMPLE_GOALS.map(eg => (
+                <button key={eg} type="button" onClick={() => setGoal(eg)}
+                  className="rounded-xl border border-slate-200 bg-white p-3 text-left text-[12px] text-slate-600 hover:border-amber-300 hover:bg-amber-50 transition-all">
+                  {eg}
+                </button>
+              ))}
             </div>
-            <div className="space-y-4">
-              {questions.map((q, i) => (
-                <div key={i} className="rounded-xl border border-stone-200 bg-white p-4">
-                  <p className="text-[13.5px] font-semibold text-stone-800 mb-2">{q}</p>
-                  <input
-                    type="text"
-                    placeholder="Your answer (optional)"
-                    value={answers[`q${i}`] ?? ""}
-                    onChange={e => setAnswers(prev => ({ ...prev, [`q${i}`]: e.target.value }))}
-                    className="w-full rounded-lg border border-stone-200 px-3 py-2 text-[13px] outline-none focus:border-amber-400"
-                  />
+          </div>
+
+          <div className="flex justify-end">
+            <button type="button" onClick={handleGoalSubmit} disabled={!goal.trim() || loading}
+              className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors">
+              <Sparkles className="h-4 w-4" /> Design Workflow
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Screen 2: Clarification ───────────────────────────────────────── */}
+      {step === "clarify" && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-amber-600" />
+            <p className="text-[13px] font-semibold text-amber-900">A few quick questions to improve your plan</p>
+          </div>
+          {clarifyQ.map((q, i) => (
+            <div key={i}>
+              <label className="block text-[12.5px] font-medium text-slate-700 mb-1">{q}</label>
+              <input value={answers[q] ?? ""} onChange={e => setAnswers(a => ({ ...a, [q]: e.target.value }))}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-amber-400"
+                placeholder="Your answer…" />
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <button type="button" onClick={handleClarifySubmit} disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50">
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+              Generate plan
+            </button>
+            <button type="button" onClick={() => doPlanGeneration(session!.id, {})} disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-[12.5px] font-medium text-slate-600 hover:bg-slate-50">
+              Skip and generate
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Screen 3: Generating ─────────────────────────────────────────── */}
+      {step === "generating" && <GeneratingView message={genMessage} />}
+
+      {/* ── Screen 4: Plan review ─────────────────────────────────────────── */}
+      {step === "plan" && plan && (
+        <div className="space-y-5">
+          {/* Plan overview */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-[16px] font-bold text-slate-900">{plan.workflowName}</h2>
+                <p className="text-[12.5px] text-slate-500 mt-0.5">{plan.goalSummary}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-[11px] text-slate-400 mb-0.5">Confidence</div>
+                <div className={`text-[14px] font-black ${plan.confidence >= 0.8 ? "text-green-600" : plan.confidence >= 0.6 ? "text-amber-600" : "text-red-500"}`}>
+                  {Math.round(plan.confidence * 100)}%
+                </div>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {[
+                { label: "Connections", value: plan.requiredConnections?.length ?? 0, icon: Link2 },
+                { label: "Tools", value: plan.tools?.length ?? 0, icon: Wrench },
+                { label: "Agents", value: plan.agents?.length ?? 0, icon: Bot },
+                { label: "Steps", value: plan.workflowSteps?.length ?? 0, icon: Zap },
+              ].map(({ label, value, icon: Icon }) => (
+                <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-center">
+                  <Icon className="h-4 w-4 text-amber-500 mx-auto mb-1" />
+                  <div className="text-[15px] font-black text-slate-800">{value}</div>
+                  <div className="text-[10px] text-slate-400">{label}</div>
                 </div>
               ))}
             </div>
-            <div className="flex gap-3">
-              <button type="button" onClick={() => void handleClarifySubmit()} disabled={loading}
-                className="flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-[13.5px] font-bold text-white hover:bg-amber-700 disabled:opacity-50">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                Generate plan
-              </button>
-              <button type="button" onClick={() => void doPlanGeneration(session!.id)}
-                className="rounded-xl border border-stone-200 px-5 py-2.5 text-[13.5px] font-medium text-stone-600 hover:bg-stone-50">
-                Skip — use assumptions
-              </button>
+
+            {/* Trigger */}
+            <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 mb-3 flex items-center gap-2">
+              <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <span className="text-[12px] font-medium text-slate-700">Trigger:</span>
+              <span className="text-[12px] text-slate-600">{plan.trigger?.type} — {plan.trigger?.description}</span>
             </div>
           </div>
-        )}
 
-        {/* ── PLAN REVIEW ───────────────────────────────────────────────────── */}
-        {step === "plan" && plan && (
-          <div className="space-y-5">
-            {/* Plan header */}
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Sparkles className="h-4 w-4 text-amber-600" />
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-amber-600">AI Workflow Architect Plan</span>
-                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                      {Math.round(plan.confidence * 100)}% confidence
-                    </span>
+          {/* Required connections */}
+          {(plan.requiredConnections?.length ?? 0) > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-[13px] font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+                <Link2 className="h-4 w-4 text-amber-500" /> Required Connections
+              </h3>
+              <div className="space-y-2">
+                {plan.requiredConnections.map(c => (
+                  <div key={c.tempConnectionId} className="flex items-start gap-3 rounded-lg border border-slate-100 p-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12.5px] font-semibold text-slate-700">{c.name}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">{c.type}</span>
+                        {c.requiredForSimulation && <span className="rounded-full bg-blue-50 border border-blue-200 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">SIM REQUIRED</span>}
+                      </div>
+                      <p className="text-[11.5px] text-slate-400 mt-0.5">{c.description}</p>
+                    </div>
                   </div>
-                  <h2 className="text-[20px] font-black text-stone-900">{plan.workflowName}</h2>
-                  <p className="text-[13.5px] text-stone-600 mt-1">{plan.goalSummary}</p>
-                </div>
-                <div className="shrink-0 flex items-center gap-2 text-[12.5px] text-stone-500">
-                  <Zap className="h-3.5 w-3.5 text-amber-500" />
-                  {plan.trigger.type}
-                </div>
-              </div>
-              {/* Summary chips */}
-              <div className="flex flex-wrap gap-2 mt-3">
-                {[
-                  { label: `${plan.agents.length} agent${plan.agents.length !== 1 ? "s" : ""}`, icon: Bot, color: "#7C3AED" },
-                  { label: `${plan.tools.length} tool${plan.tools.length !== 1 ? "s" : ""}`, icon: Wrench, color: "#0891B2" },
-                  { label: `${plan.approvalGates.length} approval${plan.approvalGates.length !== 1 ? "s" : ""}`, icon: ShieldCheck, color: "#D97706" },
-                  { label: `${plan.steps.length} steps`, icon: GitBranch, color: "#059669" },
-                ].map(({ label, icon: Icon, color }) => (
-                  <span key={label} className="inline-flex items-center gap-1.5 rounded-full bg-white border border-stone-200 px-3 py-1 text-[12px] font-semibold text-stone-700">
-                    <Icon className="h-3.5 w-3.5" style={{ color }} />
-                    {label}
-                  </span>
                 ))}
               </div>
             </div>
+          )}
 
-            {/* Agents */}
-            {plan.agents.length > 0 && (
-              <PlanCard title="Agents" count={plan.agents.length} icon={Bot}>
-                {plan.agents.map(a => (
-                  <div key={a.tempId} className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-[13.5px] font-bold text-stone-800">{a.name}</p>
-                        <p className="text-[11.5px] text-stone-500 mt-0.5">{a.role}</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">
-                        {a.type.replace(/_/g, " ")}
-                      </span>
+          {/* Tools */}
+          {(plan.tools?.length ?? 0) > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-[13px] font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+                <Wrench className="h-4 w-4 text-amber-500" /> Tools to create
+              </h3>
+              <div className="space-y-2">
+                {plan.tools.map(t => (
+                  <div key={t.tempToolId} className="flex items-center justify-between rounded-lg border border-slate-100 p-3">
+                    <div>
+                      <span className="text-[12.5px] font-semibold text-slate-700">{t.name}</span>
+                      <span className="ml-2 text-[11px] text-slate-400">{t.type}</span>
                     </div>
-                    {a.modelPreference && (
-                      <p className="text-[11px] text-stone-400 mt-2">Model: {a.modelPreference}</p>
+                    <div className="flex items-center gap-2">
+                      <RiskBadge level={t.riskLevel} />
+                      {t.requiresApproval && <span className="rounded-full bg-orange-50 border border-orange-200 px-2 py-0.5 text-[9.5px] font-bold text-orange-700">APPROVAL</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Agents */}
+          {(plan.agents?.length ?? 0) > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-[13px] font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+                <Bot className="h-4 w-4 text-amber-500" /> Agents to create
+              </h3>
+              <div className="space-y-2">
+                {plan.agents.map(a => (
+                  <div key={a.tempAgentId} className="rounded-lg border border-slate-100">
+                    <button type="button" onClick={() => setExpandedAgents(s => { const n = new Set(s); n.has(a.tempAgentId) ? n.delete(a.tempAgentId) : n.add(a.tempAgentId); return n; })}
+                      className="w-full flex items-center justify-between p-3 text-left">
+                      <div>
+                        <span className="text-[12.5px] font-semibold text-slate-700">{a.name}</span>
+                        <span className="ml-2 text-[11px] text-slate-400">{a.role}</span>
+                      </div>
+                      {expandedAgents.has(a.tempAgentId) ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                    </button>
+                    {expandedAgents.has(a.tempAgentId) && (
+                      <div className="border-t border-slate-100 p-3 bg-slate-50 rounded-b-lg">
+                        <p className="text-[11px] text-slate-500 font-semibold mb-1">System Prompt Preview</p>
+                        <pre className="text-[11px] text-slate-600 whitespace-pre-wrap font-mono leading-relaxed max-h-40 overflow-y-auto">{a.systemPrompt?.slice(0, 500)}{(a.systemPrompt?.length ?? 0) > 500 ? "…" : ""}</pre>
+                        {a.allowedTempToolIds?.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {a.allowedTempToolIds.map(tid => (
+                              <span key={tid} className="rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[10px] text-amber-800">{tid}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
-              </PlanCard>
-            )}
-
-            {/* Tools */}
-            {plan.tools.length > 0 && (
-              <PlanCard title="Tools" count={plan.tools.length} icon={Wrench}>
-                {plan.tools.map(t => (
-                  <div key={t.tempId} className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <p className="text-[13.5px] font-bold text-stone-800">{t.name}</p>
-                        <p className="text-[11.5px] text-stone-500 mt-0.5">{t.description}</p>
-                        {t.requiredConnection.type !== "none" && (
-                          <p className="text-[11px] text-amber-600 mt-1.5 flex items-center gap-1">
-                            <Globe2 className="h-3 w-3" />
-                            Requires: {t.requiredConnection.description}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <RiskBadge level={t.riskLevel} />
-                        {t.requiresApproval && (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">
-                            APPROVAL GATE
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </PlanCard>
-            )}
-
-            {/* Approvals */}
-            {plan.approvalGates.length > 0 && (
-              <PlanCard title="Approval Gates" count={plan.approvalGates.length} icon={Shield}>
-                {plan.approvalGates.map(a => (
-                  <div key={a.tempId} className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-[13.5px] font-bold text-stone-800">{a.name}</p>
-                        <p className="text-[11.5px] text-stone-600 mt-0.5">{a.reason}</p>
-                        <p className="text-[11px] text-amber-700 mt-1">Approver: {a.approverRole}</p>
-                      </div>
-                      <RiskBadge level={a.riskLevel as "low" | "medium" | "high"} />
-                    </div>
-                  </div>
-                ))}
-              </PlanCard>
-            )}
-
-            {/* Workflow Steps — ordered list */}
-            {plan.steps.length > 0 && (
-              <PlanCard title="Workflow Steps" count={plan.steps.length} icon={GitBranch}>
-                <div className="space-y-1.5">
-                  {plan.steps.map((s, i) => (
-                    <div key={s.tempId} className="flex items-start gap-3 rounded-lg border border-stone-100 bg-stone-50 px-3 py-2.5">
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-200 text-[10px] font-black text-stone-600">{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-[12.5px] font-bold text-stone-800">{s.name}</p>
-                          <span className="rounded bg-stone-100 px-1.5 py-px text-[9px] font-mono uppercase tracking-wider text-stone-500">{s.type}</span>
-                        </div>
-                        <p className="text-[11.5px] text-stone-500 mt-0.5 line-clamp-1">{s.description}</p>
-                        {s.dependsOn?.length > 0 && (
-                          <p className="text-[10.5px] text-stone-400 mt-0.5">depends on: {s.dependsOn.join(", ")}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </PlanCard>
-            )}
-
-            {/* Required connections — shown in plan review with status */}
-            {plan.requiredConnections?.length > 0 && (
-              <PlanCard title="Required Connections" count={plan.requiredConnections.length} icon={Globe2}>
-                {plan.requiredConnections.map(conn => (
-                  <div key={conn.tempId} className="flex items-start justify-between gap-3 rounded-xl border border-stone-100 bg-stone-50 px-4 py-3">
-                    <div className="flex-1">
-                      <p className="text-[13px] font-bold text-stone-800">{conn.name}</p>
-                      <p className="text-[11.5px] text-stone-500 mt-0.5">{conn.setupInstructions}</p>
-                      <p className="text-[11px] text-stone-400 mt-1">Used by: {conn.usedBy.join(", ")}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      {conn.requiredForSimulation ? (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9.5px] font-bold text-amber-700">SIM REQUIRED</span>
-                      ) : (
-                        <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[9.5px] font-bold text-stone-500">OPTIONAL FOR SIM</span>
-                      )}
-                      <span className="rounded-full bg-red-50 border border-red-200 px-2 py-0.5 text-[9.5px] font-bold text-red-600">NOT CONNECTED</span>
-                    </div>
-                  </div>
-                ))}
-              </PlanCard>
-            )}
-
-            {/* Safety notes */}
-            {plan.safetyNotes.length > 0 && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 space-y-1.5">
-                <p className="text-[11px] font-bold text-blue-700 uppercase tracking-wider">Safety notes</p>
-                {plan.safetyNotes.map((note, i) => (
-                  <p key={i} className="text-[12.5px] text-blue-700 flex items-start gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5 text-blue-500" />
-                    {note}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            {/* Simulation info */}
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-center gap-3">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
-              <div>
-                <p className="text-[13px] font-bold text-emerald-800">Simulation-first</p>
-                <p className="text-[12px] text-emerald-700">
-                  {plan.simulationPlan.canSimulateWithoutConnections
-                    ? "This workflow can run in simulation mode without real connections."
-                    : "Simulation requires an LLM connection. Real execution requires all connections."}
-                </p>
               </div>
             </div>
+          )}
 
-            {/* Revise */}
-            <div className="rounded-xl border border-stone-200 bg-white p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Edit2 className="h-3.5 w-3.5 text-stone-400" />
-                <p className="text-[12px] font-semibold text-stone-500">Request a revision</p>
+          {/* Steps */}
+          {(plan.workflowSteps?.length ?? 0) > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-[13px] font-bold text-slate-800 mb-3">Workflow Steps</h3>
+              <ol className="space-y-1.5">
+                {plan.workflowSteps.map((s, i) => (
+                  <li key={s.tempStepId} className="flex items-center gap-3 text-[12.5px] text-slate-600">
+                    <span className="h-5 w-5 rounded-full bg-amber-100 text-amber-700 font-bold text-[10px] flex items-center justify-center shrink-0">{i+1}</span>
+                    <span className="font-medium text-slate-700">{s.name}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">{s.nodeType}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {/* Safety notes */}
+          {(plan.safetyNotes?.length ?? 0) > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Shield className="h-3.5 w-3.5 text-amber-600" />
+                <span className="text-[12px] font-semibold text-amber-800">Safety notes</span>
               </div>
+              <ul className="space-y-1">
+                {plan.safetyNotes.map((n, i) => <li key={i} className="text-[12px] text-amber-700">• {n}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {/* Revise input */}
+          {showRevise && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+              <label className="text-[12.5px] font-semibold text-amber-800">Revision instructions</label>
+              <textarea rows={3} value={reviseText} onChange={e => setReviseText(e.target.value)}
+                placeholder="e.g. Add a daily digest email, remove the approval gate…"
+                className="w-full resize-none rounded-lg border border-amber-200 bg-white px-3 py-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-amber-400" />
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={reviseText}
-                  onChange={e => setReviseText(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && reviseText.trim()) void handleRevise(); }}
-                  placeholder="e.g. Remove the DB write step, make it simpler…"
-                  className="flex-1 rounded-lg border border-stone-200 px-3 py-2 text-[13px] outline-none focus:border-amber-400"
-                />
-                <button type="button" onClick={() => void handleRevise()} disabled={!reviseText.trim() || revising}
-                  className="flex items-center gap-1.5 rounded-lg bg-stone-100 px-3 py-2 text-[13px] font-semibold text-stone-700 hover:bg-stone-200 disabled:opacity-50">
-                  {revising ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  Revise
+                <button type="button" onClick={handleRevise} disabled={!reviseText.trim() || loading}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50">
+                  {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Revise plan
+                </button>
+                <button type="button" onClick={() => setShowRevise(false)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[12.5px] text-slate-600 hover:bg-slate-50">
+                  Cancel
                 </button>
               </div>
             </div>
+          )}
 
-            {/* Actions */}
-            <div className="flex items-center gap-3 pt-2">
-              <button type="button" onClick={() => void handleApprove()} disabled={loading}
-                className="flex items-center gap-2 rounded-xl px-6 py-3 text-[14px] font-black text-white disabled:opacity-50 hover:opacity-90"
-                style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)", boxShadow: "0 4px 16px rgba(217,119,6,0.35)" }}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                Approve & create workflow
-              </button>
-              <button type="button" onClick={() => setStep("goal")}
-                className="rounded-xl border border-stone-200 px-4 py-3 text-[13.5px] font-medium text-stone-600 hover:bg-stone-50">
-                Start over
-              </button>
-            </div>
+          {/* Actions */}
+          <div className="flex items-center gap-3 justify-between">
+            <button type="button" onClick={() => setShowRevise(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-medium text-slate-600 hover:bg-slate-50">
+              <RefreshCw className="h-3.5 w-3.5" /> Revise plan
+            </button>
+            <button type="button" onClick={handleApprovePlan} disabled={loading}
+              className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              Approve &amp; Continue
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ── CONNECTIONS ───────────────────────────────────────────────────── */}
-        {step === "connections" && plan && (
-          <div className="space-y-5">
-            <div>
-              <h2 className="text-[22px] font-black text-stone-900">Connect required systems</h2>
-              <p className="text-[14px] text-stone-500 mt-1">
-                Configure the connections your workflow needs. Secrets are stored securely — never in the AI chat.
-              </p>
-            </div>
-            {plan.requiredConnections.map(conn => (
-              <div key={conn.tempId} className="rounded-2xl border border-stone-200 bg-white p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="text-[14px] font-bold text-stone-800">{conn.name}</p>
-                      {conn.requiredForSimulation && (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">REQUIRED FOR SIM</span>
-                      )}
-                    </div>
-                    <p className="text-[12.5px] text-stone-500">{conn.setupInstructions}</p>
-                    <p className="text-[11.5px] text-stone-400 mt-1">Used by: {conn.usedBy.join(", ")}</p>
-                  </div>
-                  <Globe2 className="h-5 w-5 text-stone-300 shrink-0" />
-                </div>
-                <div className="mt-3 pt-3 border-t border-stone-100">
-                  <Link
-                    href={`/connections?type=${conn.type}&name=${encodeURIComponent(conn.name)}`}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-amber-100 px-3 py-1.5 text-[12.5px] font-semibold text-amber-800 hover:bg-amber-200 transition-colors"
-                  >
-                    Configure in Connections →
-                  </Link>
-                </div>
+      {/* ── Screen 5: Connection setup ────────────────────────────────────── */}
+      {step === "connections" && (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
+            <div className="flex items-start gap-3">
+              <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-[13px] font-semibold text-blue-900">Configure connections</p>
+                <p className="text-[12px] text-blue-700 mt-0.5">
+                  Vectorbea needs these connections to create tools and run your workflow.
+                  Connections marked <strong>SIM REQUIRED</strong> must be configured for simulation.
+                </p>
               </div>
-            ))}
-            <div className="flex gap-3 pt-2">
-              <button type="button" onClick={() => void handleCreateWorkflow()} disabled={loading}
-                className="flex items-center gap-2 rounded-xl px-6 py-3 text-[14px] font-black text-white disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #D97706, #F59E0B)" }}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                Create in simulation mode
-              </button>
-              <p className="self-center text-[12px] text-stone-400">
-                You can configure real connections later
-              </p>
             </div>
           </div>
-        )}
 
-        {/* ── DONE ──────────────────────────────────────────────────────────── */}
-        {step === "done" && (
-          <div className="flex flex-col items-center justify-center gap-6 py-20 text-center">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-100">
-              <CheckCircle2 className="h-10 w-10 text-emerald-600" />
-            </div>
-            <div>
-              <h2 className="text-[24px] font-black text-stone-900">Workflow created!</h2>
-              <p className="text-[14px] text-stone-500 mt-2">Opening the builder with your workflow animated in…</p>
-            </div>
-            <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
+          <div className="space-y-3">
+            {connReqs.map(req => (
+              <ConnectionCard
+                key={req.id} req={req}
+                onBindExisting={handleBindExisting}
+                onUsePlaceholder={handleUsePlaceholder}
+              />
+            ))}
           </div>
-        )}
-      </div>
+
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => setStep("plan")}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] text-slate-600 hover:bg-slate-50">
+              <ArrowLeft className="h-3.5 w-3.5" /> Back to plan
+            </button>
+            <button type="button" onClick={handleProceedFromConnections} disabled={loading}
+              className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+              Build Workflow
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Screen 6: Building ────────────────────────────────────────────── */}
+      {step === "building" && <BuildingView phase={buildPhase} />}
+
+      {/* ── Screen 7: Done / Ready ────────────────────────────────────────── */}
+      {step === "done" && (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-green-200 bg-green-50/40 p-6 text-center">
+            <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto mb-3" />
+            <h2 className="text-[16px] font-bold text-slate-900">Workflow Created!</h2>
+            <p className="text-[12.5px] text-slate-500 mt-1">
+              {genTools.filter(t => t.status === "created").length} tools and {genAgents.filter(a => a.status === "created").length} agents created. Opening canvas…
+            </p>
+          </div>
+
+          {/* Readiness */}
+          {readinessIssues.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
+              <p className="text-[12.5px] font-semibold text-slate-700">Readiness Notes</p>
+              {readinessIssues.map((issue, i) => (
+                <div key={i} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-[12px] ${
+                  issue.severity === "error" ? "bg-red-50 text-red-700" :
+                  issue.severity === "warning" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
+                }`}>
+                  {issue.severity === "error" ? <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /> :
+                   issue.severity === "warning" ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" /> :
+                   <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />}
+                  {issue.message}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+            <span className="text-[13px] text-slate-500">Opening workflow canvas…</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

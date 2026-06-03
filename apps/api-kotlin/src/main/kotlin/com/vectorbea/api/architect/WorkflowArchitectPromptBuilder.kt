@@ -1,99 +1,137 @@
 package com.vectorbea.api.architect
 
 /**
- * Builds the system + user prompts for the AI Workflow Architect planning LLM.
- * Security: never includes secrets, credentials, or other tenants' data.
+ * Builds prompts for the AI Workflow Architect LLM calls.
+ * Security: never includes secrets, credentials, or cross-tenant data.
  */
 object WorkflowArchitectPromptBuilder {
 
-    private val PLAN_SCHEMA = """
+    fun buildSystemPrompt(workspaceLimits: Map<String, Any>): String = """
+You are Vectorbea's AI Workflow Architect. You design enterprise-grade automation workflows.
+
+## Your Job
+Transform an automation goal into a precise, implementation-ready workflow plan.
+The plan MUST identify every external system, tool, and agent needed.
+The plan MUST define required connections explicitly before tools or agents.
+
+## Output Format
+Return ONLY valid JSON matching this schema exactly. No markdown fences.
+
 {
   "workflowName": "string",
   "workflowDescription": "string",
   "goalSummary": "string",
-  "confidence": "number 0-1",
+  "confidence": 0.0-1.0,
   "trigger": {
     "type": "manual|schedule|webhook|api_event",
     "description": "string",
-    "scheduleSuggestion": "string|null"
+    "scheduleSuggestion": "string (cron, only for schedule type)"
   },
-  "requiredInputs": [{"key":"string","label":"string","type":"string|number|boolean|object","required":true,"description":"string","example":"any"}],
-  "agents": [{
-    "tempId":"string","name":"string","type":"native_llm_agent|iterative_agent|router_agent",
-    "role":"string","instructions":"string","modelPreference":"string|null",
-    "requiresLlmConnection":true,"allowedToolTempIds":["string"],"outputSchema":{}
-  }],
-  "tools": [{
-    "tempId":"string","name":"string","type":"http_api|database_read|database_write|transform|webhook|email|generic_tool",
-    "description":"string","requiredConnection":{"type":"llm_provider|http_api|database|webhook|none","providerHint":"string|null","description":"string"},
-    "riskLevel":"low|medium|high","requiresApproval":false,"inputSchema":{},"outputSchema":{},"configurationQuestions":["string"]
-  }],
-  "approvalGates": [{"tempId":"string","name":"string","reason":"string","approverRole":"string","approvalMessage":"string","riskLevel":"low|medium|high"}],
-  "steps": [{
-    "tempId":"string","name":"string","type":"trigger|agent|tool|approval|branch|transform|join|end",
-    "description":"string","agentTempId":"string|null","toolTempId":"string|null","approvalTempId":"string|null",
-    "inputMappings":{},"outputContract":{},"dependsOn":["string"],"parallelGroup":"string|null",
-    "branchCondition":null,"retryPolicy":{"maxAttempts":2,"backoffMs":2000},"timeoutMs":30000
-  }],
-  "edges": [{"from":"string","to":"string","type":"success|failure|condition_true|condition_false|parallel|join","label":"string|null"}],
-  "requiredConnections": [{
-    "tempId":"string","name":"string","type":"llm_provider|http_api|database|webhook",
-    "providerHint":"string|null","usedBy":["string"],"requiredForSimulation":false,"requiredForRealExecution":true,
-    "setupInstructions":"string","fieldsNeeded":[{"key":"string","label":"string","secret":true,"type":"string","required":true}]
-  }],
-  "safetyNotes": ["string"],
-  "simulationPlan": {"canSimulateWithoutConnections":true,"sampleOutputsNeeded":["string"],"suggestedDemoData":{}},
-  "questionsBeforeCreation": ["string"]
+  "requiredConnections": [
+    {
+      "tempConnectionId": "unique_key",
+      "name": "string",
+      "type": "http_api|database|llm_provider|email|slack|generic",
+      "providerHint": "e.g. Salesforce, PostgreSQL, OpenAI, Resend",
+      "description": "why this connection is needed",
+      "requiredForSimulation": false,
+      "requiredForRealExecution": true,
+      "usedByTempToolIds": ["tool_id_1"],
+      "setupInstructions": "what credentials are needed",
+      "fieldsNeeded": [
+        {"key": "baseUrl", "label": "Base URL", "type": "url", "secret": false, "required": true},
+        {"key": "apiToken", "label": "API Token", "type": "password", "secret": true, "required": true}
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "tempToolId": "unique_key",
+      "name": "string",
+      "type": "http_api|database_read|database_write|transform|webhook|email|generic_tool",
+      "connectionTempId": "must match a requiredConnections.tempConnectionId, or null for transform",
+      "description": "string",
+      "operation": {"method": "GET|POST|PUT|DELETE", "path": "/endpoint", "queryParams": [], "bodyTemplate": {}},
+      "inputSchema": {"type": "object", "properties": {}, "required": []},
+      "outputSchema": {"type": "object", "properties": {}, "required": []},
+      "riskLevel": "low|medium|high",
+      "requiresApproval": false,
+      "timeoutMs": 30000,
+      "simulationOutput": {"sample": "expected output"}
+    }
+  ],
+  "agents": [
+    {
+      "tempAgentId": "unique_key",
+      "name": "string",
+      "type": "native_llm_agent",
+      "llmConnectionTempId": "connection id for LLM, or null for workspace default",
+      "role": "one sentence role description",
+      "systemPrompt": "DETAILED production-quality system prompt (200+ words)",
+      "allowedTempToolIds": ["tool_id_1"],
+      "inputSchema": {"type": "object", "properties": {}, "required": []},
+      "outputSchema": {"type": "object", "properties": {}, "required": []},
+      "modelHints": {"temperature": 0.2, "maxTokens": 1200},
+      "timeoutMs": 60000
+    }
+  ],
+  "workflowSteps": [
+    {
+      "tempStepId": "unique_key",
+      "name": "string",
+      "nodeType": "trigger|tool|agent|approval|branch|join|end",
+      "toolTempId": "must reference tools.tempToolId if nodeType=tool, else null",
+      "agentTempId": "must reference agents.tempAgentId if nodeType=agent, else null",
+      "inputMappings": {"field": "source.path"},
+      "outputMappings": {"alias": "field"}
+    }
+  ],
+  "edges": [
+    {"from": "tempStepId", "to": "tempStepId", "type": "success|failure|condition_true|condition_false|parallel|join", "label": "optional"}
+  ],
+  "safetyNotes": ["risk note"],
+  "simulationPlan": {"canSimulateWithoutConnections": true, "sampleOutputsNeeded": ["tool names"]}
 }
-""".trim()
 
-    fun buildSystemPrompt(workspaceLimits: Map<String, Any>): String = """
-You are Vectorbea AI Workflow Architect. Your job is to convert a user's automation goal into a practical, safe, durable workflow plan.
+## Hard Rules
+- Every tool node MUST reference a tool via toolTempId
+- Every agent node MUST reference an agent via agentTempId
+- Every tool (except type=transform) MUST have a connectionTempId
+- Every agent MUST have a detailed systemPrompt (NOT "You are a helpful assistant")
+- Edges MUST only reference tempStepIds in workflowSteps
+- Database writes: requiresApproval=true, riskLevel=high
+- NEVER ask users to paste secrets into chat
+- NEVER include secrets in the plan
 
-RULES:
-1. Output ONLY valid JSON matching the schema below. No markdown, no explanation outside the JSON.
-2. Use the MINIMUM number of agents and tools required.
-3. Add approval gates before any high-risk write operations (database_write, CRM updates, email sends, billing).
-4. Default to simulation-first (canSimulateWithoutConnections=true when possible).
-5. Never include secrets, credentials, or raw API keys in the plan.
-6. Do not design overly complex workflows. Prefer simple sequential flows unless parallel is clearly needed.
-7. Assign unique tempId values like "step_1", "agent_1", "tool_1", "conn_1" etc.
-8. Ensure every step is connected via edges. Every workflow must end with an "end" step.
-9. The first step must always be the trigger.
-10. If you cannot create a valid plan, set confidence to 0 and explain in goalSummary.
+## Agent System Prompt Quality
+A production-ready agent system prompt includes:
+1. Named role in the specific workflow
+2. Exact input data fields expected
+3. When and how to use each allowed tool
+4. Exact output JSON schema
+5. Missing data behavior (return partial/unknown, not hallucinate)
+6. Safety constraints (no direct external calls, no secrets in output)
 
-WORKSPACE LIMITS: ${workspaceLimits.entries.joinToString(", ") { "${it.key}=${it.value}" }}
-
-SUPPORTED NODE TYPES: trigger, agent, tool, approval, branch, transform, join, end
-SUPPORTED TOOL TYPES: http_api, database_read, database_write, transform, webhook, email, generic_tool
-SUPPORTED AGENT TYPES: native_llm_agent, iterative_agent, router_agent
-
-OUTPUT JSON SCHEMA:
-$PLAN_SCHEMA
+## Workspace Limits
+${workspaceLimits.entries.joinToString("\n") { "- ${it.key}: ${it.value}" }}
 """.trimIndent()
 
-    fun buildPlanningPrompt(goal: String, answers: Map<String, String> = emptyMap()): String {
-        val answerContext = if (answers.isNotEmpty()) {
-            "\n\nUSER CLARIFICATIONS:\n" + answers.entries.joinToString("\n") { "- ${it.key}: ${it.value}" }
+    fun buildPlanningPrompt(goal: String, answers: Map<String, String>): String {
+        val answersSection = if (answers.isNotEmpty()) {
+            "\n\nUser clarifications:\n" + answers.entries.joinToString("\n") { "- ${it.key}: ${it.value}" }
         } else ""
-        return "Create a workflow plan for this automation goal:\n\n\"$goal\"$answerContext"
+        return "Automation goal: $goal$answersSection\n\nDesign a complete workflow plan. Identify ALL required connections, tools, and agents. Write production-quality system prompts for each agent. Output only valid JSON."
     }
 
-    fun buildRevisionPrompt(instruction: String, existingPlanJson: String): String =
-        "Revise this workflow plan according to the instruction.\n\n" +
-        "INSTRUCTION: \"$instruction\"\n\n" +
-        "EXISTING PLAN:\n$existingPlanJson\n\n" +
-        "Return the complete revised plan as valid JSON."
+    fun buildRevisionPrompt(instruction: String, currentPlanJson: String): String =
+        "Current plan:\n$currentPlanJson\n\nRevision instruction: $instruction\n\nApply the revision and return the COMPLETE updated plan JSON. Output only valid JSON."
 
-    fun buildRepairPrompt(brokenJson: String, error: String): String =
-        "The following workflow plan JSON is invalid. Fix it to match the schema exactly.\n\n" +
-        "ERROR: $error\n\n" +
-        "BROKEN JSON:\n$brokenJson\n\n" +
-        "Return only valid JSON."
+    fun buildRepairPrompt(invalidJson: String, error: String): String =
+        "Fix this plan JSON. Error: $error\n\nPlan:\n$invalidJson\n\nReturn corrected JSON only."
 
     fun buildClarificationPrompt(goal: String): String =
-        "A user wants to create this automation: \"$goal\"\n\n" +
-        "If this goal is clear enough to plan immediately, respond with: {\"needsClarification\":false,\"questions\":[]}\n" +
-        "If the goal is vague, respond with up to 5 short clarifying questions: {\"needsClarification\":true,\"questions\":[\"...\"]}\n" +
-        "Focus on: data sources, output destinations, frequency, approval requirements, LLM preferences."
+        """Automation goal: "$goal"
+Does this need clarification before planning? Return JSON only:
+{"needsClarification": true/false, "questions": ["question 1"]}
+Only ask if 1-3 specific questions would significantly improve the plan."""
 }
