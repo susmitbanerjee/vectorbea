@@ -110,8 +110,33 @@ class RuntimeContext(
             workflowInput[key]
         }
         expr.startsWith("steps.") -> {
-            val parts = expr.removePrefix("steps.").split(".", limit = 2)
-            if (parts.size == 2) stepOutputs[parts[0]]?.get(parts[1]) else null
+            val rest  = expr.removePrefix("steps.")
+            val parts = rest.split(".")
+            val ref   = parts[0].lowercase()
+            // "previous", "prev", "last" → last completed step before this node
+            val nodeId = when (ref) {
+                "previous", "prev", "last" -> {
+                    val predecessors = graph.inboundSources(node.id).filter { isCompleted(it) }
+                    predecessors.lastOrNull()
+                        ?: stepOutputs.keys.lastOrNull()  // fallback: globally last completed step
+                }
+                else -> parts[0]
+            }
+            if (nodeId == null) null
+            else {
+                val outputs = stepOutputs[nodeId] ?: emptyMap()
+                // Skip optional "output" segment: steps.X.output.field == steps.X.field
+                val fields = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
+                if (fields.isEmpty()) {
+                    // {{steps.X}} with no field — return first meaningful value
+                    outputs["content"] ?: outputs["summary"] ?: outputs["result"]
+                        ?: outputs.values.firstOrNull()
+                } else {
+                    // Nested field lookup, e.g. steps.agent.output.itinerary.hotels
+                    fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
+                        ?: outputs[fields.last()]  // flat fallback: ignore nesting
+                }
+            }
         }
         expr.startsWith("output.") -> {
             // Resolve from the closest completed predecessor

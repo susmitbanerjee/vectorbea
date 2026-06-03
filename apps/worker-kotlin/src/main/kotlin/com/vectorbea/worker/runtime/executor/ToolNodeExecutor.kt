@@ -567,6 +567,9 @@ class ToolNodeExecutor(
             }]")
         }
 
+        // Special ref: "previous" → last completed step before the current email node
+        val previousNodeId: String? = allOutputs.keys.lastOrNull()
+
         val placeholderRegex = Regex("\\{\\{([^}]+)\\}\\}")
         return placeholderRegex.replace(template) { match ->
             val expr = match.groupValues[1].trim()
@@ -575,16 +578,31 @@ class ToolNodeExecutor(
                 expr.startsWith("steps.") -> {
                     val parts = expr.removePrefix("steps.").split(".")
                     if (parts.isEmpty()) null else {
-                        val ref     = parts[0]
-                        val nodeId  = nameToId[ref] ?: nameToId[ref.lowercase()] ?: ref
+                        val ref    = parts[0]
+                        // "previous" resolves to the last completed step before this node
+                        val nodeId = when (ref.lowercase()) {
+                            "previous", "prev", "last" ->
+                                previousNodeId ?: (nameToId[ref] ?: ref)
+                            else ->
+                                nameToId[ref] ?: nameToId[ref.lowercase()] ?: ref
+                        }
                         val outputs = allOutputs[nodeId] ?: emptyMap()
                         // Skip "output" segment (steps.name.output.field → same as steps.name.field)
-                        val fields  = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
+                        val fields = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
                         if (fields.isEmpty()) {
-                            // {{steps.name}} without field → return content or first value
-                            outputs["content"] ?: outputs["summary"] ?: outputs.values.firstOrNull()
+                            // {{steps.name}} without field → return content or summary or full JSON
+                            outputs["content"] ?: outputs["summary"] ?: outputs["result"]
+                                ?: if (outputs.size == 1) outputs.values.first()
+                                   else outputs.toString()
                         } else {
-                            fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
+                            // Try nested field lookup — also search top-level if nested fails
+                            val nested = fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
+                            if (nested != null) nested
+                            else {
+                                // Fallback: try all outputs for the field name directly
+                                val field = fields.last()
+                                allOutputs.values.firstNotNullOfOrNull { it[field] }
+                            }
                         }
                     }
                 }

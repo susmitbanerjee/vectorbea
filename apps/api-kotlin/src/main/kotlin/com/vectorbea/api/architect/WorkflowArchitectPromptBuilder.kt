@@ -82,7 +82,12 @@ Return ONLY valid JSON matching this schema exactly. No markdown fences.
       "nodeType": "trigger|tool|agent|approval|branch|join|end",
       "toolTempId": "must reference tools.tempToolId if nodeType=tool, else null",
       "agentTempId": "must reference agents.tempAgentId if nodeType=agent, else null",
-      "inputMappings": {"field": "source.path"},
+      "inputMappings": {
+        "RULE: use {{steps.EXACT_TEMP_STEP_ID.output.FIELD}} to reference outputs from prior steps": "",
+        "RULE: use {{workflow.input.FIELD}} to reference trigger/workflow inputs": "",
+        "RULE: NEVER use steps.previous — always use the real tempStepId of the producing step": "",
+        "example_param": "{{steps.fetch_data_step.output.result}}"
+      },
       "outputMappings": {"alias": "field"}
     }
   ],

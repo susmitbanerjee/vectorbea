@@ -163,16 +163,18 @@ function hydrateArchitectNode(data: WFNodeData): WFNodeData {
     const emailNode = isEmailNode(d.label, d.toolType);
 
     if (emailNode) {
-      // Email: use built-in Resend, pre-fill minimal required fields
+      // Email: use built-in Resend. Promote architect inputMappings (real step IDs) into emailBody.
       const existingCfg = (d.toolConfig ?? {}) as Record<string, unknown>;
+      // Architect plan writes inputMappings: {to, subject, body} with real {{steps.X.output.Y}}
+      const planMappings = ((d as Record<string, unknown>).inputMappings ?? {}) as Record<string, string>;
       d.toolConfig = {
         ...existingCfg,
         toolType:     "builtin_email",
         builtinEmail: true,
-        // Only ask for to/from/subject — body comes from previous step
-        emailTo:      existingCfg.emailTo      ?? existingCfg.to      ?? "{{workflow.input.recipientEmail}}",
-        emailSubject: existingCfg.emailSubject ?? existingCfg.subject ?? "Your automated report",
-        emailBody:    existingCfg.emailBody    ?? existingCfg.body    ?? "{{steps.previous.output.summary}}",
+        emailTo:      existingCfg.emailTo      ?? planMappings.to       ?? planMappings.recipient ?? "{{workflow.input.recipientEmail}}",
+        emailSubject: existingCfg.emailSubject ?? planMappings.subject  ?? "Your automated report",
+        // Use architect-generated body which contains real step IDs, not 'previous'
+        emailBody:    existingCfg.emailBody    ?? planMappings.body     ?? planMappings.content   ?? planMappings.email_body ?? "",
       } as WFNodeData["toolConfig"];
     } else if (d.toolId) {
       // Regular tool: bind the real tool record
