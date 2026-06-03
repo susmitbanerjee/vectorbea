@@ -41,7 +41,7 @@ export function ConnectionPickerModal({ sessionId, requirement, onBound, onClose
         const sorted = [...r.connections].sort((a, b) => {
           if (a.typeMatches && !b.typeMatches) return -1;
           if (!a.typeMatches && b.typeMatches) return 1;
-          return a.name.localeCompare(b.name);
+          return (a.name ?? "").localeCompare(b.name ?? "");
         });
         setConnections(sorted);
       })
@@ -58,11 +58,12 @@ export function ConnectionPickerModal({ sessionId, requirement, onBound, onClose
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
 
+  const q = search.toLowerCase();
   const filtered = connections.filter(c =>
     !search ||
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.provider.toLowerCase().includes(search.toLowerCase()) ||
-    c.type.toLowerCase().includes(search.toLowerCase())
+    (c.name ?? "").toLowerCase().includes(q) ||
+    (c.provider ?? "").toLowerCase().includes(q) ||
+    (c.type ?? "").toLowerCase().includes(q)
   );
 
   async function handleSelect(connId: string) {

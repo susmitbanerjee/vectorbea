@@ -119,6 +119,8 @@ function nextNodeId() {
  */
 function syncNodeIdCounter(nodeIds: string[]) {
   for (const id of nodeIds) {
+    // Guard: architect-generated node IDs can be non-numeric strings (trigger_auto, step_N etc.)
+    if (typeof id !== "string") continue;
     const match = id.match(/^n(\d+)$/);
     if (match) {
       const num = parseInt(match[1], 10);
@@ -152,11 +154,13 @@ const isEmailNode = (label: string, toolType?: string) =>
 function hydrateArchitectNode(data: WFNodeData): WFNodeData {
   if (!data.generatedByArchitect) return data;
   const d = { ...data };
+  // Normalize label to always be a string — architect might produce non-string labels
+  if (typeof d.label !== "string") d.label = String(d.label ?? "");
   const nodeType = d.nodeType ?? (d as Record<string, unknown>).type as string;
 
   // ── Tool node ────────────────────────────────────────────────────────────────
   if (nodeType === "tool") {
-    const emailNode = isEmailNode(d.label ?? "", d.toolType);
+    const emailNode = isEmailNode(d.label, d.toolType);
 
     if (emailNode) {
       // Email: use built-in Resend, pre-fill minimal required fields
