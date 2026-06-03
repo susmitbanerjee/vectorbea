@@ -252,11 +252,11 @@ fun main() {
     if (ds != null) {
         DashboardRoutes(DashboardRepository(ds), cacheService).register(router)
 
-    // AI Workflow Architect (requires workflow, tool, and agent repos)
-    if (workflowRepo != null && toolRepo != null && agentRepo != null) {
+    // AI Workflow Architect (requires workflow, tool, agent, connection repos)
+    if (workflowRepo != null && toolRepo != null && agentRepo != null && connectionRepo != null) {
         val architectRepo    = WorkflowArchitectRepository(ds)
         val architectService = WorkflowArchitectService(architectRepo, workflowRepo, toolRepo, agentRepo, ds, config)
-        WorkflowArchitectRoutes(architectService).register(router)
+        WorkflowArchitectRoutes(architectService, connectionRepo, secretService).register(router)
         log.info("AI Workflow Architect: enabled={} model={}", config.architectEnabled, config.architectModel)
     } else log.warn("WorkflowArchitectRoutes disabled — no database")
     } else log.warn("DashboardRoutes disabled — no database")

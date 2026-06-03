@@ -11,11 +11,12 @@ import {
 import { toast } from "sonner";
 import {
   createArchitectSession, generatePlan, revisePlan, approvePlan,
-  getConnectionRequirements, bindExistingConnection, useSimulationPlaceholder,
+  useSimulationPlaceholder, testConnection,
   generateTools, generateAgents, createWorkflowFromPlan,
   type ArchitectSession, type ArchitectPlan, type ConnectionRequirement,
   type GeneratedTool, type GeneratedAgent, type ReadinessIssue,
 } from "@/lib/architect";
+import { ConnectionPickerModal } from "@/components/architect/ConnectionPickerModal";
 
 // ── Step bar ──────────────────────────────────────────────────────────────────
 
@@ -152,46 +153,84 @@ function BuildingView({ phase }: { phase: number }) {
 // ── Connection card ───────────────────────────────────────────────────────────
 
 function ConnectionCard({
-  req, onBindExisting, onUsePlaceholder,
+  sessionId, req, onOpenPicker, onUsePlaceholder, onTest,
 }: {
+  sessionId: string;
   req: ConnectionRequirement;
-  onBindExisting: (reqId: string) => void;
+  onOpenPicker: (req: ConnectionRequirement) => void;
   onUsePlaceholder: (reqId: string) => void;
+  onTest: (reqId: string) => void;
 }) {
+  const isBound = req.boundConnectionId != null;
   const isReady = ["selected_existing","created","test_passed","simulation_placeholder"].includes(req.status);
+  const testPassed = req.status === "test_passed";
   return (
-    <div className={`rounded-xl border p-4 transition-all ${isReady ? "border-green-200 bg-green-50/30" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-xl border p-4 transition-all ${
+      testPassed ? "border-green-200 bg-green-50/30" :
+      isReady    ? "border-amber-200 bg-amber-50/20" :
+                   "border-slate-200 bg-white"
+    }`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-[13px] font-semibold text-slate-800">{req.name}</span>
             <ConnStatusBadge status={req.status} />
-            {req.requiredForSimulation && <span className="rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[9.5px] font-bold text-blue-700">SIM REQUIRED</span>}
-            {!req.requiredForSimulation && <span className="rounded-full bg-slate-50 border border-slate-200 px-2 py-0.5 text-[9.5px] font-bold text-slate-500">OPTIONAL FOR SIM</span>}
+            {req.requiredForSimulation
+              ? <span className="rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[9.5px] font-bold text-blue-700">SIM REQUIRED</span>
+              : <span className="rounded-full bg-slate-50 border border-slate-200 px-2 py-0.5 text-[9.5px] font-bold text-slate-500">OPTIONAL FOR SIM</span>
+            }
           </div>
           {req.description && <p className="text-[12px] text-slate-500 mb-2">{req.description}</p>}
-          {req.setupInstructions && <p className="text-[11.5px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mb-2">{req.setupInstructions}</p>}
-        </div>
-        {isReady && <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />}
-      </div>
-      {!isReady && (
-        <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <button type="button" onClick={() => onBindExisting(req.id)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-600 transition-colors">
-            <Link2 className="h-3 w-3" /> Select existing connection
-          </button>
-          <Link href={`/connections/new` as never} target="_blank"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-            Create new connection ↗
-          </Link>
-          {!req.requiredForSimulation && (
-            <button type="button" onClick={() => onUsePlaceholder(req.id)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] font-medium text-amber-700 hover:bg-amber-100 transition-colors">
-              Use simulation placeholder
-            </button>
+          {req.setupInstructions && (
+            <p className="text-[11.5px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mb-2">{req.setupInstructions}</p>
+          )}
+          {req.testError && (
+            <p className="text-[11.5px] text-red-600 bg-red-50 rounded-lg px-2 py-1.5 mb-2">
+              ✗ {req.testError}
+            </p>
           )}
         </div>
-      )}
+        {testPassed && <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />}
+      </div>
+
+      <div className="flex items-center gap-2 mt-3 flex-wrap">
+        {/* Primary: open picker */}
+        <button type="button" onClick={() => onOpenPicker(req)}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-600 transition-colors">
+          <Link2 className="h-3 w-3" />
+          {isReady ? "Change connection" : "Select connection"}
+        </button>
+
+        {/* Test if bound */}
+        {isBound && !testPassed && (
+          <button type="button" onClick={() => onTest(req.id)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[12px] font-semibold text-blue-700 hover:bg-blue-100 transition-colors">
+            <CheckCircle2 className="h-3 w-3" /> Test connection
+          </button>
+        )}
+
+        {/* Re-test if failed */}
+        {req.status === "test_failed" && (
+          <button type="button" onClick={() => onTest(req.id)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] font-semibold text-red-700 hover:bg-red-100 transition-colors">
+            <RefreshCw className="h-3 w-3" /> Retry test
+          </button>
+        )}
+
+        {/* Create new */}
+        <Link href={`/connections/new` as never} target="_blank"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+          Create new ↗
+        </Link>
+
+        {/* Simulation placeholder */}
+        {!req.requiredForSimulation && req.status !== "simulation_placeholder" && (
+          <button type="button" onClick={() => onUsePlaceholder(req.id)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] font-medium text-amber-700 hover:bg-amber-100 transition-colors">
+            Use simulation placeholder
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -225,6 +264,8 @@ export default function ArchitectPage() {
   const [reviseText, setReviseText]     = useState("");
   const [showRevise, setShowRevise]     = useState(false);
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+  const [pickerReq, setPickerReq]           = useState<ConnectionRequirement | null>(null);
+  const [testingReqId, setTestingReqId]     = useState<string | null>(null);
 
   // ── Step 1: Submit goal ──────────────────────────────────────────────────
   async function handleGoalSubmit() {
@@ -310,10 +351,32 @@ export default function ArchitectPage() {
   }
 
   // ── Connection actions ───────────────────────────────────────────────────
-  async function handleBindExisting(reqId: string) {
-    // In a real implementation this would open a connection picker modal
-    // For now, show a toast explaining how to use it
-    toast.info("Select an existing connection from your workspace to bind to this requirement.");
+  function handleOpenPicker(req: ConnectionRequirement) {
+    setPickerReq(req);
+  }
+
+  function handlePickerBound(reqId: string, connId: string) {
+    setConnReqs(prev => prev.map(r => r.id === reqId
+      ? { ...r, status: "selected_existing" as const, boundConnectionId: connId }
+      : r
+    ));
+    setPickerReq(null);
+  }
+
+  async function handleTestConnection(reqId: string) {
+    if (!session) return;
+    setTestingReqId(reqId);
+    try {
+      const res = await testConnection(session.id, reqId);
+      setConnReqs(prev => prev.map(r => r.id === reqId
+        ? { ...r, status: res.ok ? "test_passed" as const : "test_failed" as const, testError: res.ok ? undefined : res.message }
+        : r
+      ));
+      if (res.ok) toast.success(`Test passed (${res.latencyMs}ms)`);
+      else toast.error(`Test failed: ${res.message}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Test failed");
+    } finally { setTestingReqId(null); }
   }
 
   async function handleUsePlaceholder(reqId: string) {
@@ -693,9 +756,12 @@ export default function ArchitectPage() {
           <div className="space-y-3">
             {connReqs.map(req => (
               <ConnectionCard
-                key={req.id} req={req}
-                onBindExisting={handleBindExisting}
+                key={req.id}
+                sessionId={session?.id ?? ""}
+                req={req}
+                onOpenPicker={handleOpenPicker}
                 onUsePlaceholder={handleUsePlaceholder}
+                onTest={handleTestConnection}
               />
             ))}
           </div>
@@ -716,6 +782,16 @@ export default function ArchitectPage() {
 
       {/* ── Screen 6: Building ────────────────────────────────────────────── */}
       {step === "building" && <BuildingView phase={buildPhase} />}
+
+      {/* ── Connection picker modal ───────────────────────────────────────── */}
+      {pickerReq && session && (
+        <ConnectionPickerModal
+          sessionId={session.id}
+          requirement={pickerReq}
+          onBound={handlePickerBound}
+          onClose={() => setPickerReq(null)}
+        />
+      )}
 
       {/* ── Screen 7: Done / Ready ────────────────────────────────────────── */}
       {step === "done" && (

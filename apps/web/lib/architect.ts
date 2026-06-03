@@ -244,6 +244,24 @@ export async function getBuildSteps(sessionId: string): Promise<{ buildSteps: An
   return apiFetch(withWorkspace(`${BASE}/sessions/${sessionId}/build-steps`));
 }
 
+export async function testConnection(
+  sessionId: string, requirementId: string,
+): Promise<{ id: string; status: string; testStatus: string; ok: boolean; latencyMs: number; message: string }> {
+  return apiFetch(withWorkspace(`${BASE}/sessions/${sessionId}/connection-requirements/${requirementId}/test`), {
+    method: "POST",
+  });
+}
+
+export async function listWorkspaceConnections(type?: string): Promise<{
+  connections: Array<{ id: string; name: string; type: string; provider: string; status: string; testStatus?: string }>;
+  total: number;
+}> {
+  const url = type
+    ? withWorkspace(`${BASE}/connections?type=${encodeURIComponent(type)}`)
+    : withWorkspace(`${BASE}/connections`);
+  return apiFetch(url);
+}
+
 export async function getReadiness(sessionId: string): Promise<{
   readinessStatus: string;
   readinessIssues: ReadinessIssue[];

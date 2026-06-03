@@ -2,17 +2,24 @@ package com.vectorbea.api.architect
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.vectorbea.api.api.context
+import com.vectorbea.api.connector.ConnectionTester
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
+import com.vectorbea.api.repository.ConnectionRepository
+import com.vectorbea.api.secrets.SecretService
 import java.util.UUID
 
 /**
  * AI Workflow Architect API routes.
  * All routes: authenticated, workspace-scoped, feature-gated.
  */
-class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
+class WorkflowArchitectRoutes(
+    private val service: WorkflowArchitectService,
+    private val connectionRepo: ConnectionRepository,
+    private val secretService: SecretService,
+) {
 
     private val mapper = jacksonObjectMapper()
 
@@ -34,6 +41,10 @@ class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
         // Build steps & readiness
         router.get ("/api/architect/sessions/:id/build-steps",                                     ::getBuildSteps)
         router.get ("/api/architect/sessions/:id/readiness",                                       ::getReadiness)
+        // Connection test
+        router.post("/api/architect/sessions/:id/connection-requirements/:reqId/test",             ::testConnection)
+        // Workspace connections list (for picker)
+        router.get ("/api/architect/connections",                                                   ::listConnections)
     }
 
     private fun enabledGuard(): Response? = if (!service.isEnabled()) Response.json(403, mapOf(
@@ -269,6 +280,80 @@ class WorkflowArchitectRoutes(private val service: WorkflowArchitectService) {
             "readinessIssues" to mapper.readValue(session.readinessIssuesJson, List::class.java),
             "simulationReady" to (session.readinessStatus in listOf("simulation_ready", "real_ready")),
             "realExecutionReady" to (session.readinessStatus == "real_ready"),
+        ))
+    }
+
+    // ── POST .../connection-requirements/:reqId/test ──────────────────────────
+
+    private fun testConnection(req: Request): Response {
+        val ctx    = req.context()
+        val id     = UUID.fromString(req.pathParam("id"))
+        val reqId  = UUID.fromString(req.pathParam("reqId"))
+        sessionOrNotFound(id, ctx.workspaceId)
+        val connReq = service.repo.findConnectionRequirement(reqId, id)
+            ?: throw ApiError.NotFound("Connection requirement")
+        val connId = connReq.boundConnectionId
+            ?: return Response.json(400, mapOf("error" to "NOT_BOUND",
+                "message" to "No connection is bound to this requirement. Bind a connection first."))
+        val connection = connectionRepo.findById(connId, ctx.workspaceId)
+            ?: return Response.json(400, mapOf("error" to "CONNECTION_NOT_FOUND",
+                "message" to "Bound connection not found in workspace."))
+
+        service.repo.updateConnectionRequirementStatus(reqId, "test_pending",
+            boundConnectionId = connId, testStatus = "pending")
+
+        return try {
+            val tester = ConnectionTester(secretService)
+            val result = tester.test(connection)
+            val passed = result.status == com.vectorbea.api.connector.ConnectionTestResult.TestStatus.CONNECTED
+            val (newStatus, testStatus, testError) = if (passed) {
+                Triple("test_passed", "passed", null)
+            } else {
+                Triple("test_failed", "failed", result.message.take(300))
+            }
+            service.repo.updateConnectionRequirementStatus(reqId, newStatus,
+                boundConnectionId = connId, testStatus = testStatus, testError = testError)
+            service.repo.appendEvent(ctx.workspaceId, id, "ARCHITECT_CONNECTION_TESTED",
+                "${connReq.name}: $testStatus", testError)
+            Response.ok(mapOf(
+                "id"         to reqId.toString(),
+                "status"     to newStatus,
+                "testStatus" to testStatus,
+                "ok"         to passed,
+                "latencyMs"  to result.latencyMs,
+                "message"    to result.message,
+            ))
+        } catch (e: Exception) {
+            service.repo.updateConnectionRequirementStatus(reqId, "test_failed",
+                boundConnectionId = connId, testStatus = "failed",
+                testError = e.message?.take(300))
+            Response.json(500, mapOf("error" to "TEST_ERROR",
+                "message" to (e.message ?: "Connection test failed unexpectedly.")))
+        }
+    }
+
+    // ── GET /api/architect/connections ────────────────────────────────────────
+
+    private fun listConnections(req: Request): Response {
+        val ctx  = req.context()
+        val type = req.queryParam("type")
+        val page = connectionRepo.list(
+            workspaceId   = ctx.workspaceId,
+            environmentId = ctx.environmentId,
+            type          = type,
+            status        = "active",
+        )
+        return Response.ok(mapOf(
+            "connections" to page.items.map { conn -> mapOf(
+                "id"         to conn.id.toString(),
+                "name"       to conn.name,
+                "type"       to conn.type,
+                "provider"   to conn.provider,
+                "status"     to conn.status,
+                "testStatus" to conn.lastTestStatus,
+                "testedAt"   to conn.lastTestedAt?.toString(),
+            )},
+            "total" to page.total,
         ))
     }
 
