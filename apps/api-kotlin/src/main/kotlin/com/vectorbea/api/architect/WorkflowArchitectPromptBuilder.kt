@@ -101,6 +101,7 @@ Return ONLY valid JSON matching this schema exactly. No markdown fences.
 ## Hard Rules
 - Every tool node MUST reference a tool via toolTempId
 - Every agent node MUST reference an agent via agentTempId
+- Agent systemPrompt MUST instruct the agent to output CONCISE JSON — no verbose descriptions — to avoid token truncation
 - Every tool (except type=transform) MUST have a connectionTempId
 - Every agent MUST have a detailed systemPrompt (NOT "You are a helpful assistant")
 - Edges MUST only reference tempStepIds in workflowSteps

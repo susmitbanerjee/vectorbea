@@ -403,7 +403,7 @@ class WorkflowArchitectService(
                         llmConnectionId  = llmConnectionId,   // ← resolved LLM connection
                         modelName        = config.architectModel ?: "gpt-4o-mini",
                         temperature      = (modelHints?.get("temperature") as? Number)?.toDouble() ?: 0.2,
-                        maxTokens        = (modelHints?.get("maxTokens") as? Number)?.toInt() ?: 1200,
+                        maxTokens        = (modelHints?.get("maxTokens") as? Number)?.toInt() ?: 4000,
                         allowedToolIds   = boundToolIds,
                         outputSchema     = runCatching {
                             mapper.readValue(outputSchema, Map::class.java) as Map<String, Any>

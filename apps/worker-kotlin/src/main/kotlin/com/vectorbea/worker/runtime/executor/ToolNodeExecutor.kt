@@ -538,57 +538,129 @@ class ToolNodeExecutor(
             .removeSuffix("```")
             .trim()
 
+    /**
+     * Try to parse JSON that may be truncated (finishReason=length).
+     * If full parse fails, tries to recover a partial Map from what was parsed before truncation.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun parseJsonBestEffort(content: String): Map<String, Any?>? {
+        // 1. Normal parse
+        runCatching { return mapper.readValue(content, Map::class.java) as Map<String, Any?> }
+        // 2. Truncated — try trimming to last valid position
+        // Find the last complete object by trimming from the end
+        var s = content.trimEnd()
+        while (s.length > 2) {
+            runCatching {
+                val result = mapper.readValue(s, Map::class.java) as Map<String, Any?>
+                return result
+            }
+            // Remove last char and try again (expensive but rarely runs deep)
+            if (s.length < content.length - 500) break  // give up after 500 chars trimmed
+            s = s.dropLast(1).trimEnd().trimEnd(',').trimEnd('"').trimEnd()
+        }
+        return null
+    }
+
     /** Format raw JSON or plain content into readable HTML email body. */
     @Suppress("UNCHECKED_CAST")
     private fun formatContentAsHtml(content: String, requestedField: String): String {
-        // Try to parse as JSON and extract the requested field or format the whole thing
-        val parsed = runCatching { mapper.readValue(content, Map::class.java) as Map<String, Any?> }.getOrNull()
+        val parsed = parseJsonBestEffort(content)
         if (parsed != null) {
             val target = parsed[requestedField] ?: parsed.values.firstOrNull()
             return formatValueAsHtml(target ?: parsed)
         }
-        // Plain text — just clean it up
-        return content.replace("\n", "<br>")
+        // Fallback: treat as plain text, strip any remaining code fence artifacts
+        return content
+            .replace(Regex("^```[a-z]*\\s*", RegexOption.MULTILINE), "")
+            .replace("```", "")
+            .trim()
+            .replace("\n", "<br>")
     }
 
-    /** Format any value (Map/List/String) into readable HTML. */
+    /** Format any value (Map/List/String) into readable HTML for email. */
     @Suppress("UNCHECKED_CAST")
     private fun formatValueAsHtml(value: Any?): String = when (value) {
         is Map<*, *> -> {
             val sb = StringBuilder()
-            for ((day, details) in value) {
-                sb.append("<h3 style='color:#1a1a1a;margin-top:20px;'>$day</h3>")
-                when (details) {
-                    is Map<*, *> -> {
-                        val dest = details["destination"]
-                        if (dest != null) sb.append("<p><strong>📍 $dest</strong></p>")
-                        val activities = details["activities"]
-                        if (activities is List<*>) {
-                            sb.append("<ul style='padding-left:20px;'>")
-                            for (act in activities) {
-                                if (act is Map<*, *>) {
-                                    sb.append("<li><strong>${act["time"] ?: ""}</strong> — ${act["activity"] ?: ""}")
-                                    val d = act["details"]?.toString(); if (!d.isNullOrBlank()) sb.append(": $d")
-                                    val c = act["cost"]?.toString(); if (!c.isNullOrBlank()) sb.append(" <em>($c)</em>")
-                                    sb.append("</li>")
-                                } else {
-                                    sb.append("<li>$act</li>")
-                                }
-                            }
-                            sb.append("</ul>")
-                        }
-                        val tips = details["photo_tips"]?.toString(); if (!tips.isNullOrBlank()) sb.append("<p>📸 $tips</p>")
-                        val backup = details["backup_plan"]?.toString(); if (!backup.isNullOrBlank()) sb.append("<p>🌧 $backup</p>")
+            // Handle {trip:{...}, days:[...]} structure
+            val trip = value["trip"] as? Map<*, *>
+            if (trip != null) {
+                val dest = trip["destination"]?.toString()
+                val dates = (trip["dates"] as? Map<*, *>)?.let { "${it["start"]} to ${it["end"]}" }
+                val budget = trip["budget"]?.toString()
+                if (dest != null) sb.append("<h2 style='color:#1a1a1a;'>✈️ $dest Trip</h2>")
+                if (dates != null) sb.append("<p>📅 $dates</p>")
+                if (budget != null) sb.append("<p>💰 Budget: $budget</p>")
+                sb.append("<hr style='border:1px solid #eee;margin:12px 0;'>")
+            }
+            // Handle days array
+            val days = value["days"] as? List<*>
+            if (days != null) {
+                for (dayEntry in days) {
+                    val day = dayEntry as? Map<*, *> ?: continue
+                    val date = day["date"]?.toString() ?: ""
+                    sb.append("<h3 style='color:#333;margin-top:18px;border-bottom:1px solid #eee;padding-bottom:4px;'>📅 $date</h3>")
+                    formatActivitiesHtml(day, sb)
+                }
+            } else {
+                // Handle {date: {...activities...}} map or generic map
+                for ((key, details) in value) {
+                    if (key == "trip") continue
+                    sb.append("<h3 style='color:#333;margin-top:18px;'>$key</h3>")
+                    when (details) {
+                        is Map<*, *> -> formatActivitiesHtml(details, sb)
+                        is List<*>   -> details.forEach { sb.append("<p>${it?.toString()?.replace("\n","<br>")}</p>") }
+                        else         -> sb.append("<p>${details?.toString()?.replace("\n","<br>") ?: ""}</p>")
                     }
-                    is List<*> -> details.forEach { sb.append("<p>${it?.toString()?.replace("\n","<br>")}</p>") }
-                    else -> sb.append("<p>${details?.toString()?.replace("\n","<br>") ?: ""}</p>")
                 }
             }
             sb.toString()
         }
-        is List<*> -> value.joinToString("<br>") { formatValueAsHtml(it) }
+        is List<*> -> {
+            val sb = StringBuilder()
+            value.forEachIndexed { i, item ->
+                when (item) {
+                    is Map<*, *> -> {
+                        val date = item["date"]?.toString()
+                        if (date != null) sb.append("<h3 style='color:#333;margin-top:18px;'>📅 $date</h3>")
+                        formatActivitiesHtml(item, sb)
+                    }
+                    else -> sb.append("<p>${item?.toString()?.replace("\n","<br>")}</p>")
+                }
+            }
+            sb.toString()
+        }
         is String -> value.replace("\n", "<br>")
-        else -> value?.toString()?.replace("\n", "<br>") ?: ""
+        else      -> value?.toString()?.replace("\n", "<br>") ?: ""
+    }
+
+    private fun formatActivitiesHtml(day: Map<*, *>, sb: StringBuilder) {
+        val dest = day["destination"]?.toString()
+        if (dest != null) sb.append("<p><strong>📍 $dest</strong></p>")
+        val activities = day["activities"] as? List<*>
+        if (activities != null) {
+            sb.append("<table style='width:100%;border-collapse:collapse;font-size:13px;'>")
+            for (act in activities) {
+                val a = act as? Map<*, *> ?: continue
+                val time     = a["time"]?.toString() ?: ""
+                val place    = a["place"]?.toString()
+                val activity = a["activity"]?.toString() ?: ""
+                val cost     = a["cost"]?.toString() ?: ""
+                val food     = a["food_suggestion"]?.toString()
+                sb.append("<tr style='border-bottom:1px solid #f0f0f0;'>")
+                sb.append("<td style='padding:6px 8px;color:#888;white-space:nowrap;vertical-align:top;'>$time</td>")
+                sb.append("<td style='padding:6px 8px;vertical-align:top;'>")
+                sb.append("<strong>$activity</strong>")
+                if (!place.isNullOrBlank()) sb.append("<br><span style='color:#666;font-size:12px;'>📍 $place</span>")
+                if (!food.isNullOrBlank()) sb.append("<br><span style='color:#888;font-size:12px;'>🍽 $food</span>")
+                sb.append("</td>")
+                sb.append("<td style='padding:6px 8px;color:#555;text-align:right;white-space:nowrap;vertical-align:top;'>$cost</td>")
+                sb.append("</tr>")
+            }
+            sb.append("</table>")
+        }
+        val tips   = day["photo_tips"]?.toString();   if (!tips.isNullOrBlank())   sb.append("<p style='color:#888;font-size:12px;'>📸 $tips</p>")
+        val backup = day["backup_plan"]?.toString();  if (!backup.isNullOrBlank()) sb.append("<p style='color:#888;font-size:12px;'>🌧 $backup</p>")
     }
 
     /** Format raw step outputs as HTML (used when specific field lookup fails). */
@@ -699,16 +771,14 @@ class ToolNodeExecutor(
                             val viaMapping = reverseMappings[field]?.let { (nid, storedKey) ->
                                 allOutputs[nid]?.get(storedKey)
                             }
-                            // 4. Parse content field as JSON and search inside it
+                            // 4. Parse content field as JSON (handles truncated JSON too)
                             //    e.g. agent returns {content: "```json {\"itinerary\":{...}}"
                             val insideContent = allOutputs.values.firstNotNullOfOrNull { out ->
                                 val raw = out["content"]?.toString() ?: return@firstNotNullOfOrNull null
                                 val json = stripMarkdownFences(raw)
-                                runCatching {
-                                    @Suppress("UNCHECKED_CAST")
-                                    val parsed = mapper.readValue(json, Map::class.java) as Map<String, Any?>
-                                    parsed[field] ?: fields.fold(parsed as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
-                                }.getOrNull()
+                                val parsed = parseJsonBestEffort(json) ?: return@firstNotNullOfOrNull null
+                                parsed[field]
+                                    ?: fields.fold(parsed as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
                             }
                             // 5. Global search across ALL step outputs for field name
                             val globalSearch = allOutputs.values.firstNotNullOfOrNull { it[field] }
