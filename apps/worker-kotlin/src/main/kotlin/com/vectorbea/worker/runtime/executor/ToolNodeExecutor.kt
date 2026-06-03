@@ -531,6 +531,75 @@ class ToolNodeExecutor(
      * Node labels are normalised: "Price Analyst" → "price_analyst" for matching.
      * If a placeholder cannot be resolved it is left as-is.
      */
+    /** Remove ```json / ``` markdown fences from LLM output strings. */
+    private fun stripMarkdownFences(s: String): String =
+        s.trim()
+            .removePrefix("```json").removePrefix("```javascript").removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+
+    /** Format raw JSON or plain content into readable HTML email body. */
+    @Suppress("UNCHECKED_CAST")
+    private fun formatContentAsHtml(content: String, requestedField: String): String {
+        // Try to parse as JSON and extract the requested field or format the whole thing
+        val parsed = runCatching { mapper.readValue(content, Map::class.java) as Map<String, Any?> }.getOrNull()
+        if (parsed != null) {
+            val target = parsed[requestedField] ?: parsed.values.firstOrNull()
+            return formatValueAsHtml(target ?: parsed)
+        }
+        // Plain text — just clean it up
+        return content.replace("\n", "<br>")
+    }
+
+    /** Format any value (Map/List/String) into readable HTML. */
+    @Suppress("UNCHECKED_CAST")
+    private fun formatValueAsHtml(value: Any?): String = when (value) {
+        is Map<*, *> -> {
+            val sb = StringBuilder()
+            for ((day, details) in value) {
+                sb.append("<h3 style='color:#1a1a1a;margin-top:20px;'>$day</h3>")
+                when (details) {
+                    is Map<*, *> -> {
+                        val dest = details["destination"]
+                        if (dest != null) sb.append("<p><strong>📍 $dest</strong></p>")
+                        val activities = details["activities"]
+                        if (activities is List<*>) {
+                            sb.append("<ul style='padding-left:20px;'>")
+                            for (act in activities) {
+                                if (act is Map<*, *>) {
+                                    sb.append("<li><strong>${act["time"] ?: ""}</strong> — ${act["activity"] ?: ""}")
+                                    val d = act["details"]?.toString(); if (!d.isNullOrBlank()) sb.append(": $d")
+                                    val c = act["cost"]?.toString(); if (!c.isNullOrBlank()) sb.append(" <em>($c)</em>")
+                                    sb.append("</li>")
+                                } else {
+                                    sb.append("<li>$act</li>")
+                                }
+                            }
+                            sb.append("</ul>")
+                        }
+                        val tips = details["photo_tips"]?.toString(); if (!tips.isNullOrBlank()) sb.append("<p>📸 $tips</p>")
+                        val backup = details["backup_plan"]?.toString(); if (!backup.isNullOrBlank()) sb.append("<p>🌧 $backup</p>")
+                    }
+                    is List<*> -> details.forEach { sb.append("<p>${it?.toString()?.replace("\n","<br>")}</p>") }
+                    else -> sb.append("<p>${details?.toString()?.replace("\n","<br>") ?: ""}</p>")
+                }
+            }
+            sb.toString()
+        }
+        is List<*> -> value.joinToString("<br>") { formatValueAsHtml(it) }
+        is String -> value.replace("\n", "<br>")
+        else -> value?.toString()?.replace("\n", "<br>") ?: ""
+    }
+
+    /** Format raw step outputs as HTML (used when specific field lookup fails). */
+    @Suppress("UNCHECKED_CAST")
+    private fun formatOutputAsHtml(outputs: Map<String, Any>): String {
+        val metaFields = setOf("model", "provider", "tokenCount", "finishReason", "usage")
+        return outputs.entries.filter { it.key !in metaFields }.joinToString("\n") { (k, v) ->
+            "<p><strong>$k</strong>: ${v.toString().replace("\n", "<br>")}</p>"
+        }
+    }
+
     private fun resolveEmailTemplate(template: String, ctx: RuntimeContext): String {
         if (!template.contains("{{")) return template
 
@@ -616,27 +685,43 @@ class ToolNodeExecutor(
                         // Skip "output" segment (steps.name.output.field → same as steps.name.field)
                         val fields = if (parts.size >= 2 && parts[1] == "output") parts.drop(2) else parts.drop(1)
                         if (fields.isEmpty()) {
-                            // {{steps.name}} without field → return content or summary or full JSON
-                            outputs["content"] ?: outputs["summary"] ?: outputs["result"]
-                                ?: if (outputs.size == 1) outputs.values.first()
-                                   else outputs.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+                            // {{steps.name}} with no field → return cleaned content or entire meaningful output
+                            val raw = outputs["content"] ?: outputs["summary"] ?: outputs["result"]
+                                ?: if (outputs.size == 1) outputs.values.first() else null
+                            raw?.let { stripMarkdownFences(it.toString()) } ?: formatOutputAsHtml(outputs)
                         } else {
                             val field = fields.last()
-                            // 1. Try nested field lookup in this step's outputs
+                            // 1. Nested field path (steps.X.a.b.c)
                             val nested = fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
-                            // 2. Try flat lookup (skip output. prefix)
+                            // 2. Flat lookup in top-level outputs
                             val flat = outputs[field]
-                            // 3. Try reverse output-mapping: template says "final_itinerary" but stored key is "itinerary"
+                            // 3. Reverse output-mapping (template uses source expr, stored under mapped key)
                             val viaMapping = reverseMappings[field]?.let { (nid, storedKey) ->
                                 allOutputs[nid]?.get(storedKey)
                             }
-                            // 4. Search ALL completed steps for this field name
+                            // 4. Parse content field as JSON and search inside it
+                            //    e.g. agent returns {content: "```json {\"itinerary\":{...}}"
+                            val insideContent = allOutputs.values.firstNotNullOfOrNull { out ->
+                                val raw = out["content"]?.toString() ?: return@firstNotNullOfOrNull null
+                                val json = stripMarkdownFences(raw)
+                                runCatching {
+                                    @Suppress("UNCHECKED_CAST")
+                                    val parsed = mapper.readValue(json, Map::class.java) as Map<String, Any?>
+                                    parsed[field] ?: fields.fold(parsed as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
+                                }.getOrNull()
+                            }
+                            // 5. Global search across ALL step outputs for field name
                             val globalSearch = allOutputs.values.firstNotNullOfOrNull { it[field] }
-                            // 5. If field not found anywhere, return entire previous step output as readable text
-                            val entireOutput = if (outputs.isNotEmpty())
-                                outputs.entries.joinToString("\n") { (k, v) -> "$k: $v" } else null
+                            // 6. Entire content of previous step, cleaned and formatted as HTML
+                            val entireOutput = if (outputs.isNotEmpty()) {
+                                val raw = outputs["content"]?.toString()
+                                if (raw != null) formatContentAsHtml(stripMarkdownFences(raw), field)
+                                else formatOutputAsHtml(outputs)
+                            } else null
 
-                            nested ?: flat ?: viaMapping ?: globalSearch ?: entireOutput
+                            val result = nested ?: flat ?: viaMapping ?: insideContent ?: globalSearch ?: entireOutput
+                            // Clean markdown fences from any string result
+                            result?.let { if (it is String) stripMarkdownFences(it) else it }
                         }
                     }
                 }
@@ -648,16 +733,19 @@ class ToolNodeExecutor(
                 else -> null
             }
             if (resolved == null) {
-                log.warn("[email-template] could not resolve '{{{}}}' — previousNodeId={}, allOutputs keys={}, nameToId={}",
+                log.warn("[email-template] could not resolve '{{{}}}' — previousNodeId={}, outputs={}",
                     expr, previousNodeId,
-                    allOutputs.entries.joinToString { "'${ctx.graph.nodes.find { n -> n.id == it.key }?.label ?: it.key}': ${it.value.keys}" },
-                    nameToId.keys.take(15))
-                // Last resort: dump ALL step outputs so the email body has real data
-                val dump = allOutputs.entries.joinToString("\n\n") { (nid, out) ->
-                    val label = ctx.graph.nodes.find { n -> n.id == nid }?.label ?: nid
-                    "[$label]\n" + out.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+                    allOutputs.entries.joinToString { "'${ctx.graph.nodes.find { n -> n.id == it.key }?.label ?: it.key}': ${it.value.keys}" })
+                // Last resort: dump content from all steps (excluding LLM metadata fields)
+                val metaFields = setOf("model", "provider", "tokenCount", "finishReason", "usage")
+                allOutputs.entries.joinToString("\n\n") { (nid, out) ->
+                    val content = out["content"]?.toString()
+                    if (content != null) {
+                        formatContentAsHtml(stripMarkdownFences(content), "output")
+                    } else {
+                        out.entries.filter { it.key !in metaFields }.joinToString("\n") { (k, v) -> "$k: $v" }
+                    }
                 }
-                if (dump.isNotBlank()) dump else ""
             } else {
                 resolved.toString()
             }
