@@ -797,8 +797,12 @@ class ToolNodeExecutor(
                             } else null
 
                             val result = nested ?: flat ?: viaMapping ?: insideContent ?: globalSearch ?: entireOutput
-                            // Clean markdown fences from any string result
-                            result?.let { if (it is String) stripMarkdownFences(it) else it }
+                            // Format Maps/Lists through readable formatter; strip fences from strings
+                            when (result) {
+                                is Map<*, *>, is List<*> -> formatValueAsHtml(result)
+                                is String                -> stripMarkdownFences(result)
+                                else                     -> result
+                            }
                         }
                     }
                 }
@@ -824,7 +828,12 @@ class ToolNodeExecutor(
                     }
                 }
             } else {
-                resolved.toString()
+                // Format Maps/Lists through the readable formatter, not .toString()
+                when (resolved) {
+                    is Map<*, *>, is List<*> -> formatValueAsHtml(resolved)
+                    is String                -> stripMarkdownFences(resolved)
+                    else                     -> resolved.toString()
+                }
             }
         }
     }
