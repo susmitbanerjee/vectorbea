@@ -344,9 +344,9 @@ class WorkflowArchitectRoutes(
         // (e.g. "http", "smtp"). The UI sorts preferred-type matches to the top.
         val page = connectionRepo.list(
             workspaceId   = ctx.workspaceId,
-            environmentId = ctx.environmentId,
-            type          = null,   // no server-side type filter
-            status        = "active",
+            environmentId = null,   // show connections from ALL environments
+            type          = null,   // no type filter — frontend ranks by typeMatches
+            status        = null,   // show active AND inactive (user can see all)
         )
         return Response.ok(mapOf(
             "connections" to page.items.map { conn -> mapOf(
