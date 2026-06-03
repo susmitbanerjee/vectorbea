@@ -35,6 +35,8 @@ class RuntimeContext(
     private val nodeStatus: MutableMap<String, NodeStatus> = ConcurrentHashMap()
     private val stepOutputs: MutableMap<String, Map<String, Any>> = ConcurrentHashMap()
     private val selectedEdges: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    /** Ordered list of node IDs as they completed — used to resolve 'previous' in templates. */
+    private val completionOrder: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
 
     // ── Sequence counter (local; persisted to DB by WorkflowRuntime) ──────────
 
@@ -71,7 +73,11 @@ class RuntimeContext(
 
     fun setOutput(nodeId: String, output: Map<String, Any>) = synchronized(this) {
         stepOutputs[nodeId] = output
+        if (!completionOrder.contains(nodeId)) completionOrder.add(nodeId)
     }
+
+    /** Returns node IDs in the order they completed, most recent last. */
+    fun completionOrderedIds(): List<String> = synchronized(completionOrder) { completionOrder.toList() }
 
     fun getOutput(nodeId: String): Map<String, Any> = stepOutputs[nodeId] ?: emptyMap()
 
@@ -116,9 +122,11 @@ class RuntimeContext(
             // "previous", "prev", "last" → last completed step before this node
             val nodeId = when (ref) {
                 "previous", "prev", "last" -> {
-                    val predecessors = graph.inboundSources(node.id).filter { isCompleted(it) }
-                    predecessors.lastOrNull()
-                        ?: stepOutputs.keys.lastOrNull()  // fallback: globally last completed step
+                    // Prefer direct graph predecessors (inbound edges), most recent first
+                    val inbound = graph.inboundSources(node.id).filter { isCompleted(it) }
+                    inbound.lastOrNull()
+                        // Fallback: the node that completed most recently across the whole run
+                        ?: completionOrderedIds().lastOrNull { it != node.id }
                 }
                 else -> parts[0]
             }

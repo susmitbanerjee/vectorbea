@@ -568,8 +568,19 @@ class ToolNodeExecutor(
         }
 
         // Special ref: "previous" → last completed step before the current email node
-        // Use execution order of stepOutputs (insertion-ordered LinkedHashMap) as proxy
-        val previousNodeId: String? = allOutputs.keys.lastOrNull()
+        // Use completionOrderedIds() for reliable ordering (ConcurrentHashMap has no order)
+        val emailNodeId = ctx.graph.nodes.find { n ->
+            n.config["toolType"] == "builtin_email" ||
+            n.config["builtinEmail"] == true ||
+            n.label.lowercase().contains("email")
+        }?.id
+        val previousNodeId: String? =
+            // Prefer direct inbound predecessor via graph edges
+            emailNodeId?.let { eid ->
+                ctx.graph.inboundSources(eid).filter { allOutputs.containsKey(it) }.lastOrNull()
+            }
+            // Fallback: most recently completed step
+            ?: ctx.completionOrderedIds().lastOrNull { allOutputs.containsKey(it) }
 
         // Build reverse output-mapping lookup: outputMapping value → stored key
         // e.g. outputMappings: {itinerary ← final_itinerary}
@@ -637,9 +648,19 @@ class ToolNodeExecutor(
                 else -> null
             }
             if (resolved == null) {
-                log.warn("[email-template] could not resolve '{{$expr}}' — available: ${nameToId.keys.take(10)}")
+                log.warn("[email-template] could not resolve '{{{}}}' — previousNodeId={}, allOutputs keys={}, nameToId={}",
+                    expr, previousNodeId,
+                    allOutputs.entries.joinToString { "'${ctx.graph.nodes.find { n -> n.id == it.key }?.label ?: it.key}': ${it.value.keys}" },
+                    nameToId.keys.take(15))
+                // Last resort: dump ALL step outputs so the email body has real data
+                val dump = allOutputs.entries.joinToString("\n\n") { (nid, out) ->
+                    val label = ctx.graph.nodes.find { n -> n.id == nid }?.label ?: nid
+                    "[$label]\n" + out.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+                }
+                if (dump.isNotBlank()) dump else ""
+            } else {
+                resolved.toString()
             }
-            resolved?.toString() ?: match.value
         }
     }
 
