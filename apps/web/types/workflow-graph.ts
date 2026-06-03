@@ -387,6 +387,18 @@ export interface WFNodeData extends Record<string, unknown> {
 
   // Runtime preview status
   previewStatus?: "idle" | "running" | "succeeded" | "failed" | "waiting" | "skipped";
+
+  // ── Architect-generated fields (flat, used by hydrateArchitectNode) ──────────
+  /** Set by AI Architect — actual tool UUID created during architect flow */
+  toolId?: string;
+  /** Set by AI Architect — actual agent UUID created during architect flow */
+  agentId?: string;
+  /** Set by AI Architect — tool type hint */
+  toolType?: string;
+  /** Set by AI Architect — marks node was created by architect, needs hydration */
+  generatedByArchitect?: boolean;
+  /** Readiness status set by compiler */
+  status?: "ready" | "missing_tool" | "missing_agent" | "simulation_only" | "needs_mapping_review";
 }
 
 // ─── Edge data ────────────────────────────────────────────────────────────────

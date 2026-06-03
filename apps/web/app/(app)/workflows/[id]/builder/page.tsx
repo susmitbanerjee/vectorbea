@@ -127,12 +127,84 @@ function syncNodeIdCounter(nodeIds: string[]) {
   }
 }
 
+/**
+ * Hydrate architect-generated node data so the inspector picks up toolId/agentId.
+ * The architect writes flat data.toolId / data.agentId.
+ * The inspector reads data.toolConfig.toolId / data.agentConfig.agentId.
+ * This function merges them so both the display layer and inspector work correctly.
+ */
+const EMAIL_LABELS = ["email", "send email", "mail", "notify", "notification", "resend"];
+const isEmailNode = (label: string, toolType?: string) =>
+  toolType === "builtin_email" || EMAIL_LABELS.some(k => label.toLowerCase().includes(k));
+
+/**
+ * Hydrate architect-generated node data so the inspector pre-populates correctly.
+ *
+ * The AI Architect compiler writes:
+ *   data.toolId, data.agentId, data.toolType, data.generatedByArchitect  (flat)
+ *
+ * The WorkflowInspector reads:
+ *   data.toolConfig.toolId, data.agentConfig.agentId  (nested config objects)
+ *
+ * This function merges them so a freshly-created architect workflow opens with
+ * all tool/agent dropdowns pre-selected and email nodes pre-configured.
+ */
+function hydrateArchitectNode(data: WFNodeData): WFNodeData {
+  if (!data.generatedByArchitect) return data;
+  const d = { ...data };
+  const nodeType = d.nodeType ?? (d as Record<string, unknown>).type as string;
+
+  // ── Tool node ────────────────────────────────────────────────────────────────
+  if (nodeType === "tool") {
+    const emailNode = isEmailNode(d.label ?? "", d.toolType);
+
+    if (emailNode) {
+      // Email: use built-in Resend, pre-fill minimal required fields
+      const existingCfg = (d.toolConfig ?? {}) as Record<string, unknown>;
+      d.toolConfig = {
+        ...existingCfg,
+        toolType:     "builtin_email",
+        builtinEmail: true,
+        // Only ask for to/from/subject — body comes from previous step
+        emailTo:      existingCfg.emailTo      ?? existingCfg.to      ?? "{{workflow.input.recipientEmail}}",
+        emailSubject: existingCfg.emailSubject ?? existingCfg.subject ?? "Your automated report",
+        emailBody:    existingCfg.emailBody    ?? existingCfg.body    ?? "{{steps.previous.output.summary}}",
+      } as WFNodeData["toolConfig"];
+    } else if (d.toolId) {
+      // Regular tool: bind the real tool record
+      d.toolConfig = {
+        ...(d.toolConfig ?? {}),
+        toolId:   d.toolId,
+        toolName: d.label,
+        // Preserve existing input/output mappings from architect plan
+        inputMapping:  d.toolConfig?.inputMapping  ?? (d as Record<string, unknown>).inputMappings as Record<string, string> ?? {},
+        outputMapping: d.toolConfig?.outputMapping ?? (d as Record<string, unknown>).outputMappings as Record<string, string> ?? {},
+      };
+    }
+  }
+
+  // ── Agent node ───────────────────────────────────────────────────────────────
+  if (nodeType === "agent" && d.agentId) {
+    d.agentConfig = {
+      ...(d.agentConfig ?? {}),
+      agentId:         d.agentId,
+      agentName:       d.label,
+      taskInstruction: d.description ?? d.agentConfig?.taskInstruction ?? "",
+      // Preserve mappings
+      inputMapping:  d.agentConfig?.inputMapping  ?? (d as Record<string, unknown>).inputMappings  as Record<string, string> ?? {},
+      outputMapping: d.agentConfig?.outputMapping ?? (d as Record<string, unknown>).outputMappings as Record<string, string> ?? {},
+    };
+  }
+
+  return d;
+}
+
 function graphToFlow(graph: WorkflowGraph): { nodes: Node<WFNodeData>[]; edges: Edge<WFEdgeData>[] } {
   const nodes: Node<WFNodeData>[] = graph.nodes.map((n) => ({
     id: n.id,
     type: n.type,
     position: n.position,
-    data: n.data,
+    data: hydrateArchitectNode(n.data),
   }));
   const edges: Edge<WFEdgeData>[] = graph.edges.map((e) => ({
     id: e.id,
@@ -329,7 +401,7 @@ function WorkflowBuilderInner() {
   const liveRunRef = useRef<NodeJS.Timeout | null>(null);
 
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView, setViewport } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<WFNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<WFEdgeData>>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -477,6 +549,8 @@ function WorkflowBuilderInner() {
     // Reset visible sets so canvas starts empty
     setVisibleNodeIds(new Set());
     setVisibleEdgeIds(new Set());
+    // Center the viewport to the graph area so animation is always visible
+    setViewport({ x: 80, y: 80, zoom: 0.85 }, { duration: 300 });
 
     // Load server-provided steps from sessionStorage (written by architect page on workflow creation)
     let steps: Array<{ type: string; title: string; nodeId?: string; edgeId?: string; delayMs?: number; durationMs?: number }> = [];
@@ -509,6 +583,8 @@ function WorkflowBuilderInner() {
 
         if (step.type === "add_node" && step.nodeId) {
           setVisibleNodeIds(prev => prev ? new Set([...prev, step.nodeId!]) : null);
+          // Smooth fit after each new node so user tracks the build
+          setTimeout(() => fitView({ padding: 0.25, duration: 400 }), 50);
         }
         if (step.type === "add_edge" && step.edgeId) {
           setVisibleEdgeIds(prev => prev ? new Set([...prev, step.edgeId!]) : null);
@@ -517,7 +593,10 @@ function WorkflowBuilderInner() {
           // Reveal any remaining nodes/edges (safety net)
           setVisibleNodeIds(null);
           setVisibleEdgeIds(null);
-          setTimeout(() => setAnimatingArchitect(false), 700);
+          setTimeout(() => {
+            fitView({ padding: 0.2, duration: 600 });
+            setTimeout(() => setAnimatingArchitect(false), 700);
+          }, 200);
         }
       }, delay));
     });
