@@ -838,6 +838,38 @@ class ToolNodeExecutor(
         }
     }
 
+    /**
+     * Last-mile email body cleaner — always called before sending.
+     * If the body looks like JSON (starts with { or [), parse and format it.
+     * Otherwise strip markdown fences and pass through.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun cleanEmailBody(body: String): String {
+        val trimmed = body.trim()
+
+        // Already plain text — just ensure no leftover markdown fences
+        if (!trimmed.startsWith("{") && !trimmed.startsWith("[") && !trimmed.startsWith("```")) {
+            return trimmed.replace("```json", "").replace("```", "").trim()
+        }
+
+        // Strip markdown fences then try to parse JSON
+        val json = stripMarkdownFences(trimmed)
+
+        // Try full parse, then best-effort parse for truncated JSON
+        val parsed: Any? = runCatching {
+            val m = mapper.readValue(json, Map::class.java) as Map<String, Any?>
+            // If top-level has a single key that's the actual data, unwrap it
+            if (m.size == 1) m.values.first() else m
+        }.getOrNull() ?: runCatching {
+            val m = parseJsonBestEffort(json) as Map<String, Any?>
+            if (m.size == 1) m.values.first() else m
+        }.getOrNull() ?: runCatching {
+            mapper.readValue(json, List::class.java)
+        }.getOrNull()
+
+        return if (parsed != null) formatValueAsHtml(parsed) else json
+    }
+
     private fun sendBuiltinEmail(
         config: Map<String, Any>,
         resolvedInputs: Map<String, Any>,
@@ -861,7 +893,7 @@ class ToolNodeExecutor(
         // Resolve {{steps.nodeName.output.field}} and {{input.key}} templates
         val toRaw   = resolveEmailTemplate(rawTo,      ctx)
         val subject = resolveEmailTemplate(rawSubject, ctx)
-        val html    = resolveEmailTemplate(rawHtml,    ctx)
+        val html    = cleanEmailBody(resolveEmailTemplate(rawHtml, ctx))
 
         if (toRaw.isEmpty()) {
             return NodeResult.Failed(
