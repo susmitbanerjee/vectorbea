@@ -14,6 +14,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   Upload,
   Wrench,
 } from "lucide-react";
@@ -22,7 +23,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { IconBadge, WorkflowIcon } from "@/components/icons/vectorbea-icons";
 import type { PaginatedResult, Workflow, WorkflowStatus } from "@/types/platform";
-import { getWorkflows } from "@/lib/repository";
+import { getWorkflows, deleteWorkflow } from "@/lib/repository";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,23 @@ export default function WorkflowsPage() {
   }, [search, statusFilter]);
 
   useEffect(() => { void load(1); }, [load]);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmId, setConfirmId]   = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteWorkflow(id);
+      toast.success("Workflow deleted");
+      setResult(prev => prev ? { ...prev, items: prev.items.filter(w => w.id !== id) } : prev);
+    } catch {
+      toast.error("Failed to delete workflow");
+    } finally {
+      setDeletingId(null);
+      setConfirmId(null);
+    }
+  }
 
   const workflows = result?.items ?? [];
   const pagination = result;
@@ -344,6 +362,24 @@ export default function WorkflowsPage() {
                         >
                           Detail
                         </Link>
+                        {confirmId === wf.id ? (
+                          <div className="flex items-center gap-1">
+                            <button type="button" onClick={() => handleDelete(wf.id)} disabled={deletingId === wf.id}
+                              className="flex h-[26px] items-center gap-1 rounded px-2 text-[11px] font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50">
+                              {deletingId === wf.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Confirm"}
+                            </button>
+                            <button type="button" onClick={() => setConfirmId(null)}
+                              className="flex h-[26px] items-center rounded px-2 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors">
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setConfirmId(wf.id)}
+                            className="flex h-[26px] w-[26px] items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                            title="Delete workflow">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

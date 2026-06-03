@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { IconBadge, AgentIcon, BrainIcon, ToolIcon, type IconTone } from "@/components/icons/vectorbea-icons";
 import type { Agent } from "@/types/platform";
-import { getAgents } from "@/lib/repository";
+import { getAgents, deleteAgent } from "@/lib/repository";
 import { AppSelect } from "@/components/ui/app-select";
 import { SearchInput } from "@/components/ui/search-input";
 
@@ -51,6 +51,22 @@ export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<Agent["type"] | "">("");
   const [statusFilter, setStatusFilter] = useState<Agent["status"] | "">("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmId, setConfirmId]   = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteAgent(id);
+      toast.success("Agent deleted");
+      setAgents(prev => prev.filter(a => a.id !== id));
+    } catch {
+      toast.error("Failed to delete agent");
+    } finally {
+      setDeletingId(null);
+      setConfirmId(null);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -242,12 +258,30 @@ export default function AgentsPage() {
                       {timeAgo(agent.lastUsedAt)}
                     </td>
                     <td className="px-4 py-3.5">
-                      <Link
-                        href={`/agents/${agent.id}` as never}
-                        className="text-[11px] text-muted-foreground opacity-0 transition-all hover:text-foreground group-hover:opacity-100"
-                      >
-                        View →
-                      </Link>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Link href={`/agents/${agent.id}` as never}
+                          className="flex h-[26px] items-center gap-1 rounded px-2 text-[12px] text-muted-foreground hover:bg-slate-100 hover:text-foreground transition-colors">
+                          View →
+                        </Link>
+                        {confirmId === agent.id ? (
+                          <div className="flex items-center gap-1">
+                            <button type="button" onClick={() => handleDelete(agent.id)} disabled={deletingId === agent.id}
+                              className="flex h-[26px] items-center gap-1 rounded px-2 text-[11px] font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50">
+                              {deletingId === agent.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Confirm"}
+                            </button>
+                            <button type="button" onClick={() => setConfirmId(null)}
+                              className="flex h-[26px] items-center rounded px-2 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors">
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setConfirmId(agent.id)}
+                            className="flex h-[26px] w-[26px] items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                            title="Delete agent">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
