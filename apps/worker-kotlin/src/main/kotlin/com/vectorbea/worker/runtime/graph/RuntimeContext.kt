@@ -132,9 +132,22 @@ class RuntimeContext(
                     outputs["content"] ?: outputs["summary"] ?: outputs["result"]
                         ?: outputs.values.firstOrNull()
                 } else {
-                    // Nested field lookup, e.g. steps.agent.output.itinerary.hotels
-                    fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
-                        ?: outputs[fields.last()]  // flat fallback: ignore nesting
+                    val field = fields.last()
+                    // 1. Nested lookup (steps.X.output.a.b.c)
+                    val nested = fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
+                    // 2. Flat lookup (skip nesting)
+                    val flat = outputs[field]
+                    // 3. Reverse output-mapping: template uses source expr, stored under mapped key
+                    //    e.g. outputMapping: {itinerary ← final_itinerary}  →  template says "final_itinerary" → return outputs["itinerary"]
+                    val viaMapping = graph.nodes.firstNotNullOfOrNull { n ->
+                        n.outputMapping.entries.firstOrNull { (_, srcExpr) ->
+                            srcExpr.removePrefix("output.").trim() == field
+                        }?.let { (storedKey, _) -> stepOutputs[n.id]?.get(storedKey) }
+                    }
+                    // 4. Global search across ALL step outputs for this field name
+                    val globalSearch = stepOutputs.values.firstNotNullOfOrNull { it[field] }
+
+                    nested ?: flat ?: viaMapping ?: globalSearch
                 }
             }
         }

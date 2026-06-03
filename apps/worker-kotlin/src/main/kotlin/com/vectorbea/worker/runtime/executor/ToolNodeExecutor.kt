@@ -568,7 +568,22 @@ class ToolNodeExecutor(
         }
 
         // Special ref: "previous" → last completed step before the current email node
+        // Use execution order of stepOutputs (insertion-ordered LinkedHashMap) as proxy
         val previousNodeId: String? = allOutputs.keys.lastOrNull()
+
+        // Build reverse output-mapping lookup: outputMapping value → stored key
+        // e.g. outputMappings: {itinerary ← final_itinerary}
+        // means stored key="itinerary", source expr="final_itinerary"
+        // So if template uses "final_itinerary" we should return outputs["itinerary"]
+        val reverseMappings = mutableMapOf<String, Pair<String, String>>() // sourceExpr → (nodeId, storedKey)
+        for (node in ctx.graph.nodes) {
+            val nodeId = node.id
+            if (!allOutputs.containsKey(nodeId)) continue
+            for ((storedKey, sourceExpr) in node.outputMapping) {
+                // sourceExpr is something like "final_itinerary" or "result.summary"
+                reverseMappings[sourceExpr.removePrefix("output.").trim()] = nodeId to storedKey
+            }
+        }
 
         val placeholderRegex = Regex("\\{\\{([^}]+)\\}\\}")
         return placeholderRegex.replace(template) { match ->
@@ -593,16 +608,24 @@ class ToolNodeExecutor(
                             // {{steps.name}} without field → return content or summary or full JSON
                             outputs["content"] ?: outputs["summary"] ?: outputs["result"]
                                 ?: if (outputs.size == 1) outputs.values.first()
-                                   else outputs.toString()
+                                   else outputs.entries.joinToString("\n") { (k, v) -> "$k: $v" }
                         } else {
-                            // Try nested field lookup — also search top-level if nested fails
+                            val field = fields.last()
+                            // 1. Try nested field lookup in this step's outputs
                             val nested = fields.fold(outputs as Any?) { acc, key -> (acc as? Map<*, *>)?.get(key) }
-                            if (nested != null) nested
-                            else {
-                                // Fallback: try all outputs for the field name directly
-                                val field = fields.last()
-                                allOutputs.values.firstNotNullOfOrNull { it[field] }
+                            // 2. Try flat lookup (skip output. prefix)
+                            val flat = outputs[field]
+                            // 3. Try reverse output-mapping: template says "final_itinerary" but stored key is "itinerary"
+                            val viaMapping = reverseMappings[field]?.let { (nid, storedKey) ->
+                                allOutputs[nid]?.get(storedKey)
                             }
+                            // 4. Search ALL completed steps for this field name
+                            val globalSearch = allOutputs.values.firstNotNullOfOrNull { it[field] }
+                            // 5. If field not found anywhere, return entire previous step output as readable text
+                            val entireOutput = if (outputs.isNotEmpty())
+                                outputs.entries.joinToString("\n") { (k, v) -> "$k: $v" } else null
+
+                            nested ?: flat ?: viaMapping ?: globalSearch ?: entireOutput
                         }
                     }
                 }
