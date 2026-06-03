@@ -335,26 +335,47 @@ class WorkflowArchitectRoutes(
     // ── GET /api/architect/connections ────────────────────────────────────────
 
     private fun listConnections(req: Request): Response {
-        val ctx  = req.context()
-        val type = req.query("type")
+        val ctx          = req.context()
+        val preferredType = req.query("type")   // hint only — we return ALL connections
+
+        // Always return ALL connections for the workspace (not filtered by type).
+        // Type filtering in the frontend picker is too strict because the LLM may
+        // use type names (e.g. "http_api", "email") that differ from stored values
+        // (e.g. "http", "smtp"). The UI sorts preferred-type matches to the top.
         val page = connectionRepo.list(
             workspaceId   = ctx.workspaceId,
             environmentId = ctx.environmentId,
-            type          = type,
+            type          = null,   // no server-side type filter
             status        = "active",
         )
         return Response.ok(mapOf(
             "connections" to page.items.map { conn -> mapOf(
-                "id"         to conn.id.toString(),
-                "name"       to conn.name,
-                "type"       to conn.type,
-                "provider"   to conn.provider,
-                "status"     to conn.status,
-                "testStatus" to conn.lastTestStatus,
-                "testedAt"   to conn.lastTestedAt?.toString(),
+                "id"          to conn.id.toString(),
+                "name"        to conn.name,
+                "type"        to conn.type,
+                "provider"    to conn.provider,
+                "status"      to conn.status,
+                "testStatus"  to conn.lastTestStatus,
+                "testedAt"    to conn.lastTestedAt?.toString(),
+                "typeMatches" to typeMatches(conn.type, preferredType),
             )},
-            "total" to page.total,
+            "total"        to page.total,
+            "preferredType" to preferredType,
         ))
+    }
+
+    /** Loose match: returns true if the stored connection type is compatible with the preferred type hint. */
+    private fun typeMatches(storedType: String, preferred: String?): Boolean {
+        if (preferred == null) return true
+        val s = storedType.lowercase()
+        val p = preferred.lowercase()
+        return s == p ||
+            (p.contains("http") && (s == "http" || s == "http_api" || s == "rest" || s == "api")) ||
+            (p.contains("email") && (s == "email" || s == "smtp" || s == "sendgrid" || s == "resend")) ||
+            (p.contains("database") && (s == "database" || s == "db" || s == "postgres" || s == "mysql")) ||
+            (p.contains("llm") && (s == "llm" || s == "openai" || s == "anthropic" || s == "ai")) ||
+            (p.contains("slack") && s == "slack") ||
+            s.contains(p) || p.contains(s)
     }
 
     // ── Serialization helpers ─────────────────────────────────────────────────

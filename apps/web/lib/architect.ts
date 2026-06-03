@@ -252,12 +252,15 @@ export async function testConnection(
   });
 }
 
-export async function listWorkspaceConnections(type?: string): Promise<{
-  connections: Array<{ id: string; name: string; type: string; provider: string; status: string; testStatus?: string }>;
+export async function listWorkspaceConnections(preferredType?: string): Promise<{
+  connections: Array<{ id: string; name: string; type: string; provider: string; status: string; testStatus?: string; typeMatches?: boolean }>;
   total: number;
+  preferredType?: string;
 }> {
-  const url = type
-    ? withWorkspace(`${BASE}/connections?type=${encodeURIComponent(type)}`)
+  // Pass type as a hint only — backend returns ALL connections and sets typeMatches flag.
+  // This avoids missing connections due to type name mismatches (e.g. "http_api" vs "http").
+  const url = preferredType
+    ? withWorkspace(`${BASE}/connections?type=${encodeURIComponent(preferredType)}`)
     : withWorkspace(`${BASE}/connections`);
   return apiFetch(url);
 }
