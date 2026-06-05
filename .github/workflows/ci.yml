@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  CI_ALLOW_PUBLIC_PUBLISH: "false"
+
+jobs:
+  # ── Closed-source guardrails ────────────────────────────────────────────────
+  publishing-guard:
+    name: Publishing guard (no public SDK/proxy publish)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if npm publish exists in workflow files
+        run: |
+          if grep -r "npm publish" .github/workflows/ --include="*.yml" | grep -v "CI_ALLOW_PUBLIC_PUBLISH.*true"; then
+            echo "ERROR: npm publish found in CI. Set CI_ALLOW_PUBLIC_PUBLISH=true to allow."
+            exit 1
+          fi
+          echo "OK: No npm publish"
+
+      - name: Fail if gradle publish exists in workflow files
+        run: |
+          if grep -r "gradle.*publish\|publishToMavenLocal\|publish.*gradle" .github/workflows/ --include="*.yml" | grep -v "CI_ALLOW_PUBLIC_PUBLISH.*true"; then
+            echo "ERROR: gradle publish found in CI."
+            exit 1
+          fi
+          echo "OK: No gradle publish"
+
+      - name: Fail if docker push vectorbea:proxy exists
+        run: |
+          if grep -r "vectorbea.*proxy\|proxy.*vectorbea" .github/workflows/ --include="*.yml"; then
+            echo "ERROR: vectorbea:proxy push found — this image is obsolete."
+            exit 1
+          fi
+          echo "OK: No proxy publish"
+
+      - name: Fail if Stripe/Razorpay imported in production frontend
+        run: |
+          if grep -r "stripe\|razorpay" apps/web/app --include="*.tsx" --include="*.ts" -i | grep -v ".test.\|spec.\|//"; then
+            echo "ERROR: Stripe/Razorpay references found in frontend production code."
+            exit 1
+          fi
+          echo "OK: No billing provider in frontend"
+
+      - name: Fail if frontend imports server-only modules
+        run: |
+          forbidden_patterns="@/lib/generated/prisma|@/server/db|@/lib/server/secret-service|from.*redis|from.*bullmq"
+          if grep -rE "$forbidden_patterns" apps/web/app --include="*.tsx" --include="*.ts" | grep -v ".test.\|spec.\|//"; then
+            echo "ERROR: Frontend imports server-only module."
+            exit 1
+          fi
+          echo "OK: No server module imports in frontend"
+
+  # ── Web frontend ────────────────────────────────────────────────────────────
+  web:
+    name: Web (typecheck + lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx next lint || true   # warn-only, not blocking
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_VECTORBEA_API_URL: "https://api.vectorbea.com"
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
+          NEXT_PUBLIC_PRIVATE_BETA_MODE: "true"
+
+  # ── API (Kotlin) ────────────────────────────────────────────────────────────
+  api-kotlin:
+    name: API Kotlin (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api-kotlin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build
+        run: gradle build --no-daemon --console=plain -x test
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+
+      - name: Test
+        run: gradle test --no-daemon --console=plain
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+        continue-on-error: true   # tests are advisory until full coverage added
+
+  # ── Worker (Kotlin) ─────────────────────────────────────────────────────────
+  worker-kotlin:
+    name: Worker Kotlin (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/worker-kotlin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build
+        run: gradle build --no-daemon --console=plain -x test
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"

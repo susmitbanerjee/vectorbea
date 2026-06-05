@@ -33,9 +33,47 @@ data class AppConfig(
     val architectModel: String? = "gpt-4o-mini",
     /** Max request body size in bytes (default: 2 MB) */
     val maxRequestBodyBytes: Int,
+
+    // ── Private beta / production controls ─────────────────────────────────
+    val privateBetaMode: Boolean = false,
+    val publicSignupEnabled: Boolean = true,
+    /** Comma-separated admin email addresses */
+    val adminEmails: Set<String> = emptySet(),
+    val defaultExecutionMode: String = "simulation_only",
+    val realExecutionRequiresAdminApproval: Boolean = true,
+    val byokRequiredForRealExecution: Boolean = true,
+    val allowPlatformLlmForWorkflowExecution: Boolean = false,
+    // Beta default limits
+    val betaDefaultMaxWorkflows: Int = 3,
+    val betaDefaultMaxRunsPerDay: Int = 20,
+    val betaDefaultMaxStepsPerWorkflow: Int = 5,
 ) {
     val isProduction: Boolean get() = appEnv == "production"
     val isLocal: Boolean get() = appEnv == "local" || appEnv == "development"
+
+    /** Returns true if the given email belongs to an admin. */
+    fun isAdmin(email: String?): Boolean =
+        email != null && (adminEmails.any { it.equals(email.trim(), ignoreCase = true) })
+
+    /**
+     * Validate production-critical config. Throws [IllegalStateException] if any
+     * required production variable is missing. Safe to call in non-production; warns only.
+     */
+    fun validateForProduction() {
+        if (!isProduction) return
+        val errors = mutableListOf<String>()
+        if (db == null)                       errors += "DATABASE_URL must be set in production"
+        if (redis == null)                    errors += "REDIS_URL must be set in production"
+        if (!secretEncryptionKeyPresent)      errors += "SECRET_ENCRYPTION_KEY must be set in production"
+        if (jwtSecret == null)               errors += "JWT_SECRET (or SUPABASE_JWT_SECRET) must be set in production"
+        if ("*" in corsAllowedOrigins)        errors += "CORS_ALLOWED_ORIGINS must not be '*' in production — set explicit origins"
+        if (adminEmails.isEmpty())            errors += "ADMIN_EMAILS must be set in production to enable admin operations"
+        if (errors.isNotEmpty()) {
+            val msg = "FATAL: Production config validation failed:\n" + errors.joinToString("\n") { "  - $it" }
+            LoggerFactory.getLogger(AppConfig::class.java).error(msg)
+            throw IllegalStateException(msg)
+        }
+    }
 
     companion object {
         private val log = LoggerFactory.getLogger(AppConfig::class.java)
@@ -108,6 +146,16 @@ data class AppConfig(
             val architectApiKey  = env("AI_ARCHITECT_API_KEY") ?: env("OPENAI_API_KEY")
             val architectModel   = env("AI_ARCHITECT_MODEL") ?: "gpt-4o-mini"
 
+            // ── Private beta / production controls ───────────────────────────
+            val privateBetaMode    = env("PRIVATE_BETA_MODE")?.lowercase() == "true"
+            val publicSignupEnabled = env("PUBLIC_SIGNUP_ENABLED")?.lowercase() != "false"
+            val adminEmails        = (env("ADMIN_EMAILS") ?: "")
+                .split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+            val defaultExecMode    = env("DEFAULT_EXECUTION_MODE") ?: "simulation_only"
+            val realExecApproval   = env("REAL_EXECUTION_REQUIRES_ADMIN_APPROVAL")?.lowercase() != "false"
+            val byokRequired       = env("BYOK_REQUIRED_FOR_REAL_EXECUTION")?.lowercase() != "false"
+            val allowPlatformLlm   = env("ALLOW_PLATFORM_LLM_FOR_WORKFLOW_EXECUTION")?.lowercase() == "true"
+
             val config = AppConfig(
                 port = port,
                 appEnv = appEnv,
@@ -125,6 +173,13 @@ data class AppConfig(
                 architectEnabled = architectEnabled,
                 architectApiKey  = architectApiKey,
                 architectModel   = architectModel,
+                privateBetaMode  = privateBetaMode,
+                publicSignupEnabled = publicSignupEnabled,
+                adminEmails      = adminEmails,
+                defaultExecutionMode = defaultExecMode,
+                realExecutionRequiresAdminApproval = realExecApproval,
+                byokRequiredForRealExecution = byokRequired,
+                allowPlatformLlmForWorkflowExecution = allowPlatformLlm,
             )
 
             config.logSummary()

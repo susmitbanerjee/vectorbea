@@ -1,5 +1,6 @@
 package com.vectorbea.api.auth
 
+import com.vectorbea.api.config.AppConfig
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.users.AppUserRepository
@@ -27,17 +28,26 @@ import org.slf4j.LoggerFactory
 class AuthMiddleware(
     private val jwtVerifier: JwtVerifier?,
     private val userRepo: AppUserRepository?,
+    private val config: AppConfig? = null,
 ) {
     private val log = LoggerFactory.getLogger(AuthMiddleware::class.java)
 
     /** Paths that never require authentication. */
     private val publicPaths = setOf(
-        "/healthz",
-        "/health",
-        "/metrics",
-        "/version",
-        "/api/bootstrap",   // first-run workspace creation (protected by "no members" check)
-        "/api/network/check",
+        "/healthz", "/health", "/metrics", "/version",
+        "/api/bootstrap", "/api/network/check",
+    )
+
+    /**
+     * Paths that authenticated-but-unapproved users may access.
+     * All other product API paths require beta_status=approved.
+     */
+    private val betaAllowedPaths = setOf(
+        "/api/me",
+        "/api/beta/status",
+        "/api/beta/apply",
+        "/api/health",
+        "/api/version",
     )
 
     /**
@@ -72,27 +82,41 @@ class AuthMiddleware(
         }
 
         // Upsert user + load workspace memberships from database
-        val (appUserId, workspaceIds) = try {
-            val profile = userRepo.resolveUser(
+        val profile = try {
+            userRepo.resolveUser(
                 supabaseUserId = claims.sub,
                 email          = claims.email,
                 fullName       = claims.fullName,
                 avatarUrl      = claims.avatarUrl,
             )
-            Pair(profile.id, profile.authorizedWorkspaceIds)
         } catch (e: Exception) {
             log.error("[auth] Failed to resolve user sub={}: {}", claims.sub, e.message)
             throw ApiError.Unauthorized("Failed to resolve user identity")
         }
 
         val principal = AuthPrincipal(
-            supabaseUserId        = claims.sub,
-            appUserId             = appUserId,
-            email                 = claims.email,
-            authorizedWorkspaceIds = workspaceIds,
+            supabaseUserId         = claims.sub,
+            appUserId              = profile.id,
+            email                  = claims.email,
+            authorizedWorkspaceIds = profile.authorizedWorkspaceIds,
+            betaStatus             = profile.betaStatus,
+            isPlatformAdmin        = profile.isPlatformAdmin || config?.isAdmin(claims.email) == true,
         )
 
-        log.debug("[auth] authenticated sub={} workspaces={}", claims.sub, workspaceIds.size)
+        // ── Private beta gate ────────────────────────────────────────────────
+        // In private beta mode, unapproved users can only access beta/* and me routes.
+        if (config?.privateBetaMode == true && !principal.isApproved) {
+            val pathOk = betaAllowedPaths.any { request.path.startsWith(it) }
+            if (!pathOk) {
+                log.info("[beta-gate] blocked sub={} status={} path={}", claims.sub, profile.betaStatus, request.path)
+                throw ApiError.Forbidden(
+                    "PRIVATE_BETA_ACCESS_REQUIRED: Vectorbea is currently invite-only. Submit an application at /beta/apply."
+                )
+            }
+        }
+
+        log.debug("[auth] authenticated sub={} betaStatus={} workspaces={}",
+            claims.sub, profile.betaStatus, profile.authorizedWorkspaceIds.size)
         return request.copy(principal = principal)
     }
 

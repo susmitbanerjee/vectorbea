@@ -25,6 +25,8 @@ class AppUserRepository(private val ds: DataSource) {
         val fullName: String?,
         val avatarUrl: String?,
         val authorizedWorkspaceIds: Set<UUID>,
+        val betaStatus: String = "waitlisted",
+        val isPlatformAdmin: Boolean = false,
     )
 
     fun resolveUser(
@@ -47,6 +49,20 @@ class AppUserRepository(private val ds: DataSource) {
                 }
             }
 
+            // Load beta status
+            var betaStatus = "waitlisted"
+            var isAdmin = false
+            conn.prepareStatement(
+                "SELECT COALESCE(beta_status,'waitlisted'), COALESCE(is_platform_admin,false) FROM app_users WHERE id=?"
+            ).use { stmt ->
+                stmt.setObject(1, userId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) {
+                    betaStatus = rs.getString(1)
+                    isAdmin    = rs.getBoolean(2)
+                }
+            }
+
             return UserProfile(
                 id                     = userId,
                 supabaseUserId         = supabaseUserId,
@@ -54,6 +70,8 @@ class AppUserRepository(private val ds: DataSource) {
                 fullName               = fullName,
                 avatarUrl              = avatarUrl,
                 authorizedWorkspaceIds = workspaceIds,
+                betaStatus             = betaStatus,
+                isPlatformAdmin        = isAdmin,
             )
         }
     }
@@ -117,6 +135,50 @@ class AppUserRepository(private val ds: DataSource) {
 
             log.info("[auth] created workspace {} slug={} owner={}", wsId, slug, userId)
             return wsId
+        }
+    }
+
+    fun findById(userId: UUID): UserProfile? {
+        ds.connection.use { conn ->
+            conn.prepareStatement(
+                "SELECT id,supabase_user_id,email,full_name,avatar_url," +
+                "COALESCE(beta_status,'waitlisted') as beta_status," +
+                "COALESCE(is_platform_admin,false) as is_platform_admin FROM app_users WHERE id=?"
+            ).use { stmt ->
+                stmt.setObject(1, userId)
+                val rs = stmt.executeQuery()
+                if (!rs.next()) return null
+                val wsIds = loadWorkspaces(conn, userId)
+                return UserProfile(
+                    id                     = UUID.fromString(rs.getString("id")),
+                    supabaseUserId         = rs.getString("supabase_user_id"),
+                    email                  = rs.getString("email"),
+                    fullName               = rs.getString("full_name"),
+                    avatarUrl              = rs.getString("avatar_url"),
+                    authorizedWorkspaceIds = wsIds,
+                    betaStatus             = rs.getString("beta_status"),
+                    isPlatformAdmin        = rs.getBoolean("is_platform_admin"),
+                )
+            }
+        }
+    }
+
+    fun setBetaStatus(userId: UUID, status: String) {
+        ds.connection.use { conn ->
+            conn.prepareStatement("UPDATE app_users SET beta_status=?,updated_at=now() WHERE id=?")
+                .use { it.setString(1,status); it.setObject(2,userId); it.executeUpdate() }
+        }
+    }
+
+    fun getPrimaryWorkspaceId(userId: UUID): UUID? {
+        ds.connection.use { conn ->
+            conn.prepareStatement(
+                "SELECT workspace_id FROM workspace_members WHERE user_id=? AND role='owner' AND status='active' LIMIT 1"
+            ).use { stmt ->
+                stmt.setObject(1, userId)
+                val rs = stmt.executeQuery()
+                return if (rs.next()) UUID.fromString(rs.getString("workspace_id")) else null
+            }
         }
     }
 

@@ -46,6 +46,8 @@ import com.vectorbea.api.routes.WorkerRoutes
 import com.vectorbea.api.routes.AgentIterationRoutes
 import com.vectorbea.api.routes.DurableRunRoutes
 import com.vectorbea.api.routes.MeRoutes
+import com.vectorbea.api.beta.BetaAccessRepository
+import com.vectorbea.api.beta.BetaRoutes
 import com.vectorbea.api.routes.WorkflowRoutes
 import com.vectorbea.api.secrets.EncryptedSecretService
 import com.vectorbea.api.secrets.NoOpSecretService
@@ -77,9 +79,13 @@ fun main() {
     // 1. Config
     val config = AppConfig.fromEnv()
 
-    // Production guard
+    // Production startup validation — fail closed if critical config is missing
+    config.validateForProduction()
     if (config.isProduction && !config.secretEncryptionKeyPresent) {
         throw IllegalStateException("SECRET_ENCRYPTION_KEY is required in production")
+    }
+    if (config.privateBetaMode) {
+        log.info("[startup] PRIVATE BETA MODE enabled — unapproved users are blocked from product APIs")
     }
 
     // 2. Database
@@ -208,7 +214,7 @@ fun main() {
     val appUserRepo: AppUserRepository? = ds?.let { AppUserRepository(it) }
 
     val authMiddleware = if (jwtVerifier != null && appUserRepo != null) {
-        AuthMiddleware(jwtVerifier = jwtVerifier, userRepo = appUserRepo)
+        AuthMiddleware(jwtVerifier = jwtVerifier, userRepo = appUserRepo, config = config)
     } else {
         log.warn("AuthMiddleware: disabled (dev mode)")
         null
@@ -290,6 +296,13 @@ fun main() {
     if (appUserRepo != null) {
         MeRoutes(appUserRepo).register(router)
     } else log.warn("MeRoutes disabled — no database")
+
+    // Beta access + admin routes
+    if (ds != null && appUserRepo != null) {
+        val betaRepo = BetaAccessRepository(ds)
+        BetaRoutes(betaRepo, appUserRepo, config).register(router)
+        log.info("BetaRoutes registered (privateBetaMode={})", config.privateBetaMode)
+    }
 
     if (ds != null) {
         FailureIncidentRoutes(FailureIncidentRepository(ds)).register(router)

@@ -167,7 +167,7 @@ export default function MarketingPage() {
               <Link href="/signup"
                 className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13.5px] font-bold text-white transition-all hover:opacity-90"
                 style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 100%)", boxShadow: "0 4px 16px rgba(217,119,6,0.35)" }}>
-                Start building →
+                Request Access →
               </Link>
             </div>
           </div>
@@ -224,7 +224,7 @@ export default function MarketingPage() {
               <Link href="/signup"
                 className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-black text-white transition-all hover:scale-[1.02] active:scale-[0.99]"
                 style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 100%)", boxShadow: "0 8px 32px rgba(217,119,6,0.40), 0 0 0 1px rgba(217,119,6,0.2)" }}>
-                Start building free <ArrowRight className="h-5 w-5" />
+                Join Private Beta <ArrowRight className="h-5 w-5" />
               </Link>
               <Link href="/signin"
                 className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-bold text-stone-700 bg-white border border-stone-200 hover:border-amber-300 hover:bg-amber-50/50 transition-all"
@@ -429,7 +429,7 @@ export default function MarketingPage() {
               </Link>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
-              {["Free to start", "Bring your own keys", "No usage lock-in", "Cancel anytime"].map(hint => (
+              {["Invite-only beta", "Bring your own keys", "No usage lock-in", "Manual onboarding"].map(hint => (
                 <span key={hint} className="flex items-center gap-1.5 text-[13px]" style={{ color: "rgba(255,255,255,0.3)" }}>
                   <CheckCircle2 className="h-3.5 w-3.5 text-amber-500/50" /> {hint}
                 </span>
