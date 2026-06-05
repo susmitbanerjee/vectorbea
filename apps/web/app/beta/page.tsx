@@ -318,10 +318,7 @@ function SuccessScreen({ onSignOut }: { onSignOut: () => void }) {
 
           <div className="border-t border-slate-100 pt-4">
             <p className="text-[12.5px] text-slate-400">
-              Questions?{" "}
-              <a href="mailto:susmit@vectorbea.com" className="text-slate-700 font-medium hover:underline">
-                susmit@vectorbea.com
-              </a>
+              Questions? Reach out and we&apos;ll get back to you.
             </p>
           </div>
         </div>
@@ -388,10 +385,7 @@ function StatusScreen({ status, onSignOut }: { status: string | null; onSignOut:
       </div>
 
       <p className="text-[12.5px] text-slate-400">
-        Questions?{" "}
-        <a href="mailto:susmit@vectorbea.com" className="text-slate-700 font-medium hover:underline">
-          susmit@vectorbea.com
-        </a>
+        Questions? Reach out and we&apos;ll get back to you.
         {" "}·{" "}
         <button type="button" onClick={onSignOut}
           className="text-slate-400 hover:text-slate-700 transition-colors">
