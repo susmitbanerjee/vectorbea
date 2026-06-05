@@ -27,6 +27,7 @@ class BetaRoutes(
     private val userRepo: AppUserRepository,
     private val config: AppConfig,
 ) {
+    private val log    = org.slf4j.LoggerFactory.getLogger(BetaRoutes::class.java)
     private val mapper = jacksonObjectMapper()
 
     fun register(router: Router) {
