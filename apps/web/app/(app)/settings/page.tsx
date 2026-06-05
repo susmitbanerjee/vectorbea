@@ -31,7 +31,7 @@ import { useWorkspace } from "@/lib/workspace-context";
 
 // ─── Member types ─────────────────────────────────────────────────────────────
 
-type MemberRole = "admin" | "editor" | "viewer";
+type MemberRole = "owner" | "admin" | "editor" | "viewer";
 
 interface Member {
   id: string;
@@ -53,6 +53,7 @@ interface PendingInvitation {
 }
 
 const ROLE_CONFIG: Record<MemberRole, { label: string; icon: typeof Crown }> = {
+  owner:  { label: "Owner",  icon: Crown  },
   admin:  { label: "Admin",  icon: Crown  },
   editor: { label: "Editor", icon: Shield },
   viewer: { label: "Viewer", icon: Eye    },
@@ -300,7 +301,7 @@ export default function SettingsPage() {
                 {/* Active members */}
                 <div className="divide-y divide-border/40">
                   {members.map(m => {
-                    const { label } = ROLE_CONFIG[m.role];
+                    const { label } = ROLE_CONFIG[m.role as MemberRole] ?? { label: m.role };
                     return (
                       <div key={m.id} className="flex items-center gap-3 px-6 py-3.5">
                         <Avatar member={m} />
