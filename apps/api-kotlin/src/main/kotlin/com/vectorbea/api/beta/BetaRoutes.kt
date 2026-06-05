@@ -104,6 +104,24 @@ class BetaRoutes(
         val email = (body["email"] as? String ?: principal.email ?: "").trim()
         if (email.isBlank()) throw ApiError.ValidationError("email is required")
 
+        // Block re-submission if an application already exists for this email
+        val existing = betaRepo.findApplicationByEmail(email)
+        if (existing != null) {
+            val msg = when (existing.status) {
+                "waitlisted" -> "Your application is under evaluation. We review every request manually and will reach out soon."
+                "approved"   -> "Your application has already been approved. Please sign in to access Vectorbea."
+                "rejected"   -> "Your application was not accepted at this time. Contact us if you have questions."
+                "disabled"   -> "Your account has been disabled. Contact support."
+                else         -> "An application already exists for this email. We will be in touch."
+            }
+            return Response.ok(mapOf(
+                "id"               to existing.id.toString(),
+                "status"           to existing.status,
+                "alreadySubmitted" to true,
+                "message"          to msg,
+            ))
+        }
+
         val application = betaRepo.upsertBetaApplication(
             email           = email,
             supabaseUserId  = principal.supabaseUserId?.let { runCatching { UUID.fromString(it) }.getOrNull() },

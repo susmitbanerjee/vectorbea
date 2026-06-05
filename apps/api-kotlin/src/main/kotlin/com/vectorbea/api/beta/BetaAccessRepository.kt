@@ -181,6 +181,20 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
 
     // ── Beta applications ─────────────────────────────────────────────────────
 
+    fun findApplicationByEmail(email: String): BetaApplication? = queryOne(
+        "SELECT id,app_user_id,email,full_name,company_name,use_case,status,created_at FROM beta_applications WHERE LOWER(email)=LOWER(?) LIMIT 1",
+        { setString(1, email) },
+    ) { rs -> BetaApplication(
+        id          = UUID.fromString(rs.getString("id")),
+        appUserId   = rs.getString("app_user_id")?.let { UUID.fromString(it) },
+        email       = rs.getString("email"),
+        fullName    = rs.getString("full_name"),
+        companyName = rs.getString("company_name"),
+        useCase     = rs.getString("use_case"),
+        status      = rs.getString("status"),
+        createdAt   = rs.getTimestamp("created_at").toInstant(),
+    )}
+
     fun upsertBetaApplication(
         email: String, supabaseUserId: UUID?, appUserId: UUID?,
         fullName: String?, company: String?, useCase: String?, currentTools: String?,

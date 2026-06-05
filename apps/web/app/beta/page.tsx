@@ -32,11 +32,30 @@ function ensureTokenFromCookie() {
 // They can ONLY submit an application or sign out.
 
 export default function BetaWaitlistPage() {
-  const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading]     = useState(false);
+  const [submitted, setSubmitted]         = useState(false);
+  const [alreadySubmitted, setAlreadySub] = useState(false);
+  const [existingStatus, setExistingStatus] = useState<string | null>(null);
+  const [loading, setLoading]             = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
 
-  // Seed localStorage token from OAuth transfer cookie on first render
-  useEffect(() => { ensureTokenFromCookie(); }, []);
+  // Seed token + check if user already has an application
+  useEffect(() => {
+    ensureTokenFromCookie();
+    // Check current beta status — if already applied, skip the form
+    apiFetch<{ betaStatus: string; message: string }>(betaUrl("/api/beta/status"))
+      .then(res => {
+        if (res.betaStatus && res.betaStatus !== "waitlisted") {
+          // approved / rejected / disabled — show status instead of form
+          setExistingStatus(res.betaStatus);
+          setAlreadySub(true);
+        } else {
+          // Check if they have an existing waitlisted application via a silent apply attempt
+          // We rely on the backend returning alreadySubmitted=true if email exists
+        }
+      })
+      .catch(() => {})
+      .finally(() => setCheckingStatus(false));
+  }, []);
   const [form, setForm] = useState({
     fullName: "", company: "", role: "", useCase: "",
     currentTools: "", painPoint: "", workflowsPerWeek: "", teamSize: "",
@@ -54,10 +73,18 @@ export default function BetaWaitlistPage() {
       return;
     }
     setLoading(true);
-    ensureTokenFromCookie(); // re-check in case useEffect hadn't run yet
+    ensureTokenFromCookie();
     try {
-      await apiFetch(betaUrl("/api/beta/apply"), { method: "POST", json: form });
-      setSubmitted(true);
+      const res = await apiFetch<{ alreadySubmitted?: boolean; status?: string; message?: string }>(
+        betaUrl("/api/beta/apply"), { method: "POST", json: form }
+      );
+      if (res.alreadySubmitted) {
+        // Backend detected existing application for this email
+        setExistingStatus(res.status ?? "waitlisted");
+        setAlreadySub(true);
+      } else {
+        setSubmitted(true);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit.");
     } finally {
@@ -89,7 +116,52 @@ export default function BetaWaitlistPage() {
 
       <div className="flex-1 flex items-start justify-center px-4 py-12">
         <div className="w-full max-w-lg">
-          {submitted ? (
+          {checkingStatus ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
+            </div>
+          ) : alreadySubmitted ? (
+            /* ── Already submitted / existing application ─────────────────── */
+            <div className="text-center space-y-5">
+              <div className={`flex h-16 w-16 items-center justify-center rounded-2xl mx-auto ${
+                existingStatus === "approved" ? "bg-green-100" :
+                existingStatus === "rejected" ? "bg-red-50" : "bg-amber-100"
+              }`}>
+                <CheckCircle2 className={`h-8 w-8 ${
+                  existingStatus === "approved" ? "text-green-500" :
+                  existingStatus === "rejected" ? "text-red-400" : "text-amber-500"
+                }`} />
+              </div>
+              <div>
+                <h1 className="text-[22px] font-bold text-slate-900">
+                  {existingStatus === "approved" ? "You're approved!" :
+                   existingStatus === "rejected" ? "Application not accepted" :
+                   "We're evaluating your request"}
+                </h1>
+                <p className="mt-2 text-[14px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                  {existingStatus === "approved"
+                    ? "Your account has been approved. Sign in to access Vectorbea."
+                    : existingStatus === "rejected"
+                    ? "Your application was not accepted at this time. Reach out if you have questions."
+                    : "We already have your application on file. Our team reviews every request manually — we'll reach out soon."}
+                </p>
+              </div>
+              {existingStatus !== "approved" && existingStatus !== "rejected" && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-left max-w-sm mx-auto">
+                  <p className="text-[12.5px] font-semibold text-amber-800 mb-1">What's next</p>
+                  <p className="text-[12px] text-amber-700">
+                    You'll receive an email when your application is reviewed. No action needed — submitting again will not speed up the process.
+                  </p>
+                </div>
+              )}
+              <p className="text-[11.5px] text-slate-400">
+                Questions?{" "}
+                <a href="mailto:susmit@vectorbea.com" className="text-amber-600 font-medium hover:underline">
+                  susmit@vectorbea.com
+                </a>
+              </p>
+            </div>
+          ) : submitted ? (
             <div className="text-center space-y-5">
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-green-100 mx-auto">
                 <CheckCircle2 className="h-8 w-8 text-green-500" />
