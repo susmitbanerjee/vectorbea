@@ -343,14 +343,12 @@ export default function ArchitectPage() {
     if (!goal.trim()) return;
     setLoading(true);
     setStep("generating");
-    let idx = 0;
-    const t = setInterval(() => { idx = (idx + 1) % GEN_MESSAGES.length; setGenMsgIdx(idx); }, 1800);
+    setGenMsgIdx(0);
     try {
       const sess = await createArchitectSession(goal.trim());
       setSessionId(sess.id);
       if (sess.needsClarification && sess.clarificationQuestions?.length) {
         setClarifyQ(sess.clarificationQuestions!);
-        clearInterval(t);
         setLoading(false);
         setStep("clarify");
         return;
@@ -359,22 +357,59 @@ export default function ArchitectPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start session");
       setStep("goal");
-    } finally { clearInterval(t); setLoading(false); }
+    } finally { setLoading(false); }
   }
 
+  /**
+   * Runs the plan generation API call and the checklist animation in parallel.
+   * The plan is only revealed after BOTH the API resolves AND all checklist
+   * steps have visually completed — so the user always sees every step animate.
+   *
+   * Step timing: GEN_MESSAGES.length × MS_PER_STEP ms minimum animation time.
+   * If the API returns early, we wait for the animation; if it takes longer,
+   * the last step stays spinning until it resolves.
+   */
   async function doPlanGeneration(sid: string, ans: Record<string, string>) {
     setStep("generating");
     setGenMsgIdx(0);
-    try {
-      const res = await generatePlan(sid, ans);
-      setPlan(res.plan);
-      setConnReqs(res.connectionRequirements ?? []);
-      setGenTools(res.generatedTools ?? []);
-      setGenAgents(res.generatedAgents ?? []);
-      setStep("plan");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Plan generation failed");
+
+    const MS_PER_STEP = 950; // ms each checklist step stays visible
+    const TOTAL_STEPS = GEN_MESSAGES.length;
+
+    // Run animation and API call in parallel
+    type PlanResult = Awaited<ReturnType<typeof generatePlan>>;
+    let apiResult: PlanResult | null = null;
+    let apiError: unknown = null;
+
+    const apiPromise = generatePlan(sid, ans)
+      .then(r  => { apiResult = r; })
+      .catch(e => { apiError  = e; });
+
+    // Advance through checklist steps one by one
+    for (let i = 1; i < TOTAL_STEPS; i++) {
+      await new Promise<void>(resolve => setTimeout(resolve, MS_PER_STEP));
+      setGenMsgIdx(i);
+    }
+
+    // All steps animated — wait for API if still pending
+    await apiPromise;
+
+    // Brief pause on the last completed step so it feels resolved
+    await new Promise<void>(resolve => setTimeout(resolve, 400));
+
+    if (apiError) {
+      toast.error(apiError instanceof Error ? apiError.message : "Plan generation failed");
       setStep("goal");
+      return;
+    }
+
+    if (apiResult) {
+      const r = apiResult as PlanResult;
+      setPlan(r.plan);
+      setConnReqs(r.connectionRequirements ?? []);
+      setGenTools(r.generatedTools ?? []);
+      setGenAgents(r.generatedAgents ?? []);
+      setStep("plan");
     }
   }
 
