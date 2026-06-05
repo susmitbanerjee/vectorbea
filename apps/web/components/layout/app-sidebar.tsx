@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
+  BarChart2,
   Bot,
   CalendarClock,
   CheckCircle2,
@@ -94,8 +95,9 @@ const NAV_GROUPS: NavGroup[] = [
 // All nav items flat (for active detection)
 const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items);
 
-// Settings sub-nav — API Keys visible only to admins
+// Settings sub-nav
 const SETTINGS_SUB_NAV: NavItem[] = [
+  { href: "/settings/usage" as never, label: "Usage & Limits", icon: BarChart2, isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/api-keys" as never, label: "API Keys", icon: KeyRound, isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
