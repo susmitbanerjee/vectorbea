@@ -275,10 +275,10 @@ function SuccessScreen({ onSignOut }: { onSignOut: () => void }) {
       <div>
         <p className="text-[11.5px] font-bold uppercase tracking-widest text-green-600 mb-3">Application submitted</p>
         <h1 className="text-[32px] sm:text-[38px] font-bold tracking-tight text-slate-900 leading-[1.15]">
-          We've received<br className="hidden sm:block" /> your application.
+          We&apos;ve received<br className="hidden sm:block" /> your application.
         </h1>
         <p className="mt-4 text-[15px] text-slate-500 leading-relaxed max-w-md">
-          Thank you for your interest in Vectorbea. Every application is reviewed by a human — we'll reach out personally.
+          Thank you for your interest in Vectorbea. Every application is reviewed by a human — we&apos;ll reach out personally.
         </p>
       </div>
 
