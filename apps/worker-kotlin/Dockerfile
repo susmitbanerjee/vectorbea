@@ -31,6 +31,7 @@ COPY settings.gradle.kts build.gradle.kts ./
 RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
 
 # Copy source and build fat jar
+# cache-bust: v3
 COPY src ./src
 RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info 2>&1
 
