@@ -1,55 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { cookies } from "next/headers";
+import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
+import { neon } from "@neondatabase/serverless";
 
 export const dynamic = "force-dynamic";
 
+function db() {
+  const url = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
+  if (!url) throw new Error("DATABASE_URL not set");
+  return neon(url);
+}
+
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { id } = await params;
+    const { id: workspaceId } = await params;
+    const cookieStore = await cookies();
 
-    const auth = await assertWorkspaceMember(request, id);
-    if (auth.error) return auth.error;
+    // Verify caller is authenticated and is a member of this workspace
+    let user: { id: string; email: string } | null = null;
+    try { user = await getAuthenticatedUserFromCookies(cookieStore); } catch {}
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const supabase = createVectorBeaAdminClient();
+    const sql = db();
 
-    const { data, error } = await supabase
-      .from("workspace_members")
-      .select("user_id, role, granted_at")
-      .eq("workspace_id", id);
+    // Verify membership
+    const membership = await sql`
+      SELECT role FROM workspace_members
+      WHERE workspace_id = ${workspaceId} AND user_id = ${user.id} AND status = 'active'
+      LIMIT 1
+    ` as { role: string }[];
+    if (!membership[0]) return NextResponse.json({ error: "Not a member" }, { status: 403 });
 
-    if (error) throw new Error(error.message);
+    // Load all members with user info from Neon app_users
+    const rows = await sql`
+      SELECT wm.user_id as id, wm.role, wm.created_at as joined_at,
+             au.email, au.full_name, au.avatar_url
+      FROM workspace_members wm
+      JOIN app_users au ON au.id = wm.user_id
+      WHERE wm.workspace_id = ${workspaceId} AND wm.status = 'active'
+      ORDER BY wm.created_at ASC
+    ` as { id: string; role: string; joined_at: string; email: string; full_name: string | null; avatar_url: string | null }[];
 
-    // Fetch profiles for these users
-    const userIds = (data ?? []).map((m) => m.user_id);
-    const { data: profiles } = userIds.length
-      ? await supabase
-          .from("profiles")
-          .select("id, email, full_name, avatar_url")
-          .in("id", userIds)
-      : { data: [] };
-
-    const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
-
-    const members = (data ?? []).map((m) => {
-      const profile = profileMap.get(m.user_id);
-      return {
-        id: m.user_id,
-        email: profile?.email ?? m.user_id,
-        displayName: profile?.full_name ?? profile?.email ?? m.user_id,
-        avatarUrl: profile?.avatar_url ?? null,
-        role: m.role as "admin" | "editor" | "viewer",
-        joinedAt: m.granted_at,
-      };
-    });
+    const members = rows.map(m => ({
+      id:          m.id,
+      email:       m.email,
+      displayName: m.full_name ?? m.email,
+      avatarUrl:   m.avatar_url,
+      role:        m.role,
+      joinedAt:    m.joined_at,
+    }));
 
     return NextResponse.json(members);
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load members" },
+      { error: err instanceof Error ? err.message : "Failed to load members" },
       { status: 500 },
     );
   }

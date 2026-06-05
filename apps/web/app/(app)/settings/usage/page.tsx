@@ -113,7 +113,7 @@ export default function UsagePage() {
   );
 
   return (
-    <div className="max-w-xl space-y-6 p-6 lg:p-8">
+    <div className="w-full max-w-5xl space-y-6 p-6 lg:p-8">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -139,85 +139,95 @@ export default function UsagePage() {
         <p className="text-[13px] font-medium text-slate-800">{status?.message ?? "Loading…"}</p>
       </div>
 
-      {/* Execution mode */}
-      <div>
-        <SectionLabel>Execution Mode</SectionLabel>
-        <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-          <div className="flex items-center gap-3 py-3 px-4">
-            <FlaskConical className="h-4 w-4 text-slate-400 shrink-0" />
-            <span className="flex-1 text-[13px] text-slate-600">Simulation</span>
-            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-              status?.canRunSimulation ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-            }`}>
-              {status?.canRunSimulation ? "Enabled" : "Disabled"}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 py-3 px-4">
-            <Zap className="h-4 w-4 text-slate-400 shrink-0" />
-            <span className="flex-1 text-[13px] text-slate-600">Real execution</span>
-            {status?.canRunRealExecution
-              ? <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold bg-green-50 text-green-700">Enabled</span>
-              : <span className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
-                  <Lock className="h-3 w-3" /> Admin approval required
+      {/* 2-column grid on desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Left column */}
+        <div className="space-y-6">
+          {/* Execution mode */}
+          <div>
+            <SectionLabel>Execution Mode</SectionLabel>
+            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+              <div className="flex items-center gap-3 py-3.5 px-4">
+                <FlaskConical className="h-4 w-4 text-slate-400 shrink-0" />
+                <span className="flex-1 text-[13px] text-slate-600">Simulation</span>
+                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                  status?.canRunSimulation ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
+                }`}>
+                  {status?.canRunSimulation ? "Enabled" : "Disabled"}
                 </span>
-            }
+              </div>
+              <div className="flex items-center gap-3 py-3.5 px-4">
+                <Zap className="h-4 w-4 text-slate-400 shrink-0" />
+                <span className="flex-1 text-[13px] text-slate-600">Real execution</span>
+                {status?.canRunRealExecution
+                  ? <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold bg-green-50 text-green-700">Enabled</span>
+                  : <span className="flex items-center gap-1 text-[11px] font-medium text-slate-500">
+                      <Lock className="h-3 w-3" /> Admin approval required
+                    </span>
+                }
+              </div>
+            </div>
+          </div>
+
+          {/* Today's usage */}
+          <div>
+            <SectionLabel>Today&apos;s Usage</SectionLabel>
+            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+              <UsageBar
+                used={status?.runsToday ?? 0}
+                max={status?.maxRunsPerDay ?? 20}
+                label="Workflow runs"
+                icon={Activity}
+                color="bg-blue-500"
+              />
+              {status && (status.simulationRunsToday > 0 || status.realRunsToday > 0) && (
+                <div className="px-4 pb-3 pt-0">
+                  <span className="text-[11.5px] text-slate-400 ml-7">
+                    {status.simulationRunsToday > 0 && <>{status.simulationRunsToday} simulation</>}
+                    {status.simulationRunsToday > 0 && status.realRunsToday > 0 && " · "}
+                    {status.realRunsToday > 0 && <>{status.realRunsToday} real</>}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Features */}
+          <div>
+            <SectionLabel>Features</SectionLabel>
+            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+              <FeatureRow icon={CalendarClock} label="Schedules"             enabled={status?.allowSchedules ?? false} />
+              <FeatureRow icon={Wrench}        label="Webhooks"              enabled={status?.allowWebhooks ?? false} />
+              <FeatureRow icon={Bot}           label="Iterative agents"      enabled={status?.allowIterativeAgents ?? false} />
+              <FeatureRow icon={Zap}           label="AI Workflow Architect" enabled={true} />
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Today's usage */}
-      <div>
-        <SectionLabel>Today&apos;s Usage</SectionLabel>
-        <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-          <UsageBar
-            used={status?.runsToday ?? 0}
-            max={status?.maxRunsPerDay ?? 20}
-            label="Workflow runs"
-            icon={Activity}
-            color="bg-blue-500"
-          />
-          {status && (status.simulationRunsToday > 0 || status.realRunsToday > 0) && (
-            <div className="flex gap-4 px-4 pb-2.5 pt-0">
-              <span className="text-[11.5px] text-slate-400 ml-7">
-                {status.simulationRunsToday > 0 && <>{status.simulationRunsToday} simulation</>}
-                {status.simulationRunsToday > 0 && status.realRunsToday > 0 && " · "}
-                {status.realRunsToday > 0 && <>{status.realRunsToday} real</>}
-              </span>
+        {/* Right column */}
+        <div className="space-y-6">
+          {/* Workspace limits */}
+          <div>
+            <SectionLabel>Workspace Limits</SectionLabel>
+            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+              <LimitRow icon={Zap}           label="Max workflows"         value={status?.maxWorkflows ?? 3} />
+              <LimitRow icon={Zap}           label="Max steps / workflow"  value={status?.maxStepsPerWorkflow ?? 5} />
+              <LimitRow icon={CalendarClock} label="Max run duration"      value="5 minutes" />
+              <LimitRow icon={FileText}      label="Log retention"         value={`${status?.logRetentionDays ?? 7} days`} />
+              <LimitRow icon={Users}         label="Team members"          value={status?.maxTeamMembers ?? 1} />
+              <LimitRow icon={Bot}           label="LLM providers (BYOK)"  value={status?.maxLlmProviders ?? 1} />
             </div>
-          )}
-        </div>
-      </div>
+          </div>
 
-      {/* Workspace limits */}
-      <div>
-        <SectionLabel>Workspace Limits</SectionLabel>
-        <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-          <LimitRow icon={Zap}          label="Max workflows"         value={status?.maxWorkflows ?? 3} />
-          <LimitRow icon={Zap}          label="Max steps / workflow"  value={status?.maxStepsPerWorkflow ?? 5} />
-          <LimitRow icon={CalendarClock} label="Max run duration"     value="5 minutes" />
-          <LimitRow icon={FileText}     label="Log retention"         value={`${status?.logRetentionDays ?? 7} days`} />
-          <LimitRow icon={Users}        label="Team members"          value={status?.maxTeamMembers ?? 1} />
-          <LimitRow icon={Bot}          label="LLM providers (BYOK)"  value={status?.maxLlmProviders ?? 1} />
+          {/* Request limits */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+            <p className="text-[13px] font-semibold text-amber-800">Need higher limits?</p>
+            <p className="text-[12.5px] text-amber-700 mt-1 leading-relaxed">
+              Contact your Vectorbea admin to request increased limits for your workspace.
+            </p>
+          </div>
         </div>
-      </div>
-
-      {/* Features */}
-      <div>
-        <SectionLabel>Features</SectionLabel>
-        <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-          <FeatureRow icon={CalendarClock} label="Schedules"             enabled={status?.allowSchedules ?? false} />
-          <FeatureRow icon={Wrench}        label="Webhooks"              enabled={status?.allowWebhooks ?? false} />
-          <FeatureRow icon={Bot}           label="Iterative agents"      enabled={status?.allowIterativeAgents ?? false} />
-          <FeatureRow icon={Zap}           label="AI Workflow Architect" enabled={true} />
-        </div>
-      </div>
-
-      {/* Request limits */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
-        <p className="text-[12.5px] font-semibold text-amber-800">Need higher limits?</p>
-        <p className="text-[12px] text-amber-700 mt-0.5">
-          Contact your Vectorbea admin to request increased limits for your workspace.
-        </p>
       </div>
     </div>
   );

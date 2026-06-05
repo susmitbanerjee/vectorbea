@@ -167,14 +167,20 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   }, [activeWorkspaceId, summary]);
 
   function isActive(item: NavItem): boolean {
+    // Exact match always wins
+    if (pathname === item.href) return true;
+    // Sub-items: exact match only (already handled above)
+    if (item.isSubItem) return false;
+    // Parent items: active only if no sub-item in SETTINGS_SUB_NAV is active for this path
+    const subItemActive = SETTINGS_SUB_NAV.some(sub => pathname === sub.href || pathname.startsWith(`${sub.href}/`));
+    if (subItemActive) return false;
     return (
-      pathname === item.href ||
-      (pathname.startsWith(`${item.href}/`) &&
-        !ALL_NAV_ITEMS.some(other =>
-          other.href !== item.href &&
-          (pathname === other.href || pathname.startsWith(`${other.href}/`)) &&
-          other.href.length > item.href.length,
-        ))
+      pathname.startsWith(`${item.href}/`) &&
+      !ALL_NAV_ITEMS.some(other =>
+        other.href !== item.href &&
+        (pathname === other.href || pathname.startsWith(`${other.href}/`)) &&
+        other.href.length > item.href.length,
+      )
     );
   }
 
