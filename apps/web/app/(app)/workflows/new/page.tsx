@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, ArrowRight, Bot, CalendarClock,
-  GitBranch, Play, RefreshCw, Save, Sparkles,
+  GitBranch, Play, RefreshCw, Save,
 } from "lucide-react";
+import { ArchitectLogo } from "@/components/architect/ArchitectLogo";
 import { toast } from "sonner";
 
 import type { TriggerType, WorkflowCreationMode } from "@/types/platform";
@@ -83,9 +84,7 @@ export default function NewWorkflowPage() {
               <div className="flex-1 space-y-3">
                 {/* Title row */}
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500 shadow-sm shrink-0">
-                    <Sparkles className="h-5 w-5 text-white" />
-                  </div>
+                  <ArchitectLogo size={40} />
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-[16px] font-bold tracking-tight text-stone-900">AI Workflow Architect</span>
