@@ -17,18 +17,6 @@ const CREATION_MODES: { mode: WorkflowCreationMode; label: string; description: 
     color: "#38BDF8",
   },
   {
-    mode: "imported",
-    label: "Import from LangGraph / Temporal",
-    description: "Convert an existing LangGraph or Temporal workflow. Vectorbea stores the normalized graph.",
-    color: "#A78BFA",
-  },
-  {
-    mode: "instrumented",
-    label: "Instrument Existing Code",
-    description: "Keep execution in your code. Add the Vectorbea SDK to push events and checkpoints.",
-    color: "#34D399",
-  },
-  {
     mode: "endpoint_only",
     label: "Endpoint Trigger Only",
     description: "Trigger an existing HTTP endpoint. Limited observability — no step-level replay.",
@@ -139,47 +127,6 @@ export default function NewWorkflowPage() {
         <div className="flex-1 h-px bg-border/50" />
       </div>
 
-      {/* Creation mode */}
-      <div className="space-y-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">Execution Mode</p>
-        {CREATION_MODES.map((m) => (
-          <button
-            key={m.mode}
-            type="button"
-            onClick={() => setMode(m.mode)}
-            className={`w-full rounded-xl border p-4 text-left transition-all ${
-              mode === m.mode
-                ? "shadow-[0_0_0_2px_rgba(56,189,248,0.2)]"
-                : "border-border/60 hover:border-border"
-            }`}
-            style={{
-              background: mode === m.mode ? "var(--surface-2)" : "var(--surface-1)",
-              borderColor: mode === m.mode ? `${m.color}40` : undefined,
-            }}
-          >
-            <div className="flex items-start gap-3">
-              <span
-                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
-                style={{
-                  background: mode === m.mode ? `${m.color}20` : "transparent",
-                  borderColor: mode === m.mode ? m.color : "var(--border)",
-                }}
-              >
-                {mode === m.mode && (
-                  <span className="h-2 w-2 rounded-full" style={{ background: m.color }} />
-                )}
-              </span>
-              <div>
-                <p className="text-[13px] font-semibold" style={{ color: mode === m.mode ? m.color : undefined }}>
-                  {m.label}
-                </p>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">{m.description}</p>
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-
       {/* Basic info */}
       <div className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">Workflow Info</p>
@@ -269,7 +216,7 @@ export default function NewWorkflowPage() {
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-[13px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
         >
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          {mode === "native" ? "Create & Open Builder" : mode === "imported" ? "Continue to Import" : "Create Workflow"}
+          Create &amp; Open Builder
         </button>
       </div>
     </div>
