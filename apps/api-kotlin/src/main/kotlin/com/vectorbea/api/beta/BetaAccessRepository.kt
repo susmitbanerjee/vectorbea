@@ -7,6 +7,15 @@ import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
+data class DailyUsage(
+    val workflowRuns: Int,
+    val simulationRuns: Int,
+    val realRuns: Int,
+    val aiArchitectRequests: Int,
+    val llmCalls: Int,
+    val toolCalls: Int,
+)
+
 data class WorkspaceBetaControls(
     val id: UUID,
     val workspaceId: UUID,
@@ -139,6 +148,20 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         "SELECT COALESCE(workflow_runs,0) FROM daily_workspace_usage WHERE workspace_id=? AND usage_date=CURRENT_DATE",
         { setObject(1, workspaceId) }, { it.getInt(1) }
     ) ?: 0
+
+    fun getDailyUsage(workspaceId: UUID): DailyUsage? = queryOne(
+        """SELECT COALESCE(workflow_runs,0),COALESCE(simulation_runs,0),COALESCE(real_runs,0),
+           COALESCE(ai_architect_requests,0),COALESCE(llm_calls,0),COALESCE(tool_calls,0)
+           FROM daily_workspace_usage WHERE workspace_id=? AND usage_date=CURRENT_DATE""",
+        { setObject(1, workspaceId) },
+    ) { rs -> DailyUsage(
+        workflowRuns         = rs.getInt(1),
+        simulationRuns       = rs.getInt(2),
+        realRuns             = rs.getInt(3),
+        aiArchitectRequests  = rs.getInt(4),
+        llmCalls             = rs.getInt(5),
+        toolCalls            = rs.getInt(6),
+    )}
 
     fun incrementDailyRuns(workspaceId: UUID, isSimulation: Boolean) {
         execute("""

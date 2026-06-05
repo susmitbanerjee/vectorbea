@@ -52,8 +52,14 @@ class BetaRoutes(
         val canAccess  = betaStatus == "approved"
 
         val wsId = req.context().workspaceId
-        val controls = runCatching { betaRepo.getWorkspaceBetaControls(wsId) }.getOrNull()
-        val policy   = runCatching { betaRepo.getUsagePolicy(wsId) }.getOrNull()
+        val controls   = runCatching { betaRepo.getWorkspaceBetaControls(wsId) }.getOrNull()
+        val policy     = runCatching { betaRepo.getUsagePolicy(wsId) }.getOrNull()
+        val runsToday  = runCatching { betaRepo.getDailyRunCount(wsId) }.getOrDefault(0)
+        val usageToday = runCatching { betaRepo.getDailyUsage(wsId) }.getOrNull()
+
+        val maxRuns      = policy?.maxRunsPerDay ?: config.betaDefaultMaxRunsPerDay
+        val maxWorkflows = policy?.maxWorkflows   ?: config.betaDefaultMaxWorkflows
+        val maxSteps     = policy?.maxStepsPerWorkflow ?: config.betaDefaultMaxStepsPerWorkflow
 
         return Response.ok(mapOf(
             "betaStatus"           to betaStatus,
@@ -62,8 +68,22 @@ class BetaRoutes(
             "canRunRealExecution"  to (canAccess && (controls?.realExecutionEnabled ?: false)),
             "executionMode"        to (controls?.executionMode ?: "simulation_only"),
             "workspaceStatus"      to (controls?.accessStatus ?: "pending"),
-            "maxWorkflows"         to (policy?.maxWorkflows ?: config.betaDefaultMaxWorkflows),
-            "maxRunsPerDay"        to (policy?.maxRunsPerDay ?: config.betaDefaultMaxRunsPerDay),
+            // Limits
+            "maxRunsPerDay"        to maxRuns,
+            "maxWorkflows"         to maxWorkflows,
+            "maxStepsPerWorkflow"  to maxSteps,
+            "maxTeamMembers"       to (policy?.maxTeamMembers ?: 1),
+            "maxLlmProviders"      to (policy?.maxLlmProviders ?: 1),
+            "logRetentionDays"     to (policy?.logRetentionDays ?: 7),
+            "allowSchedules"       to (policy?.allowSchedules ?: false),
+            "allowWebhooks"        to (policy?.allowWebhooks ?: false),
+            "allowIterativeAgents" to (policy?.allowIterativeAgents ?: false),
+            // Actual usage today
+            "runsToday"            to runsToday,
+            "simulationRunsToday"  to (usageToday?.simulationRuns ?: 0),
+            "realRunsToday"        to (usageToday?.realRuns ?: 0),
+            "llmCallsToday"        to (usageToday?.llmCalls ?: 0),
+            "aiArchitectRequestsToday" to (usageToday?.aiArchitectRequests ?: 0),
             "message"              to when (betaStatus) {
                 "approved"   -> "Your account is approved. Welcome to Vectorbea private beta."
                 "waitlisted" -> "Application received. Vectorbea is currently invite-only. We review every workspace manually."
