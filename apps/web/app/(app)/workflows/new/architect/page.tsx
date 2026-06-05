@@ -136,6 +136,164 @@ function RiskBadge({ level }: { level: string }) {
   return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${cls}`}>{level}</span>;
 }
 
+// ── WorkflowStepList — responsive steps with parallel/branch treatment ────────
+
+const STEP_TYPE_STYLES: Record<string, { cls: string; dot: string }> = {
+  trigger:  { cls: "bg-green-50 text-green-700 border-green-200",   dot: "bg-green-500" },
+  tool:     { cls: "bg-purple-50 text-purple-700 border-purple-200", dot: "bg-purple-500" },
+  agent:    { cls: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-500" },
+  approval: { cls: "bg-orange-50 text-orange-700 border-orange-200", dot: "bg-orange-500" },
+  branch:   { cls: "bg-amber-50 text-amber-700 border-amber-200",   dot: "bg-amber-500" },
+  parallel: { cls: "bg-cyan-50 text-cyan-700 border-cyan-200",      dot: "bg-cyan-500" },
+  join:     { cls: "bg-slate-50 text-slate-600 border-slate-200",   dot: "bg-slate-400" },
+  end:      { cls: "bg-slate-50 text-slate-500 border-slate-200",   dot: "bg-slate-300" },
+};
+
+function WorkflowStepList({
+  steps, edges,
+}: {
+  steps: import("@/lib/architect").PlanStep[];
+  edges: import("@/lib/architect").PlanEdge[];
+}) {
+  // Build dependency map: tempStepId → dependsOn tempStepIds
+  const inbound: Record<string, string[]> = {};
+  for (const e of edges ?? []) {
+    if (!inbound[e.to]) inbound[e.to] = [];
+    inbound[e.to].push(e.from);
+  }
+
+  // Detect parallel groups: steps that share the same single predecessor
+  const parallelGroups: Record<string, string[]> = {};
+  for (const [to, froms] of Object.entries(inbound)) {
+    if (froms.length === 1) {
+      const src = froms[0];
+      if (!parallelGroups[src]) parallelGroups[src] = [];
+      parallelGroups[src].push(to);
+    }
+  }
+  const parallelStepIds = new Set<string>();
+  const usedParallelSources = new Set<string>();
+  Object.values(parallelGroups).forEach(grp => {
+    if (grp.length >= 2) grp.forEach(id => parallelStepIds.add(id));
+  });
+
+  const rendered = new Set<string>();
+
+  return (
+    <div className="space-y-2">
+      {steps.map((s, i) => {
+        if (rendered.has(s.tempStepId)) return null;
+
+        const style = STEP_TYPE_STYLES[s.nodeType] ?? STEP_TYPE_STYLES.tool;
+        const isLast = i === steps.length - 1;
+
+        // ── Branch step: show if/else preview ──────────────────────────
+        if (s.nodeType === "branch") {
+          const outgoing = (edges ?? []).filter(e => e.from === s.tempStepId);
+          const trueEdge = outgoing.find(e => e.type === "condition_true" || e.label?.toLowerCase().includes("true") || e.label?.toLowerCase().includes("yes"));
+          const falseEdge = outgoing.find(e => e.type === "condition_false" || e.label?.toLowerCase().includes("false") || e.label?.toLowerCase().includes("no"));
+          rendered.add(s.tempStepId);
+          return (
+            <div key={s.tempStepId} className="flex items-start gap-3">
+              <div className="flex flex-col items-center shrink-0">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-[11px] font-bold text-amber-700">{i+1}</div>
+                {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
+              </div>
+              <Card className="flex-1 p-3.5 mb-1.5 border-amber-200 bg-amber-50/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${style.cls}`}>branch</span>
+                  <p className="text-[13px] font-semibold text-slate-700">{s.name}</p>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {trueEdge && (
+                    <div className="flex items-center gap-1.5 rounded-lg bg-green-50 border border-green-200 px-2.5 py-1.5 text-[11.5px]">
+                      <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      <span className="font-semibold text-green-700">IF TRUE</span>
+                      {trueEdge.label && <span className="text-green-600">→ {trueEdge.label}</span>}
+                    </div>
+                  )}
+                  {falseEdge && (
+                    <div className="flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-2.5 py-1.5 text-[11.5px]">
+                      <div className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                      <span className="font-semibold text-red-700">IF FALSE</span>
+                      {falseEdge.label && <span className="text-red-600">→ {falseEdge.label}</span>}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          );
+        }
+
+        // ── Parallel group: show grouped lane cards ─────────────────────
+        const parallelSrc = Object.entries(parallelGroups).find(([src, grp]) =>
+          grp.includes(s.tempStepId) && grp.length >= 2 && !usedParallelSources.has(src)
+        );
+        if (parallelSrc) {
+          const [src, grpIds] = parallelSrc;
+          usedParallelSources.add(src);
+          grpIds.forEach(id => rendered.add(id));
+          rendered.add(s.tempStepId);
+          const grpSteps = grpIds.map(id => steps.find(st => st.tempStepId === id)).filter(Boolean) as import("@/lib/architect").PlanStep[];
+          return (
+            <div key={`parallel-${src}`} className="flex items-start gap-3">
+              <div className="flex flex-col items-center shrink-0">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-100 text-[11px] font-bold text-cyan-700">{i+1}</div>
+                {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
+              </div>
+              <div className="flex-1 mb-1.5">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-px flex-1 bg-cyan-200" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-600 bg-cyan-50 border border-cyan-200 rounded-full px-2 py-0.5">Parallel group</span>
+                  <div className="h-px flex-1 bg-cyan-200" />
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {grpSteps.map(gs => {
+                    const gs_style = STEP_TYPE_STYLES[gs.nodeType] ?? STEP_TYPE_STYLES.tool;
+                    return (
+                      <Card key={gs.tempStepId} className="flex items-center gap-2.5 px-3 py-2.5 border-cyan-100">
+                        <div className={`h-2 w-2 rounded-full shrink-0 ${gs_style.dot}`} />
+                        <div className="min-w-0">
+                          <span className={`rounded border text-[9.5px] font-bold px-1.5 py-0.5 ${gs_style.cls}`}>{gs.nodeType}</span>
+                          <p className="text-[12px] font-medium text-slate-700 mt-0.5 truncate">{gs.name}</p>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-center mt-2">
+                  <div className="h-px w-1/2 bg-cyan-200" />
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // ── Normal step ─────────────────────────────────────────────────
+        rendered.add(s.tempStepId);
+        return (
+          <div key={s.tempStepId} className="flex items-start gap-3">
+            <div className="flex flex-col items-center shrink-0">
+              <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white`}
+                style={{ background: style.dot.replace("bg-","#").length > 4 ? undefined : undefined }}
+              >
+                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold ${style.dot} text-white`}>{i+1}</div>
+              </div>
+              {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
+            </div>
+            <Card className="flex-1 flex items-center gap-3 px-3.5 py-2.5 mb-1.5">
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold shrink-0 ${style.cls}`}>{s.nodeType}</span>
+              <p className="text-[13px] font-medium text-slate-700 truncate">{s.name}</p>
+              {s.toolTempId && <span className="ml-auto text-[10.5px] text-purple-500 shrink-0 truncate hidden sm:block">{s.toolTempId}</span>}
+              {s.agentTempId && <span className="ml-auto text-[10.5px] text-indigo-500 shrink-0 truncate hidden sm:block">{s.agentTempId}</span>}
+            </Card>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[10.5px] font-bold uppercase tracking-widest text-slate-400 mb-2">{children}</p>;
 }
@@ -275,8 +433,17 @@ export default function ArchitectPage() {
     for (let i = 0; i < BUILD_PHASES.length; i++) {
       setBuildPhase(i);
       try {
-        if (i === 1) { const r = await generateTools(sessionId); setGenTools(r.tools); }
-        if (i === 2) { const r = await generateAgents(sessionId); setGenAgents(r.agents); }
+        // Only call API if not already created (avoid duplicate records on retry)
+        if (i === 1) {
+          if (!genTools.some(t => t.status === "created")) {
+            const r = await generateTools(sessionId); setGenTools(r.tools);
+          }
+        }
+        if (i === 2) {
+          if (!genAgents.some(a => a.status === "created")) {
+            const r = await generateAgents(sessionId); setGenAgents(r.agents);
+          }
+        }
         if (i === 3) {
           const result = await createWorkflowFromPlan(sessionId, {});
           setReadiness({ status: result.readinessStatus, issues: result.readinessIssues ?? [] });
@@ -661,35 +828,11 @@ export default function ArchitectPage() {
                   </div>
                 )}
 
-                {/* Workflow steps */}
+                {/* Workflow steps — with parallel/branch visual treatment */}
                 {(plan.workflowSteps?.length ?? 0) > 0 && (
                   <div>
                     <SectionLabel>Workflow Steps</SectionLabel>
-                    <div className="space-y-2">
-                      {plan.workflowSteps.map((s, i) => {
-                        const typeColors: Record<string, string> = {
-                          trigger: "bg-green-50 text-green-700",
-                          tool:    "bg-purple-50 text-purple-700",
-                          agent:   "bg-indigo-50 text-indigo-700",
-                          approval:"bg-orange-50 text-orange-700",
-                          branch:  "bg-amber-50 text-amber-700",
-                          end:     "bg-slate-50 text-slate-500",
-                        };
-                        const cls = typeColors[s.nodeType] ?? "bg-slate-50 text-slate-500";
-                        return (
-                          <div key={s.tempStepId} className="flex items-start gap-3">
-                            <div className="flex flex-col items-center shrink-0">
-                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">{i+1}</div>
-                              {i < plan.workflowSteps.length - 1 && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
-                            </div>
-                            <Card className="flex-1 flex items-center gap-3 px-3.5 py-2.5 mb-1.5">
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0 ${cls}`}>{s.nodeType}</span>
-                              <p className="text-[13px] font-medium text-slate-700 truncate">{s.name}</p>
-                            </Card>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <WorkflowStepList steps={plan.workflowSteps} edges={plan.edges} />
                   </div>
                 )}
 
@@ -825,8 +968,34 @@ export default function ArchitectPage() {
               <div className="space-y-5">
                 <div>
                   <h1 className="text-[22px] font-bold text-slate-900">Confirm Building Blocks</h1>
-                  <p className="mt-1 text-[13.5px] text-slate-500">Vectorbea will create these tools and agents in your workspace.</p>
+                  <p className="mt-1 text-[13.5px] text-slate-500">
+                    Review what Vectorbea will create in your workspace, then click Build to start.
+                  </p>
                 </div>
+
+                {/* Fallback: show plan-level summary when materialized items not yet generated */}
+                {genTools.length === 0 && genAgents.length === 0 && plan && (
+                  <Card className="p-5 border-blue-100 bg-blue-50/30">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Sparkles className="h-4 w-4 text-blue-500" />
+                      <p className="text-[13.5px] font-semibold text-blue-900">Plan ready to build</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      {[
+                        { label: "Tools",       value: plan.tools?.length ?? 0,               icon: Wrench },
+                        { label: "Agents",      value: plan.agents?.length ?? 0,              icon: Bot },
+                        { label: "Steps",       value: plan.workflowSteps?.length ?? 0,       icon: Zap },
+                      ].map(({ label, value, icon: Icon }) => (
+                        <div key={label} className="flex flex-col items-center gap-1 rounded-xl bg-white border border-blue-100 p-3">
+                          <Icon className="h-4 w-4 text-blue-500" />
+                          <span className="text-[16px] font-black text-slate-900">{value}</span>
+                          <span className="text-[10.5px] text-slate-400">{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-[12px] text-blue-700">Click <strong>Build Workflow</strong> to create tools and agents, then open the animated canvas.</p>
+                  </Card>
+                )}
 
                 {/* Tools */}
                 {genTools.length > 0 && (

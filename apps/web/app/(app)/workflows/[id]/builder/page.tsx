@@ -552,6 +552,17 @@ function WorkflowBuilderInner() {
   // The full graph is already in React Flow state — we only filter what is rendered.
   useEffect(() => {
     if (!animatingArchitect) return;
+
+    // Reduced-motion: skip animation entirely, show full graph immediately
+    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setVisibleNodeIds(null);
+      setVisibleEdgeIds(null);
+      setAnimationLabel("Workflow ready");
+      setAnimationProgress(100);
+      setTimeout(() => setAnimatingArchitect(false), 300);
+      return;
+    }
+
     // Reset visible sets so canvas starts empty
     setVisibleNodeIds(new Set());
     setVisibleEdgeIds(new Set());
@@ -872,35 +883,74 @@ function WorkflowBuilderInner() {
       <style dangerouslySetInnerHTML={{ __html: HANDLE_CSS }} />
 
       {/* ── AI Architect creation animation overlay ──────────────────────────── */}
-      {animatingArchitect && (
-        <>
-          {/* Progress panel — bottom right */}
-          <div className="absolute bottom-5 right-5 z-50 w-64 rounded-2xl border border-amber-200 bg-white/95 shadow-xl backdrop-blur-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-amber-100 flex items-center gap-2">
-              <div className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-              <span className="text-[12px] font-bold text-amber-900 truncate">{animationLabel}</span>
-            </div>
-            <div className="px-4 py-2.5">
-              <div className="h-1.5 w-full rounded-full bg-amber-100 overflow-hidden">
-                <div className="h-full rounded-full bg-amber-400 transition-all duration-500"
-                  style={{ width: `${animationProgress}%` }} />
+      {animatingArchitect && (() => {
+        // Read step titles from sessionStorage to render progress list
+        let allSteps: Array<{ title: string; type: string }> = [];
+        try {
+          const stored = sessionStorage.getItem(`architect-anim-${id}`);
+          if (stored) allSteps = (JSON.parse(stored) as Array<{ title: string; type: string }>)
+            .filter(s => !["add_edge"].includes(s.type)); // show meaningful steps only
+        } catch {}
+        const completedCount = Math.floor((animationProgress / 100) * allSteps.length);
+        const visibleSteps = allSteps.slice(0, Math.min(allSteps.length, 8)); // cap at 8 visible
+
+        return (
+          <>
+            {/* Progress panel — bottom right */}
+            <div className="absolute bottom-5 right-5 z-50 w-72 rounded-2xl border border-amber-200 bg-white/97 shadow-2xl backdrop-blur-sm overflow-hidden">
+              {/* Header */}
+              <div className="px-4 py-3 border-b border-amber-100 flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                <span className="text-[12px] font-bold text-amber-900 flex-1 truncate">{animationLabel}</span>
+                <span className="text-[10.5px] text-amber-600 font-semibold shrink-0">{animationProgress}%</span>
               </div>
-              <p className="mt-2 text-[10.5px] text-stone-400">Vectorbea is building your workflow step by step</p>
+              {/* Progress bar */}
+              <div className="px-4 pt-2.5">
+                <div className="h-1.5 w-full rounded-full bg-amber-100 overflow-hidden">
+                  <div className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                    style={{ width: `${animationProgress}%` }} />
+                </div>
+              </div>
+              {/* Step list with checkmarks */}
+              {visibleSteps.length > 0 && (
+                <div className="px-4 py-2 space-y-1 max-h-40 overflow-y-auto">
+                  {visibleSteps.map((step, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      {i < completedCount
+                        ? <div className="h-4 w-4 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                            <svg className="h-2.5 w-2.5 text-green-600" fill="none" viewBox="0 0 12 12">
+                              <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </div>
+                        : i === completedCount
+                          ? <div className="h-4 w-4 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                              <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                            </div>
+                          : <div className="h-4 w-4 rounded-full border border-slate-200 shrink-0" />
+                      }
+                      <span className={`text-[11px] truncate ${i < completedCount ? "text-green-700" : i === completedCount ? "text-amber-800 font-medium" : "text-slate-400"}`}>
+                        {step.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Actions */}
+              <div className="px-4 pb-3 pt-1">
+                <button type="button" onClick={skipAnimation}
+                  className="w-full rounded-xl border border-stone-200 bg-stone-50 py-1.5 text-[12px] font-medium text-stone-500 hover:bg-stone-100 transition-colors">
+                  Skip animation
+                </button>
+              </div>
             </div>
-            <div className="px-4 pb-3">
-              <button type="button" onClick={skipAnimation}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50 py-1.5 text-[12px] font-medium text-stone-500 hover:bg-stone-100 transition-colors">
-                Skip animation
-              </button>
+            {/* Top-center status banner */}
+            <div className="absolute top-3 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-2 shadow-sm backdrop-blur-sm flex items-center gap-2">
+              <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <span className="text-[12.5px] font-semibold text-amber-800">Vectorbea is building your workflow…</span>
             </div>
-          </div>
-          {/* Top-center status banner */}
-          <div className="absolute top-3 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-2 shadow-sm backdrop-blur-sm flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-            <span className="text-[12.5px] font-semibold text-amber-800">Vectorbea is building your workflow…</span>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
       <div
         className="flex shrink-0 items-center gap-0 px-4"
