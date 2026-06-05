@@ -21,6 +21,7 @@ import {
 
 import { IconBadge, type IconTone } from "@/components/icons/vectorbea-icons";
 import { getPlatformSummary, getRuns } from "@/lib/repository";
+import { apiFetch, withWorkspace } from "@/lib/api/client";
 import type { AgentRun } from "@/types/platform";
 import { cn } from "@/lib/utils";
 
@@ -201,6 +202,11 @@ export default function OverviewPage() {
   const [runsTotalPages, setRunsTotalPages] = useState(1);
   const [runsPage, setRunsPage]     = useState(1);
   const [loading, setLoading]       = useState(true);
+  const [betaUsage, setBetaUsage]   = useState<{
+    runsToday: number; maxRunsPerDay: number;
+    simulationRunsToday: number; realRunsToday: number;
+    canRunRealExecution: boolean; executionMode: string;
+  } | null>(null);
 
   const RECENT_RUNS_LIMIT = 15;
 
@@ -220,7 +226,12 @@ export default function OverviewPage() {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { void load(1); }, []);
+  useEffect(() => {
+    void load(1);
+    apiFetch<typeof betaUsage & Record<string, unknown>>(withWorkspace("/api/beta/status"))
+      .then(r => setBetaUsage(r as typeof betaUsage))
+      .catch(() => {});
+  }, []);
 
   const isConnected = (summary?.connectedWorkers ?? 0) > 0;
   const isEmpty = !loading && (summary?.totalWorkflows ?? 0) === 0 && (summary?.totalAgents ?? 0) === 0;
@@ -467,26 +478,63 @@ export default function OverviewPage() {
         <div className="flex flex-col gap-4">
 
           {/* Usage 24h */}
+          {/* Beta usage widget */}
           <div
             className="rounded-2xl bg-white"
             style={{ border: "1px solid #E2E8F0", padding: "16px 18px", boxShadow: "0 4px 14px rgba(15,23,42,0.03)" }}
           >
-            <p style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A", marginBottom: 12 }}>
-              Usage (24h)
-            </p>
-            <div className="space-y-3">
-              {[
-                { label: "Tokens",    value: loading ? "…" : summary != null ? fmtTokens(summary.usageLast24h?.tokens ?? summary.totalTokens24h ?? 0) : "—" },
-                { label: "Est. cost", value: loading ? "…" : summary != null ? `$${(summary.usageLast24h?.estimatedCost ?? summary.totalCost24h ?? 0).toFixed(3)}` : "—" },
-              ].map(({ label, value }) => (
-                <div key={label} className="flex items-center justify-between">
-                  <span style={{ fontSize: 12.5, color: "#64748B" }}>{label}</span>
-                  <span className="font-mono tabular-nums" style={{ fontSize: 13.5, fontWeight: 600, color: "#0F172A" }}>
-                    {value}
+            <div className="flex items-center justify-between mb-3">
+              <p style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>Usage today</p>
+              <Link href={"/settings/usage" as never}
+                style={{ fontSize: 12, color: "#2563EB", fontWeight: 600 }}
+                className="hover:underline">
+                View limits →
+              </Link>
+            </div>
+            {betaUsage ? (
+              <div className="space-y-3">
+                {/* Run progress bar */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span style={{ fontSize: 12, color: "#64748B" }}>Runs</span>
+                    <span className="font-mono tabular-nums" style={{ fontSize: 12.5, fontWeight: 700, color: betaUsage.runsToday >= betaUsage.maxRunsPerDay * 0.8 ? "#DC2626" : "#0F172A" }}>
+                      {betaUsage.runsToday} / {betaUsage.maxRunsPerDay}
+                    </span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 99, background: "#F1F5F9", overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%", borderRadius: 99,
+                      width: `${Math.min(100, Math.round((betaUsage.runsToday / betaUsage.maxRunsPerDay) * 100))}%`,
+                      background: betaUsage.runsToday >= betaUsage.maxRunsPerDay * 0.8 ? "#EF4444" : "#3B82F6",
+                      transition: "width 0.4s ease",
+                    }} />
+                  </div>
+                  {betaUsage.simulationRunsToday > 0 || betaUsage.realRunsToday > 0 ? (
+                    <p style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>
+                      {betaUsage.simulationRunsToday > 0 && `${betaUsage.simulationRunsToday} simulation`}
+                      {betaUsage.simulationRunsToday > 0 && betaUsage.realRunsToday > 0 && " · "}
+                      {betaUsage.realRunsToday > 0 && `${betaUsage.realRunsToday} real`}
+                    </p>
+                  ) : null}
+                </div>
+                {/* Execution mode */}
+                <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                  <span style={{ fontSize: 12, color: "#64748B" }}>Execution</span>
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
+                    background: betaUsage.canRunRealExecution ? "#F0FDF4" : "#FEF9C3",
+                    color: betaUsage.canRunRealExecution ? "#16A34A" : "#92400E",
+                  }}>
+                    {betaUsage.canRunRealExecution ? "Real enabled" : "Simulation only"}
                   </span>
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div style={{ height: 5, borderRadius: 99, background: "#F1F5F9" }} />
+                <p style={{ fontSize: 12, color: "#94A3B8" }}>Loading usage…</p>
+              </div>
+            )}
           </div>
 
           {/* Worker health section removed — workers are internal infrastructure */}
