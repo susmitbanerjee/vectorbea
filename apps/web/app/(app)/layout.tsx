@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -9,6 +9,7 @@ import {
   getPostLoginRedirectForUser,
   loadProfileForUser,
 } from "@/lib/auth/server";
+import { getUserBetaStatus } from "@/lib/auth/neon-auth";
 import { WorkspaceProvider } from "@/lib/workspace-context";
 
 export const dynamic = "force-dynamic";
@@ -17,11 +18,17 @@ export const dynamic = "force-dynamic";
 // If JWT_SECRET is not set the app degrades gracefully (shows UI without data).
 const REQUIRE_AUTH = !!process.env.JWT_SECRET;
 
+// Private beta mode — when true, unapproved users are redirected to /beta
+const PRIVATE_BETA = process.env.NEXT_PUBLIC_PRIVATE_BETA_MODE === "true";
+
+// Paths within the (app) group that waitlisted users may access
+const BETA_OPEN_PATHS = ["/beta", "/settings/usage"];
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
 
   if (REQUIRE_AUTH) {
-    let user;
+    let user: { id: string; email: string } | null = null;
     try {
       user = await getAuthenticatedUserFromCookies(cookieStore);
     } catch {
@@ -30,6 +37,30 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
     if (!user) {
       redirect("/signin");
+    }
+
+    // ── Private beta gate ──────────────────────────────────────────────────
+    if (PRIVATE_BETA) {
+      let betaStatus = "approved"; // default safe for existing users pre-migration
+      try {
+        const bs = await getUserBetaStatus(user.id);
+        betaStatus = bs?.betaStatus ?? "approved";
+        // Platform admins always bypass the gate
+        if (bs?.isPlatformAdmin) betaStatus = "approved";
+      } catch {
+        // Migration not yet applied — let them through
+      }
+
+      const isApproved = betaStatus === "approved";
+      if (!isApproved) {
+        // Allow access to beta application pages only
+        const headersList = await headers();
+        const pathname = headersList.get("x-pathname") ?? "";
+        const allowedNow = BETA_OPEN_PATHS.some(p => pathname === p || pathname.startsWith(p + "/"));
+        if (!allowedNow) {
+          redirect("/beta");
+        }
+      }
     }
 
     let organizations: { id: string; name: string }[] = [];
@@ -57,7 +88,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // No JWT_SECRET — open/dev mode
+  // No JWT_SECRET — open/dev mode (all API calls will fail gracefully anyway)
   return (
     <WorkspaceProvider organizations={[] as never[]}>
       <div className="flex h-screen overflow-hidden" style={{ background: "#F8FAFC" }}>

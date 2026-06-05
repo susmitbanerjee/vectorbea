@@ -36,7 +36,10 @@ function enforceAuth(request: NextRequest) {
 export async function middleware(request: NextRequest) {
   const authRedirect = enforceAuth(request);
   if (authRedirect) return withSecurityHeaders(authRedirect);
-  return withSecurityHeaders(NextResponse.next());
+  // Pass pathname to server components via header (needed for beta gate in layout.tsx)
+  const response = NextResponse.next();
+  response.headers.set("x-pathname", request.nextUrl.pathname);
+  return withSecurityHeaders(response);
 }
 
 export const config = {

@@ -66,6 +66,21 @@ export async function getUserById(id: string): Promise<NeonUser | null> {
   return rows[0] ? (rows[0] as NeonUser) : null;
 }
 
+export async function getUserBetaStatus(id: string): Promise<{ betaStatus: string; isPlatformAdmin: boolean } | null> {
+  try {
+    const sql = db();
+    const rows = await sql`
+      SELECT COALESCE(beta_status, 'waitlisted') as beta_status,
+             COALESCE(is_platform_admin, false) as is_platform_admin
+      FROM app_users WHERE id = ${id} LIMIT 1` as { beta_status: string; is_platform_admin: boolean }[];
+    if (!rows[0]) return null;
+    return { betaStatus: rows[0].beta_status, isPlatformAdmin: rows[0].is_platform_admin };
+  } catch {
+    // V015 migration not yet applied — default to approved so existing users aren't blocked
+    return { betaStatus: "approved", isPlatformAdmin: false };
+  }
+}
+
 export async function getUserWorkspaces(userId: string) {
   const sql = db();
   const rows = await sql`
