@@ -43,7 +43,12 @@ export default function AdminBetaApplicationsClient() {
       const data = await apiFetch<{ applications: Application[]; total: number }>(url);
       setApps(data.applications);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load applications");
+      const msg = e instanceof Error ? e.message : "Failed to load";
+      if (msg.includes("403") || msg.toLowerCase().includes("admin") || msg.toLowerCase().includes("forbidden")) {
+        toast.error("Admin access required. Make sure ADMIN_EMAILS is set in Railway and includes your email.");
+      } else {
+        toast.error(msg);
+      }
     } finally { setLoading(false); }
   }
 
