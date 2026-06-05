@@ -202,7 +202,7 @@ export default function MembersPage() {
                       </p>
                       <p className="mt-1 text-amber-100/80">
                         <a
-                          href="/settings/billing"
+                          href="/settings/usage"
                           className="font-medium underline underline-offset-4"
                         >
                           Upgrade plan to add more seats

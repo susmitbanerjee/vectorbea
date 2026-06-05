@@ -98,6 +98,42 @@ class RunProcessor(
         // 1b. SECURITY: verify job workspace matches run workspace
         if (!verifyWorkspaceMatch(job, run)) return
 
+        // 1c. BETA GATE: re-check workspace controls before any execution.
+        // This ensures a workspace disabled AFTER the job was queued cannot execute.
+        val byokRequired = System.getenv("BYOK_REQUIRED_FOR_REAL_EXECUTION")?.lowercase() != "false"
+        val allowPlatformLlm = System.getenv("ALLOW_PLATFORM_LLM_FOR_WORKFLOW_EXECUTION")?.lowercase() == "true"
+        try {
+            val controlsResult = dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    "SELECT access_status, real_execution_enabled, simulation_enabled FROM workspace_beta_controls WHERE workspace_id = ?"
+                ).use { stmt ->
+                    stmt.setObject(1, run.workspaceId)
+                    val rs = stmt.executeQuery()
+                    if (rs.next()) Triple(rs.getString("access_status"), rs.getBoolean("real_execution_enabled"), rs.getBoolean("simulation_enabled"))
+                    else null
+                }
+            }
+            if (controlsResult != null) {
+                val (accessStatus, realEnabled, simEnabled) = controlsResult
+                if (accessStatus == "disabled") {
+                    log.warn("[processor] workspace {} is DISABLED — aborting run {}", run.workspaceId, job.runId)
+                    markRunFailed(job, "WORKSPACE_DISABLED: This workspace has been disabled.", start)
+                    return
+                }
+                // For real-execution runs, re-verify permission hasn't been revoked
+                if (!realEnabled && !simEnabled) {
+                    log.warn("[processor] workspace {} has execution disabled — aborting run {}", run.workspaceId, job.runId)
+                    markRunFailed(job, "EXECUTION_DISABLED: Execution has been disabled for this workspace.", start)
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            // Fail closed: if we can't check controls, abort to prevent unauthorized execution
+            log.error("[processor] failed to check workspace beta controls for run {} — aborting: {}", job.runId, e.message)
+            markRunFailed(job, "SECURITY_CHECK_FAILED: Could not verify workspace execution permission.", start)
+            return
+        }
+
         // 2. Transition: queued → running
         val updated = updateRunStatus(
             runId      = job.runId,

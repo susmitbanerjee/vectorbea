@@ -147,8 +147,13 @@ data class AppConfig(
             val architectModel   = env("AI_ARCHITECT_MODEL") ?: "gpt-4o-mini"
 
             // ── Private beta / production controls ───────────────────────────
-            val privateBetaMode    = env("PRIVATE_BETA_MODE")?.lowercase() == "true"
-            val publicSignupEnabled = env("PUBLIC_SIGNUP_ENABLED")?.lowercase() != "false"
+            // Safe production defaults: beta gate ON, signup CLOSED unless explicitly opened.
+            // In production (APP_ENV=production) these default to the restrictive direction.
+            val isProductionEnv = appEnv == "production"
+            val privateBetaMode    = env("PRIVATE_BETA_MODE")?.lowercase()?.let { it == "true" }
+                ?: isProductionEnv   // production defaults to beta mode ON
+            val publicSignupEnabled = env("PUBLIC_SIGNUP_ENABLED")?.lowercase()?.let { it != "false" }
+                ?: !isProductionEnv  // production defaults to signup CLOSED
             val adminEmails        = (env("ADMIN_EMAILS") ?: "")
                 .split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
             val defaultExecMode    = env("DEFAULT_EXECUTION_MODE") ?: "simulation_only"

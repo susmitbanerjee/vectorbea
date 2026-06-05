@@ -1,7 +1,6 @@
-import { BillingDashboard } from "@/components/billing/billing-dashboard";
-
-export const dynamic = "force-dynamic";
-
-export default function SettingsBillingPage() {
-  return <BillingDashboard mode="billing" />;
+// Billing is not implemented — Vectorbea is private beta with manual onboarding.
+// Redirect to beta usage/limits page.
+import { redirect } from "next/navigation";
+export default function BillingPage() {
+  redirect("/settings/usage");
 }

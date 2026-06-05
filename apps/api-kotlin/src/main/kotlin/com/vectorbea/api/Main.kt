@@ -268,6 +268,7 @@ fun main() {
     } else log.warn("DashboardRoutes disabled — no database")
 
     if (runRepo != null && runEventRepo != null) {
+        val betaRepoForRuns = ds?.let { com.vectorbea.api.beta.BetaAccessRepository(it) }
         RunRoutes(
             runRepo = runRepo,
             eventRepo = runEventRepo,
@@ -276,6 +277,8 @@ fun main() {
             eventBus = eventBus,
             lock = distributedLock,
             redis = redis,
+            betaRepo = betaRepoForRuns,
+            appConfig = config,
         ).register(router)
     } else log.warn("RunRoutes disabled — no database")
 

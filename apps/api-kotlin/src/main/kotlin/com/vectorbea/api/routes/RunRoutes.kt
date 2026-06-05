@@ -110,6 +110,8 @@ class RunRoutes(
     private val eventBus: EventBus? = null,
     private val lock: DistributedLock? = null,
     private val redis: RedisProvider? = null,
+    private val betaRepo: com.vectorbea.api.beta.BetaAccessRepository? = null,
+    private val appConfig: com.vectorbea.api.config.AppConfig? = null,
 ) {
     fun register(router: Router) {
         // Workflow-scoped trigger
@@ -153,15 +155,50 @@ class RunRoutes(
         val versionId = workflow.currentVersionId
             ?: throw ApiError.ValidationError("Workflow '${workflow.name}' has no current version — publish a version first")
 
+        // ── 1b. Beta controls + usage limit gate ──────────────────────────────
+        val beta = betaRepo
+        if (beta != null) {
+            // Workspace must be approved and not disabled
+            val controls = beta.getWorkspaceBetaControls(ctx.workspaceId)
+            if (controls != null) {
+                if (controls.accessStatus == "disabled") {
+                    throw ApiError.Forbidden("WORKSPACE_DISABLED: This workspace has been disabled. Contact support.")
+                }
+                if (!controls.simulationEnabled && !controls.realExecutionEnabled) {
+                    throw ApiError.Forbidden("WORKSPACE_DISABLED: Execution is disabled for this workspace.")
+                }
+            }
+
+            // Daily run limit
+            val policy = beta.getUsagePolicy(ctx.workspaceId)
+            val maxRuns = policy?.maxRunsPerDay ?: (appConfig?.betaDefaultMaxRunsPerDay ?: 20)
+            val todayRuns = beta.getDailyRunCount(ctx.workspaceId)
+            if (todayRuns >= maxRuns) {
+                throw ApiError.TooManyRequests("BETA_USAGE_LIMIT_EXCEEDED: Daily run limit of $maxRuns reached. Resets at midnight UTC.")
+            }
+        }
+
         // ── 2. Parse request body ─────────────────────────────────────────────
         data class TriggerBody(
             val input: Map<String, Any?> = emptyMap(),
             val idempotencyKey: String? = null,
             val triggerType: String = "manual",
+            val mode: String = "simulation",  // "simulation" | "real"
         )
 
         val body = if (req.body.isBlank()) TriggerBody()
                    else req.bodyAs<TriggerBody>()
+
+        // ── 2b. Real execution gate ───────────────────────────────────────────
+        val requestedMode = if (body.mode == "real") "real" else "simulation"
+        if (requestedMode == "real" && beta != null) {
+            val controls = beta.getWorkspaceBetaControls(ctx.workspaceId)
+            val realEnabled = controls?.realExecutionEnabled ?: false
+            if (!realEnabled) {
+                throw ApiError.Forbidden("REAL_EXECUTION_NOT_ENABLED: Real execution requires admin approval. " +
+                    "Contact your Vectorbea admin or run in simulation mode.")
+            }
+        }
 
         // Validate triggerType
         if (body.triggerType !in setOf("manual", "api", "schedule")) {
@@ -229,9 +266,12 @@ class RunRoutes(
             throw ApiError.ServiceUnavailable("Failed to enqueue workflow job: queue unavailable")
         }
 
-        log.info("[run] triggered runId={} workflowId={} messageId={}", run.id, workflowId, messageId)
+        log.info("[run] triggered runId={} workflowId={} mode={} messageId={}", run.id, workflowId, requestedMode, messageId)
 
-        // ── 8. Record idempotency key ─────────────────────────────────────────
+        // ── 8. Increment daily usage counter ─────────────────────────────────
+        runCatching { beta?.incrementDailyRuns(ctx.workspaceId, isSimulation = requestedMode == "simulation") }
+
+        // ── 9. Record idempotency key ─────────────────────────────────────────
         if (body.idempotencyKey != null) {
             recordIdempotency(ctx.workspaceId, body.idempotencyKey, run.id.toString())
         }
