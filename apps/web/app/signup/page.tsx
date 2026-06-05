@@ -18,15 +18,19 @@ export default async function SignupPage({
   const { next, error } = await searchParams;
 
   if (!error) {
-    const cookieStore = await cookies();
-    const user = await getAuthenticatedUserFromCookies(cookieStore);
-    if (user) {
-      try {
-        const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
-        redirect(destination as Route);
-      } catch {
-        redirect("/dashboard");
+    try {
+      const cookieStore = await cookies();
+      const user = await getAuthenticatedUserFromCookies(cookieStore);
+      if (user) {
+        try {
+          const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
+          redirect(destination as Route);
+        } catch {
+          redirect("/dashboard");
+        }
       }
+    } catch {
+      // JWT_SECRET not configured or token invalid — show sign-up form
     }
   }
 

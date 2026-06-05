@@ -489,41 +489,7 @@ export default function OverviewPage() {
             </div>
           </div>
 
-          {/* Worker health */}
-          <div
-            className="rounded-2xl bg-white"
-            style={{ border: "1px solid #E2E8F0", padding: "16px 18px", boxShadow: "0 4px 14px rgba(15,23,42,0.03)" }}
-          >
-            <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-              <p style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>Workers</p>
-              <Link
-                href={"/workers" as Route}
-                style={{ fontSize: 12, color: "#2563EB", fontWeight: 600 }}
-                className="hover:underline"
-              >
-                Manage →
-              </Link>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className={cn(
-                "h-2 w-2 rounded-full shrink-0",
-                isConnected ? "bg-emerald-500" : "bg-red-400",
-              )} />
-              <span style={{ fontSize: 13.5, fontWeight: 500, color: "#334155" }}>
-                {isConnected
-                  ? `${summary!.connectedWorkers} worker${summary!.connectedWorkers !== 1 ? "s" : ""} connected`
-                  : "No workers connected"}
-              </span>
-            </div>
-            {!isConnected && (
-              <p style={{ fontSize: 12, color: "#94A3B8", marginTop: 8 }}>
-                Start a worker or see{" "}
-                <Link href={"/settings/sdk" as Route} style={{ color: "#2563EB" }} className="hover:underline">
-                  setup docs
-                </Link>.
-              </p>
-            )}
-          </div>
+          {/* Worker health section removed — workers are internal infrastructure */}
 
           {/* Explore */}
           <div

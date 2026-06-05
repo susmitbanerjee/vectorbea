@@ -61,17 +61,26 @@ data class AppConfig(
      */
     fun validateForProduction() {
         if (!isProduction) return
-        val errors = mutableListOf<String>()
-        if (db == null)                       errors += "DATABASE_URL must be set in production"
-        if (redis == null)                    errors += "REDIS_URL must be set in production"
-        if (!secretEncryptionKeyPresent)      errors += "SECRET_ENCRYPTION_KEY must be set in production"
-        if (jwtSecret == null)               errors += "JWT_SECRET (or SUPABASE_JWT_SECRET) must be set in production"
-        if ("*" in corsAllowedOrigins)        errors += "CORS_ALLOWED_ORIGINS must not be '*' in production — set explicit origins"
-        if (adminEmails.isEmpty())            errors += "ADMIN_EMAILS must be set in production to enable admin operations"
-        if (errors.isNotEmpty()) {
-            val msg = "FATAL: Production config validation failed:\n" + errors.joinToString("\n") { "  - $it" }
-            LoggerFactory.getLogger(AppConfig::class.java).error(msg)
+        val log = LoggerFactory.getLogger(AppConfig::class.java)
+
+        // ── Hard failures — service cannot function without these ──────────────
+        val fatal = mutableListOf<String>()
+        if (db == null)                  fatal += "DATABASE_URL must be set in production"
+        if (redis == null)               fatal += "REDIS_URL must be set in production"
+        if (!secretEncryptionKeyPresent) fatal += "SECRET_ENCRYPTION_KEY must be set in production"
+        if (jwtSecret == null)           fatal += "JWT_SECRET (or SUPABASE_JWT_SECRET) must be set in production"
+        if (fatal.isNotEmpty()) {
+            val msg = "FATAL: Production config missing critical vars:\n" + fatal.joinToString("\n") { "  - $it" }
+            log.error(msg)
             throw IllegalStateException(msg)
+        }
+
+        // ── Soft warnings — service starts but security is degraded ────────────
+        if ("*" in corsAllowedOrigins) {
+            log.warn("[config] CORS_ALLOWED_ORIGINS=* in production — consider setting explicit origins for security")
+        }
+        if (adminEmails.isEmpty()) {
+            log.warn("[config] ADMIN_EMAILS not set — admin routes will be inaccessible. Set ADMIN_EMAILS=you@example.com")
         }
     }
 

@@ -24,9 +24,10 @@ export async function signToken(payload: JwtPayload): Promise<string> {
     .sign(getSecret());
 }
 
-/** Verify and decode a JWT. Returns null if invalid/expired. */
+/** Verify and decode a JWT. Returns null if invalid/expired or if JWT_SECRET is not set. */
 export async function verifyToken(token: string): Promise<JwtPayload | null> {
   try {
+    if (!RAW_SECRET) return null;  // JWT_SECRET not configured — degrade gracefully
     const { payload } = await jwtVerify(token, getSecret());
     if (!payload.sub) return null;
     return {
