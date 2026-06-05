@@ -1,13 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Loader2, LogOut, Sparkles } from "lucide-react";
+import { useEffect } from "react";
+import { CheckCircle2, Loader2, LogOut } from "lucide-react";
+import Image from "next/image";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, setAccessToken } from "@/lib/api/client";
 
 function betaUrl(path: string): string {
   const base = (process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? "http://localhost:8080").trimEnd().replace(/\/$/, "");
   return base + path;
+}
+
+/**
+ * Waitlisted users never pass through (app)/layout, so the OAuthTokenTransfer
+ * hook never runs and the JWT stays in the vb-token-transfer cookie.
+ * Read it here and seed localStorage so apiFetch can attach the Authorization header.
+ */
+function ensureTokenFromCookie() {
+  if (typeof document === "undefined") return;
+  const match = document.cookie.match(/(?:^|;\s*)vb-token-transfer=([^;]+)/);
+  if (match?.[1]) {
+    const token = decodeURIComponent(match[1]);
+    setAccessToken(token);
+    document.cookie = "vb-token-transfer=; max-age=0; path=/";
+  }
 }
 
 // Standalone page — NO sidebar, NO app navigation.
@@ -17,6 +34,9 @@ function betaUrl(path: string): string {
 export default function BetaWaitlistPage() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading]     = useState(false);
+
+  // Seed localStorage token from OAuth transfer cookie on first render
+  useEffect(() => { ensureTokenFromCookie(); }, []);
   const [form, setForm] = useState({
     fullName: "", company: "", role: "", useCase: "",
     currentTools: "", painPoint: "", workflowsPerWeek: "", teamSize: "",
@@ -34,6 +54,7 @@ export default function BetaWaitlistPage() {
       return;
     }
     setLoading(true);
+    ensureTokenFromCookie(); // re-check in case useEffect hadn't run yet
     try {
       await apiFetch(betaUrl("/api/beta/apply"), { method: "POST", json: form });
       setSubmitted(true);
@@ -54,9 +75,7 @@ export default function BetaWaitlistPage() {
       {/* Minimal header — Vectorbea logo + sign out only */}
       <header className="h-14 flex items-center justify-between px-6 bg-white border-b border-slate-200">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500">
-            <Sparkles className="h-4 w-4 text-white" />
-          </div>
+          <Image src="/icon.svg" alt="Vectorbea" width={28} height={28} className="rounded-lg" />
           <span className="text-[14px] font-bold text-slate-900">Vectorbea</span>
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700 uppercase tracking-wide">
             Private Beta
@@ -93,9 +112,7 @@ export default function BetaWaitlistPage() {
           ) : (
             <>
               <div className="text-center mb-8">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500 mx-auto mb-4">
-                  <Sparkles className="h-6 w-6 text-white" />
-                </div>
+                <Image src="/icon.svg" alt="Vectorbea" width={48} height={48} className="mx-auto mb-4 rounded-2xl" />
                 <h1 className="text-[24px] font-bold text-slate-900">Request beta access</h1>
                 <p className="mt-2 text-[13.5px] text-slate-500 max-w-md mx-auto leading-relaxed">
                   Vectorbea is invite-only for selected backend and AI teams. We review every application personally.
@@ -154,7 +171,9 @@ export default function BetaWaitlistPage() {
                   </label>
                   <button type="submit" disabled={loading}
                     className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-500 py-3 text-[14px] font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors shadow-sm">
-                    {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</> : <><Sparkles className="h-4 w-4" /> Request access</>}
+                    {loading
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</>
+                      : <><Image src="/icon.svg" alt="" width={18} height={18} className="rounded" /> Request access</>}
                   </button>
                 </form>
                 <div className="px-6 pb-5 text-center border-t border-slate-100">

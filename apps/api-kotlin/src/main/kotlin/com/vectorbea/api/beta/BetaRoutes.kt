@@ -117,11 +117,60 @@ class BetaRoutes(
             byokReady       = body["byokReady"] as? Boolean,
         )
 
+        // Send admin notification email via Resend (best-effort — never block the response)
+        runCatching { sendAdminNotification(email, body) }
+            .onFailure { log.warn("[beta] admin notification email failed: {}", it.message) }
+
         return Response.created(mapOf(
             "id"      to application.id.toString(),
             "status"  to application.status,
             "message" to "Application received. Vectorbea is currently invite-only. We review every workspace manually.",
         ))
+    }
+
+    private fun sendAdminNotification(applicantEmail: String, body: Map<String, Any?>) {
+        val resendKey = System.getenv("RESEND_API_KEY") ?: return
+        val adminEmails = config.adminEmails.ifEmpty { return }
+        val appUrl      = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL") ?: "https://app.vectorbea.com"
+
+        val fullName  = body["fullName"]  as? String ?: "—"
+        val company   = body["company"]   as? String ?: "—"
+        val useCase   = body["useCase"]   as? String ?: "—"
+        val byokReady = (body["byokReady"] as? Boolean) ?: false
+
+        val html = """
+            <h2>New Vectorbea Beta Application</h2>
+            <table style="border-collapse:collapse;font-size:14px;">
+              <tr><td style="padding:4px 12px 4px 0;color:#666;"><b>Name</b></td><td>$fullName</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666;"><b>Email</b></td><td>$applicantEmail</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666;"><b>Company</b></td><td>$company</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666;"><b>Use case</b></td><td>${useCase.take(300)}</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666;"><b>BYOK ready</b></td><td>${if (byokReady) "Yes" else "No"}</td></tr>
+            </table>
+            <p style="margin-top:16px;">
+              <a href="$appUrl/admin/beta/applications" style="background:#D97706;color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;">
+                Review in admin panel
+              </a>
+            </p>
+        """.trimIndent()
+
+        val payload = mapper.writeValueAsString(mapOf(
+            "from"    to "Vectorbea <noreply@vectorbea.com>",
+            "to"      to adminEmails.toList(),
+            "subject" to "New beta application: $fullName ($applicantEmail)",
+            "html"    to html,
+        ))
+
+        val http = java.net.http.HttpClient.newHttpClient()
+        val req  = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create("https://api.resend.com/emails"))
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer $resendKey")
+            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
+            .timeout(java.time.Duration.ofSeconds(10))
+            .build()
+        val res = http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString())
+        log.info("[beta] admin notification sent to {} → HTTP {}", adminEmails, res.statusCode())
     }
 
     // ── Admin: list applications ──────────────────────────────────────────────
