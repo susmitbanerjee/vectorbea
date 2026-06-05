@@ -51,11 +51,12 @@ class BetaRoutes(
         val betaStatus = user?.betaStatus ?: "waitlisted"
         val canAccess  = betaStatus == "approved"
 
-        val wsId = req.context().workspaceId
-        val controls   = runCatching { betaRepo.getWorkspaceBetaControls(wsId) }.getOrNull()
-        val policy     = runCatching { betaRepo.getUsagePolicy(wsId) }.getOrNull()
-        val runsToday  = runCatching { betaRepo.getDailyRunCount(wsId) }.getOrDefault(0)
-        val usageToday = runCatching { betaRepo.getDailyUsage(wsId) }.getOrNull()
+        // Workspace is optional for beta status — waitlisted users have no workspace yet
+        val wsId = runCatching { req.context().workspaceId }.getOrNull()
+        val controls   = wsId?.let { runCatching { betaRepo.getWorkspaceBetaControls(it) }.getOrNull() }
+        val policy     = wsId?.let { runCatching { betaRepo.getUsagePolicy(it) }.getOrNull() }
+        val runsToday  = wsId?.let { runCatching { betaRepo.getDailyRunCount(it) }.getOrDefault(0) } ?: 0
+        val usageToday = wsId?.let { runCatching { betaRepo.getDailyUsage(it) }.getOrNull() }
 
         val maxRuns      = policy?.maxRunsPerDay ?: config.betaDefaultMaxRunsPerDay
         val maxWorkflows = policy?.maxWorkflows   ?: config.betaDefaultMaxWorkflows

@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { CheckCircle2, Loader2, LogOut, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { apiFetch, withWorkspace } from "@/lib/api/client";
+import { apiFetch } from "@/lib/api/client";
+
+function betaUrl(path: string): string {
+  const base = (process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? "http://localhost:8080").trimEnd().replace(/\/$/, "");
+  return base + path;
+}
 
 // Standalone page — NO sidebar, NO app navigation.
 // Unapproved/waitlisted users land here after sign-up.
@@ -30,7 +35,7 @@ export default function BetaWaitlistPage() {
     }
     setLoading(true);
     try {
-      await apiFetch(withWorkspace("/api/beta/apply"), { method: "POST", json: form });
+      await apiFetch(betaUrl("/api/beta/apply"), { method: "POST", json: form });
       setSubmitted(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit.");
