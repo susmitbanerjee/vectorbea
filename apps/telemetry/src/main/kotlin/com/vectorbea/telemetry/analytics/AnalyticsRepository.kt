@@ -107,7 +107,7 @@ class AnalyticsRepository(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 stmt.setTimestamp(p++, Timestamp.from(dateFrom))
                 stmt.setTimestamp(p, Timestamp.from(dateTo))
                 val rs = stmt.executeQuery()
@@ -133,7 +133,7 @@ class AnalyticsRepository(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 stmt.setString(p++, category)
                 stmt.setTimestamp(p++, Timestamp.from(dateFrom))
                 stmt.setTimestamp(p, Timestamp.from(dateTo))
@@ -152,7 +152,7 @@ class AnalyticsRepository(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 stmt.setString(p++, eventName)
                 stmt.setTimestamp(p++, Timestamp.from(dateFrom))
                 stmt.setTimestamp(p, Timestamp.from(dateTo))
@@ -171,7 +171,7 @@ class AnalyticsRepository(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 stmt.setTimestamp(p++, Timestamp.from(dateFrom))
                 stmt.setTimestamp(p, Timestamp.from(dateTo))
                 val rs = stmt.executeQuery()
@@ -189,7 +189,7 @@ class AnalyticsRepository(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 stmt.setTimestamp(p++, Timestamp.from(dateFrom))
                 stmt.setTimestamp(p, Timestamp.from(dateTo))
                 val rs = stmt.executeQuery()

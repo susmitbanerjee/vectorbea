@@ -87,7 +87,7 @@ class EngineeringTelemetryService(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 val rs = stmt.executeQuery()
                 val results = mutableListOf<Map<String, Any?>>()
                 while (rs.next()) {
@@ -127,7 +127,7 @@ class EngineeringTelemetryService(private val ds: DataSource) {
         return ds.withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var p = 1
-                for (param in envParams) stmt.setString(p++, param.toString())
+                for (param in envParams) stmt.setString(p++, param)
                 val rs = stmt.executeQuery()
                 val results = mutableListOf<Map<String, Any?>>()
                 while (rs.next()) {
