@@ -1,7 +1,7 @@
-FROM eclipse-temurin:17-jdk AS build
+FROM gradle:8.5-jdk17 AS build
 WORKDIR /app
 COPY . .
-RUN ./gradlew fatJar --no-daemon --console=plain \
+RUN gradle fatJar --no-daemon --console=plain \
     -Dorg.gradle.jvmargs="-Xmx512m" \
     -Dkotlin.compiler.execution.strategy=in-process
 
