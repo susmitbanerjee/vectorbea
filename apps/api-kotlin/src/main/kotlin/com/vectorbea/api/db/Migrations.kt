@@ -53,9 +53,11 @@ object Migrations {
             .outOfOrder(false)
             // Validate applied migrations against classpath (detects drift)
             .validateOnMigrate(true)
-            // Baseline on migrate if the schema already has tables (useful
-            // when taking over an existing DB without Flyway history)
-            .baselineOnMigrate(false)
+            // If flyway_schema_history is empty (wiped by external tool),
+            // baseline at V016 so Flyway treats V001-V016 as already applied.
+            // Safe: only fires when the history table has no applied entries.
+            .baselineOnMigrate(true)
+            .baselineVersion("016")
             .load()
 
         // Repair before migrate to fix any description/checksum mismatches
