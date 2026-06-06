@@ -9,7 +9,9 @@ object Migrations {
 
     fun run(ds: DataSource) {
         log.info("[migrations] running Flyway migrations")
-        flyway(ds).migrate()
+        val fw = flyway(ds)
+        fw.repair()   // fixes checksum mismatches from redeployed migrations
+        fw.migrate()
         log.info("[migrations] Flyway migrations complete")
     }
 
@@ -21,6 +23,5 @@ object Migrations {
         .dataSource(ds)
         .locations("classpath:db/migration")
         .baselineOnMigrate(true)
-        .repairOnMigrate(true)
         .load()
 }
