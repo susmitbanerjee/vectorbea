@@ -14,6 +14,7 @@ import com.vectorbea.telemetry.engineering.OTelConfig
 import com.vectorbea.telemetry.http.HealthRoutes
 import com.vectorbea.telemetry.http.IngestionRoutes
 import com.vectorbea.telemetry.http.Router
+import com.vectorbea.telemetry.http.StaticFileHandler
 import com.vectorbea.telemetry.http.TelemetryHttpServer
 import org.slf4j.LoggerFactory
 
@@ -103,6 +104,7 @@ fun main() {
     val router = Router()
 
     HealthRoutes(config, database).register(router)
+    StaticFileHandler.register(router)
 
     if (auth != null) {
         if (analyticsIngestion != null) {

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Vectorbea Telemetry</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+
+<!-- ── Login ─────────────────────────────────────────────── -->
+<div id="login-screen" class="login-wrap" style="display:none">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="dot"></div>
+      <div>
+        <h1>Vectorbea</h1>
+        <span>Telemetry &amp; Analytics</span>
+      </div>
+    </div>
+    <h2>Admin Sign In</h2>
+    <p>Paste your JWT token to access the telemetry dashboard. Admin access only.</p>
+    <div class="form-group">
+      <label>JWT Token</label>
+      <textarea id="token-input" placeholder="eyJhbGciOiJIUzI1NiJ9..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="App.login()">Sign In →</button>
+    <div id="login-error" class="error-msg"></div>
+    <p style="margin-top:16px;font-size:11px;color:var(--muted)">
+      Get your token from app.vectorbea.com → DevTools → Local Storage → JWT key.
+    </p>
+  </div>
+</div>
+
+<!-- ── App shell ──────────────────────────────────────────── -->
+<div id="app" class="app" style="display:none">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="dot"></div>
+      <div class="text">
+        <h2>Vectorbea</h2>
+        <span>Telemetry</span>
+      </div>
+    </div>
+
+    <nav>
+      <div class="nav-section">Dashboards</div>
+      <div class="nav-item active" data-page="overview"    onclick="App.nav(this)"><span class="icon">⬡</span> Overview</div>
+      <div class="nav-item"       data-page="business"    onclick="App.nav(this)"><span class="icon">📊</span> Business</div>
+      <div class="nav-item"       data-page="engineering" onclick="App.nav(this)"><span class="icon">⚙️</span> Engineering</div>
+      <div class="nav-item"       data-page="users"       onclick="App.nav(this)"><span class="icon">👥</span> Users</div>
+      <div class="nav-item"       data-page="architect"   onclick="App.nav(this)"><span class="icon">✦</span> AI Architect</div>
+      <div class="nav-item"       data-page="workflows"   onclick="App.nav(this)"><span class="icon">↻</span> Workflows</div>
+      <div class="nav-item"       data-page="environments" onclick="App.nav(this)"><span class="icon">◈</span> Environments</div>
+      <div class="nav-section">Finance</div>
+      <div class="nav-item"       data-page="revenue"     onclick="App.nav(this)"><span class="icon">💳</span> Revenue</div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div id="env-badge" class="env-badge prod">● prod</div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)">
+        <a href="#" onclick="App.logout()" style="color:var(--muted);text-decoration:none">Sign out</a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <h1 id="page-title">Overview</h1>
+        <p id="page-sub" class="last-updated"></p>
+      </div>
+      <div class="topbar-controls">
+        <select id="env-select" onchange="App.changeEnv()">
+          <option value="prod">Production</option>
+          <option value="stage">Staging</option>
+          <option value="dev">Development</option>
+          <option value="all">All Environments</option>
+        </select>
+        <select id="range-select" onchange="App.changeRange()">
+          <option value="1">Last 24h</option>
+          <option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="App.refresh()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Page content -->
+    <div class="content" id="page-content">
+      <div class="loading"><div class="spinner"></div> Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
