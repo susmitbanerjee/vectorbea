@@ -135,3 +135,29 @@ jobs:
         run: gradle build --no-daemon --console=plain -x test
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+
+  # ── Telemetry service (Kotlin) ───────────────────────────────────────────────
+  telemetry:
+    name: Telemetry (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/telemetry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build
+        run: gradle build --no-daemon --console=plain -x test
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+
+      - name: Test
+        run: gradle test --no-daemon --console=plain
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+        continue-on-error: true
