@@ -68,11 +68,18 @@ export function track(
 
 async function sendBestEffort(payload: object): Promise<void> {
   try {
+    const token = typeof window !== 'undefined'
+      ? localStorage.getItem('vectorbea-access-token')
+      : null
+    if (!token) return  // not signed in — skip silently
+
     await fetch(`${TELEMETRY_ENDPOINT}/api/telemetry/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
       body: JSON.stringify(payload),
-      credentials: 'include',
     })
   } catch {
     // Silently ignore — telemetry must not affect UX
