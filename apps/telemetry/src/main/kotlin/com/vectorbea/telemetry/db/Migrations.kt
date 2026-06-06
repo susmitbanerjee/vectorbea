@@ -21,5 +21,6 @@ object Migrations {
         .dataSource(ds)
         .locations("classpath:db/migration")
         .baselineOnMigrate(true)
+        .repairOnMigrate(true)
         .load()
 }
