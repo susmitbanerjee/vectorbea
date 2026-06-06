@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Workflow, AgentRun } from "@/types/platform";
 import { getWorkflow, getWorkflowGraph, getRuns, triggerWorkflow } from "@/lib/repository";
+import { track } from "@/lib/telemetry/client";
 import type { WorkflowGraph } from "@/types/workflow-graph";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -141,6 +142,7 @@ export default function WorkflowDetailPage() {
   const nodeCount = graphNodes.length;
 
   const handleRun = async () => {
+    track("workflow_run_queued", { workflowId: id, properties: { mode: "simulation", source: "workflow_detail" } });
     setTriggering(true);
     try {
       const run = await triggerWorkflow(id, {});

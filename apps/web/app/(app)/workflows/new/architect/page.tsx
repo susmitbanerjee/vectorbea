@@ -18,6 +18,7 @@ import {
 } from "@/lib/architect";
 import { ConnectionPickerModal } from "@/components/architect/ConnectionPickerModal";
 import { ArchitectLogo } from "@/components/architect/ArchitectLogo";
+import { track } from "@/lib/telemetry/client";
 import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -310,6 +311,7 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
 
 export default function ArchitectPage() {
   const router = useRouter();
+  useEffect(() => { track("architect_opened"); }, []);
   const [step, setStep]         = useState<StepId>("goal");
   const [loading, setLoading]   = useState(false);
   const [buildPhase, setBuildPhase] = useState(0);
@@ -341,6 +343,7 @@ export default function ArchitectPage() {
   // ── Step 1: Submit goal ──────────────────────────────────────────────────
   async function handleGoalSubmit() {
     if (!goal.trim()) return;
+    track("architect_goal_submitted");
     setLoading(true);
     setStep("generating");
     setGenMsgIdx(0);
@@ -481,6 +484,7 @@ export default function ArchitectPage() {
         }
         if (i === 3) {
           const result = await createWorkflowFromPlan(sessionId, {});
+          track("architect_workflow_created", { architectSessionId: sessionId ?? undefined, workflowId: result.workflowId });
           setReadiness({ status: result.readinessStatus, issues: result.readinessIssues ?? [] });
           try { sessionStorage.setItem(`architect-anim-${result.workflowId}`, JSON.stringify(result.animationSteps)); } catch {}
           setBuildPhase(BUILD_PHASES.length - 1);

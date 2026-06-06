@@ -86,6 +86,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Agent, Tool, Workflow } from "@/types/platform";
 import type { WFNodeData, WFEdgeData, WFNodeType, WorkflowGraph } from "@/types/workflow-graph";
+import { track } from "@/lib/telemetry/client";
 import {
   getAgents,
   getTools,
@@ -828,6 +829,7 @@ function WorkflowBuilderInner() {
   // ── Run Workflow — stays on canvas, animates nodes live ─────────────────────
   async function handleRun() {
     if (!workflow) return;
+    track("workflow_run_queued", { workflowId: workflow.id, properties: { mode: "simulation", source: "builder" } });
     setRunning(true);
     try {
       await doSave();

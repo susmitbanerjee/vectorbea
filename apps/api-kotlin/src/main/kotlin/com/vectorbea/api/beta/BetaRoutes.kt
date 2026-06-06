@@ -8,6 +8,7 @@ import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
 import com.vectorbea.api.users.AppUserRepository
+import com.vectorbea.api.telemetry.TelemetryClient
 import java.util.UUID
 
 /**
@@ -26,6 +27,7 @@ class BetaRoutes(
     private val betaRepo: BetaAccessRepository,
     private val userRepo: AppUserRepository,
     private val config: AppConfig,
+    private val telemetry: TelemetryClient? = null,
 ) {
     private val log    = org.slf4j.LoggerFactory.getLogger(BetaRoutes::class.java)
     private val mapper = jacksonObjectMapper()
@@ -140,6 +142,10 @@ class BetaRoutes(
         runCatching { sendAdminNotification(email, body) }
             .onFailure { log.warn("[beta] admin notification email failed: {}", it.message) }
 
+        telemetry?.track("beta_application_submitted", "beta",
+            appUserId = principal.appUserId.toString(),
+            properties = mapOf("company" to (body["company"] as? String)))
+
         return Response.created(mapOf(
             "id"      to application.id.toString(),
             "status"  to application.status,
@@ -235,6 +241,10 @@ class BetaRoutes(
             }
         }
 
+        telemetry?.track("beta_application_approved", "beta",
+            appUserId = app?.appUserId?.toString(),
+            properties = mapOf("applicationId" to id.toString()))
+
         return Response.ok(mapOf("id" to id.toString(), "status" to "approved",
             "message" to "Application approved. User can now access the product."))
     }
@@ -250,6 +260,10 @@ class BetaRoutes(
         val apps = betaRepo.listBetaApplications()
         val app  = apps.find { it.id == id }
         if (app?.appUserId != null) userRepo.setBetaStatus(app.appUserId, "rejected")
+
+        telemetry?.track("beta_application_rejected", "beta",
+            properties = mapOf("applicationId" to id.toString()))
+
         return Response.ok(mapOf("id" to id.toString(), "status" to "rejected"))
     }
 

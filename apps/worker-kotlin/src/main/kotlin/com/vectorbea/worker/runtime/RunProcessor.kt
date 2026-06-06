@@ -11,6 +11,7 @@ import com.vectorbea.worker.observability.mdcClearAll
 import com.vectorbea.worker.queue.WorkflowRunJob
 import com.vectorbea.worker.recovery.WorkerRecoveryService
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
+import com.vectorbea.worker.telemetry.TelemetryClient
 import com.vectorbea.worker.runtime.graph.WorkflowGraph
 import org.slf4j.MDC
 import java.sql.PreparedStatement
@@ -38,6 +39,7 @@ class RunProcessor(
     private val runtime: WorkflowRuntime,
     private val checkpointStore: CheckpointStore = CheckpointStore(dataSource),
     private val recoveryService: WorkerRecoveryService? = try { WorkerRecoveryService(dataSource) } catch (_: Exception) { null },
+    private val telemetry: TelemetryClient? = null,
 ) {
     private val log = logger()
 
@@ -517,6 +519,11 @@ class RunProcessor(
                 ))
                 WorkerMetrics.runsSucceeded.inc()
                 WorkerMetrics.runDuration.observe(durationMs, job.jobType.name)
+                telemetry?.track("workflow_run_succeeded", "run",
+                    workspaceId = run.workspaceId.toString(),
+                    runId = job.runId.toString(),
+                    workflowId = run.workflowId.toString(),
+                    properties = mapOf("durationMs" to durationMs))
                 log.info("[processor] run succeeded [runId={}, durationMs={}]", job.runId, durationMs)
             }
 
@@ -546,6 +553,11 @@ class RunProcessor(
                 ))
                 WorkerMetrics.runsCancelled.inc()
                 WorkerMetrics.runDuration.observe(durationMs, job.jobType.name)
+                telemetry?.track("workflow_run_cancelled", "run",
+                    workspaceId = run.workspaceId.toString(),
+                    runId = job.runId.toString(),
+                    workflowId = run.workflowId.toString(),
+                    properties = mapOf("durationMs" to durationMs))
                 log.info("[processor] run cancelled cleanly [runId={}, durationMs={}]", job.runId, durationMs)
             }
         }
@@ -686,6 +698,14 @@ class RunProcessor(
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
         WorkerMetrics.runsFailed.inc()
         WorkerMetrics.runDuration.observe(durationMs, job.jobType.name)
+        runCatching {
+            val failedRun = loadRun(job.runId)
+            telemetry?.track("workflow_run_failed", "run",
+                workspaceId = failedRun?.workspaceId?.toString(),
+                runId = job.runId.toString(),
+                workflowId = failedRun?.workflowId?.toString(),
+                properties = mapOf("durationMs" to durationMs))
+        }
 
         runCatching {
             val run = loadRun(job.runId)

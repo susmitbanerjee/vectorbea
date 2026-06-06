@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, Loader2, LogOut, XCircle } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { apiFetch, setAccessToken } from "@/lib/api/client";
+import { track } from "@/lib/telemetry/client";
 
 function betaUrl(path: string): string {
   const base = (process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? "http://localhost:8080").trimEnd().replace(/\/$/, "");
@@ -77,6 +78,7 @@ export default function BetaWaitlistPage() {
         setAlreadySub(true);
       } else {
         setSubmitted(true);
+        track("beta_application_submitted", { properties: { company: form.company } });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit. Please try again.");

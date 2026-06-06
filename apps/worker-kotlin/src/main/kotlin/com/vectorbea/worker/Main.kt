@@ -21,6 +21,7 @@ import com.vectorbea.worker.durable.HistoryLimitChecker
 import com.vectorbea.worker.durable.RunLeaseManager
 import com.vectorbea.worker.durable.StepExecutionGuard
 import com.vectorbea.worker.durable.TimerScheduler
+import com.vectorbea.worker.telemetry.TelemetryClient
 import java.util.concurrent.CountDownLatch
 import kotlin.system.exitProcess
 
@@ -127,6 +128,7 @@ fun main() {
         connectionResolver = connectionResolver,
         dbPoolManager      = dbPoolManager,
     )
+    val telemetry = TelemetryClient.fromEnv()
     val processor = RunProcessor(
         dataSource      = database.dataSource,
         eventStore      = eventStore,
@@ -134,6 +136,7 @@ fun main() {
         workerId        = config.workerId,
         runtime         = workflowRuntime,
         checkpointStore = checkpointStore,
+        telemetry       = telemetry,
     )
     log.info("[startup] run processor ready")
 

@@ -23,6 +23,7 @@ import com.vectorbea.api.repository.UpdateWorkflowRequest
 import com.vectorbea.api.repository.Workflow
 import com.vectorbea.api.repository.WorkflowRepository
 import com.vectorbea.api.repository.WorkflowVersion
+import com.vectorbea.api.telemetry.TelemetryClient
 
 // ── Request bodies ────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ private fun WorkflowVersion.toResponse(): Map<String, Any?> = mapOf(
 class WorkflowRoutes(
     private val repo: WorkflowRepository,
     private val cache: CacheService,
+    private val telemetry: TelemetryClient? = null,
 ) {
     fun register(router: Router) {
         router.get("/api/workflows", ::list)
@@ -161,6 +163,11 @@ class WorkflowRoutes(
             )
         )
         invalidateListCache(ctx.workspaceId.toString(), envId.toString())
+        telemetry?.track("workflow_created", "workflow",
+            workspaceId = ctx.workspaceId.toString(),
+            workflowId = workflow.id.toString(),
+            appUserId = req.principal?.appUserId?.toString(),
+            properties = mapOf("name" to name, "status" to status))
         return Response.created(workflow.toResponse())
     }
 

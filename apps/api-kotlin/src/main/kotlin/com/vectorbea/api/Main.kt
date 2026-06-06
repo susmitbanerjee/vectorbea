@@ -49,6 +49,7 @@ import com.vectorbea.api.routes.MeRoutes
 import com.vectorbea.api.beta.BetaAccessRepository
 import com.vectorbea.api.beta.BetaRoutes
 import com.vectorbea.api.routes.WorkflowRoutes
+import com.vectorbea.api.telemetry.TelemetryClient
 import com.vectorbea.api.secrets.EncryptedSecretService
 import com.vectorbea.api.secrets.NoOpSecretService
 import com.vectorbea.api.secrets.SecretRepository
@@ -78,6 +79,7 @@ fun main() {
 
     // 1. Config
     val config = AppConfig.fromEnv()
+    val telemetry = TelemetryClient.fromEnv()
 
     // Production startup validation — fail closed if critical config is missing
     config.validateForProduction()
@@ -251,7 +253,7 @@ fun main() {
     } else log.warn("ToolRoutes disabled — no database")
 
     if (workflowRepo != null) {
-        WorkflowRoutes(workflowRepo, cacheService).register(router)
+        WorkflowRoutes(workflowRepo, cacheService, telemetry).register(router)
     } else log.warn("WorkflowRoutes disabled — no database")
 
     // Dashboard summary — requires DB for metric queries
@@ -279,6 +281,7 @@ fun main() {
             redis = redis,
             betaRepo = betaRepoForRuns,
             appConfig = config,
+            telemetry = telemetry,
         ).register(router)
     } else log.warn("RunRoutes disabled — no database")
 
@@ -303,7 +306,7 @@ fun main() {
     // Beta access + admin routes
     if (ds != null && appUserRepo != null) {
         val betaRepo = BetaAccessRepository(ds)
-        BetaRoutes(betaRepo, appUserRepo, config).register(router)
+        BetaRoutes(betaRepo, appUserRepo, config, telemetry).register(router)
         log.info("BetaRoutes registered (privateBetaMode={})", config.privateBetaMode)
     }
 

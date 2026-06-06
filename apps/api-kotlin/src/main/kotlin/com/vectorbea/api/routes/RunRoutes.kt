@@ -23,6 +23,7 @@ import com.vectorbea.api.repository.RunEvent
 import com.vectorbea.api.repository.RunEventRepository
 import com.vectorbea.api.repository.RunRepository
 import com.vectorbea.api.repository.WorkflowRepository
+import com.vectorbea.api.telemetry.TelemetryClient
 import io.lettuce.core.pubsub.RedisPubSubAdapter
 import org.slf4j.LoggerFactory
 import java.time.Instant
@@ -112,6 +113,7 @@ class RunRoutes(
     private val redis: RedisProvider? = null,
     private val betaRepo: com.vectorbea.api.beta.BetaAccessRepository? = null,
     private val appConfig: com.vectorbea.api.config.AppConfig? = null,
+    private val telemetry: TelemetryClient? = null,
 ) {
     fun register(router: Router) {
         // Workflow-scoped trigger
@@ -275,6 +277,13 @@ class RunRoutes(
         if (body.idempotencyKey != null) {
             recordIdempotency(ctx.workspaceId, body.idempotencyKey, run.id.toString())
         }
+
+        telemetry?.track("workflow_run_queued", "run",
+            workspaceId = ctx.workspaceId.toString(),
+            runId = run.id.toString(),
+            workflowId = workflowId.toString(),
+            appUserId = req.principal?.appUserId?.toString(),
+            properties = mapOf("mode" to requestedMode, "triggerType" to body.triggerType))
 
         return Response.accepted(mapOf(
             "runId" to run.id.toString(),
