@@ -9,9 +9,7 @@ object Migrations {
 
     fun run(ds: DataSource) {
         log.info("[migrations] running Flyway migrations")
-        val fw = flyway(ds)
-        fw.repair()   // fixes checksum mismatches from redeployed migrations
-        fw.migrate()
+        flyway(ds).migrate()
         log.info("[migrations] Flyway migrations complete")
     }
 
@@ -22,6 +20,8 @@ object Migrations {
     private fun flyway(ds: DataSource): Flyway = Flyway.configure()
         .dataSource(ds)
         .locations("classpath:db/migration")
+        // Separate history table — never touches api-kotlin's flyway_schema_history
+        .table("flyway_schema_history_telemetry")
         .baselineOnMigrate(true)
         .load()
 }
