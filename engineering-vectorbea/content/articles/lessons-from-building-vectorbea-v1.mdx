@@ -1,0 +1,102 @@
+---
+title: "Lessons from Building Vectorbea v1"
+description: "What we'd keep and what we'd change across UI, backend, security, observability, and positioning, after shipping the first version of Vectorbea's durable workflow engine."
+date: "2026-05-26"
+author: "Susmit Banerjee"
+tags: ["lessons", "retrospective", "engineering-culture"]
+category: "Lessons"
+series: "building-vectorbea"
+part: 10
+featured: false
+---
+
+This series has mostly been about specific decisions — event history, retries, approval gates,
+BYOK, worker scaling, budgets, self-correction. This post zooms out: what did we learn across the
+first version of Vectorbea as a whole, and what would we tell ourselves a year ago if we could?
+
+## UI: durability has to be visible, not just true
+
+The execution engine being durable doesn't help a user who can't *see* that it's durable. Early
+on, our run view looked basically the same whether a run was healthy, stalled, retrying, or
+waiting on an approval — a spinner and a status word. Users would ask "is this stuck?" about runs
+that were working exactly as designed, just slowly or mid-retry.
+
+<Callout type="lesson" title="Lesson learned">
+The event history we built for correctness turned out to be the same thing users needed to trust
+the system. Once we exposed it as a live timeline — "step 3 failed, retrying in 30s, attempt
+2 of 5" — the "is this stuck?" questions mostly disappeared. The fix wasn't reassurance copy; it
+was showing the truth we already had.
+</Callout>
+
+## Backend: boring and explicit beats clever and implicit
+
+The single biggest backend lesson is one I touched on in the [retries post](/articles/retries-resume-and-idempotency):
+when two code paths are supposed to provide the same guarantee, make them the *same* code path.
+We paid for parallel implementations of "resume" and "retry," and separately for parallel
+implementations of "the run's current state" (a maintained column versus the event log). In both
+cases, the fix was to delete one of the two and make everything go through the other. Less code,
+fewer bugs, and — this part surprised me — *easier* to explain to a new engineer, because there's
+only one mental model to learn instead of two that are supposed to agree but sometimes don't.
+
+<Callout type="decision" title="Design decision">
+We now treat "two implementations of one guarantee" as a smell worth stopping for, even under
+deadline pressure — because the cost of reconciling them later is reliably higher than the cost
+of unifying them now, and the bugs that come from drift are the kind that only show up in
+production, under load, in the path you tested least.
+</Callout>
+
+## Security: the boring checklist beats the clever architecture
+
+I wrote a whole post on [BYOK boundaries](/articles/byok-architecture-for-ai-saas), and the
+short version of what I'd add here is: the architecture mattered less than the discipline of
+applying it consistently. A single code path that does the risky thing (using a customer's key)
+is easy to audit. The danger is always the *second* path someone adds later without realizing
+it's now also a risky-thing path. Code review checklists — unglamorous, repetitive, easy to
+skip when you're in a hurry — caught more potential issues for us than any single architectural
+decision did.
+
+## Observability: you will need to answer questions you haven't thought of yet
+
+The event history was designed to make the engine correct. It turned out to also be the thing
+that let us answer support questions, debug production incidents, and build the run timeline UI
+— none of which were the original design goal. The pattern, in hindsight, is: when you build a
+system that needs to be *correct* about what happened, you've usually also built the system that
+lets you *understand* what happened. Investing in the former pays off in the latter, often
+sooner than expected.
+
+<Callout type="lesson" title="Lesson learned">
+If you're not sure whether to invest in structured, queryable records of "what the system did
+and why," consider that the question you'll eventually be asked is rarely the one you designed
+the records to answer — and a good event log answers questions you didn't anticipate, while a
+narrow-purpose log usually doesn't.
+</Callout>
+
+## Positioning: "durable" is a promise, not a feature
+
+Early marketing copy described Vectorbea with words like "powerful" and "intelligent" — true, in
+some sense, but not what actually distinguishes it. What distinguishes it is the much less
+exciting-sounding claim that a workflow will survive a crash, a deploy, or a four-hour pause for
+human approval, and pick up exactly where it left off. That's a promise about reliability, and
+reliability is hard to market because it's invisible when it works.
+
+<Callout type="tradeoff" title="Tradeoff">
+We chose to lean into the "durable execution" framing even though it's a less flashy pitch than
+"AI agents that do X." The tradeoff is that it's a harder story to tell in thirty seconds — but
+it's also a story that holds up under scrutiny from the engineers who will actually decide
+whether to trust a workflow platform with real-world actions. We'd rather earn that trust slowly
+and keep it than spend it on a pitch we can't fully back up.
+</Callout>
+
+## What I'd tell myself a year ago
+
+Build the durability layer first, even though it's the least visible part of the product and the
+hardest to demo. Make the event history append-only and authoritative from day one — retrofitting
+that distinction after building around a mutable "current state" table cost us real time. Treat
+parallel implementations of the same guarantee as bugs waiting to happen. And resist the urge to
+make any failure path "smarter" before you've made it *legible* — the self-correction loop only
+became trustworthy once we could see, in plain language, what it tried and why it gave up.
+
+None of this is exotic. It's mostly the unglamorous work of being honest with yourself about what
+your system actually guarantees, and then building the parts that make that guarantee true under
+the conditions that will actually occur — crashes, slow humans, rate limits, and code written by
+someone who didn't get this memo. That's the job, and it's a good one.

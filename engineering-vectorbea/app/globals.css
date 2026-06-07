@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f8fafc;
+  --ink: #0f172a;
+  --accent-blue: #3b82f6;
+  --accent-violet: #7c3aed;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.bg-mesh {
+  background-image:
+    radial-gradient(at 20% 20%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, rgba(124, 58, 237, 0.15) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(59, 130, 246, 0.08) 0px, transparent 50%);
+}
+
+.terminal-card {
+  background: #0f172a;
+  border-radius: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #e2e8f0;
+  box-shadow: 0 20px 60px -20px rgba(15, 23, 42, 0.5);
+}
+
+.callout {
+  border-left: 4px solid;
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+.callout-decision { border-color: var(--accent-blue); background: rgba(59, 130, 246, 0.06); }
+.callout-tradeoff { border-color: var(--accent-violet); background: rgba(124, 58, 237, 0.06); }
+.callout-note { border-color: #94a3b8; background: rgba(148, 163, 184, 0.08); }
+.callout-warning { border-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.callout-lesson { border-color: #10b981; background: rgba(16, 185, 129, 0.08); }
+
+[data-rehype-pretty-code-fragment] pre {
+  border-radius: 0.625rem;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.reading-progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(to right, var(--accent-blue), var(--accent-violet));
+  z-index: 50;
+  transition: width 0.1s ease-out;
+}

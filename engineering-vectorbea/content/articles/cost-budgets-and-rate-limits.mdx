@@ -1,0 +1,110 @@
+---
+title: "Cost Budgets and Rate Limits for Agentic Workflows"
+description: "How we estimate token costs before and during a run, enforce per-run and per-workspace budgets, apply rate limits, and build kill switches that actually stop a runaway workflow."
+date: "2026-04-21"
+author: "Susmit Banerjee"
+tags: ["cost", "rate-limiting", "reliability"]
+category: "Reliability"
+series: "building-vectorbea"
+part: 8
+featured: false
+---
+
+An agentic workflow can, left unchecked, spend money very quickly. A loop that calls an LLM,
+checks whether its output is "good enough," and tries again if not — which is a completely
+reasonable thing to want — is also a loop that can run a hundred times in a few minutes if the
+exit condition is wrong. This post is about how we think about cost budgets and rate limits, and
+the kill switches we built after the first time this happened to us in staging.
+
+## Estimating cost before you've spent it
+
+The first useful thing is an *estimate* of what a run is likely to cost, available before it
+starts. We compute this from the workflow definition: the number of LLM-calling steps, the
+configured models (each with a known per-token price), and rough token estimates based on prompt
+templates and historical runs of similar workflows. It is not precise — actual token counts
+depend on the data flowing through the workflow — but it's precise enough to catch the obvious
+problem cases: "this workflow has an unbounded loop with no iteration cap, and each iteration
+calls GPT-4-class models with large context."
+
+<Callout type="decision" title="Design decision">
+We surface a cost estimate at workflow-design time, not just at run time. Catching "this could
+cost $40 per run" while someone is still building the workflow is far more useful than telling
+them after they've run it fifty times. The estimate is intentionally labeled as an estimate —
+overpromising precision here would be worse than the estimate simply being a little off.
+</Callout>
+
+## Budgets: per-run and per-workspace
+
+Two levels of budget turned out to matter:
+
+- **Per-run budgets** cap what a single execution can spend. If a run's accumulated cost
+  (tracked incrementally as steps complete and report token usage) crosses the cap, the engine
+  halts the run — not mid-step in a way that could leave things inconsistent, but at the next
+  safe checkpoint boundary, emitting a `RUN_HALTED_BUDGET_EXCEEDED` event.
+- **Per-workspace budgets** cap aggregate spend across all runs in a time window. This is the
+  one that actually prevents the "many runs, each individually reasonable, collectively
+  enormous" failure mode — which is the one that's easy to miss if you only think in terms of
+  single runs.
+
+<Callout type="tradeoff" title="Tradeoff">
+Halting at "the next safe checkpoint" rather than instantly means a run can slightly overshoot
+its budget — it finishes the in-flight step before stopping. We accept this because halting
+mid-step could leave a workflow in a state that's hard to reason about (and possibly hard to
+resume later, if resuming matters to the customer). A small, bounded overshoot is a better
+tradeoff than an inconsistent stopped state. We make the overshoot bound small by checking the
+budget at every step boundary, not just periodically.
+</Callout>
+
+## Rate limits
+
+Separately from cost, we apply rate limits — partly to protect customers' own provider quotas
+(especially relevant for [BYOK](/articles/byok-architecture-for-ai-saas) users, whose limits are
+theirs, not ours, and who feel the consequences directly), and partly to keep our own
+infrastructure healthy when usage spikes.
+
+Rate limits are enforced at the point where a step is about to make a provider call — a token
+bucket per workspace, per provider, refilling at a configured rate. If a step would exceed the
+limit, it's not failed outright; it's *deferred*, re-queued with a delay, and the run's status
+reflects "waiting on rate limit" rather than "failed." This distinction matters in the UI: a
+rate-limited run is healthy and will continue; a failed run needs attention.
+
+```text
+step wants to call provider X
+  → token available?     → proceed, consume token
+  → no token available?  → re-enqueue with delay, emit STEP_DEFERRED_RATE_LIMIT
+```
+
+## Kill switches that actually work
+
+The incident that prompted most of this section: in staging, a workflow with a self-correction
+loop (more on that in the [next post](/articles/self-correction-loops-for-failed-workflows))
+had a subtly wrong exit condition. It ran for around forty minutes before anyone noticed,
+making a few hundred LLM calls. Nothing was *broken*, exactly — every individual call succeeded —
+but nothing was stopping it either, and the existing "cancel run" button required the run to
+reach a checkpoint boundary to honor the cancellation, which it kept passing through too quickly
+to catch in the UI.
+
+<Callout type="lesson" title="Lesson learned">
+A kill switch that only takes effect at the next natural pause point isn't really a kill switch
+for a workflow whose problem *is* that it's not pausing. We added a separate, more forceful
+cancellation path: marking a run as `FORCE_CANCELLED` causes the *next* event-history append from
+any worker on that run to fail loudly and stop that worker's processing of it — a tripwire baked
+into the durability layer itself, rather than a flag the workflow has to politely check.
+</Callout>
+
+This is the kind of mechanism that's easy to skip when you're designing for the happy path —
+"the workflow checks a cancellation flag between steps" sounds adequate until you have a
+workflow that doesn't behave the way you expected. The fix didn't require rearchitecting
+anything; it required noticing that the event history append point — something every step
+already goes through — was the right place to enforce a hard stop, because nothing can make
+progress without going through it.
+
+## What we'd still like to improve
+
+Our cost estimates are workflow-shaped, not data-shaped — they don't yet account well for "this
+workflow processes a batch of 500 items instead of 5." Per-item cost projection based on input
+size is on the roadmap. And our rate limit token buckets are currently per-workspace; provider-
+level global limits (useful for our pooled-key customers) are coarser than we'd like. Both are
+the kind of thing where the current version is honest about its limits rather than confidently
+wrong — which, if you're choosing between the two while shipping something, is usually the
+better place to be.

@@ -1,0 +1,90 @@
+---
+title: "Toy Demo: A Durable Runner Concept in Kotlin"
+description: "A small, sanitized Kotlin sketch of the durable-execution ideas from this blog — checkpointing, step-level retry, and replay — built as a standalone learning exercise."
+date: "2026-04-02"
+author: "Susmit Banerjee"
+tags: ["kotlin", "durable-execution", "experiment"]
+category: "Experiment"
+---
+
+This is a write-up of a small, standalone Kotlin experiment — not a piece of Vectorbea's actual
+codebase, and deliberately simplified to the point where it could fit in a single file and be
+understood in one sitting. The goal was to answer a question for myself: "if I had to explain
+durable execution to someone with nothing but a whiteboard and an afternoon, what's the smallest
+thing I could build that demonstrates the core idea?"
+
+## The shape of the toy
+
+The demo models a "run" as a list of steps, a sequence number, and an append-only list of
+events. A `DurableRunner` interface exposes one operation: given a run ID, execute the next step
+that hasn't completed yet, append the resulting event, and — critically — persist that event
+*before* returning. "Persist," in the toy, means writing to an in-memory map guarded by a mutex,
+standing in for what would be a database write in a real system. The substitution is intentional:
+the interesting part isn't the storage technology, it's the *shape* of the guarantee.
+
+```kotlin
+interface EventStore {
+    fun append(runId: String, event: RunEvent)
+    fun eventsFor(runId: String): List<RunEvent>
+}
+
+sealed interface RunEvent {
+    val sequence: Int
+    data class StepStarted(override val sequence: Int, val stepId: String) : RunEvent
+    data class StepCompleted(override val sequence: Int, val stepId: String, val result: String) : RunEvent
+    data class StepFailed(override val sequence: Int, val stepId: String, val error: String) : RunEvent
+}
+```
+
+## Replay as the recovery mechanism
+
+The part I most wanted to demonstrate — because it's the part that feels like magic until you've
+built a tiny version of it — is that "resume after a crash" and "compute current state" are the
+*same operation*. The toy includes a `replay` function that folds a run's event list into a
+`RunState`, and the runner's "what should I do next" logic calls exactly that function, every
+time, rather than consulting any separately maintained status field.
+
+```kotlin
+fun replay(events: List<RunEvent>): RunState =
+    events.fold(RunState.initial()) { state, event ->
+        when (event) {
+            is RunEvent.StepStarted   -> state.markRunning(event.stepId)
+            is RunEvent.StepCompleted -> state.markCompleted(event.stepId, event.result)
+            is RunEvent.StepFailed    -> state.markFailed(event.stepId, event.error)
+        }
+    }
+```
+
+To "simulate a crash," the demo just throws away the in-memory `RunState` and calls `replay`
+again from the stored events. Watching the reconstructed state come out identical to the one
+that existed before the simulated crash is, I think, the clearest way to *feel* why event
+sourcing buys you crash recovery — it's not a separate feature, it's a direct consequence of
+"current state is a pure function of the event log."
+
+## Bounded retry with backoff
+
+The toy also includes a minimal retry loop — attempt a step, and on failure, append a
+`StepFailed` event and schedule a retry with exponential backoff up to a configured maximum,
+after which the run is marked terminal. This is the smallest possible version of the ideas in
+the [retries and idempotency article](/articles/retries-resume-and-idempotency) — it doesn't
+attempt idempotency keys or external side-effect deduplication, because doing that convincingly
+requires a real external system to deduplicate against, which would have made the demo much
+larger without making the *core* idea any clearer.
+
+## What this demo deliberately doesn't do
+
+It has no concurrency control, no real persistence, no checkpointing distinct from the event
+log itself, and no notion of multiple workers competing for the same run. All of those are real
+and important in a production system — and all of them would have obscured, rather than
+clarified, the one idea this toy exists to demonstrate: that durability comes from making
+"what happened" the single source of truth, and deriving everything else from it.
+
+## Where to find it
+
+The full sketch — around 200 lines, including a small test harness that simulates failures and
+crashes — will be published as a standalone repository. We'll link it here once it's up:
+**[github.com/vectorbea/durable-runner-demo](https://github.com/vectorbea/durable-runner-demo)**
+*(placeholder — repository to be published)*.
+
+If you build something similar yourself, I'd genuinely like to hear what you found confusing or
+surprising — that's usually the most useful signal for what to write about next.

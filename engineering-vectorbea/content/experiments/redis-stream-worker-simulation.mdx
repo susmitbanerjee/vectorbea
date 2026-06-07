@@ -1,0 +1,87 @@
+---
+title: "Toy Demo: Simulating a Redis Streams Worker Fleet"
+description: "A small standalone simulation of consumer groups, the pending entries list, and crash recovery — built to test intuitions about Redis Streams before relying on them in production."
+date: "2026-04-29"
+author: "Susmit Banerjee"
+tags: ["redis", "workers", "experiment", "infrastructure"]
+category: "Experiment"
+---
+
+Before committing to Redis Streams as the backbone of Vectorbea's worker queue (see the
+[worker scaling article](/articles/worker-scaling-with-redis-streams) for the production
+reasoning), I built a small simulation to pressure-test my intuitions about consumer groups and
+crash recovery. This is a write-up of that simulation — a standalone toy, not production code,
+designed to answer a narrow question: "if a worker dies mid-processing, does the work actually
+come back, and how long does that take under realistic-ish conditions?"
+
+## The setup
+
+The simulation spins up an in-memory analogue of a Redis Stream — an ordered log of work items —
+plus a configurable number of simulated "worker" goroutine-equivalents (in this case, Kotlin
+coroutines), each of which:
+
+1. Claims a batch of items from the stream via a simulated `XREADGROUP`.
+2. "Processes" each item, taking a randomized amount of time, with a configurable probability of
+   simulated failure (an exception) or simulated death (the worker simply stops, mid-item, with
+   no acknowledgment).
+3. Acknowledges successfully processed items via a simulated `XACK`, removing them from a
+   simulated pending entries list (PEL).
+
+A separate "reaper" coroutine periodically scans the simulated PEL for items claimed longer than
+a threshold and reclaims them for other workers — mirroring the `XCLAIM`-based mechanism
+described in the production article.
+
+```kotlin
+data class PendingEntry(val itemId: String, val consumerId: String, val claimedAt: Instant)
+
+fun reclaimStale(pel: List<PendingEntry>, threshold: Duration, now: Instant): List<PendingEntry> =
+    pel.filter { now - it.claimedAt > threshold }
+```
+
+## What I was trying to learn
+
+Three questions, specifically:
+
+- **Does reclaimed work actually get reprocessed, exactly once in the steady state?** (Modulo
+  the "at least once" nature of the guarantee — I wanted to confirm duplicates were rare and,
+  more importantly, *detectable* via the simulated idempotency layer.)
+- **How does PEL size behave under sustained worker failure** — does it grow unboundedly, or
+  stabilize once the reaper catches up?
+- **What reaper interval feels right** — too short and you reclaim work from workers that are
+  just slow, not dead; too long and failed work sits idle for an uncomfortable amount of time.
+
+## What the simulation showed
+
+With a failure rate around 5% and a reaper interval roughly 3x the expected processing time, the
+PEL size stabilized quickly and stayed bounded — reclaimed items got picked up by healthy workers
+within one or two reaper cycles. Pushing the failure rate up to around 30% (deliberately
+unrealistic, to find the breaking point) caused the PEL to grow faster than the reaper could
+drain it, which is exactly the "growing, aging PEL means something is wrong" signal described in
+the production article — seeing it appear in a 200-line simulation made me trust that signal much
+more when I later saw it in real metrics.
+
+<Callout type="note" title="What this confirmed, and what it didn't">
+The simulation gave me confidence in the *shape* of the recovery mechanism — that reclaimed work
+comes back, that the PEL is a meaningful health signal, and that a reaper interval needs to be
+tuned relative to expected processing time, not picked arbitrarily. It did *not* tell me anything
+about Redis's actual performance characteristics under load, network partition behavior, or
+memory usage at scale — those require the real thing, under real conditions, and no simulation
+substitutes for that.
+</Callout>
+
+## Why build a simulation at all, if it can't tell you about real-world performance
+
+Because the question I needed to answer first wasn't "is Redis Streams fast enough" — it was
+"do I correctly understand how consumer groups, the PEL, and reclaiming work *together* as a
+mechanism, well enough to design a reaper, alerting, and a retry/DLQ policy around them?" A
+simulation is a cheap, fast way to find gaps in your mental model before you've committed
+infrastructure and on-call hours to it. It found one for me, in fact: my first reaper design
+reclaimed items based on a global timestamp rather than per-consumer-group claim time, which
+would have caused healthy slow-running items to be reclaimed prematurely. Catching that in a
+200-line simulation was considerably cheaper than catching it in production.
+
+## Where to find it
+
+The simulation will be published as a standalone repository alongside the durable runner demo:
+**[github.com/vectorbea/redis-stream-worker-sim](https://github.com/vectorbea/redis-stream-worker-sim)**
+*(placeholder — repository to be published)*.

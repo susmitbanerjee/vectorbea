@@ -1,0 +1,109 @@
+---
+title: "Worker Scaling with Redis Streams: Consumer Groups, PEL, and When to Reach for Kafka"
+description: "How Vectorbea's worker fleet pulls work from Redis Streams — consumer groups, the pending entries list, retry and DLQ handling, and the honest answer to 'why not Kafka?'"
+date: "2026-04-07"
+author: "Susmit Banerjee"
+tags: ["infrastructure", "redis", "workers", "scaling"]
+category: "Infrastructure"
+series: "building-vectorbea"
+part: 7
+featured: false
+---
+
+Vectorbea's workers pull work from Redis Streams. This surprises some people who expect Kafka or
+SQS at the mention of "durable queue for an AI workflow platform," so this post is partly about
+why Redis Streams was the right choice for where we are, and partly a walkthrough of how we use
+it.
+
+## What we needed from a queue
+
+- **At-least-once delivery** with explicit acknowledgment, so a crashed worker's claimed work
+  isn't lost.
+- **Consumer groups**, so multiple worker processes can share a stream of work without
+  duplicating effort.
+- **Visibility into "stuck" work** — items claimed by a worker that then died — so we can detect
+  and reclaim them.
+- **Operational simplicity**, because we're a small team and every additional piece of
+  infrastructure is something we have to run, monitor, and understand at 2 a.m.
+
+Redis Streams checks all four boxes, and — this mattered more than it might sound — we were
+already running Redis for other things. Adding a new category of infrastructure has a cost that's
+easy to underweight when you're excited about a feature; not adding one, when an existing piece
+can do the job, is underrated.
+
+## Consumer groups and the pending entries list
+
+A Redis Stream consumer group works roughly like this: workers call `XREADGROUP` to claim a batch
+of entries from the stream. Each claimed entry moves into the group's **pending entries list**
+(PEL) — a record of "this entry was delivered to this consumer and hasn't been acknowledged yet."
+When a worker finishes processing an entry successfully, it calls `XACK`, which removes the entry
+from the PEL. If a worker dies mid-processing, the entry stays in the PEL, visibly assigned to a
+consumer that's no longer responding.
+
+<Callout type="decision" title="Design decision">
+We run a periodic reaper that scans the PEL for entries claimed longer than a configurable
+threshold (a few minutes, tuned per queue) and reclaims them via `XCLAIM`, making them available
+to a healthy worker. This is the mechanism that makes "a worker got OOM-killed mid-step" a
+non-event from the run's perspective — the work resurfaces and a different worker picks it up,
+informed by the event history about exactly where to resume.
+</Callout>
+
+The PEL is also one of the most useful operational surfaces we have. "How much work is currently
+claimed-but-not-acknowledged, and for how long" is close to the single best signal for "is the
+worker fleet healthy" — a growing, aging PEL means workers are claiming work and not finishing it,
+which is either a crash loop or a slow downstream dependency.
+
+## Retry and DLQ
+
+Not every failure should be retried indefinitely. We track an attempt counter per logical unit of
+work (tied to the step's idempotency key, see the [retries post](/articles/retries-resume-and-idempotency))
+and apply exponential backoff between attempts. After a configured maximum, the item moves to a
+dead-letter stream rather than being retried again.
+
+```text
+work item fails
+  → attempt < max?  → re-enqueue with backoff, increment attempt
+  → attempt = max?  → append to DLQ stream, emit STEP_FAILED (terminal), alert on-call
+```
+
+The DLQ stream is just another Redis Stream — there's no separate DLQ *system*, which keeps the
+operational surface small. Items there are inspectable, replayable (we can re-enqueue from the
+DLQ after a fix ships), and don't silently disappear.
+
+<Callout type="warning" title="A DLQ you don't monitor isn't a safety net">
+Early on, our DLQ existed but nothing watched it. Items landed there and sat, invisible, while
+the corresponding runs sat in a failed state that nobody was alerted to. A dead-letter queue is
+only useful if something pages a human when it grows. We added that alert after finding a backlog
+of failed runs that had been silently accumulating for the better part of a week.
+</Callout>
+
+## Concurrency and backpressure
+
+Workers process a configurable number of items concurrently, bounded by both a per-worker limit
+(to avoid overwhelming a single process) and per-customer rate limits (so one workspace's burst
+of activity doesn't starve others — more on this in the [next post](/articles/cost-budgets-and-rate-limits)).
+Redis Streams doesn't give you backpressure for free; we implement it by having workers only
+claim as much as they're prepared to process, and by monitoring queue depth to decide when to
+scale the worker fleet horizontally.
+
+## When would we reach for Kafka?
+
+Honestly: when our throughput or retention requirements outgrow what a single well-resourced
+Redis instance (or a small cluster) can comfortably handle, or when we need stream processing
+semantics — windowed aggregations, multiple independent consumer groups replaying the same long
+history for analytical purposes, exactly-once-style processing guarantees backed by transactional
+writes across systems. None of that describes Vectorbea's worker queue today.
+
+<Callout type="tradeoff" title="Tradeoff">
+Kafka is a better choice if you need very high throughput, long retention windows, or rich
+stream-processing semantics — and a meaningfully heavier piece of infrastructure to run well.
+Redis Streams is a better choice if your requirements are "reliable work queue with consumer
+groups and crash recovery" and you'd rather spend your operational budget elsewhere. We chose
+the latter because it matches both our current scale and our team size — and because "the
+simplest thing that gives you the guarantees you actually need" is a durable strategy, not just
+an early-stage one.
+</Callout>
+
+This is intentionally simplified — there's more nuance around stream trimming, memory usage at
+scale, and multi-region considerations that we haven't had to solve yet because we haven't hit
+the scale where they bite. When we do, I expect this post will need a sequel.

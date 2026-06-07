@@ -1,0 +1,82 @@
+---
+title: "RFC-002: Event History Model"
+description: "Proposing an append-only, typed event log as the authoritative source of truth for workflow run state, replacing a mutable run-status table."
+date: "2026-01-22"
+author: "Susmit Banerjee"
+tags: ["event-sourcing", "data-model", "rfc"]
+category: "RFC"
+---
+
+## Status
+
+Accepted and implemented (v1, January 2026). Event payload versioning proposed as a follow-up
+(tracked separately, not yet an RFC at time of writing).
+
+## Context
+
+RFC-001 established the run model — runs, checkpoints, and a basic event log. In practice, the
+event log was being treated as a secondary, "for debugging" artifact, while a `runs.status`
+column was the engine's actual source of truth. The two have begun to disagree after crashes,
+and reconciling them has become a recurring debugging task.
+
+## Problem
+
+Two representations of "what state is this run in" can drift, and when they do, neither one is
+trustworthy without cross-referencing the other. We need exactly one source of truth, and a
+principled way to derive everything else from it.
+
+## Goals
+
+- Establish the event log as the sole authoritative record of run state.
+- Make "current state" a deterministic function of the event log (full or partial replay).
+- Preserve the ability to query "current state" cheaply for UI purposes (a run list shouldn't
+  require replaying every run's full history on every page load).
+- Produce, as a side effect, a trustworthy audit trail — without building a separate audit
+  system.
+
+## Non-goals
+
+- Real-time event streaming to the frontend (polling is acceptable for v1; streaming can be
+  layered on later without changing the underlying model).
+- Cross-run event correlation or analytics. This RFC is about per-run state, not aggregate
+  reporting.
+
+## Proposed design
+
+Make the `events` table append-only and authoritative. Define a closed set of typed events
+(`RUN_STARTED`, `STEP_STARTED`, `STEP_COMPLETED`, `STEP_FAILED`, `RETRY_SCHEDULED`,
+`CHECKPOINT_WRITTEN`, `APPROVAL_REQUESTED`, `APPROVAL_GRANTED`, `RUN_COMPLETED`, `RUN_FAILED`,
+and others as needed), each with a versioned JSON payload schema. Maintain a `run_summary`
+projection table — derived from the event log, rebuildable from scratch — for cheap UI queries.
+Remove the mutable `runs.status` column; replace all reads of it with reads of the projection,
+and all writes to it with event appends that the projection consumes.
+
+## Alternatives considered
+
+**Keep the mutable status column as a cache, with the event log as a "true" backup.** This is
+roughly the status quo, and the status quo is the problem — a cache that can disagree with the
+thing it's caching is not a cache, it's a second source of truth wearing a cache's clothes.
+
+**Use a general-purpose event sourcing framework.** We considered adopting an off-the-shelf
+event sourcing library to get snapshotting, projections, and replay machinery for free. We
+decided our needs were narrow enough (one aggregate type — the run; a small, closed set of event
+types) that a bespoke, minimal implementation would be easier to understand, debug, and extend
+than learning and constraining ourselves to a general framework's abstractions.
+
+## Tradeoffs
+
+Append-only storage means the table only grows and "current state" requires either replay or
+maintained projections — more moving parts than a single mutable table. We accept this because
+it eliminates an entire category of bugs (the two-sources-of-truth class) and gives us audit and
+replay essentially for free, which we'd otherwise have to build separately.
+
+## Open questions
+
+- How do we evolve event payload schemas over time without breaking replay of historical events?
+  We're leaning toward an explicit `schema_version` field per event type plus migration functions
+  invoked during replay, but haven't fully specified this.
+- At what volume does the `events` table need partitioning or archival, and what does "archival"
+  mean for a table that's also your audit trail?
+- Should projections be rebuilt synchronously (on write) or asynchronously (via a queue)? We
+  currently do the former for simplicity; the latter would reduce write-path latency at the cost
+  of eventual consistency in the UI.

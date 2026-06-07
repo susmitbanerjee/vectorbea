@@ -1,0 +1,110 @@
+---
+title: "Retries, Resume, and Idempotency: The Unglamorous Core of Reliability"
+description: "Step-level retries sound simple until you ask what happens when the step already had a side effect. Notes on idempotency keys, resumption, and duplicate tool calls in Vectorbea."
+date: "2026-02-18"
+author: "Susmit Banerjee"
+tags: ["reliability", "idempotency", "retries"]
+category: "Reliability"
+series: "building-vectorbea"
+part: 4
+featured: false
+---
+
+Of all the pieces of Vectorbea's execution engine, the retry logic is the one that looks the most
+boring in a design doc and causes the most trouble in production. This post is about why, and
+what we do about it.
+
+## The naive version
+
+"If a step fails, retry it with exponential backoff" is one sentence and feels complete. It is
+not complete, because it doesn't answer the question that actually matters: **did the step's
+side effect happen before it failed?**
+
+Consider a step that calls an LLM to draft an email and then sends it via an email API. If the
+send succeeds but the function then throws (network blip on the response, timeout, whatever),
+a naive retry sends the email again. Multiply this by every external action a workflow might
+take — creating a ticket, charging a card, posting a message — and "just retry it" becomes "just
+do the thing twice, sometimes."
+
+<Callout type="note" title="The real question">
+Retrying isn't the hard part. Knowing whether the thing you're retrying already happened is the
+hard part. Everything else follows from how you answer that.
+</Callout>
+
+## Idempotency keys
+
+Our answer, like most people's, is idempotency keys: every side-effecting operation a step
+performs is tagged with a deterministic key derived from the run ID, step ID, and attempt
+context. When a step is retried, it regenerates the *same* key for the *same* logical operation.
+Downstream systems that support idempotency keys (Stripe, many email providers, our own internal
+APIs) use that key to deduplicate — "I've already processed this; here's the result from last
+time" — instead of performing the action again.
+
+<Callout type="decision" title="Design decision">
+We generate idempotency keys at the step level, not the workflow level, and derive them
+deterministically (`hash(run_id, step_id, operation_name)`) rather than randomly. Determinism
+means that even if our own bookkeeping about "did this run before" is lost or wrong, regenerating
+the key produces the same value, and the downstream system's deduplication is the backstop.
+</Callout>
+
+This pushes a real constraint onto anyone building a step that calls an external system: that
+system needs to support idempotency keys, or the step needs its own deduplication check before
+acting (e.g., "does a ticket with this key already exist?"). We're upfront with workflow authors
+about this — a step that can't be made idempotent is a step that can't be safely retried, and we
+say so rather than pretending otherwise.
+
+## Resume is retry's sibling, not its opposite
+
+Resuming a run after a crash and retrying a failed step are, from the engine's point of view,
+nearly the same operation: in both cases, we're picking up execution from a known point using
+persisted state rather than in-memory state. The difference is just *why* we're doing it — an
+explicit failure versus an interrupted process.
+
+This symmetry was not obvious to us at first. In the first version, "resume" and "retry" were
+separate code paths, written by different people, at different times, and they drifted —
+resume didn't replay the same validation that retry did, which meant a resumed run could end up
+in a state retry would never have produced. We eventually merged them into one path: both go
+through "load the run's state as of its last checkpoint, validate it, and continue from there."
+Retry just additionally increments an attempt counter and may apply backoff.
+
+<Callout type="lesson" title="Lesson learned">
+If two code paths are supposed to produce the same invariant ("the run continues correctly from
+a known-good point"), make them the same code path. Parallel implementations of the same
+guarantee will drift, and the drift will show up as a bug that's hard to reproduce because it
+only happens via one of the two paths.
+</Callout>
+
+## Duplicate tool calls and LLM non-determinism
+
+There's a layer of this problem that's specific to agentic workflows: the LLM itself can decide
+to call a tool, and if the *call* succeeds but something downstream fails, retrying "the step"
+might mean asking the LLM again — and the LLM might decide to call a *different* tool, or the
+same tool with different arguments, because its context has shifted slightly (a timestamp, a
+random seed, a slightly different prompt assembly).
+
+We handle this by snapshotting the LLM's tool-call decision as part of the step's checkpoint,
+*before* executing the tool. A retry of that step replays the snapshotted decision rather than
+re-querying the LLM — unless the failure was in the LLM call itself, in which case we do need to
+re-query, and we accept that the new response might differ.
+
+<Callout type="tradeoff" title="Tradeoff">
+Snapshotting tool-call decisions adds storage and a bit of complexity, but it converts "retry a
+step that calls an LLM and a tool" from a fuzzy, non-deterministic operation into "replay a known
+decision, retry only the part that actually failed." The alternative — re-deriving everything on
+every retry — is simpler to build and much harder to reason about when something goes wrong at
+3 a.m.
+</Callout>
+
+## What "idempotent" doesn't mean
+
+Worth saying plainly: idempotency keys don't make an operation safe to run concurrently, and they
+don't make it free. They make it safe to run *more than once and get the same result*. A step
+that holds a lock, checks a precondition, and then acts still needs that logic to be correct
+under retries — the idempotency key just prevents the *external* side effect from duplicating.
+This is intentionally simplified in our current implementation: we don't yet have a general
+mechanism for steps that need cross-step locking, and workflows that need it have to build it
+into their own logic. It's on the list.
+
+Next: how human approval gates fit into all of this — what it means for a workflow to be in a
+"waiting for a human" state for hours or days, and how that interacts with retries, timeouts,
+and the event history.
