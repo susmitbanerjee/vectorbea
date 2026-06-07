@@ -45,6 +45,8 @@ data class WorkflowRunJob(
      * Used for audit trail only — does not affect execution.
      */
     val requestedByUserId: String? = null,
+    /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
+    val debugMode: Boolean = false,
 ) {
     enum class JobType {
         START_RUN,
@@ -85,6 +87,7 @@ data class WorkflowRunJob(
                 workspaceId = (fields["workspaceId"] ?: fields["workspace_id"])
                     ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
                 requestedByUserId = fields["requestedByUserId"] ?: fields["requested_by_user_id"],
+                debugMode = (fields["debugMode"] ?: fields["debug_mode"])?.equals("true", ignoreCase = true) ?: false,
             )
         }
 

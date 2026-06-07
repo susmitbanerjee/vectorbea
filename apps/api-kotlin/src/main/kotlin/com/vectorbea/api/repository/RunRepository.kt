@@ -15,6 +15,8 @@ data class CreateRunRequest(
     val triggerType: String,
     val inputJson: String = "{}",
     val idempotencyKey: String? = null,
+    /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
+    val debugMode: Boolean = false,
 )
 
 data class AgentRun(
@@ -38,6 +40,7 @@ data class AgentRun(
     val estimatedCost: Double?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val debugMode: Boolean = false,
 )
 
 open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
@@ -48,7 +51,7 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         status, trigger_type, input_json, output_json, error_json,
         current_step_id, current_agent_id, idempotency_key,
         started_at, completed_at, duration_ms, token_count, estimated_cost,
-        created_at, updated_at
+        created_at, updated_at, debug_mode
     """.trimIndent()
 
     open fun findById(id: UUID, workspaceId: UUID): AgentRun? = queryOne(
@@ -65,8 +68,8 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         """
         INSERT INTO agent_runs
             (workspace_id, environment_id, workflow_id, workflow_version_id,
-             status, trigger_type, input_json, idempotency_key)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?)
+             status, trigger_type, input_json, idempotency_key, debug_mode)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -77,6 +80,7 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setString(5, req.triggerType)
             setString(6, req.inputJson)
             setString(7, req.idempotencyKey)
+            setBoolean(8, req.debugMode)
         },
         ::mapRow,
     )
@@ -154,5 +158,6 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         estimatedCost = (rs.getObject("estimated_cost") as? java.math.BigDecimal)?.toDouble(),
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
+        debugMode = rs.getBoolean("debug_mode"),
     )
 }

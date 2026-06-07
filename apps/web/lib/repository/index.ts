@@ -405,6 +405,87 @@ export async function triggerWorkflow(
 }
 
 /**
+ * Start a "Debug Run" — like triggerWorkflow, but instructs the worker to
+ * capture per-node debug snapshots (resolved inputs/outputs/variable mapping/
+ * failure reasons). Scoped to this single run only — never a workflow-level toggle.
+ * Calls POST /api/workflows/:id/runs/debug.
+ */
+export async function startDebugRun(
+  workflowId: string,
+  input: unknown = {},
+): Promise<{ runId: string; status: string; debugMode: boolean }> {
+  return api<{ runId: string; status: string; debugMode: boolean }>(
+    withWorkspace(`/api/workflows/${workflowId}/runs/debug`),
+    { method: "POST", body: JSON.stringify({ input }) },
+  );
+}
+
+export interface DebugNodeSummary {
+  nodeId: string;
+  nodeType: string;
+  nodeName: string | null;
+  status: "pending" | "running" | "success" | "failed" | "skipped" | "retried" | string;
+  attempt: number;
+  errorType: string | null;
+  humanFailureReason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  hasFailure: boolean;
+}
+
+export interface DebugNodeDetail {
+  id: string;
+  workflowRunId: string;
+  nodeId: string;
+  nodeType: string;
+  nodeName: string | null;
+  attempt: number;
+  status: string;
+  inputTemplate: string | null;
+  resolvedInput: string | null;
+  resolvedVariables: string | null;
+  variableSources: string | null;
+  output: string | null;
+  parsedOutput: string | null;
+  schemaValidation: string | null;
+  errorType: string | null;
+  errorMessage: string | null;
+  humanFailureReason: string | null;
+  suggestedFix: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
+  tokensInput: number | null;
+  tokensOutput: number | null;
+  costEstimate: number | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  createdAt: string;
+}
+
+/** GET /api/workflow-runs/:runId/debug/nodes — summary debug status for all nodes. */
+export async function getDebugNodeSummaries(runId: string): Promise<{ debugMode: boolean; nodes: DebugNodeSummary[] }> {
+  return api<{ debugMode: boolean; nodes: DebugNodeSummary[] }>(
+    withWorkspace(`/api/workflow-runs/${runId}/debug/nodes`),
+  );
+}
+
+/** GET /api/workflow-runs/:runId/debug/nodes/:nodeId — detailed snapshot for a node. */
+export async function getDebugNodeDetail(runId: string, nodeId: string): Promise<DebugNodeDetail> {
+  return api<DebugNodeDetail>(
+    withWorkspace(`/api/workflow-runs/${runId}/debug/nodes/${encodeURIComponent(nodeId)}`),
+  );
+}
+
+/** GET /api/workflow-runs/:runId/debug/nodes/:nodeId/attempts — all attempts for a node. */
+export async function getDebugNodeAttempts(runId: string, nodeId: string): Promise<{ attempts: DebugNodeDetail[] }> {
+  return api<{ attempts: DebugNodeDetail[] }>(
+    withWorkspace(`/api/workflow-runs/${runId}/debug/nodes/${encodeURIComponent(nodeId)}/attempts`),
+  );
+}
+
+/**
  * runWorkflow — alias for triggerWorkflow.
  */
 export async function runWorkflow(

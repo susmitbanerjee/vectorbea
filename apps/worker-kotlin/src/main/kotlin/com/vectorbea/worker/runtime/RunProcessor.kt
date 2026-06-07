@@ -193,6 +193,8 @@ class RunProcessor(
             inputJson         = job.inputJson,
             source            = "worker:$workerId",
             cancellationCheck = { isCancellationRequested(job.runId) },
+            debugMode         = job.debugMode,
+            workflowId        = run.workflowId,
         )
 
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
@@ -276,6 +278,8 @@ class RunProcessor(
             pendingNodeIds    = pendingOverrides,
             source            = "worker:$workerId",
             cancellationCheck = { isCancellationRequested(job.runId) },
+            debugMode         = job.debugMode,
+            workflowId        = run.workflowId,
         )
 
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
@@ -355,6 +359,8 @@ class RunProcessor(
             pendingNodeIds    = setOf(nodeId),
             source            = "worker:$workerId",
             cancellationCheck = { isCancellationRequested(job.runId) },
+            debugMode         = job.debugMode,
+            workflowId        = run.workflowId,
         )
 
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
@@ -418,6 +424,8 @@ class RunProcessor(
             inputJson         = job.inputJson,
             source            = "worker:$workerId",
             cancellationCheck = { isCancellationRequested(job.runId) },
+            debugMode         = job.debugMode,
+            workflowId        = run.workflowId,
         )
 
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()

@@ -127,6 +127,7 @@ fun main() {
         workerId           = config.workerId,
         connectionResolver = connectionResolver,
         dbPoolManager      = dbPoolManager,
+        debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
     )
     val telemetry = TelemetryClient.fromEnv()
     val processor = RunProcessor(

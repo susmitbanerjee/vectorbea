@@ -134,7 +134,7 @@ interface LogsTabProps {
 export function LogsTab({ run, viewMode, rawEvents }: LogsTabProps) {
   const [search, setSearch]       = useState("");
   const [levelFilter, setLevel]   = useState("all");
-  const [showDebug, setShowDebug] = useState(viewMode !== "business");
+  const [showDebug, setShowDebug] = useState(true);
   const [copiedAll, setCopiedAll] = useState(false);
 
   // Merge structured run.logs + raw timeline events into unified stream

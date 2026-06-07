@@ -24,10 +24,22 @@ class RuntimeContext(
     val workspaceId: UUID,
     val environmentId: UUID,
     val workflowVersionId: UUID,
+    val workflowId: UUID = workflowVersionId,
     /** Raw workflow input — treat as untrusted, do not log. */
     val workflowInput: Map<String, Any>,
     val graph: WorkflowGraph,
+    /** True for "Debug Run" — when set, the runtime captures per-node debug snapshots. */
+    val debugMode: Boolean = false,
 ) {
+    /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
+    private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()
+
+    fun nextAttempt(nodeId: String): Int = synchronized(this) {
+        val n = (nodeAttempts[nodeId] ?: 0) + 1
+        nodeAttempts[nodeId] = n
+        n
+    }
+
     enum class NodeStatus { PENDING, RUNNING, COMPLETED, FAILED, SKIPPED }
 
     // ── Node state ────────────────────────────────────────────────────────────

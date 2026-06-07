@@ -24,84 +24,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function BusinessPanel({ step, run, onAction }: { step: RunStep; run: WorkflowRun; onAction: (a: string) => void }) {
-  const approval = run.approvals.find(a => a.id === step.approvalId);
-  return (
-    <div className="space-y-4">
-      <p style={{ fontSize: 14, color: "#334155", lineHeight: 1.6 }}>{step.businessDescription}</p>
-
-      {step.status === "waiting_for_approval" && approval && (
-        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #FDE68A", background: "#FFFBEB" }}>
-          <div className="px-4 py-3" style={{ borderBottom: "1px solid #FDE68A" }}>
-            <p style={{ fontSize: 13, fontWeight: 700, color: "#B45309" }}>Approval required</p>
-          </div>
-          <div className="p-4 space-y-3">
-            {step.input !== undefined && (
-              <div>
-                <p style={{ fontSize: 11.5, fontWeight: 600, color: "#64748B", marginBottom: 6 }}>Recommendation for review:</p>
-                <div className="rounded-xl border border-amber-200 bg-white p-3">
-                  {typeof step.input === "object" && step.input !== null && "recommendation" in step.input && (
-                    <p style={{ fontSize: 13, color: "#334155", fontWeight: 600 }}>{(step.input as Record<string, unknown>).recommendation as string}</p>
-                  )}
-                </div>
-              </div>
-            )}
-            <p style={{ fontSize: 11.5, color: "#78716C" }}>Requested: {fmtDate(approval.requestedAt)}</p>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => onAction("approve")}
-                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#059669] text-[13px] font-semibold text-white hover:bg-[#047857] transition-colors">
-                <ThumbsUp className="h-3.5 w-3.5" /> Approve
-              </button>
-              <button type="button" onClick={() => onAction("reject")}
-                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-red-50 text-[13px] font-semibold text-red-700 hover:bg-red-100 transition-colors">
-                <ThumbsDown className="h-3.5 w-3.5" /> Reject
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {step.error && (
-        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #FECACA", background: "#FEF2F2" }}>
-          <div className="px-4 py-3" style={{ borderBottom: "1px solid #FECACA" }}>
-            <p style={{ fontSize: 13, fontWeight: 700, color: "#B91C1C" }}>Step failed</p>
-          </div>
-          <div className="p-4 space-y-2">
-            <p style={{ fontSize: 13, color: "#334155" }}>{step.error.message}</p>
-            {step.error.impact && <p style={{ fontSize: 12, color: "#64748B" }}><strong>Impact:</strong> {step.error.impact}</p>}
-            {step.error.retryable && (
-              <button type="button" onClick={() => onAction("retry_step")}
-                className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-xl bg-[#2563EB] px-3 text-[12px] font-semibold text-white hover:bg-[#1D4ED8] transition-colors">
-                <RotateCcw className="h-3.5 w-3.5" /> Retry this step
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {step.attemptCount > 1 && !step.error && (
-        <div className="flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
-          <Shield className="h-4 w-4 text-violet-600 shrink-0" />
-          <p style={{ fontSize: 12.5, color: "#5B21B6" }}>
-            Vectorbea automatically recovered from {step.attemptCount - 1} temporary {step.attemptCount - 1 === 1 ? "failure" : "failures"}.
-          </p>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-          <p style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Time spent</p>
-          <p style={{ fontSize: 18, fontWeight: 700, color: "#0F172A", marginTop: 2 }}>{fmtMs(step.durationMs)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-          <p style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Status</p>
-          <div className="mt-1.5"><StatusBadge status={step.status} size="sm" /></div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function EngineeringPanel({ step, run, onAction }: { step: RunStep; run: WorkflowRun; onAction: (a: string) => void }) {
   const approval = run.approvals.find(a => a.id === step.approvalId);
   return (
@@ -227,7 +149,7 @@ export function StepDetailsPanel({
     );
   }
 
-  const name = viewMode === "business" ? step.businessName : step.name;
+  const name = step.name;
 
   return (
     <div
@@ -244,10 +166,7 @@ export function StepDetailsPanel({
       </div>
 
       <div className="p-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 400px)" }}>
-        {viewMode === "business"
-          ? <BusinessPanel step={step} run={run} onAction={onAction} />
-          : <EngineeringPanel step={step} run={run} onAction={onAction} />
-        }
+        <EngineeringPanel step={step} run={run} onAction={onAction} />
       </div>
     </div>
   );

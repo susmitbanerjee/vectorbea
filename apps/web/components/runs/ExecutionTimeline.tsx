@@ -49,7 +49,7 @@ function TimelineRow({
   };
   const barColor = barColorMap[step.status] ?? "#CBD5E1";
 
-  const name = viewMode === "business" ? step.businessName : step.name;
+  const name = step.name;
   const isWaiting = step.status === "waiting_for_approval" || step.status === "waiting";
 
   return (
@@ -206,7 +206,7 @@ export function ExecutionTimeline({
                         className="cursor-pointer rounded-lg border px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                         style={{ borderColor: "#E2E8F0" }}
                       >
-                        {viewMode === "business" ? step.businessName : step.name}
+                        {step.name}
                       </span>
                     ))}
                   </div>

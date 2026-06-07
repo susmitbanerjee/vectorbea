@@ -283,6 +283,13 @@ fun main() {
             appConfig = config,
             telemetry = telemetry,
         ).register(router)
+
+        com.vectorbea.api.routes.DebugRoutes(
+            runRepo = runRepo,
+            debugRepo = com.vectorbea.api.repository.DebugSnapshotRepository(ds!!),
+            workflowRepo = workflowRepo,
+            queue = workflowQueue,
+        ).register(router)
     } else log.warn("RunRoutes disabled — no database")
 
     if (approvalRepo != null) {

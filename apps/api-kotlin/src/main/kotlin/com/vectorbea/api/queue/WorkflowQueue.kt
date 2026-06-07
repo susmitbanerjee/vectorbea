@@ -36,6 +36,8 @@ data class WorkflowRunJob(
      * Used for audit trail; does not affect execution.
      */
     val requestedByUserId: String? = null,
+    /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
+    val debugMode: Boolean = false,
 )
 
 enum class JobType {

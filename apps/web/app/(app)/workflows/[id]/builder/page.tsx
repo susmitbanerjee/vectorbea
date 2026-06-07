@@ -72,6 +72,7 @@ import {
 import {
   AlertTriangle,
   ArrowLeft,
+  Bug,
   CheckCircle2,
   Clock,
   Loader2,
@@ -79,6 +80,7 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
+  X,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -97,7 +99,11 @@ import {
   updateWorkflow,
   getRun,
   getRunTimeline,
+  startDebugRun,
+  getDebugNodeSummaries,
+  type DebugNodeSummary,
 } from "@/lib/repository";
+import { NodeInspectorDrawer } from "@/components/workflow-builder/NodeInspectorDrawer";
 import { validateWorkflowGraph } from "@/lib/workflows/workflow-validation";
 import { WORKFLOW_TEMPLATES } from "@/lib/workflows/workflow-templates";
 import { NodePalette } from "@/components/workflow-builder/NodePalette";
@@ -406,6 +412,27 @@ function WorkflowBuilderInner() {
   const [activeRunId, setActiveRunId]     = useState<string | null>(null);
   const [liveRunStatus, setLiveRunStatus] = useState<string>("idle");
   const liveRunRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ── Debug Run mode (per-run, not persisted on the workflow) ─────────────────
+  const [debugRunning, setDebugRunning]       = useState(false);
+  const [debugRunActive, setDebugRunActive]   = useState(false);
+  const [debugRunId, setDebugRunId]           = useState<string | null>(null);
+  const [debugNodes, setDebugNodes]           = useState<Map<string, DebugNodeSummary>>(new Map());
+  const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
+  const debugRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (!debugRunId) return;
+    async function pollDebug() {
+      try {
+        const res = await getDebugNodeSummaries(debugRunId!);
+        setDebugNodes(new Map(res.nodes.map((n) => [n.nodeId, n])));
+      } catch { /* ignore transient errors */ }
+    }
+    void pollDebug();
+    debugRef.current = setInterval(() => void pollDebug(), 2500);
+    return () => { if (debugRef.current) clearInterval(debugRef.current); };
+  }, [debugRunId]);
 
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const { screenToFlowPosition, fitView, setViewport } = useReactFlow();
@@ -737,10 +764,48 @@ function WorkflowBuilderInner() {
   // ── Node selection ──────────────────────────────────────────────────────────
   function onNodeClick(_: React.MouseEvent, node: Node) {
     setSelectedNodeId(node.id);
+    if (debugRunActive) setInspectorNodeId(node.id);
   }
 
   function onPaneClick() {
     setSelectedNodeId(null);
+    setInspectorNodeId(null);
+  }
+
+  // ── Debug Run — per-run, captures resolved inputs/outputs/variables ─────────
+  async function handleDebugRun() {
+    if (!workflow) return;
+    track("workflow_debug_run_queued", { workflowId: workflow.id, properties: { source: "builder" } });
+    setDebugRunning(true);
+    try {
+      await doSave();
+      const run = await startDebugRun(workflow.id, {});
+      const runId = run.runId;
+      if (!runId) {
+        toast.error("Debug run triggered but run ID was not returned.");
+        return;
+      }
+      setNodes((nds) =>
+        nds.map((n) => ({ ...n, data: { ...n.data, previewStatus: "idle" as const } }))
+      );
+      setDebugNodes(new Map());
+      setLiveRunStatus("queued");
+      setActiveRunId(runId);
+      setDebugRunId(runId);
+      setDebugRunActive(true);
+      toast.success("Debug Run started — click any node to inspect resolved variables.");
+    } catch {
+      toast.error("Failed to start debug run.");
+    } finally {
+      setDebugRunning(false);
+    }
+  }
+
+  function stopDebugRun() {
+    setDebugRunActive(false);
+    setDebugRunId(null);
+    setInspectorNodeId(null);
+    if (debugRef.current) clearInterval(debugRef.current);
   }
 
   // ── Update / delete node from inspector ─────────────────────────────────────
@@ -1079,23 +1144,60 @@ function WorkflowBuilderInner() {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => void handleRun()}
-              disabled={saving || running}
-              className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] bg-[#2563EB] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#1D4ED8] disabled:opacity-40"
-              style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.28)" }}
-            >
-              {running ? (
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5 fill-white" />
-              )}
-              Run
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleRun()}
+                disabled={saving || running || debugRunning}
+                className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] bg-[#2563EB] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#1D4ED8] disabled:opacity-40"
+                style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.28)" }}
+              >
+                {running ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 fill-white" />
+                )}
+                Run
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDebugRun()}
+                disabled={saving || running || debugRunning}
+                title="Run with full variable resolution capture — per-run, doesn't change your workflow"
+                className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 text-[12px] font-semibold text-amber-700 transition-all hover:bg-amber-100 disabled:opacity-40"
+              >
+                {debugRunning ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Bug className="h-3.5 w-3.5" />
+                )}
+                Debug Run
+              </button>
+            </div>
           )}
         </div>
       </div>
+
+      {/* Debug Run active banner */}
+      {debugRunActive && (
+        <div className="flex items-center justify-between gap-3 border-b px-6 py-2" style={{ borderColor: "#FDE68A", background: "#FFFBEB" }}>
+          <div className="flex items-center gap-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: "#FEF3C7" }}>
+              <Bug className="h-3 w-3 text-amber-700" />
+            </span>
+            <p className="text-[12px] font-semibold text-amber-800">
+              Debug Run Active · Click any node to inspect resolved variables
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={stopDebugRun}
+            className="inline-flex h-7 items-center gap-1 rounded-lg border border-amber-200 px-2.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+          >
+            <X className="h-3 w-3" /> Exit debug view
+          </button>
+        </div>
+      )}
 
       {/* ── Three-column layout ─────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
@@ -1211,6 +1313,20 @@ function WorkflowBuilderInner() {
               </Panel>
             )}
           </ReactFlow>
+
+          {debugRunActive && inspectorNodeId && debugRunId && (() => {
+            const n = nodes.find((nd) => nd.id === inspectorNodeId);
+            if (!n) return null;
+            return (
+              <NodeInspectorDrawer
+                runId={debugRunId}
+                nodeId={inspectorNodeId}
+                nodeLabel={(n.data as WFNodeData)?.label ?? inspectorNodeId}
+                nodeType={n.type ?? "node"}
+                onClose={() => setInspectorNodeId(null)}
+              />
+            );
+          })()}
         </div>
 
         {/* Right: Inspector */}

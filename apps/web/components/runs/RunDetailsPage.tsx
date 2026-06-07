@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import type { WorkflowRun, ViewMode, RunStep } from "@/types/runs";
+import type { WorkflowRun, RunStep } from "@/types/runs";
 import { RunSummaryHeader } from "./RunSummaryHeader";
-import { RunViewToggle } from "./RunViewToggle";
 import { RunTimeline } from "./RunTimeline";
 import type { RunTimelineEventUi } from "@/types/agent-run-ui";
 import { LogsTab } from "./tabs/LogsTab";
@@ -13,15 +12,11 @@ import { EventHistoryTab } from "./tabs/EventHistoryTab";
 import { RecoveryTab } from "./tabs/RecoveryTab";
 import { cn } from "@/lib/utils";
 
-// Tabs always visible below the timeline, regardless of Business / Engineering view
-type TabId = "logs" | "recovery" | "tool_calls" | "events";
+// Single tab bar: Execution View (timeline) plus Logs / Tool Calls / Recovery / Events
+type TabId = "execution" | "logs" | "recovery" | "tool_calls" | "events";
 
-const BUSINESS_TABS: { id: TabId; label: string }[] = [
-  { id: "logs",     label: "Logs" },
-  { id: "recovery", label: "Recovery Engine" },
-];
-
-const ENGINEERING_TABS: { id: TabId; label: string }[] = [
+const TABS: { id: TabId; label: string }[] = [
+  { id: "execution",  label: "Execution View" },
   { id: "logs",       label: "Logs" },
   { id: "recovery",   label: "Recovery Engine" },
   { id: "tool_calls", label: "Tool Calls" },
@@ -39,11 +34,9 @@ export function RunDetailsPage({
   rawEvents?: RunTimelineEventUi[];
   isLive?: boolean;
 }) {
-  const [viewMode, setViewMode]          = useState<ViewMode>("business");
   const [selectedEventId, setSelectedId] = useState<string | null>(null);
-  const [activeTab, setActiveTab]        = useState<TabId>("logs");
+  const [activeTab, setActiveTab]        = useState<TabId>("execution");
 
-  const tabs = viewMode === "business" ? BUSINESS_TABS : ENGINEERING_TABS;
   const timelineEvents = rawEvents ?? [];
 
   function handleAction(action: string) {
@@ -72,48 +65,16 @@ export function RunDetailsPage({
   return (
     <div className="page-shell space-y-5">
       {/* Header */}
-      <RunSummaryHeader run={run} viewMode={viewMode} onAction={handleAction} />
+      <RunSummaryHeader run={run} viewMode="engineering" onAction={handleAction} />
 
-      {/* View toggle */}
-      <div className="flex items-center justify-between">
-        <RunViewToggle mode={viewMode} onChange={v => { setViewMode(v); }} />
-        <p style={{ fontSize: 12, color: "#94A3B8" }}>
-          {viewMode === "business"
-            ? "Key steps — technical details hidden"
-            : "Full event trace — all technical details"}
-        </p>
-      </div>
-
-      {/* ── Timeline ──────────────────────────────────────────────────────── */}
-      <div
-        className="rounded-2xl overflow-hidden bg-white"
-        style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>
-            {viewMode === "business" ? "Execution Summary" : "Event Timeline"}
-          </span>
-          <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
-            {viewMode === "business" ? "Key steps only" : `${timelineEvents.length} events`}
-          </span>
-        </div>
-        <RunTimeline
-          events={timelineEvents}
-          variant={viewMode}
-          selectedId={selectedEventId ?? undefined}
-          onSelect={id => { setSelectedId(id); setActiveTab("logs"); }}
-          isLive={isLive}
-        />
-      </div>
-
-      {/* ── Logs / Recovery / Tool Calls / Events tabs ────────────────────── */}
+      {/* ── Execution View / Logs / Recovery / Tool Calls / Events tabs ───── */}
       <div
         className="rounded-2xl bg-white overflow-hidden"
         style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
       >
         {/* Tab bar */}
         <div className="flex items-center border-b border-slate-200 overflow-x-auto" style={{ background: "#F8FAFC" }}>
-          {tabs.map(tab => {
+          {TABS.map(tab => {
             const badge = badgeCounts[tab.id];
             return (
               <button
@@ -144,9 +105,24 @@ export function RunDetailsPage({
         </div>
 
         {/* Tab content */}
-        <div className={activeTab === "logs" ? "" : "p-4 min-h-[300px]"}>
-          {activeTab === "logs"       && <LogsTab run={run} viewMode={viewMode} rawEvents={rawEvents} />}
-          {activeTab === "recovery"   && <RecoveryTab run={run} viewMode={viewMode} onAction={handleAction} />}
+        <div className={activeTab === "logs" || activeTab === "execution" ? "" : "p-4 min-h-[300px]"}>
+          {activeTab === "execution" && (
+            <div>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>Event Timeline</span>
+                <span style={{ fontSize: 11.5, color: "#94A3B8" }}>{timelineEvents.length} events</span>
+              </div>
+              <RunTimeline
+                events={timelineEvents}
+                variant="engineering"
+                selectedId={selectedEventId ?? undefined}
+                onSelect={id => { setSelectedId(id); setActiveTab("logs"); }}
+                isLive={isLive}
+              />
+            </div>
+          )}
+          {activeTab === "logs"       && <LogsTab run={run} viewMode="engineering" rawEvents={rawEvents} />}
+          {activeTab === "recovery"   && <RecoveryTab run={run} viewMode="engineering" onAction={handleAction} />}
           {activeTab === "tool_calls" && <ToolCallsTab run={run} />}
           {activeTab === "events"     && <EventHistoryTab run={run} />}
         </div>

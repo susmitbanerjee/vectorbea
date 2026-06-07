@@ -10,6 +10,7 @@ import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.mapping.InMemoryStepOutputView
 import com.vectorbea.worker.mapping.MappingResolver
+import com.vectorbea.worker.runtime.debug.DebugSnapshotWriter
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.runtime.executor.NodeExecutorRegistry
@@ -51,6 +52,7 @@ class WorkflowRuntime(
     private val workerId: String,
     connectionResolver: ConnectionResolver? = null,
     dbPoolManager: ClientDbPoolManager? = null,
+    private val debugWriter: DebugSnapshotWriter? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -95,6 +97,8 @@ class WorkflowRuntime(
         inputJson: String,
         source: String = "worker:$workerId",
         cancellationCheck: () -> Boolean = { false },
+        debugMode: Boolean = false,
+        workflowId: UUID = workflowVersionId,
     ): ExecutionResult {
         // 1. Validate graph
         val graphScheduler = GraphScheduler(graph)
@@ -119,8 +123,10 @@ class WorkflowRuntime(
             workspaceId = workspaceId,
             environmentId = environmentId,
             workflowVersionId = workflowVersionId,
+            workflowId = workflowId,
             workflowInput = workflowInput,
             graph = graph,
+            debugMode = debugMode,
         )
 
         // 4. Build per-run output view for cross-step template resolution
@@ -155,6 +161,8 @@ class WorkflowRuntime(
         pendingNodeIds: Set<String> = emptySet(),
         source: String = "worker:$workerId",
         cancellationCheck: () -> Boolean = { false },
+        debugMode: Boolean = false,
+        workflowId: UUID = workflowVersionId,
     ): ExecutionResult {
         val graphScheduler = GraphScheduler(graph)
 
@@ -168,8 +176,10 @@ class WorkflowRuntime(
             workspaceId       = workspaceId,
             environmentId     = environmentId,
             workflowVersionId = workflowVersionId,
+            workflowId        = workflowId,
             workflowInput     = workflowInput,
             graph             = graph,
+            debugMode         = debugMode,
         )
 
         // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)
@@ -280,6 +290,7 @@ class WorkflowRuntime(
         source: String,
         stepOutputView: InMemoryStepOutputView,
     ): ExecutionResult? {
+        val nodeStartedAt = java.time.Instant.now()
         ctx.markRunning(node.id)
 
         // Emit STEP_SCHEDULED then STEP_STARTED
@@ -315,10 +326,17 @@ class WorkflowRuntime(
                     title  = "Failed: ${nodeLabel(node)}",
                     stepId = node.id,
                     error  = """{"reason":"input_mapping_failed","nodeType":"${node.type}"}""")
-                return ExecutionResult.Failed(
-                    "Input mapping failed for node '${node.id}' (${node.label.ifBlank { node.type }}). " +
+                val reason = "Input mapping failed for node '${node.id}' (${node.label.ifBlank { node.type }}). " +
                     "Check that all step references use the correct node ID or label and that the referenced steps are completed."
+                captureDebugSnapshot(
+                    node = node, ctx = ctx, status = "failed",
+                    resolvedInput = null, output = null,
+                    errorType = "input_mapping_failed", errorMessage = reason,
+                    humanFailureReason = "The node could not start because one or more of its input variables could not be resolved.",
+                    suggestedFix = "Check that every {{...}} reference in this node's inputs points to a node ID/label and field path that actually exists upstream.",
+                    startedAt = nodeStartedAt,
                 )
+                return ExecutionResult.Failed(reason)
             }
 
         if (isTransform) {
@@ -347,7 +365,156 @@ class WorkflowRuntime(
             NodeResult.Failed(sanitizeError(e))
         }
 
+        captureNodeResultSnapshot(node, ctx, resolvedInputs, result, nodeStartedAt)
+
         return applyNodeResult(node, result, scheduler, ctx, source, stepOutputView)
+    }
+
+    // ── Debug snapshot capture (Debug Run only) ──────────────────────────────
+
+    private fun captureNodeResultSnapshot(
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+        resolvedInputs: Map<String, Any>,
+        result: NodeResult,
+        startedAt: java.time.Instant,
+    ) {
+        if (!ctx.debugMode || debugWriter == null) return
+        when (result) {
+            is NodeResult.Completed -> captureDebugSnapshot(
+                node = node, ctx = ctx, status = "success",
+                resolvedInput = resolvedInputs, output = result.output,
+                startedAt = startedAt,
+            )
+            is NodeResult.Failed -> captureDebugSnapshot(
+                node = node, ctx = ctx, status = "failed",
+                resolvedInput = resolvedInputs, output = null,
+                errorType = "execution_failed",
+                errorMessage = result.reason,
+                humanFailureReason = humanizeFailure(node, result.reason),
+                suggestedFix = suggestFixFor(node, result.reason),
+                startedAt = startedAt,
+            )
+            is NodeResult.Unsupported -> captureDebugSnapshot(
+                node = node, ctx = ctx, status = "failed",
+                resolvedInput = resolvedInputs, output = null,
+                errorType = "unsupported_node_type",
+                errorMessage = "Unsupported node type '${result.nodeType}'",
+                humanFailureReason = "This node type ('${result.nodeType}') is not supported by the execution engine.",
+                suggestedFix = "Replace this node with a supported node type, or check for a platform update.",
+                startedAt = startedAt,
+            )
+            is NodeResult.ApprovalPaused -> captureDebugSnapshot(
+                node = node, ctx = ctx, status = "running",
+                resolvedInput = resolvedInputs, output = null,
+                startedAt = startedAt,
+            )
+        }
+    }
+
+    private fun humanizeFailure(node: WorkflowNode, reason: String): String {
+        val lower = reason.lowercase()
+        return when {
+            "json" in lower && ("parse" in lower || "valid" in lower || "schema" in lower) ->
+                "The node failed because its output could not be parsed as valid JSON matching the expected schema. " +
+                "The model or upstream service likely returned plain text or malformed JSON instead of the structured shape this workflow expects."
+            "timeout" in lower || "timed out" in lower ->
+                "The node failed because the call did not complete within the allowed time. The downstream service may be slow, unreachable, or rate-limiting requests."
+            "401" in reason || "unauthorized" in lower || "forbidden" in lower || "403" in reason ->
+                "The node failed because the request was rejected for authentication/authorization reasons — the connection's credentials are likely invalid, expired, or missing required scopes."
+            "404" in reason || "not found" in lower ->
+                "The node failed because the target resource could not be found — check the URL, ID, or path used by this node."
+            "rate limit" in lower || "429" in reason ->
+                "The node failed because the upstream service rate-limited the request. Retrying later or reducing concurrency may help."
+            else ->
+                "The node (${node.label.ifBlank { node.id }}) failed during execution: $reason"
+        }
+    }
+
+    private fun suggestFixFor(node: WorkflowNode, reason: String): String {
+        val lower = reason.lowercase()
+        return when {
+            "json" in lower && ("parse" in lower || "valid" in lower || "schema" in lower) ->
+                "Tighten the prompt/response-format instructions so the model always returns JSON matching the schema, or add a transformation/validation step before this node consumes the output."
+            "timeout" in lower || "timed out" in lower ->
+                "Increase the node's timeout, check the target service's health, or add a retry policy."
+            "401" in reason || "unauthorized" in lower || "forbidden" in lower || "403" in reason ->
+                "Reconnect or refresh the connection's credentials in Settings → Connections, and verify it has the required scopes."
+            "404" in reason || "not found" in lower ->
+                "Verify the resolved URL/ID in the Resolved Inputs tab — it may be using a stale or incorrectly mapped variable."
+            "rate limit" in lower || "429" in reason ->
+                "Add a delay/backoff before this node, or reduce how often this workflow runs."
+            else ->
+                "Open the Resolved Inputs and Raw JSON tabs to inspect exactly what this node received, and compare it against what it expects."
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun captureDebugSnapshot(
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+        status: String,
+        resolvedInput: Map<String, Any?>?,
+        output: Map<String, Any?>?,
+        errorType: String? = null,
+        errorMessage: String? = null,
+        humanFailureReason: String? = null,
+        suggestedFix: String? = null,
+        startedAt: java.time.Instant,
+    ) {
+        val writer = debugWriter ?: return
+        if (!ctx.debugMode) return
+        try {
+            val finishedAt = java.time.Instant.now()
+            val attempt = ctx.nextAttempt(node.id)
+
+            // Best-effort variable mapping: pair each {{template}} expression in inputMapping
+            // with its resolved value and a guess at its source node.
+            val variableSources = mutableListOf<Map<String, Any?>>()
+            for ((field, template) in node.inputMapping) {
+                if (!template.contains("{{")) continue
+                val refs = Regex("\\{\\{\\s*([^}]+?)\\s*\\}\\}").findAll(template).map { it.groupValues[1] }.toList()
+                for (ref in refs) {
+                    val sourceNodeId = ref.substringBefore('.').removePrefix("steps.").trim()
+                    val path = ref.substringAfter('.', "")
+                    variableSources.add(mapOf(
+                        "variable" to "{{$ref}}",
+                        "field" to field,
+                        "resolvedValue" to resolvedInput?.get(field),
+                        "sourceNode" to (ctx.graph.nodes.firstOrNull { it.id == sourceNodeId || it.label == sourceNodeId }?.label ?: sourceNodeId),
+                        "sourcePath" to path,
+                        "missing" to (resolvedInput?.get(field) == null),
+                    ))
+                }
+            }
+
+            writer.record(DebugSnapshotWriter.NodeDebugCapture(
+                workflowRunId = ctx.runId,
+                workflowId = ctx.workflowId,
+                workspaceId = ctx.workspaceId,
+                environmentId = ctx.environmentId,
+                nodeId = node.id,
+                nodeType = node.type,
+                nodeName = DebugSnapshotWriter.nodeName(node),
+                attempt = attempt,
+                status = status,
+                inputTemplate = node.inputMapping,
+                resolvedInput = resolvedInput,
+                resolvedVariables = variableSources,
+                variableSources = variableSources,
+                output = output,
+                parsedOutput = output,
+                errorType = errorType,
+                errorMessage = errorMessage,
+                humanFailureReason = humanFailureReason,
+                suggestedFix = suggestedFix,
+                startedAt = startedAt,
+                finishedAt = finishedAt,
+                durationMs = finishedAt.toEpochMilli() - startedAt.toEpochMilli(),
+            ))
+        } catch (e: Exception) {
+            log.warn("[runtime] debug snapshot capture failed [nodeId={}, runId={}]: {}", node.id, ctx.runId, e.message)
+        }
     }
 
     /**
