@@ -6,20 +6,23 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Bot,
+  Check,
   CheckCircle2,
   Clock,
   GitBranch,
   History,
+  Pencil,
   RefreshCw,
   Shield,
   Trash2,
   Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { Agent, AgentRun, Tool } from "@/types/platform";
-import { getAgent, getTools, getRunsForAgent, deleteAgent } from "@/lib/repository";
+import { getAgent, getTools, getRunsForAgent, deleteAgent, updateAgent } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -99,6 +102,81 @@ export default function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
+  const [allTools, setAllTools] = useState<Tool[]>([]);
+
+  // ── Inline edit state ───────────────────────────────────────────────────────
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<{
+    name: string;
+    description: string;
+    role: string;
+    instructions: string;
+    modelProvider: string;
+    modelName: string;
+    temperature: number;
+    maxIterations: number;
+    allowedToolIds: string[];
+  } | null>(null);
+
+  function startEdit() {
+    if (!agent) return;
+    setDraft({
+      name: agent.name,
+      description: agent.description ?? "",
+      role: agent.role ?? "",
+      instructions: agent.instructions ?? "",
+      modelProvider: agent.modelProvider ?? "",
+      modelName: agent.modelName ?? "",
+      temperature: agent.temperature,
+      maxIterations: agent.maxIterations,
+      allowedToolIds: [...(agent.allowedToolIds ?? [])],
+    });
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setDraft(null);
+  }
+
+  function toggleAllowedTool(toolId: string) {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      allowedToolIds: draft.allowedToolIds.includes(toolId)
+        ? draft.allowedToolIds.filter((tid) => tid !== toolId)
+        : [...draft.allowedToolIds, toolId],
+    });
+  }
+
+  async function saveEdit() {
+    if (!agent || !draft) return;
+    setSaving(true);
+    try {
+      const updated = await updateAgent(agent.id, {
+        name: draft.name.trim(),
+        description: draft.description,
+        role: draft.role,
+        instructions: draft.instructions,
+        modelProvider: draft.modelProvider,
+        modelName: draft.modelName,
+        temperature: draft.temperature,
+        maxIterations: draft.maxIterations,
+        allowedToolIds: draft.allowedToolIds,
+      });
+      if (!updated) throw new Error("update failed");
+      setAgent(updated);
+      setAllowedTools(allTools.filter((t) => (updated.allowedToolIds ?? []).includes(t.id)));
+      setEditing(false);
+      setDraft(null);
+      toast.success("Agent updated.");
+    } catch {
+      toast.error("Failed to update agent.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleDelete() {
     if (!confirm(`Delete agent "${agent?.name}"? This cannot be undone.`)) return;
@@ -123,6 +201,7 @@ export default function AgentDetailPage() {
           getRunsForAgent(id),
         ]);
         setAgent(a);
+        setAllTools(allTools);
         setAllowedTools(allTools.filter((t) => (a?.allowedToolIds ?? []).includes(t.id)));
         setRuns(agentRuns);
       } catch {
@@ -202,6 +281,37 @@ export default function AgentDetailPage() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {!editing ? (
+              <button
+                type="button"
+                onClick={startEdit}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                style={{ background: "var(--surface-2)" }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                >
+                  <X className="h-3.5 w-3.5" /> Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveEdit()}
+                  disabled={saving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#2563EB] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-40"
+                >
+                  {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Save
+                </button>
+              </>
+            )}
             <Link
               href={"/agents/new" as never}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -265,26 +375,113 @@ export default function AgentDetailPage() {
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Identity</h2>
-              <div className="divide-y divide-border/30">
-                <KVRow label="ID" value={<code className="font-mono text-[11px]">{agent.id}</code>} />
-                <KVRow label="Slug" value={<code className="font-mono text-[11px]">{agent.slug}</code>} />
-                <KVRow label="Type" value={TYPE_LABELS[agent.type]} />
-                <KVRow label="Role" value={agent.role || "—"} />
-                <KVRow label="Status" value={agent.status} />
-                <KVRow label="Total runs" value={(agent.totalRuns ?? 0).toLocaleString()} />
-                <KVRow label="Last used" value={timeAgo(agent.lastUsedAt)} />
-                <KVRow label="Created" value={timeAgo(agent.createdAt)} />
-              </div>
+              {editing && draft ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Name</label>
+                    <input
+                      value={draft.name}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Role</label>
+                    <input
+                      value={draft.role}
+                      onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Description</label>
+                    <textarea
+                      value={draft.description}
+                      onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                      rows={3}
+                      className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                  <div className="divide-y divide-border/30">
+                    <KVRow label="ID" value={<code className="font-mono text-[11px]">{agent.id}</code>} />
+                    <KVRow label="Slug" value={<code className="font-mono text-[11px]">{agent.slug}</code>} />
+                    <KVRow label="Type" value={TYPE_LABELS[agent.type]} />
+                    <KVRow label="Status" value={agent.status} />
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-border/30">
+                  <KVRow label="ID" value={<code className="font-mono text-[11px]">{agent.id}</code>} />
+                  <KVRow label="Slug" value={<code className="font-mono text-[11px]">{agent.slug}</code>} />
+                  <KVRow label="Type" value={TYPE_LABELS[agent.type]} />
+                  <KVRow label="Role" value={agent.role || "—"} />
+                  <KVRow label="Status" value={agent.status} />
+                  <KVRow label="Total runs" value={(agent.totalRuns ?? 0).toLocaleString()} />
+                  <KVRow label="Last used" value={timeAgo(agent.lastUsedAt)} />
+                  <KVRow label="Created" value={timeAgo(agent.createdAt)} />
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Model Config</h2>
-              <div className="divide-y divide-border/30">
-                <KVRow label="Provider" value={agent.modelProvider || "—"} />
-                <KVRow label="Model" value={<code className="font-mono text-[11px]">{agent.modelName || "—"}</code>} />
-                <KVRow label="Temperature" value={String(agent.temperature)} />
-                <KVRow label="Max iterations" value={String(agent.maxIterations)} />
-              </div>
+              {editing && draft ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-muted-foreground">Provider</label>
+                      <input
+                        value={draft.modelProvider}
+                        onChange={(e) => setDraft({ ...draft, modelProvider: e.target.value })}
+                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-muted-foreground">Model</label>
+                      <input
+                        value={draft.modelName}
+                        onChange={(e) => setDraft({ ...draft, modelName: e.target.value })}
+                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 font-mono text-[12px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-muted-foreground">Temperature</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={draft.temperature}
+                        onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })}
+                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-muted-foreground">Max iterations</label>
+                      <input
+                        type="number"
+                        value={draft.maxIterations}
+                        onChange={(e) => setDraft({ ...draft, maxIterations: Number(e.target.value) })}
+                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-border/30">
+                  <KVRow label="Provider" value={agent.modelProvider || "—"} />
+                  <KVRow label="Model" value={<code className="font-mono text-[11px]">{agent.modelName || "—"}</code>} />
+                  <KVRow label="Temperature" value={String(agent.temperature)} />
+                  <KVRow label="Max iterations" value={String(agent.maxIterations)} />
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-border/60 px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
@@ -312,7 +509,16 @@ export default function AgentDetailPage() {
               <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>System Prompt</h2>
               <span className="text-[11px] text-muted-foreground">{(agent.instructions ?? "").length} chars</span>
             </div>
-            {agent.instructions ? (
+            {editing && draft ? (
+              <textarea
+                value={draft.instructions}
+                onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
+                rows={16}
+                placeholder="You are an assistant that..."
+                className="min-h-[300px] w-full resize-y px-5 py-4 font-mono text-[12px] leading-6 outline-none"
+                style={{ background: "transparent", color: "var(--text-primary)" }}
+              />
+            ) : agent.instructions ? (
               <pre className="min-h-[300px] px-5 py-4 font-mono text-[12px] leading-6 text-muted-foreground whitespace-pre-wrap">
                 {agent.instructions}
               </pre>
@@ -330,13 +536,54 @@ export default function AgentDetailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
-                {allowedTools.length} allowed tool{allowedTools.length !== 1 ? "s" : ""}
+                {editing && draft ? draft.allowedToolIds.length : allowedTools.length} allowed tool{(editing && draft ? draft.allowedToolIds.length : allowedTools.length) !== 1 ? "s" : ""}
               </p>
               <Link href={"/tools/new" as never} className="text-[12px] text-primary hover:underline">
                 Register tool →
               </Link>
             </div>
-            {allowedTools.length === 0 ? (
+            {editing && draft ? (
+              allTools.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+                  <Wrench className="h-8 w-8 text-muted-foreground/20" />
+                  <p className="text-sm text-muted-foreground">No tools registered yet.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {allTools.map((tool) => {
+                    const checked = draft.allowedToolIds.includes(tool.id);
+                    return (
+                      <button
+                        type="button"
+                        key={tool.id}
+                        onClick={() => toggleAllowedTool(tool.id)}
+                        className={cn(
+                          "group flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
+                          checked ? "border-primary/40" : "border-border/60 hover:border-border",
+                        )}
+                        style={{ background: checked ? "rgba(37,99,235,0.05)" : "var(--surface-1)" }}
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.15)" }}>
+                          <Wrench className="h-4 w-4 text-cyan-700" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+                            {tool.name}
+                          </p>
+                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{tool.description}</p>
+                        </div>
+                        <div className={cn(
+                          "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                          checked ? "border-primary bg-primary text-white" : "border-border/60",
+                        )}>
+                          {checked && <Check className="h-3 w-3" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : allowedTools.length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
                 <Wrench className="h-8 w-8 text-muted-foreground/20" />
                 <p className="text-sm text-muted-foreground">No tools allowed for this agent.</p>

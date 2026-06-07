@@ -5,18 +5,22 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Check,
   History,
   KeyRound,
+  Pencil,
   RefreshCw,
   ScrollText,
   Shield,
   Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { RunEvent, Tool } from "@/types/platform";
-import { getTool, getCallsForTool } from "@/lib/repository";
+import type { Connection } from "@/types/connections";
+import { getTool, getCallsForTool, updateTool, getConnections } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -89,16 +93,96 @@ export default function ToolDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tool, setTool] = useState<Tool | null>(null);
   const [calls, setCalls] = useState<RunEvent[]>([]);
+  const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
+
+  // ── Inline edit state ───────────────────────────────────────────────────────
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<{
+    name: string;
+    description: string;
+    riskLevel: Tool["riskLevel"];
+    timeoutMs: number;
+    idempotent: boolean;
+    httpMethod: string;
+    httpUrl: string;
+    httpHeaders: string;
+    httpBodyTemplate: string;
+    connectionId: string;
+  } | null>(null);
+
+  function startEdit() {
+    if (!tool) return;
+    setDraft({
+      name: tool.name,
+      description: tool.description ?? "",
+      riskLevel: tool.riskLevel,
+      timeoutMs: tool.timeoutMs,
+      idempotent: tool.idempotent,
+      httpMethod: tool.httpConfig?.method ?? "GET",
+      httpUrl: tool.httpConfig?.url ?? "",
+      httpHeaders: tool.httpConfig ? JSON.stringify(tool.httpConfig.headers ?? {}, null, 2) : "{}",
+      httpBodyTemplate: tool.httpConfig?.bodyTemplate ?? "",
+      connectionId: tool.connectionId ?? "",
+    });
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setDraft(null);
+  }
+
+  async function saveEdit() {
+    if (!tool || !draft) return;
+    let headers: Record<string, string> = {};
+    try {
+      headers = draft.httpHeaders.trim() ? JSON.parse(draft.httpHeaders) : {};
+    } catch {
+      toast.error("Headers must be valid JSON.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: Partial<Tool> & Record<string, unknown> = {
+        name: draft.name.trim(),
+        description: draft.description,
+        riskLevel: draft.riskLevel,
+        timeoutMs: draft.timeoutMs,
+        connectionId: draft.connectionId || null,
+      };
+      if (tool.httpConfig || tool.type === "http") {
+        payload.config = {
+          ...(tool.config ?? {}),
+          method: draft.httpMethod,
+          url: draft.httpUrl,
+          headers,
+          bodyTemplate: draft.httpBodyTemplate || undefined,
+        };
+      }
+      const updated = await updateTool(tool.id, payload);
+      if (!updated) throw new Error("update failed");
+      setTool(updated);
+      setEditing(false);
+      setDraft(null);
+      toast.success("Tool updated.");
+    } catch {
+      toast.error("Failed to update tool.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const [t, c] = await Promise.all([getTool(id), getCallsForTool(id)]);
+        const [t, c, conns] = await Promise.all([getTool(id), getCallsForTool(id), getConnections().catch(() => [])]);
         setTool(t);
         setCalls(c as RunEvent[]);
+        setConnections(conns);
       } catch {
         toast.error("Failed to load tool.");
       } finally {
@@ -174,6 +258,39 @@ export default function ToolDetailPage() {
             </div>
             <p className="mt-0.5 text-sm text-muted-foreground">{tool.description || "No description"}</p>
           </div>
+
+          {/* Edit / Save / Cancel */}
+          {!editing ? (
+            <button
+              type="button"
+              onClick={startEdit}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              style={{ background: "var(--surface-2)" }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          ) : (
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={saving}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+              >
+                <X className="h-3.5 w-3.5" /> Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveEdit()}
+                disabled={saving}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#2563EB] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-40"
+              >
+                {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                Save
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -215,13 +332,43 @@ export default function ToolDetailPage() {
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Identity</h2>
-              <div className="divide-y divide-border/30">
-                <KVRow label="ID" value={<code className="font-mono text-[11px]">{tool.id}</code>} />
-                <KVRow label="Slug" value={<code className="font-mono text-[11px]">{tool.slug}</code>} />
-                <KVRow label="Type" value={<span className="capitalize">{displayToolType(tool)}</span>} />
-                <KVRow label="Risk level" value={RISK_LABELS[tool.riskLevel]} />
-                <KVRow label="Status" value={tool.status} />
-              </div>
+              {editing && draft ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Name</label>
+                    <input
+                      value={draft.name}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Description</label>
+                    <textarea
+                      value={draft.description}
+                      onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                      rows={3}
+                      className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                  <div className="divide-y divide-border/30">
+                    <KVRow label="ID" value={<code className="font-mono text-[11px]">{tool.id}</code>} />
+                    <KVRow label="Slug" value={<code className="font-mono text-[11px]">{tool.slug}</code>} />
+                    <KVRow label="Type" value={<span className="capitalize">{displayToolType(tool)}</span>} />
+                    <KVRow label="Status" value={tool.status} />
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-border/30">
+                  <KVRow label="ID" value={<code className="font-mono text-[11px]">{tool.id}</code>} />
+                  <KVRow label="Slug" value={<code className="font-mono text-[11px]">{tool.slug}</code>} />
+                  <KVRow label="Type" value={<span className="capitalize">{displayToolType(tool)}</span>} />
+                  <KVRow label="Risk level" value={RISK_LABELS[tool.riskLevel]} />
+                  <KVRow label="Status" value={tool.status} />
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
@@ -234,30 +381,76 @@ export default function ToolDetailPage() {
               </div>
             </div>
 
-            {tool.httpConfig && (
+            {(tool.httpConfig || (editing && tool.type === "http")) && (
               <div className="rounded-xl border border-border/60 p-5 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
                 <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>HTTP Endpoint</h2>
-                <div className="flex items-center gap-2">
-                  <code className="rounded bg-sky-50 px-2 py-0.5 font-mono text-[11px] text-sky-700">
-                    {tool.httpConfig.method}
-                  </code>
-                  <code className="flex-1 truncate font-mono text-[12px] text-muted-foreground">
-                    {tool.httpConfig.url}
-                  </code>
-                </div>
-                {Object.keys(tool.httpConfig.headers).length > 0 && (
-                  <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[10px] text-muted-foreground">
-                    {JSON.stringify(tool.httpConfig.headers, null, 2)}
-                  </pre>
-                )}
-                {tool.httpConfig.bodyTemplate && (
-                  <div className="mt-3">
-                    <p className="mb-1.5 text-[11px] text-muted-foreground">Body template</p>
-                    <pre className="overflow-x-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[10px] text-muted-foreground">
-                      {tool.httpConfig.bodyTemplate}
-                    </pre>
+                {editing && draft ? (
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <select
+                        value={draft.httpMethod}
+                        onChange={(e) => setDraft({ ...draft, httpMethod: e.target.value })}
+                        className="h-8 shrink-0 rounded-lg border border-border/60 px-2 text-[12px]"
+                        style={{ background: "var(--surface-2)" }}
+                      >
+                        {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      <input
+                        value={draft.httpUrl}
+                        onChange={(e) => setDraft({ ...draft, httpUrl: e.target.value })}
+                        placeholder="https://api.example.com/v1/resource"
+                        className="h-8 flex-1 rounded-lg border border-border/60 px-2.5 font-mono text-[12px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-muted-foreground">Headers (JSON)</label>
+                      <textarea
+                        value={draft.httpHeaders}
+                        onChange={(e) => setDraft({ ...draft, httpHeaders: e.target.value })}
+                        rows={4}
+                        className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 font-mono text-[11px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-muted-foreground">Body template</label>
+                      <textarea
+                        value={draft.httpBodyTemplate}
+                        onChange={(e) => setDraft({ ...draft, httpBodyTemplate: e.target.value })}
+                        rows={4}
+                        className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 font-mono text-[11px]"
+                        style={{ background: "var(--surface-2)" }}
+                      />
+                    </div>
                   </div>
-                )}
+                ) : tool.httpConfig ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <code className="rounded bg-sky-50 px-2 py-0.5 font-mono text-[11px] text-sky-700">
+                        {tool.httpConfig.method}
+                      </code>
+                      <code className="flex-1 truncate font-mono text-[12px] text-muted-foreground">
+                        {tool.httpConfig.url}
+                      </code>
+                    </div>
+                    {Object.keys(tool.httpConfig.headers).length > 0 && (
+                      <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[10px] text-muted-foreground">
+                        {JSON.stringify(tool.httpConfig.headers, null, 2)}
+                      </pre>
+                    )}
+                    {tool.httpConfig.bodyTemplate && (
+                      <div className="mt-3">
+                        <p className="mb-1.5 text-[11px] text-muted-foreground">Body template</p>
+                        <pre className="overflow-x-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[10px] text-muted-foreground">
+                          {tool.httpConfig.bodyTemplate}
+                        </pre>
+                      </div>
+                    )}
+                  </>
+                ) : null}
               </div>
             )}
 
@@ -298,7 +491,22 @@ export default function ToolDetailPage() {
           <div className="space-y-5">
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Connection</h2>
-              {tool.authConnectionRef ? (
+              {editing && draft ? (
+                <div>
+                  <label className="mb-1 block text-[11px] text-muted-foreground">Connection</label>
+                  <select
+                    value={draft.connectionId}
+                    onChange={(e) => setDraft({ ...draft, connectionId: e.target.value })}
+                    className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                    style={{ background: "var(--surface-2)" }}
+                  >
+                    <option value="">No connection</option>
+                    {connections.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : tool.authConnectionRef ? (
                 <div className="divide-y divide-border/30">
                   <KVRow
                     label="Connection ref"
@@ -392,11 +600,40 @@ export default function ToolDetailPage() {
 
             <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Execution</h2>
-              <div className="divide-y divide-border/30">
-                <KVRow label="Timeout" value={`${tool.timeoutMs >= 1000 ? `${tool.timeoutMs / 1000}s` : `${tool.timeoutMs}ms`}`} />
-                <KVRow label="Idempotent" value={tool.idempotent ? "Yes" : "No"} />
-                <KVRow label="Risk level" value={RISK_LABELS[tool.riskLevel]} />
-              </div>
+              {editing && draft ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Timeout (ms)</label>
+                    <input
+                      type="number"
+                      value={draft.timeoutMs}
+                      onChange={(e) => setDraft({ ...draft, timeoutMs: Number(e.target.value) })}
+                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">Risk level</label>
+                    <select
+                      value={draft.riskLevel}
+                      onChange={(e) => setDraft({ ...draft, riskLevel: e.target.value as Tool["riskLevel"] })}
+                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    >
+                      {(["low", "medium", "high", "critical"] as const).map((r) => (
+                        <option key={r} value={r}>{RISK_LABELS[r]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <KVRow label="Idempotent" value={tool.idempotent ? "Yes" : "No"} />
+                </div>
+              ) : (
+                <div className="divide-y divide-border/30">
+                  <KVRow label="Timeout" value={`${tool.timeoutMs >= 1000 ? `${tool.timeoutMs / 1000}s` : `${tool.timeoutMs}ms`}`} />
+                  <KVRow label="Idempotent" value={tool.idempotent ? "Yes" : "No"} />
+                  <KVRow label="Risk level" value={RISK_LABELS[tool.riskLevel]} />
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-border/60 px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
