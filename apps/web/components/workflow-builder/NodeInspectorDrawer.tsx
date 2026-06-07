@@ -10,12 +10,12 @@ import { getDebugNodeAttempts, getDebugNodeDetail, type DebugNodeDetail } from "
 
 type TabId = "inputs" | "outputs" | "variables" | "failure" | "raw";
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: "inputs",    label: "Resolved Inputs" },
-  { id: "outputs",   label: "Outputs" },
-  { id: "variables", label: "Variable Mapping" },
-  { id: "failure",   label: "Failure Reason" },
-  { id: "raw",       label: "Raw JSON" },
+const TABS: { id: TabId; label: string; short: string }[] = [
+  { id: "inputs",    label: "Resolved Inputs",  short: "Inputs" },
+  { id: "outputs",   label: "Outputs",          short: "Outputs" },
+  { id: "variables", label: "Variable Mapping", short: "Variables" },
+  { id: "failure",   label: "Failure Reason",   short: "Failure" },
+  { id: "raw",       label: "Raw JSON",         short: "Raw JSON" },
 ];
 
 function tryParse(json: string | null | undefined): unknown {
@@ -159,12 +159,14 @@ function EmptyState({ icon: Icon = Sparkles, text }: { icon?: React.ElementType;
 // ── Main drawer ───────────────────────────────────────────────────────────────
 
 export function NodeInspectorDrawer({
-  runId, nodeId, nodeLabel, nodeType, onClose,
+  runId, nodeId, nodeLabel, nodeType, inputMapping, outputMapping, onClose,
 }: {
   runId: string;
   nodeId: string;
   nodeLabel: string;
   nodeType: string;
+  inputMapping?: Record<string, string>;
+  outputMapping?: Record<string, string>;
   onClose: () => void;
 }) {
   const [width, setWidth]       = useState(420);
@@ -280,21 +282,22 @@ export function NodeInspectorDrawer({
               )}
             </div>
 
-            {/* Tab bar */}
-            <div className="flex items-center overflow-x-auto border-b border-slate-200" style={{ background: "#F8FAFC" }}>
+            {/* Tab bar — equal-width grid, no horizontal scrolling */}
+            <div className="grid grid-cols-5 border-b border-slate-200" style={{ background: "#F8FAFC" }}>
               {TABS.map(tab => (
                 <button
                   key={tab.id}
                   type="button"
+                  title={tab.label}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    "inline-flex h-10 shrink-0 items-center gap-1 border-b-2 px-3.5 text-[12px] font-semibold transition-colors whitespace-nowrap",
+                    "relative flex h-10 items-center justify-center gap-1 border-b-2 px-1 text-[11px] font-semibold transition-colors truncate",
                     activeTab === tab.id ? "border-amber-500 text-amber-700" : "border-transparent text-slate-500 hover:text-slate-700",
                   )}
                 >
-                  {tab.label}
+                  <span className="truncate">{tab.short}</span>
                   {tab.id === "failure" && current.status === "failed" && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                    <span className="absolute top-1.5 right-2.5 h-1.5 w-1.5 rounded-full bg-red-500" />
                   )}
                 </button>
               ))}
@@ -304,7 +307,7 @@ export function NodeInspectorDrawer({
             <div className="flex-1 overflow-y-auto p-4">
               {activeTab === "inputs"    && <ResolvedInputsTab detail={current} />}
               {activeTab === "outputs"   && <OutputsTab detail={current} />}
-              {activeTab === "variables" && <VariableMappingTab detail={current} />}
+              {activeTab === "variables" && <VariableMappingTab detail={current} inputMapping={inputMapping} outputMapping={outputMapping} />}
               {activeTab === "failure"   && <FailureReasonTab detail={current} />}
               {activeTab === "raw"       && <RawJsonTab detail={current} />}
             </div>
@@ -472,37 +475,114 @@ interface VariableEntry {
   missing?: boolean;
 }
 
-function VariableMappingTab({ detail }: { detail: DebugNodeDetail }) {
-  const vars = (tryParse(detail.variableSources) ?? tryParse(detail.resolvedVariables)) as VariableEntry[] | null;
-  if (!vars || !Array.isArray(vars) || vars.length === 0) {
-    return <EmptyState text="This node does not reference any template variables." />;
-  }
+function FlowArrow() {
   return (
-    <div className="space-y-2.5">
-      {vars.map((v, i) => (
-        <div key={i} className="rounded-xl border overflow-hidden" style={{ borderColor: v.missing ? "#FECACA" : "#E2E8F0" }}>
-          <div className="flex items-center justify-between px-3 py-2" style={{ background: v.missing ? "#FEF2F2" : "#F8FAFC" }}>
-            <code className="text-[12px] font-mono font-semibold" style={{ color: "#1D4ED8" }}>{v.variable ?? `{{${v.field}}}`}</code>
-            {v.missing && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
-                <AlertTriangle className="h-2.5 w-2.5" /> MISSING
-              </span>
-            )}
+    <svg width="40" height="16" viewBox="0 0 40 16" fill="none" className="shrink-0">
+      <line x1="2" y1="8" x2="32" y2="8" stroke="#94A3B8" strokeWidth="1.5" strokeDasharray="4 3">
+        <animate attributeName="stroke-dashoffset" from="14" to="0" dur="0.7s" repeatCount="indefinite" />
+      </line>
+      <path d="M27 3 L34 8 L27 13" stroke="#94A3B8" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MappingFlowCard({
+  title, subtitle, rows, direction,
+}: {
+  title: string;
+  subtitle: string;
+  rows: { left: string; right: string }[];
+  direction: "in" | "out";
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center gap-1.5 px-3 py-2" style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+        <span className="text-[11.5px] font-bold text-slate-700">{title}</span>
+        <span className="text-[10.5px] text-slate-400">· {subtitle}</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-2.5">
+            <code className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-[11.5px] font-mono"
+              style={{ background: direction === "in" ? "#EFF6FF" : "#FAFBFC", color: direction === "in" ? "#1D4ED8" : "#475569" }}>
+              {direction === "in" ? r.right : r.left}
+            </code>
+            <FlowArrow />
+            <code className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-[11.5px] font-mono"
+              style={{ background: direction === "in" ? "#FAFBFC" : "#ECFDF5", color: direction === "in" ? "#475569" : "#047857" }}>
+              {direction === "in" ? r.left : r.right}
+            </code>
           </div>
-          <div className="px-3 py-2.5 space-y-1.5 text-[12px]">
-            <Row label="Resolved value">
-              {v.resolvedValue == null
-                ? <span className="font-mono text-red-600">null / undefined</span>
-                : <span className="font-mono text-slate-700">{typeof v.resolvedValue === "string" ? `"${v.resolvedValue}"` : JSON.stringify(v.resolvedValue)}</span>}
-            </Row>
-            {v.sourceNode && <Row label="Source"><span className="text-slate-700">{v.sourceNode}</span></Row>}
-            {v.sourcePath && <Row label="Path"><code className="font-mono text-slate-500">{v.sourcePath}</code></Row>}
-            {v.fallback !== undefined && v.fallback !== null && (
-              <Row label="Fallback used"><span className="font-mono text-amber-700">{JSON.stringify(v.fallback)}</span></Row>
-            )}
-          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VariableMappingTab({
+  detail, inputMapping, outputMapping,
+}: {
+  detail: DebugNodeDetail;
+  inputMapping?: Record<string, string>;
+  outputMapping?: Record<string, string>;
+}) {
+  const vars = (tryParse(detail.variableSources) ?? tryParse(detail.resolvedVariables)) as VariableEntry[] | null;
+  const inRows  = inputMapping  ? Object.entries(inputMapping).map(([left, right]) => ({ left, right })) : [];
+  const outRows = outputMapping ? Object.entries(outputMapping).map(([left, right]) => ({ left, right })) : [];
+  const hasVars = Array.isArray(vars) && vars.length > 0;
+
+  if (!hasVars && inRows.length === 0 && outRows.length === 0) {
+    return <EmptyState text="This node does not reference any template variables or field mappings." />;
+  }
+
+  return (
+    <div className="space-y-4">
+      {inRows.length > 0 && (
+        <MappingFlowCard
+          title="Inputs into this node"
+          subtitle="source field → node field"
+          rows={inRows}
+          direction="in"
+        />
+      )}
+      {outRows.length > 0 && (
+        <MappingFlowCard
+          title="Outputs from this node"
+          subtitle="node field → published variable"
+          rows={outRows}
+          direction="out"
+        />
+      )}
+
+      {hasVars && (
+        <div className="space-y-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Template variables resolved</p>
+          {vars!.map((v, i) => (
+            <div key={i} className="rounded-xl border overflow-hidden" style={{ borderColor: v.missing ? "#FECACA" : "#E2E8F0" }}>
+              <div className="flex items-center justify-between px-3 py-2" style={{ background: v.missing ? "#FEF2F2" : "#F8FAFC" }}>
+                <code className="text-[12px] font-mono font-semibold" style={{ color: "#1D4ED8" }}>{v.variable ?? `{{${v.field}}}`}</code>
+                {v.missing && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                    <AlertTriangle className="h-2.5 w-2.5" /> MISSING
+                  </span>
+                )}
+              </div>
+              <div className="px-3 py-2.5 space-y-1.5 text-[12px]">
+                <Row label="Resolved value">
+                  {v.resolvedValue == null
+                    ? <span className="font-mono text-red-600">null / undefined</span>
+                    : <span className="font-mono text-slate-700">{typeof v.resolvedValue === "string" ? `"${v.resolvedValue}"` : JSON.stringify(v.resolvedValue)}</span>}
+                </Row>
+                {v.sourceNode && <Row label="Source"><span className="text-slate-700">{v.sourceNode}</span></Row>}
+                {v.sourcePath && <Row label="Path"><code className="font-mono text-slate-500">{v.sourcePath}</code></Row>}
+                {v.fallback !== undefined && v.fallback !== null && (
+                  <Row label="Fallback used"><span className="font-mono text-amber-700">{JSON.stringify(v.fallback)}</span></Row>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

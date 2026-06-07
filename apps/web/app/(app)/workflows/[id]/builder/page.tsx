@@ -1323,14 +1323,20 @@ function WorkflowBuilderInner() {
                 nodeId={inspectorNodeId}
                 nodeLabel={(n.data as WFNodeData)?.label ?? inspectorNodeId}
                 nodeType={n.type ?? "node"}
+                inputMapping={(n.data as WFNodeData)?.inputMappingJson}
+                outputMapping={(n.data as WFNodeData)?.outputMappingJson}
                 onClose={() => setInspectorNodeId(null)}
               />
             );
           })()}
         </div>
 
-        {/* Right: Inspector */}
-        <div className="w-80 shrink-0 overflow-hidden" style={{ borderLeft: "1px solid #E2E8F0", background: "#FFFFFF" }}>
+        {/* Right: Inspector — hidden while the debug Node Inspector drawer is open
+            so the two panels don't sandwich the canvas */}
+        <div className={cn(
+          "shrink-0 overflow-hidden transition-all duration-150",
+          inspectorNodeId ? "w-0" : "w-80",
+        )} style={{ borderLeft: inspectorNodeId ? "none" : "1px solid #E2E8F0", background: "#FFFFFF" }}>
           <WorkflowInspector
             selectedNode={selectedNode}
             nodes={nodes as Node<WFNodeData>[]}

@@ -84,7 +84,9 @@ class ToolNodeExecutor(
         val syntheticNode   = node.copy(config = syntheticConfig)
 
         val result: NodeResult = when (tool.type) {
-            "http" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            // Aliases for the canonical "http" type — some tools (e.g. architect-generated
+            // before the type normalizer existed) may be persisted with these variants.
+            "http", "http_api", "rest_api", "api", "rest" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
             // "database" is the canonical type in the tools table (see V001 migration).
             // Distinguish read vs write by inspecting the first keyword of the SQL statement —
