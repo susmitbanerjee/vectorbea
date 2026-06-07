@@ -20,10 +20,25 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
-export function Mermaid({ chart }: { chart: string }) {
+function decodeChart(encodedChart?: string, chart?: string): string {
+  if (encodedChart) {
+    try {
+      if (typeof window !== "undefined" && typeof window.atob === "function") {
+        return decodeURIComponent(escape(window.atob(encodedChart)));
+      }
+      return Buffer.from(encodedChart, "base64").toString("utf-8");
+    } catch {
+      // fall through
+    }
+  }
+  return chart ?? "";
+}
+
+export function Mermaid({ chart, encodedChart }: { chart?: string; encodedChart?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const resolvedChart = decodeChart(encodedChart, chart);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +60,7 @@ export function Mermaid({ chart }: { chart: string }) {
       // Reset content to the raw chart source on every run so mermaid.run()
       // can re-process it (it replaces the element's innerHTML with rendered SVG).
       node.removeAttribute("data-processed");
-      node.innerHTML = chart;
+      node.innerHTML = resolvedChart;
 
       try {
         await mermaid.run({ nodes: [node] });
@@ -62,7 +77,7 @@ export function Mermaid({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart]);
+  }, [resolvedChart]);
 
   if (error) {
     return (
@@ -70,7 +85,7 @@ export function Mermaid({ chart }: { chart: string }) {
         <p className="mb-2 text-xs font-medium text-amber-800">
           Diagram failed to render: {error}
         </p>
-        <pre className="overflow-x-auto text-xs text-slate-500">{chart}</pre>
+        <pre className="overflow-x-auto text-xs text-slate-500">{resolvedChart}</pre>
       </div>
     );
   }
@@ -83,7 +98,7 @@ export function Mermaid({ chart }: { chart: string }) {
         className="mermaid"
         style={{ visibility: ready ? "visible" : "hidden", height: ready ? "auto" : 0 }}
       >
-        {chart}
+        {resolvedChart}
       </div>
     </div>
   );

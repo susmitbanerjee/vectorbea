@@ -70,8 +70,9 @@ const prettyCodeOptions = {
  */
 function preprocessMermaid(source: string): string {
   return source.replace(/```mermaid\n([\s\S]*?)```/g, (_match, chart: string) => {
-    const escaped = chart.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
-    return `<Mermaid chart={\`${escaped.trim()}\`} />`;
+    const trimmed = chart.trim();
+    const b64 = Buffer.from(trimmed, "utf-8").toString("base64");
+    return `<Mermaid encodedChart="${b64}" />`;
   });
 }
 
