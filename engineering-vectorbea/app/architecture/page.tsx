@@ -41,7 +41,7 @@ export default function ArchitecturePage() {
         <h1 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Architecture</h1>
         <p className="mt-3 text-base leading-relaxed text-slate-500">
           A high-level map of how Vectorbea is put together. This is intentionally a simple system
-          — the goal was to ship something durable and correct before reaching for anything more
+          The early goal was to ship something durable and correct before reaching for anything more
           elaborate. We go deeper on each piece in the articles.
         </p>
       </div>

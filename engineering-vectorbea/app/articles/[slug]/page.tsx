@@ -87,7 +87,7 @@ export default async function ArticlePage({ params }: { params: { slug: string }
           {seriesInfo && (
             <div className="mt-8 rounded-xl border border-accent-blue/20 bg-accent-blue/5 px-5 py-4">
               <p className="text-sm font-semibold text-ink">
-                {seriesInfo.title} — Part {article.frontMatter.part}
+                {seriesInfo.title} · Part {article.frontMatter.part}
               </p>
               <p className="mt-1 text-sm text-slate-500">{seriesInfo.description}</p>
             </div>

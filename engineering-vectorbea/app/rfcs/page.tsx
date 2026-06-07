@@ -6,7 +6,7 @@ import { TagPill } from "@/components/TagPill";
 
 export const metadata: Metadata = buildMetadata({
   title: "RFCs",
-  description: "Design proposals for Vectorbea's execution engine — context, goals, alternatives considered, and open questions.",
+  description: "Design proposals for Vectorbea's execution engine: context, goals, alternatives considered, and open questions.",
   path: "/rfcs",
 });
 

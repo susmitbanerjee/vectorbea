@@ -9,14 +9,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0f172a",
+        ink: "#1c1408",
         slate: {
-          850: "#172033",
+          50: "#fbf8f2",
+          100: "#f3ede1",
+          200: "#e6dccb",
+          300: "#d3c4a8",
+          400: "#a8987c",
+          500: "#8a7a60",
+          600: "#6b5d47",
+          700: "#544838",
+          800: "#3a3122",
+          850: "#2a2010",
+          900: "#1c1408",
         },
         accent: {
-          blue: "#3b82f6",
-          violet: "#7c3aed",
-          teal: "#0d9488",
+          blue: "#d97706",
+          violet: "#b45309",
+          teal: "#a16207",
+        },
+        honey: {
+          50: "#fffaf0",
+          100: "#fef3da",
+          400: "#f5b942",
+          500: "#f8d36a",
         },
       },
       maxWidth: {

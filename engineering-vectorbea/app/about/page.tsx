@@ -18,7 +18,7 @@ export default function AboutPage() {
         <p>
           Vectorbea Engineering is a public engineering blog written by the team building{" "}
           <a href={SITE.mainSiteUrl}>Vectorbea</a>, a durable, long-running visual agentic workflow
-          builder. Vectorbea itself is a private product — this blog is where we write about the
+          builder. Vectorbea itself is a private product. This blog is where we write about the
           engineering decisions, tradeoffs, and mistakes behind it, in the kind of detail we'd want
           to read ourselves.
         </p>
@@ -32,14 +32,14 @@ export default function AboutPage() {
         <p>
           <strong>{SITE.author.name}</strong> is a backend engineer with 9+ years building
           distributed systems in Java and Kotlin. At Vectorbea, Susmit works on the execution
-          engine, worker orchestration, and event history — the durability layer that the rest of
+          engine, worker orchestration, and event history: the durability layer that the rest of
           the product sits on top of.
         </p>
 
         <h2>Why we write this</h2>
         <p>
           Most of what we learn building Vectorbea comes from reading other teams' write-ups about
-          systems they've shipped — the honest ones, with the parts that didn't work included. This
+          systems they've shipped: the honest ones, with the parts that didn't work included. This
           is our attempt to return the favor. We try to be specific about what we built, why, and
           what we'd do differently, without overselling the scale we're operating at. We're a small
           team; these are notes from the trenches, not claims of having solved distributed systems.

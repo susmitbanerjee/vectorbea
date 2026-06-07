@@ -3,7 +3,7 @@ export const SITE = {
   shortName: "Vectorbea Eng",
   tagline: "Engineering durable AI workflows.",
   description:
-    "Engineering notes from the team building Vectorbea — a durable, long-running visual agentic workflow builder. Execution guarantees, retries, checkpoints, approvals, BYOK, and worker orchestration.",
+    "Engineering notes from the team building Vectorbea, a durable, long-running visual agentic workflow builder. Execution guarantees, retries, checkpoints, approvals, BYOK, and worker orchestration.",
   url: "https://engineering.vectorbea.com",
   mainSiteUrl: "https://vectorbea.com",
   githubUrl: "https://github.com/vectorbea",
@@ -39,6 +39,6 @@ export const SERIES = {
   "building-vectorbea": {
     title: "Building Vectorbea",
     description:
-      "A running series on the design and engineering decisions behind Vectorbea's durable execution engine — from event history to approval gates to BYOK.",
+      "A running series on the design and engineering decisions behind Vectorbea's durable execution engine: from event history to approval gates to BYOK.",
   },
 };

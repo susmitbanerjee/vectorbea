@@ -1,6 +1,6 @@
 ---
 title: "RFC-001: Workflow Run Model"
-description: "Proposing a durable, replayable run model for Vectorbea workflows — runs, steps, checkpoints, and how they relate to the event history."
+description: "Proposing a durable, replayable run model for Vectorbea workflows, runs, steps, checkpoints, and how they relate to the event history."
 date: "2026-01-05"
 author: "Susmit Banerjee"
 tags: ["execution-engine", "data-model", "rfc"]
@@ -21,7 +21,7 @@ and inspection without relying on in-memory state.
 ## Problem
 
 Our prototype held run state in memory inside the worker process executing it. This meant a
-crashed or redeployed worker lost track of in-progress runs entirely — they neither completed
+crashed or redeployed worker lost track of in-progress runs entirely, they neither completed
 nor failed cleanly, they just stopped existing from the system's point of view.
 
 ## Goals
@@ -29,7 +29,7 @@ nor failed cleanly, they just stopped existing from the system's point of view.
 - A run's state must be fully reconstructable from persisted data at any time.
 - Any worker must be able to pick up any run at its last known-good point.
 - The model must support step-level retry without re-running completed steps.
-- The model must be inspectable — a human should be able to ask "what is run X doing right now
+- The model must be inspectable, a human should be able to ask "what is run X doing right now
   and how did it get there?" and get a complete answer.
 
 ## Non-goals
@@ -49,14 +49,14 @@ step sequence number. An append-only `events` table (see the event history artic
 records everything that happens.
 
 The engine's "what should happen next" logic always derives its answer from the latest
-checkpoint plus any events appended after it — never from an in-memory cache that could disagree
+checkpoint plus any events appended after it, never from an in-memory cache that could disagree
 with persisted state.
 
 ## Alternatives considered
 
 **In-memory state with periodic snapshotting to disk.** Faster during normal operation, but
 reconstruction after a crash requires figuring out how stale the last snapshot was and replaying
-an unknown amount of in-memory-only history that no longer exists. Rejected — this reintroduces
+an unknown amount of in-memory-only history that no longer exists. Rejected, this reintroduces
 the exact problem we're trying to solve.
 
 **A single mutable `run_state` JSON column, updated in place per step.** Simpler to query, but
@@ -67,7 +67,7 @@ append-only log plus derived projections.
 ## Tradeoffs
 
 Persisting state at every step boundary adds write load and latency compared to an in-memory
-model. We accept this because the alternative — losing track of in-progress work — is
+model. We accept this because the alternative, losing track of in-progress work, is
 unacceptable for a product whose core promise is durability. The write load has, so far, not
 been a bottleneck at our current scale; we'd revisit this design if it became one.
 
@@ -75,7 +75,7 @@ been a bottleneck at our current scale; we'd revisit this design if it became on
 
 - How do we handle workflow definitions that need to be upgraded while runs against the old
   version are still in flight? Currently, in-flight runs continue against their original
-  snapshot, and new runs use the new version — but this means two versions can be "live"
+  snapshot, and new runs use the new version, but this means two versions can be "live"
   simultaneously, which has implications for debugging and support.
-- At what scale does per-step persistence become a bottleneck, and what's the mitigation —
+- At what scale does per-step persistence become a bottleneck, and what's the mitigation ,
   batching writes, a faster storage tier for checkpoints, something else?

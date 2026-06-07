@@ -6,7 +6,7 @@ import { TagPill } from "@/components/TagPill";
 
 export const metadata: Metadata = buildMetadata({
   title: "Experiments",
-  description: "Sanitized toy demos and experiments related to Vectorbea's execution model — durable runners, worker simulations, and more.",
+  description: "Sanitized toy demos and experiments related to Vectorbea's execution model: durable runners, worker simulations, and more.",
   path: "/experiments",
 });
 
@@ -17,7 +17,7 @@ export default function ExperimentsPage() {
       <div className="max-w-2xl">
         <h1 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Experiments</h1>
         <p className="mt-3 text-base leading-relaxed text-slate-500">
-          Small, sanitized demos that explore ideas adjacent to Vectorbea's execution model —
+          Small, sanitized demos that explore ideas adjacent to Vectorbea's execution model ,
           separate from the production codebase, meant for learning and discussion.
         </p>
       </div>

@@ -5,7 +5,7 @@ import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
   title: "Articles",
-  description: "All engineering articles from Vectorbea Engineering — durable execution, reliability, agentic systems, security, and infrastructure.",
+  description: "All engineering articles from Vectorbea Engineering: durable execution, reliability, agentic systems, security, and infrastructure.",
   path: "/articles",
 });
 
@@ -24,7 +24,7 @@ export default function ArticlesPage({
         <h1 className="text-3xl font-bold tracking-tight text-ink md:text-4xl">Articles</h1>
         <p className="mt-3 text-base text-slate-500">
           Engineering write-ups on durable execution, reliability, agentic systems, security,
-          and infrastructure — from the team building Vectorbea.
+          and infrastructure, from the team building Vectorbea.
         </p>
       </div>
       <div className="mt-10">

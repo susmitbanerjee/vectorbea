@@ -43,7 +43,7 @@ export default function HomePage() {
                 {SITE.tagline}
               </h1>
               <p className="mt-5 max-w-lg text-lg leading-relaxed text-slate-500">
-                Notes from the team building <strong className="text-ink">Vectorbea</strong> — a
+                Notes from the team building <strong className="text-ink">Vectorbea</strong>: a
                 durable, long-running visual agentic workflow builder. Execution guarantees,
                 checkpoints, retries, approvals, BYOK, and worker orchestration, written up as we
                 build them.
@@ -69,7 +69,7 @@ export default function HomePage() {
                 <span className="h-3 w-3 rounded-full bg-red-400/80" />
                 <span className="h-3 w-3 rounded-full bg-yellow-400/80" />
                 <span className="h-3 w-3 rounded-full bg-green-400/80" />
-                <span className="ml-3 text-slate-400">run_8f2e — event history</span>
+                <span className="ml-3 text-slate-400">run_8f2e · event history</span>
               </div>
               <ul className="space-y-1.5">
                 {TIMELINE_EVENTS.map((ev) => (
@@ -129,11 +129,11 @@ export default function HomePage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-8 md:p-10">
           <h2 className="text-xl font-semibold text-ink">About this project</h2>
           <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-500">
-            Vectorbea is a durable, long-running visual agentic workflow builder — it gives teams
+            Vectorbea is a durable, long-running visual agentic workflow builder. It gives teams
             execution guarantees, retry and resume, checkpointing, human approval gates, BYOK LLM
             keys, worker orchestration, full event history, run timelines, cost budgets, and rate
             limits. Vectorbea Engineering is where we write publicly about the decisions, tradeoffs,
-            and mistakes behind it. The product is private; these notes are not marketing copy —
+            and mistakes behind it. The product is private; these notes are not marketing copy ,
             they're the kind of write-up we'd want to read if we were building something similar.
           </p>
           <Link href="/about" className="mt-4 inline-block text-sm font-medium text-accent-blue hover:underline">
