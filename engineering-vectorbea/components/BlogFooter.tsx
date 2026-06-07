@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { SITE, NAV_LINKS } from "@/lib/constants";
 
@@ -8,10 +9,8 @@ export function BlogFooter() {
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-accent-blue to-accent-violet text-xs font-bold text-white">
-                V
-              </span>
-              <span className="text-sm font-semibold text-ink">{SITE.name}</span>
+              <Image src="/logo.svg" alt="" width={28} height={28} className="h-7 w-7 rounded-md" />
+              <span className="font-display text-sm font-semibold text-ink">{SITE.name}</span>
             </div>
             <p className="mt-3 max-w-xs text-sm text-slate-500">{SITE.tagline}</p>
           </div>

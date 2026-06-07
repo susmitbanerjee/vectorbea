@@ -16,11 +16,43 @@ const config: Config = {
         accent: {
           blue: "#3b82f6",
           violet: "#7c3aed",
+          teal: "#0d9488",
         },
       },
       maxWidth: {
         article: "780px",
         page: "1180px",
+      },
+      fontFamily: {
+        sans: [
+          "ui-sans-serif",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Inter",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
+        display: [
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Inter",
+          "ui-sans-serif",
+          "Helvetica Neue",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "JetBrains Mono",
+          "Menlo",
+          "Consolas",
+          "Liberation Mono",
+          "monospace",
+        ],
       },
       typography: () => ({
         DEFAULT: {

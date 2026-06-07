@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { NAV_LINKS, SITE } from "@/lib/constants";
 
@@ -5,11 +6,16 @@ export function BlogHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur">
       <div className="mx-auto flex max-w-page items-center justify-between px-6 py-4">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-blue to-accent-violet text-sm font-bold text-white">
-            V
-          </span>
-          <span className="text-base font-semibold tracking-tight text-ink">
+        <Link href="/" className="flex items-center gap-2.5">
+          <Image
+            src="/logo.svg"
+            alt=""
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
+            priority
+          />
+          <span className="font-display text-base font-semibold tracking-tight text-ink">
             {SITE.name}
           </span>
         </Link>

@@ -16,6 +16,16 @@ html {
 body {
   background-color: var(--bg);
   color: var(--ink);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  letter-spacing: -0.02em;
+}
+
+h1, h2, h3, h4 {
+  letter-spacing: -0.02em;
 }
 
 .bg-grid {
