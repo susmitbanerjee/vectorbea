@@ -61,7 +61,22 @@ const prettyCodeOptions = {
   keepBackground: true,
 };
 
-export async function compileContent(source: string) {
+/**
+ * Replace fenced ```mermaid blocks with a <Mermaid chart={`...`} /> component
+ * invocation before MDX compilation. rehype-pretty-code restructures <pre>/<code>
+ * elements (Shiki spans, data-language attrs), which makes it unreliable to detect
+ * mermaid blocks downstream in a custom `pre` component. Handling it at the source
+ * level sidesteps that entirely.
+ */
+function preprocessMermaid(source: string): string {
+  return source.replace(/```mermaid\n([\s\S]*?)```/g, (_match, chart: string) => {
+    const escaped = chart.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+    return `<Mermaid chart={\`${escaped.trim()}\`} />`;
+  });
+}
+
+export async function compileContent(rawSource: string) {
+  const source = preprocessMermaid(rawSource);
   const { content } = await compileMDX({
     source,
     components: MDXComponents,

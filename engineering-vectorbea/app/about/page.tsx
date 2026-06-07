@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { buildMetadata } from "@/lib/seo";
 import { SITE } from "@/lib/constants";
 
@@ -29,6 +30,19 @@ export default function AboutPage() {
         </p>
 
         <h2>About the author</h2>
+        <div className="not-prose flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5">
+          <Image
+            src="/author.jpg"
+            alt={SITE.author.name}
+            width={72}
+            height={72}
+            className="h-[72px] w-[72px] shrink-0 rounded-full object-cover"
+          />
+          <div>
+            <p className="font-display text-base font-semibold text-ink">{SITE.author.name}</p>
+            <p className="text-sm text-slate-500">{SITE.author.title}</p>
+          </div>
+        </div>
         <p>
           <strong>{SITE.author.name}</strong> is a backend engineer with 9+ years building
           distributed systems in Java and Kotlin. At Vectorbea, Susmit works on the execution

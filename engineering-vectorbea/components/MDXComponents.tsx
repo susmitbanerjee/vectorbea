@@ -26,6 +26,7 @@ function A(props: ComponentPropsWithoutRef<"a">) {
 
 export const MDXComponents = {
   Callout,
+  Mermaid,
   pre: Pre,
   a: A,
 };

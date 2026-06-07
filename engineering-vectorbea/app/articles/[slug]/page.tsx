@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -69,9 +70,13 @@ export default async function ArticlePage({ params }: { params: { slug: string }
               {article.frontMatter.description}
             </p>
             <div className="mt-4 flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-accent-blue to-accent-violet text-sm font-semibold text-white">
-                {article.frontMatter.author.split(" ").map((n) => n[0]).join("")}
-              </div>
+              <Image
+                src="/author.jpg"
+                alt={article.frontMatter.author}
+                width={36}
+                height={36}
+                className="h-9 w-9 shrink-0 rounded-full object-cover"
+              />
               <div>
                 <p className="text-sm font-medium text-ink">{article.frontMatter.author}</p>
                 <p className="text-xs text-slate-400">{SITE.author.title}</p>
