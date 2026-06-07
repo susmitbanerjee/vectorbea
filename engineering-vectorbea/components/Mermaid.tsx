@@ -4,6 +4,22 @@ import { useEffect, useRef, useState } from "react";
 
 let initialized = false;
 
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.str === "string") return obj.str;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return Object.prototype.toString.call(err);
+    }
+  }
+  return String(err);
+}
+
 export function Mermaid({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +53,8 @@ export function Mermaid({ chart }: { chart: string }) {
       } catch (err) {
         if (!cancelled) {
           // eslint-disable-next-line no-console
-          console.error("[mermaid] render failed:", err);
-          setError(err instanceof Error ? err.message : String(err));
+          console.error("[mermaid] render failed:", err, JSON.stringify(err));
+          setError(describeError(err));
         }
       }
     });
@@ -65,7 +81,7 @@ export function Mermaid({ chart }: { chart: string }) {
       <div
         ref={containerRef}
         className="mermaid"
-        style={{ display: ready ? "block" : "none" }}
+        style={{ visibility: ready ? "visible" : "hidden", height: ready ? "auto" : 0 }}
       >
         {chart}
       </div>
