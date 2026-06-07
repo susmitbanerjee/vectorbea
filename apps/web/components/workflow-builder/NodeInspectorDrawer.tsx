@@ -37,9 +37,9 @@ function PrettyValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   }
   if (typeof value === "string") {
     if (value.trim() === "") {
-      return <span className="rounded px-1.5 py-0.5 text-[11.5px] font-mono" style={{ background: "#FFFBEB", color: "#B45309" }}>"" (empty)</span>;
+      return <span className="rounded px-1.5 py-0.5 text-[11.5px] font-mono" style={{ background: "#FFFBEB", color: "#B45309" }}>&quot;&quot; (empty)</span>;
     }
-    return <span className="text-[12px] font-mono" style={{ color: "#0F766E" }}>"{value}"</span>;
+    return <span className="text-[12px] font-mono" style={{ color: "#0F766E" }}>&quot;{value}&quot;</span>;
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return <span className="text-[12px] font-mono" style={{ color: "#1D4ED8" }}>{String(value)}</span>;
