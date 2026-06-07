@@ -440,6 +440,10 @@ function WorkflowBuilderInner() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<WFEdgeData>>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
+  // ── Run-with-input dialog ────────────────────────────────────────────────────
+  const [runInputDialog, setRunInputDialog] = useState<{ mode: "run" | "debug"; schema: Record<string, unknown> } | null>(null);
+  const [runInputValues, setRunInputValues] = useState<Record<string, string>>({});
+
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // ── Live run: poll events → update node previewStatus on canvas ─────────────
@@ -772,14 +776,65 @@ function WorkflowBuilderInner() {
     setInspectorNodeId(null);
   }
 
+  // ── Trigger input schema discovery ──────────────────────────────────────────
+  function getTriggerInputSchema(): Record<string, unknown> | null {
+    const triggerNode = nodes.find((n) => (n.data as WFNodeData)?.nodeType === "trigger");
+    const schema = (triggerNode?.data as WFNodeData | undefined)?.triggerConfig?.inputSchema;
+    if (!schema || typeof schema !== "object") return null;
+    const properties = (schema as Record<string, unknown>).properties;
+    if (!properties || typeof properties !== "object" || Object.keys(properties).length === 0) return null;
+    return schema as Record<string, unknown>;
+  }
+
+  function coerceRunInputValues(schema: Record<string, unknown>, raw: Record<string, string>): Record<string, unknown> {
+    const properties = (schema.properties ?? {}) as Record<string, { type?: string }>;
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (value === "") continue;
+      const type = properties[key]?.type;
+      if (type === "number" || type === "integer") {
+        const n = Number(value);
+        result[key] = Number.isNaN(n) ? value : n;
+      } else if (type === "boolean") {
+        result[key] = value === "true";
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  function openRunInputDialog(mode: "run" | "debug") {
+    const schema = getTriggerInputSchema();
+    if (!schema) {
+      void (mode === "run" ? executeRun({}) : executeDebugRun({}));
+      return;
+    }
+    const properties = (schema.properties ?? {}) as Record<string, unknown>;
+    setRunInputValues(Object.fromEntries(Object.keys(properties).map((k) => [k, ""])));
+    setRunInputDialog({ mode, schema });
+  }
+
+  function confirmRunInputDialog() {
+    if (!runInputDialog) return;
+    const input = coerceRunInputValues(runInputDialog.schema, runInputValues);
+    const mode = runInputDialog.mode;
+    setRunInputDialog(null);
+    void (mode === "run" ? executeRun(input) : executeDebugRun(input));
+  }
+
   // ── Debug Run — per-run, captures resolved inputs/outputs/variables ─────────
-  async function handleDebugRun() {
+  function handleDebugRun() {
+    openRunInputDialog("debug");
+  }
+
+  async function executeDebugRun(input: Record<string, unknown>) {
     if (!workflow) return;
     track("workflow_debug_run_queued", { workflowId: workflow.id, properties: { source: "builder" } });
     setDebugRunning(true);
     try {
       await doSave();
-      const run = await startDebugRun(workflow.id, {});
+      const run = await startDebugRun(workflow.id, input);
       const runId = run.runId;
       if (!runId) {
         toast.error("Debug run triggered but run ID was not returned.");
@@ -892,13 +947,17 @@ function WorkflowBuilderInner() {
   }
 
   // ── Run Workflow — stays on canvas, animates nodes live ─────────────────────
-  async function handleRun() {
+  function handleRun() {
+    openRunInputDialog("run");
+  }
+
+  async function executeRun(input: Record<string, unknown>) {
     if (!workflow) return;
     track("workflow_run_queued", { workflowId: workflow.id, properties: { mode: "simulation", source: "builder" } });
     setRunning(true);
     try {
       await doSave();
-      const run = await triggerWorkflow(workflow.id, {});
+      const run = await triggerWorkflow(workflow.id, input);
       const runId = run.runId;
       if (!runId) {
         toast.error("Workflow triggered but run ID was not returned.");
@@ -1349,6 +1408,57 @@ function WorkflowBuilderInner() {
           />
         </div>
       </div>
+
+      {/* Run-with-input dialog — collects values matching the trigger's input schema */}
+      {runInputDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border/60 bg-white p-5 shadow-xl">
+            <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
+              {runInputDialog.mode === "debug" ? "Debug Run — provide input" : "Run workflow — provide input"}
+            </h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              This workflow&apos;s trigger expects the following input values.
+            </p>
+            <div className="mt-4 space-y-3 max-h-[60vh] overflow-y-auto">
+              {Object.entries((runInputDialog.schema.properties ?? {}) as Record<string, { type?: string; description?: string }>).map(([key, prop]) => {
+                const required = ((runInputDialog.schema.required ?? []) as string[]).includes(key);
+                return (
+                  <div key={key}>
+                    <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                      {key}{required && <span className="ml-0.5 text-red-600">*</span>}
+                      {prop.type && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">({prop.type})</span>}
+                    </label>
+                    <input
+                      value={runInputValues[key] ?? ""}
+                      onChange={(e) => setRunInputValues((v) => ({ ...v, [key]: e.target.value }))}
+                      placeholder={prop.description ?? ""}
+                      className="h-9 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
+                      style={{ background: "var(--surface-2)" }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRunInputDialog(null)}
+                className="inline-flex h-9 items-center rounded-lg border border-border/60 px-3.5 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRunInputDialog}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#2563EB] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#1D4ED8]"
+              >
+                <Play className="h-3.5 w-3.5 fill-white" />
+                {runInputDialog.mode === "debug" ? "Start Debug Run" : "Run"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
