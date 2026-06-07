@@ -189,6 +189,7 @@ export function compileOutputExtraction(
  */
 export function decompileExpression(expr: string): VisualMapping {
   if (!expr) return { type: "unset" };
+  if (typeof expr !== "string") return { type: "literal", value: String(expr) };
 
   // {{ input.path }}
   const inputMatch = expr.match(/^\{\{\s*input\.(.+?)\s*\}\}$/);
