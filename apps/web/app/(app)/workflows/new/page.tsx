@@ -106,7 +106,7 @@ export default function NewWorkflowPage() {
                       <p className="text-[12.5px] text-amber-700 font-medium mt-0.5">Best for teams new to Vectorbea</p>
                     </div>
                   </div>
-                  <div className="shrink-0 h-9 w-9 flex items-center justify-center rounded-xl bg-amber-500 group-hover:bg-amber-600 transition-colors shadow-sm mt-0.5">
+                  <div className="shrink-0 h-9 w-9 flex items-center justify-center rounded-xl bg-amber-500 group-hover:bg-[#007F4E] transition-colors shadow-sm mt-0.5">
                     <ArrowRight className="h-4.5 w-4.5 text-white" />
                   </div>
                 </div>
@@ -130,7 +130,7 @@ export default function NewWorkflowPage() {
 
                 {/* CTA */}
                 <div className="mt-auto">
-                  <div className="inline-flex items-center gap-2 rounded-xl bg-amber-500 group-hover:bg-amber-600 transition-colors px-5 py-2.5 text-[13.5px] font-semibold text-white shadow-sm">
+                  <div className="inline-flex items-center gap-2 rounded-xl bg-amber-500 group-hover:bg-[#007F4E] transition-colors px-5 py-2.5 text-[13.5px] font-semibold text-white shadow-sm">
                     Start with AI Architect
                     <ArrowRight className="h-4 w-4" />
                   </div>

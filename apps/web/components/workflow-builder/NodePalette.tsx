@@ -214,7 +214,7 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
           <input
-            className="w-full rounded-xl border border-slate-200 bg-white pl-7 pr-3 py-1.5 text-[12px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors"
+            className="w-full rounded-xl border border-slate-200 bg-white pl-7 pr-3 py-1.5 text-[12px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#E6F4EF] focus:border-[#9CCFBB] transition-colors"
             placeholder="Search nodes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

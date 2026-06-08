@@ -53,20 +53,29 @@ const config: Config = {
 
         // Sidebar semantic tokens
         sidebar: {
-          DEFAULT:    "#F4F5F7",
-          fg:         "#111827",
+          DEFAULT:    "#FFFFFF",
+          fg:         "#0B0D0F",
           muted:      "#4B5563",
-          border:     "#DDE3EA",
-          active:     "#E8EEF6",
-          hover:      "#ECEFF3",
+          border:     "#E0E3E6",
+          active:     "#E6F4EF",
+          hover:      "#F3F4F5",
         },
 
         // Surface hierarchy
         surface: {
           1:     "#FFFFFF",
           2:     "#FFFFFF",
-          3:     "#F6F7F9",
-          hover: "#F1F3F5",
+          3:     "#F3F4F5",
+          hover: "#F3F4F5",
+        },
+
+        // Brand green scale
+        vbgreen: {
+          DEFAULT: "#007F4E",
+          hover:   "#006B45",
+          bright:  "#00A65A",
+          soft:    "#E6F4EF",
+          border:  "#9CCFBB",
         },
 
         // Chart colors

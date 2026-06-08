@@ -133,7 +133,7 @@ export default function WorkflowDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-24 text-center">
         <p className="text-sm font-medium text-slate-500">Workflow not found</p>
-        <Link href={"/workflows" as never} className="text-xs text-blue-600 hover:underline">
+        <Link href={"/workflows" as never} className="text-xs text-[#007F4E] hover:underline">
           ← Back to Workflows
         </Link>
       </div>

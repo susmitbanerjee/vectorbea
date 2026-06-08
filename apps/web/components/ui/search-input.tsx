@@ -23,7 +23,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
           "placeholder:text-slate-400",
           "transition-all duration-150 outline-none",
           "hover:border-slate-300",
-          "focus:border-blue-400 focus:ring-4 focus:ring-blue-100",
+          "focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}

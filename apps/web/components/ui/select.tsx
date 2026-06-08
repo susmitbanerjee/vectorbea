@@ -33,7 +33,7 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             "transition-all duration-150 outline-none",
             // States
             "hover:border-slate-300 hover:bg-slate-50",
-            "focus:border-blue-400 focus:ring-4 focus:ring-blue-100",
+            "focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]",
             // Option colours (best-effort)
             "[&>option]:bg-white [&>option]:text-slate-800",
             // Disabled

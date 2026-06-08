@@ -54,13 +54,13 @@ function useNodeAnimCSS() {
       @keyframes vb-soft-pulse {
         0%, 100% {
           box-shadow:
-            0 0 0 4px rgba(37,99,235,0.10),
-            0 16px 40px rgba(37,99,235,0.14);
+            0 0 0 4px rgba(15,118,110,0.10),
+            0 16px 40px rgba(15,118,110,0.14);
         }
         50% {
           box-shadow:
-            0 0 0 6px rgba(37,99,235,0.16),
-            0 20px 48px rgba(37,99,235,0.20);
+            0 0 0 6px rgba(15,118,110,0.16),
+            0 20px 48px rgba(15,118,110,0.20);
         }
       }
     `;
@@ -91,7 +91,7 @@ function RunningSpinner({ size }: { size: number }) {
         cy={(size + 8) / 2}
         r={r}
         fill="none"
-        stroke="rgba(37,99,235,0.15)"
+        stroke="rgba(15,118,110,0.15)"
         strokeWidth={2.5}
       />
       {/* Animated arc */}
@@ -100,12 +100,12 @@ function RunningSpinner({ size }: { size: number }) {
         cy={(size + 8) / 2}
         r={r}
         fill="none"
-        stroke="#2563EB"
+        stroke="#0F766E"
         strokeWidth={2.5}
         strokeLinecap="round"
         strokeDasharray={`${circ * 0.28} ${circ * 0.72}`}
         strokeDashoffset={0}
-        style={{ filter: "drop-shadow(0 0 3px rgba(37,99,235,0.5))" }}
+        style={{ filter: "drop-shadow(0 0 3px rgba(15,118,110,0.5))" }}
       />
     </svg>
   );
@@ -121,10 +121,10 @@ function StatusDot({ status }: { status?: string }) {
 
 // Status-based status text color for light mode
 function statusTextColor(dot: string): string {
-  if (dot.includes("blue"))   return "#2563EB";
-  if (dot.includes("emerald"))return "#059669";
+  if (dot.includes("teal") || dot.includes("blue")) return "#0F766E";
+  if (dot.includes("emerald"))return "#007F4E";
   if (dot.includes("red"))    return "#DC2626";
-  if (dot.includes("amber"))  return "#D97706";
+  if (dot.includes("amber"))  return "#CA8A04";
   return "#94A3B8";
 }
 
@@ -167,22 +167,22 @@ export const BaseNode = memo(function BaseNode({
   let boxShadow: string;
 
   if (selected) {
-    borderColor = "#2563EB";
-    boxShadow = `0 0 0 4px #DBEAFE, 0 16px 36px rgba(37,99,235,0.14)`;
+    borderColor = "#168A5B";
+    boxShadow = `0 0 0 4px #E6F4EF, 0 16px 36px rgba(0,127,78,0.14)`;
   } else if (status === "running") {
-    borderColor = "#93C5FD";
+    borderColor = "#5EEAD4";
     boxShadow = ""; // animation handles it
   } else if (status === "succeeded") {
-    borderColor = "#BBF7D0";
-    boxShadow = "0 0 0 3px rgba(22,163,74,0.10), 0 8px 20px rgba(15,23,42,0.06)";
+    borderColor = "#9CCFBB";
+    boxShadow = "0 0 0 3px rgba(0,127,78,0.10), 0 8px 20px rgba(15,23,42,0.06)";
   } else if (status === "failed") {
     borderColor = "#FECACA";
     boxShadow = "0 0 0 3px rgba(220,38,38,0.10), 0 8px 20px rgba(15,23,42,0.06)";
   } else if (status === "waiting") {
     borderColor = "#FDE68A";
-    boxShadow = "0 0 0 3px rgba(217,119,6,0.10), 0 8px 20px rgba(15,23,42,0.06)";
+    boxShadow = "0 0 0 3px rgba(202,138,4,0.10), 0 8px 20px rgba(15,23,42,0.06)";
   } else {
-    borderColor = "#E2E8F0";
+    borderColor = "#E0E3E6";
     boxShadow = "0 10px 28px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)";
   }
 
@@ -223,7 +223,7 @@ export const BaseNode = memo(function BaseNode({
             style={{
               position: "absolute",
               top: 0, left: 0, right: 0, bottom: 0,
-              background: "linear-gradient(90deg, transparent, #2563EB, #7C3AED, transparent)",
+              background: "linear-gradient(90deg, transparent, #0F766E, #00A65A, transparent)",
               animation: "vb-node-shimmer 1.4s linear infinite",
             }}
           />
@@ -322,10 +322,10 @@ export const BaseNode = memo(function BaseNode({
           className="pointer-events-none absolute bottom-0 left-[3px] right-0 h-[2px] rounded-b-2xl"
           style={{
             background:
-              status === "running"   ? "#2563EB" :
-              status === "succeeded" ? "#16A34A" :
+              status === "running"   ? "#0F766E" :
+              status === "succeeded" ? "#007F4E" :
               status === "failed"    ? "#DC2626" :
-              status === "waiting"   ? "#D97706" :
+              status === "waiting"   ? "#CA8A04" :
               status === "skipped"   ? "#CBD5E1" : "transparent",
           }}
         />
@@ -412,9 +412,9 @@ export const BaseNode = memo(function BaseNode({
           position={Position.Top}
           style={{
             background: "#FFFFFF",
-            border: "2px solid #818CF8",
+            border: "2px solid #5EC9A0",
             width: 10, height: 10,
-            boxShadow: "0 0 0 2.5px rgba(129,140,248,0.2)",
+            boxShadow: "0 0 0 2.5px rgba(0,127,78,0.18)",
             left: `${((i + 1) / (extraTopHandles.length + 1)) * 100}%`,
           }}
         />

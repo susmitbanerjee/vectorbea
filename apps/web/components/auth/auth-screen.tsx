@@ -76,9 +76,9 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
       className="min-h-screen"
       style={{
         background:
-          "radial-gradient(circle at 20% 15%, rgba(217,119,6,0.07), transparent 32%), " +
-          "radial-gradient(circle at 80% 85%, rgba(217,119,6,0.03), transparent 30%), " +
-          "#F8FAFC",
+          "radial-gradient(circle at 20% 15%, rgba(0,127,78,0.07), transparent 32%), " +
+          "radial-gradient(circle at 80% 85%, rgba(0,127,78,0.03), transparent 30%), " +
+          "#F7F8F9",
       }}
     >
       <div className="grid min-h-screen lg:grid-cols-[1fr_480px]">
@@ -101,9 +101,9 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
             <Link href="/" className="inline-flex w-fit items-center gap-2.5">
               <span
                 className="flex h-8 w-8 items-center justify-center rounded-lg"
-                style={{ background: "#FEF3C7", border: "1px solid #FDE68A" }}
+                style={{ background: "#E6F4EF", border: "1px solid #9CCFBB" }}
               >
-                <BeeLogo className="h-4 w-4 text-amber-700" />
+                <BeeLogo className="h-4 w-4 text-[#006B45]" />
               </span>
               <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.02em", color: "#0F172A" }}>
                 Vectorbea
@@ -113,7 +113,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
             <div className="my-auto max-w-lg space-y-9">
               <span
                 className="inline-block font-mono text-[10px] font-bold uppercase tracking-[0.18em]"
-                style={{ color: "#D97706" }}
+                style={{ color: "#007F4E" }}
               >
                 Production control plane for AI agent jobs
               </span>
@@ -135,10 +135,10 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                   <li key={item} className="flex items-start gap-2.5">
                     <span
                       className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                      style={{ background: "#FEF3C7" }}
+                      style={{ background: "#E6F4EF" }}
                     >
                       <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 10 10">
-                        <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="#D97706" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="#007F4E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </span>
                     <span style={{ fontSize: 13, lineHeight: 1.6, color: "#475569" }}>{item}</span>
@@ -161,9 +161,9 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
               <Link href="/" className="inline-flex items-center gap-2">
                 <span
                   className="flex h-7 w-7 items-center justify-center rounded-lg"
-                  style={{ background: "#FEF3C7", border: "1px solid #FDE68A" }}
+                  style={{ background: "#E6F4EF", border: "1px solid #9CCFBB" }}
                 >
-                  <BeeLogo className="h-3.5 w-3.5 text-amber-700" />
+                  <BeeLogo className="h-3.5 w-3.5 text-[#006B45]" />
                 </span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>Vectorbea</span>
               </Link>
@@ -209,7 +209,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="Jane Smith"
                       disabled={loading}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
                       style={{ height: 42 }}
                     />
                   </div>
@@ -226,7 +226,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                     placeholder="name@company.com"
                     required
                     disabled={loading}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
                     style={{ height: 42 }}
                   />
                 </div>
@@ -244,7 +244,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                       required
                       disabled={loading}
                       minLength={isSignup ? 8 : 1}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 pr-10 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 pr-10 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
                       style={{ height: 42 }}
                     />
                     <button
@@ -262,9 +262,9 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                   type="submit"
                   disabled={loading}
                   className="flex h-11 w-full items-center justify-center gap-2 rounded-xl font-semibold text-white transition-all disabled:opacity-50"
-                  style={{ background: "#D97706", fontSize: 14, boxShadow: "0 2px 8px rgba(217,119,6,0.28)" }}
-                  onMouseEnter={(e) => { if (!loading) (e.currentTarget as HTMLButtonElement).style.background = "#B45309"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#D97706"; }}
+                  style={{ background: "#007F4E", fontSize: 14, boxShadow: "0 2px 8px rgba(0,127,78,0.28)" }}
+                  onMouseEnter={(e) => { if (!loading) (e.currentTarget as HTMLButtonElement).style.background = "#006B45"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#007F4E"; }}
                 >
                   {loading
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> {isSignup ? "Creating account…" : "Signing in…"}</>
@@ -291,7 +291,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                       href={href}
                       className="flex h-10 w-full items-center justify-between rounded-xl border px-3.5 transition-all"
                       style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", fontSize: 13, fontWeight: 600, color: "#334155", textDecoration: "none" }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#F8FAFC"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#CBD5E1"; }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#F7F8F9"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#CBD5E1"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#FFFFFF"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#E2E8F0"; }}
                     >
                       <span className="inline-flex items-center gap-2.5">{icon} Continue with {label}</span>
@@ -306,7 +306,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                   {isSignup ? "Already have an account?" : "Don't have an account?"}{" "}
                   <Link
                     href={isSignup ? "/signin" : "/signup"}
-                    style={{ fontWeight: 600, color: "#D97706" }}
+                    style={{ fontWeight: 600, color: "#007F4E" }}
                     className="hover:underline underline-offset-4"
                   >
                     {isSignup ? "Sign in" : "Create account"}

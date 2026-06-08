@@ -12,82 +12,96 @@
   ══════════════════════════════════════════════════════════════════════════ */
   :root {
     /* ── Tailwind semantic tokens (hsl) ─────────────────────────────────── */
-    --background:             220 14% 97%;    /* #F8FAFC */
-    --foreground:             222 47% 7%;     /* #0F172A */
+    --background:             210 14% 97%;    /* #F6F7F8 */
+    --foreground:             210 13% 5%;     /* #0B0D0F */
     --card:                   0 0% 100%;
-    --card-foreground:        222 47% 7%;
+    --card-foreground:        210 13% 5%;
     --popover:                0 0% 100%;
-    --popover-foreground:     222 47% 7%;
-    --primary:                32 95% 44%;     /* #D97706 amber */
+    --popover-foreground:     210 13% 5%;
+    --primary:                157 100% 25%;   /* #007F4E brand green */
     --primary-foreground:     0 0% 100%;
-    --secondary:              40 60% 96%;     /* warm cream */
-    --secondary-foreground:   30 30% 20%;
-    --muted:                  40 30% 96%;
-    --muted-foreground:       30 10% 46%;
-    --accent:                 40 60% 93%;
-    --accent-foreground:      30 30% 15%;
-    --border:                 38 40% 88%;     /* warm border */
-    --input:                  38 40% 88%;
-    --ring:                   32 95% 44%;     /* #D97706 amber */
+    --secondary:              160 30% 96%;    /* soft green-gray */
+    --secondary-foreground:   162 30% 18%;
+    --muted:                  210 17% 96%;    /* #F3F4F5 */
+    --muted-foreground:       215 14% 42%;    /* #4B5563 */
+    --accent:                 158 38% 93%;    /* soft green tint #E6F4EF */
+    --accent-foreground:      160 100% 21%;   /* #006B45 */
+    --border:                 210 11% 89%;    /* #E0E3E6 */
+    --input:                  210 11% 89%;
+    --ring:                   157 100% 25%;   /* green focus */
     --destructive:            0 84% 51%;      /* #DC2626 */
     --destructive-foreground: 0 0% 100%;
-    --success:                142 71% 45%;    /* #22C55E */
-    --warning:                32 95% 44%;     /* #D97706 */
-    --radius:                 0.625rem;
+    --success:                157 100% 25%;   /* #007F4E */
+    --warning:                44 90% 61%;     /* #F5C542 */
+    --radius:                 0.5rem;
 
     /* ── Charts ─────────────────────────────────────────────────────────── */
-    --chart-1: 221 83% 53%;
+    --chart-1: 157 100% 25%;
     --chart-2: 161 86% 30%;
-    --chart-3: 32 95% 44%;
+    --chart-3: 175 73% 26%;
     --chart-4: 0 84% 51%;
     --chart-5: 220 9% 46%;
 
     /* ── Sidebar ─────────────────────────────────────────────────────────── */
     --sidebar-bg:          0 0% 100%;         /* white sidebar */
-    --sidebar-fg:          222 47% 7%;
-    --sidebar-muted:       215 16% 47%;
-    --sidebar-border:      214 32% 91%;
-    --sidebar-active-bg:   40 100% 94%;       /* warm amber tint */
-    --sidebar-hover-bg:    40 40% 96%;        /* warm hover */
+    --sidebar-fg:          210 13% 5%;
+    --sidebar-muted:       215 14% 42%;
+    --sidebar-border:      210 11% 89%;
+    --sidebar-active-bg:   158 38% 93%;       /* soft green tint */
+    --sidebar-hover-bg:    210 17% 96%;       /* muted hover */
 
     /* ── Semantic surface tokens ─────────────────────────────────────────── */
-    --bg-app:            #FAFAF7;
+    --bg-app:            #F7F8F9;
     --bg-sidebar:        #FFFFFF;
-    --bg-main:           #FAFAF7;
+    --bg-main:           #F7F8F9;
     --surface-0:         #FFFFFF;
     --surface-1:         #FFFFFF;
     --surface-2:         #FAFAFA;
-    --surface-3:         #F1F5F9;
-    --surface-hover:     #F8FAFC;
-    --border-subtle:     #E2E8F0;
-    --border-medium:     #CBD5E1;
-    --border-strong:     #94A3B8;
-    --sidebar-border-hex:#E2E8F0;
+    --surface-3:         #F3F4F5;
+    --surface-hover:     #F3F4F5;
+    --border-subtle:     #E0E3E6;
+    --border-medium:     #D7DBE0;
+    --border-strong:     #C9CED4;
+    --sidebar-border-hex:#E0E3E6;
 
     /* ── Text tokens ─────────────────────────────────────────────────────── */
-    --text-primary:      #0F172A;
-    --text-secondary:    #334155;
-    --text-muted:        #64748B;
-    --text-faint:        #94A3B8;
-    --text-nav:          #475569;
-    --text-nav-active:   #B45309;
+    --text-primary:      #0B0D0F;
+    --text-secondary:    #4B5563;
+    --text-muted:        #6B7280;
+    --text-faint:        #9CA3AF;
+    --text-nav:          #4B5563;
+    --text-nav-active:   #006B45;
 
     /* ── Accent tokens ───────────────────────────────────────────────────── */
-    --accent-primary:    #D97706;
-    --accent-blue:       #D97706;
-    --accent-blue-dark:  #B45309;
-    --accent-blue-bg:    #FEF3C7;
-    --accent-blue-border:#FDE68A;
+    --accent-primary:    #007F4E;
+    --accent-blue:       #007F4E;
+    --accent-blue-dark:  #006B45;
+    --accent-blue-bg:    #E6F4EF;
+    --accent-blue-border:#9CCFBB;
+
+    /* ── Brand green tokens (Vectorbea) ──────────────────────────────────── */
+    --vb-green:          #007F4E;
+    --vb-green-hover:    #006B45;
+    --vb-green-bright:   #00A65A;
+    --vb-green-soft:     #E6F4EF;
+    --vb-green-border:   #9CCFBB;
+
+    /* ── Canvas tokens ───────────────────────────────────────────────────── */
+    --vb-canvas-bg:      #FAFAFA;
+    --vb-canvas-dot:     #CFD4D9;
+    --vb-edge:           #8B8F94;
+    --vb-edge-active:    #007F4E;
+    --vb-node-selected:  #168A5B;
 
     /* ── Status tokens ───────────────────────────────────────────────────── */
-    --status-success:    #16A34A;
-    --status-running:    #2563EB;
-    --status-waiting:    #D97706;
+    --status-success:    #007F4E;
+    --status-running:    #0F766E;
+    --status-waiting:    #CA8A04;
     --status-failure:    #DC2626;
     --status-retry:      #EA580C;
     --status-paused:     #7C3AED;
-    --status-cancelled:  #64748B;
-    --status-queued:     #0284C7;
+    --status-cancelled:  #6B7280;
+    --status-queued:     #0F766E;
 
     /* ── Shadow scale ────────────────────────────────────────────────────── */
     --shadow-xs:  0 1px 2px rgba(15,23,42,0.04);
@@ -105,7 +119,7 @@
 
   html {
     @apply scroll-smooth;
-    font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-sans), "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -116,7 +130,7 @@
   body {
     background-color: var(--bg-main);
     color: var(--text-primary);
-    font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-sans), "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: 14px;
     line-height: 1.6;
     font-weight: 400;
@@ -132,7 +146,7 @@
 
   /* ── Monospace ───────────────────────────────────────────────────────────── */
   code, pre, .mono, .font-mono {
-    font-family: "JetBrains Mono", "Fira Code", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    font-family: var(--font-mono), "Geist Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
     font-feature-settings: "liga" 0, "calt" 0;
   }
 
@@ -158,11 +172,11 @@
   /* ── Focus ring ──────────────────────────────────────────────────────────── */
   :focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(37,99,235,0.40);
+    box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(0,127,78,0.40);
   }
 
   /* ── Selection ───────────────────────────────────────────────────────────── */
-  ::selection { background: rgba(37,99,235,0.12); color: #0F172A; }
+  ::selection { background: rgba(0,127,78,0.12); color: #0B0D0F; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -241,12 +255,12 @@
   /* ── Nav active ──────────────────────────────────────────────────────────── */
   .nav-active {
     position: relative;
-    background-color: #FEF3C7 !important;
-    color: #B45309 !important;
+    background-color: #E6F4EF !important;
+    color: #006B45 !important;
     font-weight: 600 !important;
-    border: 1px solid #FDE68A !important;
+    border: 1px solid #9CCFBB !important;
   }
-  .nav-active svg { color: #D97706 !important; }
+  .nav-active svg { color: #007F4E !important; }
 
   /* ── Page header ─────────────────────────────────────────────────────────── */
   .page-title {
@@ -312,10 +326,10 @@
   }
 
   /* ── Live dot ────────────────────────────────────────────────────────────── */
-  .live-dot { position: relative; display: inline-flex; height: 8px; width: 8px; border-radius: 50%; background: #22C55E; }
+  .live-dot { position: relative; display: inline-flex; height: 8px; width: 8px; border-radius: 50%; background: #00A65A; }
   .live-dot::before {
     content: "";
-    position: absolute; inset: 0; border-radius: 50%; background: #22C55E;
+    position: absolute; inset: 0; border-radius: 50%; background: #00A65A;
     animation: ping 1.6s cubic-bezier(0,0,0.2,1) infinite;
   }
 
@@ -409,18 +423,51 @@
   .docs-prose h3 { @apply mt-8 font-semibold tracking-tight; font-size: 1.0625rem; color: var(--text-primary); }
   .docs-prose p  { @apply mt-4 leading-[1.8]; font-size: 0.9375rem; color: var(--text-muted); }
   .docs-prose strong { @apply font-semibold; color: var(--text-primary); }
-  .docs-prose a { @apply font-medium underline underline-offset-4 decoration-blue-300 transition-colors; color: #2563EB; }
-  .docs-prose a:hover { color: #1D4ED8; }
+  .docs-prose a { @apply font-medium underline underline-offset-4 transition-colors; color: #007F4E; text-decoration-color: #9CCFBB; }
+  .docs-prose a:hover { color: #006B45; }
   .docs-prose ul, .docs-prose ol { @apply mt-4 space-y-2.5 pl-5; color: var(--text-muted); }
   .docs-prose li { @apply pl-1; }
   .docs-prose code { @apply rounded-md border px-1.5 py-0.5 font-mono; font-size: 0.875em; background: #F1F5F9; border-color: #E2E8F0; color: #334155; }
   .docs-prose pre { @apply mt-6 overflow-x-auto rounded-xl border px-5 py-4 text-sm leading-7; background: #0F172A; border-color: #1E293B; color: #F1F5F9; }
   .docs-prose pre code { @apply bg-transparent border-none p-0; color: inherit; }
-  .docs-prose blockquote { @apply mt-6 rounded-xl border-l-4 px-5 py-4 not-italic; border-color: #2563EB; background: #EFF6FF; color: var(--text-secondary); }
+  .docs-prose blockquote { @apply mt-6 rounded-xl border-l-4 px-5 py-4 not-italic; border-color: #007F4E; background: #E6F4EF; color: var(--text-secondary); }
   .docs-prose hr { @apply my-10; border-color: var(--border-subtle); }
   .docs-prose table { @apply mt-6 w-full overflow-hidden rounded-xl border text-left text-sm; border-color: var(--border-subtle); }
   .docs-prose thead { background: #F8FAFC; }
   .docs-prose th, .docs-prose td { @apply px-4 py-3 align-top border-b; border-color: var(--border-subtle); }
+
+  /* ── Dotted engineering canvas ───────────────────────────────────────────── */
+  .vb-canvas-dots {
+    background-color: var(--vb-canvas-bg);
+    background-image: radial-gradient(var(--vb-canvas-dot) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: -12px -12px;
+  }
+
+  /* ── Mono section label (e.g. "01 VISUAL CANVAS") ───────────────────────── */
+  .vb-mono-label {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--vb-green);
+  }
+
+  /* ── Soft green badge ────────────────────────────────────────────────────── */
+  .vb-badge-green {
+    background: var(--vb-green-soft);
+    color: var(--vb-green-hover);
+    border: 1px solid var(--vb-green-border);
+  }
+
+  /* ── Browser-like top shell chrome ───────────────────────────────────────── */
+  .vb-shell {
+    background: var(--surface-0);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius, 12px);
+    box-shadow: var(--shadow-sm);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════

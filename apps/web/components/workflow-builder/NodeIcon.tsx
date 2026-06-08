@@ -358,8 +358,8 @@ export function getToolNodeMeta(data: WFNodeData): NodeMeta {
 
 // Status colors for preview/test run
 export const PREVIEW_STATUS_COLORS: Record<string, { ring: string; dot: string; label: string }> = {
-  running: { ring: "rgba(37,99,235,0.3)", dot: "bg-blue-500 animate-pulse", label: "Running" },
-  succeeded: { ring: "rgba(5,150,105,0.3)", dot: "bg-emerald-500", label: "Succeeded" },
+  running: { ring: "rgba(15,118,110,0.3)", dot: "bg-teal-600 animate-pulse", label: "Running" },
+  succeeded: { ring: "rgba(0,127,78,0.3)", dot: "bg-emerald-600", label: "Succeeded" },
   failed: { ring: "rgba(220,38,38,0.3)", dot: "bg-red-500", label: "Failed" },
   waiting: { ring: "rgba(217,119,6,0.3)", dot: "bg-amber-500 animate-pulse", label: "Waiting" },
   skipped: { ring: "rgba(156,163,175,0.3)", dot: "bg-[#D1D5DB]", label: "Skipped" },

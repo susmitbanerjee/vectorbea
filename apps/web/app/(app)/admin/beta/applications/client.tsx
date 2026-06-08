@@ -82,7 +82,7 @@ export default function AdminBetaApplicationsClient() {
     <div className="max-w-4xl mx-auto p-6 lg:p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#007F4E]">
             <Shield className="h-5 w-5 text-white" />
           </div>
           <div>

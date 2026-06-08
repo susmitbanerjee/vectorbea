@@ -294,7 +294,7 @@ export function FieldPicker({
               onChange={e => setAdvancedExpr(e.target.value)}
               rows={4}
               placeholder="e.g. {{ steps.fetchCustomer.output.customer.id }}"
-              className="w-full rounded-xl border border-slate-200 bg-white font-mono px-3 py-2 text-[12.5px] text-slate-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              className="w-full rounded-xl border border-slate-200 bg-white font-mono px-3 py-2 text-[12.5px] text-slate-800 outline-none focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
             />
             <p style={{ fontSize: 11, color: "#94A3B8", fontStyle: "italic" }}>
               Advanced expressions bypass type checking and transform options.
@@ -336,7 +336,7 @@ export function FieldPicker({
                     value={search}
                     onChange={e => setSearch(e.target.value)}
                     placeholder="Search fields…"
-                    className="h-8 w-full rounded-xl border border-slate-200 bg-white pl-8 pr-3 text-[12.5px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="h-8 w-full rounded-xl border border-slate-200 bg-white pl-8 pr-3 text-[12.5px] outline-none focus:border-[#9CCFBB] focus:ring-2 focus:ring-[#E6F4EF]"
                   />
                 </div>
               </div>

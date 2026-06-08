@@ -111,7 +111,7 @@ function SearchableJson({ value }: { value: unknown }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search this payload…"
-            className="h-8 w-full rounded-lg border border-slate-200 pl-8 pr-3 text-[12px] outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+            className="h-8 w-full rounded-lg border border-slate-200 pl-8 pr-3 text-[12px] outline-none focus:border-[#9CCFBB] focus:ring-2 focus:ring-[#E6F4EF]"
           />
         </div>
         <div className="inline-flex rounded-lg border border-slate-200 p-0.5">
@@ -243,7 +243,7 @@ export function NodeInspectorDrawer({
 
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-500" />
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-teal-600" />
           </div>
         ) : notFound || !current ? (
           <div className="flex flex-1 items-center justify-center px-6">
@@ -292,7 +292,7 @@ export function NodeInspectorDrawer({
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
                     "relative flex h-10 items-center justify-center gap-1 border-b-2 px-1 text-[11px] font-semibold transition-colors truncate",
-                    activeTab === tab.id ? "border-amber-500 text-amber-700" : "border-transparent text-slate-500 hover:text-slate-700",
+                    activeTab === tab.id ? "border-[#007F4E] text-[#006B45]" : "border-transparent text-slate-500 hover:text-slate-700",
                   )}
                 >
                   <span className="truncate">{tab.short}</span>
@@ -322,7 +322,7 @@ function StatusPill({ status }: { status: string }) {
   const meta: Record<string, { bg: string; text: string; dot: string }> = {
     success:  { bg: "#ECFDF5", text: "#059669", dot: "#10B981" },
     failed:   { bg: "#FEF2F2", text: "#DC2626", dot: "#EF4444" },
-    running:  { bg: "#EFF6FF", text: "#2563EB", dot: "#3B82F6" },
+    running:  { bg: "#F0FDFA", text: "#0F766E", dot: "#0F766E" },
     pending:  { bg: "#F8FAFC", text: "#64748B", dot: "#94A3B8" },
     skipped:  { bg: "#F8FAFC", text: "#64748B", dot: "#CBD5E1" },
     retried:  { bg: "#FFFBEB", text: "#B45309", dot: "#F59E0B" },
@@ -623,8 +623,8 @@ function FailureReasonTab({ detail }: { detail: DebugNodeDetail }) {
       {detail.suggestedFix && (
         <div className="rounded-2xl overflow-hidden border" style={{ borderColor: "#BFDBFE" }}>
           <div className="flex items-center gap-2 px-3.5 py-2.5" style={{ background: "#EFF6FF", borderBottom: "1px solid #BFDBFE" }}>
-            <Sparkles className="h-4 w-4 text-blue-600" />
-            <p className="text-[12.5px] font-bold text-blue-700">Suggested fix</p>
+            <Sparkles className="h-4 w-4 text-[#007F4E]" />
+            <p className="text-[12.5px] font-bold text-[#006B45]">Suggested fix</p>
           </div>
           <div className="px-3.5 py-3">
             <p className="text-[13px] leading-relaxed text-slate-700">{detail.suggestedFix}</p>

@@ -101,7 +101,7 @@ function RailStep({
       <div className={cn(
         "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold mt-0.5",
         done   && "bg-green-500 text-white",
-        active && "bg-blue-600 text-white",
+        active && "bg-[#007F4E] text-white",
         locked && "bg-slate-200 text-slate-400",
       )}>
         {done ? <Check className="h-3.5 w-3.5" /> : idx + 1}
@@ -590,7 +590,7 @@ export default function ArchitectPage() {
                     <span className="text-[11px] text-slate-400">{goal.length} chars · ⌘↵ to submit</span>
                     <button type="button" onClick={handleGoalSubmit}
                       disabled={!goal.trim() || loading}
-                      className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40 transition-colors shadow-sm">
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 transition-colors shadow-sm">
                       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                       Architect my workflow
                     </button>
@@ -652,7 +652,7 @@ export default function ArchitectPage() {
                   ))}
                   <div className="flex gap-2 pt-1">
                     <button type="button" onClick={handleClarifySubmit} disabled={loading}
-                      className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40">
                       {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
                       Generate plan
                     </button>
@@ -845,7 +845,7 @@ export default function ArchitectPage() {
                                     <div className="flex items-center justify-between mb-1.5">
                                       <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">System Prompt</p>
                                       <button type="button" onClick={() => setExpandedPrompts(s => { const n = new Set(s); n.has(a.tempAgentId) ? n.delete(a.tempAgentId) : n.add(a.tempAgentId); return n; })}
-                                        className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700">
+                                        className="flex items-center gap-1 text-[11px] text-[#007F4E] hover:text-[#006B45]">
                                         {promptExpanded ? <><EyeOff className="h-3 w-3" /> Hide</> : <><Eye className="h-3 w-3" /> View</>}
                                       </button>
                                     </div>
@@ -897,7 +897,7 @@ export default function ArchitectPage() {
                       className="w-full resize-none rounded-xl border border-blue-200 bg-white px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-400" />
                     <div className="flex gap-2">
                       <button type="button" onClick={handleRevise} disabled={!reviseText.trim() || loading}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#007F4E] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40">
                         {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Revise
                       </button>
                       <button type="button" onClick={() => setShowRevise(false)}
@@ -913,7 +913,7 @@ export default function ArchitectPage() {
                     <RefreshCw className="h-3.5 w-3.5" /> Revise plan
                   </button>
                   <button type="button" onClick={handleApprovePlan} disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40 shadow-sm">
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 shadow-sm">
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                     Approve &amp; Continue
                   </button>
@@ -962,7 +962,7 @@ export default function ArchitectPage() {
                         {!isReady && (
                           <div className="flex flex-wrap gap-1.5">
                             <button type="button" onClick={() => setPickerReq(req)}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-blue-700">
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-[#007F4E] px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-[#006B45]">
                               <Link2 className="h-3 w-3" /> Select connection
                             </button>
                             <Link href="/connections/new" target="_blank"
@@ -994,7 +994,7 @@ export default function ArchitectPage() {
                     <ArrowLeft className="h-3.5 w-3.5" /> Back
                   </button>
                   <button type="button" onClick={() => setStep("confirm")} disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40 shadow-sm">
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 shadow-sm">
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                     Continue
                   </button>
@@ -1090,7 +1090,7 @@ export default function ArchitectPage() {
                               </div>
                               {a.systemPromptPreview && (
                                 <button type="button" onClick={() => setExpandedPrompts(s => { const n = new Set(s); const k = `confirm-${a.id}`; n.has(k) ? n.delete(k) : n.add(k); return n; })}
-                                  className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700 shrink-0">
+                                  className="flex items-center gap-1 text-[11px] text-[#007F4E] hover:text-[#006B45] shrink-0">
                                   {promptExpanded ? <><EyeOff className="h-3 w-3" /> Hide</> : <><Eye className="h-3 w-3" /> Prompt</>}
                                 </button>
                               )}
@@ -1115,7 +1115,7 @@ export default function ArchitectPage() {
                     <ArrowLeft className="h-3.5 w-3.5" /> Back
                   </button>
                   <button type="button" onClick={handleBuild} disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40 shadow-sm">
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 shadow-sm">
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                     Build Workflow
                   </button>

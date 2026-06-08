@@ -6,7 +6,7 @@ type StatusVariant = RunStatus | TimelineEventStatus;
 const STATUS_STYLES: Record<string, string> = {
   // Run statuses
   QUEUED:               "border-sky-200 bg-sky-50 text-sky-700",
-  RUNNING:              "border-blue-200 bg-blue-50 text-blue-700",
+  RUNNING:              "border-teal-200 bg-teal-50 text-teal-700",
   WAITING_FOR_APPROVAL: "border-amber-200 bg-amber-50 text-amber-800",
   SUCCEEDED:            "border-emerald-200 bg-emerald-50 text-emerald-700",
   FAILED:               "border-red-200 bg-red-50 text-red-700",
@@ -33,7 +33,7 @@ const LABEL_MAP: Record<string, string> = {
 
 const DOT_COLORS: Record<string, string> = {
   QUEUED:               "bg-sky-400",
-  RUNNING:              "bg-blue-500",
+  RUNNING:              "bg-teal-500",
   WAITING_FOR_APPROVAL: "bg-amber-500",
   SUCCEEDED:            "bg-emerald-500",
   FAILED:               "bg-red-500",

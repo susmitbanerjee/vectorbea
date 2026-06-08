@@ -59,7 +59,7 @@ function ILabel({ children }: { children: React.ReactNode }) {
 function IInput({ value, onChange, placeholder, mono }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean }) {
   return (
     <input
-      className={cn("w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 placeholder:text-slate-400 transition-colors", mono && "font-mono")}
+      className={cn("w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E6F4EF] focus:border-[#9CCFBB] placeholder:text-slate-400 transition-colors", mono && "font-mono")}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -71,7 +71,7 @@ function ITextarea({ value, onChange, placeholder, rows = 3, mono }: { value: st
   return (
     <textarea
       rows={rows}
-      className={cn("w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 placeholder:text-slate-400 transition-colors", mono && "font-mono text-[11px]")}
+      className={cn("w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E6F4EF] focus:border-[#9CCFBB] placeholder:text-slate-400 transition-colors", mono && "font-mono text-[11px]")}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -92,7 +92,7 @@ function INumber({ value, onChange, min }: { value: number; onChange: (v: number
     <input
       type="number"
       min={min}
-      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors"
+      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E6F4EF] focus:border-[#9CCFBB] transition-colors"
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
     />
@@ -393,7 +393,7 @@ function MappingEditor({
         <button
           type="button"
           onClick={addRow}
-          className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 transition-colors"
+          className="text-[10px] font-semibold text-[#007F4E] hover:text-[#006B45] transition-colors"
         >
           + Add row
         </button>
@@ -406,7 +406,7 @@ function MappingEditor({
             <div key={idx} className="flex items-center gap-1.5">
               {/* Key */}
               <input
-                className="w-[38%] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 placeholder:text-slate-400"
+                className="w-[38%] shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E6F4EF] focus:border-[#9CCFBB] placeholder:text-slate-400"
                 value={k}
                 onChange={(e) => updateKey(idx, e.target.value)}
                 placeholder={keyPlaceholder ?? "param"}
@@ -414,7 +414,7 @@ function MappingEditor({
               <span className="shrink-0 text-[10px] text-slate-400">←</span>
               {/* Value */}
               <input
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 placeholder:text-slate-400"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E6F4EF] focus:border-[#9CCFBB] placeholder:text-slate-400"
                 value={v}
                 onChange={(e) => updateValue(idx, e.target.value)}
                 placeholder={valuePlaceholder ?? "{{input.field}}"}
@@ -1128,7 +1128,7 @@ function NodeInspector({
               className={cn(
                 "inline-flex h-8 items-center gap-1.5 border-b-2 px-2.5 text-[11px] font-semibold transition-colors",
                 activeTab === t.id
-                  ? "border-blue-500 text-blue-700"
+                  ? "border-[#007F4E] text-[#006B45]"
                   : "border-transparent text-slate-400 hover:text-slate-700",
               )}
             >

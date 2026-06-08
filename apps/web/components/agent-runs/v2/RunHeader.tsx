@@ -12,7 +12,7 @@ import type { AgentRunUiModel } from "@/types/agent-run-ui";
 const STATUS_MAP = {
   SUCCEEDED: { label: "Succeeded", dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
   FAILED: { label: "Failed", dot: "bg-red-500", text: "text-red-700", bg: "bg-red-50", border: "border-red-200" },
-  RUNNING: { label: "Running", dot: "bg-blue-500 animate-pulse", text: "text-[#1D4ED8]", bg: "bg-[#EFF6FF]", border: "border-[#BFDBFE]" },
+  RUNNING: { label: "Running", dot: "bg-teal-500 animate-pulse", text: "text-teal-700", bg: "bg-teal-50", border: "border-teal-200" },
   QUEUED: { label: "Queued", dot: "bg-[#9CA3AF]", text: "text-[#6B7280]", bg: "bg-[#F9FAFB]", border: "border-[#E5E7EB]" },
   WAITING_FOR_APPROVAL: { label: "Waiting for Approval", dot: "bg-amber-500 animate-pulse", text: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
   CANCELLED: { label: "Cancelled", dot: "bg-[#D1D5DB]", text: "text-[#6B7280]", bg: "bg-[#F9FAFB]", border: "border-[#E5E7EB]" },

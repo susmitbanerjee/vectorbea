@@ -94,7 +94,7 @@ function ConditionRow({
       <select
         value={condition.operator}
         onChange={e => onChange({ ...condition, operator: e.target.value as ConditionOperator })}
-        className="h-7 appearance-none rounded-lg border border-slate-200 bg-white px-2 pr-6 text-[11.5px] font-medium text-slate-700 outline-none focus:border-blue-400"
+        className="h-7 appearance-none rounded-lg border border-slate-200 bg-white px-2 pr-6 text-[11.5px] font-medium text-slate-700 outline-none focus:border-[#9CCFBB]"
       >
         {(Object.entries(OPERATOR_LABELS) as [ConditionOperator, string][]).map(([op, label]) => (
           <option key={op} value={op}>{label}</option>
@@ -107,7 +107,7 @@ function ConditionRow({
           value={String(condition.rightLiteral ?? "")}
           onChange={e => onChange({ ...condition, rightLiteral: e.target.value })}
           placeholder="value"
-          className="h-7 w-24 rounded-lg border border-slate-200 bg-white px-2 text-[11.5px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          className="h-7 w-24 rounded-lg border border-slate-200 bg-white px-2 text-[11.5px] outline-none focus:border-[#9CCFBB] focus:ring-2 focus:ring-[#E6F4EF]"
         />
       )}
 

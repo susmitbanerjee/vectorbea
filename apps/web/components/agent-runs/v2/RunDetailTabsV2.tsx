@@ -116,7 +116,7 @@ function TabTrigger({ value, icon, label, children }: {
         "relative flex shrink-0 items-center gap-1.5 px-3.5 py-3 text-[13px] font-medium whitespace-nowrap",
         "text-slate-500 hover:text-slate-800 rounded-none border-b-2 border-transparent",
         "transition-colors duration-150",
-        "data-[state=active]:text-blue-700 data-[state=active]:border-blue-600 data-[state=active]:font-semibold",
+        "data-[state=active]:text-[#006B45] data-[state=active]:border-[#007F4E] data-[state=active]:font-semibold",
         "data-[state=active]:bg-transparent data-[state=active]:shadow-none",
         "focus-visible:outline-none",
       ].join(" ")}

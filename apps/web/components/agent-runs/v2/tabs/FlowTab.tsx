@@ -40,7 +40,7 @@ const STATUS: Record<TimelineEventStatus, {
     icon: <XCircle className="h-3 w-3" />,
   },
   RUNNING: {
-    dot: "bg-blue-500 animate-pulse",
+    dot: "bg-teal-500 animate-pulse",
     border: "border-blue-200",
     bg: "bg-blue-50",
     label: "Running",

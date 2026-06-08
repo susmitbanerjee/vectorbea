@@ -196,11 +196,11 @@ export default function MembersPage() {
                   className="mt-4 space-y-4"
                 >
                   {seatLimitReached && (
-                    <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm">
-                      <p className="font-medium text-amber-200">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+                      <p className="font-medium text-amber-800">
                         Seat limit reached ({seatsUsed}/{maxSeats}).
                       </p>
-                      <p className="mt-1 text-amber-100/80">
+                      <p className="mt-1 text-amber-700">
                         <a
                           href="/settings/usage"
                           className="font-medium underline underline-offset-4"
@@ -385,11 +385,11 @@ export default function MembersPage() {
                       {member.avatarUrl ? (
                         <Image src={member.avatarUrl} alt={member.displayName} width={36} height={36}
                           className="h-9 w-9 shrink-0 rounded-full object-cover"
-                          style={{ border: "1px solid #BFDBFE" }}
+                          style={{ border: "1px solid #9CCFBB" }}
                         />
                       ) : (
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                          style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 13, fontWeight: 700, color: "#1D4ED8" }}>
+                          style={{ background: "#E6F4EF", border: "1px solid #9CCFBB", fontSize: 13, fontWeight: 700, color: "#006B45" }}>
                           {initials}
                         </div>
                       )}
@@ -401,7 +401,7 @@ export default function MembersPage() {
                     {/* Role */}
                     <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1"
                       style={{ fontSize: 11.5, fontWeight: 600,
-                        ...(member.role === "admin" ? { background: "#EFF6FF", borderColor: "#BFDBFE", color: "#1D4ED8" } :
+                        ...(member.role === "admin" ? { background: "#E6F4EF", borderColor: "#9CCFBB", color: "#006B45" } :
                           member.role === "editor" ? { background: "#F8FAFC", borderColor: "#E2E8F0", color: "#475569" } :
                           { background: "#F8FAFC", borderColor: "#E2E8F0", color: "#64748B" }) }}>
                       <Icon className="h-3 w-3" />
@@ -429,7 +429,7 @@ export default function MembersPage() {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                      style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 13, fontWeight: 700, color: "#1D4ED8" }}>
+                      style={{ background: "#E6F4EF", border: "1px solid #9CCFBB", fontSize: 13, fontWeight: 700, color: "#006B45" }}>
                       {(sessionUser.displayName[0] ?? "U").toUpperCase()}
                     </div>
                     <div className="min-w-0">
@@ -438,7 +438,7 @@ export default function MembersPage() {
                     </div>
                   </div>
                   <span className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1"
-                    style={{ fontSize: 11.5, fontWeight: 600, background: "#EFF6FF", borderColor: "#BFDBFE", color: "#1D4ED8" }}>
+                    style={{ fontSize: 11.5, fontWeight: 600, background: "#E6F4EF", borderColor: "#9CCFBB", color: "#006B45" }}>
                     <Crown className="h-3 w-3" />
                     Admin
                   </span>
@@ -489,7 +489,7 @@ export default function MembersPage() {
                             {accepted && <span className="flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3 w-3" />Accepted</span>}
                             {revoked && <span className="flex items-center gap-1 text-xs text-muted-foreground"><XCircle className="h-3 w-3" />Revoked</span>}
                             {expired && <span className="flex items-center gap-1 text-xs text-amber-700"><Clock className="h-3 w-3" />Expired</span>}
-                            {isPending && <span className="flex items-center gap-1 text-xs text-blue-700"><Clock className="h-3 w-3" />Pending</span>}
+                            {isPending && <span className="flex items-center gap-1 text-xs text-teal-700"><Clock className="h-3 w-3" />Pending</span>}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {new Date(inv.expiresAt).toLocaleDateString()}

@@ -262,18 +262,15 @@ export const WorkflowEdge = memo(function WorkflowEdge({
   );
 
   // Stroke state
-  const strokeColor = selected ? "#3B82F6" : styleCfg.stroke;
+  const strokeColor = selected ? "#007F4E" : isRunning ? "#0F766E" : styleCfg.stroke;
   const strokeWidth = selected ? 2.5 : 1.75;
   const markerId    = `wf-arrow-${id}`;
 
-  // Always animate — slow ambient flow shows data direction.
-  // Running state: brighter color, faster flow.
-  // Smaller dashes on static connectors — less visual noise on orthogonal paths
-  const dashArray = isRunning ? "5 3" : "5 6";
-  const animation = isRunning
-    ? "wfDashFast 0.45s linear infinite"
-    : "wfDashSlow 2.2s linear infinite";
-  const strokeOpacity = selected ? 1 : isRunning ? 0.9 : 0.65;
+  // Clean reference look: static edges are SOLID curves; only running edges
+  // show the flowing dashed animation (direction of data flow).
+  const dashArray = isRunning ? "5 3" : undefined;
+  const animation = isRunning ? "wfDashFast 0.45s linear infinite" : undefined;
+  const strokeOpacity = selected ? 1 : isRunning ? 0.95 : 0.85;
   const filter = selected
     ? `drop-shadow(0 0 4px ${strokeColor}60)`
     : isRunning

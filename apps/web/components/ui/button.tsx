@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-1.5 whitespace-nowrap",
-    "rounded-[10px] font-semibold tracking-[-0.01em]",
+    "rounded-[8px] font-semibold tracking-[-0.01em]",
     "transition-all duration-150 ease-out",
     "focus-visible:outline-none",
     "disabled:pointer-events-none disabled:opacity-40",
@@ -14,15 +14,15 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:     "bg-slate-900 text-white shadow-sm hover:bg-slate-800 hover:shadow-md active:bg-slate-900",
-        primary:     "bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:shadow-md active:bg-blue-600",
+        default:     "bg-[#0B0D0F] text-white shadow-sm hover:bg-[#1c1f22] hover:shadow-md active:bg-[#0B0D0F]",
+        primary:     "bg-[#007F4E] text-white shadow-sm hover:bg-[#006B45] hover:shadow-md active:bg-[#007F4E]",
         destructive: "bg-red-600 text-white shadow-sm hover:bg-red-700",
-        outline:     "border border-slate-200 bg-white text-slate-700 shadow-xs hover:bg-slate-50 hover:border-slate-300",
-        ghost:       "text-slate-600 hover:bg-slate-100 hover:text-slate-800",
-        secondary:   "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200",
-        success:     "bg-emerald-600 text-white shadow-sm hover:bg-emerald-700",
-        brand:       "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300",
-        link:        "text-blue-600 underline-offset-4 hover:underline h-auto p-0 shadow-none",
+        outline:     "border border-[#E0E3E6] bg-white text-[#4B5563] shadow-xs hover:bg-[#F3F4F5] hover:border-[#C9CED4]",
+        ghost:       "text-[#4B5563] hover:bg-[#F3F4F5] hover:text-[#0B0D0F]",
+        secondary:   "bg-[#F3F4F5] text-[#4B5563] border border-[#E0E3E6] hover:bg-[#ECEEEF]",
+        success:     "bg-[#007F4E] text-white shadow-sm hover:bg-[#006B45]",
+        brand:       "bg-[#E6F4EF] text-[#006B45] border border-[#9CCFBB] hover:bg-[#d8ebe2]",
+        link:        "text-[#007F4E] underline-offset-4 hover:underline h-auto p-0 shadow-none",
       },
       size: {
         default:   "h-[36px] px-4 text-[13.5px]",

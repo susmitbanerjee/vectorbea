@@ -220,11 +220,11 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           <Icon
             className={cn(
               "h-[16px] w-[16px] shrink-0 transition-colors",
-              active ? "text-amber-700" : "text-[#6B7280] group-hover:text-slate-800",
+              active ? "text-[#006B45]" : "text-[#6B7280] group-hover:text-slate-800",
             )}
           />
           {loading && (
-            <Loader2 className="absolute h-[13px] w-[13px] animate-spin text-amber-700" />
+            <Loader2 className="absolute h-[13px] w-[13px] animate-spin text-[#006B45]" />
           )}
         </Link>
       );
@@ -256,13 +256,13 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           className={cn(
             "shrink-0 transition-colors",
             item.isSubItem ? "h-[13px] w-[13px]" : "h-[16px] w-[16px]",
-            active ? "text-amber-700" : "text-[#6B7280] group-hover:text-slate-800",
+            active ? "text-[#006B45]" : "text-[#6B7280] group-hover:text-slate-800",
             loading && "opacity-0",
           )}
         />
         {loading && (
           <Loader2 className={cn(
-            "absolute h-[13px] w-[13px] animate-spin text-amber-700",
+            "absolute h-[13px] w-[13px] animate-spin text-[#006B45]",
             item.isSubItem ? "left-7" : "left-[10px]",
           )} />
         )}
@@ -270,7 +270,7 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           {item.label}
         </span>
         {item.badge && (
-          <span className="rounded px-1 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-widest bg-amber-50 text-amber-700 border border-amber-200">
+          <span className="rounded px-1 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-widest bg-[#E6F4EF] text-[#006B45] border border-[#9CCFBB]">
             {item.badge}
           </span>
         )}
@@ -318,9 +318,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   fontSize: 11,
                   fontWeight: 600,
                   letterSpacing: "0.04em",
-                  color: "#D97706",
-                  borderColor: "#FDE68A",
-                  background: "#FEF3C7",
+                  color: "#006B45",
+                  borderColor: "#9CCFBB",
+                  background: "#E6F4EF",
                 }}
               >
                 Dev
@@ -393,12 +393,12 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                     width={32}
                     height={32}
                     className="h-8 w-8 shrink-0 rounded-full object-cover"
-                    style={{ border: "1px solid #BFDBFE" }}
+                    style={{ border: "1px solid #9CCFBB" }}
                   />
                 ) : (
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                    style={{ background: "#FEF3C7", border: "1px solid #FDE68A", fontSize: 13, fontWeight: 700, color: "#B45309" }}
+                    style={{ background: "#E6F4EF", border: "1px solid #9CCFBB", fontSize: 13, fontWeight: 700, color: "#006B45" }}
                   >
                     {((user.full_name ?? user.email ?? "?")[0] ?? "?").toUpperCase()}
                   </div>

@@ -40,7 +40,7 @@ export function EventHistoryTab({ run }: { run: WorkflowRun }) {
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search events…"
-            className="h-9 w-48 rounded-xl border border-slate-200 bg-white pl-8 pr-3 text-[12.5px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            className="h-9 w-48 rounded-xl border border-slate-200 bg-white pl-8 pr-3 text-[12.5px] outline-none focus:border-[#9CCFBB] focus:ring-2 focus:ring-[#E6F4EF]" />
         </div>
         {categories.map(c => (
           <button key={c.id} type="button" onClick={() => setCategory(c.id)}

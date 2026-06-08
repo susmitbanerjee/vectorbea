@@ -102,7 +102,7 @@ function MeterCard({
     tone === "critical"
       ? "bg-red-600"
       : tone === "warning"
-        ? "bg-amber-600"
+        ? "bg-[#007F4E]"
         : "bg-emerald-600";
 
   return (

@@ -46,7 +46,7 @@ function timeAgo(ts: string | null) {
 const STATUS_CONFIG: Record<string, { dot: string; label: string; labelColor: string }> = {
   succeeded:            { dot: "bg-emerald-500",                 label: "Succeeded",       labelColor: "#059669" },
   failed:               { dot: "bg-red-500",                     label: "Failed",           labelColor: "#DC2626" },
-  running:              { dot: "bg-blue-500 animate-pulse",       label: "Running",          labelColor: "#2563EB" },
+  running:              { dot: "bg-teal-500 animate-pulse",       label: "Running",          labelColor: "#0F766E" },
   waiting_for_approval: { dot: "bg-amber-500 animate-pulse",     label: "Awaiting approval",labelColor: "#D97706" },
   queued:               { dot: "bg-slate-400",                   label: "Queued",           labelColor: "#64748B" },
   cancelled:            { dot: "bg-slate-300",                   label: "Cancelled",        labelColor: "#94A3B8" },
@@ -267,7 +267,7 @@ export default function OverviewPage() {
             Get started with Vectorbea
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <GetStartedTile icon={GitBranch}  title="Create workflow" description="Build a native AI workflow" href="/workflows/new" color="#2563EB" />
+            <GetStartedTile icon={GitBranch}  title="Create workflow" description="Build a native AI workflow" href="/workflows/new" color="#007F4E" />
             <GetStartedTile icon={Plug}       title="Add connection"  description="Connect an LLM provider"  href="/connections"   color="#7C3AED" />
             <GetStartedTile icon={Bot}        title="Register agent"  description="Define an agent persona"  href="/agents/new"    color="#059669" />
           </div>
@@ -298,7 +298,7 @@ export default function OverviewPage() {
           {(summary?.waitingApprovals ?? 0) > 0 && (
             <Link
               href={"/approvals" as Route}
-              className="inline-flex h-[34px] items-center gap-1.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3 text-amber-700 transition-colors hover:bg-amber-100"
+              className="inline-flex h-[34px] items-center gap-1.5 rounded-[10px] border border-[#9CCFBB] bg-[#E6F4EF] px-3 text-[#006B45] transition-colors hover:bg-[#d8ebe2]"
               style={{ fontSize: 13, fontWeight: 600 }}
             >
               <ShieldCheck className="h-3.5 w-3.5" />
@@ -314,7 +314,7 @@ export default function OverviewPage() {
           label="Active Workflows"
           value={loading ? "…" : (summary?.activeWorkflows ?? 0)}
           sub={`${summary?.totalWorkflows ?? 0} total`}
-          color="#2563EB" icon={GitBranch} tone="workflow"
+          color="#007F4E" icon={GitBranch} tone="workflow"
         />
         <MetricCard
           label="Running Now"
@@ -354,7 +354,7 @@ export default function OverviewPage() {
             <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>Recent Runs</span>
             <Link
               href={"/runs" as Route}
-              style={{ fontSize: 12, color: "#2563EB", fontWeight: 600 }}
+              style={{ fontSize: 12, color: "#007F4E", fontWeight: 600 }}
               className="hover:underline"
             >
               View all →
@@ -486,7 +486,7 @@ export default function OverviewPage() {
             <div className="flex items-center justify-between mb-3">
               <p style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>Usage today</p>
               <Link href={"/settings/usage" as never}
-                style={{ fontSize: 12, color: "#2563EB", fontWeight: 600 }}
+                style={{ fontSize: 12, color: "#007F4E", fontWeight: 600 }}
                 className="hover:underline">
                 View limits →
               </Link>

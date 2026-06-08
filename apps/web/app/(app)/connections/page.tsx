@@ -337,7 +337,7 @@ export default function ConnectionsPage() {
               className={cn(
                 "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-all",
                 typeFilter === f.value
-                  ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                  ? "border-[#9CCFBB] bg-[#E6F4EF] text-[#006B45] font-semibold"
                   : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
               )}
             >

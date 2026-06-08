@@ -15,18 +15,18 @@ function BeeSVG({ size = 24, className = "" }: { size?: number; className?: stri
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className={className}>
       {/* Body */}
-      <ellipse cx="16" cy="18" rx="7" ry="9" fill="#F59E0B" />
+      <ellipse cx="16" cy="18" rx="7" ry="9" fill="#00A65A" />
       {/* Stripes */}
       <ellipse cx="16" cy="16" rx="7" ry="3.5" fill="#1C1917" opacity="0.8" />
       <ellipse cx="16" cy="21" rx="6" ry="2.5" fill="#1C1917" opacity="0.7" />
-      <ellipse cx="16" cy="25.5" rx="4.5" ry="2" fill="#92400E" opacity="0.6" />
+      <ellipse cx="16" cy="25.5" rx="4.5" ry="2" fill="#006B45" opacity="0.6" />
       {/* Head */}
       <circle cx="16" cy="9" r="4" fill="#1C1917" />
       {/* Antennae */}
       <line x1="14" y1="6" x2="11" y2="3" stroke="#1C1917" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="11" cy="3" r="1" fill="#F59E0B" />
+      <circle cx="11" cy="3" r="1" fill="#00A65A" />
       <line x1="18" y1="6" x2="21" y2="3" stroke="#1C1917" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="21" cy="3" r="1" fill="#F59E0B" />
+      <circle cx="21" cy="3" r="1" fill="#00A65A" />
       {/* Wings */}
       <ellipse cx="8" cy="13" rx="6" ry="3" fill="white" opacity="0.85" transform="rotate(-20 8 13)" />
       <ellipse cx="24" cy="13" rx="6" ry="3" fill="white" opacity="0.85" transform="rotate(20 24 13)" />
@@ -37,14 +37,14 @@ function BeeSVG({ size = 24, className = "" }: { size?: number; className?: stri
 
 // ─── Hex cell ─────────────────────────────────────────────────────────────────
 function HexCell({ x, y, opacity = 0.06 }: { x: number; y: number; opacity?: number }) {
+  // Dotted engineering-grid motif (replaces the old honeycomb)
   return (
-    <polygon
-      points="30,0 60,17 60,52 30,69 0,52 0,17"
-      fill="none"
-      stroke="#D97706"
-      strokeWidth="1"
-      opacity={opacity}
-      transform={`translate(${x},${y})`}
+    <circle
+      cx={x + 30}
+      cy={y + 34}
+      r="1.4"
+      fill="#007F4E"
+      opacity={opacity * 2.2}
     />
   );
 }
@@ -54,7 +54,7 @@ function StatusPill({ status }: { status: "succeeded" | "running" | "waiting" })
   const v = {
     succeeded: { label: "Succeeded", bg: "#ECFDF5", border: "#BBF7D0", color: "#15803D", dot: "#22C55E" },
     running:   { label: "Running",   bg: "#EFF6FF", border: "#BFDBFE", color: "#1D4ED8", dot: "#3B82F6" },
-    waiting:   { label: "Awaiting",  bg: "#FFFBEB", border: "#FDE68A", color: "#92400E", dot: "#F59E0B" },
+    waiting:   { label: "Awaiting",  bg: "#FFFBEB", border: "#9CCFBB", color: "#006B45", dot: "#00A65A" },
   }[status];
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
@@ -75,7 +75,7 @@ function TEvent({ icon, title, sub, time, color, last = false }: {
           style={{ borderColor: color + "40", background: color + "10", color }}>
           {icon}
         </div>
-        {!last && <div className="mt-1 w-px flex-1 bg-amber-100" style={{ minHeight: 18 }} />}
+        {!last && <div className="mt-1 w-px flex-1 bg-[#E6F4EF]" style={{ minHeight: 18 }} />}
       </div>
       <div className="pb-3 flex-1 min-w-0" style={{ paddingTop: 4 }}>
         <div className="flex items-baseline justify-between gap-2">
@@ -116,7 +116,7 @@ function WNode({ icon, label, type, badge, accent = "#2563EB", active }: {
 // ─── Feature card ─────────────────────────────────────────────────────────────
 function FCard({ icon, title, desc, accent }: { icon: React.ReactNode; title: string; desc: string; accent: string }) {
   return (
-    <div className="rounded-2xl p-6 bg-white border border-amber-100 hover:border-amber-200 transition-all hover:shadow-md"
+    <div className="rounded-2xl p-6 bg-white border border-[#E6F4EF] hover:border-[#9CCFBB] transition-all hover:shadow-md"
       style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
       <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl"
         style={{ background: accent + "12", border: `1.5px solid ${accent}25`, color: accent }}>{icon}</div>
@@ -139,13 +139,13 @@ export default function MarketingPage() {
         .float-bee { animation: floatBee 3s ease-in-out infinite; }
       `}</style>
 
-      <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "#FFFBF0", color: "#1C1917" }}>
+      <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "#FFFFFF", color: "#1C1917" }}>
 
         {/* ── NAV ─────────────────────────────────────────────────────────── */}
-        <header className="sticky top-0 z-50 w-full" style={{ background: "rgba(255,251,240,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(217,119,6,0.12)" }}>
+        <header className="sticky top-0 z-50 w-full" style={{ background: "rgba(255,251,240,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(0,127,78,0.12)" }}>
           <div className="flex w-full items-center justify-between gap-4 px-6 py-4 lg:px-16 xl:px-24">
             <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#FEF3C7", border: "1.5px solid #FDE68A" }}>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#E6F4EF", border: "1.5px solid #9CCFBB" }}>
                 <BeeLogo className="h-4 w-4" />
               </div>
               <span className="text-[15px] font-bold tracking-tight text-slate-900">Vectorbea</span>
@@ -154,7 +154,7 @@ export default function MarketingPage() {
             <nav className="hidden items-center gap-1 sm:flex">
               {["Features", "How it works", "Pricing"].map(label => (
                 <a key={label} href={`#${label.toLowerCase().replace(/\s/g, "")}`}
-                  className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-slate-600 hover:text-amber-700 hover:bg-amber-50 transition-colors">
+                  className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-slate-600 hover:text-[#006B45] hover:bg-[#E6F4EF] transition-colors">
                   {label}
                 </a>
               ))}
@@ -166,7 +166,7 @@ export default function MarketingPage() {
               </Link>
               <Link href="/signup"
                 className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13.5px] font-bold text-white transition-all hover:opacity-90"
-                style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 100%)", boxShadow: "0 4px 16px rgba(217,119,6,0.35)" }}>
+                style={{ background: "linear-gradient(135deg, #007F4E 0%, #00A65A 100%)", boxShadow: "0 4px 16px rgba(0,127,78,0.35)" }}>
                 Request Access →
               </Link>
             </div>
@@ -189,15 +189,15 @@ export default function MarketingPage() {
 
           {/* Amber radial glow top-center */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] pointer-events-none"
-            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251,191,36,0.22) 0%, transparent 70%)" }} />
+            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(0,166,90,0.22) 0%, transparent 70%)" }} />
 
 
           {/* Content */}
           <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 lg:px-16 xl:px-24 pt-28 pb-16" style={{ minHeight: "100vh" }}>
             {/* Badge */}
             <div className="mb-8 inline-flex items-center gap-2 rounded-full px-5 py-2"
-              style={{ background: "#FEF3C7", border: "1.5px solid #FDE68A", color: "#92400E" }}>
-              <span className="text-base">🐝</span>
+              style={{ background: "#E6F4EF", border: "1.5px solid #9CCFBB", color: "#006B45" }}>
+              <BeeSVG size={16} />
               <span className="text-[12px] font-bold tracking-widest uppercase">Agentic Automation Platform</span>
             </div>
 
@@ -205,7 +205,7 @@ export default function MarketingPage() {
             <h1 className="w-full font-black tracking-[-0.045em] text-stone-900 leading-[1.0] mb-6"
               style={{ fontSize: "clamp(52px, 9vw, 110px)" }}>
               Durable automation<br />
-              <span style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 40%, #22C55E 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              <span style={{ background: "linear-gradient(135deg, #007F4E 0%, #00A65A 40%, #22C55E 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
                 for AI agents
               </span>
               <br />
@@ -223,11 +223,11 @@ export default function MarketingPage() {
             <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
               <Link href="/signup"
                 className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-black text-white transition-all hover:scale-[1.02] active:scale-[0.99]"
-                style={{ background: "linear-gradient(135deg, #D97706 0%, #F59E0B 100%)", boxShadow: "0 8px 32px rgba(217,119,6,0.40), 0 0 0 1px rgba(217,119,6,0.2)" }}>
+                style={{ background: "linear-gradient(135deg, #007F4E 0%, #00A65A 100%)", boxShadow: "0 8px 32px rgba(0,127,78,0.40), 0 0 0 1px rgba(0,127,78,0.2)" }}>
                 Join Private Beta <ArrowRight className="h-5 w-5" />
               </Link>
               <Link href="/signin"
-                className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-bold text-stone-700 bg-white border border-stone-200 hover:border-amber-300 hover:bg-amber-50/50 transition-all"
+                className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-bold text-stone-700 bg-white border border-stone-200 hover:border-[#9CCFBB] hover:bg-[#E6F4EF] transition-all"
                 style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
                 View run timeline <ChevronRight className="h-4 w-4 text-stone-400" />
               </Link>
@@ -237,17 +237,17 @@ export default function MarketingPage() {
             <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 mb-16">
               {["BYOK models", "Human approvals", "Durable retries", "Event-sourced runs", "No vendor lock-in"].map(hint => (
                 <span key={hint} className="flex items-center gap-1.5 text-[13px] text-stone-500">
-                  <span className="text-amber-500">🐝</span> {hint}
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#007F4E]" /> {hint}
                 </span>
               ))}
             </div>
 
             {/* ── Full-width product preview ─────────────────────────────── */}
             <div className="w-full max-w-none rounded-3xl overflow-hidden"
-              style={{ border: "1.5px solid rgba(217,119,6,0.2)", background: "white", boxShadow: "0 40px 120px rgba(217,119,6,0.12), 0 8px 32px rgba(0,0,0,0.08)" }}>
+              style={{ border: "1.5px solid rgba(0,127,78,0.2)", background: "white", boxShadow: "0 40px 120px rgba(0,127,78,0.12), 0 8px 32px rgba(0,0,0,0.08)" }}>
 
               {/* Window chrome */}
-              <div className="flex items-center justify-between px-5 py-4" style={{ background: "#FFFBF0", borderBottom: "1px solid rgba(217,119,6,0.12)" }}>
+              <div className="flex items-center justify-between px-5 py-4" style={{ background: "#FFFFFF", borderBottom: "1px solid rgba(0,127,78,0.12)" }}>
                 <div className="flex items-center gap-2">
                   <div className="flex gap-1.5">
                     <div className="h-3 w-3 rounded-full bg-red-400" />
@@ -261,7 +261,7 @@ export default function MarketingPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px]">
                 {/* Canvas */}
-                <div className="p-8 space-y-5" style={{ background: "#FAFAF7", borderRight: "1px solid rgba(217,119,6,0.08)" }}>
+                <div className="p-8 space-y-5" style={{ background: "#FAFAF7", borderRight: "1px solid rgba(0,127,78,0.08)" }}>
                   {/* Row 1 */}
                   <div className="flex items-center gap-6 flex-wrap">
                     <WNode icon={<Play className="h-3.5 w-3.5" />} label="Schedule Trigger" type="TRIGGER" badge="Daily" accent="#2563EB" />
@@ -278,7 +278,7 @@ export default function MarketingPage() {
                       <div className="flex-1 border-t-2 border-dashed border-stone-200" />
                       <span className="text-stone-300 text-xs">→</span>
                     </div>
-                    <WNode icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approval Gate" type="HUMAN APPROVAL" badge="pending" accent="#D97706" />
+                    <WNode icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approval Gate" type="HUMAN APPROVAL" badge="pending" accent="#007F4E" />
                   </div>
                   {/* Row 3 */}
                   <div className="flex items-center gap-6 flex-wrap pl-16">
@@ -289,7 +289,7 @@ export default function MarketingPage() {
                     <span className="text-[11px] text-stone-400">Active agents:</span>
                     <div className="flex gap-1">
                       {[0,1,2].map(i => (
-                        <span key={i} className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" style={{ animationDelay: `${i * 0.3}s` }} />
+                        <span key={i} className="h-2 w-2 rounded-full bg-[#00A65A] animate-pulse" style={{ animationDelay: `${i * 0.3}s` }} />
                       ))}
                     </div>
                     <span className="text-[11px] text-stone-400">3 workers running</span>
@@ -298,7 +298,7 @@ export default function MarketingPage() {
 
                 {/* Timeline */}
                 <div>
-                  <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid rgba(217,119,6,0.08)" }}>
+                  <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid rgba(0,127,78,0.08)" }}>
                     <span className="text-[13px] font-bold text-stone-700">Run timeline</span>
                     <span className="font-mono text-[11px] text-stone-400">2m 14s</span>
                   </div>
@@ -306,7 +306,7 @@ export default function MarketingPage() {
                     <TEvent icon={<Play className="h-3 w-3" />} title="Run started" sub="Schedule trigger · daily 09:00" time="09:00:01" color="#3B82F6" />
                     <TEvent icon={<Database className="h-3 w-3" />} title="Fetched 34 renewals" sub="DB read · 284ms" time="09:00:02" color="#22C55E" />
                     <TEvent icon={<Bot className="h-3 w-3" />} title="Agent completed" sub="Risk scored · 6.2k tokens" time="09:01:18" color="#8B5CF6" />
-                    <TEvent icon={<ShieldCheck className="h-3 w-3" />} title="Approval requested" sub="Waiting Finance Ops · 3 high-risk" time="09:01:20" color="#F59E0B" last />
+                    <TEvent icon={<ShieldCheck className="h-3 w-3" />} title="Approval requested" sub="Waiting Finance Ops · 3 high-risk" time="09:01:20" color="#00A65A" last />
                   </div>
                 </div>
               </div>
@@ -315,12 +315,12 @@ export default function MarketingPage() {
         </section>
 
         {/* ── PROBLEM — warm white full bleed ──────────────────────────────── */}
-        <section id="features" className="w-full py-28" style={{ background: "white", borderTop: "1px solid #FEF3C7" }}>
+        <section id="features" className="w-full py-28" style={{ background: "white", borderTop: "1px solid #E6F4EF" }}>
           <div className="w-full px-6 lg:px-16 xl:px-24">
             <div className="mb-16">
               <div className="flex items-center gap-2 mb-4">
                 <BeeSVG size={22} />
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-600">The problem</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#007F4E]">The problem</p>
               </div>
               <h2 className="font-black tracking-[-0.035em] text-stone-900 leading-[1.05] mb-5"
                 style={{ fontSize: "clamp(32px, 5vw, 64px)" }}>
@@ -351,7 +351,7 @@ export default function MarketingPage() {
         </section>
 
         {/* ── CAPABILITIES — honey amber full bleed ────────────────────────── */}
-        <section id="howItWorks" className="w-full py-28 relative overflow-hidden" style={{ background: "linear-gradient(180deg, #FFFBF0 0%, #FEF3C7 100%)", borderTop: "1px solid #FDE68A" }}>
+        <section id="howItWorks" className="w-full py-28 relative overflow-hidden" style={{ background: "linear-gradient(180deg, #FFFFFF 0%, #E6F4EF 100%)", borderTop: "1px solid #9CCFBB" }}>
           {/* Honeycomb decorative */}
           <svg className="absolute right-0 top-0 h-full opacity-[0.07]" width="400" viewBox="0 0 300 800">
             {Array.from({ length: 6 }).map((_, row) =>
@@ -365,18 +365,18 @@ export default function MarketingPage() {
             <div className="mb-16">
               <div className="flex items-center gap-2 mb-4">
                 <BeeSVG size={22} />
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">The hive</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#006B45]">The hive</p>
               </div>
               <h2 className="font-black tracking-[-0.035em] text-stone-900 leading-[1.05] mb-5"
                 style={{ fontSize: "clamp(32px, 5vw, 64px)" }}>
                 Every bee knows its role.<br />
-                <span style={{ color: "#D97706" }}>Every step gets done.</span>
+                <span style={{ color: "#007F4E" }}>Every step gets done.</span>
               </h2>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <FCard accent="#2563EB" icon={<GitBranch className="h-5 w-5" />} title="Visual workflow canvas" desc="Drag-and-drop builder for multi-step agentic workflows. Connect agents, tools, and approval gates." />
               <FCard accent="#7C3AED" icon={<Bot className="h-5 w-5" />} title="Durable agent runs" desc="Runs checkpoint at every step. Failures retry from the last checkpoint, not the beginning." />
-              <FCard accent="#D97706" icon={<ShieldCheck className="h-5 w-5" />} title="Human approval gates" desc="Pause mid-workflow for a human decision with full context and audit trail." />
+              <FCard accent="#007F4E" icon={<ShieldCheck className="h-5 w-5" />} title="Human approval gates" desc="Pause mid-workflow for a human decision with full context and audit trail." />
               <FCard accent="#059669" icon={<ListChecks className="h-5 w-5" />} title="Immutable event history" desc="Every tool call, LLM response, retry, and approval is recorded in a structured log." />
               <FCard accent="#0891B2" icon={<RotateCcw className="h-5 w-5" />} title="Automatic retry & resume" desc="Configure backoff per step. Failed runs resume from the last successful checkpoint." />
               <FCard accent="#F97316" icon={<Zap className="h-5 w-5" />} title="BYOK connections" desc="Connect your own OpenAI, Anthropic, or Gemini keys. Your own databases and APIs too." />
@@ -385,7 +385,7 @@ export default function MarketingPage() {
         </section>
 
         {/* ── FINAL CTA — full bleed warm ──────────────────────────────────── */}
-        <section id="pricing" className="relative w-full py-36 overflow-hidden" style={{ background: "#1C1917", borderTop: "1px solid rgba(217,119,6,0.3)" }}>
+        <section id="pricing" className="relative w-full py-36 overflow-hidden" style={{ background: "#1C1917", borderTop: "1px solid rgba(0,127,78,0.3)" }}>
           {/* Honeycomb bg */}
           <svg className="absolute inset-0 w-full h-full opacity-[0.05]" preserveAspectRatio="xMidYMid slice">
             {Array.from({ length: 10 }).map((_, row) =>
@@ -396,18 +396,18 @@ export default function MarketingPage() {
           </svg>
           {/* Glow */}
           <div className="absolute inset-0 pointer-events-none"
-            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(251,191,36,0.15) 0%, transparent 70%)" }} />
+            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(0,166,90,0.15) 0%, transparent 70%)" }} />
 
 
           <div className="relative z-10 w-full text-center px-6 lg:px-16 xl:px-24">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2"
-              style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.3)", color: "#FCD34D" }}>
+              style={{ background: "rgba(0,166,90,0.12)", border: "1px solid rgba(0,166,90,0.3)", color: "#34D399" }}>
               <BeeSVG size={18} /> <span className="text-[12px] font-bold">Join the hive</span>
             </div>
             <h2 className="font-black tracking-[-0.04em] text-white leading-[1.0] mb-6"
               style={{ fontSize: "clamp(40px, 6vw, 80px)" }}>
               Build workflows your<br />
-              <span style={{ background: "linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              <span style={{ background: "linear-gradient(135deg, #34D399 0%, #00A65A 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
                 team can trust.
               </span>
             </h2>
@@ -419,7 +419,7 @@ export default function MarketingPage() {
             <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
               <Link href="/signup"
                 className="flex items-center gap-2 rounded-2xl px-10 py-5 text-[16px] font-black text-stone-900 transition-all hover:scale-[1.02]"
-                style={{ background: "linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%)", boxShadow: "0 8px 32px rgba(251,191,36,0.35)" }}>
+                style={{ background: "linear-gradient(135deg, #34D399 0%, #00A65A 100%)", boxShadow: "0 8px 32px rgba(0,166,90,0.35)" }}>
                 Create your first workflow <ArrowRight className="h-5 w-5" />
               </Link>
               <Link href="/signin"
@@ -431,7 +431,7 @@ export default function MarketingPage() {
             <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
               {["Invite-only beta", "Bring your own keys", "No usage lock-in", "Manual onboarding"].map(hint => (
                 <span key={hint} className="flex items-center gap-1.5 text-[13px]" style={{ color: "rgba(255,255,255,0.3)" }}>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-amber-500/50" /> {hint}
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#00A65A]" /> {hint}
                 </span>
               ))}
             </div>

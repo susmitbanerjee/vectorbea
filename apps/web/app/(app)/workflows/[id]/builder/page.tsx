@@ -24,9 +24,9 @@ const HANDLE_CSS = `
   .vb-handle:hover,
   .vb-handle.react-flow__handle-connecting {
     transform: scale(1.45) !important;
-    box-shadow: 0 0 0 5px rgba(59,130,246,0.35) !important;
-    border-color: #3B82F6 !important;
-    background: #3B82F6 !important;
+    box-shadow: 0 0 0 5px rgba(0,127,78,0.30) !important;
+    border-color: #007F4E !important;
+    background: #007F4E !important;
     z-index: 100;
   }
   /* Larger invisible hit area so handles are easy to click */
@@ -39,10 +39,10 @@ const HANDLE_CSS = `
   /* Green ring when a connection is being drawn and user hovers valid target */
   .react-flow__handle.connectingfrom,
   .react-flow__handle.react-flow__handle-connecting {
-    background: #22C55E !important;
+    background: #00A65A !important;
     border-color: white !important;
     transform: scale(1.5) !important;
-    box-shadow: 0 0 0 6px rgba(34,197,94,0.3) !important;
+    box-shadow: 0 0 0 6px rgba(0,166,90,0.3) !important;
   }
 `;
 
@@ -77,6 +77,7 @@ import {
   Clock,
   Loader2,
   Play,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -107,6 +108,7 @@ import { NodeInspectorDrawer } from "@/components/workflow-builder/NodeInspector
 import { validateWorkflowGraph } from "@/lib/workflows/workflow-validation";
 import { WORKFLOW_TEMPLATES } from "@/lib/workflows/workflow-templates";
 import { NodePalette } from "@/components/workflow-builder/NodePalette";
+import { AddNodeCommandMenu } from "@/components/workflow-builder/AddNodeCommandMenu";
 import { WorkflowInspector } from "@/components/workflow-builder/WorkflowInspector";
 import { WorkflowTemplatePicker } from "@/components/workflow-builder/WorkflowTemplatePicker";
 import { nodeTypes } from "@/components/workflow-builder/nodes";
@@ -407,6 +409,7 @@ function WorkflowBuilderInner() {
   const [running, setRunning] = useState(false);
   const [testRunning, setTestRunning] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   // ── Live run mode ────────────────────────────────────────────────────────────
   const [activeRunId, setActiveRunId]     = useState<string | null>(null);
@@ -732,6 +735,18 @@ function WorkflowBuilderInner() {
     setUnsaved(true);
   }
 
+  // ── ⌘K / Ctrl+K opens the Add command palette ───────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setAddMenuOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // ── Node palette click-to-add ───────────────────────────────────────────────
   function handleAddNode(type: WFNodeType) {
     const offset = nodes.length * 30;
@@ -1004,7 +1019,7 @@ function WorkflowBuilderInner() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" style={{ background: "#F8FAFC" }}>
+    <div className="flex h-full flex-col overflow-hidden" style={{ background: "#F7F8F9" }}>
       {/* ── Handle CSS injected once ─────────────────────────────────────────── */}
       <style dangerouslySetInnerHTML={{ __html: HANDLE_CSS }} />
 
@@ -1023,17 +1038,17 @@ function WorkflowBuilderInner() {
         return (
           <>
             {/* Progress panel — bottom right */}
-            <div className="absolute bottom-5 right-5 z-50 w-72 rounded-2xl border border-amber-200 bg-white/97 shadow-2xl backdrop-blur-sm overflow-hidden">
+            <div className="absolute bottom-5 right-5 z-50 w-72 rounded-2xl border border-[#9CCFBB] bg-white/97 shadow-2xl backdrop-blur-sm overflow-hidden">
               {/* Header */}
-              <div className="px-4 py-3 border-b border-amber-100 flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                <span className="text-[12px] font-bold text-amber-900 flex-1 truncate">{animationLabel}</span>
-                <span className="text-[10.5px] text-amber-600 font-semibold shrink-0">{animationProgress}%</span>
+              <div className="px-4 py-3 border-b border-[#E6F4EF] flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-[#00A65A] animate-pulse shrink-0" />
+                <span className="text-[12px] font-bold text-[#063] flex-1 truncate">{animationLabel}</span>
+                <span className="text-[10.5px] text-[#007F4E] font-semibold shrink-0">{animationProgress}%</span>
               </div>
               {/* Progress bar */}
               <div className="px-4 pt-2.5">
-                <div className="h-1.5 w-full rounded-full bg-amber-100 overflow-hidden">
-                  <div className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                <div className="h-1.5 w-full rounded-full bg-[#E6F4EF] overflow-hidden">
+                  <div className="h-full rounded-full bg-[#00A65A] transition-all duration-500"
                     style={{ width: `${animationProgress}%` }} />
                 </div>
               </div>
@@ -1049,12 +1064,12 @@ function WorkflowBuilderInner() {
                             </svg>
                           </div>
                         : i === completedCount
-                          ? <div className="h-4 w-4 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                              <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                          ? <div className="h-4 w-4 rounded-full bg-[#E6F4EF] flex items-center justify-center shrink-0">
+                              <div className="h-2 w-2 rounded-full bg-[#00A65A] animate-pulse" />
                             </div>
                           : <div className="h-4 w-4 rounded-full border border-slate-200 shrink-0" />
                       }
-                      <span className={`text-[11px] truncate ${i < completedCount ? "text-green-700" : i === completedCount ? "text-amber-800 font-medium" : "text-slate-400"}`}>
+                      <span className={`text-[11px] truncate ${i < completedCount ? "text-green-700" : i === completedCount ? "text-[#006B45] font-medium" : "text-slate-400"}`}>
                         {step.title}
                       </span>
                     </div>
@@ -1070,9 +1085,9 @@ function WorkflowBuilderInner() {
               </div>
             </div>
             {/* Top-center status banner */}
-            <div className="absolute top-3 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-2 shadow-sm backdrop-blur-sm flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-              <span className="text-[12.5px] font-semibold text-amber-800">Vectorbea is building your workflow…</span>
+            <div className="absolute top-3 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-[#9CCFBB] bg-[#E6F4EF]/90 px-4 py-2 shadow-sm backdrop-blur-sm flex items-center gap-2">
+              <div className="h-2 w-2 rounded-full bg-[#00A65A] animate-pulse shrink-0" />
+              <span className="text-[12.5px] font-semibold text-[#006B45]">Vectorbea is building your workflow…</span>
             </div>
           </>
         );
@@ -1171,7 +1186,7 @@ function WorkflowBuilderInner() {
               {/* Live status pill */}
               <span className={cn(
                 "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                liveRunStatus === "running"   && "border-blue-200 bg-blue-50 text-blue-700",
+                liveRunStatus === "running"   && "border-teal-200 bg-teal-50 text-teal-700",
                 liveRunStatus === "queued"    && "border-slate-200 bg-slate-100 text-slate-600",
                 liveRunStatus === "succeeded" && "border-emerald-200 bg-emerald-50 text-emerald-700",
                 liveRunStatus === "failed"    && "border-red-200 bg-red-50 text-red-700",
@@ -1208,7 +1223,7 @@ function WorkflowBuilderInner() {
                 type="button"
                 onClick={() => void handleRun()}
                 disabled={saving || running || debugRunning}
-                className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] bg-[#2563EB] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#1D4ED8] disabled:opacity-40"
+                className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] bg-[#007F4E] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#006B45] disabled:opacity-40"
                 style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.28)" }}
               >
                 {running ? (
@@ -1270,7 +1285,7 @@ function WorkflowBuilderInner() {
         <div ref={reactFlowWrapper} className="relative flex-1 overflow-hidden" onDragOver={onDragOver} onDrop={onDrop}>
           {/* Template picker overlay */}
           {showTemplatePicker && (
-            <div className="absolute inset-0 z-20 overflow-y-auto" style={{ background: "#F8FAFC" }}>
+            <div className="absolute inset-0 z-20 overflow-y-auto" style={{ background: "#F7F8F9" }}>
               <WorkflowTemplatePicker
                 templates={WORKFLOW_TEMPLATES}
                 workflowName={workflow.name}
@@ -1311,14 +1326,29 @@ function WorkflowBuilderInner() {
             maxZoom={2}
             deleteKeyCode="Delete"
             multiSelectionKeyCode="Shift"
-            style={{ background: "#F8FAFC" }}
+            style={{ background: "#FAFAFA" }}
           >
             <Background
               variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1.2}
-              color="rgba(148,163,184,0.35)"
+              gap={24}
+              size={1.4}
+              color="#CFD4D9"
             />
+            {/* Add button — top-right, opens the command palette (reference style) */}
+            <Panel position="top-right">
+              <button
+                type="button"
+                onClick={() => setAddMenuOpen(true)}
+                className="group inline-flex h-9 items-center gap-2 rounded-[8px] border border-dashed border-[#C9CED4] bg-white/90 px-3 text-[12.5px] font-semibold text-[#0B0D0F] shadow-sm backdrop-blur-sm transition-colors hover:border-[#9CCFBB] hover:bg-[#E6F4EF]"
+                title="Add to canvas  (⌘K)"
+              >
+                <span className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] bg-[#007F4E] text-white">
+                  <Plus className="h-3 w-3" strokeWidth={2.5} />
+                </span>
+                Add
+              </button>
+            </Panel>
+
             <Controls
               className="!bottom-4 !left-4"
               showInteractive={false}
@@ -1351,9 +1381,9 @@ function WorkflowBuilderInner() {
                 >
                   <div
                     className="flex h-14 w-14 items-center justify-center rounded-2xl"
-                    style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
+                    style={{ background: "#E6F4EF", border: "1px solid #9CCFBB" }}
                   >
-                    <ShieldCheck className="h-7 w-7" style={{ color: "#2563EB" }} />
+                    <ShieldCheck className="h-7 w-7" style={{ color: "#007F4E" }} />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[15px] font-semibold text-slate-800">Start building your workflow</p>
@@ -1372,6 +1402,15 @@ function WorkflowBuilderInner() {
               </Panel>
             )}
           </ReactFlow>
+
+          {/* Add-node command palette (reference-style centered modal) */}
+          <AddNodeCommandMenu
+            open={addMenuOpen}
+            onClose={() => setAddMenuOpen(false)}
+            onAddNode={handleAddNode}
+            templates={WORKFLOW_TEMPLATES}
+            onApplyTemplate={handleApplyTemplate}
+          />
 
           {debugRunActive && inspectorNodeId && debugRunId && (() => {
             const n = nodes.find((nd) => nd.id === inspectorNodeId);

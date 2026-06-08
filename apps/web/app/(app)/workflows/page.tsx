@@ -84,7 +84,7 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
       className={cn(
         "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-colors",
         active
-          ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+          ? "border-[#9CCFBB] bg-[#E6F4EF] text-[#006B45] font-semibold"
           : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
       )}
     >
@@ -184,7 +184,7 @@ export default function WorkflowsPage() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             placeholder="Search workflows…"
-            className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-[13.5px] text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 outline-none transition-all hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+            className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-[13.5px] text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 outline-none transition-all hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

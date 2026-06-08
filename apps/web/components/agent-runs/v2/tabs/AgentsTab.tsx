@@ -14,7 +14,7 @@ function fmtDur(ms?: number) {
 const STATUS_CONFIG: Record<TimelineEventStatus, { dot: string; label: string; text: string }> = {
   SUCCEEDED: { dot: "bg-emerald-500", label: "Succeeded", text: "text-emerald-600" },
   FAILED: { dot: "bg-red-500", label: "Failed", text: "text-red-600" },
-  RUNNING: { dot: "bg-blue-500 animate-pulse", label: "Running", text: "text-blue-600" },
+  RUNNING: { dot: "bg-teal-500 animate-pulse", label: "Running", text: "text-teal-600" },
   WAITING: { dot: "bg-amber-500", label: "Waiting", text: "text-amber-600" },
   PENDING: { dot: "bg-muted-foreground/40", label: "Pending", text: "text-muted-foreground" },
   CANCELLED: { dot: "bg-muted-foreground/40", label: "Cancelled", text: "text-muted-foreground" },

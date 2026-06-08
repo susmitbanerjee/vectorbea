@@ -13,15 +13,15 @@ export function Logo({ className, showName = false }: LogoProps) {
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <Image
         src="/favicon.svg"
-        alt="VectorBea"
+        alt="Vectorbea"
         width={24}
         height={24}
-        className="h-5 w-5 shrink-0 object-contain"
+        className="h-[22px] w-[22px] shrink-0 rounded-[6px] object-contain"
         priority
       />
       {showName && (
-        <span className="text-sm font-semibold tracking-tight text-foreground">
-          VectorBea
+        <span className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
+          Vectorbea
         </span>
       )}
     </span>

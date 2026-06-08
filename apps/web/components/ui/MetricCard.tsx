@@ -8,24 +8,26 @@ interface MetricCardProps {
   icon?: LucideIcon;
   trend?: "up" | "down" | "neutral";
   trendLabel?: string;
-  /** Optional color accent: "emerald" | "red" | "amber" | "blue" | "violet" */
-  accent?: "emerald" | "red" | "amber" | "blue" | "violet";
+  /** Optional color accent */
+  accent?: "emerald" | "green" | "red" | "amber" | "blue" | "violet";
   className?: string;
 }
 
 const ACCENT_ICON: Record<string, string> = {
   emerald: "text-emerald-500",
+  green:   "text-[#007F4E]",
   red:     "text-red-500",
   amber:   "text-amber-500",
-  blue:    "text-blue-500",
+  blue:    "text-teal-600",
   violet:  "text-violet-500",
 };
 
 const ACCENT_VALUE: Record<string, string> = {
   emerald: "text-emerald-700",
+  green:   "text-[#006B45]",
   red:     "text-red-700",
   amber:   "text-amber-700",
-  blue:    "text-[#1D4ED8]",
+  blue:    "text-teal-700",
   violet:  "text-violet-700",
 };
 
