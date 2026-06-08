@@ -111,14 +111,6 @@ function RunningSpinner({ size }: { size: number }) {
   );
 }
 
-function StatusDot({ status }: { status?: string }) {
-  if (!status || status === "idle") return null;
-  const s = PREVIEW_STATUS_COLORS[status] ?? PREVIEW_STATUS_COLORS.idle;
-  return (
-    <span className={cn("absolute -top-1 -right-1 z-20 h-2.5 w-2.5 rounded-full border-2 border-white", s.dot)} />
-  );
-}
-
 // Status-based status text color for light mode
 function statusTextColor(dot: string): string {
   if (dot.includes("teal") || dot.includes("blue")) return "#0F766E";
@@ -188,7 +180,7 @@ export const BaseNode = memo(function BaseNode({
 
   return (
     <div
-      className="relative rounded-2xl border transition-all duration-[160ms] ease-out"
+      className="relative rounded-[10px] border transition-all duration-[160ms] ease-out"
       style={{
         width,
         background: "#FFFFFF",
@@ -203,20 +195,13 @@ export const BaseNode = memo(function BaseNode({
       onDragOver={e => e.preventDefault()}
       onDrop={e => e.stopPropagation()}
     >
-      {/* Inner clip wrapper — keeps shimmer/accent visuals contained */}
-      <div className="relative rounded-2xl overflow-hidden" style={{ background: "transparent" }}>
-      {/* Left accent bar — node-type color */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl"
-        style={{ background: meta.color, opacity: selected ? 1 : 0.7 }}
-      />
-
+      {/* Inner clip wrapper — keeps shimmer visuals contained */}
+      <div className="relative rounded-[10px] overflow-hidden" style={{ background: "transparent" }}>
       {/* Running: animated shimmer strip across the top */}
       {status === "running" && (
         <div
           aria-hidden
-          className="pointer-events-none absolute top-0 left-0 right-0 h-[3px] overflow-hidden rounded-tl-[0] rounded-tr-2xl"
+          className="pointer-events-none absolute top-0 left-0 right-0 h-[3px] overflow-hidden"
           style={{ zIndex: 5 }}
         >
           <div
@@ -230,106 +215,84 @@ export const BaseNode = memo(function BaseNode({
         </div>
       )}
 
-      {/* Status ring / dot */}
-      <StatusDot status={status} />
+      {/* Header — icon, title, subtitle (reference layout) */}
+      <div className={cn("relative z-10 flex items-center gap-2.5 px-3", compact ? "py-2" : "py-2.5")}>
+        {/* Icon badge — always shows node type icon */}
+        <span
+          className="relative flex shrink-0 items-center justify-center rounded-[8px] overflow-visible"
+          style={{
+            width: compact ? 26 : 32,
+            height: compact ? 26 : 32,
+            background: meta.bgColor,
+            border: `1px solid ${meta.borderColor}`,
+          }}
+        >
+          {status === "running" && (
+            <RunningSpinner size={compact ? 26 : 32} />
+          )}
+          <LucideIcon
+            style={{ color: meta.color, width: compact ? 13 : 16, height: compact ? 13 : 16 }}
+          />
+          {/* Provider logo badge — bottom-right corner */}
+          {llmProvider && !compact && (
+            <span
+              className="absolute -bottom-1.5 -right-1.5 flex items-center justify-center overflow-hidden"
+              style={{
+                width: 15, height: 15,
+                border: "1.5px solid white",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.22)",
+                borderRadius: 5,
+              }}
+              title={llmProvider.label}
+            >
+              <llmProvider.Icon size={15} />
+            </span>
+          )}
+        </span>
 
-      {/* Content */}
-      <div className={cn("relative z-10 pl-4 pr-3", compact ? "py-2.5" : "py-3")}>
-        {/* Header row */}
-        <div className="flex items-center gap-2.5">
-          {/* Icon badge — always shows node type icon (robot, neural hub, etc.) */}
-          <span
-            className="relative flex shrink-0 items-center justify-center rounded-xl overflow-visible"
-            style={{
-              width: compact ? 28 : 36,
-              height: compact ? 28 : 36,
-              background: meta.bgColor,
-              border: `1.5px solid ${meta.borderColor}`,
-              boxShadow: `0 1px 4px ${meta.color}15`,
-            }}
-          >
-            {status === "running" && (
-              <RunningSpinner size={compact ? 28 : 36} />
-            )}
-            <LucideIcon
-              style={{ color: meta.color, width: compact ? 13 : 16, height: compact ? 13 : 16 }}
-            />
-            {/* Provider logo badge — bottom-right corner, shows actual brand icon */}
-            {llmProvider && !compact && (
-              <span
-                className="absolute -bottom-1.5 -right-1.5 flex items-center justify-center rounded-lg overflow-hidden"
-                style={{
-                  width: 16, height: 16,
-                  border: "1.5px solid white",
-                  boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
-                  borderRadius: 5,
-                }}
-                title={llmProvider.label}
-              >
-                <llmProvider.Icon size={16} />
-              </span>
-            )}
-          </span>
-
-          <div className="min-w-0 flex-1">
-            {/* Node type badge + status label */}
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <span
-                className="inline-block rounded-md px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider"
-                style={{ background: meta.bgColor, color: meta.color }}
-              >
-                {meta.label}
-              </span>
-              {status !== "idle" && (
-                <span
-                  className="text-[9px] font-semibold"
-                  style={{ color: statusTextColor(statusCfg.dot) }}
-                >
-                  {statusCfg.label}
-                </span>
-              )}
-            </div>
-
-            {/* Node label */}
-            <p className="truncate text-[12px] font-semibold leading-tight text-slate-900">
-              {data.label}
-            </p>
-          </div>
-        </div>
-
-        {/* Description */}
-        {!compact && data.description && (
-          <p className="mt-2 text-[10px] leading-relaxed text-slate-500 line-clamp-2">
-            {data.description}
+        <div className="min-w-0 flex-1">
+          {/* Node title */}
+          <p className="truncate text-[13px] font-semibold leading-tight text-slate-900">
+            {data.label}
           </p>
-        )}
-
-        {/* Extra chips from children */}
-        {children && (
-          <div className={cn("flex flex-wrap gap-1", compact ? "mt-1.5" : "mt-2.5")}>
-            {children}
-          </div>
-        )}
+          {/* Subtitle — node type / description */}
+          <p className="truncate text-[11px] leading-tight text-slate-500">
+            {(!compact && data.description) ? data.description : meta.label}
+          </p>
+        </div>
       </div>
+
+      {/* Optional metadata chips (model / provider / settings) */}
+      {children && !compact && (
+        <div className="flex flex-wrap gap-1 px-3 pb-2">
+          {children}
+        </div>
+      )}
 
       {/* ↑ close inner overflow-hidden wrapper */}
       </div>
 
-      {/* Bottom status strip — outside clip wrapper so it sits on the border */}
-      {status !== "idle" && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute bottom-0 left-[3px] right-0 h-[2px] rounded-b-2xl"
-          style={{
-            background:
-              status === "running"   ? "#0F766E" :
-              status === "succeeded" ? "#007F4E" :
-              status === "failed"    ? "#DC2626" :
-              status === "waiting"   ? "#CA8A04" :
-              status === "skipped"   ? "#CBD5E1" : "transparent",
-          }}
+      {/* Footer — muted status row (reference: label left, status dot right) */}
+      <div
+        className="relative z-10 flex items-center justify-between px-3 py-[7px]"
+        style={{ borderTop: "1px solid #ECEEEF", background: "#FAFBFB" }}
+      >
+        <span
+          className="flex items-center gap-1.5 text-[11px] font-medium"
+          style={{ color: status === "idle" ? "#6B7280" : statusTextColor(statusCfg.dot) }}
+        >
+          <span
+            className={cn("h-1.5 w-1.5 rounded-full", status === "idle" ? "bg-[#C9CED4]" : statusCfg.dot)}
+          />
+          {status === "idle" ? "Ready" : statusCfg.label}
+        </span>
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            status === "idle" ? "bg-[#C9CED4]" : statusCfg.dot,
+          )}
         />
-      )}
+      </div>
 
       {/* ── Handles — large, always visible, easy to grab ─────────────────── */}
       {/* React Flow handle hover/connect styles injected globally */}

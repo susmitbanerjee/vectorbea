@@ -1,460 +1,335 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import {
-  ArrowRight, CheckCircle2, RefreshCw, Shield, Zap,
-  Activity, Bot, ShieldCheck, GitBranch, Play,
-  ChevronRight, Database, AlertTriangle, RotateCcw, Eye,
-  Layers, ListChecks,
+  ArrowRight,
+  Terminal,
+  GitBranch,
+  Bot,
+  ShieldCheck,
+  RotateCcw,
+  Webhook,
+  Zap,
+  Eye,
+  ChevronRight,
 } from "lucide-react";
-import { BeeLogo } from "@/components/brand/bee-logo";
+import {
+  BrowserShell,
+  ProductTopBar,
+  CanvasMock,
+  MockNode,
+} from "@/components/brand/canvas-mock";
 
-// ─── Bee SVG ─────────────────────────────────────────────────────────────────
-function BeeSVG({ size = 24, className = "" }: { size?: number; className?: string }) {
+/* ── Logo cube ────────────────────────────────────────────────────────────── */
+function LogoCube({ size = 28 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className={className}>
-      {/* Body */}
-      <ellipse cx="16" cy="18" rx="7" ry="9" fill="#00A65A" />
-      {/* Stripes */}
-      <ellipse cx="16" cy="16" rx="7" ry="3.5" fill="#1C1917" opacity="0.8" />
-      <ellipse cx="16" cy="21" rx="6" ry="2.5" fill="#1C1917" opacity="0.7" />
-      <ellipse cx="16" cy="25.5" rx="4.5" ry="2" fill="#006B45" opacity="0.6" />
-      {/* Head */}
-      <circle cx="16" cy="9" r="4" fill="#1C1917" />
-      {/* Antennae */}
-      <line x1="14" y1="6" x2="11" y2="3" stroke="#1C1917" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="11" cy="3" r="1" fill="#00A65A" />
-      <line x1="18" y1="6" x2="21" y2="3" stroke="#1C1917" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="21" cy="3" r="1" fill="#00A65A" />
-      {/* Wings */}
-      <ellipse cx="8" cy="13" rx="6" ry="3" fill="white" opacity="0.85" transform="rotate(-20 8 13)" />
-      <ellipse cx="24" cy="13" rx="6" ry="3" fill="white" opacity="0.85" transform="rotate(20 24 13)" />
-    </svg>
-  );
-}
-
-
-// ─── Hex cell ─────────────────────────────────────────────────────────────────
-function HexCell({ x, y, opacity = 0.06 }: { x: number; y: number; opacity?: number }) {
-  // Dotted engineering-grid motif (replaces the old honeycomb)
-  return (
-    <circle
-      cx={x + 30}
-      cy={y + 34}
-      r="1.4"
-      fill="#007F4E"
-      opacity={opacity * 2.2}
-    />
-  );
-}
-
-// ─── Status pill ──────────────────────────────────────────────────────────────
-function StatusPill({ status }: { status: "succeeded" | "running" | "waiting" }) {
-  const v = {
-    succeeded: { label: "Succeeded", bg: "#ECFDF5", border: "#BBF7D0", color: "#15803D", dot: "#22C55E" },
-    running:   { label: "Running",   bg: "#EFF6FF", border: "#BFDBFE", color: "#1D4ED8", dot: "#3B82F6" },
-    waiting:   { label: "Awaiting",  bg: "#FFFBEB", border: "#9CCFBB", color: "#006B45", dot: "#00A65A" },
-  }[status];
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
-      style={{ background: v.bg, border: `1px solid ${v.border}`, color: v.color }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: v.dot }} />{v.label}
+    <span className="flex items-center justify-center rounded-[8px]" style={{ width: size, height: size, background: "#0B0D0F" }}>
+      <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 32 32" fill="none">
+        <g stroke="#FFFFFF" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <ellipse cx="11.6" cy="11.4" rx="3" ry="2.1" fill="#00A65A" fillOpacity="0.9" />
+          <ellipse cx="20.4" cy="11.4" rx="3" ry="2.1" fill="#00A65A" fillOpacity="0.9" />
+          <ellipse cx="16" cy="18" rx="4" ry="5" fill="#007F4E" />
+          <path d="M12.4 16.4h7.2" />
+          <path d="M12.2 19h7.6" />
+          <path d="M12.8 21.6h6.4" />
+        </g>
+      </svg>
     </span>
   );
 }
 
-// ─── Timeline event ───────────────────────────────────────────────────────────
-function TEvent({ icon, title, sub, time, color, last = false }: {
-  icon: React.ReactNode; title: string; sub: string; time: string; color: string; last?: boolean;
-}) {
+/* ── Reusable bits ────────────────────────────────────────────────────────── */
+function MonoLabel({ children }: { children: React.ReactNode }) {
+  return <span className="vb-mono-label">{children}</span>;
+}
+
+function MetricBars({ tint = "#007F4E", values }: { tint?: string; values: number[] }) {
   return (
-    <div className="flex gap-3">
-      <div className="flex flex-col items-center">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2"
-          style={{ borderColor: color + "40", background: color + "10", color }}>
-          {icon}
-        </div>
-        {!last && <div className="mt-1 w-px flex-1 bg-[#E6F4EF]" style={{ minHeight: 18 }} />}
-      </div>
-      <div className="pb-3 flex-1 min-w-0" style={{ paddingTop: 4 }}>
-        <div className="flex items-baseline justify-between gap-2">
-          <p className="text-[12.5px] font-semibold text-slate-800">{title}</p>
-          <span className="shrink-0 font-mono text-[10px] text-slate-400">{time}</span>
-        </div>
-        <p className="text-[11.5px] text-slate-500 mt-0.5">{sub}</p>
-      </div>
+    <div className="flex items-end gap-[3px]" style={{ height: 44 }}>
+      {values.map((v, i) => (
+        <span
+          key={i}
+          className="flex-1 rounded-[2px]"
+          style={{ height: `${v}%`, background: tint, opacity: 0.35 + (i / values.length) * 0.65 }}
+        />
+      ))}
     </div>
   );
 }
 
-// ─── Canvas node ──────────────────────────────────────────────────────────────
-function WNode({ icon, label, type, badge, accent = "#2563EB", active }: {
-  icon: React.ReactNode; label: string; type: string; badge?: string; accent?: string; active?: boolean;
-}) {
-  return (
-    <div className="rounded-xl px-3 py-2.5 min-w-[150px]"
-      style={{
-        background: active ? accent + "0f" : "#FAFAFA",
-        border: `1.5px solid ${active ? accent + "40" : "#E5E7EB"}`,
-        boxShadow: active ? `0 0 0 3px ${accent}12` : "none",
-      }}>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-          style={{ background: accent + "15", color: accent }}>{icon}</span>
-        <span className="text-[11.5px] font-bold text-slate-800 leading-tight">{label}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-[9.5px] font-mono uppercase tracking-wider" style={{ color: accent + "aa" }}>{type}</span>
-        {badge && <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
-          style={{ background: accent + "15", color: accent, border: `1px solid ${accent}30` }}>{badge}</span>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Feature card ─────────────────────────────────────────────────────────────
-function FCard({ icon, title, desc, accent }: { icon: React.ReactNode; title: string; desc: string; accent: string }) {
-  return (
-    <div className="rounded-2xl p-6 bg-white border border-[#E6F4EF] hover:border-[#9CCFBB] transition-all hover:shadow-md"
-      style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl"
-        style={{ background: accent + "12", border: `1.5px solid ${accent}25`, color: accent }}>{icon}</div>
-      <h3 className="text-[15px] font-bold text-slate-900 mb-2">{title}</h3>
-      <p className="text-[13.5px] text-slate-500 leading-relaxed">{desc}</p>
-    </div>
-  );
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+/* ── Page ─────────────────────────────────────────────────────────────────── */
 export default function MarketingPage() {
   return (
-    <>
-      {/* Bee animation keyframes */}
-      <style>{`
-        @keyframes floatBee {
-          0%,100% { transform: translateY(0px) rotate(-3deg); }
-          50%     { transform: translateY(-8px) rotate(3deg); }
-        }
-        .float-bee { animation: floatBee 3s ease-in-out infinite; }
-      `}</style>
-
-      <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "#FFFFFF", color: "#1C1917" }}>
-
-        {/* ── NAV ─────────────────────────────────────────────────────────── */}
-        <header className="sticky top-0 z-50 w-full" style={{ background: "rgba(255,251,240,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(0,127,78,0.12)" }}>
-          <div className="flex w-full items-center justify-between gap-4 px-6 py-4 lg:px-16 xl:px-24">
-            <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#E6F4EF", border: "1.5px solid #9CCFBB" }}>
-                <BeeLogo className="h-4 w-4" />
-              </div>
-              <span className="text-[15px] font-bold tracking-tight text-slate-900">Vectorbea</span>
+    <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "#F7F8F9", color: "#0B0D0F" }}>
+      {/* ── NAV ───────────────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-50 w-full backdrop-blur"
+        style={{ background: "rgba(247,248,249,0.85)", borderBottom: "1px solid #E0E3E6" }}
+      >
+        <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between gap-4 px-6 py-3.5">
+          <div className="flex items-center gap-8">
+            <Link href="/" className="flex items-center gap-2.5">
+              <LogoCube />
+              <span className="text-[16px] font-semibold tracking-[-0.01em]">Vectorbea</span>
             </Link>
-
-            <nav className="hidden items-center gap-1 sm:flex">
-              {["Features", "How it works", "Pricing"].map(label => (
-                <a key={label} href={`#${label.toLowerCase().replace(/\s/g, "")}`}
-                  className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-slate-600 hover:text-[#006B45] hover:bg-[#E6F4EF] transition-colors">
-                  {label}
+            <nav className="hidden items-center gap-1 md:flex">
+              {["Product", "Docs", "Pricing", "Changelog"].map((l) => (
+                <a key={l} href="#" className="rounded-[7px] px-3 py-1.5 text-[13.5px] font-medium text-[#4B5563] transition-colors hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
+                  {l}
                 </a>
               ))}
             </nav>
-
-            <div className="flex items-center gap-3 shrink-0">
-              <Link href="/signin" className="px-4 py-2 text-[13.5px] font-medium text-slate-600 hover:text-slate-900 transition-colors">
-                Sign in
-              </Link>
-              <Link href="/signup"
-                className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13.5px] font-bold text-white transition-all hover:opacity-90"
-                style={{ background: "linear-gradient(135deg, #007F4E 0%, #00A65A 100%)", boxShadow: "0 4px 16px rgba(0,127,78,0.35)" }}>
-                Request Access →
-              </Link>
-            </div>
           </div>
-        </header>
-
-        {/* ── HERO — full-screen with bees ─────────────────────────────────── */}
-        <section className="relative w-full overflow-hidden" style={{ minHeight: "100vh" }}>
-          {/* Honeycomb SVG background — full bleed */}
-          <svg className="absolute inset-0 w-full h-full" style={{ opacity: 1 }} preserveAspectRatio="xMidYMid slice">
-            {/* Tiled hex grid */}
-            {Array.from({ length: 12 }).map((_, row) =>
-              Array.from({ length: 20 }).map((_, col) => {
-                const x = col * 90 - (row % 2 === 0 ? 0 : 45);
-                const y = row * 60;
-                return <HexCell key={`${row}-${col}`} x={x} y={y} opacity={0.06 + (col + row) % 3 * 0.02} />;
-              })
-            )}
-          </svg>
-
-          {/* Amber radial glow top-center */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] pointer-events-none"
-            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(0,166,90,0.22) 0%, transparent 70%)" }} />
-
-
-          {/* Content */}
-          <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 lg:px-16 xl:px-24 pt-28 pb-16" style={{ minHeight: "100vh" }}>
-            {/* Badge */}
-            <div className="mb-8 inline-flex items-center gap-2 rounded-full px-5 py-2"
-              style={{ background: "#E6F4EF", border: "1.5px solid #9CCFBB", color: "#006B45" }}>
-              <BeeSVG size={16} />
-              <span className="text-[12px] font-bold tracking-widest uppercase">Agentic Automation Platform</span>
-            </div>
-
-            {/* Headline — big and full-width */}
-            <h1 className="w-full font-black tracking-[-0.045em] text-stone-900 leading-[1.0] mb-6"
-              style={{ fontSize: "clamp(52px, 9vw, 110px)" }}>
-              Durable automation<br />
-              <span style={{ background: "linear-gradient(135deg, #007F4E 0%, #00A65A 40%, #22C55E 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                for AI agents
-              </span>
-              <br />
-              that must finish.
-            </h1>
-
-            <p className="max-w-3xl mx-auto mb-10 text-stone-600 leading-[1.7]"
-              style={{ fontSize: "clamp(16px, 1.8vw, 21px)" }}>
-              Like a hive where every worker bee knows its job —
-              Vectorbea gives AI workflows durable execution, human approval gates,
-              automatic retries, and full observability. No black boxes.
-            </p>
-
-            {/* CTAs */}
-            <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
-              <Link href="/signup"
-                className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-black text-white transition-all hover:scale-[1.02] active:scale-[0.99]"
-                style={{ background: "linear-gradient(135deg, #007F4E 0%, #00A65A 100%)", boxShadow: "0 8px 32px rgba(0,127,78,0.40), 0 0 0 1px rgba(0,127,78,0.2)" }}>
-                Join Private Beta <ArrowRight className="h-5 w-5" />
-              </Link>
-              <Link href="/signin"
-                className="flex items-center gap-2 rounded-2xl px-8 py-4 text-[16px] font-bold text-stone-700 bg-white border border-stone-200 hover:border-[#9CCFBB] hover:bg-[#E6F4EF] transition-all"
-                style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-                View run timeline <ChevronRight className="h-4 w-4 text-stone-400" />
-              </Link>
-            </div>
-
-            {/* Trust hints */}
-            <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 mb-16">
-              {["BYOK models", "Human approvals", "Durable retries", "Event-sourced runs", "No vendor lock-in"].map(hint => (
-                <span key={hint} className="flex items-center gap-1.5 text-[13px] text-stone-500">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-[#007F4E]" /> {hint}
-                </span>
-              ))}
-            </div>
-
-            {/* ── Full-width product preview ─────────────────────────────── */}
-            <div className="w-full max-w-none rounded-3xl overflow-hidden"
-              style={{ border: "1.5px solid rgba(0,127,78,0.2)", background: "white", boxShadow: "0 40px 120px rgba(0,127,78,0.12), 0 8px 32px rgba(0,0,0,0.08)" }}>
-
-              {/* Window chrome */}
-              <div className="flex items-center justify-between px-5 py-4" style={{ background: "#FFFFFF", borderBottom: "1px solid rgba(0,127,78,0.12)" }}>
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1.5">
-                    <div className="h-3 w-3 rounded-full bg-red-400" />
-                    <div className="h-3 w-3 rounded-full bg-yellow-400" />
-                    <div className="h-3 w-3 rounded-full bg-green-400" />
-                  </div>
-                  <span className="ml-3 text-[13px] font-semibold text-stone-600">Customer Renewal Intelligence</span>
-                </div>
-                <StatusPill status="running" />
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px]">
-                {/* Canvas */}
-                <div className="p-8 space-y-5" style={{ background: "#FAFAF7", borderRight: "1px solid rgba(0,127,78,0.08)" }}>
-                  {/* Row 1 */}
-                  <div className="flex items-center gap-6 flex-wrap">
-                    <WNode icon={<Play className="h-3.5 w-3.5" />} label="Schedule Trigger" type="TRIGGER" badge="Daily" accent="#2563EB" />
-                    <div className="flex-1 min-w-[60px] flex items-center gap-1">
-                      <div className="flex-1 border-t-2 border-dashed border-stone-200" />
-                      <span className="text-stone-300 text-xs">→</span>
-                    </div>
-                    <WNode icon={<Database className="h-3.5 w-3.5" />} label="Fetch Renewals" type="DB READ" accent="#059669" active />
-                  </div>
-                  {/* Row 2 */}
-                  <div className="flex items-center gap-6 flex-wrap pl-8">
-                    <WNode icon={<Bot className="h-3.5 w-3.5" />} label="Risk Scoring Agent" type="LLM · gpt-4o" badge="running" accent="#7C3AED" active />
-                    <div className="flex-1 min-w-[60px] flex items-center gap-1">
-                      <div className="flex-1 border-t-2 border-dashed border-stone-200" />
-                      <span className="text-stone-300 text-xs">→</span>
-                    </div>
-                    <WNode icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Approval Gate" type="HUMAN APPROVAL" badge="pending" accent="#007F4E" />
-                  </div>
-                  {/* Row 3 */}
-                  <div className="flex items-center gap-6 flex-wrap pl-16">
-                    <WNode icon={<Activity className="h-3.5 w-3.5" />} label="Notify & Archive" type="HTTP · TOOL" accent="#0891B2" />
-                  </div>
-                  {/* Active agents indicator */}
-                  <div className="flex items-center gap-3 pt-2 border-t border-stone-100">
-                    <span className="text-[11px] text-stone-400">Active agents:</span>
-                    <div className="flex gap-1">
-                      {[0,1,2].map(i => (
-                        <span key={i} className="h-2 w-2 rounded-full bg-[#00A65A] animate-pulse" style={{ animationDelay: `${i * 0.3}s` }} />
-                      ))}
-                    </div>
-                    <span className="text-[11px] text-stone-400">3 workers running</span>
-                  </div>
-                </div>
-
-                {/* Timeline */}
-                <div>
-                  <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid rgba(0,127,78,0.08)" }}>
-                    <span className="text-[13px] font-bold text-stone-700">Run timeline</span>
-                    <span className="font-mono text-[11px] text-stone-400">2m 14s</span>
-                  </div>
-                  <div className="p-5 space-y-0">
-                    <TEvent icon={<Play className="h-3 w-3" />} title="Run started" sub="Schedule trigger · daily 09:00" time="09:00:01" color="#3B82F6" />
-                    <TEvent icon={<Database className="h-3 w-3" />} title="Fetched 34 renewals" sub="DB read · 284ms" time="09:00:02" color="#22C55E" />
-                    <TEvent icon={<Bot className="h-3 w-3" />} title="Agent completed" sub="Risk scored · 6.2k tokens" time="09:01:18" color="#8B5CF6" />
-                    <TEvent icon={<ShieldCheck className="h-3 w-3" />} title="Approval requested" sub="Waiting Finance Ops · 3 high-risk" time="09:01:20" color="#00A65A" last />
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div className="flex items-center gap-3">
+            <Link href="/signin" className="text-[13.5px] font-medium text-[#4B5563] transition-colors hover:text-[#0B0D0F]">
+              Sign in
+            </Link>
+            <Link
+              href="/signup"
+              className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 py-2 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1c1f22]"
+            >
+              Start free <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
-        </section>
+        </div>
+      </header>
 
-        {/* ── PROBLEM — warm white full bleed ──────────────────────────────── */}
-        <section id="features" className="w-full py-28" style={{ background: "white", borderTop: "1px solid #E6F4EF" }}>
-          <div className="w-full px-6 lg:px-16 xl:px-24">
-            <div className="mb-16">
-              <div className="flex items-center gap-2 mb-4">
-                <BeeSVG size={22} />
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#007F4E]">The problem</p>
-              </div>
-              <h2 className="font-black tracking-[-0.035em] text-stone-900 leading-[1.05] mb-5"
-                style={{ fontSize: "clamp(32px, 5vw, 64px)" }}>
-                AI workflows break when<br />they leave the demo.
-              </h2>
-              <p className="max-w-xl text-[17px] text-stone-500 leading-relaxed">
-                LLM calls are probabilistic. Networks fail. APIs rate-limit.
-                Humans need to approve. Most frameworks don&apos;t handle any of this.
+      {/* ── HERO ──────────────────────────────────────────────────────────── */}
+      <section className="mx-auto w-full max-w-[1180px] px-6 pt-20 pb-10">
+        <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#00A65A" }} />
+          <span className="font-mono text-[11px] font-medium tracking-[0.04em] text-[#4B5563]">Early access</span>
+        </span>
+
+        <h1 className="mt-7 max-w-[16ch] text-balance font-bold leading-[1.02] tracking-[-0.035em]" style={{ fontSize: "clamp(44px, 6.4vw, 78px)" }}>
+          Durable AI workflows that actually finish.
+        </h1>
+
+        <p className="mt-6 max-w-[56ch] text-[18px] leading-[1.6] text-[#4B5563]">
+          Vectorbea is a visual control plane for long-running agentic workflows — build on a canvas, watch
+          every node execute, and resume from a durable checkpoint instead of starting over. No black boxes.
+        </p>
+
+        <div className="mt-8 flex flex-wrap items-center gap-4">
+          <Link
+            href="/signup"
+            className="inline-flex items-center gap-2 rounded-[9px] bg-[#0B0D0F] px-6 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-[#1c1f22]"
+          >
+            Start free <ArrowRight className="h-4 w-4" />
+          </Link>
+          <a href="#" className="inline-flex items-center gap-2 text-[15px] font-semibold text-[#0B0D0F]">
+            <Terminal className="h-4 w-4 text-[#6B7280]" /> Read the docs
+          </a>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2">
+          {["BYOK models", "Human approvals", "Durable retries", "Event-sourced runs"].map((h) => (
+            <span key={h} className="flex items-center gap-1.5 text-[13px] text-[#6B7280]">
+              <span className="h-1 w-1 rounded-full" style={{ background: "#9CCFBB" }} /> {h}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      {/* ── HERO PRODUCT SHOT ─────────────────────────────────────────────── */}
+      <section className="mx-auto w-full max-w-[1180px] px-6 pb-24">
+        <BrowserShell>
+          <ProductTopBar />
+          <CanvasMock height={520} />
+        </BrowserShell>
+      </section>
+
+      {/* ── PLATFORM ──────────────────────────────────────────────────────── */}
+      <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+        <div className="mx-auto w-full max-w-[1180px] px-6 py-24">
+          <MonoLabel>The platform</MonoLabel>
+          <h2 className="mt-4 max-w-[20ch] font-bold leading-[1.08] tracking-[-0.03em]" style={{ fontSize: "clamp(30px, 4vw, 50px)" }}>
+            A canvas, observability, and reliability in one platform.
+          </h2>
+          <p className="mt-4 max-w-[60ch] text-[17px] leading-[1.6] text-[#4B5563]">
+            Click any node to jump to its inputs, prompt, tool calls, and logs. Every change lands in an
+            immutable history, and any previous run state is one click away.
+          </p>
+
+          {/* 01 — Visual canvas */}
+          <div className="mt-14 grid items-stretch gap-5 lg:grid-cols-2">
+            <div className="flex flex-col justify-center rounded-[14px] border p-9" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+              <MonoLabel>01 · Visual canvas</MonoLabel>
+              <h3 className="mt-3 text-[28px] font-bold tracking-[-0.02em]">See your workflow.</h3>
+              <p className="mt-3 text-[15px] leading-[1.6] text-[#4B5563]">
+                Every agent, tool, approval, and branch on one production-grade canvas. You get the audit
+                trail and rollback of infrastructure-as-code without writing any.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {[
-                { icon: <Eye className="h-4 w-4" />, title: "Hidden tool calls", desc: "No visibility into what your agent called." },
-                { icon: <RotateCcw className="h-4 w-4" />, title: "Manual retries", desc: "Failed steps require human intervention." },
-                { icon: <ShieldCheck className="h-4 w-4" />, title: "No approval trail", desc: "Decisions happen inside the agent silently." },
-                { icon: <AlertTriangle className="h-4 w-4" />, title: "Hard to debug", desc: "Failure at step 7? Start from scratch." },
-                { icon: <Layers className="h-4 w-4" />, title: "Lost state", desc: "Intermediate results vanish on failure." },
-                { icon: <Activity className="h-4 w-4" />, title: "Unclear costs", desc: "No per-run token or spend breakdown." },
-              ].map(({ icon, title, desc }) => (
-                <div key={title} className="rounded-2xl p-5 border border-red-100 bg-red-50/50">
-                  <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-xl bg-red-100 text-red-500">{icon}</div>
-                  <h3 className="text-[13.5px] font-bold text-stone-800 mb-1">{title}</h3>
-                  <p className="text-[12.5px] text-stone-500 leading-relaxed">{desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── CAPABILITIES — honey amber full bleed ────────────────────────── */}
-        <section id="howItWorks" className="w-full py-28 relative overflow-hidden" style={{ background: "linear-gradient(180deg, #FFFFFF 0%, #E6F4EF 100%)", borderTop: "1px solid #9CCFBB" }}>
-          {/* Honeycomb decorative */}
-          <svg className="absolute right-0 top-0 h-full opacity-[0.07]" width="400" viewBox="0 0 300 800">
-            {Array.from({ length: 6 }).map((_, row) =>
-              Array.from({ length: 4 }).map((_, col) => (
-                <HexCell key={`d-${row}-${col}`} x={col * 90 - (row % 2 === 0 ? 0 : 45)} y={row * 60} />
-              ))
-            )}
-          </svg>
-
-          <div className="relative z-10 w-full px-6 lg:px-16 xl:px-24">
-            <div className="mb-16">
-              <div className="flex items-center gap-2 mb-4">
-                <BeeSVG size={22} />
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#006B45]">The hive</p>
+            <div className="overflow-hidden rounded-[14px] border" style={{ borderColor: "#E0E3E6" }}>
+              <div className="vb-canvas-dots relative h-full min-h-[300px]">
+                <MockNode
+                  style={{ left: 28, top: 36 }}
+                  icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#EEF2FF", color: "#4F46E5" }}><Webhook className="h-4 w-4" /></span>}
+                  title="webhook-trigger"
+                  subtitle="POST /v1/intake"
+                  visibility="Public"
+                  dotColor="#9CA3AF"
+                />
+                <MockNode
+                  style={{ right: 28, top: 96 }}
+                  selected
+                  icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#E6F4EF", color: "#007F4E" }}><Bot className="h-4 w-4" /></span>}
+                  title="triage-agent"
+                  subtitle="claude · BYOK Anthropic"
+                  visibility="Private"
+                  dotColor="#0F766E"
+                />
+                <MockNode
+                  style={{ left: 70, bottom: 28 }}
+                  icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#FFFBEB", color: "#CA8A04" }}><ShieldCheck className="h-4 w-4" /></span>}
+                  title="approval-gate"
+                  subtitle="waits for human decision"
+                  subRows={[{ icon: <ShieldCheck className="h-3.5 w-3.5" />, label: "SLA 24h" }]}
+                  dotColor="#CA8A04"
+                />
+                <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                  <path d="M 250 70 C 340 70 320 150 372 150" fill="none" stroke="#8B8F94" strokeWidth="1.5" />
+                </svg>
               </div>
-              <h2 className="font-black tracking-[-0.035em] text-stone-900 leading-[1.05] mb-5"
-                style={{ fontSize: "clamp(32px, 5vw, 64px)" }}>
-                Every bee knows its role.<br />
-                <span style={{ color: "#007F4E" }}>Every step gets done.</span>
-              </h2>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <FCard accent="#2563EB" icon={<GitBranch className="h-5 w-5" />} title="Visual workflow canvas" desc="Drag-and-drop builder for multi-step agentic workflows. Connect agents, tools, and approval gates." />
-              <FCard accent="#7C3AED" icon={<Bot className="h-5 w-5" />} title="Durable agent runs" desc="Runs checkpoint at every step. Failures retry from the last checkpoint, not the beginning." />
-              <FCard accent="#007F4E" icon={<ShieldCheck className="h-5 w-5" />} title="Human approval gates" desc="Pause mid-workflow for a human decision with full context and audit trail." />
-              <FCard accent="#059669" icon={<ListChecks className="h-5 w-5" />} title="Immutable event history" desc="Every tool call, LLM response, retry, and approval is recorded in a structured log." />
-              <FCard accent="#0891B2" icon={<RotateCcw className="h-5 w-5" />} title="Automatic retry & resume" desc="Configure backoff per step. Failed runs resume from the last successful checkpoint." />
-              <FCard accent="#F97316" icon={<Zap className="h-5 w-5" />} title="BYOK connections" desc="Connect your own OpenAI, Anthropic, or Gemini keys. Your own databases and APIs too." />
             </div>
           </div>
-        </section>
 
-        {/* ── FINAL CTA — full bleed warm ──────────────────────────────────── */}
-        <section id="pricing" className="relative w-full py-36 overflow-hidden" style={{ background: "#1C1917", borderTop: "1px solid rgba(0,127,78,0.3)" }}>
-          {/* Honeycomb bg */}
-          <svg className="absolute inset-0 w-full h-full opacity-[0.05]" preserveAspectRatio="xMidYMid slice">
-            {Array.from({ length: 10 }).map((_, row) =>
-              Array.from({ length: 18 }).map((_, col) => (
-                <HexCell key={`cta-${row}-${col}`} x={col * 90 - (row % 2 === 0 ? 0 : 45)} y={row * 60} />
-              ))
-            )}
-          </svg>
-          {/* Glow */}
-          <div className="absolute inset-0 pointer-events-none"
-            style={{ background: "radial-gradient(ellipse 60% 50% at 50% 0%, rgba(0,166,90,0.15) 0%, transparent 70%)" }} />
-
-
-          <div className="relative z-10 w-full text-center px-6 lg:px-16 xl:px-24">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2"
-              style={{ background: "rgba(0,166,90,0.12)", border: "1px solid rgba(0,166,90,0.3)", color: "#34D399" }}>
-              <BeeSVG size={18} /> <span className="text-[12px] font-bold">Join the hive</span>
+          {/* 02 — Observability */}
+          <div className="mt-5 grid items-stretch gap-5 lg:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3 rounded-[14px] border p-5" style={{ borderColor: "#E0E3E6", background: "#FAFBFB" }}>
+              <div className="rounded-[10px] border bg-white p-4" style={{ borderColor: "#E0E3E6" }}>
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#9CA3AF]">Tokens</p>
+                <p className="mt-1 text-[22px] font-semibold tabular-nums">128.4k</p>
+                <div className="mt-3"><MetricBars values={[30, 45, 38, 60, 52, 70, 48, 64, 55, 80, 62, 90]} /></div>
+              </div>
+              <div className="rounded-[10px] border bg-white p-4" style={{ borderColor: "#E0E3E6" }}>
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#9CA3AF]">Cost</p>
+                <p className="mt-1 text-[22px] font-semibold tabular-nums">$2.41</p>
+                <div className="mt-3"><MetricBars tint="#0F766E" values={[40, 35, 55, 42, 60, 48, 70, 52, 66, 58, 74, 68]} /></div>
+              </div>
+              <div className="col-span-2 rounded-[10px] border bg-white p-4" style={{ borderColor: "#E0E3E6" }}>
+                <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#9CA3AF]">Logs</p>
+                <div className="space-y-1 font-mono text-[11.5px] leading-[1.7]">
+                  <p><span className="text-[#9CA3AF]">12:04:19</span> <span className="text-[#007F4E]">info</span> workflow started</p>
+                  <p><span className="text-[#9CA3AF]">12:04:20</span> <span className="text-[#007F4E]">info</span> node triage-agent completed 842ms</p>
+                  <p><span className="text-[#9CA3AF]">12:04:22</span> <span className="text-[#CA8A04]">warn</span> retry scheduled for flight-api</p>
+                  <p><span className="text-[#9CA3AF]">12:04:23</span> <span className="text-[#DC2626]">error</span> hotel-api returned 500</p>
+                </div>
+              </div>
             </div>
-            <h2 className="font-black tracking-[-0.04em] text-white leading-[1.0] mb-6"
-              style={{ fontSize: "clamp(40px, 6vw, 80px)" }}>
-              Build workflows your<br />
-              <span style={{ background: "linear-gradient(135deg, #34D399 0%, #00A65A 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                team can trust.
-              </span>
-            </h2>
-            <p className="max-w-2xl mx-auto mb-12 leading-relaxed"
-              style={{ fontSize: "clamp(16px, 1.5vw, 20px)", color: "rgba(255,255,255,0.5)" }}>
-              Not another AI demo. Vectorbea is the production execution layer for agentic automation.
-              Durable, observable, and debuggable from day one.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-4 mb-10">
-              <Link href="/signup"
-                className="flex items-center gap-2 rounded-2xl px-10 py-5 text-[16px] font-black text-stone-900 transition-all hover:scale-[1.02]"
-                style={{ background: "linear-gradient(135deg, #34D399 0%, #00A65A 100%)", boxShadow: "0 8px 32px rgba(0,166,90,0.35)" }}>
-                Create your first workflow <ArrowRight className="h-5 w-5" />
-              </Link>
-              <Link href="/signin"
-                className="rounded-2xl px-10 py-5 text-[16px] font-bold transition-all"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)" }}>
-                Sign in
-              </Link>
+            <div className="flex flex-col justify-center rounded-[14px] border p-9" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+              <MonoLabel>02 · Observability</MonoLabel>
+              <h3 className="mt-3 text-[28px] font-bold tracking-[-0.02em]">Watch it run.</h3>
+              <p className="mt-3 text-[15px] leading-[1.6] text-[#4B5563]">
+                Follow every prompt, tool call, retry, approval, token, and cost in one place. Click a node on
+                the canvas and see exactly what it&apos;s doing.
+              </p>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2">
-              {["Invite-only beta", "Bring your own keys", "No usage lock-in", "Manual onboarding"].map(hint => (
-                <span key={hint} className="flex items-center gap-1.5 text-[13px]" style={{ color: "rgba(255,255,255,0.3)" }}>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-[#00A65A]" /> {hint}
+          </div>
+
+          {/* 03 — Reliability */}
+          <div className="mt-5 grid items-stretch gap-5 lg:grid-cols-2">
+            <div className="flex flex-col justify-center rounded-[14px] border p-9" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+              <MonoLabel>03 · Reliability</MonoLabel>
+              <h3 className="mt-3 text-[28px] font-bold tracking-[-0.02em]">Recover from failure.</h3>
+              <p className="mt-3 text-[15px] leading-[1.6] text-[#4B5563]">
+                Resume workflows from durable checkpoints instead of restarting from scratch. Retry a single
+                node, replay from an event, or roll back to any previous state.
+              </p>
+            </div>
+            <div className="overflow-hidden rounded-[14px] border" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+              <div className="border-b px-5 py-3" style={{ borderColor: "#ECEEEF" }}>
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Run timeline</span>
+              </div>
+              <div className="space-y-0 p-5">
+                {[
+                  { c: "#007F4E", t: "WorkflowStarted", s: "schedule · daily 09:00", time: "09:00:01" },
+                  { c: "#007F4E", t: "NodeCompleted", s: "triage-agent · 6.2k tokens", time: "09:01:18" },
+                  { c: "#CA8A04", t: "RetryScheduled", s: "flight-api · attempt 2/3", time: "09:01:20" },
+                  { c: "#0F766E", t: "ApprovalRequested", s: "waiting Finance Ops", time: "09:01:24", last: true },
+                ].map((e, i, arr) => (
+                  <div key={i} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <span className="mt-1 h-2.5 w-2.5 rounded-full" style={{ background: e.c, boxShadow: `0 0 0 3px ${e.c}1f` }} />
+                      {i < arr.length - 1 && <span className="my-1 w-px flex-1" style={{ background: "#E0E3E6" }} />}
+                    </div>
+                    <div className="pb-4">
+                      <p className="font-mono text-[12.5px] font-medium text-[#0B0D0F]">{e.t}</p>
+                      <p className="text-[12px] text-[#6B7280]">{e.s} · <span className="text-[#9CA3AF]">{e.time}</span></p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FEATURES ──────────────────────────────────────────────────────── */}
+      <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#F7F8F9" }}>
+        <div className="mx-auto w-full max-w-[1180px] px-6 py-24">
+          <MonoLabel>Built for production</MonoLabel>
+          <h2 className="mt-4 max-w-[22ch] font-bold leading-[1.08] tracking-[-0.03em]" style={{ fontSize: "clamp(28px, 3.6vw, 46px)" }}>
+            Everything an agentic workflow needs to survive the real world.
+          </h2>
+          <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { icon: GitBranch, title: "Visual workflow canvas", desc: "Drag-and-drop builder for multi-step agentic workflows. Connect agents, tools, and approval gates." },
+              { icon: Bot, title: "Durable agent runs", desc: "Runs checkpoint at every step. Failures resume from the last checkpoint, not the beginning." },
+              { icon: ShieldCheck, title: "Human approval gates", desc: "Pause mid-workflow for a human decision with full context and a complete audit trail." },
+              { icon: Eye, title: "Immutable event history", desc: "Every tool call, LLM response, retry, and approval recorded in a structured, replayable log." },
+              { icon: RotateCcw, title: "Automatic retry & resume", desc: "Configure backoff per node. Failed runs resume from the last successful durable checkpoint." },
+              { icon: Zap, title: "Bring your own keys", desc: "Connect your own OpenAI, Anthropic, or Gemini keys — plus your own databases and APIs." },
+            ].map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="rounded-[12px] border bg-white p-6 transition-shadow hover:shadow-[0_8px_24px_rgba(11,13,15,0.06)]" style={{ borderColor: "#E0E3E6" }}>
+                <span className="flex h-10 w-10 items-center justify-center rounded-[10px]" style={{ background: "#E6F4EF", border: "1px solid #9CCFBB", color: "#007F4E" }}>
+                  <Icon className="h-5 w-5" strokeWidth={1.8} />
                 </span>
-              ))}
-            </div>
+                <h3 className="mt-4 text-[15.5px] font-bold tracking-[-0.01em]">{title}</h3>
+                <p className="mt-2 text-[13.5px] leading-[1.6] text-[#6B7280]">{desc}</p>
+              </div>
+            ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* ── FOOTER ───────────────────────────────────────────────────────── */}
-        <footer className="w-full py-10" style={{ background: "#1C1917", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-          <div className="flex w-full flex-col items-center justify-between gap-4 px-6 sm:flex-row lg:px-16 xl:px-24">
-            <div className="flex items-center gap-2.5">
-              <BeeSVG size={22} />
-              <span className="text-[14px] font-semibold text-stone-400">Vectorbea</span>
-            </div>
-            <p className="text-[12.5px] text-stone-600">Durable agentic automation. Built for production.</p>
-            <div className="flex items-center gap-6">
-              {["Privacy", "Terms", "Docs"].map(link => (
-                <a key={link} href={`/${link.toLowerCase()}`}
-                  className="text-[12.5px] text-stone-600 hover:text-stone-400 transition-colors">{link}</a>
-              ))}
-            </div>
+      {/* ── CTA ───────────────────────────────────────────────────────────── */}
+      <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+        <div className="mx-auto w-full max-w-[1180px] px-6 py-28 text-center">
+          <h2 className="mx-auto max-w-[18ch] font-bold leading-[1.05] tracking-[-0.035em]" style={{ fontSize: "clamp(34px, 5vw, 64px)" }}>
+            Build workflows your team can trust.
+          </h2>
+          <p className="mx-auto mt-5 max-w-[52ch] text-[17px] leading-[1.6] text-[#4B5563]">
+            Not another AI demo. Vectorbea is the production execution layer for agentic automation — durable,
+            observable, and debuggable from day one.
+          </p>
+          <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
+            <Link href="/signup" className="inline-flex items-center gap-2 rounded-[9px] bg-[#0B0D0F] px-7 py-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+              Start free <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link href="/signin" className="inline-flex items-center gap-2 rounded-[9px] border bg-white px-7 py-3.5 text-[15px] font-semibold text-[#0B0D0F] transition-colors hover:bg-[#F3F4F5]" style={{ borderColor: "#E0E3E6" }}>
+              View run timeline <ChevronRight className="h-4 w-4 text-[#9CA3AF]" />
+            </Link>
           </div>
-        </footer>
-      </div>
-    </>
+        </div>
+      </section>
+
+      {/* ── FOOTER ────────────────────────────────────────────────────────── */}
+      <footer className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#F7F8F9" }}>
+        <div className="mx-auto flex w-full max-w-[1180px] flex-col items-center justify-between gap-4 px-6 py-10 sm:flex-row">
+          <div className="flex items-center gap-2.5">
+            <LogoCube size={22} />
+            <span className="text-[14px] font-semibold">Vectorbea</span>
+          </div>
+          <p className="font-mono text-[12px] text-[#9CA3AF]">Durable agentic automation. Built for production.</p>
+          <div className="flex items-center gap-6">
+            {["Privacy", "Terms", "Docs"].map((l) => (
+              <a key={l} href="#" className="text-[13px] text-[#6B7280] transition-colors hover:text-[#0B0D0F]">{l}</a>
+            ))}
+          </div>
+        </div>
+      </footer>
+    </div>
   );
 }
