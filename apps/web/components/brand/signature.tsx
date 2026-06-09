@@ -101,23 +101,23 @@ export function DurableRunPanel({ className = "" }: { className?: string }) {
 /** Small dark runtime console — the engineering signature accent. */
 export function RuntimeConsole({ className = "" }: { className?: string }) {
   const lines = [
-    { t: "09:00:01", lvl: "info", c: "#34D399", msg: "run started · trigger=schedule" },
-    { t: "09:01:18", lvl: "ckpt", c: "#5EEAD4", msg: "checkpoint persisted seq=14" },
-    { t: "09:01:20", lvl: "warn", c: "#FBBF24", msg: "flight-api 429 — retry 2/3" },
-    { t: "09:01:24", lvl: "hold", c: "#67E8F9", msg: "awaiting approval finance-ops" },
+    { t: "09:00:01", lvl: "info", c: "#34D399", msg: "run started" },
+    { t: "09:01:18", lvl: "ckpt", c: "#5EEAD4", msg: "checkpoint seq=14" },
+    { t: "09:01:20", lvl: "warn", c: "#FBBF24", msg: "flight-api 429 retry" },
+    { t: "09:01:24", lvl: "hold", c: "#67E8F9", msg: "awaiting approval" },
   ];
   return (
     <div className={`overflow-hidden rounded-[12px] ${className}`} style={{ background: "#0B0D0F", boxShadow: "0 18px 50px rgba(11,13,15,0.30)" }}>
       <div className="flex items-center gap-2 border-b px-3.5 py-2.5" style={{ borderColor: "#1c1f22" }}>
-        <Terminal className="h-3.5 w-3.5 text-[#6B7280]" />
-        <span className="font-mono text-[11px] text-[#9CA3AF]">runtime · production</span>
-        <span className="ml-auto font-mono text-[10px] text-[#4B5563]">durable</span>
+        <Terminal className="h-3.5 w-3.5 shrink-0 text-[#6B7280]" />
+        <span className="truncate font-mono text-[11px] text-[#9CA3AF]">runtime · production</span>
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#4B5563]">durable</span>
       </div>
-      <div className="space-y-1 px-3.5 py-3 font-mono text-[11.5px] leading-[1.7]">
+      <div className="space-y-1 px-3.5 py-3 font-mono text-[11px] leading-[1.7]">
         {lines.map((l, i) => (
-          <p key={i} className="whitespace-nowrap">
+          <p key={i} className="truncate">
             <span className="text-[#4B5563]">{l.t}</span>{" "}
-            <span style={{ color: l.c }}>{l.lvl.padEnd(5, " ")}</span>{" "}
+            <span style={{ color: l.c }}>{l.lvl}</span>{" "}
             <span className="text-[#D1D5DB]">{l.msg}</span>
           </p>
         ))}

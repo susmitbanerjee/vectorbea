@@ -152,6 +152,7 @@ export function MockNode({
   dotColor = "#9CA3AF",
   selected = false,
   subRows = [],
+  inline = false,
   style,
 }: {
   icon: ReactNode;
@@ -161,11 +162,17 @@ export function MockNode({
   dotColor?: string;
   selected?: boolean;
   subRows?: { icon: ReactNode; label: string; meta?: string }[];
+  /** Render in normal document flow (full-width) instead of absolutely positioned on a canvas. */
+  inline?: boolean;
   style?: React.CSSProperties;
 }) {
   return (
     <div
-      className="absolute w-[230px] overflow-hidden rounded-[9px] bg-white"
+      className={
+        inline
+          ? "relative w-full overflow-hidden rounded-[9px] bg-white"
+          : "absolute w-[230px] overflow-hidden rounded-[9px] bg-white"
+      }
       style={{
         border: `1px solid ${selected ? "#168A5B" : "#E0E3E6"}`,
         boxShadow: selected
@@ -231,7 +238,7 @@ function FloatingButton({ children, className = "" }: { children: ReactNode; cla
 
 /* ── The full canvas surface ──────────────────────────────────────────────── */
 
-export function CanvasMock({ height = 520 }: { height?: number }) {
+export function CanvasMock({ height = 520, compact = false }: { height?: number; compact?: boolean }) {
   return (
     <div className="flex" style={{ height }}>
       <IconRail />
@@ -274,64 +281,93 @@ export function CanvasMock({ height = 520 }: { height?: number }) {
                 <path d="M0 1 L5.5 3.5 L0 6 L1.5 3.5 Z" fill="#8B8F94" />
               </marker>
             </defs>
-            {/* webhook -> agent */}
-            <path d="M 250 165 C 320 165 300 230 372 230" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
-            {/* agent -> approval */}
-            <path d="M 432 300 C 432 350 432 360 432 392" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
-            {/* agent -> db */}
-            <path d="M 540 270 C 640 270 660 340 700 392" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
+            {compact ? (
+              <path d="M 258 96 C 296 96 286 150 312 150" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
+            ) : (
+              <>
+                <path d="M 250 165 C 320 165 300 230 372 230" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
+                <path d="M 432 300 C 432 350 432 360 432 392" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
+                <path d="M 540 270 C 640 270 660 340 700 392" fill="none" stroke="#8B8F94" strokeWidth="1.6" markerEnd="url(#mk-arrow)" />
+              </>
+            )}
           </svg>
 
           {/* Nodes */}
-          <MockNode
-            style={{ left: 40, top: 120, zIndex: 2 }}
-            icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#EEF2FF", color: "#4F46E5" }}><Webhook className="h-4 w-4" /></span>}
-            title="renewal-trigger"
-            subtitle="Schedule · daily 09:00"
-            visibility="Public"
-            dotColor="#9CA3AF"
-          />
-          <MockNode
-            style={{ left: 320, top: 185, zIndex: 3 }}
-            selected
-            icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#E6F4EF", color: "#007F4E" }}><Bot className="h-4 w-4" /></span>}
-            title="risk-scoring-agent"
-            subtitle="gpt-4o-mini · BYOK OpenAI"
-            visibility="Private"
-            dotColor="#0F766E"
-          />
-          <MockNode
-            style={{ left: 320, top: 392, zIndex: 2 }}
-            icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#FFFBEB", color: "#CA8A04" }}><ShieldCheck className="h-4 w-4" /></span>}
-            title="manager-approval"
-            subtitle="waits for human decision"
-            subRows={[{ icon: <Clock className="h-3.5 w-3.5" />, label: "SLA 24h" }]}
-            dotColor="#CA8A04"
-          />
-          <MockNode
-            style={{ left: 588, top: 360, zIndex: 2 }}
-            icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#ECFDF5", color: "#1D6F42" }}><Database className="h-4 w-4" /></span>}
-            title="renewals-db"
-            subtitle="postgres:16 · encrypted"
-            subRows={[{ icon: <Database className="h-3.5 w-3.5" />, label: "txn-data", meta: "10GB" }]}
-            dotColor="#007F4E"
-          />
+          {compact ? (
+            <>
+              <MockNode
+                style={{ left: 28, top: 56, zIndex: 2 }}
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#EEF2FF", color: "#4F46E5" }}><Webhook className="h-4 w-4" /></span>}
+                title="renewal-trigger"
+                subtitle="Schedule · daily 09:00"
+                visibility="Public"
+                dotColor="#9CA3AF"
+              />
+              <MockNode
+                style={{ left: 312, top: 112, zIndex: 3 }}
+                selected
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#E6F4EF", color: "#007F4E" }}><Bot className="h-4 w-4" /></span>}
+                title="risk-scoring-agent"
+                subtitle="gpt-4o-mini · BYOK OpenAI"
+                visibility="Private"
+                dotColor="#0F766E"
+              />
+            </>
+          ) : (
+            <>
+              <MockNode
+                style={{ left: 40, top: 120, zIndex: 2 }}
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#EEF2FF", color: "#4F46E5" }}><Webhook className="h-4 w-4" /></span>}
+                title="renewal-trigger"
+                subtitle="Schedule · daily 09:00"
+                visibility="Public"
+                dotColor="#9CA3AF"
+              />
+              <MockNode
+                style={{ left: 320, top: 185, zIndex: 3 }}
+                selected
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#E6F4EF", color: "#007F4E" }}><Bot className="h-4 w-4" /></span>}
+                title="risk-scoring-agent"
+                subtitle="gpt-4o-mini · BYOK OpenAI"
+                visibility="Private"
+                dotColor="#0F766E"
+              />
+              <MockNode
+                style={{ left: 320, top: 392, zIndex: 2 }}
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#FFFBEB", color: "#CA8A04" }}><ShieldCheck className="h-4 w-4" /></span>}
+                title="manager-approval"
+                subtitle="waits for human decision"
+                subRows={[{ icon: <Clock className="h-3.5 w-3.5" />, label: "SLA 24h" }]}
+                dotColor="#CA8A04"
+              />
+              <MockNode
+                style={{ left: 588, top: 360, zIndex: 2 }}
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#ECFDF5", color: "#1D6F42" }}><Database className="h-4 w-4" /></span>}
+                title="renewals-db"
+                subtitle="postgres:16 · encrypted"
+                subRows={[{ icon: <Database className="h-3.5 w-3.5" />, label: "txn-data", meta: "10GB" }]}
+                dotColor="#007F4E"
+              />
+            </>
+          )}
 
-          {/* Undo / redo — bottom left */}
-          <div className="absolute bottom-4 left-4 z-10">
-            <FloatingButton>
-              <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Undo2 className="h-3.5 w-3.5" /></span>
-              <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Redo2 className="h-3.5 w-3.5" /></span>
-            </FloatingButton>
-          </div>
+          {/* Undo / redo — bottom left (full mode only) */}
+          {!compact && (
+            <div className="absolute bottom-4 left-4 z-10">
+              <FloatingButton>
+                <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Undo2 className="h-3.5 w-3.5" /></span>
+                <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Redo2 className="h-3.5 w-3.5" /></span>
+              </FloatingButton>
+            </div>
+          )}
           {/* Zoom controls — bottom right */}
           <div className="absolute bottom-4 right-4 z-10">
             <FloatingButton>
               <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Minus className="h-3.5 w-3.5" /></span>
               <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Plus className="h-3.5 w-3.5" /></span>
               <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Maximize2 className="h-3.5 w-3.5" /></span>
-              <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><LayoutGrid className="h-3.5 w-3.5" /></span>
-              <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Sliders className="h-3.5 w-3.5" /></span>
+              {!compact && <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><LayoutGrid className="h-3.5 w-3.5" /></span>}
+              {!compact && <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Sliders className="h-3.5 w-3.5" /></span>}
             </FloatingButton>
           </div>
         </div>
