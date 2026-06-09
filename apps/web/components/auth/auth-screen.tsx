@@ -2,23 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { BeeLogo } from "@/components/brand/bee-logo";
+import { Eye, EyeOff, Loader2, ArrowRight } from "lucide-react";
 import {
   GitHubMark,
   GoogleMark,
   MicrosoftMark,
 } from "@/components/auth/oauth-provider-icons";
 import { setAccessToken } from "@/lib/api/client";
+import { LogoCube, Checkpoint, DurableRunPanel, RuntimeConsole } from "@/components/brand/signature";
 
 type Mode = "signin" | "signup";
 
 const BENEFITS = [
-  "Durable execution timeline for every agent run",
-  "Approval gates before high-risk agent actions",
-  "Retry and failure recovery with full context",
-  "Token and cost budget visibility per run",
-  "Complete audit trail for every agent decision",
+  "Every node checkpoints as it runs",
+  "Resume from failure, never restart",
+  "Approval gates before risky actions",
+  "Token & cost visibility per run",
 ];
 
 export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
@@ -71,82 +70,62 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
     }
   }
 
-  return (
-    <div
-      className="min-h-screen"
-      style={{
-        background:
-          "radial-gradient(circle at 20% 15%, rgba(0,127,78,0.07), transparent 32%), " +
-          "radial-gradient(circle at 80% 85%, rgba(0,127,78,0.03), transparent 30%), " +
-          "#F7F8F9",
-      }}
-    >
-      <div className="grid min-h-screen lg:grid-cols-[1fr_480px]">
+  const labelCls = "block text-[12.5px] font-medium text-[#4B5563]";
+  const inputCls =
+    "w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[14px] text-[#0B0D0F] placeholder:text-[#9CA3AF] outline-none transition-all disabled:opacity-50 hover:border-[#C9CED4] focus:border-[#9CCFBB] focus:ring-2 focus:ring-[#E6F4EF]";
 
-        {/* ── Left panel ────────────────────────────────────────────────── */}
-        <section
-          className="relative hidden overflow-hidden lg:flex"
-          style={{ borderRight: "1px solid #E2E8F0" }}
-        >
+  return (
+    <div className="min-h-screen" style={{ background: "#F7F8F9", color: "#0B0D0F" }}>
+      <div className="grid min-h-screen lg:grid-cols-[1.1fr_minmax(440px,520px)]">
+
+        {/* ── Left brand panel ──────────────────────────────────────────── */}
+        <section className="vb-canvas-dots relative hidden overflow-hidden lg:flex" style={{ borderRight: "1px solid #E0E3E6" }}>
+          {/* soft green glow */}
           <div
             className="pointer-events-none absolute inset-0"
-            style={{
-              backgroundImage:
-                "linear-gradient(rgba(148,163,184,0.10) 1px, transparent 1px), " +
-                "linear-gradient(90deg, rgba(148,163,184,0.10) 1px, transparent 1px)",
-              backgroundSize: "32px 32px",
-            }}
+            style={{ background: "radial-gradient(60% 50% at 25% 20%, rgba(0,127,78,0.07), transparent 70%)" }}
           />
-          <div className="relative flex h-full w-full flex-col px-10 py-10 xl:px-14 xl:py-12">
+          <div className="relative flex h-full w-full flex-col px-12 py-12 xl:px-16">
+            {/* Logo */}
             <Link href="/" className="inline-flex w-fit items-center gap-2.5">
-              <span
-                className="flex h-8 w-8 items-center justify-center rounded-lg"
-                style={{ background: "#E6F4EF", border: "1px solid #9CCFBB" }}
-              >
-                <BeeLogo className="h-4 w-4 text-[#006B45]" />
-              </span>
-              <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.02em", color: "#0F172A" }}>
-                Vectorbea
-              </span>
+              <LogoCube />
+              <span className="text-[16px] font-semibold tracking-[-0.01em] text-[#0B0D0F]">Vectorbea</span>
             </Link>
 
-            <div className="my-auto max-w-lg space-y-9">
-              <span
-                className="inline-block font-mono text-[10px] font-bold uppercase tracking-[0.18em]"
-                style={{ color: "#007F4E" }}
-              >
-                Production control plane for AI agent jobs
+            {/* Story */}
+            <div className="my-auto max-w-[460px]">
+              <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
+                <Checkpoint size={9} />
+                <span className="font-mono text-[11px] font-medium text-[#006B45]">Durable execution for AI agents</span>
               </span>
-              <div className="space-y-3">
-                <h1
-                  className="text-balance leading-[1.1] tracking-[-0.03em]"
-                  style={{ fontSize: "2.1rem", fontWeight: 700, color: "#0F172A" }}
-                >
-                  {isSignup ? "Run AI agent jobs safely." : "Operate AI agents with confidence."}
-                </h1>
-                <p style={{ fontSize: 15, lineHeight: 1.7, color: "#475569" }}>
-                  {isSignup
-                    ? "Create your workspace and ship AI agent automations with approval gates, retries, cost budgets, and audit logs."
-                    : "Schedule, inspect, retry, and approve long-running AI agent workflows — with complete execution traceability."}
-                </p>
-              </div>
-              <ul className="space-y-2.5">
+
+              <h1 className="mt-6 text-balance font-bold leading-[1.04] tracking-[-0.03em]" style={{ fontSize: "clamp(30px, 3.2vw, 42px)" }}>
+                Agents that resume,<br />not restart.
+              </h1>
+
+              <ul className="mt-7 space-y-2.5">
                 {BENEFITS.map((item) => (
-                  <li key={item} className="flex items-start gap-2.5">
-                    <span
-                      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                      style={{ background: "#E6F4EF" }}
-                    >
+                  <li key={item} className="flex items-center gap-2.5">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full" style={{ background: "#E6F4EF" }}>
                       <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 10 10">
-                        <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="#007F4E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="#007F4E" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </span>
-                    <span style={{ fontSize: 13, lineHeight: 1.6, color: "#475569" }}>{item}</span>
+                    <span className="text-[13.5px] text-[#4B5563]">{item}</span>
                   </li>
                 ))}
               </ul>
+
+              {/* Signature durable-run + console */}
+              <div className="relative mt-9">
+                <DurableRunPanel />
+                <div className="mt-4 w-[300px] max-w-full">
+                  <RuntimeConsole />
+                </div>
+              </div>
             </div>
-            <p style={{ fontSize: 11, color: "#94A3B8" }}>
+
+            <p className="font-mono text-[11px] text-[#9CA3AF]">
               Works with LangChain, CrewAI, AutoGen, and any HTTP-callable agent.
             </p>
           </div>
@@ -158,67 +137,58 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
 
             {/* Mobile logo */}
             <div className="flex items-center lg:hidden">
-              <Link href="/" className="inline-flex items-center gap-2">
-                <span
-                  className="flex h-7 w-7 items-center justify-center rounded-lg"
-                  style={{ background: "#E6F4EF", border: "1px solid #9CCFBB" }}
-                >
-                  <BeeLogo className="h-3.5 w-3.5 text-[#006B45]" />
-                </span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>Vectorbea</span>
+              <Link href="/" className="inline-flex items-center gap-2.5">
+                <LogoCube size={26} />
+                <span className="text-[15px] font-semibold text-[#0B0D0F]">Vectorbea</span>
               </Link>
             </div>
 
             {/* Heading */}
-            <div className="space-y-1.5">
-              <h2 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.025em", color: "#0F172A", lineHeight: 1.2 }}>
+            <div className="space-y-2">
+              <span className="inline-flex items-center gap-2">
+                <Checkpoint size={9} />
+                <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[#007F4E]">
+                  {isSignup ? "New workspace" : "Welcome back"}
+                </span>
+              </span>
+              <h2 className="text-[27px] font-bold leading-[1.15] tracking-[-0.02em] text-[#0B0D0F]">
                 {isSignup ? "Create your account" : "Sign in to Vectorbea"}
               </h2>
-              <p style={{ fontSize: 14, color: "#64748B", lineHeight: 1.6 }}>
+              <p className="text-[14px] leading-[1.6] text-[#6B7280]">
                 {isSignup
-                  ? "Start building reliable AI workflows."
-                  : "Continue building, running, and debugging durable agentic workflows."}
+                  ? "Start building durable, observable agent workflows."
+                  : "Resume building, running, and debugging durable workflows."}
               </p>
             </div>
 
             {/* Error */}
             {error && (
-              <div
-                className="rounded-xl px-4 py-3"
-                style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#B91C1C", fontSize: 13, fontWeight: 500 }}
-              >
+              <div className="flex items-start gap-2 rounded-[10px] px-4 py-3" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#B91C1C", fontSize: 13, fontWeight: 500 }}>
                 {error}
               </div>
             )}
 
             {/* Form */}
-            <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+            <form onSubmit={(e) => void handleSubmit(e)} className="space-y-5">
               {/* Card */}
-              <div
-                className="rounded-2xl space-y-4"
-                style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", boxShadow: "0 18px 48px rgba(15,23,42,0.08)", padding: "28px" }}
-              >
+              <div className="space-y-4 rounded-[14px] border bg-white p-7" style={{ borderColor: "#E0E3E6", boxShadow: "0 12px 36px rgba(11,13,15,0.06)" }}>
                 {isSignup && (
                   <div className="space-y-1.5">
-                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "#475569" }}>
-                      Full name
-                    </label>
+                    <label className={labelCls}>Full name</label>
                     <input
                       type="text"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="Jane Smith"
                       disabled={loading}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
+                      className={inputCls}
                       style={{ height: 42 }}
                     />
                   </div>
                 )}
 
                 <div className="space-y-1.5">
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "#475569" }}>
-                    Work email
-                  </label>
+                  <label className={labelCls}>Work email</label>
                   <input
                     type="email"
                     value={email}
@@ -226,15 +196,13 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                     placeholder="name@company.com"
                     required
                     disabled={loading}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
+                    className={inputCls}
                     style={{ height: 42 }}
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "#475569" }}>
-                    Password
-                  </label>
+                  <label className={labelCls}>Password</label>
                   <div className="relative">
                     <input
                       type={showPw ? "text" : "password"}
@@ -244,14 +212,15 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                       required
                       disabled={loading}
                       minLength={isSignup ? 8 : 1}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 pr-10 text-[13.5px] text-slate-800 placeholder:text-slate-400 outline-none transition-all disabled:opacity-50 hover:border-slate-300 focus:border-[#9CCFBB] focus:ring-4 focus:ring-[#E6F4EF]"
+                      className={`${inputCls} pr-10`}
                       style={{ height: 42 }}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPw(!showPw)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] transition-colors hover:text-[#4B5563]"
                       tabIndex={-1}
+                      aria-label={showPw ? "Hide password" : "Show password"}
                     >
                       {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -261,26 +230,26 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl font-semibold text-white transition-all disabled:opacity-50"
-                  style={{ background: "#007F4E", fontSize: 14, boxShadow: "0 2px 8px rgba(0,127,78,0.28)" }}
-                  onMouseEnter={(e) => { if (!loading) (e.currentTarget as HTMLButtonElement).style.background = "#006B45"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#007F4E"; }}
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-[8px] text-[14px] font-semibold text-white transition-colors disabled:opacity-50"
+                  style={{ background: "#0B0D0F" }}
+                  onMouseEnter={(e) => { if (!loading) (e.currentTarget as HTMLButtonElement).style.background = "#1c1f22"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#0B0D0F"; }}
                 >
                   {loading
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> {isSignup ? "Creating account…" : "Signing in…"}</>
-                    : isSignup ? "Create account" : "Sign in"
+                    : <>{isSignup ? "Create account" : "Sign in"} <ArrowRight className="h-4 w-4" /></>
                   }
                 </button>
 
                 {/* OAuth divider */}
-                <div className="flex items-center gap-3">
-                  <span className="h-px flex-1" style={{ background: "#E2E8F0" }} />
-                  <span style={{ fontSize: 11, color: "#94A3B8" }}>or continue with</span>
-                  <span className="h-px flex-1" style={{ background: "#E2E8F0" }} />
+                <div className="flex items-center gap-3 pt-1">
+                  <span className="h-px flex-1" style={{ background: "#E0E3E6" }} />
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#9CA3AF]">or continue with</span>
+                  <span className="h-px flex-1" style={{ background: "#E0E3E6" }} />
                 </div>
 
                 {/* OAuth buttons */}
-                <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { label: "GitHub",    href: "/api/auth/github",    icon: <GitHubMark    className="h-[18px] w-[18px]" /> },
                     { label: "Google",    href: "/api/auth/google",    icon: <GoogleMark    className="h-[18px] w-[18px]" /> },
@@ -289,12 +258,13 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                     <a
                       key={label}
                       href={href}
-                      className="flex h-10 w-full items-center justify-between rounded-xl border px-3.5 transition-all"
-                      style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", fontSize: 13, fontWeight: 600, color: "#334155", textDecoration: "none" }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#F7F8F9"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#CBD5E1"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#FFFFFF"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#E2E8F0"; }}
+                      title={`Continue with ${label}`}
+                      className="flex h-10 items-center justify-center rounded-[8px] border transition-colors"
+                      style={{ background: "#FFFFFF", borderColor: "#E0E3E6" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#F3F4F5"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#C9CED4"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = "#FFFFFF"; (e.currentTarget as HTMLAnchorElement).style.borderColor = "#E0E3E6"; }}
                     >
-                      <span className="inline-flex items-center gap-2.5">{icon} Continue with {label}</span>
+                      {icon}
                     </a>
                   ))}
                 </div>
@@ -302,21 +272,16 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
 
               {/* Switch mode */}
               <div className="flex items-center justify-between px-1">
-                <p style={{ fontSize: 13, color: "#64748B" }}>
+                <p className="text-[13px] text-[#6B7280]">
                   {isSignup ? "Already have an account?" : "Don't have an account?"}{" "}
                   <Link
                     href={isSignup ? "/signin" : "/signup"}
-                    style={{ fontWeight: 600, color: "#007F4E" }}
-                    className="hover:underline underline-offset-4"
+                    className="font-semibold text-[#007F4E] underline-offset-4 hover:underline"
                   >
                     {isSignup ? "Sign in" : "Create account"}
                   </Link>
                 </p>
-                <Link
-                  href="/"
-                  style={{ fontSize: 12, color: "#94A3B8" }}
-                  className="transition-colors hover:text-slate-600"
-                >
+                <Link href="/" className="text-[12px] text-[#9CA3AF] transition-colors hover:text-[#4B5563]">
                   ← Home
                 </Link>
               </div>
