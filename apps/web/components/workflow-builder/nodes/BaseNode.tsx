@@ -228,12 +228,9 @@ export const BaseNode = memo(function BaseNode({
       )}
 
       {/* Header — icon, title, subtitle (reference layout) */}
-      <div
-        className={cn("relative z-10 flex items-center gap-2.5 px-3", compact ? "py-2" : "py-2.5")}
-        style={{ background: `linear-gradient(180deg, ${meta.color}0d, ${meta.color}00)` }}
-      >
+      <div className={cn("relative z-10 flex items-center gap-2.5 px-3", compact ? "py-2" : "py-2.5")}>
         {llmProvider ? (
-          /* Provider-logo badge (premium brand mark, like the Agents page) */
+          /* Provider-logo badge (real brand mark, like the Agents page) */
           <span
             className="relative flex shrink-0 items-center justify-center rounded-[9px] border border-[#E0E3E6] bg-white overflow-visible"
             style={{ width: compact ? 28 : 34, height: compact ? 28 : 34, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 3px rgba(11,13,15,0.08)" }}
@@ -243,20 +240,18 @@ export const BaseNode = memo(function BaseNode({
             <span className="relative z-[1] flex items-center justify-center"><llmProvider.Icon size={compact ? 16 : 19} /></span>
           </span>
         ) : (
-          /* Gradient type-icon badge */
+          /* Solid colored type tile + white glyph — distinct & premium */
           <span
             className="relative flex shrink-0 items-center justify-center rounded-[9px] overflow-visible"
             style={{
               width: compact ? 28 : 34,
               height: compact ? 28 : 34,
-              background: `linear-gradient(150deg, ${meta.color}26, ${meta.color}0d)`,
-              border: `1px solid ${meta.color}33`,
-              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.65), 0 1px 2px ${meta.color}26`,
+              background: meta.color,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 4px rgba(0,0,0,0.12), 0 2px 5px ${meta.color}40`,
             }}
           >
-            <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[9px]" style={{ background: "linear-gradient(155deg, rgba(255,255,255,0.5), transparent 55%)" }} />
             {status === "running" && <RunningSpinner size={compact ? 28 : 34} />}
-            <LucideIcon style={{ color: meta.color, width: compact ? 14 : 17, height: compact ? 14 : 17, position: "relative", zIndex: 1 }} />
+            <LucideIcon style={{ color: "#FFFFFF", width: compact ? 14 : 17, height: compact ? 14 : 17, position: "relative", zIndex: 1 }} />
           </span>
         )}
 

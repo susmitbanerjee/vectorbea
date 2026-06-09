@@ -29,9 +29,7 @@ type WFEdge = Edge<WFEdgeData>;
 
 // ─── Routing constants ────────────────────────────────────────────────────────
 
-/** px: within this Δ use a straight line (handles this close look aligned visually) */
-const ALIGNMENT_TOLERANCE = 80;
-/** px: radius for elbow rounded corners */
+/** px: radius for rounded corners on the optional step (orthogonal) edge style */
 const CORNER_RADIUS = 10;
 
 // ─── Per-edge-type style config ───────────────────────────────────────────────
@@ -147,29 +145,15 @@ function getWorkflowPath(
 ): PathResult {
   const cx = (sourceX + targetX) / 2;
   const cy = (sourceY + targetY) / 2;
-  const dx = Math.abs(sourceX - targetX);
-  const dy = Math.abs(sourceY - targetY);
 
-  // Parallel / branch fan-out → keep a smooth wide bezier
+  // Parallel / branch fan-out → smooth wide bezier (curves read better here)
   if (edgeType === "parallel" || edgeType === "parallel_branch") {
     return [`M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`, cx, cy];
   }
 
-  // ── Horizontal flow (side handles) ────────────────────────────────────────
-  if (sourcePosition === Position.Right || targetPosition === Position.Left) {
-    if (dy <= ALIGNMENT_TOLERANCE) {
-      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, sourceY]; // straight
-    }
-    const c = Math.max(40, Math.min(dx * 0.5, 150));
-    return [`M ${sourceX} ${sourceY} C ${sourceX + c} ${sourceY} ${targetX - c} ${targetY} ${targetX} ${targetY}`, cx, cy];
-  }
-
-  // ── Vertical flow (bottom → top) ──────────────────────────────────────────
-  if (dx <= ALIGNMENT_TOLERANCE) {
-    return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy]; // straight
-  }
-  const c = Math.max(36, Math.min(dy * 0.5, 150));
-  return [`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + c} ${targetX} ${targetY - c} ${targetX} ${targetY}`, cx, cy];
+  // Sequential edges → clean STRAIGHT line from the real source handle to the
+  // real target handle (vertical when stacked, a crisp diagonal when offset).
+  return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
 }
 
 // ─── Edge component ───────────────────────────────────────────────────────────

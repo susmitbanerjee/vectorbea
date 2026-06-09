@@ -82,18 +82,17 @@ function PaletteItem({ item, onAdd }: { item: PaletteItem; onAdd: () => void }) 
       title={`Drag to canvas or click to add — ${item.description}`}
       style={{ userSelect: "none" }}
     >
-      {/* Premium icon badge — larger with deeper color */}
+      {/* Solid colored type tile + white glyph — distinct & premium */}
       <span
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]"
         style={{
-          background: meta.bgColor,
-          border: `1.5px solid ${meta.borderColor}`,
-          boxShadow: `0 1px 4px ${meta.color}18`,
+          background: meta.color,
+          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 4px rgba(0,0,0,0.12), 0 2px 5px ${meta.color}40`,
         }}
       >
         <Icon
-          strokeWidth={1.75}
-          style={{ color: meta.color, width: 16, height: 16 }}
+          strokeWidth={1.9}
+          style={{ color: "#FFFFFF", width: 16, height: 16 }}
         />
       </span>
       <div className="min-w-0 flex-1">

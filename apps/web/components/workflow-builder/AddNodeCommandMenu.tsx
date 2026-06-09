@@ -239,10 +239,10 @@ export function AddNodeCommandMenu({
                       )}
                     >
                       <span
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border"
-                        style={{ background: meta.bgColor, borderColor: meta.borderColor, color: meta.color }}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]"
+                        style={{ background: meta.color, boxShadow: `inset 0 1px 0 rgba(255,255,255,0.26), 0 1px 3px ${meta.color}40`, color: "#FFFFFF" }}
                       >
-                        <Icon strokeWidth={1.75} className="h-4 w-4" />
+                        <Icon strokeWidth={1.9} className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13px] font-semibold text-[#0B0D0F]">
