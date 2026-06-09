@@ -1,52 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import {
-  AlertTriangle,
-  Bot,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  GitBranch,
-  Play,
-  Plug,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  Wrench,
-  ArrowRight,
-  CalendarClock,
-  Webhook,
-  type LucideIcon,
+  AlertTriangle, Bot, Clock, GitBranch, Play, Plug, Plus, RefreshCw,
+  ShieldCheck, Wrench, ArrowRight, Coins, Timer, Activity, type LucideIcon,
 } from "lucide-react";
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, ResponsiveContainer, Tooltip } from "recharts";
 
 import { getPlatformSummary, getRuns } from "@/lib/repository";
 import { apiFetch, withWorkspace } from "@/lib/api/client";
 import type { AgentRun } from "@/types/platform";
 import { cn } from "@/lib/utils";
-import { Diamond, Console, Chip } from "@/components/ui/page-kit";
+import { Diamond, Chip } from "@/components/ui/page-kit";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
+// ─── Format helpers ───────────────────────────────────────────────────────────
 function fmtDuration(ms: number | null) {
   if (!ms) return "—";
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
-}
-function timeAgo(ts: string | null) {
-  if (!ts) return "—";
-  const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-function clockTime(ts: string | null) {
-  if (!ts) return "--:--";
-  return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 function fmtTokens(n: number | null) {
   if (!n) return "0";
@@ -60,26 +34,7 @@ function fmtCost(n: number | null) {
   return `$${n.toFixed(2)}`;
 }
 
-const STATUS_TONE: Record<string, { tone: "green" | "red" | "teal" | "amber" | "gray"; pulse?: boolean; bar: string }> = {
-  succeeded:            { tone: "green", bar: "#007F4E" },
-  failed:               { tone: "red",   bar: "#DC2626" },
-  running:              { tone: "teal",  pulse: true, bar: "#0F766E" },
-  waiting_for_approval: { tone: "amber", pulse: true, bar: "#CA8A04" },
-  queued:               { tone: "gray",  bar: "#C9CED4" },
-  cancelled:            { tone: "gray",  bar: "#C9CED4" },
-};
-const STATUS_LABEL: Record<string, string> = {
-  succeeded: "Succeeded", failed: "Failed", running: "Running",
-  waiting_for_approval: "Awaiting", queued: "Queued", cancelled: "Cancelled",
-};
-const CONSOLE_STATUS: Record<string, { lvl: string; color: string }> = {
-  succeeded: { lvl: "ok  ", color: "#34D399" }, failed: { lvl: "err ", color: "#F87171" },
-  running: { lvl: "run ", color: "#5EEAD4" }, waiting_for_approval: { lvl: "hold", color: "#FBBF24" },
-  queued: { lvl: "wait", color: "#9CA3AF" }, cancelled: { lvl: "skip", color: "#6B7280" },
-};
-
 // ─── KPI card ─────────────────────────────────────────────────────────────────
-
 function Kpi({ label, value, sub, accent, icon: Icon, iconBg, iconFg, href }: {
   label: string; value: string | number; sub?: string; accent?: string;
   icon: LucideIcon; iconBg: string; iconFg: string; href?: Route;
@@ -88,9 +43,7 @@ function Kpi({ label, value, sub, accent, icon: Icon, iconBg, iconFg, href }: {
     <>
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#9CA3AF]">{label}</span>
-        <span className="flex h-7 w-7 items-center justify-center rounded-[8px]" style={{ background: iconBg, color: iconFg }}>
-          <Icon className="h-4 w-4" strokeWidth={1.9} />
-        </span>
+        <span className="flex h-7 w-7 items-center justify-center rounded-[8px]" style={{ background: iconBg, color: iconFg }}><Icon className="h-4 w-4" strokeWidth={1.9} /></span>
       </div>
       <p className="mt-3 text-[30px] font-semibold leading-none tabular-nums tracking-[-0.03em]" style={{ color: accent ?? "#0B0D0F" }}>{value}</p>
       {sub && <p className="mt-1.5 text-[12px] text-[#6B7280]">{sub}</p>}
@@ -100,134 +53,30 @@ function Kpi({ label, value, sub, accent, icon: Icon, iconBg, iconFg, href }: {
   return href ? <Link href={href} className={cn(cls, "block hover:border-[#C9CED4]")}>{inner}</Link> : <div className={cls}>{inner}</div>;
 }
 
-// ─── Execution health centerpiece ─────────────────────────────────────────────
-
-function ExecutionHealth({ succeeded, failed, running, recentRuns, tokens24h, cost24h }: {
-  succeeded: number; failed: number; running: number; recentRuns: AgentRun[]; tokens24h: number; cost24h: number;
-}) {
-  const tot = succeeded + failed + running;
-  const decided = succeeded + failed;
-  const rate = decided > 0 ? Math.round((succeeded / decided) * 100) : null;
-  const seg = (n: number) => (tot > 0 ? `${(n / tot) * 100}%` : "0%");
-
-  const durs = [...recentRuns].reverse();
-  const maxDur = Math.max(1, ...durs.map((r) => r.durationMs ?? 0));
-  const withDur = recentRuns.filter((r) => r.durationMs);
-  const avgLatency = withDur.length ? Math.round(withDur.reduce((s, r) => s + (r.durationMs ?? 0), 0) / withDur.length) : null;
-
+// ─── Metric tile ──────────────────────────────────────────────────────────────
+function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
   return (
-    <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Diamond size={8} />
-          <span className="vb-mono-label">Execution health</span>
-          <span className="font-mono text-[11px] text-[#9CA3AF]">last 24h</span>
-        </div>
-        <Link href={"/runs" as Route} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#007F4E] hover:underline">
-          Inspect <ArrowRight className="h-3 w-3" />
-        </Link>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-[200px_minmax(0,1fr)]">
-        {/* Success rate + stacked bar */}
-        <div>
-          <div className="flex items-end gap-2">
-            <span className="text-[44px] font-semibold leading-none tabular-nums tracking-[-0.035em] text-[#0B0D0F]">{rate == null ? "—" : `${rate}%`}</span>
-            <span className="mb-1.5 text-[12px] text-[#6B7280]">success</span>
-          </div>
-          <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-[#ECEEEF]">
-            {succeeded > 0 && <span style={{ width: seg(succeeded), background: "#007F4E" }} />}
-            {running > 0 && <span style={{ width: seg(running), background: "#0F766E" }} />}
-            {failed > 0 && <span style={{ width: seg(failed), background: "#DC2626" }} />}
-          </div>
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px]">
-            <span className="inline-flex items-center gap-1.5 text-[#047857]"><span className="h-1.5 w-1.5 rounded-full bg-[#007F4E]" />{succeeded} ok</span>
-            <span className="inline-flex items-center gap-1.5 text-[#B91C1C]"><span className="h-1.5 w-1.5 rounded-full bg-[#DC2626]" />{failed} failed</span>
-            {running > 0 && <span className="inline-flex items-center gap-1.5 text-[#0F766E]"><span className="h-1.5 w-1.5 rounded-full bg-[#0F766E]" />{running} running</span>}
-          </div>
-        </div>
-
-        {/* Duration sparkline */}
-        <div className="flex flex-col justify-between">
-          <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#9CA3AF]">Recent durations</span>
-          <div className="mt-2 flex items-end gap-[3px]" style={{ height: 56 }}>
-            {durs.length === 0
-              ? <span className="text-[12px] text-[#C9CED4]">no runs yet</span>
-              : durs.slice(-32).map((r, i) => (
-                <span key={i} title={`${r.workflowName ?? r.id.slice(0, 6)} · ${fmtDuration(r.durationMs)}`}
-                  className="flex-1 rounded-[2px] transition-opacity hover:opacity-100"
-                  style={{ height: `${Math.max(8, ((r.durationMs ?? 0) / maxDur) * 100)}%`, background: (STATUS_TONE[r.status]?.bar ?? "#C9CED4"), opacity: 0.85 }} />
-              ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Footer metrics */}
-      <div className="mt-5 grid grid-cols-3 divide-x divide-[#ECEEEF] border-t border-[#ECEEEF] pt-4">
-        {[
-          { k: "Tokens · 24h", v: fmtTokens(tokens24h) },
-          { k: "Cost · 24h", v: fmtCost(cost24h) },
-          { k: "Avg latency", v: avgLatency ? fmtDuration(avgLatency) : "—" },
-        ].map((m, i) => (
-          <div key={i} className={cn("px-4", i === 0 && "pl-0")}>
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">{m.k}</p>
-            <p className="mt-1 text-[20px] font-semibold tabular-nums tracking-[-0.02em] text-[#0B0D0F]">{m.v}</p>
-          </div>
-        ))}
-      </div>
+    <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-4">
+      <div className="flex items-center gap-2"><Icon className="h-3.5 w-3.5 text-[#9CA3AF]" /><span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#9CA3AF]">{label}</span></div>
+      <p className="mt-2.5 text-[24px] font-semibold leading-none tabular-nums tracking-[-0.025em] text-[#0B0D0F]">{value}</p>
     </div>
   );
 }
 
-// ─── Dense activity row ───────────────────────────────────────────────────────
-
-function RunRow({ run }: { run: AgentRun }) {
-  const t = STATUS_TONE[run.status] ?? { tone: "gray" as const, bar: "#C9CED4" };
-  const name = run.workflowName?.trim() ? run.workflowName : `Run ${run.id.slice(0, 8)}`;
-  const ckpt = run.checkpoints?.length ?? 0;
-  const TriggerIcon = run.triggerType === "cron" ? CalendarClock : run.triggerType === "webhook" ? Webhook : Play;
+// ─── Panel shell ──────────────────────────────────────────────────────────────
+function ChartPanel({ label, title, action, children }: { label: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <Link href={`/runs/${run.id}` as Route} className="group flex items-center gap-3 px-[18px] transition-colors hover:bg-[#FAFBFB]" style={{ minHeight: 58, borderTop: "1px solid #F1F2F3" }}>
-      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", t.pulse && "animate-pulse")} style={{ background: t.bar }} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13.5px] font-semibold leading-tight text-[#0B0D0F]">{name}</p>
-        <div className="mt-1 flex items-center gap-2 truncate font-mono text-[11px] text-[#9CA3AF]">
-          <span>{run.id.slice(0, 8)}</span>
-          <span className="text-[#E0E3E6]">·</span>
-          <span className="inline-flex items-center gap-1 capitalize"><TriggerIcon className="h-3 w-3" />{run.triggerType}</span>
-          {(run.totalTokens ?? 0) > 0 && <><span className="text-[#E0E3E6]">·</span><span>{fmtTokens(run.totalTokens)} tok</span></>}
-          {run.estimatedCostUsd ? <><span className="text-[#E0E3E6]">·</span><span>{fmtCost(run.estimatedCostUsd)}</span></> : null}
-          {ckpt > 0 && <><span className="text-[#E0E3E6]">·</span><span className="inline-flex items-center gap-1 text-[#006B45]"><Diamond size={7} />{ckpt}</span></>}
-        </div>
+    <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
+      <div className="mb-4 flex items-start justify-between">
+        <div className="flex items-center gap-2"><Diamond size={8} /><span className="vb-mono-label">{label}</span><span className="text-[14px] font-bold text-[#0B0D0F]">{title}</span></div>
+        {action}
       </div>
-      <Chip tone={t.tone} pulse={t.pulse}>{STATUS_LABEL[run.status] ?? run.status}</Chip>
-      <span className="hidden w-14 shrink-0 text-right font-mono text-[12px] tabular-nums text-[#4B5563] sm:block">{fmtDuration(run.durationMs)}</span>
-      <span className="hidden w-16 shrink-0 text-right font-mono text-[12px] text-[#9CA3AF] md:block">{timeAgo(run.startedAt)}</span>
-      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#C9CED4] opacity-0 transition-opacity group-hover:opacity-100" />
-    </Link>
-  );
-}
-
-// ─── Get started tile ─────────────────────────────────────────────────────────
-
-function GetStartedTile({ icon: Icon, title, description, href, color }: {
-  icon: LucideIcon; title: string; description: string; href: string; color: string;
-}) {
-  return (
-    <Link href={href as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]">
-      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]" style={{ background: `${color}14`, border: `1px solid ${color}33`, color }}>
-        <Icon className="h-4 w-4" strokeWidth={1.9} />
-      </span>
-      <div className="min-w-0">
-        <p className="text-[13.5px] font-semibold leading-5 text-[#0B0D0F]">{title}</p>
-        <p className="mt-0.5 text-[12px] leading-4 text-[#6B7280]">{description}</p>
-      </div>
-    </Link>
+      {children}
+    </div>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-
 interface Summary {
   totalWorkflows: number; activeWorkflows: number; totalAgents: number; totalTools: number;
   totalRuns: number; runningRuns: number; runningNow: number; waitingApprovals: number;
@@ -237,42 +86,37 @@ interface Summary {
   connectedWorkers: number; recentRunsTotal: number;
 }
 
+const LAT_BUCKETS = [
+  { label: "<1s", max: 1000 },
+  { label: "1–5s", max: 5000 },
+  { label: "5–30s", max: 30_000 },
+  { label: "30s–2m", max: 120_000 },
+  { label: ">2m", max: Infinity },
+];
+
 export default function OverviewPage() {
-  const [summary, setSummary]     = useState<Summary | null>(null);
-  const [recentRuns, setRecentRuns] = useState<AgentRun[]>([]);
-  const [runsTotal, setRunsTotal]   = useState(0);
-  const [runsTotalPages, setRunsTotalPages] = useState(1);
-  const [runsPage, setRunsPage]     = useState(1);
-  const [loading, setLoading]       = useState(true);
-  const [betaUsage, setBetaUsage]   = useState<{
-    runsToday: number; maxRunsPerDay: number;
-    simulationRunsToday: number; realRunsToday: number;
+  const [summary, setSummary]   = useState<Summary | null>(null);
+  const [runSample, setRunSample] = useState<AgentRun[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [betaUsage, setBetaUsage] = useState<{
+    runsToday: number; maxRunsPerDay: number; simulationRunsToday: number; realRunsToday: number;
     canRunRealExecution: boolean; executionMode: string;
   } | null>(null);
 
-  const RECENT_RUNS_LIMIT = 10;
-
-  async function load(p = 1) {
+  async function load() {
     setLoading(true);
     try {
-      const [s, runsResult] = await Promise.all([
-        getPlatformSummary(),
-        getRuns({ pageSize: RECENT_RUNS_LIMIT, page: p }),
-      ]);
+      const [s, runs] = await Promise.all([getPlatformSummary(), getRuns({ pageSize: 50, page: 1 })]);
       setSummary(s as Summary);
-      setRecentRuns(runsResult.items.slice(0, RECENT_RUNS_LIMIT));
-      setRunsTotal(runsResult.total);
-      setRunsTotalPages(runsResult.totalPages ?? Math.ceil(runsResult.total / RECENT_RUNS_LIMIT));
-      setRunsTotal(runsResult.total);
-    } catch { /* silently fallback */ }
+      setRunSample(runs.items ?? []);
+    } catch { /* silent */ }
     finally { setLoading(false); }
   }
 
   useEffect(() => {
-    void load(1);
+    void load();
     apiFetch<typeof betaUsage & Record<string, unknown>>(withWorkspace("/api/beta/status"))
-      .then(r => setBetaUsage(r as typeof betaUsage))
-      .catch(() => {});
+      .then(r => setBetaUsage(r as typeof betaUsage)).catch(() => {});
   }, []);
 
   const isEmpty = !loading && (summary?.totalWorkflows ?? 0) === 0 && (summary?.totalAgents ?? 0) === 0;
@@ -282,23 +126,43 @@ export default function OverviewPage() {
   const pending = summary?.pendingApprovals ?? summary?.waitingApprovals ?? 0;
   const tokens24h = summary?.totalTokens24h ?? summary?.usageLast24h?.tokens ?? 0;
   const cost24h = summary?.totalCost24h ?? summary?.usageLast24h?.estimatedCost ?? 0;
+  const totalRuns24h = succeeded24 + failed24 + runningNow;
+  const rate = (succeeded24 + failed24) > 0 ? Math.round((succeeded24 / (succeeded24 + failed24)) * 100) : null;
 
-  const consoleLines = recentRuns.slice(0, 7).map((r) => {
-    const m = CONSOLE_STATUS[r.status] ?? { lvl: "--  ", color: "#9CA3AF" };
-    const name = (r.workflowName?.trim() || `run ${r.id.slice(0, 6)}`).slice(0, 20);
-    const tail = r.status === "succeeded" ? fmtDuration(r.durationMs) : r.status === "running" ? "executing" : r.status === "waiting_for_approval" ? "awaiting approval" : r.status === "failed" ? "failed" : r.status;
-    return { t: clockTime(r.startedAt), lvl: m.lvl, color: m.color, msg: `${name} · ${tail}` };
-  });
+  // Run outcomes donut (24h, real)
+  const outcomeData = [
+    { name: "Succeeded", value: succeeded24, color: "#007F4E" },
+    { name: "Running", value: runningNow, color: "#0F766E" },
+    { name: "Failed", value: failed24, color: "#DC2626" },
+  ].filter(d => d.value > 0);
 
-  // System status pill
+  // Latency profile (from run sample, real)
+  const { histData, avgLatency, p95Latency, sampleN } = useMemo(() => {
+    const durs = runSample.map(r => r.durationMs).filter((d): d is number => typeof d === "number" && d > 0).sort((a, b) => a - b);
+    const counts = LAT_BUCKETS.map(b => ({ label: b.label, count: 0 }));
+    for (const d of durs) { const i = LAT_BUCKETS.findIndex(b => d < b.max); counts[i === -1 ? counts.length - 1 : i].count++; }
+    const avg = durs.length ? Math.round(durs.reduce((s, d) => s + d, 0) / durs.length) : null;
+    const p95 = durs.length ? durs[Math.min(durs.length - 1, Math.floor(durs.length * 0.95))] : null;
+    return { histData: counts, avgLatency: avg, p95Latency: p95, sampleN: durs.length };
+  }, [runSample]);
+
+  // Resource composition (real counts)
+  const resources = [
+    { label: "Workflows", value: summary?.totalWorkflows ?? 0, color: "#007F4E", href: "/workflows" as Route, icon: GitBranch },
+    { label: "Agents", value: summary?.totalAgents ?? 0, color: "#7C3AED", href: "/agents" as Route, icon: Bot },
+    { label: "Tools", value: summary?.totalTools ?? 0, color: "#0F766E", href: "/tools" as Route, icon: Wrench },
+  ];
+  const resMax = Math.max(1, ...resources.map(r => r.value));
+
   const statusPill = loading ? null
     : failed24 > 0 ? { tone: "amber" as const, text: `${failed24} failed · 24h` }
     : runningNow > 0 ? { tone: "teal" as const, text: `${runningNow} running` }
     : { tone: "green" as const, text: "All systems durable" };
 
+  const workflowUtil = (summary?.totalWorkflows ?? 0) > 0 ? Math.round(((summary?.activeWorkflows ?? 0) / (summary?.totalWorkflows ?? 1)) * 100) : null;
+
   return (
     <div className="page-shell space-y-4">
-
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -329,9 +193,9 @@ export default function OverviewPage() {
         <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
           <div className="mb-3 flex items-center gap-2"><Diamond size={9} /><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Get started with Vectorbea</p></div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <GetStartedTile icon={GitBranch} title="Create workflow" description="Build a durable AI workflow" href="/workflows/new" color="#007F4E" />
-            <GetStartedTile icon={Plug}      title="Add connection"  description="Connect an LLM provider"   href="/connections"   color="#7C3AED" />
-            <GetStartedTile icon={Bot}       title="Register agent"  description="Define an agent persona"   href="/agents/new"    color="#0F766E" />
+            <Link href={"/workflows/new" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#007F4E14", border: "1px solid #007F4E33", color: "#007F4E" }}><GitBranch className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Create workflow</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Build a durable AI workflow</p></div></Link>
+            <Link href={"/connections" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#7C3AED14", border: "1px solid #7C3AED33", color: "#7C3AED" }}><Plug className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Add connection</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Connect an LLM provider</p></div></Link>
+            <Link href={"/agents/new" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#0F766E14", border: "1px solid #0F766E33", color: "#0F766E" }}><Bot className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Register agent</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Define an agent persona</p></div></Link>
           </div>
         </div>
       )}
@@ -344,63 +208,105 @@ export default function OverviewPage() {
         <Kpi label="Pending approvals" value={loading ? "…" : pending} accent={pending > 0 ? "#B45309" : undefined} sub={pending > 0 ? "awaiting decision" : "none waiting"} icon={ShieldCheck} iconBg={pending > 0 ? "#FFFBEB" : "#F3F4F5"} iconFg={pending > 0 ? "#CA8A04" : "#9CA3AF"} href={"/approvals" as Route} />
       </div>
 
-      {/* Main grid */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
-
-        {/* Left column */}
-        <div className="space-y-4">
-          {/* Execution health */}
+      {/* Charts row */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        {/* Run outcomes donut */}
+        <ChartPanel label="Reliability" title="Run outcomes" action={<span className="font-mono text-[11px] text-[#9CA3AF]">24h</span>}>
           {loading ? (
-            <div className="h-[220px] animate-pulse rounded-[12px] border border-[#E0E3E6] bg-[#FAFBFB]" />
+            <div className="h-[200px] animate-pulse rounded-[10px] bg-[#FAFBFB]" />
+          ) : totalRuns24h === 0 ? (
+            <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-center"><Activity className="h-6 w-6 text-[#C9CED4]" /><p className="text-[13px] text-[#9CA3AF]">No runs in the last 24h</p></div>
           ) : (
-            <ExecutionHealth succeeded={succeeded24} failed={failed24} running={runningNow} recentRuns={recentRuns} tokens24h={tokens24h} cost24h={cost24h} />
-          )}
-
-          {/* Recent runs feed */}
-          <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
-            <div className="flex items-center justify-between px-[18px]" style={{ height: 50, borderBottom: "1px solid #ECEEEF" }}>
-              <div className="flex items-center gap-2"><span className="text-[14px] font-bold text-[#0B0D0F]">Recent runs</span><span className="font-mono text-[11px] text-[#9CA3AF]">event-sourced</span></div>
-              <Link href={"/runs" as Route} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#007F4E] hover:underline">View all <ArrowRight className="h-3 w-3" /></Link>
-            </div>
-
-            {loading ? (
-              <div>{Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-[18px]" style={{ minHeight: 58, borderTop: "1px solid #F1F2F3" }}>
-                  <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#ECEEEF]" />
-                  <div className="flex-1 space-y-1.5"><div className="h-3 w-1/3 animate-pulse rounded bg-[#ECEEEF]" /><div className="h-2.5 w-1/2 animate-pulse rounded bg-[#ECEEEF]" /></div>
-                  <div className="h-5 w-16 animate-pulse rounded-full bg-[#ECEEEF]" />
+            <>
+              <div className="relative" style={{ height: 184 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={outcomeData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={86} paddingAngle={outcomeData.length > 1 ? 2 : 0} startAngle={90} endAngle={-270} stroke="none">
+                      {outcomeData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                    </Pie>
+                    <Tooltip cursor={false} contentStyle={{ borderRadius: 8, border: "1px solid #E0E3E6", fontSize: 12, fontFamily: "var(--font-mono)" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-[30px] font-semibold tabular-nums tracking-[-0.03em] text-[#0B0D0F]">{rate == null ? "—" : `${rate}%`}</span>
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#9CA3AF]">success</span>
                 </div>
-              ))}</div>
-            ) : recentRuns.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 text-center" style={{ height: 260 }}>
-                <span className="flex h-12 w-12 items-center justify-center rounded-[12px] border border-[#9CCFBB] bg-[#E6F4EF]"><GitBranch className="h-5 w-5 text-[#007F4E]" /></span>
-                <div><p className="text-[15px] font-semibold text-[#0B0D0F]">No runs yet</p><p className="mt-1 text-[13px] text-[#9CA3AF]">Trigger your first workflow to see runs here.</p></div>
-                <Link href={"/workflows/new" as Route} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> Create workflow</Link>
               </div>
-            ) : (
-              <>
-                <div>{recentRuns.map((run) => <RunRow key={run.id} run={run} />)}</div>
-                <div className="flex items-center justify-between px-[18px] py-2.5" style={{ borderTop: "1px solid #ECEEEF" }}>
-                  <span className="font-mono text-[11.5px] text-[#9CA3AF]">{runsTotal > 0 ? `${((runsPage - 1) * RECENT_RUNS_LIMIT) + 1}–${Math.min(runsPage * RECENT_RUNS_LIMIT, runsTotal)} of ${runsTotal.toLocaleString()}` : `${recentRuns.length} runs`}</span>
-                  <div className="flex items-center gap-1">
-                    <button type="button" disabled={runsPage <= 1} onClick={() => { const p = runsPage - 1; setRunsPage(p); void load(p); }} className="flex h-7 w-7 items-center justify-center rounded-[6px] border border-[#E0E3E6] bg-white text-[#4B5563] transition-colors hover:bg-[#F3F4F5] disabled:opacity-40"><ChevronLeft className="h-3.5 w-3.5" /></button>
-                    {Array.from({ length: Math.min(runsTotalPages, 5) }, (_, i) => { const half = 2; let start = Math.max(1, runsPage - half); const end = Math.min(runsTotalPages, start + 4); start = Math.max(1, end - 4); return start + i; }).filter(p => p <= runsTotalPages).map(p => (
-                      <button key={p} type="button" onClick={() => { setRunsPage(p); void load(p); }} className={cn("flex h-7 w-7 items-center justify-center rounded-[6px] border text-[12px] font-medium transition-colors", p === runsPage ? "border-[#0B0D0F] bg-[#0B0D0F] text-white" : "border-[#E0E3E6] bg-white text-[#4B5563] hover:bg-[#F3F4F5]")}>{p}</button>
-                    ))}
-                    <button type="button" disabled={runsPage >= runsTotalPages} onClick={() => { const p = runsPage + 1; setRunsPage(p); void load(p); }} className="flex h-7 w-7 items-center justify-center rounded-[6px] border border-[#E0E3E6] bg-white text-[#4B5563] transition-colors hover:bg-[#F3F4F5] disabled:opacity-40"><ChevronRight className="h-3.5 w-3.5" /></button>
+              <div className="mt-4 space-y-2 border-t border-[#ECEEEF] pt-3">
+                {[{ l: "Succeeded", v: succeeded24, c: "#007F4E" }, { l: "Running", v: runningNow, c: "#0F766E" }, { l: "Failed", v: failed24, c: "#DC2626" }].map((r) => (
+                  <div key={r.l} className="flex items-center justify-between text-[12.5px]">
+                    <span className="flex items-center gap-2 text-[#4B5563]"><span className="h-2 w-2 rounded-full" style={{ background: r.c }} />{r.l}</span>
+                    <span className="font-mono tabular-nums text-[#0B0D0F]">{r.v}<span className="ml-1 text-[#9CA3AF]">{totalRuns24h ? `${Math.round((r.v / totalRuns24h) * 100)}%` : "0%"}</span></span>
                   </div>
-                </div>
-              </>
-            )}
+                ))}
+              </div>
+            </>
+          )}
+        </ChartPanel>
+
+        {/* Latency histogram */}
+        <ChartPanel label="Performance" title="Execution latency" action={<span className="font-mono text-[11px] text-[#9CA3AF]">{sampleN} runs</span>}>
+          {loading ? (
+            <div className="h-[200px] animate-pulse rounded-[10px] bg-[#FAFBFB]" />
+          ) : sampleN === 0 ? (
+            <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-center"><Timer className="h-6 w-6 text-[#C9CED4]" /><p className="text-[13px] text-[#9CA3AF]">No completed runs to profile</p></div>
+          ) : (
+            <>
+              <div style={{ height: 184 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={histData} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#9CA3AF", fontFamily: "var(--font-mono)" }} />
+                    <Tooltip cursor={{ fill: "#F3F4F5" }} contentStyle={{ borderRadius: 8, border: "1px solid #E0E3E6", fontSize: 12, fontFamily: "var(--font-mono)" }} />
+                    <Bar dataKey="count" radius={[5, 5, 0, 0]} maxBarSize={64}>
+                      {histData.map((_, i) => <Cell key={i} fill="#007F4E" fillOpacity={0.45 + (i / histData.length) * 0.55} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3 flex items-center gap-6 border-t border-[#ECEEEF] pt-3">
+                <div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">Avg</p><p className="mt-0.5 text-[18px] font-semibold tabular-nums text-[#0B0D0F]">{avgLatency ? fmtDuration(avgLatency) : "—"}</p></div>
+                <div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">p95</p><p className="mt-0.5 text-[18px] font-semibold tabular-nums text-[#0B0D0F]">{p95Latency ? fmtDuration(p95Latency) : "—"}</p></div>
+              </div>
+            </>
+          )}
+        </ChartPanel>
+      </div>
+
+      {/* Spend + resources + rail */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+        <div className="space-y-4">
+          {/* Spend metrics */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Metric label="Tokens · 24h" value={loading ? "…" : fmtTokens(tokens24h)} icon={Coins} />
+            <Metric label="Cost · 24h" value={loading ? "…" : fmtCost(cost24h)} icon={Coins} />
+            <Metric label="Total runs" value={loading ? "…" : (summary?.totalRuns ?? summary?.recentRunsTotal ?? 0).toLocaleString()} icon={Activity} />
+            <Metric label="Workflow active" value={loading ? "…" : (workflowUtil == null ? "—" : `${workflowUtil}%`)} icon={GitBranch} />
+          </div>
+
+          {/* Resource composition */}
+          <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
+            <div className="mb-4 flex items-center gap-2"><span className="vb-mono-label">Registry</span><span className="text-[14px] font-bold text-[#0B0D0F]">Platform resources</span></div>
+            <div className="space-y-3.5">
+              {resources.map((r) => {
+                const Icon = r.icon;
+                return (
+                  <Link key={r.label} href={r.href} className="group block">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#374151]"><Icon className="h-3.5 w-3.5" style={{ color: r.color }} />{r.label}</span>
+                      <span className="font-mono text-[13px] font-semibold tabular-nums text-[#0B0D0F]">{r.value}</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-[#ECEEEF]">
+                      <div className="h-full rounded-full transition-all group-hover:opacity-90" style={{ width: `${Math.max(4, (r.value / resMax) * 100)}%`, background: r.color }} />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         </div>
 
         {/* Right rail */}
         <div className="flex flex-col gap-4">
-          {!loading && recentRuns.length > 0 && (
-            <Console title="runtime · live" badge={runningNow > 0 ? `${runningNow} active` : "idle"} lines={consoleLines} />
-          )}
-
           {/* Usage today */}
           <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-[18px]">
             <div className="mb-3 flex items-center justify-between">
