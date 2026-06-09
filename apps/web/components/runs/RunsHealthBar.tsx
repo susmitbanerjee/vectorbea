@@ -100,7 +100,7 @@ export function RunsHealthBar() {
     <div className="flex flex-wrap items-center gap-3">
       <StatPill label="total" value={counts.total} />
       <div className="h-5 w-px bg-[#E5E7EB]" />
-      <StatPill label="running"   value={counts.running}   dot="bg-blue-500"    dotPulse valueClass="text-[#1D4ED8]" />
+      <StatPill label="running"   value={counts.running}   dot="bg-teal-500"    dotPulse valueClass="text-[#0F766E]" />
       <StatPill label="queued"    value={counts.queued}    dot="bg-slate-400"   hide={counts.queued === 0} />
       <StatPill label="waiting"   value={counts.waiting}   dot="bg-amber-500"   dotPulse valueClass="text-amber-700" hide={counts.waiting === 0} />
       <StatPill label="succeeded" value={counts.succeeded} dot="bg-emerald-500" valueClass="text-emerald-700" />
