@@ -3,24 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
-  Archive,
-  BrainCircuit,
-  Cable,
-  CheckCircle2,
-  Clock,
-  Database,
-  DatabaseZap,
-  Globe,
-  HardDrive,
-  Loader2,
-  MessageSquare,
-  MoreHorizontal,
-  Plus,
-  RefreshCw,
-  Search,
-  ShieldAlert,
-  XCircle,
+  AlertTriangle, Archive, BrainCircuit, Cable, CheckCircle2, Clock, Database,
+  DatabaseZap, Globe, HardDrive, Loader2, MessageSquare, Plus, RefreshCw,
+  ShieldAlert, XCircle, ArrowRight, Trash2, Plug,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,6 +13,8 @@ import { cn } from "@/lib/utils";
 import type { Connection, ConnectionType, ConnectionStatus } from "@/types/connections";
 import { getConnections, getConnection, testConnection, deleteConnection } from "@/lib/repository";
 import { SearchInput } from "@/components/ui/search-input";
+import { ProviderIcon } from "@/components/ui/provider-icon";
+import { Chip, FilterTabs, EmptyHint, StatTile } from "@/components/ui/page-kit";
 
 // ─── Connection type meta ─────────────────────────────────────────────────────
 
@@ -41,158 +28,72 @@ const TYPE_META: Record<ConnectionType, { label: string; icon: React.ElementType
   object_storage:  { label: "Object Storage",   icon: HardDrive,    color: "#6B7280" },
 };
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
-
-const STATUS_META: Record<ConnectionStatus, { label: string; color: string; border: string; bg: string; icon: React.ElementType }> = {
-  connected:       { label: "Connected",       color: "#059669", border: "#A7F3D0", bg: "#ECFDF5", icon: CheckCircle2 },
-  not_tested:      { label: "Not tested",      color: "#6B7280", border: "#E5E7EB", bg: "#F9FAFB", icon: Clock },
-  failed:          { label: "Failed",          color: "#DC2626", border: "#FECACA", bg: "#FEF2F2", icon: XCircle },
-  needs_whitelist: { label: "Needs whitelist", color: "#D97706", border: "#FDE68A", bg: "#FFFBEB", icon: AlertTriangle },
-  missing_secret:  { label: "Missing secret",  color: "#D97706", border: "#FDE68A", bg: "#FFFBEB", icon: ShieldAlert },
-  disabled:        { label: "Disabled",        color: "#6B7280", border: "#E5E7EB", bg: "#F9FAFB", icon: Archive },
+const STATUS_TONE: Record<ConnectionStatus, "green" | "gray" | "red" | "amber"> = {
+  connected: "green", not_tested: "gray", failed: "red",
+  needs_whitelist: "amber", missing_secret: "amber", disabled: "gray",
+};
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  connected: "Connected", not_tested: "Not tested", failed: "Failed",
+  needs_whitelist: "Needs whitelist", missing_secret: "Missing secret", disabled: "Disabled",
+};
+const STATUS_ICON: Record<ConnectionStatus, React.ElementType> = {
+  connected: CheckCircle2, not_tested: Clock, failed: XCircle,
+  needs_whitelist: AlertTriangle, missing_secret: ShieldAlert, disabled: Archive,
 };
 
-function StatusBadge({ status }: { status: ConnectionStatus }) {
-  const m = STATUS_META[status];
-  const Icon = m.icon;
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-medium"
-      style={{ color: m.color, borderColor: m.border, background: m.bg }}
-    >
-      <Icon className="h-3 w-3" />
-      {m.label}
-    </span>
-  );
-}
+// ─── Connection card ──────────────────────────────────────────────────────────
 
-function TypeBadge({ type }: { type: ConnectionType }) {
-  const m = TYPE_META[type];
-  const Icon = m.icon;
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[12px] font-medium" style={{ color: m.color }}>
-      <Icon className="h-3.5 w-3.5" />
-      {m.label}
-    </span>
-  );
-}
-
-// ─── Connection row ───────────────────────────────────────────────────────────
-
-function ConnectionRow({
-  conn,
-  onTest,
-  onDelete,
-  testing,
-}: {
-  conn: Connection;
-  onTest: () => void;
-  onDelete: () => void;
-  testing: boolean;
+function ConnectionCard({ conn, onTest, onDelete, testing }: {
+  conn: Connection; onTest: () => void; onDelete: () => void; testing: boolean;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const latencyLabel = conn.lastTestLatencyMs ? `${conn.lastTestLatencyMs}ms` : "—";
+  const meta = TYPE_META[conn.type];
+  const Icon = meta.icon;
   const usageCount = conn.usedByAgentIds.length + conn.usedByToolIds.length;
-
+  const isLLM = conn.type === "llm_provider";
+  const net = conn.networkPolicy.networkStatus;
   return (
-    <div
-      className="group relative grid items-center gap-4 rounded-lg border border-border bg-white px-5 py-3.5 transition-all hover:border-[#D1D5DB] hover:bg-[#F9FAFB]"
-      style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr auto" }}
-    >
-      {/* Name + provider */}
-      <div className="min-w-0">
-        <Link
-          href={`/connections/${conn.id}` as never}
-          className="text-[13px] font-semibold text-foreground hover:text-primary transition-colors"
-        >
-          {conn.name}
-        </Link>
-        <p className="mt-0.5 text-[11px] capitalize text-muted-foreground/60">
-          {conn.provider.replace(/_/g, " ")} · {conn.environment}
-        </p>
-      </div>
-
-      {/* Type */}
-      <TypeBadge type={conn.type} />
-
-      {/* Status */}
-      <StatusBadge status={conn.status} />
-
-      {/* Used by */}
-      <span className="text-[12px] text-muted-foreground">
-        {usageCount > 0 ? `${usageCount} resource${usageCount !== 1 ? "s" : ""}` : <span className="text-muted-foreground/30">unused</span>}
-      </span>
-
-      {/* Last tested */}
-      <div>
-        <span className="text-[12px] text-muted-foreground">
-          {conn.lastTestedAt ? new Date(conn.lastTestedAt).toLocaleDateString() : "Never"}
-        </span>
-        {conn.lastTestLatencyMs && (
-          <span className="ml-1.5 text-[10px] text-muted-foreground/40">{latencyLabel}</span>
-        )}
-      </div>
-
-      {/* Network */}
-      <div>
-        {conn.networkPolicy.networkStatus === "reachable" ? (
-          <span className="text-[11px] text-emerald-700">Reachable</span>
-        ) : conn.networkPolicy.networkStatus === "whitelist_required" ? (
-          <span className="text-[11px] text-amber-700">Whitelist needed</span>
-        ) : conn.networkPolicy.networkStatus === "blocked" ? (
-          <span className="text-[11px] text-red-700">Blocked</span>
+    <div className="group flex flex-col overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white transition-all hover:border-[#C9CED4] hover:shadow-[0_6px_20px_rgba(11,13,15,0.05)]">
+      {/* Header */}
+      <div className="flex items-start gap-3 p-4">
+        {isLLM ? (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-[#E0E3E6] bg-white"><ProviderIcon providerType={conn.provider} className="h-[18px] w-[18px]" /></span>
         ) : (
-          <span className="text-[11px] text-[#9CA3AF]">Unknown</span>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px]" style={{ background: meta.color, boxShadow: `inset 0 1px 0 rgba(255,255,255,0.26), 0 2px 5px ${meta.color}40` }}><Icon className="h-[18px] w-[18px] text-white" /></span>
+        )}
+        <div className="min-w-0 flex-1">
+          <Link href={`/connections/${conn.id}` as never} className="block truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#0B0D0F] hover:text-[#007F4E]">{conn.name}</Link>
+          <p className="mt-0.5 truncate font-mono text-[11.5px] capitalize text-[#6B7280]">{conn.provider.replace(/_/g, " ")} · {conn.environment}</p>
+        </div>
+        <Chip tone={STATUS_TONE[conn.status]} pulse={conn.status === "not_tested" ? false : undefined}>{STATUS_LABEL[conn.status]}</Chip>
+      </div>
+
+      {/* Meta */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-[#ECEEEF] px-4 py-2.5">
+        <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium" style={{ color: meta.color }}><Icon className="h-3.5 w-3.5" />{meta.label}</span>
+        <span className="text-[#D7DBE0]">·</span>
+        <span className="font-mono text-[11.5px] text-[#6B7280]">{usageCount > 0 ? `${usageCount} resource${usageCount !== 1 ? "s" : ""}` : "unused"}</span>
+        {net && (
+          <>
+            <span className="text-[#D7DBE0]">·</span>
+            <span className={cn("font-mono text-[11.5px]", net === "reachable" ? "text-[#047857]" : net === "whitelist_required" ? "text-[#B45309]" : net === "blocked" ? "text-[#DC2626]" : "text-[#9CA3AF]")}>
+              {net === "reachable" ? "reachable" : net === "whitelist_required" ? "whitelist needed" : net === "blocked" ? "blocked" : "unknown"}
+            </span>
+          </>
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onTest}
-          disabled={testing}
-          className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-white px-2.5 text-[11px] text-[#6B7280] transition-all hover:border-[#D1D5DB] hover:text-foreground disabled:opacity-40"
-        >
-          {testing ? <RefreshCw className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-          Test
-        </button>
-
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            className="flex h-7 w-7 items-center justify-center rounded border border-border bg-white text-[#6B7280] transition-all hover:border-[#D1D5DB] hover:text-foreground"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
+      {/* Footer */}
+      <div className="mt-auto flex items-center justify-between border-t border-[#ECEEEF] bg-[#FAFBFB] px-4 py-2.5">
+        <span className="font-mono text-[11.5px] text-[#6B7280]">
+          {conn.lastTestedAt ? `tested ${new Date(conn.lastTestedAt).toLocaleDateString()}` : "never tested"}
+          {conn.lastTestLatencyMs ? ` · ${conn.lastTestLatencyMs}ms` : ""}
+        </span>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={onTest} disabled={testing} className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[#E0E3E6] bg-white px-2.5 text-[11.5px] font-medium text-[#4B5563] transition-colors hover:border-[#C9CED4] hover:text-[#0B0D0F] disabled:opacity-40">
+            <RefreshCw className={cn("h-3 w-3", testing && "animate-spin")} /> Test
           </button>
-          {menuOpen && (
-            <div
-              className="absolute right-0 top-8 z-20 w-40 overflow-hidden rounded-xl border border-border/50 shadow-2xl"
-              style={{ background: "#FFFFFF" }}
-              onMouseLeave={() => setMenuOpen(false)}
-            >
-              <Link
-                href={`/connections/${conn.id}` as never}
-                className="block px-3 py-2 text-[12px] text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-              >
-                View details
-              </Link>
-              <Link
-                href={`/connections/${conn.id}` as never}
-                className="block px-3 py-2 text-[12px] text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-              >
-                Edit
-              </Link>
-              <button
-                type="button"
-                onClick={() => { setMenuOpen(false); onDelete(); }}
-                className="block w-full px-3 py-2 text-left text-[12px] text-red-600 hover:bg-red-50"
-              >
-                Delete
-              </button>
-            </div>
-          )}
+          <Link href={`/connections/${conn.id}` as never} className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[12px] font-medium text-[#4B5563] opacity-0 transition-opacity hover:bg-[#ECEEEF] hover:text-[#0B0D0F] group-hover:opacity-100">View <ArrowRight className="h-3 w-3" /></Link>
+          <button type="button" onClick={onDelete} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#9CA3AF] opacity-0 transition-all hover:bg-[#FEF2F2] hover:text-[#DC2626] group-hover:opacity-100" title="Delete connection"><Trash2 className="h-3.5 w-3.5" /></button>
         </div>
       </div>
     </div>
@@ -201,14 +102,14 @@ function ConnectionRow({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-const TYPE_FILTERS: { value: ConnectionType | "all"; label: string }[] = [
-  { value: "all",            label: "All" },
-  { value: "llm_provider",   label: "LLM" },
-  { value: "database",       label: "Database" },
-  { value: "http_api",       label: "HTTP/API" },
-  { value: "saas",           label: "SaaS" },
-  { value: "mcp_server",     label: "MCP" },
-  { value: "vector_store",   label: "Vector Store" },
+const TYPE_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "llm_provider", label: "LLM" },
+  { value: "database", label: "Database" },
+  { value: "http_api", label: "HTTP/API" },
+  { value: "saas", label: "SaaS" },
+  { value: "mcp_server", label: "MCP" },
+  { value: "vector_store", label: "Vector" },
   { value: "object_storage", label: "Storage" },
 ];
 
@@ -222,10 +123,7 @@ export default function ConnectionsPage() {
   async function load() {
     setLoading(true);
     try {
-      const items = await getConnections({
-        search: search || undefined,
-        type: typeFilter === "all" ? undefined : typeFilter,
-      });
+      const items = await getConnections({ search: search || undefined, type: typeFilter === "all" ? undefined : typeFilter });
       setConnections(items);
     } catch (error) {
       console.error("[connections] load failed:", error);
@@ -244,16 +142,9 @@ export default function ConnectionsPage() {
     setTestingIds((s) => { const n = new Set(s); n.delete(id); return n; });
     if (result) {
       const passed = result.status === "connected";
-      // Re-fetch the full connection so the list reflects the persisted test status
       const refreshed = await getConnection(id);
-      if (refreshed) {
-        setConnections((prev) => prev.map((c) => (c.id === id ? refreshed : c)));
-      }
-      toast[passed ? "success" : "error"](
-        passed
-          ? `${refreshed?.name ?? id} connected (${result.latencyMs}ms)`
-          : `${refreshed?.name ?? id} test failed: ${result.message}`,
-      );
+      if (refreshed) setConnections((prev) => prev.map((c) => (c.id === id ? refreshed : c)));
+      toast[passed ? "success" : "error"](passed ? `${refreshed?.name ?? id} connected (${result.latencyMs}ms)` : `${refreshed?.name ?? id} test failed: ${result.message}`);
     }
   }
 
@@ -271,148 +162,68 @@ export default function ConnectionsPage() {
   };
 
   return (
-    <div className="page-shell">
+    <div className="page-shell space-y-5">
       {/* Header */}
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[24px] font-bold tracking-tight text-foreground">Connections</h1>
-          <p className="mt-1 text-[14px] text-muted-foreground">
-            Configure LLM providers, databases, APIs, SaaS tools, MCP servers, and storage used by agents and tools.
-          </p>
+          <span className="vb-mono-label">Build</span>
+          <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Connections</h1>
+          <p className="mt-1 max-w-[60ch] text-[13.5px] text-[#6B7280]">LLM providers, databases, APIs, SaaS, MCP servers, and storage — secrets encrypted, never shown.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/50 px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
+          <button type="button" onClick={() => void load()} title="Refresh" className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white transition-colors hover:bg-[#F3F4F5]">
+            <RefreshCw className="h-3.5 w-3.5 text-[#6B7280]" />
           </button>
-          <Link
-            href={"/connections/new" as never}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1E293B]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New Connection
+          <Link href={"/connections/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+            <Plus className="h-3.5 w-3.5" /> New connection
           </Link>
         </div>
       </div>
 
-      {/* Stats bar */}
-      {!loading && (
-        <div className="mb-6 grid grid-cols-3 gap-3 sm:grid-cols-3">
-          {[
-            { label: "Connected", value: stats.connected, color: "#059669" },
-            { label: "Failed",    value: stats.failed,    color: "#DC2626" },
-            { label: "Needs action", value: stats.needsAction, color: "#FCD34D" },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="rounded-xl border border-border/40 bg-card/60 px-4 py-3"
-            >
-              <p className="text-[11px] text-muted-foreground/60 uppercase tracking-wider font-semibold">{s.label}</p>
-              <p className="mt-1 text-[22px] font-bold" style={{ color: s.value > 0 ? s.color : "var(--text-faint)" }}>
-                {s.value}
-              </p>
-            </div>
-          ))}
+      {/* Stats */}
+      {!loading && connections.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatTile label="Connected" value={stats.connected} accent={stats.connected > 0 ? "#007F4E" : undefined} icon={CheckCircle2} />
+          <StatTile label="Failed" value={stats.failed} accent={stats.failed > 0 ? "#DC2626" : undefined} icon={XCircle} />
+          <StatTile label="Needs action" value={stats.needsAction} accent={stats.needsAction > 0 ? "#CA8A04" : undefined} icon={AlertTriangle} />
         </div>
       )}
 
-      {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <SearchInput
-          containerClassName="w-[280px] max-w-full"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search connections…"
-        />
-        <div className="flex flex-wrap gap-1.5">
-          {TYPE_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setTypeFilter(f.value as ConnectionType | "all")}
-              className={cn(
-                "inline-flex h-9 items-center rounded-xl border px-3 text-[12.5px] font-medium transition-all",
-                typeFilter === f.value
-                  ? "border-[#9CCFBB] bg-[#E6F4EF] text-[#006B45] font-semibold"
-                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput containerClassName="w-[260px] max-w-full" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search connections…" />
+        <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={(v) => setTypeFilter(v as ConnectionType | "all")} />
       </div>
 
-      {/* Table header */}
-      {!loading && connections.length > 0 && (
-        <div
-          className="mb-2 grid items-center gap-4 px-5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40"
-          style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr auto" }}
-        >
-          <span>Name</span>
-          <span>Type</span>
-          <span>Status</span>
-          <span>Used by</span>
-          <span>Last tested</span>
-          <span>Network</span>
-          <span />
-        </div>
-      )}
-
-      {/* List */}
+      {/* Grid */}
       {loading ? (
-        <div className="flex h-40 items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[140px] animate-pulse rounded-[12px] border border-[#E0E3E6] bg-[#FAFBFB]" />)}
         </div>
       ) : connections.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/40 py-20 text-center">
-          <Cable className="mb-3 h-10 w-10 text-muted-foreground/15" />
-          <p className="text-[14px] font-semibold text-foreground/60">No connections yet</p>
-          <p className="mt-1 mb-4 text-[12px] text-muted-foreground/50">
-            Connect an LLM provider, database, or API to start running agents.
-          </p>
-          <Link
-            href={"/connections/new" as never}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13px] font-semibold text-white hover:bg-[#1E293B]"
-          >
-            <Plus className="h-3 w-3" />
-            New Connection
-          </Link>
-        </div>
+        <EmptyHint
+          icon={Plug}
+          title="No connections yet"
+          desc="Connect an LLM provider, database, or API to start running agents."
+          action={<Link href={"/connections/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> New connection</Link>}
+        />
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {connections.map((conn) => (
-            <ConnectionRow
-              key={conn.id}
-              conn={conn}
-              onTest={() => void handleTest(conn.id)}
-              onDelete={() => void handleDelete(conn.id, conn.name)}
-              testing={testingIds.has(conn.id)}
-            />
+            <ConnectionCard key={conn.id} conn={conn} onTest={() => void handleTest(conn.id)} onDelete={() => void handleDelete(conn.id, conn.name)} testing={testingIds.has(conn.id)} />
           ))}
         </div>
       )}
 
       {/* Private runner callout */}
-      <div className="mt-8 rounded-2xl border border-border/40 bg-card/40 p-5">
+      <div className="rounded-[12px] border border-[#E0E3E6] bg-[#FAFBFB] p-5">
         <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/40 bg-muted/20">
-            <AlertTriangle className="h-5 w-5 text-amber-600" />
-          </div>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB]"><AlertTriangle className="h-5 w-5 text-[#CA8A04]" /></div>
           <div>
-            <p className="text-[13px] font-semibold text-foreground">Private systems require network access</p>
-            <p className="mt-1 text-[12px] text-muted-foreground/70 max-w-2xl">
-              For Vectorbea Cloud to connect to databases, internal APIs, or self-hosted services,
-              your firewall or VPC security group must allow inbound connections from Vectorbea&apos;s outbound IPs.
-              Alternatively, deploy a{" "}
-              <Link href={"/workers" as never} className="text-primary hover:underline">
-                private runner
-              </Link>{" "}
-              inside your network.
+            <p className="text-[13px] font-semibold text-[#0B0D0F]">Private systems require network access</p>
+            <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-[#6B7280]">
+              For Vectorbea Cloud to reach databases, internal APIs, or self-hosted services, your firewall or VPC must allow inbound connections from Vectorbea&apos;s outbound IPs — or deploy a{" "}
+              <Link href={"/workers" as never} className="font-medium text-[#007F4E] hover:underline">private runner</Link> inside your network.
             </p>
           </div>
         </div>

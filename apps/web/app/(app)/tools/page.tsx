@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Trash2, ArrowRight, Wrench, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -11,25 +11,14 @@ import type { Tool } from "@/types/platform";
 import { getTools, deleteTool } from "@/lib/repository";
 import { AppSelect } from "@/components/ui/app-select";
 import { SearchInput } from "@/components/ui/search-input";
+import { Chip, EmptyHint } from "@/components/ui/page-kit";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Maps uiToolType (stored in config by createTool) → human label.
-// Falls back to capitalising the raw API type when uiToolType is absent.
 const TOOL_TYPE_LABELS: Record<string, string> = {
-  http:             "HTTP",
-  database_read:    "Database (Read)",
-  database_write:   "Database (Write)",
-  database:         "Database",
-  email:            "Email",
-  crm:              "CRM",
-  mcp_tool:         "MCP",
-  custom_function:  "Custom Function",
-  imported_tool:    "Imported Tool",
-  code:             "Code",
-  custom:           "Custom",
-  builtin:          "Built-in",
-  llm_generate:     "LLM Generate",
+  http: "HTTP", database_read: "Database (Read)", database_write: "Database (Write)", database: "Database",
+  email: "Email", crm: "CRM", mcp_tool: "MCP", custom_function: "Custom Function",
+  imported_tool: "Imported Tool", code: "Code", custom: "Custom", builtin: "Built-in", llm_generate: "LLM Generate",
 };
 
 function displayToolType(tool: Tool): string {
@@ -38,22 +27,21 @@ function displayToolType(tool: Tool): string {
   return TOOL_TYPE_LABELS[key] ?? key.replace(/_/g, " ");
 }
 
-const RISK_COLORS: Record<Tool["riskLevel"], string> = {
-  low:      "bg-emerald-50 text-emerald-700 border-emerald-200",
-  medium:   "bg-amber-50   text-amber-700   border-amber-200",
-  high:     "bg-orange-50  text-orange-700  border-orange-200",
-  critical: "bg-red-50     text-red-700     border-red-200",
+const RISK_TONE: Record<Tool["riskLevel"], "green" | "amber" | "red"> = {
+  low: "green", medium: "amber", high: "amber", critical: "red",
 };
+const RISK_LABELS: Record<Tool["riskLevel"], string> = { low: "Low risk", medium: "Medium", high: "High", critical: "Critical" };
 
-const RISK_LABELS: Record<Tool["riskLevel"], string> = {
-  low:      "Low",
-  medium:   "Medium",
-  high:     "High",
-  critical: "Critical",
-};
+function toolIcon(type: string) {
+  if (type.includes("http") || type.includes("graphql")) return { Icon: HttpIcon, tone: "http" as const };
+  if (type.includes("database") || type.includes("db")) return { Icon: DatabaseIcon, tone: "database" as const };
+  if (type.includes("email")) return { Icon: EmailIcon, tone: "email" as const };
+  if (type.includes("code") || type.includes("function")) return { Icon: CodeIcon, tone: "tool" as const };
+  return { Icon: ToolIcon, tone: "tool" as const };
+}
 
 function timeAgo(ts: string | null) {
-  if (!ts) return "—";
+  if (!ts) return "never";
   const diff = Date.now() - new Date(ts).getTime();
   if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
@@ -89,13 +77,9 @@ export default function ToolsPage() {
 
   async function load() {
     setLoading(true);
-    try {
-      setTools(await getTools());
-    } catch {
-      toast.error("Failed to load tools.");
-    } finally {
-      setLoading(false);
-    }
+    try { setTools(await getTools()); }
+    catch { toast.error("Failed to load tools."); }
+    finally { setLoading(false); }
   }
 
   useEffect(() => { void load(); }, []);
@@ -112,226 +96,117 @@ export default function ToolsPage() {
   });
 
   const allTypes = [...new Set(tools.map((t) => t.type))].sort();
+  const activeCount = tools.filter((t) => t.status === "active").length;
+  const totalCalls = tools.reduce((s, t) => s + (t.totalCalls ?? 0), 0);
 
   return (
-    <div className="page-shell">
+    <div className="page-shell space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="page-title" style={{ color: "var(--text-primary)" }}>
-            Tool Registry
-          </h1>
-          <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>
-            {loading ? "Loading…" : `${tools.length} tool${tools.length !== 1 ? "s" : ""} registered`}
+          <span className="vb-mono-label">Build</span>
+          <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Tools</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[12.5px] text-[#6B7280]">
+            {loading ? "loading…" : (
+              <>
+                <span className="font-semibold text-[#0B0D0F]">{tools.length}</span> registered
+                <span className="text-[#D7DBE0]">·</span>
+                <span className="font-semibold text-[#007F4E]">{activeCount}</span> active
+                <span className="text-[#D7DBE0]">·</span>
+                <span className="font-semibold text-[#0B0D0F]">{totalCalls.toLocaleString()}</span> calls
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 transition-colors hover:bg-muted disabled:opacity-40"
-            style={{ background: "var(--surface-1)" }}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 text-muted-foreground", loading && "animate-spin")} />
+          <button type="button" onClick={() => void load()} disabled={loading} title="Refresh"
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white transition-colors hover:bg-[#F3F4F5] disabled:opacity-40">
+            <RefreshCw className={cn("h-3.5 w-3.5 text-[#6B7280]", loading && "animate-spin")} />
           </button>
-          <Link
-            href={"/tools/new" as never}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white shadow-sm transition-all hover:bg-[#1E293B]"
-          >
-            <Plus className="h-4 w-4" />
-            New Tool
+          <Link href={"/tools/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+            <Plus className="h-4 w-4" /> New tool
           </Link>
         </div>
       </div>
 
-      {/* ── Filters — horizontal row, New Tool stays in header above ── */}
-      <div className="flex flex-wrap items-center gap-2 mt-4 mb-4">
-        <SearchInput
-          containerClassName="w-[280px] max-w-full"
-          placeholder="Search tools…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <AppSelect
-          className="w-[160px]"
-          value={riskFilter}
-          onValueChange={(v) => setRiskFilter(v as Tool["riskLevel"] | "")}
-          options={[
-            { label: "All risk levels", value: "" },
-            { label: "Low",      value: "low" },
-            { label: "Medium",   value: "medium" },
-            { label: "High",     value: "high" },
-            { label: "Critical", value: "critical" },
-          ]}
-        />
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput containerClassName="w-[260px] max-w-full" placeholder="Search tools…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <AppSelect className="w-[150px]" value={riskFilter} onValueChange={(v) => setRiskFilter(v as Tool["riskLevel"] | "")}
+          options={[{ label: "All risk", value: "" }, { label: "Low", value: "low" }, { label: "Medium", value: "medium" }, { label: "High", value: "high" }, { label: "Critical", value: "critical" }]} />
         {allTypes.length > 0 && (
-          <AppSelect
-            className="w-[160px]"
-            value={typeFilter}
-            onValueChange={(v) => setTypeFilter(v)}
-            options={[
-              { label: "All types", value: "" },
-              ...allTypes.map((t) => ({ label: t.replace(/_/g, " "), value: t })),
-            ]}
-          />
+          <AppSelect className="w-[150px]" value={typeFilter} onValueChange={(v) => setTypeFilter(v)}
+            options={[{ label: "All types", value: "" }, ...allTypes.map((t) => ({ label: t.replace(/_/g, " "), value: t }))]} />
         )}
-        <AppSelect
-          className="w-[150px]"
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as Tool["status"] | "")}
-          options={[
-            { label: "All statuses", value: "" },
-            { label: "Active",   value: "active" },
-            { label: "Inactive", value: "inactive" },
-          ]}
-        />
+        <AppSelect className="w-[140px]" value={statusFilter} onValueChange={(v) => setStatusFilter(v as Tool["status"] | "")}
+          options={[{ label: "All statuses", value: "" }, { label: "Active", value: "active" }, { label: "Inactive", value: "inactive" }]} />
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-border/60" style={{ background: "var(--surface-1)" }}>
-        {loading ? (
-          <div className="divide-y divide-border/60">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-5 py-4">
-                <div className="h-4 w-56 animate-pulse rounded bg-muted" />
-                <div className="h-4 w-20 animate-pulse rounded bg-muted ml-auto" />
+      {/* Grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[132px] animate-pulse rounded-[12px] border border-[#E0E3E6] bg-[#FAFBFB]" />)}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyHint
+          icon={Wrench}
+          title={tools.length === 0 ? "No tools registered" : "No tools match your filters"}
+          desc={tools.length === 0 ? "Tools let agents call APIs, databases, and services. Register one to use it in a workflow." : undefined}
+          action={tools.length === 0 ? (
+            <Link href={"/tools/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> Register first tool</Link>
+          ) : undefined}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((tool) => {
+            const ti = toolIcon(tool.type);
+            return (
+              <div key={tool.id} className="group flex flex-col overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white transition-all hover:border-[#C9CED4] hover:shadow-[0_6px_20px_rgba(11,13,15,0.05)]">
+                {/* Header */}
+                <div className="flex items-start gap-3 p-4">
+                  <IconBadge icon={ti.Icon} tone={ti.tone} size="sm" className="shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/tools/${tool.id}` as never} className="block truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#0B0D0F] hover:text-[#007F4E]">{tool.name}</Link>
+                    <p className="mt-0.5 truncate text-[12px] text-[#6B7280]">{tool.description || displayToolType(tool)}</p>
+                  </div>
+                  {tool.status === "active" ? <Chip tone="green">Active</Chip> : <Chip tone="gray" dot={false}>Inactive</Chip>}
+                </div>
+
+                {/* Meta */}
+                <div className="flex flex-wrap items-center gap-2 border-t border-[#ECEEEF] px-4 py-2.5">
+                  <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10.5px] font-medium capitalize text-cyan-700">{displayToolType(tool)}</span>
+                  <Chip tone={RISK_TONE[tool.riskLevel]} dot={tool.riskLevel !== "low"}>{RISK_LABELS[tool.riskLevel]}</Chip>
+                  {tool.authConnectionRef && <span className="rounded-[6px] border border-[#E0E3E6] bg-[#F3F4F5] px-1.5 py-0.5 font-mono text-[10.5px] text-[#6B7280]">{tool.authConnectionRef}</span>}
+                </div>
+
+                {/* Footer */}
+                <div className="mt-auto flex items-center justify-between border-t border-[#ECEEEF] bg-[#FAFBFB] px-4 py-2.5">
+                  <span className="flex items-center gap-2 font-mono text-[11.5px] text-[#6B7280]">
+                    {(tool.totalCalls ?? 0).toLocaleString()} calls
+                    <span className="text-[#D7DBE0]">·</span>
+                    {tool.timeoutMs >= 1000 ? `${tool.timeoutMs / 1000}s` : `${tool.timeoutMs}ms`}
+                    <span className="text-[#D7DBE0]">·</span>
+                    <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{timeAgo(tool.lastUsedAt)}</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {confirmId === tool.id ? (
+                      <>
+                        <button type="button" onClick={() => handleDelete(tool.id)} disabled={deletingId === tool.id} className="flex h-7 items-center gap-1 rounded-[6px] bg-[#FEF2F2] px-2 text-[11px] font-semibold text-[#DC2626] hover:bg-[#FEE2E2] disabled:opacity-50">{deletingId === tool.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Confirm"}</button>
+                        <button type="button" onClick={() => setConfirmId(null)} className="flex h-7 items-center rounded-[6px] px-2 text-[11px] text-[#6B7280] hover:bg-[#F3F4F5]">Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <Link href={`/tools/${tool.id}` as never} className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[12px] font-medium text-[#4B5563] opacity-0 transition-opacity hover:bg-[#ECEEEF] hover:text-[#0B0D0F] group-hover:opacity-100">View <ArrowRight className="h-3 w-3" /></Link>
+                        <button type="button" onClick={() => setConfirmId(tool.id)} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#9CA3AF] opacity-0 transition-all hover:bg-[#FEF2F2] hover:text-[#DC2626] group-hover:opacity-100" title="Delete tool"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-20 text-center">
-            <IconBadge icon={ToolIcon} tone="tool" size="lg" />
-            <p className="text-sm font-medium text-muted-foreground">
-              {tools.length === 0 ? "No tools registered" : "No tools match your filters"}
-            </p>
-            {tools.length === 0 && (
-              <Link
-                href={"/tools/new" as never}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13px] font-semibold text-white hover:bg-[#1E293B]"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Register first tool
-              </Link>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border/60 bg-muted/10">
-                  {["Tool", "Type", "Risk Level", "Auth / Connection", "Timeout", "Status", "Calls", "Last used", ""].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {filtered.map((tool) => (
-                  <tr key={tool.id} className="group transition-colors hover:bg-muted/20">
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <IconBadge
-                          icon={
-                            tool.type.includes("http") || tool.type.includes("graphql") ? HttpIcon :
-                            tool.type.includes("database") || tool.type.includes("db") ? DatabaseIcon :
-                            tool.type.includes("email") ? EmailIcon :
-                            tool.type.includes("code") || tool.type.includes("function") ? CodeIcon :
-                            ToolIcon
-                          }
-                          tone={
-                            tool.type.includes("http") ? "http" :
-                            tool.type.includes("database") || tool.type.includes("db") ? "database" :
-                            tool.type.includes("email") ? "email" :
-                            "tool"
-                          }
-                          size="sm"
-                          className="shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <Link
-                            href={`/tools/${tool.id}` as never}
-                            className="block text-[13px] font-medium hover:underline"
-                            style={{ color: "var(--text-primary)" }}
-                          >
-                            {tool.name}
-                          </Link>
-                          {tool.description && (
-                            <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted-foreground">{tool.description}</p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 capitalize">
-                        {displayToolType(tool)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium", RISK_COLORS[tool.riskLevel])}>
-                        {RISK_LABELS[tool.riskLevel]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[11px] text-muted-foreground">
-                      {tool.authConnectionRef ? (
-                        <code className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px]">{tool.authConnectionRef}</code>
-                      ) : (
-                        <span className="opacity-40">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[12px] text-muted-foreground">
-                      {tool.timeoutMs >= 1000 ? `${tool.timeoutMs / 1000}s` : `${tool.timeoutMs}ms`}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span className={cn(
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                        tool.status === "active"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : "bg-[#F9FAFB] text-[#6B7280] border-[#E5E7EB]",
-                      )}>
-                        {tool.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[12px] text-muted-foreground">
-                      {(tool.totalCalls ?? 0).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3.5 text-[12px] text-muted-foreground">
-                      {timeAgo(tool.lastUsedAt)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Link href={`/tools/${tool.id}` as never}
-                          className="flex h-[26px] items-center gap-1 rounded px-2 text-[12px] text-muted-foreground hover:bg-slate-100 hover:text-foreground transition-colors">
-                          View →
-                        </Link>
-                        {confirmId === tool.id ? (
-                          <div className="flex items-center gap-1">
-                            <button type="button" onClick={() => handleDelete(tool.id)} disabled={deletingId === tool.id}
-                              className="flex h-[26px] items-center gap-1 rounded px-2 text-[11px] font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50">
-                              {deletingId === tool.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Confirm"}
-                            </button>
-                            <button type="button" onClick={() => setConfirmId(null)}
-                              className="flex h-[26px] items-center rounded px-2 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors">
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <button type="button" onClick={() => setConfirmId(tool.id)}
-                            className="flex h-[26px] w-[26px] items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                            title="Delete tool">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

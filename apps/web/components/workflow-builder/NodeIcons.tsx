@@ -24,16 +24,11 @@ const base: IconProps = {
   strokeLinejoin: "round" as const,
 };
 
-// ─── Trigger — Zap bolt with motion lines (reference 5) ──────────────────────
+// ─── Trigger — Clean lightning bolt ──────────────────────────────────────────
 export function TriggerIcon({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>
-      {/* Motion speed lines */}
-      <line x1="3" y1="7"  x2="9"  y2="7"  strokeWidth="1.5" />
-      <line x1="2" y1="11" x2="8"  y2="11" strokeWidth="1.5" />
-      <line x1="3" y1="15" x2="9"  y2="15" strokeWidth="1.5" />
-      {/* Lightning bolt */}
-      <path d="M15 3L10 13h5L9 21" strokeWidth="2" />
+      <path d="M13.5 2 5 13h6l-1.5 9L19 11h-6l.5-9Z" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -61,26 +56,14 @@ export function AgentIcon({ className, style }: IconProps) {
   );
 }
 
-// ─── LLM — OpenAI-inspired 6-node radial neural hub (reference 1 & 10) ───────
+// ─── LLM Call — AI generation sparkle (big + small) ──────────────────────────
 export function LlmIcon({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>
-      {/* Center hub */}
-      <circle cx="12" cy="12" r="2.25" />
-      {/* 6 outer nodes at 60° intervals */}
-      <circle cx="12"   cy="3.5"  r="1.5" />
-      <circle cx="19.5" cy="7.75" r="1.5" />
-      <circle cx="19.5" cy="16.25"r="1.5" />
-      <circle cx="12"   cy="20.5" r="1.5" />
-      <circle cx="4.5"  cy="16.25"r="1.5" />
-      <circle cx="4.5"  cy="7.75" r="1.5" />
-      {/* Spokes from center to nodes */}
-      <line x1="12"   y1="9.75" x2="12"   y2="5"    />
-      <line x1="14"   y1="10.2" x2="18.1" y2="9"    />
-      <line x1="14"   y1="13.8" x2="18.1" y2="15"   />
-      <line x1="12"   y1="14.25"x2="12"   y2="19"   />
-      <line x1="10"   y1="13.8" x2="5.9"  y2="15"   />
-      <line x1="10"   y1="10.2" x2="5.9"  y2="9"    />
+      {/* Large 4-point sparkle */}
+      <path d="M13.5 2.5c.7 4 2.5 5.8 6.5 6.5-4 .7-5.8 2.5-6.5 6.5-.7-4-2.5-5.8-6.5-6.5 4-.7 5.8-2.5 6.5-6.5Z" />
+      {/* Small sparkle */}
+      <path d="M6.5 15c.3 1.7 1.1 2.5 2.8 2.8-1.7.3-2.5 1.1-2.8 2.8-.3-1.7-1.1-2.5-2.8-2.8 1.7-.3 2.5-1.1 2.8-2.8Z" />
     </svg>
   );
 }
@@ -243,64 +226,59 @@ export function BranchIcon({ className, style }: IconProps) {
   );
 }
 
-// ─── Parallel — Fan-out arrows ────────────────────────────────────────────────
+// ─── Parallel — Clean 1→3 fan-out ─────────────────────────────────────────────
 export function ParallelIcon({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>
-      <line x1="3" y1="12" x2="10" y2="12" strokeWidth="2" />
-      <line x1="10" y1="12" x2="10" y2="5"  strokeWidth="2" />
-      <line x1="10" y1="12" x2="10" y2="19" strokeWidth="2" />
-      <line x1="10" y1="5"  x2="21" y2="5"  strokeWidth="2" />
-      <line x1="10" y1="12" x2="21" y2="12" strokeWidth="2" />
-      <line x1="10" y1="19" x2="21" y2="19" strokeWidth="2" />
-      <path d="M18 2.5l3 2.5-3 2.5" />
-      <path d="M18 9.5l3 2.5-3 2.5" />
-      <path d="M18 16.5l3 2.5-3 2.5" />
+      <circle cx="5" cy="12" r="2" />
+      <path d="M7 12h4" strokeWidth="2" />
+      <path d="M11 12c4 0 2-5 6-5" strokeWidth="2" />
+      <path d="M11 12h6" strokeWidth="2" />
+      <path d="M11 12c4 0 2 5 6 5" strokeWidth="2" />
+      <circle cx="19" cy="7"  r="2" />
+      <circle cx="19" cy="12" r="2" />
+      <circle cx="19" cy="17" r="2" />
     </svg>
   );
 }
 
-// ─── Join — Merge arrows ──────────────────────────────────────────────────────
+// ─── Join — Clean 3→1 merge ───────────────────────────────────────────────────
 export function JoinIcon({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>
-      <line x1="3"  y1="5"  x2="14" y2="5"  strokeWidth="2" />
-      <line x1="3"  y1="12" x2="14" y2="12" strokeWidth="2" />
-      <line x1="3"  y1="19" x2="14" y2="19" strokeWidth="2" />
-      <line x1="14" y1="5"  x2="14" y2="12" strokeWidth="2" />
-      <line x1="14" y1="19" x2="14" y2="12" strokeWidth="2" />
-      <line x1="14" y1="12" x2="21" y2="12" strokeWidth="2" />
-      <path d="M18 9.5l3 2.5-3 2.5" />
+      <circle cx="5" cy="7"  r="2" />
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="5" cy="17" r="2" />
+      <path d="M7 7c4 0 2 5 6 5" strokeWidth="2" />
+      <path d="M7 12h6" strokeWidth="2" />
+      <path d="M7 17c4 0 2-5 6-5" strokeWidth="2" />
+      <path d="M13 12h4" strokeWidth="2" />
+      <circle cx="19" cy="12" r="2" />
     </svg>
   );
 }
 
-// ─── Timer — Stopwatch ────────────────────────────────────────────────────────
+// ─── Timer — Clean stopwatch ──────────────────────────────────────────────────
 export function TimerIcon({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>
-      {/* Stopwatch body */}
-      <circle cx="12" cy="13" r="8" />
-      {/* Crown / top button */}
-      <rect x="10" y="3" width="4" height="2.5" rx="1" />
-      {/* Side button */}
-      <line x1="19" y1="6" x2="21" y2="4.5" />
-      {/* Clock hands */}
-      <line x1="12" y1="13" x2="12" y2="8.5" strokeWidth="2" />
-      <line x1="12" y1="13" x2="15.5" y2="13" strokeWidth="2" />
-      <circle cx="12" cy="13" r="1" fill="currentColor" stroke="none" />
+      <line x1="9.5" y1="2.6" x2="14.5" y2="2.6" strokeWidth="2" />
+      <line x1="12" y1="2.6" x2="12" y2="5.2" strokeWidth="1.8" />
+      <line x1="18.5" y1="5.5" x2="20" y2="4" strokeWidth="1.6" />
+      <circle cx="12" cy="13.5" r="7.5" />
+      <line x1="12" y1="13.5" x2="12" y2="9.3" strokeWidth="2" />
     </svg>
   );
 }
 
-// ─── Artifact / Document ──────────────────────────────────────────────────────
+// ─── Artifact — 3D box / package ──────────────────────────────────────────────
 export function ArtifactIcon({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>
-      <path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9L14 3Z" />
-      <path d="M14 3v6h6" />
-      <line x1="8"  y1="13" x2="16" y2="13" />
-      <line x1="8"  y1="17" x2="13" y2="17" />
+      <path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7L12 2.5Z" strokeLinejoin="round" />
+      <path d="M3.7 7 12 11.6 20.3 7" />
+      <line x1="12" y1="11.6" x2="12" y2="21.3" />
+      <path d="M7.75 4.75 16 9.3" opacity="0.55" />
     </svg>
   );
 }

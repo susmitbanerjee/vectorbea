@@ -13,6 +13,7 @@ import { memo, useEffect } from "react";
 import { Handle, Position } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 import { getNodeMeta, getToolNodeMeta, getLLMProviderForNode, PREVIEW_STATUS_COLORS } from "@/components/workflow-builder/NodeIcon";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import type { WFNodeData, WFNodeType } from "@/types/workflow-graph";
 
 interface BaseNodeProps {
@@ -237,7 +238,9 @@ export const BaseNode = memo(function BaseNode({
             title={llmProvider.label}
           >
             {status === "running" && <RunningSpinner size={compact ? 28 : 34} />}
-            <span className="relative z-[1] flex items-center justify-center"><llmProvider.Icon size={compact ? 16 : 19} /></span>
+            <span className="relative z-[1] flex items-center justify-center">
+              <ProviderIcon providerType={llmProvider.label} className={compact ? "h-4 w-4" : "h-[19px] w-[19px]"} />
+            </span>
           </span>
         ) : (
           /* Solid colored type tile + white glyph — distinct & premium */
