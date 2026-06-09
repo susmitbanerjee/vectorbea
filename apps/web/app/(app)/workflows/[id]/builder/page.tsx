@@ -1377,20 +1377,12 @@ function WorkflowBuilderInner() {
             multiSelectionKeyCode="Shift"
             style={{ background: "#FAFAFA" }}
           >
-            {/* Premium dual-layer engineering grid */}
+            {/* Marketing-style fine dotted canvas (subtle, no large squares) */}
             <Background
-              id="vb-grid-lines"
-              variant={BackgroundVariant.Lines}
-              gap={120}
-              lineWidth={1}
-              color="#EDEFF1"
-            />
-            <Background
-              id="vb-grid-dots"
               variant={BackgroundVariant.Dots}
-              gap={24}
-              size={1.4}
-              color="#CFD4D9"
+              gap={22}
+              size={1.1}
+              color="#D2D6DB"
             />
             {/* Add button — top-right, opens the command palette (reference style) */}
             <Panel position="top-right">

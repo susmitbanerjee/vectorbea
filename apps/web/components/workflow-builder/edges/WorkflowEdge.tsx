@@ -102,67 +102,6 @@ function injectAnimCSS() {
 type PathResult = [path: string, labelX: number, labelY: number];
 
 /**
- * Horizontal elbow — source exits Right, target enters Left.
- * Routes: right → turn → down/up → turn → left
- */
-function horizontalElbow(sx: number, sy: number, tx: number, ty: number): PathResult {
-  const midX = (sx + tx) / 2;
-  const dy   = ty - sy;
-  const dirY = dy >= 0 ? 1 : -1;
-  const r    = Math.min(CORNER_RADIUS, Math.abs(midX - sx) / 2, Math.abs(dy) / 2);
-
-  const path = r < 3
-    ? `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
-    : [
-        `M ${sx} ${sy}`,
-        `L ${midX - r} ${sy}`,
-        `Q ${midX} ${sy} ${midX} ${sy + dirY * r}`,
-        `L ${midX} ${ty - dirY * r}`,
-        `Q ${midX} ${ty} ${midX + r} ${ty}`,
-        `L ${tx} ${ty}`,
-      ].join(" ");
-
-  return [path, midX, (sy + ty) / 2];
-}
-
-/**
- * Vertical elbow — source exits Bottom, target enters Top.
- * Routes: down → turn → left/right → turn → up.
- *
- * When the horizontal offset is small (< 120px), uses a cubic bezier
- * instead of a hard elbow so the line looks nearly-straight rather than
- * making a jarring 90° detour.
- */
-function verticalElbow(sx: number, sy: number, tx: number, ty: number): PathResult {
-  const dx    = tx - sx;
-  const absDx = Math.abs(dx);
-
-  // For small offsets use a smooth S-curve (barely visible deflection)
-  if (absDx < 120) {
-    const cy = (sy + ty) / 2;
-    const path = `M ${sx} ${sy} C ${sx} ${cy} ${tx} ${cy} ${tx} ${ty}`;
-    return [path, (sx + tx) / 2, cy];
-  }
-
-  const midY = (sy + ty) / 2;
-  const dirX = dx >= 0 ? 1 : -1;
-  const r    = Math.min(CORNER_RADIUS, absDx / 2, Math.abs(midY - sy));
-
-  const path = r < 3
-    ? `M ${sx} ${sy} L ${sx} ${midY} L ${tx} ${midY} L ${tx} ${ty}`
-    : [
-        `M ${sx} ${sy}`,
-        `L ${sx} ${midY - r}`,
-        `Q ${sx} ${midY} ${sx + dirX * r} ${midY}`,
-        `L ${tx - dirX * r} ${midY}`,
-        `Q ${tx} ${midY} ${tx} ${midY + r}`,
-        `L ${tx} ${ty}`,
-      ].join(" ");
-
-  return [path, (sx + tx) / 2, midY];
-}
-
-/**
  * Proper draw.io-style routing.
  *
  * Rules:
@@ -194,6 +133,11 @@ function roundedOrthogonal(
   ].join(" ");
 }
 
+/**
+ * Clean premium routing: a true straight line when handles are aligned,
+ * otherwise a single gentle cubic bezier (no boxy elbows). Works regardless
+ * of node size because it always anchors on the real handle coordinates.
+ */
 function getWorkflowPath(
   sourceX: number, sourceY: number,
   targetX: number, targetY: number,
@@ -206,46 +150,26 @@ function getWorkflowPath(
   const dx = Math.abs(sourceX - targetX);
   const dy = Math.abs(sourceY - targetY);
 
+  // Parallel / branch fan-out → keep a smooth wide bezier
+  if (edgeType === "parallel" || edgeType === "parallel_branch") {
+    return [`M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`, cx, cy];
+  }
+
   // ── Horizontal flow (side handles) ────────────────────────────────────────
   if (sourcePosition === Position.Right || targetPosition === Position.Left) {
     if (dy <= ALIGNMENT_TOLERANCE) {
-      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, sourceY];
+      return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, sourceY]; // straight
     }
-    return horizontalElbow(sourceX, sourceY, targetX, targetY);
+    const c = Math.max(40, Math.min(dx * 0.5, 150));
+    return [`M ${sourceX} ${sourceY} C ${sourceX + c} ${sourceY} ${targetX - c} ${targetY} ${targetX} ${targetY}`, cx, cy];
   }
 
-  // ── Parallel / branch fan-out → smooth bezier (keep the arcs) ────────────
-  const isParallel = edgeType === "parallel" || edgeType === "parallel_branch";
-  if (isParallel) {
-    const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
-    return [path, cx, cy];
-  }
-
-  // ── Sequential vertical flow ──────────────────────────────────────────────
+  // ── Vertical flow (bottom → top) ──────────────────────────────────────────
   if (dx <= ALIGNMENT_TOLERANCE) {
-    // Very close — straight line
-    return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
+    return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy]; // straight
   }
-
-  if (dx <= 300) {
-    // Medium offset (same-size nodes not perfectly centred).
-    // Use a gentle S-curve with control points close to the endpoints so the
-    // connector looks nearly straight: the deviation at the midpoint is only
-    // dx/2 pixels wide over the full dy height — barely visible.
-    // Crucially it connects FROM the real source handle TO the real target handle.
-    const tension = Math.min(dy * 0.35, 80); // control point offset — small = straighter
-    const path = [
-      `M ${sourceX} ${sourceY}`,
-      `C ${sourceX} ${sourceY + tension}`,   // control 1 — pulls down from source
-      `  ${targetX} ${targetY - tension}`,   // control 2 — pulls up to target
-      `  ${targetX} ${targetY}`,
-    ].join(" ");
-    return [path, cx, cy];
-  }
-
-  // Wide offset → full arc (fan-out / fan-in style)
-  const path = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
-  return [path, cx, cy];
+  const c = Math.max(36, Math.min(dy * 0.5, 150));
+  return [`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + c} ${targetX} ${targetY - c} ${targetX} ${targetY}`, cx, cy];
 }
 
 // ─── Edge component ───────────────────────────────────────────────────────────

@@ -228,51 +228,46 @@ export const BaseNode = memo(function BaseNode({
       )}
 
       {/* Header — icon, title, subtitle (reference layout) */}
-      <div className={cn("relative z-10 flex items-center gap-2.5 px-3", compact ? "py-2" : "py-2.5")}>
-        {/* Icon badge — always shows node type icon */}
-        <span
-          className="relative flex shrink-0 items-center justify-center rounded-[9px] overflow-visible"
-          style={{
-            width: compact ? 28 : 34,
-            height: compact ? 28 : 34,
-            background: meta.bgColor,
-            border: `1px solid ${meta.borderColor}`,
-            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.75), 0 1px 2px ${meta.color}1f`,
-          }}
-        >
-          {/* Sheen overlay for depth */}
-          <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[9px]" style={{ background: "linear-gradient(155deg, rgba(255,255,255,0.55), transparent 55%)" }} />
-          {status === "running" && (
-            <RunningSpinner size={compact ? 28 : 34} />
-          )}
-          <LucideIcon
-            style={{ color: meta.color, width: compact ? 14 : 17, height: compact ? 14 : 17, position: "relative", zIndex: 1 }}
-          />
-          {/* Provider logo badge — bottom-right corner */}
-          {llmProvider && !compact && (
-            <span
-              className="absolute -bottom-1.5 -right-1.5 flex items-center justify-center overflow-hidden"
-              style={{
-                width: 15, height: 15,
-                border: "1.5px solid white",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.22)",
-                borderRadius: 5,
-              }}
-              title={llmProvider.label}
-            >
-              <llmProvider.Icon size={15} />
-            </span>
-          )}
-        </span>
+      <div
+        className={cn("relative z-10 flex items-center gap-2.5 px-3", compact ? "py-2" : "py-2.5")}
+        style={{ background: `linear-gradient(180deg, ${meta.color}0d, ${meta.color}00)` }}
+      >
+        {llmProvider ? (
+          /* Provider-logo badge (premium brand mark, like the Agents page) */
+          <span
+            className="relative flex shrink-0 items-center justify-center rounded-[9px] border border-[#E0E3E6] bg-white overflow-visible"
+            style={{ width: compact ? 28 : 34, height: compact ? 28 : 34, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 3px rgba(11,13,15,0.08)" }}
+            title={llmProvider.label}
+          >
+            {status === "running" && <RunningSpinner size={compact ? 28 : 34} />}
+            <span className="relative z-[1] flex items-center justify-center"><llmProvider.Icon size={compact ? 16 : 19} /></span>
+          </span>
+        ) : (
+          /* Gradient type-icon badge */
+          <span
+            className="relative flex shrink-0 items-center justify-center rounded-[9px] overflow-visible"
+            style={{
+              width: compact ? 28 : 34,
+              height: compact ? 28 : 34,
+              background: `linear-gradient(150deg, ${meta.color}26, ${meta.color}0d)`,
+              border: `1px solid ${meta.color}33`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.65), 0 1px 2px ${meta.color}26`,
+            }}
+          >
+            <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[9px]" style={{ background: "linear-gradient(155deg, rgba(255,255,255,0.5), transparent 55%)" }} />
+            {status === "running" && <RunningSpinner size={compact ? 28 : 34} />}
+            <LucideIcon style={{ color: meta.color, width: compact ? 14 : 17, height: compact ? 14 : 17, position: "relative", zIndex: 1 }} />
+          </span>
+        )}
 
         <div className="min-w-0 flex-1">
-          {/* Node title */}
-          <p className="truncate text-[13px] font-semibold leading-tight text-slate-900">
+          {/* Node title — strong contrast */}
+          <p className="truncate text-[13px] font-semibold leading-tight text-[#0B0D0F]">
             {data.label}
           </p>
-          {/* Subtitle — node type / description */}
-          <p className="truncate text-[11px] leading-tight text-slate-500">
-            {(!compact && data.description) ? data.description : meta.label}
+          {/* Subtitle — readable muted */}
+          <p className="truncate text-[11px] leading-tight text-[#5B6573]">
+            {llmProvider && !data.description ? llmProvider.label : (!compact && data.description) ? data.description : meta.label}
           </p>
         </div>
       </div>
