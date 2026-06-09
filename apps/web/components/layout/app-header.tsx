@@ -28,10 +28,13 @@ const mobileNavigation: Array<{
 export function AppHeader({
   title,
   subtitle,
+  eyebrow,
   actions,
 }: {
   title: string;
   subtitle?: string;
+  /** Optional mono uppercase label shown above the title (e.g. "OVERVIEW"). */
+  eyebrow?: string;
   actions?: ReactNode;
 }) {
   const pathname = usePathname();
@@ -87,12 +90,15 @@ export function AppHeader({
       }}
     >
       {/* ── Main header row ────────────────────────────────────────────── */}
-      <div className="flex h-[52px] items-center gap-4 px-5">
+      <div className="flex min-h-[60px] items-center gap-4 px-6 py-2.5">
         {/* Title */}
         <div className="flex-1 min-w-0">
-          <h1 className="page-title leading-none">{title}</h1>
+          {eyebrow && (
+            <span className="vb-mono-label mb-0.5 block leading-none">{eyebrow}</span>
+          )}
+          <h1 className="text-[22px] font-bold leading-[1.15] tracking-[-0.022em] text-[#0B0D0F]">{title}</h1>
           {subtitle && (
-            <p className="page-subtitle hidden sm:block">{subtitle}</p>
+            <p className="mt-0.5 hidden text-[13px] text-[#6B7280] sm:block">{subtitle}</p>
           )}
         </div>
 
@@ -103,14 +109,14 @@ export function AppHeader({
         >
           <Search className={cn(
             "pointer-events-none absolute left-2.5 h-3.5 w-3.5 transition-colors",
-            searchFocused ? "text-[#2563EB]" : "text-[#9CA3AF]",
+            searchFocused ? "text-[#007F4E]" : "text-[#9CA3AF]",
           )} />
           <input
             className={cn(
-              "h-8 w-52 rounded-md border bg-white pl-8 pr-3 text-[13px] transition-all placeholder:text-[#9CA3AF] focus:outline-none focus:w-64",
+              "h-9 w-52 rounded-[8px] border bg-white pl-8 pr-3 text-[13px] transition-all placeholder:text-[#9CA3AF] focus:outline-none focus:w-64",
               searchFocused
-                ? "border-[#2563EB] ring-2 ring-blue-500/10"
-                : "border-[#E5E7EB]",
+                ? "border-[#9CCFBB] ring-2 ring-[#E6F4EF]"
+                : "border-[#E0E3E6]",
             )}
             placeholder="Search…"
             value={query}
@@ -156,8 +162,8 @@ export function AppHeader({
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12px] font-medium whitespace-nowrap transition-all",
                 active
-                  ? "border-blue-200 bg-blue-50 text-blue-700"
-                  : "border-[#E5E7EB] bg-white text-[#4B5563] hover:bg-[#F1F3F5]",
+                  ? "border-[#9CCFBB] bg-[#E6F4EF] text-[#006B45]"
+                  : "border-[#E0E3E6] bg-white text-[#4B5563] hover:bg-[#F3F4F5]",
               )}
             >
               <Icon className="h-3 w-3" />

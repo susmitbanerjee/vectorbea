@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CalendarClock, ExternalLink, Pause, Play, RefreshCw } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/lib/workspace-context";
+import { Chip, FilterTabs, EmptyHint, StatTile } from "@/components/ui/page-kit";
 
 const API_BASE = process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -23,25 +22,6 @@ interface Schedule {
   lastRun: string | null;
   status: "ACTIVE" | "PAUSED";
   jobId: string;
-}
-
-// ─── Filter chip ─────────────────────────────────────────────────────────────
-
-function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "h-7 rounded-full border px-3 text-[11px] font-medium transition-colors",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -84,13 +64,14 @@ export default function SchedulesPage() {
   const pausedCount = schedules.filter((s) => s.status === "PAUSED").length;
 
   return (
-    <div className="page-shell">
+    <div className="page-shell space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="page-title">Schedules</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {loading ? "Loading…" : `${schedules.length} schedule${schedules.length !== 1 ? "s" : ""} configured`}
+          <span className="vb-mono-label">Orchestration</span>
+          <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Schedules</h1>
+          <p className="mt-1 text-[13.5px] text-[#6B7280]">
+            {loading ? "Loading…" : `${schedules.length} trigger${schedules.length !== 1 ? "s" : ""} firing workflows on a cron`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -98,158 +79,110 @@ export default function SchedulesPage() {
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 transition-colors hover:bg-muted disabled:opacity-40"
-            style={{ background: "var(--surface-1)" }}
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white transition-colors hover:bg-[#F3F4F5] disabled:opacity-40"
+            title="Refresh"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5 text-muted-foreground", loading && "animate-spin")} />
+            <RefreshCw className={cn("h-3.5 w-3.5 text-[#6B7280]", loading && "animate-spin")} />
           </button>
           <Link
             href={"/agent-jobs/new" as never}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 text-[13.5px] font-semibold text-white shadow-sm transition-all hover:bg-[#1E293B]"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1c1f22]"
           >
             <CalendarClock className="h-4 w-4" />
-            New Schedule
+            New schedule
           </Link>
         </div>
       </div>
 
-      {/* Summary strip — only when there are schedules */}
+      {/* Stat tiles */}
       {schedules.length > 0 && (
-        <div className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 px-4 py-2.5 text-[12px] text-muted-foreground">
-          <span><span className="font-semibold text-foreground">{schedules.length}</span> schedules</span>
-          <span className="text-border">·</span>
-          <span><span className="font-semibold text-emerald-600">{activeCount}</span> active</span>
-          <span className="text-border">·</span>
-          <span><span className="font-semibold text-amber-600">{pausedCount}</span> paused</span>
+        <div className="grid grid-cols-3 gap-3">
+          <StatTile label="Schedules" value={schedules.length} icon={CalendarClock} />
+          <StatTile label="Active" value={activeCount} accent="#007F4E" />
+          <StatTile label="Paused" value={pausedCount} accent="#CA8A04" />
         </div>
       )}
 
-      {/* Filter chips — only when there are schedules */}
+      {/* Filter */}
       {schedules.length > 0 && (
-        <div className="flex items-center gap-1.5">
-          {(["ALL", "ACTIVE", "PAUSED"] as const).map((f) => (
-            <FilterChip
-              key={f}
-              label={f === "ALL" ? "All" : f === "ACTIVE" ? "Active" : "Paused"}
-              active={filter === f}
-              onClick={() => setFilter(f)}
-            />
-          ))}
-        </div>
+        <FilterTabs
+          options={[
+            { value: "ALL", label: "All", count: schedules.length },
+            { value: "ACTIVE", label: "Active", count: activeCount },
+            { value: "PAUSED", label: "Paused", count: pausedCount },
+          ]}
+          value={filter}
+          onChange={(v) => setFilter(v as "ALL" | "ACTIVE" | "PAUSED")}
+        />
       )}
 
       {/* Table */}
-      <Card className="overflow-hidden">
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="divide-y divide-border/60">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4 px-5 py-4">
-                  <div className="h-4 w-48 animate-pulse rounded bg-muted" />
-                  <div className="h-4 w-24 animate-pulse rounded bg-muted ml-auto" />
-                </div>
-              ))}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-20 text-center">
-              <CalendarClock className="h-10 w-10 text-muted-foreground/20" />
-              <p className="text-sm font-medium text-muted-foreground">
-                {schedules.length === 0 ? "No schedules configured" : "No schedules match this filter"}
-              </p>
-              {schedules.length === 0 && (
-                <p className="text-xs text-muted-foreground/60 max-w-xs">
-                  Schedules trigger agent jobs on a recurring cron or interval. Create a job first, then attach a schedule to it.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    {["Job Name", "Cron", "Schedule", "Timezone", "Next Run", "Last Run", "Status", ""].map((h) => (
-                      <th
-                        key={h}
-                        className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {filtered.map((s) => (
-                    <tr key={s.id} className="group transition-colors hover:bg-muted/20">
-                      <td className="px-5 py-3.5">
-                        <Link
-                          href={`/agent-jobs/${s.jobId}` as never}
-                          className="block text-[13px] font-medium hover:underline"
-                        >
-                          {s.jobName}
-                        </Link>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className="font-mono text-[11px] text-muted-foreground">{s.cron}</span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className="text-[12px] text-muted-foreground">{s.humanReadable}</span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className="text-[12px] text-muted-foreground">{s.timezone}</span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className={cn(
-                          "text-[12px]",
-                          s.status === "ACTIVE" ? "text-foreground" : "text-muted-foreground/50",
-                        )}>
-                          {s.nextRun ?? "—"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className="text-[12px] text-muted-foreground">{s.lastRun ?? "Never"}</span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        {s.status === "ACTIVE" ? (
-                          <Badge className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 text-[10px]">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                            Active
-                          </Badge>
-                        ) : (
-                          <Badge className="gap-1 border-amber-200 bg-amber-50 text-amber-700 text-[10px]">
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                            Paused
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            type="button"
-                            title={s.status === "ACTIVE" ? "Pause" : "Resume"}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                          >
-                            {s.status === "ACTIVE" ? (
-                              <Pause className="h-3 w-3" />
-                            ) : (
-                              <Play className="h-3 w-3" />
-                            )}
-                          </button>
-                          <Link
-                            href={`/agent-jobs/${s.jobId}` as never}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
+      {loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-[52px] animate-pulse rounded-[10px] border border-[#E0E3E6] bg-[#FAFBFB]" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyHint
+          icon={CalendarClock}
+          title={schedules.length === 0 ? "No schedules yet" : "No schedules match this filter"}
+          desc={schedules.length === 0
+            ? "Schedules fire workflows on a recurring cron or interval. Create a job, then attach a schedule to it."
+            : undefined}
+        />
+      ) : (
+        <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: "1px solid #ECEEEF", background: "#FAFBFB" }}>
+                  {["Job", "Cron", "Schedule", "Timezone", "Next run", "Last run", "Status", ""].map((h) => (
+                    <th key={h} className="px-5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9CA3AF]">
+                      {h}
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((s) => (
+                  <tr key={s.id} className="group transition-colors hover:bg-[#FAFBFB]" style={{ borderTop: "1px solid #F1F2F3" }}>
+                    <td className="px-5 py-3.5">
+                      <Link href={`/agent-jobs/${s.jobId}` as never} className="block text-[13px] font-semibold text-[#0B0D0F] hover:text-[#007F4E]">
+                        {s.jobName}
+                      </Link>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className="rounded-[6px] border border-[#E0E3E6] bg-[#F3F4F5] px-1.5 py-0.5 font-mono text-[11px] text-[#4B5563]">{s.cron}</span>
+                    </td>
+                    <td className="px-5 py-3.5"><span className="text-[12.5px] text-[#4B5563]">{s.humanReadable}</span></td>
+                    <td className="px-5 py-3.5"><span className="font-mono text-[12px] text-[#6B7280]">{s.timezone}</span></td>
+                    <td className="px-5 py-3.5">
+                      <span className={cn("font-mono text-[12px]", s.status === "ACTIVE" ? "text-[#0B0D0F]" : "text-[#9CA3AF]")}>{s.nextRun ?? "—"}</span>
+                    </td>
+                    <td className="px-5 py-3.5"><span className="font-mono text-[12px] text-[#6B7280]">{s.lastRun ?? "Never"}</span></td>
+                    <td className="px-5 py-3.5">
+                      {s.status === "ACTIVE"
+                        ? <Chip tone="green">Active</Chip>
+                        : <Chip tone="amber" dot>Paused</Chip>}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button type="button" title={s.status === "ACTIVE" ? "Pause" : "Resume"} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#F3F4F5] hover:text-[#0B0D0F]">
+                          {s.status === "ACTIVE" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        </button>
+                        <Link href={`/agent-jobs/${s.jobId}` as never} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#F3F4F5] hover:text-[#0B0D0F]">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

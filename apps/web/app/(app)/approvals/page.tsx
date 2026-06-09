@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { CheckCircle, Clock, XCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { CheckCircle2, Clock, XCircle, ShieldCheck, RefreshCw, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Chip, FilterTabs, EmptyHint, Diamond } from "@/components/ui/page-kit";
 import {
   getApprovals,
   approveRunGate,
@@ -31,23 +30,27 @@ function fmtTime(ts: string | null | undefined) {
   });
 }
 
-function statusIcon(status: ApprovalItem["status"]) {
+function statusChip(status: ApprovalItem["status"]) {
   switch (status) {
-    case "PENDING":  return <Clock className="h-4 w-4 text-amber-500" />;
-    case "APPROVED": return <CheckCircle className="h-4 w-4 text-emerald-500" />;
-    case "REJECTED": return <XCircle className="h-4 w-4 text-red-500" />;
-    default:         return <AlertCircle className="h-4 w-4 text-gray-400" />;
+    case "PENDING":  return <Chip tone="amber" pulse>Awaiting decision</Chip>;
+    case "APPROVED": return <Chip tone="green">Approved</Chip>;
+    case "REJECTED": return <Chip tone="red">Rejected</Chip>;
+    default:         return <Chip tone="gray">{status}</Chip>;
   }
 }
 
-function statusBadge(status: ApprovalItem["status"]) {
-  const map: Record<ApprovalItem["status"], { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
-    PENDING:  { variant: "outline",     label: "Pending"  },
-    APPROVED: { variant: "default",     label: "Approved" },
-    REJECTED: { variant: "destructive", label: "Rejected" },
-  };
-  const cfg = map[status] ?? { variant: "secondary" as const, label: status };
-  return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
+function gateIcon(status: ApprovalItem["status"]) {
+  const cfg = {
+    PENDING:  { bg: "#FFFBEB", bd: "#FDE68A", fg: "#CA8A04", Icon: ShieldCheck },
+    APPROVED: { bg: "#E6F4EF", bd: "#9CCFBB", fg: "#007F4E", Icon: CheckCircle2 },
+    REJECTED: { bg: "#FEF2F2", bd: "#FECACA", fg: "#DC2626", Icon: XCircle },
+  }[status] ?? { bg: "#F3F4F5", bd: "#E0E3E6", fg: "#6B7280", Icon: ShieldCheck };
+  const { Icon } = cfg;
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border" style={{ background: cfg.bg, borderColor: cfg.bd, color: cfg.fg }}>
+      <Icon className="h-[18px] w-[18px]" />
+    </span>
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -107,16 +110,22 @@ export default function ApprovalsPage() {
     }
   }
 
-  const FILTERS: StatusFilter[] = ["PENDING", "APPROVED", "REJECTED", "ALL"];
+  const FILTER_OPTS = [
+    { value: "PENDING", label: "Pending" },
+    { value: "APPROVED", label: "Approved" },
+    { value: "REJECTED", label: "Rejected" },
+    { value: "ALL", label: "All" },
+  ];
 
   return (
     <div className="page-shell">
       {/* Header */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-tight">Approvals</h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            Review and act on pending human-in-the-loop approvals.
+          <span className="vb-mono-label">Governance</span>
+          <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Approval gates</h1>
+          <p className="mt-1 text-[13.5px] text-[#6B7280]">
+            Runs pause here for a human decision — every gate is logged to the durable timeline.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -125,110 +134,90 @@ export default function ApprovalsPage() {
         </Button>
       </div>
 
-      {/* Filter tabs */}
-      <div className="mb-5 flex gap-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => setFilter(f)}
-            className={`rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors ${
-              filter === f
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
-            }`}
-          >
-            {f === "ALL" ? "All" : f.charAt(0) + f.slice(1).toLowerCase()}
-          </button>
-        ))}
+      {/* Filter + count */}
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <FilterTabs options={FILTER_OPTS} value={filter} onChange={(v) => setFilter(v as StatusFilter)} />
         {total > 0 && (
-          <span className="ml-auto self-center text-[12px] text-muted-foreground">
-            {total} result{total !== 1 ? "s" : ""}
-          </span>
+          <span className="font-mono text-[12px] text-[#9CA3AF]">{total} gate{total !== 1 ? "s" : ""}</span>
         )}
       </div>
 
       {/* Error */}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-4 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm text-[#B91C1C]">
           <strong>Failed to load approvals:</strong> {error}
         </div>
       )}
 
       {/* Content */}
       {loading ? (
-        <div className="flex min-h-[30vh] items-center justify-center text-muted-foreground text-sm">
-          Loading…
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-[120px] animate-pulse rounded-[12px] border border-[#E0E3E6] bg-[#FAFBFB]" />
+          ))}
         </div>
       ) : approvals.length === 0 ? (
-        <div className="flex min-h-[30vh] flex-col items-center justify-center gap-2 text-center">
-          <CheckCircle className="h-8 w-8 text-emerald-400" />
-          <p className="text-sm font-medium text-muted-foreground">
-            {filter === "PENDING" ? "No pending approvals" : "No approvals found"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {filter === "PENDING"
-              ? "All runs are proceeding without human intervention."
-              : "Try changing the filter above."}
-          </p>
-        </div>
+        <EmptyHint
+          icon={CheckCircle2}
+          title={filter === "PENDING" ? "No gates waiting" : "No approvals found"}
+          desc={filter === "PENDING"
+            ? "Every run is proceeding without human intervention."
+            : "Try a different filter above."}
+        />
       ) : (
         <div className="space-y-3">
-          {approvals.map((a) => (
-            <Card key={a.id} className="shadow-card">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-4">
-                  <CardTitle className="flex items-center gap-2 text-[14px] font-semibold">
-                    {statusIcon(a.status)}
-                    <span className="font-mono text-[12px] text-muted-foreground">
-                      Run:{" "}
-                      <Link
-                        href={`/runs/${a.runId}` as never}
-                        className="hover:underline text-foreground"
-                      >
-                        {a.runId.slice(0, 8)}…
+          {approvals.map((a) => {
+            const pending = a.status === "PENDING";
+            return (
+              <div
+                key={a.id}
+                className="rounded-[12px] border bg-white p-4 transition-colors"
+                style={{ borderColor: pending ? "#FDE68A" : "#E0E3E6", background: pending ? "#FFFDF5" : "#FFFFFF" }}
+              >
+                <div className="flex items-start gap-3.5">
+                  {gateIcon(a.status)}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-[14px] font-semibold text-[#0B0D0F]">
+                        {a.nodeId ? `Approval · ${a.nodeId}` : "Manager approval gate"}
+                      </h3>
+                      {statusChip(a.status)}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[12px] text-[#6B7280]">
+                      <Link href={`/runs/${a.runId}` as never} className="inline-flex items-center gap-1 text-[#007F4E] hover:underline">
+                        run {a.runId.slice(0, 8)} <ArrowRight className="h-3 w-3" />
                       </Link>
-                    </span>
-                    {a.nodeId && (
-                      <span className="text-[11px] text-muted-foreground">· node {a.nodeId}</span>
+                      <span className="inline-flex items-center gap-1 text-[#9CA3AF]">
+                        <Clock className="h-3 w-3" /> {fmtTime(a.createdAt)}
+                      </span>
+                      {a.resolvedBy && <span>by {a.resolvedBy}</span>}
+                      {a.status !== "PENDING" && <span>resolved {fmtTime(a.updatedAt)}</span>}
+                    </div>
+                    {a.message && (
+                      <p className="mt-2.5 rounded-[8px] border border-[#ECEEEF] bg-[#FAFBFB] px-3 py-2 text-[13px] leading-[1.5] text-[#4B5563]">
+                        {a.message}
+                      </p>
                     )}
-                  </CardTitle>
-                  {statusBadge(a.status)}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {a.message && (
-                  <p className="mb-3 text-[13px] text-muted-foreground">{a.message}</p>
-                )}
-                <div className="flex flex-wrap items-center gap-4 text-[11px] text-muted-foreground">
-                  <span>Requested: {fmtTime(a.createdAt)}</span>
-                  {a.resolvedBy && <span>Resolved by: {a.resolvedBy}</span>}
-                  {a.status !== "PENDING" && (
-                    <span>Resolved: {fmtTime(a.updatedAt)}</span>
-                  )}
-                </div>
-                {a.status === "PENDING" && (
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      size="sm"
-                      disabled={actingId === a.id}
-                      onClick={() => void handleApprove(a)}
-                    >
-                      {actingId === a.id ? "…" : "Approve"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={actingId === a.id}
-                      onClick={() => void handleReject(a)}
-                    >
-                      {actingId === a.id ? "…" : "Reject"}
-                    </Button>
+                    {pending && (
+                      <div className="mt-3.5 flex items-center gap-2">
+                        <Button size="sm" variant="primary" disabled={actingId === a.id} onClick={() => void handleApprove(a)}>
+                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                          {actingId === a.id ? "…" : "Approve"}
+                        </Button>
+                        <Button size="sm" variant="destructive" disabled={actingId === a.id} onClick={() => void handleReject(a)}>
+                          <XCircle className="mr-1 h-3.5 w-3.5" />
+                          {actingId === a.id ? "…" : "Reject"}
+                        </Button>
+                        <span className="ml-1 inline-flex items-center gap-1.5 font-mono text-[11px] text-[#9CA3AF]">
+                          <Diamond size={8} color="#CA8A04" /> resumes on decision
+                        </span>
+                      </div>
+                    )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
