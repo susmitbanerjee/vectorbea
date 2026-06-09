@@ -9,7 +9,7 @@ import {
   MicrosoftMark,
 } from "@/components/auth/oauth-provider-icons";
 import { setAccessToken } from "@/lib/api/client";
-import { LogoCube, Checkpoint, DurableRunPanel, RuntimeConsole } from "@/components/brand/signature";
+import { LogoCube, Checkpoint } from "@/components/brand/signature";
 
 type Mode = "signin" | "signup";
 
@@ -76,55 +76,58 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
 
   return (
     <div className="min-h-screen" style={{ background: "#F7F8F9", color: "#0B0D0F" }}>
-      <div className="grid min-h-screen lg:grid-cols-[1.1fr_minmax(440px,520px)]">
+      <div className="grid min-h-screen lg:grid-cols-[1.05fr_minmax(440px,512px)]">
 
         {/* ── Left brand panel ──────────────────────────────────────────── */}
         <section className="vb-canvas-dots relative hidden overflow-hidden lg:flex" style={{ borderRight: "1px solid #E0E3E6" }}>
           {/* soft green glow */}
           <div
             className="pointer-events-none absolute inset-0"
-            style={{ background: "radial-gradient(60% 50% at 25% 20%, rgba(0,127,78,0.07), transparent 70%)" }}
+            style={{ background: "radial-gradient(72% 60% at 26% 26%, rgba(0,127,78,0.08), transparent 70%)" }}
           />
-          <div className="relative flex h-full w-full flex-col px-12 py-12 xl:px-16">
-            {/* Logo */}
+          <div className="relative flex h-full w-full flex-col px-14 py-14 xl:px-20">
+            {/* Logo — top */}
             <Link href="/" className="inline-flex w-fit items-center gap-2.5">
               <LogoCube />
               <span className="text-[16px] font-semibold tracking-[-0.01em] text-[#0B0D0F]">Vectorbea</span>
             </Link>
 
-            {/* Story */}
-            <div className="my-auto max-w-[460px]">
+            {/* Story — vertically centered */}
+            <div className="my-auto max-w-[480px]">
               <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
                 <Checkpoint size={9} />
-                <span className="font-mono text-[11px] font-medium text-[#006B45]">Durable execution for AI agents</span>
+                <span className="font-mono text-[11px] font-medium tracking-[0.02em] text-[#006B45]">Durable execution for AI agents</span>
               </span>
 
-              <h1 className="mt-6 text-balance font-bold leading-[1.04] tracking-[-0.03em]" style={{ fontSize: "clamp(30px, 3.2vw, 42px)" }}>
+              <h1 className="mt-7 text-balance font-bold leading-[1.04] tracking-[-0.032em] text-[#0B0D0F]" style={{ fontSize: "clamp(34px, 3.4vw, 50px)" }}>
                 Agents that resume,<br />not restart.
               </h1>
 
-              <ul className="mt-7 space-y-2.5">
+              <p className="mt-5 max-w-[440px] text-[16px] leading-[1.6] text-[#4B5563]">
+                The control plane for long-running agentic workflows. Design on a canvas, watch every node
+                execute, and recover from failure without losing work.
+              </p>
+
+              <ul className="mt-9 space-y-4">
                 {BENEFITS.map((item) => (
-                  <li key={item} className="flex items-center gap-2.5">
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full" style={{ background: "#E6F4EF" }}>
+                  <li key={item} className="flex items-center gap-3">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full" style={{ background: "#E6F4EF", border: "1px solid #9CCFBB" }}>
                       <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 10 10">
-                        <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="#007F4E" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="#007F4E" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </span>
-                    <span className="text-[13.5px] text-[#4B5563]">{item}</span>
+                    <span className="text-[14.5px] text-[#374151]">{item}</span>
                   </li>
                 ))}
               </ul>
 
-              {/* Signature durable-run + console */}
-              <div className="relative mt-9">
-                <DurableRunPanel />
-                <div className="mt-4 w-[300px] max-w-full">
-                  <RuntimeConsole />
-                </div>
+              <div className="mt-10 inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5" style={{ borderColor: "#E0E3E6", background: "rgba(255,255,255,0.6)" }}>
+                <Checkpoint size={9} />
+                <span className="font-mono text-[12px] text-[#006B45]">resume from any checkpoint — never restart</span>
               </div>
             </div>
 
+            {/* Footer */}
             <p className="font-mono text-[11px] text-[#9CA3AF]">
               Works with LangChain, CrewAI, AutoGen, and any HTTP-callable agent.
             </p>

@@ -175,9 +175,11 @@ export function MockNode({
       }
       style={{
         border: `1px solid ${selected ? "#168A5B" : "#E0E3E6"}`,
-        boxShadow: selected
-          ? "0 0 0 3px #E6F4EF, 0 10px 28px rgba(11,13,15,0.08)"
-          : "0 4px 14px rgba(11,13,15,0.06)",
+        boxShadow: inline
+          ? "0 1px 2px rgba(11,13,15,0.04)"
+          : selected
+            ? "0 0 0 3px #E6F4EF, 0 10px 28px rgba(11,13,15,0.08)"
+            : "0 4px 14px rgba(11,13,15,0.06)",
         ...style,
       }}
     >
