@@ -63,6 +63,17 @@ function useNodeAnimCSS() {
             0 20px 48px rgba(15,118,110,0.20);
         }
       }
+      @keyframes vb-node-in {
+        from { opacity: 0; transform: translateY(6px) scale(0.985); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      /* Premium hover lift (idle nodes only) */
+      .vb-node-card { transition: transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s ease, border-color .16s ease; }
+      .react-flow__node:hover .vb-node-card[data-idle="1"] {
+        transform: translateY(-2px);
+        box-shadow: 0 18px 40px rgba(11,13,15,0.13), 0 2px 6px rgba(11,13,15,0.05) !important;
+        border-color: #C9CED4 !important;
+      }
     `;
     document.head.appendChild(el);
   }, []);
@@ -180,13 +191,14 @@ export const BaseNode = memo(function BaseNode({
 
   return (
     <div
-      className="relative rounded-[10px] border transition-all duration-[160ms] ease-out"
+      className="vb-node-card relative rounded-[10px] border"
+      data-idle={status === "idle" && !selected ? "1" : "0"}
       style={{
         width,
         background: "#FFFFFF",
         borderColor,
         boxShadow: status === "running" ? undefined : boxShadow,
-        animation: status === "running" ? "vb-soft-pulse 1.6s ease-in-out infinite" : undefined,
+        animation: status === "running" ? "vb-soft-pulse 1.6s ease-in-out infinite" : "vb-node-in 0.22s cubic-bezier(.2,.7,.3,1) both",
         overflow: "visible",   // lets handles extend outside for clickability
       }}
       // Nodes must NOT absorb drag-over/drop events from the palette.
@@ -219,19 +231,22 @@ export const BaseNode = memo(function BaseNode({
       <div className={cn("relative z-10 flex items-center gap-2.5 px-3", compact ? "py-2" : "py-2.5")}>
         {/* Icon badge — always shows node type icon */}
         <span
-          className="relative flex shrink-0 items-center justify-center rounded-[8px] overflow-visible"
+          className="relative flex shrink-0 items-center justify-center rounded-[9px] overflow-visible"
           style={{
-            width: compact ? 26 : 32,
-            height: compact ? 26 : 32,
+            width: compact ? 28 : 34,
+            height: compact ? 28 : 34,
             background: meta.bgColor,
             border: `1px solid ${meta.borderColor}`,
+            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.75), 0 1px 2px ${meta.color}1f`,
           }}
         >
+          {/* Sheen overlay for depth */}
+          <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[9px]" style={{ background: "linear-gradient(155deg, rgba(255,255,255,0.55), transparent 55%)" }} />
           {status === "running" && (
-            <RunningSpinner size={compact ? 26 : 32} />
+            <RunningSpinner size={compact ? 28 : 34} />
           )}
           <LucideIcon
-            style={{ color: meta.color, width: compact ? 13 : 16, height: compact ? 13 : 16 }}
+            style={{ color: meta.color, width: compact ? 14 : 17, height: compact ? 14 : 17, position: "relative", zIndex: 1 }}
           />
           {/* Provider logo badge — bottom-right corner */}
           {llmProvider && !compact && (

@@ -74,9 +74,25 @@ function injectAnimCSS() {
     }
     /* Fast flow — active/running state */
     @keyframes wfDashFast {
-      from { stroke-dashoffset: 20; }
+      from { stroke-dashoffset: 18; }
       to   { stroke-dashoffset: 0;  }
     }
+    /* Soft pulse for the running glow underlay */
+    @keyframes wfEdgeGlow {
+      0%, 100% { opacity: 0.28; }
+      50%      { opacity: 0.55; }
+    }
+    /* Premium hover feedback — thicken + lift the connector under the cursor */
+    .react-flow__edge:hover .vb-edge-path {
+      stroke-width: 2.6px !important;
+      stroke-opacity: 1 !important;
+      filter: drop-shadow(0 1px 3px rgba(0,127,78,0.30));
+    }
+    .react-flow__edge.selected .vb-edge-path {
+      stroke-width: 2.6px !important;
+    }
+    /* Traveling data packet on running edges */
+    .vb-edge-packet { filter: drop-shadow(0 0 4px rgba(0,166,90,0.7)); }
   `;
   document.head.appendChild(el);
 }
@@ -253,67 +269,70 @@ export const WorkflowEdge = memo(function WorkflowEdge({
   const label     = edgeData?.label;
   const isRunning = (edgeData as unknown as Record<string, unknown>)?.isRunning === true;
 
-  const [edgePath, labelX, labelY] = getWorkflowPath(
-    sourceX, sourceY,
-    targetX, targetY,
-    sourcePosition,
-    targetPosition,
-    edgeType,          // pass edge type so parallel keeps its curve
-  );
+  // ── Path: supports straight / step / smooth curve (default = smart routing)
+  const curveStyle = (edgeData as unknown as { curveStyle?: string } | undefined)?.curveStyle;
+  let edgePath: string;
+  let labelX: number;
+  let labelY: number;
+  if (curveStyle === "straight") {
+    edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+    labelX = (sourceX + targetX) / 2;
+    labelY = (sourceY + targetY) / 2;
+  } else if (curveStyle === "step") {
+    edgePath = roundedOrthogonal(sourceX, sourceY, targetX, targetY);
+    labelX = (sourceX + targetX) / 2;
+    labelY = (sourceY + targetY) / 2;
+  } else {
+    [edgePath, labelX, labelY] = getWorkflowPath(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, edgeType);
+  }
 
-  // Stroke state
+  // ── Stroke state ──────────────────────────────────────────────────────────
   const strokeColor = selected ? "#007F4E" : isRunning ? "#0F766E" : styleCfg.stroke;
-  const strokeWidth = selected ? 2.5 : 1.75;
+  const strokeWidth = selected ? 2.4 : 1.75;
   const markerId    = `wf-arrow-${id}`;
+  const gradId      = `wf-grad-${id}`;
 
-  // Clean reference look: static edges are SOLID curves; only running edges
-  // show the flowing dashed animation (direction of data flow).
-  const dashArray = isRunning ? "5 3" : undefined;
-  const animation = isRunning ? "wfDashFast 0.45s linear infinite" : undefined;
-  const strokeOpacity = selected ? 1 : isRunning ? 0.95 : 0.85;
-  const filter = selected
-    ? `drop-shadow(0 0 4px ${strokeColor}60)`
-    : isRunning
-      ? `drop-shadow(0 0 3px ${strokeColor}80)`
-      : undefined;
+  const dashArray = isRunning ? "6 5" : undefined;
+  const animation = isRunning ? "wfDashFast 0.5s linear infinite" : undefined;
+  const strokeOpacity = selected ? 1 : isRunning ? 0.95 : 0.8;
 
   return (
     <>
-      {/* Per-edge arrowhead (unique id so color tracks strokeColor) */}
       <defs>
-        <marker
-          id={markerId}
-          markerWidth="7"
-          markerHeight="7"
-          refX="5.5"
-          refY="3.5"
-          orient="auto"
-          markerUnits="strokeWidth"
-        >
-          {/* Slightly concave filled arrowhead — clean and professional */}
-          <path
-            d="M 0 0.75 L 5.5 3.5 L 0 6.25 L 1.5 3.5 Z"
-            fill={strokeColor}
-            opacity={selected ? 1 : 0.85}
-          />
+        {/* Running gradient — teal → bright green, conveys flow */}
+        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#0F766E" />
+          <stop offset="100%" stopColor="#00A65A" />
+        </linearGradient>
+        {/* Modern arrowhead */}
+        <marker id={markerId} markerWidth="9" markerHeight="9" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
+          <path d="M 0.6 1 L 6.6 4 L 0.6 7 L 2.5 4 Z" fill={isRunning ? "#00A65A" : strokeColor} opacity={selected || isRunning ? 1 : 0.9} />
         </marker>
       </defs>
 
+      {/* Soft glow underlay — depth on selected / running */}
+      {(selected || isRunning) && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke={isRunning ? `url(#${gradId})` : strokeColor}
+          strokeWidth={isRunning ? 7 : 6}
+          strokeLinecap="round"
+          strokeOpacity={0.18}
+          style={{ filter: "blur(3px)", animation: isRunning ? "wfEdgeGlow 1.6s ease-in-out infinite" : undefined }}
+        />
+      )}
+
       {/* Invisible wider hit zone for comfortable click/hover */}
-      <path
-        d={edgePath}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={14}
-        className="react-flow__edge-interaction"
-      />
+      <path d={edgePath} fill="none" stroke="transparent" strokeWidth={16} className="react-flow__edge-interaction" />
 
       {/* Main connector */}
       <path
         id={id}
         d={edgePath}
+        className="vb-edge-path"
         fill="none"
-        stroke={strokeColor}
+        stroke={isRunning ? `url(#${gradId})` : strokeColor}
         strokeWidth={strokeWidth}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -321,11 +340,18 @@ export const WorkflowEdge = memo(function WorkflowEdge({
         strokeOpacity={strokeOpacity}
         markerEnd={`url(#${markerId})`}
         style={{
-          transition: "stroke 0.15s ease, stroke-width 0.15s ease",
+          transition: "stroke-width 0.18s ease, stroke-opacity 0.18s ease",
           animation,
-          filter,
+          filter: selected ? `drop-shadow(0 0 5px ${strokeColor}55)` : undefined,
         }}
       />
+
+      {/* Traveling data packet — premium running animation */}
+      {isRunning && (
+        <circle r="3.2" fill="#00A65A" className="vb-edge-packet">
+          <animateMotion dur="1.3s" repeatCount="indefinite" path={edgePath} rotate="auto" />
+        </circle>
+      )}
 
       {/* Label chip — rendered outside SVG via EdgeLabelRenderer */}
       {label && (
@@ -339,13 +365,12 @@ export const WorkflowEdge = memo(function WorkflowEdge({
             }}
           >
             <span
-              className="rounded-full border px-2 py-0.5 text-[9px] font-semibold"
+              className="rounded-full border px-2 py-[3px] text-[9.5px] font-semibold shadow-[0_2px_6px_rgba(11,13,15,0.08)]"
               style={{
                 background: styleCfg.labelBg,
                 borderColor: styleCfg.labelBorder,
                 color: styleCfg.labelColor,
                 whiteSpace: "nowrap",
-                boxShadow: "0 1px 4px rgba(15,23,42,0.07)",
               }}
             >
               {label}

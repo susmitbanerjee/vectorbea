@@ -12,6 +12,7 @@ import "@xyflow/react/dist/style.css";
 // ── Handle visibility + hover styles injected as global CSS ──────────────────
 // Must be a module-level <style> to target React Flow's shadow DOM handles.
 const HANDLE_CSS = `
+  @keyframes wfDashFast { from { stroke-dashoffset: 18; } to { stroke-dashoffset: 0; } }
   /* Source handle (filled dot) — always visible */
   .vb-handle-source {
     cursor: crosshair !important;
@@ -43,6 +44,54 @@ const HANDLE_CSS = `
     border-color: white !important;
     transform: scale(1.5) !important;
     box-shadow: 0 0 0 6px rgba(0,166,90,0.3) !important;
+  }
+  .react-flow__handle { transition: transform .15s cubic-bezier(.2,.7,.3,1), box-shadow .15s ease; }
+
+  /* ── Premium controls dock ─────────────────────────────────────────────── */
+  .react-flow__controls {
+    border-radius: 10px !important;
+    overflow: hidden;
+    border: 1px solid #E0E3E6 !important;
+    background: rgba(255,255,255,0.92) !important;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 16px rgba(11,13,15,0.08) !important;
+    padding: 3px !important;
+    gap: 2px;
+  }
+  .react-flow__controls-button {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 7px !important;
+    width: 28px !important;
+    height: 28px !important;
+    color: #6B7280 !important;
+    transition: background .12s ease, color .12s ease;
+  }
+  .react-flow__controls-button:hover {
+    background: #E6F4EF !important;
+    color: #007F4E !important;
+  }
+  .react-flow__controls-button svg { fill: currentColor; }
+
+  /* ── Premium minimap ───────────────────────────────────────────────────── */
+  .react-flow__minimap {
+    border-radius: 10px !important;
+    border: 1px solid #E0E3E6 !important;
+    box-shadow: 0 4px 16px rgba(11,13,15,0.08) !important;
+    overflow: hidden;
+  }
+  .react-flow__minimap-mask { fill: rgba(247,248,249,0.6) !important; }
+
+  /* Hide React Flow attribution for a clean premium canvas */
+  .react-flow__attribution { display: none !important; }
+
+  /* Connection line being dragged — premium green */
+  .react-flow__connectionline .react-flow__connection-path,
+  .react-flow__connection-path {
+    stroke: #00A65A !important;
+    stroke-width: 2 !important;
+    stroke-dasharray: 6 5;
+    animation: wfDashFast 0.5s linear infinite;
   }
 `;
 
@@ -1328,7 +1377,16 @@ function WorkflowBuilderInner() {
             multiSelectionKeyCode="Shift"
             style={{ background: "#FAFAFA" }}
           >
+            {/* Premium dual-layer engineering grid */}
             <Background
+              id="vb-grid-lines"
+              variant={BackgroundVariant.Lines}
+              gap={120}
+              lineWidth={1}
+              color="#EDEFF1"
+            />
+            <Background
+              id="vb-grid-dots"
               variant={BackgroundVariant.Dots}
               gap={24}
               size={1.4}
