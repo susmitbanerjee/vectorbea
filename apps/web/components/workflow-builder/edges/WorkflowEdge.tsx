@@ -19,7 +19,7 @@
 import { memo } from "react";
 import {
   EdgeLabelRenderer,
-  Position,
+  useReactFlow,
   type Edge,
   type EdgeProps,
 } from "@xyflow/react";
@@ -95,20 +95,10 @@ function injectAnimCSS() {
   document.head.appendChild(el);
 }
 
-// ─── Path routing helpers ─────────────────────────────────────────────────────
-
-type PathResult = [path: string, labelX: number, labelY: number];
+// ─── Path routing helper ──────────────────────────────────────────────────────
 
 /**
- * Proper draw.io-style routing.
- *
- * Rules:
- *  PARALLEL/BRANCH fan-out → smooth bezier curves (intentional wide arcs)
- *  SEQUENTIAL aligned (dx ≤ 12px) → pure straight vertical line
- *  SEQUENTIAL offset (12px < dx ≤ 400px) → rounded orthogonal step
- *     M sx,sy → down to midY → across to tx → down to ty
- *     This always starts at the real source handle and ends at the real target.
- *  SEQUENTIAL far-offset (dx > 400) → smooth bezier (fan-in/merge)
+ * Rounded orthogonal (step) path — only used for the optional `curveStyle: "step"`.
  */
 function roundedOrthogonal(
   sx: number, sy: number, tx: number, ty: number, r = CORNER_RADIUS,
@@ -131,68 +121,50 @@ function roundedOrthogonal(
   ].join(" ");
 }
 
-/**
- * Clean premium routing: a true straight line when handles are aligned,
- * otherwise a single gentle cubic bezier (no boxy elbows). Works regardless
- * of node size because it always anchors on the real handle coordinates.
- */
-function getWorkflowPath(
-  sourceX: number, sourceY: number,
-  targetX: number, targetY: number,
-  sourcePosition: Position,
-  targetPosition: Position,
-  edgeType?: string,
-): PathResult {
-  const cx = (sourceX + targetX) / 2;
-  const cy = (sourceY + targetY) / 2;
-
-  // Parallel / branch fan-out → smooth wide bezier (curves read better here)
-  if (edgeType === "parallel" || edgeType === "parallel_branch") {
-    return [`M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`, cx, cy];
-  }
-
-  // Sequential edges → clean STRAIGHT line from the real source handle to the
-  // real target handle (vertical when stacked, a crisp diagonal when offset).
-  return [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, cx, cy];
-}
-
 // ─── Edge component ───────────────────────────────────────────────────────────
 
 export const WorkflowEdge = memo(function WorkflowEdge({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
   data,
   selected,
 }: EdgeProps<WFEdge>) {
   injectAnimCSS();
 
+  const { getNode } = useReactFlow();
   const edgeData  = data as WFEdgeData | undefined;
   const edgeType  = edgeData?.edgeType ?? "default";
   const styleCfg  = EDGE_STYLES[edgeType] ?? EDGE_STYLES.default;
   const label     = edgeData?.label;
   const isRunning = (edgeData as unknown as Record<string, unknown>)?.isRunning === true;
 
-  // ── Path: supports straight / step / smooth curve (default = smart routing)
+  // Curve ONLY when an endpoint node is a fan-out (parallel) or fan-in (join);
+  // every other connector is a clean straight line.
+  const isFanNode = (t?: string) => t === "parallel" || t === "join";
+  const shouldCurve =
+    isFanNode(getNode(source)?.type) ||
+    isFanNode(getNode(target)?.type) ||
+    edgeType === "parallel" || edgeType === "parallel_branch" || edgeType === "join";
+
+  const cx = (sourceX + targetX) / 2;
+  const cy = (sourceY + targetY) / 2;
+  const straightPath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+  const curvedPath   = `M ${sourceX} ${sourceY} C ${sourceX} ${cy} ${targetX} ${cy} ${targetX} ${targetY}`;
+
+  // ── Path: explicit curveStyle override, else auto (straight | curve) ───────
   const curveStyle = (edgeData as unknown as { curveStyle?: string } | undefined)?.curveStyle;
   let edgePath: string;
-  let labelX: number;
-  let labelY: number;
-  if (curveStyle === "straight") {
-    edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-    labelX = (sourceX + targetX) / 2;
-    labelY = (sourceY + targetY) / 2;
-  } else if (curveStyle === "step") {
-    edgePath = roundedOrthogonal(sourceX, sourceY, targetX, targetY);
-    labelX = (sourceX + targetX) / 2;
-    labelY = (sourceY + targetY) / 2;
-  } else {
-    [edgePath, labelX, labelY] = getWorkflowPath(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, edgeType);
-  }
+  if (curveStyle === "straight")     edgePath = straightPath;
+  else if (curveStyle === "step")    edgePath = roundedOrthogonal(sourceX, sourceY, targetX, targetY);
+  else if (curveStyle === "smooth")  edgePath = curvedPath;
+  else                               edgePath = shouldCurve ? curvedPath : straightPath;
+  const labelX = cx;
+  const labelY = cy;
 
   // ── Stroke state ──────────────────────────────────────────────────────────
   const strokeColor = selected ? "#007F4E" : isRunning ? "#0F766E" : styleCfg.stroke;
