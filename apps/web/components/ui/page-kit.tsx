@@ -198,6 +198,54 @@ export function FilterTabs({
   );
 }
 
+/* ── Sparkline bars (marketing observability style) ───────────────────────── */
+export function MiniBars({ values, tint = "#007F4E", height = 30 }: { values: number[]; tint?: string; height?: number }) {
+  const max = Math.max(1, ...values);
+  return (
+    <div className="flex items-end gap-[3px]" style={{ height }}>
+      {values.map((v, i) => (
+        <span
+          key={i}
+          className="flex-1 rounded-[2px]"
+          style={{ height: `${Math.max(6, (v / max) * 100)}%`, background: tint, opacity: 0.3 + (i / values.length) * 0.7 }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── Dark runtime console (engineering signature) ─────────────────────────── */
+export function Console({
+  title = "runtime · production",
+  badge = "durable",
+  lines,
+  className,
+}: {
+  title?: string;
+  badge?: string;
+  lines: { t?: string; lvl: string; color: string; msg: string }[];
+  className?: string;
+}) {
+  return (
+    <div className={cn("overflow-hidden rounded-[12px]", className)} style={{ background: "#0B0D0F", boxShadow: "0 16px 44px rgba(11,13,15,0.22)" }}>
+      <div className="flex items-center gap-2 border-b px-3.5 py-2.5" style={{ borderColor: "#1c1f22" }}>
+        <span className="flex h-1.5 w-1.5 rounded-full bg-[#34D399]" style={{ animation: "pulse 1.8s ease-in-out infinite" }} />
+        <span className="truncate font-mono text-[11px] text-[#9CA3AF]">{title}</span>
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-[#4B5563]">{badge}</span>
+      </div>
+      <div className="space-y-1 px-3.5 py-3 font-mono text-[11px] leading-[1.75]">
+        {lines.map((l, i) => (
+          <p key={i} className="truncate">
+            {l.t && <span className="text-[#4B5563]">{l.t}</span>}{l.t && " "}
+            <span style={{ color: l.color }}>{l.lvl}</span>{" "}
+            <span className="text-[#D1D5DB]">{l.msg}</span>
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── Empty hint ───────────────────────────────────────────────────────────── */
 export function EmptyHint({
   icon: Icon,

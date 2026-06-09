@@ -2,15 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, ExternalLink, Pause, Play, RefreshCw } from "lucide-react";
+import { CalendarClock, ExternalLink, Pause, Play, RefreshCw, ArrowRight, Clock } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/lib/workspace-context";
-import { Chip, FilterTabs, EmptyHint, StatTile } from "@/components/ui/page-kit";
+import { Chip, FilterTabs, EmptyHint } from "@/components/ui/page-kit";
 
 const API_BASE = process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Schedule {
   id: string;
@@ -23,8 +21,6 @@ interface Schedule {
   status: "ACTIVE" | "PAUSED";
   jobId: string;
 }
-
-// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function SchedulesPage() {
   const { activeWorkspaceId } = useWorkspace();
@@ -39,18 +35,12 @@ export default function SchedulesPage() {
       const token = typeof window !== "undefined" ? localStorage.getItem("vectorbea-access-token") : null;
       const res = await fetch(
         `${API_BASE}/api/schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            "X-Workspace-Id": activeWorkspaceId,
-          },
-        },
+        { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "X-Workspace-Id": activeWorkspaceId } },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: unknown = await res.json();
       setSchedules(Array.isArray(data) ? (data as Schedule[]) : []);
     } catch {
-      // API may not be wired yet — show empty state silently
       setSchedules([]);
     } finally {
       setLoading(false);
@@ -69,39 +59,29 @@ export default function SchedulesPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <span className="vb-mono-label">Orchestration</span>
-          <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Schedules</h1>
-          <p className="mt-1 text-[13.5px] text-[#6B7280]">
-            {loading ? "Loading…" : `${schedules.length} trigger${schedules.length !== 1 ? "s" : ""} firing workflows on a cron`}
+          <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Schedules</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[12.5px] text-[#6B7280]">
+            {loading ? "loading…" : (
+              <>
+                <span className="font-semibold text-[#0B0D0F]">{schedules.length}</span> triggers
+                <span className="text-[#D7DBE0]">·</span>
+                <span className="font-semibold text-[#007F4E]">{activeCount}</span> active
+                <span className="text-[#D7DBE0]">·</span>
+                <span className="font-semibold text-[#CA8A04]">{pausedCount}</span> paused
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white transition-colors hover:bg-[#F3F4F5] disabled:opacity-40"
-            title="Refresh"
-          >
+          <button type="button" onClick={() => void load()} disabled={loading} title="Refresh"
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white transition-colors hover:bg-[#F3F4F5] disabled:opacity-40">
             <RefreshCw className={cn("h-3.5 w-3.5 text-[#6B7280]", loading && "animate-spin")} />
           </button>
-          <Link
-            href={"/agent-jobs/new" as never}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1c1f22]"
-          >
-            <CalendarClock className="h-4 w-4" />
-            New schedule
+          <Link href={"/agent-jobs/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+            <CalendarClock className="h-4 w-4" /> New schedule
           </Link>
         </div>
       </div>
-
-      {/* Stat tiles */}
-      {schedules.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <StatTile label="Schedules" value={schedules.length} icon={CalendarClock} />
-          <StatTile label="Active" value={activeCount} accent="#007F4E" />
-          <StatTile label="Paused" value={pausedCount} accent="#CA8A04" />
-        </div>
-      )}
 
       {/* Filter */}
       {schedules.length > 0 && (
@@ -116,71 +96,63 @@ export default function SchedulesPage() {
         />
       )}
 
-      {/* Table */}
+      {/* Grid */}
       {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-[52px] animate-pulse rounded-[10px] border border-[#E0E3E6] bg-[#FAFBFB]" />
-          ))}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[140px] animate-pulse rounded-[12px] border border-[#E0E3E6] bg-[#FAFBFB]" />)}
         </div>
       ) : filtered.length === 0 ? (
         <EmptyHint
           icon={CalendarClock}
           title={schedules.length === 0 ? "No schedules yet" : "No schedules match this filter"}
-          desc={schedules.length === 0
-            ? "Schedules fire workflows on a recurring cron or interval. Create a job, then attach a schedule to it."
-            : undefined}
+          desc={schedules.length === 0 ? "Schedules fire workflows on a recurring cron. Create a job, then attach a schedule to it." : undefined}
         />
       ) : (
-        <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: "1px solid #ECEEEF", background: "#FAFBFB" }}>
-                  {["Job", "Cron", "Schedule", "Timezone", "Next run", "Last run", "Status", ""].map((h) => (
-                    <th key={h} className="px-5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9CA3AF]">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((s) => (
-                  <tr key={s.id} className="group transition-colors hover:bg-[#FAFBFB]" style={{ borderTop: "1px solid #F1F2F3" }}>
-                    <td className="px-5 py-3.5">
-                      <Link href={`/agent-jobs/${s.jobId}` as never} className="block text-[13px] font-semibold text-[#0B0D0F] hover:text-[#007F4E]">
-                        {s.jobName}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3.5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((s) => {
+            const active = s.status === "ACTIVE";
+            return (
+              <div key={s.id} className="group flex flex-col overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white transition-all hover:border-[#C9CED4] hover:shadow-[0_6px_20px_rgba(11,13,15,0.05)]">
+                {/* Header */}
+                <div className="flex items-start gap-3 p-4">
+                  <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border", active ? "border-[#9CCFBB] bg-[#E6F4EF] text-[#007F4E]" : "border-[#E0E3E6] bg-[#F3F4F5] text-[#9CA3AF]")}>
+                    <CalendarClock className="h-[18px] w-[18px]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/agent-jobs/${s.jobId}` as never} className="block truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#0B0D0F] hover:text-[#007F4E]">
+                      {s.jobName}
+                    </Link>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       <span className="rounded-[6px] border border-[#E0E3E6] bg-[#F3F4F5] px-1.5 py-0.5 font-mono text-[11px] text-[#4B5563]">{s.cron}</span>
-                    </td>
-                    <td className="px-5 py-3.5"><span className="text-[12.5px] text-[#4B5563]">{s.humanReadable}</span></td>
-                    <td className="px-5 py-3.5"><span className="font-mono text-[12px] text-[#6B7280]">{s.timezone}</span></td>
-                    <td className="px-5 py-3.5">
-                      <span className={cn("font-mono text-[12px]", s.status === "ACTIVE" ? "text-[#0B0D0F]" : "text-[#9CA3AF]")}>{s.nextRun ?? "—"}</span>
-                    </td>
-                    <td className="px-5 py-3.5"><span className="font-mono text-[12px] text-[#6B7280]">{s.lastRun ?? "Never"}</span></td>
-                    <td className="px-5 py-3.5">
-                      {s.status === "ACTIVE"
-                        ? <Chip tone="green">Active</Chip>
-                        : <Chip tone="amber" dot>Paused</Chip>}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button type="button" title={s.status === "ACTIVE" ? "Pause" : "Resume"} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#F3F4F5] hover:text-[#0B0D0F]">
-                          {s.status === "ACTIVE" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                        </button>
-                        <Link href={`/agent-jobs/${s.jobId}` as never} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#F3F4F5] hover:text-[#0B0D0F]">
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <span className="truncate font-mono text-[11px] text-[#9CA3AF]">{s.timezone}</span>
+                    </div>
+                  </div>
+                  {active ? <Chip tone="green">Active</Chip> : <Chip tone="amber">Paused</Chip>}
+                </div>
+
+                {/* Human-readable */}
+                <p className="-mt-1 px-4 pb-3 text-[12.5px] text-[#4B5563]">{s.humanReadable}</p>
+
+                {/* Footer — next/last fire */}
+                <div className="mt-auto flex items-center justify-between border-t border-[#ECEEEF] bg-[#FAFBFB] px-4 py-2.5">
+                  <span className="flex items-center gap-3 font-mono text-[11.5px]">
+                    <span className={cn("inline-flex items-center gap-1", active ? "text-[#006B45]" : "text-[#9CA3AF]")}>
+                      <ArrowRight className="h-3 w-3" /> next {s.nextRun ?? "—"}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-[#9CA3AF]"><Clock className="h-3 w-3" /> {s.lastRun ?? "never"}</span>
+                  </span>
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button type="button" title={active ? "Pause" : "Resume"} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
+                      {active ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                    </button>
+                    <Link href={`/agent-jobs/${s.jobId}` as never} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
