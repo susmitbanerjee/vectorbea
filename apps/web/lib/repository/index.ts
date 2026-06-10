@@ -711,27 +711,42 @@ export async function getPlatformSummary(): Promise<DashboardSummary> {
     recentRunsTotal: number;
   }>(withWorkspace("/api/dashboard/summary")).catch(() => null);
 
-  // Side-channel: workers and total counts (not in summary endpoint)
+  // Side-channel: workers and total counts (not in summary endpoint).
+  // Agents/tools/workers endpoints may return either a raw array or a
+  // paginated `{ items, total }` envelope — handle both (same as getAgents/getTools).
+  type ListEnvelope<T> = T[] | { items?: T[]; total?: number };
+  const listCount = (res: PromiseSettledResult<ListEnvelope<unknown>>): number => {
+    if (res.status !== "fulfilled") return 0;
+    const v = res.value;
+    if (Array.isArray(v)) return v.length;
+    return v.total ?? v.items?.length ?? 0;
+  };
+  const listItems = <T,>(res: PromiseSettledResult<ListEnvelope<T>>): T[] => {
+    if (res.status !== "fulfilled") return [];
+    const v = res.value;
+    return Array.isArray(v) ? v : (v.items ?? []);
+  };
+
   const [workersResult, agentsResult, toolsResult, workflowsResult] =
     await Promise.allSettled([
-      api<WorkerItem[]>(withWorkspace("/api/workers")),
-      api<Agent[]>(withWorkspace("/api/agents")),
-      api<Tool[]>(withWorkspace("/api/tools")),
+      api<ListEnvelope<WorkerItem>>(withWorkspace("/api/workers")),
+      api<ListEnvelope<Agent>>(withWorkspace("/api/agents")),
+      api<ListEnvelope<Tool>>(withWorkspace("/api/tools")),
       api<PaginatedResult<Workflow>>(withWorkspace("/api/workflows?page=1&pageSize=1")),
     ]);
 
-  const workers   = workersResult.status === "fulfilled" ? workersResult.value : [];
-  const agents    = agentsResult.status === "fulfilled" ? agentsResult.value : [];
-  const tools     = toolsResult.status === "fulfilled" ? toolsResult.value : [];
-  const workflows = workflowsResult.status === "fulfilled" ? workflowsResult.value : null;
+  const workers     = listItems(workersResult);
+  const agentsCount = listCount(agentsResult);
+  const toolsCount  = listCount(toolsResult);
+  const workflows   = workflowsResult.status === "fulfilled" ? workflowsResult.value : null;
 
   if (summaryResult) {
     return {
       ...summaryResult,
       totalWorkflows:   workflows?.total ?? 0,
-      totalAgents:      Array.isArray(agents) ? agents.length : 0,
-      totalTools:       Array.isArray(tools) ? tools.length : 0,
-      connectedWorkers: Array.isArray(workers) ? workers.filter(w => w.status === "CONNECTED").length : 0,
+      totalAgents:      agentsCount,
+      totalTools:       toolsCount,
+      connectedWorkers: workers.filter(w => w.status === "CONNECTED").length,
       // Backwards-compat aliases
       waitingApprovals: summaryResult.pendingApprovals,
       failedRuns24h:    summaryResult.failedLast24h,
@@ -755,11 +770,11 @@ export async function getPlatformSummary(): Promise<DashboardSummary> {
     ...SUMMARY_ZERO,
     totalWorkflows:   workflows?.total ?? 0,
     activeWorkflows:  0,
-    totalAgents:      Array.isArray(agents) ? agents.length : 0,
-    totalTools:       Array.isArray(tools) ? tools.length : 0,
+    totalAgents:      agentsCount,
+    totalTools:       toolsCount,
     totalRuns:        runs?.total ?? 0,
     pendingApprovals: approvals?.total ?? 0,
     waitingApprovals: approvals?.total ?? 0,
-    connectedWorkers: Array.isArray(workers) ? workers.filter(w => w.status === "CONNECTED").length : 0,
+    connectedWorkers: workers.filter(w => w.status === "CONNECTED").length,
   };
 }

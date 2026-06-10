@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import type { WorkflowRun, ViewMode } from "@/types/runs";
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight,
-  RefreshCw, Shield, ShieldCheck, Wrench, X, Zap, Clock,
-  ArrowRight, ExternalLink, Info,
+  CheckCircle2, ChevronDown, ChevronRight,
+  RefreshCw, Shield, ShieldCheck, X, Zap,
+  ArrowRight, AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api/client";
@@ -28,25 +28,25 @@ interface FailureIncident {
   resolutionStatus: "open" | "resolved";
 }
 
-// ─── Category → human label + colour ─────────────────────────────────────────
+// ─── Category → human label + identity colour ────────────────────────────────
 
-const CATEGORY_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  CONNECTION_FAILURE:       { label: "Connection failure",       color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-  AUTH_FAILURE:             { label: "Authentication failure",   color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-  NETWORK_FAILURE:          { label: "Network failure",          color: "#EA580C", bg: "#FFF7ED", border: "#FED7AA" },
-  RATE_LIMIT:               { label: "Rate limit",               color: "#D97706", bg: "#FFFBEB", border: "#FDE68A" },
-  TIMEOUT:                  { label: "Timeout",                  color: "#D97706", bg: "#FFFBEB", border: "#FDE68A" },
-  MAPPING_FAILURE:          { label: "Input mapping error",      color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE" },
-  LLM_OUTPUT_INVALID:       { label: "LLM output invalid",       color: "#9333EA", bg: "#FAF5FF", border: "#E9D5FF" },
-  SCHEMA_VALIDATION_FAILURE:{ label: "Schema validation",        color: "#0891B2", bg: "#ECFEFF", border: "#A5F3FC" },
-  DB_QUERY_FAILURE:         { label: "Database query failed",    color: "#0369A1", bg: "#F0F9FF", border: "#BAE6FD" },
-  DB_WRITE_BLOCKED:         { label: "Database write blocked",   color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-  APPROVAL_REJECTED:        { label: "Approval rejected",        color: "#B45309", bg: "#FFFBEB", border: "#FDE68A" },
-  APPROVAL_TIMEOUT:         { label: "Approval timed out",       color: "#B45309", bg: "#FFFBEB", border: "#FDE68A" },
-  WORKER_CRASHED:           { label: "Worker crashed",           color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-  WORKFLOW_GRAPH_INVALID:   { label: "Workflow misconfigured",   color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-  RESOURCE_LIMIT_EXCEEDED:  { label: "Resource limit exceeded",  color: "#D97706", bg: "#FFFBEB", border: "#FDE68A" },
-  UNKNOWN:                  { label: "Unknown failure",          color: "#475569", bg: "#F8FAFC", border: "#E2E8F0" },
+const CATEGORY_META: Record<string, { label: string; color: string }> = {
+  CONNECTION_FAILURE:       { label: "Connection failure",      color: "#DC2626" },
+  AUTH_FAILURE:             { label: "Authentication failure",  color: "#DC2626" },
+  NETWORK_FAILURE:          { label: "Network failure",         color: "#EA580C" },
+  RATE_LIMIT:               { label: "Rate limit",              color: "#D97706" },
+  TIMEOUT:                  { label: "Timeout",                 color: "#D97706" },
+  MAPPING_FAILURE:          { label: "Input mapping error",     color: "#7C3AED" },
+  LLM_OUTPUT_INVALID:       { label: "LLM output invalid",      color: "#9333EA" },
+  SCHEMA_VALIDATION_FAILURE:{ label: "Schema validation",       color: "#0891B2" },
+  DB_QUERY_FAILURE:         { label: "Database query failed",   color: "#0369A1" },
+  DB_WRITE_BLOCKED:         { label: "Database write blocked",  color: "#DC2626" },
+  APPROVAL_REJECTED:        { label: "Approval rejected",       color: "#B45309" },
+  APPROVAL_TIMEOUT:         { label: "Approval timed out",      color: "#B45309" },
+  WORKER_CRASHED:           { label: "Worker crashed",          color: "#DC2626" },
+  WORKFLOW_GRAPH_INVALID:   { label: "Workflow misconfigured",  color: "#DC2626" },
+  RESOURCE_LIMIT_EXCEEDED:  { label: "Resource limit exceeded", color: "#D97706" },
+  UNKNOWN:                  { label: "Unknown failure",         color: "#4B5563" },
 };
 
 // ─── What the Recovery Engine can do for each failure type ────────────────────
@@ -69,6 +69,28 @@ const RECOVERY_CAPABILITY: Record<string, { auto: string; manual: string; canAut
   RESOURCE_LIMIT_EXCEEDED:  { canAutoFix: false, auto: "Budget/token limit reached",       manual: "Increase limits in workflow node settings" },
   UNKNOWN:                  { canAutoFix: false, auto: "Could not classify the failure",   manual: "Check the engineering view logs for details" },
 };
+
+// ─── Local primitives ─────────────────────────────────────────────────────────
+
+function MonoLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p className={cn("font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]", className)}>
+      {children}
+    </p>
+  );
+}
+
+/** Checkpoint diamond bullet — the durable signature. */
+function DiamondBullet({ ok }: { ok: boolean }) {
+  return (
+    <span
+      className="mt-[5px] inline-block h-[9px] w-[9px] shrink-0 rotate-45 rounded-[2px]"
+      style={ok
+        ? { background: "#FFFFFF", border: "2px solid #007F4E" }
+        : { background: "#FFFFFF", border: "2px solid #FCA5A5" }}
+    />
+  );
+}
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
@@ -100,87 +122,78 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
   const inc = incident === "loading" ? null : incident;
   const catMeta = inc ? (CATEGORY_META[inc.category] ?? CATEGORY_META.UNKNOWN) : null;
   const capability = inc ? (RECOVERY_CAPABILITY[inc.category] ?? RECOVERY_CAPABILITY.UNKNOWN) : null;
+  const severityColor = inc?.severity === "CRITICAL" || inc?.severity === "HIGH" ? "#DC2626" : "#CA8A04";
 
   return (
     <div className="space-y-4">
 
-      {/* ── Hero: Diagnosis card (only when failed) ─────────────────────── */}
+      {/* ── Diagnosis: analysing ──────────────────────────────────────────── */}
       {isFailed && incident === "loading" && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-500" />
-            <span style={{ fontSize: 13, color: "#64748B" }}>Recovery Engine analysing failure…</span>
+        <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
+          <div className="flex items-center gap-2.5">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#E0E3E6] border-t-[#007F4E]" />
+            <span className="text-[13px] text-[#6B7280]">Recovery Engine analysing failure…</span>
           </div>
         </div>
       )}
 
+      {/* ── Diagnosis card (failed runs) ──────────────────────────────────── */}
       {isFailed && inc && catMeta && capability && (
-        <div className="rounded-2xl overflow-hidden" style={{ border: `1.5px solid ${catMeta.border}`, background: catMeta.bg }}>
+        <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: `1px solid ${catMeta.border}` }}>
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl"
-                style={{ background: catMeta.color + "18", border: `1px solid ${catMeta.color}30` }}>
-                <Shield className="h-4 w-4" style={{ color: catMeta.color }} />
+          <div className="flex items-center justify-between border-b border-[#ECEEEF] px-5 py-3.5">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-[8px]" style={{ background: catMeta.color }}>
+                <Shield className="h-4 w-4 text-white" />
               </span>
               <div>
-                <p className="text-[13.5px] font-bold" style={{ color: catMeta.color }}>
-                  Recovery Engine — {catMeta.label}
-                </p>
-                <p className="text-[11px] font-mono" style={{ color: catMeta.color + "99" }}>
-                  {inc.code}
-                </p>
+                <p className="text-[13.5px] font-bold tracking-[-0.01em] text-[#0B0D0F]">{catMeta.label}</p>
+                <p className="font-mono text-[10.5px] text-[#9CA3AF]">{inc.code}</p>
               </div>
             </div>
             <span
-              className="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
-              style={{ background: catMeta.color + "18", color: catMeta.color }}
+              className="rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.08em]"
+              style={{ color: severityColor, borderColor: `${severityColor}55`, background: `${severityColor}10` }}
             >
               {inc.severity}
             </span>
           </div>
 
-          {/* Diagnosis */}
-          <div className="px-5 py-4 space-y-4">
+          <div className="space-y-4 px-5 py-4">
             {/* What happened */}
             <div>
-              <p className="text-[10.5px] font-semibold uppercase tracking-widest mb-1.5" style={{ color: catMeta.color + "aa" }}>
-                What happened
-              </p>
-              <p style={{ fontSize: 13.5, color: "#1E293B", lineHeight: 1.6 }}>{inc.summary}</p>
+              <MonoLabel className="mb-1.5">What happened</MonoLabel>
+              <p className="text-[13.5px] leading-[1.6] text-[#0B0D0F]">{inc.summary}</p>
             </div>
 
-            {/* What Recovery Engine did */}
-            <div className="rounded-xl border p-3.5 space-y-2.5"
-              style={{ borderColor: catMeta.border, background: "#FFFFFF80" }}>
-              <p className="text-[10.5px] font-semibold uppercase tracking-widest" style={{ color: "#64748B" }}>
-                Recovery Engine response
-              </p>
+            {/* Recovery Engine response */}
+            <div className="space-y-2.5 rounded-[10px] border border-[#ECEEEF] bg-[#FAFBFB] p-3.5">
+              <MonoLabel>Recovery engine response</MonoLabel>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                  style={{ background: capability.canAutoFix ? "#DCFCE7" : "#FEF2F2" }}>
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                  style={{ background: capability.canAutoFix ? "#E6F4EF" : "#FEF2F2" }}>
                   {capability.canAutoFix
-                    ? <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                    : <X className="h-3 w-3 text-red-500" />
+                    ? <CheckCircle2 className="h-3 w-3 text-[#007F4E]" />
+                    : <X className="h-3 w-3 text-[#DC2626]" />
                   }
                 </span>
-                <p style={{ fontSize: 12.5, color: "#334155" }}>{capability.auto}</p>
+                <p className="text-[12.5px] leading-[1.55] text-[#4B5563]">{capability.auto}</p>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-50">
-                  <ArrowRight className="h-3 w-3 text-blue-500" />
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#E6F4EF]">
+                  <ArrowRight className="h-3 w-3 text-[#007F4E]" />
                 </span>
                 <div>
-                  <p className="text-[11px] font-semibold mb-0.5" style={{ color: "#64748B" }}>Recommended fix</p>
-                  <p style={{ fontSize: 12.5, color: "#334155" }}>{inc.recommendedAction ?? capability.manual}</p>
+                  <p className="mb-0.5 text-[11px] font-semibold text-[#6B7280]">Recommended fix</p>
+                  <p className="text-[12.5px] leading-[1.55] text-[#4B5563]">{inc.recommendedAction ?? capability.manual}</p>
                 </div>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                  style={{ background: inc.retryable ? "#DCFCE7" : "#FFF7ED" }}>
-                  <RefreshCw className="h-3 w-3" style={{ color: inc.retryable ? "#16A34A" : "#D97706" }} />
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                  style={{ background: inc.retryable ? "#E6F4EF" : "#FFFBEB" }}>
+                  <RefreshCw className="h-3 w-3" style={{ color: inc.retryable ? "#007F4E" : "#CA8A04" }} />
                 </span>
-                <p style={{ fontSize: 12.5, color: "#334155" }}>
+                <p className="text-[12.5px] leading-[1.55] text-[#4B5563]">
                   {inc.retryable
                     ? "This failure type is retryable — manual retry may succeed"
                     : "Not retryable — fixing the root cause is required before retrying"}
@@ -188,22 +201,26 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
               </div>
             </div>
 
-            {/* Technical detail (expandable) */}
+            {/* Technical detail (expandable, dark console) */}
             {inc.technicalSummary && (
               <div>
                 <button
                   type="button"
                   onClick={() => setShowTech(v => !v)}
-                  className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider transition-colors hover:opacity-80"
-                  style={{ color: catMeta.color + "cc" }}
+                  className="flex items-center gap-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#007F4E] transition-colors hover:text-[#006B45]"
                 >
                   {showTechnical ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                   Technical detail
                 </button>
                 {showTechnical && (
-                  <div className="mt-2 rounded-xl border p-3 font-mono text-[11.5px] leading-relaxed"
-                    style={{ borderColor: catMeta.border, background: "#FFFFFF", color: "#334155" }}>
-                    {inc.technicalSummary}
+                  <div className="mt-2 overflow-hidden rounded-[10px]" style={{ background: "#0B0D0F" }}>
+                    <div className="flex items-center gap-2 border-b px-3.5 py-2" style={{ borderColor: "#1C1F22" }}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#F87171]" />
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#6B7280]">Failure trace</span>
+                    </div>
+                    <p className="whitespace-pre-wrap p-3.5 font-mono text-[11.5px] leading-relaxed text-[#D1D5DB]">
+                      {inc.technicalSummary}
+                    </p>
                   </div>
                 )}
               </div>
@@ -213,21 +230,19 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
             <div className="flex flex-wrap gap-2 pt-1">
               {inc.retryable && (
                 <button type="button" onClick={() => onAction("retry")}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-[12px] font-semibold text-white transition-colors hover:opacity-90"
-                  style={{ background: catMeta.color }}>
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[#007F4E] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#006B45]">
                   <RefreshCw className="h-3 w-3" /> Retry now
                 </button>
               )}
               {r.replaySafeResumeAvailable && (
                 <button type="button" onClick={() => onAction("resume")}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[12px] font-semibold transition-colors hover:bg-white"
-                  style={{ borderColor: catMeta.border, color: catMeta.color }}>
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#9CCFBB] bg-white px-3.5 text-[12px] font-semibold text-[#006B45] transition-colors hover:bg-[#E6F4EF]">
                   <Zap className="h-3 w-3" /> Resume from checkpoint
                 </button>
               )}
               {inc.resolutionStatus === "open" && (
                 <button type="button" onClick={markResolved} disabled={resolving}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50">
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-3.5 text-[12px] font-semibold text-[#4B5563] transition-colors hover:bg-[#F7F8F9] disabled:opacity-50">
                   <CheckCircle2 className="h-3 w-3" /> {resolving ? "Marking…" : "Mark resolved"}
                 </button>
               )}
@@ -236,45 +251,46 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
         </div>
       )}
 
-      {/* ── Stats grid ─────────────────────────────────────────────────────── */}
+      {/* ── Resilience stats ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { icon: Shield,       value: r.recoveredFailures,      label: "Auto-recovered",    color: "#7C3AED",
-            detail: r.recoveredFailures > 0 ? "Vectorbea fixed these without you." : "No transient failures this run." },
-          { icon: RefreshCw,    value: r.retryAttempts,          label: "Retry attempts",    color: "#D97706",
-            detail: r.retryAttempts > 0 ? "With exponential backoff." : "No retries needed." },
-          { icon: AlertTriangle,value: r.rateLimitEvents,        label: "Rate limits hit",   color: "#EA580C",
-            detail: r.rateLimitEvents > 0 ? "Backoff applied automatically." : "No rate limits hit." },
+          { icon: Shield,        value: r.recoveredFailures, label: "Auto-recovered",  color: "#7C3AED",
+            detail: r.recoveredFailures > 0 ? "Fixed without intervention" : "No transient failures" },
+          { icon: RefreshCw,     value: r.retryAttempts,     label: "Retry attempts",  color: "#CA8A04",
+            detail: r.retryAttempts > 0 ? "With exponential backoff" : "No retries needed" },
+          { icon: AlertTriangle, value: r.rateLimitEvents,   label: "Rate limits hit", color: "#EA580C",
+            detail: r.rateLimitEvents > 0 ? "Backoff applied automatically" : "No rate limits hit" },
           { icon: r.replaySafeResumeAvailable ? ShieldCheck : X,
             value: r.replaySafeResumeAvailable ? "Yes" : "No",
             label: "Checkpoint replay",
-            color: r.replaySafeResumeAvailable ? "#059669" : "#94A3B8",
-            detail: r.replaySafeResumeAvailable ? "Can resume without re-running completed steps." : "No checkpoint available for this run." },
+            color: r.replaySafeResumeAvailable ? "#007F4E" : "#9CA3AF",
+            detail: r.replaySafeResumeAvailable ? "Resumable from last checkpoint" : "No checkpoint for this run" },
         ].map(({ icon: Icon, value, label, color, detail }, i) => (
-          <div key={i} className="rounded-2xl border border-slate-200 bg-white p-4 text-center group relative"
-            title={detail}>
-            <Icon className="mx-auto mb-1.5 h-5 w-5" style={{ color }} />
-            <p style={{ fontSize: 22, fontWeight: 800, color: "#0F172A", lineHeight: 1 }}>{value}</p>
-            <p style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>{label}</p>
-            {/* Tooltip */}
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block
-              whitespace-nowrap rounded-lg bg-slate-800 px-3 py-1.5 text-[11px] text-white shadow-lg z-10">
-              {detail}
+          <div key={i} className="rounded-[12px] border border-[#E0E3E6] bg-white p-4">
+            <div className="flex items-center justify-between">
+              <MonoLabel>{label}</MonoLabel>
+              <span className="flex h-6 w-6 items-center justify-center rounded-[6px]" style={{ background: `${color}14`, color }}>
+                <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+              </span>
             </div>
+            <p className="mt-2.5 text-[24px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[#0B0D0F]">{value}</p>
+            <p className="mt-1.5 text-[11.5px] leading-[1.45] text-[#6B7280]">{detail}</p>
           </div>
         ))}
       </div>
 
       {/* ── Recovery capabilities ─────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2"
-          style={{ background: "#F8FAFC" }}>
-          <Info className="h-3.5 w-3.5 text-blue-500" />
-          <p style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
-            What Vectorbea Recovery Engine handles automatically
+      <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
+        <div className="border-b border-[#ECEEEF] px-5 py-4">
+          <MonoLabel>Recovery engine</MonoLabel>
+          <p className="mt-0.5 text-[14.5px] font-bold tracking-[-0.01em] text-[#0B0D0F]">
+            Handled automatically
+          </p>
+          <p className="mt-0.5 text-[12.5px] text-[#6B7280]">
+            Transient failures are checkpointed and recovered without intervention. Two classes need a human.
           </p>
         </div>
-        <div className="p-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-1 p-4 sm:grid-cols-2">
           {[
             { ok: true,  text: "API rate limits",      detail: "Detects 429s, backs off, retries" },
             { ok: true,  text: "Network timeouts",     detail: "Retries with jitter & backoff" },
@@ -285,17 +301,18 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
             { ok: false, text: "Auth / credential errors", detail: "Requires human to rotate key" },
             { ok: false, text: "Config errors",        detail: "Requires fixing the workflow builder" },
           ].map(({ ok, text, detail }, i) => (
-            <div key={i} className="flex items-start gap-2.5 py-1.5 px-2 rounded-lg hover:bg-slate-50 transition-colors">
-              <span className="flex h-5 w-5 shrink-0 mt-0.5 items-center justify-center rounded-full"
-                style={{ background: ok ? "#DCFCE7" : "#FEF2F2" }}>
-                {ok
-                  ? <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                  : <X className="h-3 w-3 text-red-400" />
-                }
-              </span>
+            <div key={i} className="flex items-start gap-3 rounded-[8px] px-2 py-2 transition-colors hover:bg-[#FAFBFB]">
+              <DiamondBullet ok={ok} />
               <div>
-                <p style={{ fontSize: 12.5, fontWeight: 600, color: "#1E293B" }}>{text}</p>
-                <p style={{ fontSize: 11, color: "#64748B" }}>{detail}</p>
+                <p className="flex items-center gap-2 text-[12.5px] font-semibold text-[#0B0D0F]">
+                  {text}
+                  {!ok && (
+                    <span className="rounded-full border border-[#FECACA] bg-[#FEF2F2] px-1.5 py-px font-mono text-[8.5px] font-semibold uppercase tracking-[0.08em] text-[#B91C1C]">
+                      Human
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11.5px] text-[#9CA3AF]">{detail}</p>
               </div>
             </div>
           ))}
@@ -306,7 +323,7 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
       {viewMode === "engineering" && r.replaySafeResumeAvailable && !inc && (
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => onAction("resume")}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 text-[13px] font-semibold text-white hover:bg-[#1D4ED8] transition-colors">
+            className="inline-flex h-9 items-center gap-1.5 rounded-[9px] bg-[#007F4E] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#006B45]">
             <RefreshCw className="h-3.5 w-3.5" /> Resume from checkpoint
           </button>
         </div>

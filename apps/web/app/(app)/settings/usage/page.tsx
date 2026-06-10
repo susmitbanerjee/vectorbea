@@ -3,10 +3,14 @@
 import { useEffect, useState } from "react";
 import { apiFetch, withWorkspace } from "@/lib/api/client";
 import {
-  AlertTriangle, Bot, CalendarClock, CheckCircle2,
-  FileText, FlaskConical, Loader2, Lock, RefreshCw,
-  Users, Wrench, Zap, Activity,
+  Activity, AlertTriangle, Bot, CalendarClock, CheckCircle2, Clock,
+  FileText, FlaskConical, GitBranch, Layers, Loader2, Lock, Mail,
+  RefreshCw, Timer, Users, Webhook, Zap,
 } from "lucide-react";
+import { AppHeader } from "@/components/layout/app-header";
+import { Chip } from "@/components/ui/page-kit";
+import { ArchitectLogo } from "@/components/architect/ArchitectLogo";
+import { cn } from "@/lib/utils";
 
 interface UsageStatus {
   betaStatus: string;
@@ -30,67 +34,60 @@ interface UsageStatus {
   message: string;
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function MonoLabel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className="px-1 text-[10.5px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+    <p className={cn("font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]", className)}>
       {children}
     </p>
   );
 }
 
-function UsageBar({ used, max, icon: Icon, label, color = "bg-blue-500" }: {
-  used: number; max: number; label: string;
-  icon: React.ElementType; color?: string;
-}) {
-  const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
-  const isHigh = pct >= 80;
-  return (
-    <div className="flex items-center gap-3 py-3 px-4">
-      <Icon className="h-4 w-4 text-slate-400 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[13px] text-slate-600">{label}</span>
-          <span className={`text-[13px] font-bold tabular-nums ${isHigh ? "text-red-600" : "text-slate-800"}`}>
-            {used} <span className="text-slate-400 font-normal text-[11px]">/ {max}</span>
-          </span>
-        </div>
-        <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${isHigh ? "bg-red-500" : color}`}
-            style={{ width: `${pct}%` }}
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn("rounded-[12px] border border-[#E0E3E6] bg-white", className)}>{children}</div>;
+}
+
+/** Time remaining until the next UTC midnight (when daily quotas reset). */
+function resetCountdown(): string {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  const mins = Math.max(0, Math.floor((next.getTime() - now.getTime()) / 60_000));
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+
+/** Segmented quota meter — one cell per run when the quota is small. */
+function QuotaMeter({ used, max }: { used: number; max: number }) {
+  const pct = max > 0 ? Math.min(100, (used / max) * 100) : 0;
+  const color = pct >= 100 ? "#DC2626" : pct >= 80 ? "#CA8A04" : "#007F4E";
+  if (max > 0 && max <= 40) {
+    return (
+      <div className="flex w-full gap-[3px]">
+        {Array.from({ length: max }).map((_, i) => (
+          <span
+            key={i}
+            className="h-[10px] flex-1 rounded-[2px] transition-colors duration-300"
+            style={{ background: i < used ? color : "#ECEEEF" }}
           />
-        </div>
-        {isHigh && (
-          <p className="mt-1 text-[11px] text-red-500 font-medium">
-            {pct >= 100 ? "Limit reached for today" : `${pct}% used — approaching limit`}
-          </p>
-        )}
+        ))}
       </div>
+    );
+  }
+  return (
+    <div className="h-[10px] w-full overflow-hidden rounded-full bg-[#ECEEEF]">
+      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: color }} />
     </div>
   );
 }
 
-function LimitRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string | number }) {
+function LimitTile({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string | number; sub?: string }) {
   return (
-    <div className="flex items-center gap-3 py-3 px-4">
-      <Icon className="h-4 w-4 text-slate-400 shrink-0" />
-      <span className="flex-1 text-[13px] text-slate-600">{label}</span>
-      <span className="text-[13px] font-semibold text-slate-800">{value}</span>
-    </div>
-  );
-}
-
-function FeatureRow({ icon: Icon, label, enabled }: { icon: React.ElementType; label: string; enabled: boolean }) {
-  return (
-    <div className="flex items-center gap-3 py-3 px-4">
-      <Icon className="h-4 w-4 text-slate-400 shrink-0" />
-      <span className="flex-1 text-[13px] text-slate-600">{label}</span>
-      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-        enabled ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-500"
-      }`}>
-        {enabled ? "Enabled" : "Disabled"}
-      </span>
-    </div>
+    <Panel className="p-4">
+      <div className="flex items-center justify-between">
+        <MonoLabel>{label}</MonoLabel>
+        <Icon className="h-4 w-4 text-[#C9CED4]" strokeWidth={1.8} />
+      </div>
+      <p className="mt-2.5 text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[#0B0D0F]">{value}</p>
+      {sub && <p className="mt-1 text-[11.5px] text-[#9CA3AF]">{sub}</p>}
+    </Panel>
   );
 }
 
@@ -106,128 +103,208 @@ export default function UsagePage() {
 
   useEffect(() => { load(); }, []);
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-20">
-      <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
-    </div>
-  );
+  const approved = status?.betaStatus === "approved";
+  const used = status?.runsToday ?? 0;
+  const max  = status?.maxRunsPerDay ?? 20;
+  const pct  = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
+
+  const features = [
+    { label: "AI Workflow Architect", desc: "Plain English → running workflow", enabled: true, architect: true, icon: Zap },
+    { label: "Schedules",        desc: "Cron-triggered workflows",      enabled: status?.allowSchedules ?? false,       icon: CalendarClock },
+    { label: "Webhooks",         desc: "HTTP-triggered workflows",      enabled: status?.allowWebhooks ?? false,        icon: Webhook },
+    { label: "Iterative agents", desc: "Multi-turn agent loops",        enabled: status?.allowIterativeAgents ?? false, icon: Bot },
+  ];
 
   return (
-    <div className="w-full max-w-5xl space-y-6 p-6 lg:p-8">
+    <div className="min-h-screen">
+      <AppHeader
+        eyebrow="Workspace"
+        title="Usage & limits"
+        subtitle="Private beta · daily usage resets at midnight UTC"
+        actions={
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] font-medium text-[#4B5563] transition-colors hover:bg-[#F7F8F9] disabled:opacity-40"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
+          </button>
+        }
+      />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-[18px] font-bold text-slate-900">Usage & Limits</h1>
-          <p className="mt-0.5 text-[13px] text-slate-400">Private beta · daily usage resets at midnight UTC</p>
-        </div>
-        <button type="button" onClick={load}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] text-slate-500 hover:bg-slate-50 transition-colors">
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
-        </button>
-      </div>
-
-      {/* Status banner */}
-      <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
-        status?.betaStatus === "approved"
-          ? "border-green-200 bg-green-50"
-          : "border-amber-200 bg-amber-50"
-      }`}>
-        {status?.betaStatus === "approved"
-          ? <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
-          : <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />}
-        <p className="text-[13px] font-medium text-slate-800">{status?.message ?? "Loading…"}</p>
-      </div>
-
-      {/* 2-column grid on desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Left column */}
-        <div className="space-y-6">
-          {/* Execution mode */}
-          <div>
-            <SectionLabel>Execution Mode</SectionLabel>
-            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-              <div className="flex items-center gap-3 py-3.5 px-4">
-                <FlaskConical className="h-4 w-4 text-slate-400 shrink-0" />
-                <span className="flex-1 text-[13px] text-slate-600">Simulation</span>
-                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                  status?.canRunSimulation ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-                }`}>
-                  {status?.canRunSimulation ? "Enabled" : "Disabled"}
-                </span>
-              </div>
-              <div className="flex items-center gap-3 py-3.5 px-4">
-                <Zap className="h-4 w-4 text-slate-400 shrink-0" />
-                <span className="flex-1 text-[13px] text-slate-600">Real execution</span>
-                {status?.canRunRealExecution
-                  ? <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold bg-green-50 text-green-700">Enabled</span>
-                  : <span className="flex items-center gap-1 text-[11px] font-medium text-slate-500">
-                      <Lock className="h-3 w-3" /> Admin approval required
-                    </span>
-                }
-              </div>
-            </div>
+      <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
+        {loading && !status ? (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 className="h-5 w-5 animate-spin text-[#C9CED4]" />
           </div>
+        ) : (
+          <>
+            {/* ── Beta status banner ── */}
+            <div className={cn(
+              "animate-slide-up flex items-center gap-3 rounded-[12px] border px-4 py-3",
+              approved ? "border-[#9CCFBB] bg-[#E6F4EF]/60" : "border-[#FDE68A] bg-[#FFFBEB]",
+            )}>
+              {approved
+                ? <CheckCircle2 className="h-[18px] w-[18px] shrink-0 text-[#007F4E]" />
+                : <AlertTriangle className="h-[18px] w-[18px] shrink-0 text-[#CA8A04]" />}
+              <p className={cn("text-[13px] font-medium", approved ? "text-[#006B45]" : "text-[#92400E]")}>
+                {status?.message ?? "Loading…"}
+              </p>
+            </div>
 
-          {/* Today's usage */}
-          <div>
-            <SectionLabel>Today&apos;s Usage</SectionLabel>
-            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-              <UsageBar
-                used={status?.runsToday ?? 0}
-                max={status?.maxRunsPerDay ?? 20}
-                label="Workflow runs"
-                icon={Activity}
-                color="bg-blue-500"
-              />
-              {status && (status.simulationRunsToday > 0 || status.realRunsToday > 0) && (
-                <div className="px-4 pb-3 pt-0">
-                  <span className="text-[11.5px] text-slate-400 ml-7">
-                    {status.simulationRunsToday > 0 && <>{status.simulationRunsToday} simulation</>}
-                    {status.simulationRunsToday > 0 && status.realRunsToday > 0 && " · "}
-                    {status.realRunsToday > 0 && <>{status.realRunsToday} real</>}
+            {/* ── Quota hero + execution mode ── */}
+            <div className="animate-slide-up stagger-1 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+              {/* Today's runs */}
+              <Panel className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <MonoLabel>Today&apos;s usage</MonoLabel>
+                    <p className="mt-0.5 text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">Workflow runs</p>
+                  </div>
+                  <span className="flex items-center gap-1.5 font-mono text-[11px] text-[#9CA3AF]">
+                    <Clock className="h-3 w-3" /> resets in {resetCountdown()}
                   </span>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Features */}
-          <div>
-            <SectionLabel>Features</SectionLabel>
-            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-              <FeatureRow icon={CalendarClock} label="Schedules"             enabled={status?.allowSchedules ?? false} />
-              <FeatureRow icon={Wrench}        label="Webhooks"              enabled={status?.allowWebhooks ?? false} />
-              <FeatureRow icon={Bot}           label="Iterative agents"      enabled={status?.allowIterativeAgents ?? false} />
-              <FeatureRow icon={Zap}           label="AI Workflow Architect" enabled={true} />
-            </div>
-          </div>
-        </div>
+                <div className="mt-4 flex items-end gap-2">
+                  <span
+                    className="text-[40px] font-semibold leading-none tabular-nums tracking-[-0.03em]"
+                    style={{ color: pct >= 100 ? "#DC2626" : pct >= 80 ? "#CA8A04" : "#0B0D0F" }}
+                  >
+                    {used}
+                  </span>
+                  <span className="mb-1 font-mono text-[14px] text-[#9CA3AF]">/ {max}</span>
+                  <span className="mb-1 ml-auto font-mono text-[12px] tabular-nums text-[#9CA3AF]">{pct}%</span>
+                </div>
 
-        {/* Right column */}
-        <div className="space-y-6">
-          {/* Workspace limits */}
-          <div>
-            <SectionLabel>Workspace Limits</SectionLabel>
-            <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-              <LimitRow icon={Zap}           label="Max workflows"         value={status?.maxWorkflows ?? 3} />
-              <LimitRow icon={Zap}           label="Max steps / workflow"  value={status?.maxStepsPerWorkflow ?? 5} />
-              <LimitRow icon={CalendarClock} label="Max run duration"      value="5 minutes" />
-              <LimitRow icon={FileText}      label="Log retention"         value={`${status?.logRetentionDays ?? 7} days`} />
-              <LimitRow icon={Users}         label="Team members"          value={status?.maxTeamMembers ?? 1} />
-              <LimitRow icon={Bot}           label="LLM providers (BYOK)"  value={status?.maxLlmProviders ?? 1} />
-            </div>
-          </div>
+                <div className="mt-3">
+                  <QuotaMeter used={used} max={max} />
+                </div>
 
-          {/* Request limits */}
-          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
-            <p className="text-[13px] font-semibold text-amber-800">Need higher limits?</p>
-            <p className="text-[12.5px] text-amber-700 mt-1 leading-relaxed">
-              Contact your Vectorbea admin to request increased limits for your workspace.
-            </p>
-          </div>
-        </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[#ECEEEF] pt-3.5">
+                  <Chip tone="teal" dot={false}>
+                    <FlaskConical className="mr-0.5 h-3 w-3" /> {status?.simulationRunsToday ?? 0} simulation
+                  </Chip>
+                  <Chip tone="green" dot={false}>
+                    <Zap className="mr-0.5 h-3 w-3" /> {status?.realRunsToday ?? 0} real
+                  </Chip>
+                  {pct >= 80 && (
+                    <span className="ml-auto text-[11.5px] font-medium text-[#DC2626]">
+                      {pct >= 100 ? "Daily limit reached" : "Approaching daily limit"}
+                    </span>
+                  )}
+                </div>
+              </Panel>
+
+              {/* Execution mode */}
+              <Panel className="p-5">
+                <MonoLabel>Execution mode</MonoLabel>
+                <p className="mt-0.5 text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">What can run</p>
+                <div className="mt-4 space-y-2.5">
+                  <div className={cn(
+                    "flex items-center gap-3 rounded-[10px] border p-3.5",
+                    status?.canRunSimulation ? "border-[#9CCFBB] bg-[#E6F4EF]/40" : "border-[#ECEEEF] bg-[#FAFBFB]",
+                  )}>
+                    <span className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]",
+                      status?.canRunSimulation ? "bg-[#0F766E]" : "bg-[#E0E3E6]",
+                    )}>
+                      <FlaskConical className="h-4 w-4 text-white" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold text-[#0B0D0F]">Simulation</p>
+                      <p className="text-[11.5px] text-[#6B7280]">Safe test runs, no real calls</p>
+                    </div>
+                    <Chip tone={status?.canRunSimulation ? "green" : "red"} dot={false}>
+                      {status?.canRunSimulation ? "Enabled" : "Disabled"}
+                    </Chip>
+                  </div>
+
+                  <div className={cn(
+                    "flex items-center gap-3 rounded-[10px] border p-3.5",
+                    status?.canRunRealExecution ? "border-[#9CCFBB] bg-[#E6F4EF]/40" : "border-[#ECEEEF] bg-[#FAFBFB]",
+                  )}>
+                    <span className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]",
+                      status?.canRunRealExecution ? "bg-[#007F4E]" : "bg-[#E0E3E6]",
+                    )}>
+                      {status?.canRunRealExecution
+                        ? <Zap className="h-4 w-4 text-white" />
+                        : <Lock className="h-4 w-4 text-[#6B7280]" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold text-[#0B0D0F]">Real execution</p>
+                      <p className="text-[11.5px] text-[#6B7280]">
+                        {status?.canRunRealExecution ? "Live side effects enabled" : "Admin approval required"}
+                      </p>
+                    </div>
+                    <Chip tone={status?.canRunRealExecution ? "green" : "gray"} dot={false}>
+                      {status?.canRunRealExecution ? "Enabled" : "Locked"}
+                    </Chip>
+                  </div>
+                </div>
+              </Panel>
+            </div>
+
+            {/* ── Workspace limits ── */}
+            <div className="animate-slide-up stagger-2">
+              <MonoLabel className="mb-2.5">Workspace limits</MonoLabel>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+                <LimitTile icon={GitBranch}     label="Workflows"      value={status?.maxWorkflows ?? 3}        sub="max active" />
+                <LimitTile icon={Layers}        label="Steps"          value={status?.maxStepsPerWorkflow ?? 5} sub="per workflow" />
+                <LimitTile icon={Timer}         label="Run duration"   value="5m"                               sub="max per run" />
+                <LimitTile icon={FileText}      label="Log retention"  value={`${status?.logRetentionDays ?? 7}d`} sub="then purged" />
+                <LimitTile icon={Users}         label="Team"           value={status?.maxTeamMembers ?? 1}      sub="members" />
+                <LimitTile icon={Activity}      label="LLM providers"  value={status?.maxLlmProviders ?? 1}     sub="BYOK keys" />
+              </div>
+            </div>
+
+            {/* ── Features + request more ── */}
+            <div className="animate-slide-up stagger-3 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+              <div>
+                <MonoLabel className="mb-2.5">Features</MonoLabel>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  {features.map(({ label, desc, enabled, icon: Icon, architect }) => (
+                    <Panel key={label} className={cn("flex items-center gap-3 p-3.5", !enabled && "opacity-70")}>
+                      {architect ? (
+                        <ArchitectLogo size={32} />
+                      ) : (
+                        <span className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]",
+                          enabled ? "bg-[#0B0D0F]" : "bg-[#F3F4F5]",
+                        )}>
+                          <Icon className={cn("h-4 w-4", enabled ? "text-white" : "text-[#9CA3AF]")} strokeWidth={1.9} />
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-[#0B0D0F]">{label}</p>
+                        <p className="truncate text-[11.5px] text-[#9CA3AF]">{desc}</p>
+                      </div>
+                      <Chip tone={enabled ? "green" : "gray"} dot={false}>{enabled ? "Enabled" : "Disabled"}</Chip>
+                    </Panel>
+                  ))}
+                </div>
+              </div>
+
+              {/* Need higher limits */}
+              <Panel className="flex flex-col p-5">
+                <MonoLabel>Limits</MonoLabel>
+                <p className="mt-0.5 text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">Need more headroom?</p>
+                <p className="mt-2 text-[12.5px] leading-[1.6] text-[#6B7280]">
+                  Private-beta limits keep early workloads safe. Contact your Vectorbea admin to raise run quotas,
+                  workflow counts, or unlock features for this workspace.
+                </p>
+                <a
+                  href="mailto:support@vectorbea.com?subject=Limit%20increase%20request"
+                  className="mt-auto flex h-9 w-full items-center justify-center gap-2 rounded-[9px] border border-[#9CCFBB] bg-white pt-px text-[13px] font-semibold text-[#006B45] transition-colors hover:bg-[#E6F4EF]"
+                >
+                  <Mail className="h-3.5 w-3.5" /> Request higher limits
+                </a>
+              </Panel>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

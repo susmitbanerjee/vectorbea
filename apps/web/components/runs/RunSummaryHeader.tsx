@@ -23,9 +23,9 @@ function fmtDate(iso: string): string {
 
 function MetaItem({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.07em", textTransform: "uppercase" }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>{value}</span>
+    <div className="flex flex-col gap-1">
+      <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">{label}</span>
+      <span className="text-[13px] font-semibold text-[#0B0D0F]">{value}</span>
     </div>
   );
 }

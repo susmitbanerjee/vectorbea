@@ -184,7 +184,8 @@ export default function OverviewPage() {
     { label: "Agents", value: summary?.totalAgents ?? 0, color: "#7C3AED", href: "/agents" as Route, icon: Bot },
     { label: "Tools", value: summary?.totalTools ?? 0, color: "#0F766E", href: "/tools" as Route, icon: Wrench },
   ];
-  const resMax = Math.max(1, ...resources.map(r => r.value));
+  const resTotal = resources.reduce((s, r) => s + r.value, 0);
+  const workersOnline = summary?.connectedWorkers ?? 0;
 
   const statusPill = loading ? null
     : failed24 > 0 ? { tone: "amber" as const, text: `${failed24} failed · 24h` }
@@ -368,24 +369,64 @@ export default function OverviewPage() {
             <Metric label="Workflow active" value={loading ? "…" : (workflowUtil == null ? "—" : `${workflowUtil}%`)} icon={GitBranch} />
           </div>
 
-          {/* Resource composition */}
+          {/* Registry — what's deployed in this workspace */}
           <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
-            <div className="mb-4 flex items-center gap-2"><span className="vb-mono-label">Registry</span><span className="text-[14px] font-bold text-[#0B0D0F]">Platform resources</span></div>
-            <div className="space-y-3.5">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2"><span className="vb-mono-label">Registry</span><span className="text-[14px] font-bold text-[#0B0D0F]">Platform resources</span></div>
+              <span className="font-mono text-[11px] tabular-nums text-[#9CA3AF]">{loading ? "…" : `${resTotal} total`}</span>
+            </div>
+
+            {/* Composition strip — share of registry by resource type */}
+            {resTotal > 0 && (
+              <div className="mb-4 flex h-2 w-full gap-[3px] overflow-hidden">
+                {resources.filter(r => r.value > 0).map(r => (
+                  <span
+                    key={r.label}
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.max(3, (r.value / resTotal) * 100)}%`, background: r.color }}
+                    title={`${r.label}: ${r.value}`}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Resource tiles */}
+            <div className="grid grid-cols-3 gap-2.5">
               {resources.map((r) => {
                 const Icon = r.icon;
                 return (
-                  <Link key={r.label} href={r.href} className="group block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#374151]"><Icon className="h-3.5 w-3.5" style={{ color: r.color }} />{r.label}</span>
-                      <span className="font-mono text-[13px] font-semibold tabular-nums text-[#0B0D0F]">{r.value}</span>
+                  <Link
+                    key={r.label}
+                    href={r.href}
+                    className="group rounded-[10px] border border-[#ECEEEF] bg-[#FAFBFB] p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-white"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: r.color }}>
+                        <Icon className="h-3.5 w-3.5 text-white" strokeWidth={2} />
+                      </span>
+                      <ArrowRight className="h-3.5 w-3.5 text-[#C9CED4] opacity-0 transition-opacity group-hover:opacity-100" />
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-[#ECEEEF]">
-                      <div className="h-full rounded-full transition-all group-hover:opacity-90" style={{ width: `${Math.max(4, (r.value / resMax) * 100)}%`, background: r.color }} />
-                    </div>
+                    <p className="mt-2.5 text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[#0B0D0F]">
+                      {loading ? "…" : r.value}
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">{r.label}</p>
                   </Link>
                 );
               })}
+            </div>
+
+            {/* Worker fleet line */}
+            <div className="mt-4 flex items-center gap-2 border-t border-[#ECEEEF] pt-3.5">
+              <span
+                className={cn("h-2 w-2 rounded-full", workersOnline > 0 && "animate-pulse")}
+                style={{ background: workersOnline > 0 ? "#0F766E" : "#C9CED4" }}
+              />
+              <span className="text-[12.5px] text-[#4B5563]">
+                {workersOnline > 0
+                  ? `${workersOnline} worker${workersOnline !== 1 ? "s" : ""} connected`
+                  : "No workers connected"}
+              </span>
+              <span className="ml-auto font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#9CA3AF]">Fleet</span>
             </div>
           </div>
         </div>

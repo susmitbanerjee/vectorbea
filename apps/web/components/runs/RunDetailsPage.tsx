@@ -70,10 +70,10 @@ export function RunDetailsPage({
       {/* ── Execution View / Logs / Recovery / Tool Calls / Events tabs ───── */}
       <div
         className="rounded-2xl bg-white overflow-hidden"
-        style={{ border: "1px solid #E2E8F0", boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}
+        style={{ border: "1px solid #E0E3E6", boxShadow: "0 2px 8px rgba(11,13,15,0.04)" }}
       >
         {/* Tab bar */}
-        <div className="flex items-center border-b border-slate-200 overflow-x-auto" style={{ background: "#F8FAFC" }}>
+        <div className="flex items-center overflow-x-auto border-b border-[#E0E3E6]" style={{ background: "#FAFBFB" }}>
           {TABS.map(tab => {
             const badge = badgeCounts[tab.id];
             return (
@@ -82,19 +82,19 @@ export function RunDetailsPage({
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "inline-flex h-11 shrink-0 items-center gap-1.5 border-b-2 px-4 text-[13px] font-semibold transition-colors",
+                  "inline-flex h-11 shrink-0 items-center gap-1.5 border-b-2 px-4 text-[13px] transition-colors",
                   activeTab === tab.id
-                    ? "border-amber-500 text-amber-700"
-                    : "border-transparent text-slate-500 hover:text-slate-700",
+                    ? "border-[#007F4E] font-semibold text-[#006B45]"
+                    : "border-transparent font-medium text-[#6B7280] hover:text-[#0B0D0F]",
                 )}
               >
                 {tab.label}
                 {badge != null && badge > 0 && (
                   <span
-                    className="rounded-full px-1.5 py-px text-[10px] font-bold"
+                    className="rounded-full px-1.5 py-px font-mono text-[10px] font-semibold tabular-nums"
                     style={activeTab === tab.id
-                      ? { background: "#FEF3C7", color: "#B45309" }
-                      : { background: "#F1F5F9", color: "#64748B" }}
+                      ? { background: "#E6F4EF", color: "#006B45" }
+                      : { background: "#F3F4F5", color: "#6B7280" }}
                   >
                     {badge}
                   </span>
@@ -108,9 +108,9 @@ export function RunDetailsPage({
         <div className={activeTab === "logs" || activeTab === "execution" ? "" : "p-4 min-h-[300px]"}>
           {activeTab === "execution" && (
             <div>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>Event Timeline</span>
-                <span style={{ fontSize: 11.5, color: "#94A3B8" }}>{timelineEvents.length} events</span>
+              <div className="flex items-center justify-between border-b border-[#ECEEEF] px-4 py-3">
+                <span className="text-[13.5px] font-bold tracking-[-0.01em] text-[#0B0D0F]">Event Timeline</span>
+                <span className="font-mono text-[11px] tabular-nums text-[#9CA3AF]">{timelineEvents.length} events</span>
               </div>
               <RunTimeline
                 events={timelineEvents}

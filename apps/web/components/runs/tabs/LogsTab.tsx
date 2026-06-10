@@ -4,16 +4,16 @@ import { useState, useMemo } from "react";
 import type { WorkflowRun, ViewMode, RunLog } from "@/types/runs";
 import type { RunTimelineEventUi } from "@/types/agent-run-ui";
 import {
-  Check, Copy, Download, Search, FileText, Filter, X, ChevronRight, ChevronDown,
+  Check, Copy, Download, Search, Terminal, X, ChevronRight, ChevronDown, Bug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ─── Level config (light-mode palette) ───────────────────────────────────────
+// ─── Level config (dark runtime-console palette) ─────────────────────────────
 const LEVEL = {
-  debug: { label: "DEBG", fg: "#64748B", bg: "#F8FAFC", border: "#E2E8F0", dot: "#94A3B8", text: "#475569" },
-  info:  { label: "INFO", fg: "#2563EB", bg: "#EFF6FF", border: "#BFDBFE", dot: "#3B82F6", text: "#1E40AF" },
-  warn:  { label: "WARN", fg: "#D97706", bg: "#FFFBEB", border: "#FDE68A", dot: "#F59E0B", text: "#92400E" },
-  error: { label: "ERRR", fg: "#DC2626", bg: "#FEF2F2", border: "#FECACA", dot: "#EF4444", text: "#991B1B" },
+  debug: { label: "DEBG", fg: "#6B7280", text: "#9CA3AF" },
+  info:  { label: "INFO", fg: "#34D399", text: "#D1D5DB" },
+  warn:  { label: "WARN", fg: "#FBBF24", text: "#FDE68A" },
+  error: { label: "ERRR", fg: "#F87171", text: "#FECACA" },
 } as const;
 type Level = keyof typeof LEVEL;
 
@@ -28,13 +28,25 @@ function isoTs(ts: string): string {
   try { return new Date(ts).toISOString(); } catch { return ts; }
 }
 
+/** Normalize a log line for de-duplication: same second + same words = same event. */
+function dedupKey(l: RunLog): string {
+  const sec = Math.floor(new Date(l.timestamp ?? 0).getTime() / 1000);
+  const msg = (l.message ?? "")
+    .toLowerCase()
+    .replace(/[—·•|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return `${sec}|${l.level ?? "info"}|${l.stepId ?? ""}|${msg}`;
+}
+
 function Highlight({ text, q }: { text: string; q: string }) {
   if (!q.trim()) return <>{text}</>;
   const parts = text.split(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
   return <>
     {parts.map((p, i) =>
       p.toLowerCase() === q.toLowerCase()
-        ? <mark key={i} className="rounded px-0.5" style={{ background: "#FEF08A", color: "#713F12" }}>{p}</mark>
+        ? <mark key={i} className="rounded px-0.5" style={{ background: "#5C4A0E", color: "#FDE68A" }}>{p}</mark>
         : p
     )}
   </>;
@@ -55,64 +67,62 @@ function LogRow({ log, line, q }: { log: RunLog; line: number; q: string }) {
   }
 
   return (
-    <div className="group" style={{ borderBottom: "1px solid #F1F5F9" }}>
+    <div className="group">
       <div
-        className="flex items-start gap-0 font-mono cursor-default transition-colors hover:bg-slate-50"
-        style={{ fontSize: 12.5, lineHeight: 1.6 }}
+        className="flex cursor-default items-start font-mono transition-colors hover:bg-[#14171A]"
+        style={{ fontSize: 12, lineHeight: 1.65 }}
       >
         {/* Line # */}
-        <span className="shrink-0 select-none text-right pr-3 pl-3 py-2"
-          style={{ width: 48, color: "#CBD5E1", fontSize: 10.5 }}>
+        <span className="shrink-0 select-none py-1.5 pl-3 pr-3 text-right tabular-nums"
+          style={{ width: 48, color: "#374151", fontSize: 10.5 }}>
           {line}
         </span>
 
         {/* Timestamp */}
-        <span className="shrink-0 pr-4 py-2 tabular-nums" style={{ color: "#94A3B8", minWidth: 90, fontSize: 11.5 }}>
+        <span className="shrink-0 py-1.5 pr-4 tabular-nums" style={{ color: "#4B5563", minWidth: 92, fontSize: 11 }}>
           {fmtTime(log.timestamp ?? "")}
         </span>
 
-        {/* Level badge */}
-        <span className="shrink-0 mr-3 py-2 flex items-start pt-[9px]">
-          <span className="rounded px-1.5 py-0.5 text-[9.5px] font-black tracking-widest"
-            style={{ background: cfg.bg, color: cfg.fg, border: `1px solid ${cfg.border}` }}>
-            {cfg.label}
-          </span>
+        {/* Level */}
+        <span className="shrink-0 select-none py-1.5 pr-3 font-semibold tracking-[0.08em]"
+          style={{ color: cfg.fg, width: 46, fontSize: 10.5 }}>
+          {cfg.label}
         </span>
 
         {/* Step */}
         {log.stepId && (
-          <span className="shrink-0 pr-3 py-2 truncate"
-            style={{ color: "#94A3B8", minWidth: 80, maxWidth: 120, fontSize: 11 }}>
+          <span className="shrink-0 truncate py-1.5 pr-3"
+            style={{ color: "#5EEAD4", minWidth: 64, maxWidth: 120, fontSize: 11 }}>
             [{log.stepId}]
           </span>
         )}
 
         {/* Message */}
-        <span className="flex-1 min-w-0 pr-3 py-2 break-words whitespace-pre-wrap"
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words py-1.5 pr-3"
           style={{ color: cfg.text }}>
           <Highlight text={log.message ?? ""} q={q} />
         </span>
 
         {/* Actions */}
-        <div className="shrink-0 flex items-center gap-1 pr-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex shrink-0 items-center gap-1 py-1.5 pr-3 opacity-0 transition-opacity group-hover:opacity-100">
           {hasMeta && (
             <button type="button" onClick={() => setOpen(v => !v)}
-              className="flex h-5 w-5 items-center justify-center rounded hover:bg-slate-200 transition-colors text-slate-400">
+              className="flex h-5 w-5 items-center justify-center rounded text-[#6B7280] transition-colors hover:bg-[#1F2428] hover:text-[#D1D5DB]">
               {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
           )}
           <button type="button" onClick={copy}
-            className="flex h-5 w-5 items-center justify-center rounded hover:bg-slate-200 transition-colors text-slate-400">
-            {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            className="flex h-5 w-5 items-center justify-center rounded text-[#6B7280] transition-colors hover:bg-[#1F2428] hover:text-[#D1D5DB]">
+            {copied ? <Check className="h-3 w-3 text-[#34D399]" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
       </div>
 
       {/* Expanded metadata */}
       {open && hasMeta && (
-        <div className="ml-[232px] mr-4 mb-2 rounded-lg overflow-hidden"
-          style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-          <pre className="font-mono text-[11px] leading-relaxed overflow-auto max-h-52 p-3 text-slate-600">
+        <div className="mb-2 ml-[140px] mr-4 overflow-hidden rounded-[8px]"
+          style={{ background: "#14171A", border: "1px solid #2A2E33" }}>
+          <pre className="max-h-52 overflow-auto p-3 font-mono text-[11px] leading-relaxed text-[#9CA3AF]">
             {JSON.stringify(
               Object.fromEntries(Object.entries(log.metadata ?? {}).filter(([, v]) => v != null && v !== "")),
               null, 2
@@ -137,10 +147,13 @@ export function LogsTab({ run, viewMode, rawEvents }: LogsTabProps) {
   const [showDebug, setShowDebug] = useState(true);
   const [copiedAll, setCopiedAll] = useState(false);
 
-  // Merge structured run.logs + raw timeline events into unified stream
+  // Merge structured run.logs + raw timeline events into one stream.
+  // Events describing the same moment as an existing structured log
+  // (same second / level / step / words) are dropped to avoid duplicate lines.
   const allLogs: RunLog[] = useMemo(() => {
     const structured: RunLog[] = run.logs ?? [];
-    const existingIds = new Set(structured.map(l => l.id));
+    const existingIds  = new Set(structured.map(l => l.id));
+    const existingKeys = new Set(structured.map(dedupKey));
 
     const eventLogs: RunLog[] = (rawEvents ?? []).map(ev => ({
       id:        `evt-${ev.id}`,
@@ -180,8 +193,13 @@ export function LogsTab({ run, viewMode, rawEvents }: LogsTabProps) {
     }));
 
     const combined = [...structured];
+    const seenKeys = new Set(existingKeys);
     for (const el of eventLogs) {
-      if (!existingIds.has(el.id)) combined.push(el);
+      if (existingIds.has(el.id)) continue;
+      const key = dedupKey(el);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      combined.push(el);
     }
     return combined.sort((a, b) =>
       new Date(a.timestamp ?? 0).getTime() - new Date(b.timestamp ?? 0).getTime()
@@ -248,32 +266,34 @@ export function LogsTab({ run, viewMode, rawEvents }: LogsTabProps) {
   }
 
   return (
-    <div className="bg-white" style={{ borderRadius: "0 0 16px 16px", minHeight: 380 }}>
+    <div className="overflow-hidden" style={{ borderRadius: "0 0 16px 16px", minHeight: 380, background: "#0B0D0F" }}>
 
-      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-slate-100"
-        style={{ background: "#F8FAFC" }}>
+      {/* ── Console toolbar ──────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5" style={{ borderBottom: "1px solid #1C1F22" }}>
 
-        {/* Icon + label */}
-        <div className="flex items-center gap-1.5 mr-1">
-          <FileText className="h-3.5 w-3.5 text-slate-400" />
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-            {run.id.slice(0, 8)} · {filtered.length.toLocaleString()} lines
+        {/* Identity */}
+        <div className="mr-1 flex items-center gap-2">
+          <Terminal className="h-3.5 w-3.5 shrink-0 text-[#6B7280]" />
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#6B7280]">
+            run-{run.id.slice(0, 8)} · {filtered.length.toLocaleString()} lines
           </span>
         </div>
 
         {/* Search */}
-        <div className="relative flex-1 min-w-[160px] max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+        <div className="relative min-w-[160px] max-w-xs flex-1">
+          <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[#4B5563]" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search logs…"
-            className="w-full rounded-lg border border-slate-200 bg-white pl-8 pr-8 py-1.5 text-[12px] text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+            className="w-full rounded-[8px] py-1.5 pl-8 pr-8 font-mono text-[12px] text-[#D1D5DB] placeholder:text-[#4B5563] focus:outline-none"
+            style={{ background: "#14171A", border: "1px solid #2A2E33" }}
+            onFocus={e => { e.currentTarget.style.borderColor = "#00A65A"; }}
+            onBlur={e => { e.currentTarget.style.borderColor = "#2A2E33"; }}
           />
           {search && (
             <button type="button" onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-[#D1D5DB]">
               <X className="h-3 w-3" />
             </button>
           )}
@@ -285,69 +305,81 @@ export function LogsTab({ run, viewMode, rawEvents }: LogsTabProps) {
           const cfg    = l !== "all" ? LEVEL[l] : null;
           const cnt    = l === "all" ? allLogs.length : (counts[l] ?? 0);
           if (cnt === 0 && l !== "all" && l !== levelFilter) return null;
+          const color  = cfg?.fg ?? "#D1D5DB";
           return (
             <button key={l} type="button" onClick={() => setLevel(l)}
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition-all"
+              className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] transition-colors"
               style={{
-                background: active ? (cfg?.bg ?? "#F1F5F9") : "transparent",
-                border:     `1px solid ${active ? (cfg?.border ?? "#E2E8F0") : "transparent"}`,
-                color:      active ? (cfg?.fg ?? "#64748B") : "#94A3B8",
+                background: active ? `${color}1a` : "transparent",
+                border:     `1px solid ${active ? `${color}55` : "transparent"}`,
+                color:      active ? color : "#6B7280",
               }}>
-              {cfg && <span className="h-1.5 w-1.5 rounded-full shrink-0"
-                style={{ background: active ? cfg.dot : "#CBD5E1" }} />}
+              {cfg && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: active ? color : "#4B5563" }} />}
               {l === "all" ? "All" : cfg!.label}
-              <span className="opacity-60 ml-0.5">{cnt}</span>
+              <span className="tabular-nums opacity-60">{cnt}</span>
             </button>
           );
         })}
 
         {/* DEBUG toggle */}
         <button type="button" onClick={() => setShowDebug(v => !v)}
-          className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all"
+          title={showDebug ? "Hide debug lines" : "Show debug lines"}
+          className="flex items-center gap-1.5 rounded-[7px] px-2.5 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] transition-colors"
           style={{
-            background: showDebug ? "#F0FDF4" : "transparent",
-            border:     `1px solid ${showDebug ? "#BBF7D0" : "transparent"}`,
-            color:      showDebug ? "#16A34A" : "#94A3B8",
+            background: showDebug ? "#34D3991a" : "transparent",
+            border:     `1px solid ${showDebug ? "#34D39955" : "#2A2E33"}`,
+            color:      showDebug ? "#34D399" : "#6B7280",
           }}>
-          <Filter className="h-2.5 w-2.5" />
+          <Bug className="h-2.5 w-2.5" />
           Debug
         </button>
 
-        {/* Copy / Download */}
-        <div className="flex items-center gap-1.5 ml-auto">
+        {/* Copy / Export */}
+        <div className="ml-auto flex items-center gap-1.5">
           <button type="button" onClick={copyAll}
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11.5px] font-medium text-slate-500 hover:bg-slate-50 transition-colors">
-            {copiedAll ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            className="flex h-7 items-center gap-1.5 rounded-[7px] px-2.5 font-mono text-[11px] text-[#9CA3AF] transition-colors hover:bg-[#14171A] hover:text-[#D1D5DB]"
+            style={{ border: "1px solid #2A2E33" }}>
+            {copiedAll ? <Check className="h-3 w-3 text-[#34D399]" /> : <Copy className="h-3 w-3" />}
             Copy all
           </button>
           <button type="button" onClick={download}
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11.5px] font-medium text-slate-500 hover:bg-slate-50 transition-colors">
+            className="flex h-7 items-center gap-1.5 rounded-[7px] px-2.5 font-mono text-[11px] text-[#9CA3AF] transition-colors hover:bg-[#14171A] hover:text-[#D1D5DB]"
+            style={{ border: "1px solid #2A2E33" }}>
             <Download className="h-3 w-3" /> Export
           </button>
         </div>
       </div>
 
       {/* ── Column headers ────────────────────────────────────────────────── */}
-      <div className="flex items-center select-none border-b border-slate-100"
-        style={{ background: "#FAFAFA", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "#CBD5E1", paddingTop: 5, paddingBottom: 5 }}>
+      <div className="flex select-none items-center font-mono"
+        style={{ borderBottom: "1px solid #1C1F22", fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.12em", color: "#4B5563", paddingTop: 6, paddingBottom: 6 }}>
         <span style={{ width: 48, textAlign: "right", paddingRight: 12, paddingLeft: 12 }}>#</span>
-        <span style={{ minWidth: 90, paddingRight: 16, fontFamily: "monospace" }}>Time</span>
-        <span style={{ width: 52, marginRight: 12 }}>Level</span>
+        <span style={{ minWidth: 92, paddingRight: 16 }}>Time</span>
+        <span style={{ width: 46, paddingRight: 12 }}>Lvl</span>
         <span>Message</span>
       </div>
 
       {/* ── Log rows ──────────────────────────────────────────────────────── */}
-      <div className="overflow-y-auto" style={{ maxHeight: 520, fontFamily: "'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace" }}>
+      <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <FileText className="h-8 w-8 text-slate-200" />
-            <p className="text-[12px] text-slate-400">
+          <div className="flex flex-col items-center justify-center gap-3 py-20">
+            <Terminal className="h-8 w-8 text-[#2A2E33]" />
+            <p className="font-mono text-[12px] text-[#6B7280]">
               {search ? `No lines matching "${search}"` : "No log output yet."}
             </p>
           </div>
         ) : (
           filtered.map((log, i) => <LogRow key={log.id} log={log} line={i + 1} q={search} />)
         )}
+      </div>
+
+      {/* ── Console footer ────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 py-2" style={{ borderTop: "1px solid #1C1F22" }}>
+        <span className="font-mono text-[10px] text-[#4B5563]">vectorbea runtime · durable execution</span>
+        <span className="flex items-center gap-1.5 font-mono text-[10px] text-[#4B5563]">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: counts.error > 0 ? "#F87171" : "#34D399" }} />
+          {counts.error > 0 ? `${counts.error} error${counts.error !== 1 ? "s" : ""}` : "no errors"}
+        </span>
       </div>
     </div>
   );
