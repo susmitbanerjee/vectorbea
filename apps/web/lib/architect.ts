@@ -6,12 +6,43 @@ import { apiFetch, withWorkspace } from "@/lib/api/client";
 
 const BASE = "/api/architect";
 
+/**
+ * Adaptive clarification question. The architect asks only what it genuinely
+ * needs — 0 questions for a clear goal, up to 5 for a vague one. `why`
+ * explains how the answer shapes the design; `suggestions` are tappable
+ * example answers.
+ */
+export interface ClarifyQuestion {
+  question: string;
+  why?: string | null;
+  suggestions?: string[];
+}
+
+/** Accepts both rich objects and legacy plain-string questions. */
+export function normalizeClarifyQuestions(raw: unknown): ClarifyQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((q): ClarifyQuestion | null => {
+      if (typeof q === "string") return q.trim() ? { question: q } : null;
+      if (q && typeof q === "object" && typeof (q as ClarifyQuestion).question === "string") {
+        const o = q as ClarifyQuestion;
+        return {
+          question: o.question,
+          why: o.why ?? undefined,
+          suggestions: Array.isArray(o.suggestions) ? o.suggestions.filter(s => typeof s === "string") : undefined,
+        };
+      }
+      return null;
+    })
+    .filter((q): q is ClarifyQuestion => q !== null);
+}
+
 export interface ArchitectSession {
   id: string;
   status: string;
   currentStage: string;
   userGoal: string;
-  clarificationQuestions?: string[];
+  clarificationQuestions?: Array<ClarifyQuestion | string>;
   needsClarification?: boolean;
   plan?: ArchitectPlan;
   animationSteps?: AnimationStep[];

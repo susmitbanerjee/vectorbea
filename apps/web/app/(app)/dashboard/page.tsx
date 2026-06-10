@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import {
-  AlertTriangle, Bot, Clock, GitBranch, Play, Plug, Plus, RefreshCw,
-  ShieldCheck, Wrench, ArrowRight, Coins, Timer, Activity, type LucideIcon,
+  Activity, AlertTriangle, ArrowRight, Bot, Clock, Coins, GitBranch,
+  Play, Plug, Plus, RefreshCw, ShieldCheck, Sparkles, Timer, Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, ResponsiveContainer, Tooltip } from "recharts";
 
@@ -14,6 +15,7 @@ import { apiFetch, withWorkspace } from "@/lib/api/client";
 import type { AgentRun } from "@/types/platform";
 import { cn } from "@/lib/utils";
 import { Diamond, Chip } from "@/components/ui/page-kit";
+import { ArchitectLogo } from "@/components/architect/ArchitectLogo";
 
 // ─── Format helpers ───────────────────────────────────────────────────────────
 function fmtDuration(ms: number | null) {
@@ -64,9 +66,9 @@ function Metric({ label, value, icon: Icon }: { label: string; value: string; ic
 }
 
 // ─── Panel shell ──────────────────────────────────────────────────────────────
-function ChartPanel({ label, title, action, children }: { label: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function ChartPanel({ label, title, action, children, className }: { label: string; title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
-    <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
+    <div className={cn("rounded-[12px] border border-[#E0E3E6] bg-white p-5", className)}>
       <div className="mb-4 flex items-start justify-between">
         <div className="flex items-center gap-2"><Diamond size={8} /><span className="vb-mono-label">{label}</span><span className="text-[14px] font-bold text-[#0B0D0F]">{title}</span></div>
         {action}
@@ -93,6 +95,13 @@ const LAT_BUCKETS = [
   { label: "30s–2m", max: 120_000 },
   { label: ">2m", max: Infinity },
 ];
+
+const ACTIVITY_SERIES = [
+  { key: "succeeded", label: "Succeeded", color: "#007F4E" },
+  { key: "active",    label: "In flight", color: "#0F766E" },
+  { key: "failed",    label: "Failed",    color: "#DC2626" },
+  { key: "cancelled", label: "Cancelled", color: "#C9CED4" },
+] as const;
 
 export default function OverviewPage() {
   const [summary, setSummary]   = useState<Summary | null>(null);
@@ -135,6 +144,29 @@ export default function OverviewPage() {
     { name: "Running", value: runningNow, color: "#0F766E" },
     { name: "Failed", value: failed24, color: "#DC2626" },
   ].filter(d => d.value > 0);
+
+  // Hourly activity — last 24h, bucketed from the run sample (real)
+  const { activityBuckets, activityTotal } = useMemo(() => {
+    const buckets = Array.from({ length: 24 }, (_, i) => {
+      const ago = 23 - i;
+      return { label: ago === 0 ? "now" : `-${ago}h`, succeeded: 0, failed: 0, cancelled: 0, active: 0 };
+    });
+    const now = Date.now();
+    let total = 0;
+    for (const r of runSample) {
+      const t = Date.parse(r.startedAt ?? r.createdAt);
+      if (Number.isNaN(t)) continue;
+      const ageH = (now - t) / 3_600_000;
+      if (ageH < 0 || ageH >= 24) continue;
+      const b = buckets[23 - Math.floor(ageH)];
+      if (r.status === "succeeded") b.succeeded++;
+      else if (r.status === "failed" || r.status === "timed_out") b.failed++;
+      else if (r.status === "cancelled") b.cancelled++;
+      else b.active++;
+      total++;
+    }
+    return { activityBuckets: buckets, activityTotal: total };
+  }, [runSample]);
 
   // Latency profile (from run sample, real)
   const { histData, avgLatency, p95Latency, sampleN } = useMemo(() => {
@@ -188,11 +220,29 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      {/* Empty get-started */}
+      {/* Empty get-started — architect first */}
       {isEmpty && (
-        <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
-          <div className="mb-3 flex items-center gap-2"><Diamond size={9} /><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Get started with Vectorbea</p></div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="animate-slide-up overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
+          <div
+            className="flex flex-col items-start justify-between gap-4 border-b border-[#ECEEEF] px-5 py-5 sm:flex-row sm:items-center"
+            style={{
+              background: "#FAFBFB",
+              backgroundImage: "radial-gradient(#D2D6DB 1px, transparent 1px)",
+              backgroundSize: "20px 20px",
+            }}
+          >
+            <div className="flex items-center gap-3.5">
+              <ArchitectLogo size={40} />
+              <div>
+                <p className="text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">Describe it. Vectorbea builds it.</p>
+                <p className="mt-0.5 text-[12.5px] text-[#6B7280]">The AI Architect turns a plain-English goal into agents, tools and a runnable workflow.</p>
+              </div>
+            </div>
+            <Link href={"/workflows/new/architect" as Route} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-[9px] bg-[#007F4E] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#006B45]">
+              <Sparkles className="h-3.5 w-3.5" /> Open AI Architect
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
             <Link href={"/workflows/new" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#007F4E14", border: "1px solid #007F4E33", color: "#007F4E" }}><GitBranch className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Create workflow</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Build a durable AI workflow</p></div></Link>
             <Link href={"/connections" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#7C3AED14", border: "1px solid #7C3AED33", color: "#7C3AED" }}><Plug className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Add connection</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Connect an LLM provider</p></div></Link>
             <Link href={"/agents/new" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#0F766E14", border: "1px solid #0F766E33", color: "#0F766E" }}><Bot className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Register agent</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Define an agent persona</p></div></Link>
@@ -201,15 +251,15 @@ export default function OverviewPage() {
       )}
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="animate-slide-up grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Kpi label="Active workflows" value={loading ? "…" : (summary?.activeWorkflows ?? 0)} sub={`${summary?.totalWorkflows ?? 0} total`} icon={GitBranch} iconBg="#E6F4EF" iconFg="#007F4E" href={"/workflows" as Route} />
         <Kpi label="Running now" value={loading ? "…" : runningNow} accent={runningNow > 0 ? "#0F766E" : undefined} sub={runningNow > 0 ? "executing" : "idle"} icon={Play} iconBg="#F0FDFA" iconFg="#0F766E" href={"/runs" as Route} />
         <Kpi label="Failed · 24h" value={loading ? "…" : failed24} accent={failed24 > 0 ? "#DC2626" : undefined} sub={`${succeeded24} succeeded`} icon={AlertTriangle} iconBg={failed24 > 0 ? "#FEF2F2" : "#F3F4F5"} iconFg={failed24 > 0 ? "#DC2626" : "#9CA3AF"} href={"/runs" as Route} />
         <Kpi label="Pending approvals" value={loading ? "…" : pending} accent={pending > 0 ? "#B45309" : undefined} sub={pending > 0 ? "awaiting decision" : "none waiting"} icon={ShieldCheck} iconBg={pending > 0 ? "#FFFBEB" : "#F3F4F5"} iconFg={pending > 0 ? "#CA8A04" : "#9CA3AF"} href={"/approvals" as Route} />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+      {/* Reliability row: outcomes donut + hourly activity */}
+      <div className="animate-slide-up stagger-1 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         {/* Run outcomes donut */}
         <ChartPanel label="Reliability" title="Run outcomes" action={<span className="font-mono text-[11px] text-[#9CA3AF]">24h</span>}>
           {loading ? (
@@ -244,37 +294,72 @@ export default function OverviewPage() {
           )}
         </ChartPanel>
 
-        {/* Latency histogram */}
-        <ChartPanel label="Performance" title="Execution latency" action={<span className="font-mono text-[11px] text-[#9CA3AF]">{sampleN} runs</span>}>
+        {/* Hourly activity — stacked outcomes */}
+        <ChartPanel label="Throughput" title="Activity" action={<span className="font-mono text-[11px] text-[#9CA3AF]">last {runSample.length} runs · 24h</span>}>
           {loading ? (
             <div className="h-[200px] animate-pulse rounded-[10px] bg-[#FAFBFB]" />
-          ) : sampleN === 0 ? (
-            <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-center"><Timer className="h-6 w-6 text-[#C9CED4]" /><p className="text-[13px] text-[#9CA3AF]">No completed runs to profile</p></div>
+          ) : activityTotal === 0 ? (
+            <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-center"><Clock className="h-6 w-6 text-[#C9CED4]" /><p className="text-[13px] text-[#9CA3AF]">No run activity in the last 24h</p></div>
           ) : (
             <>
               <div style={{ height: 184 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={histData} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
-                    <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#9CA3AF", fontFamily: "var(--font-mono)" }} />
+                  <BarChart data={activityBuckets} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barCategoryGap="22%">
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} interval={5} tick={{ fontSize: 10.5, fill: "#9CA3AF", fontFamily: "var(--font-mono)" }} />
                     <Tooltip cursor={{ fill: "#F3F4F5" }} contentStyle={{ borderRadius: 8, border: "1px solid #E0E3E6", fontSize: 12, fontFamily: "var(--font-mono)" }} />
-                    <Bar dataKey="count" radius={[5, 5, 0, 0]} maxBarSize={64}>
-                      {histData.map((_, i) => <Cell key={i} fill="#007F4E" fillOpacity={0.45 + (i / histData.length) * 0.55} />)}
-                    </Bar>
+                    {ACTIVITY_SERIES.map(s => (
+                      <Bar key={s.key} dataKey={s.key} name={s.label} stackId="a" fill={s.color} radius={s.key === "cancelled" ? [3, 3, 0, 0] : undefined} maxBarSize={22} />
+                    ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div className="mt-3 flex items-center gap-6 border-t border-[#ECEEEF] pt-3">
-                <div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">Avg</p><p className="mt-0.5 text-[18px] font-semibold tabular-nums text-[#0B0D0F]">{avgLatency ? fmtDuration(avgLatency) : "—"}</p></div>
-                <div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">p95</p><p className="mt-0.5 text-[18px] font-semibold tabular-nums text-[#0B0D0F]">{p95Latency ? fmtDuration(p95Latency) : "—"}</p></div>
+              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-[#ECEEEF] pt-3">
+                {ACTIVITY_SERIES.map(s => {
+                  const total = activityBuckets.reduce((sum, b) => sum + b[s.key], 0);
+                  if (total === 0) return null;
+                  return (
+                    <span key={s.key} className="flex items-center gap-1.5 text-[12px] text-[#4B5563]">
+                      <span className="h-2 w-2 rounded-[2px]" style={{ background: s.color }} />
+                      {s.label} <span className="font-mono tabular-nums text-[#0B0D0F]">{total}</span>
+                    </span>
+                  );
+                })}
               </div>
             </>
           )}
         </ChartPanel>
       </div>
 
-      {/* Spend + resources + rail */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+      {/* Performance + resources + rail */}
+      <div className="animate-slide-up stagger-2 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
         <div className="space-y-4">
+          {/* Latency histogram */}
+          <ChartPanel label="Performance" title="Execution latency" action={<span className="font-mono text-[11px] text-[#9CA3AF]">{sampleN} runs</span>}>
+            {loading ? (
+              <div className="h-[180px] animate-pulse rounded-[10px] bg-[#FAFBFB]" />
+            ) : sampleN === 0 ? (
+              <div className="flex h-[180px] flex-col items-center justify-center gap-2 text-center"><Timer className="h-6 w-6 text-[#C9CED4]" /><p className="text-[13px] text-[#9CA3AF]">No completed runs to profile</p></div>
+            ) : (
+              <>
+                <div style={{ height: 164 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={histData} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#9CA3AF", fontFamily: "var(--font-mono)" }} />
+                      <Tooltip cursor={{ fill: "#F3F4F5" }} contentStyle={{ borderRadius: 8, border: "1px solid #E0E3E6", fontSize: 12, fontFamily: "var(--font-mono)" }} />
+                      <Bar dataKey="count" radius={[5, 5, 0, 0]} maxBarSize={64}>
+                        {histData.map((_, i) => <Cell key={i} fill="#007F4E" fillOpacity={0.45 + (i / histData.length) * 0.55} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-3 flex items-center gap-6 border-t border-[#ECEEEF] pt-3">
+                  <div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">Avg</p><p className="mt-0.5 text-[18px] font-semibold tabular-nums text-[#0B0D0F]">{avgLatency ? fmtDuration(avgLatency) : "—"}</p></div>
+                  <div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">p95</p><p className="mt-0.5 text-[18px] font-semibold tabular-nums text-[#0B0D0F]">{p95Latency ? fmtDuration(p95Latency) : "—"}</p></div>
+                </div>
+              </>
+            )}
+          </ChartPanel>
+
           {/* Spend metrics */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Metric label="Tokens · 24h" value={loading ? "…" : fmtTokens(tokens24h)} icon={Coins} />
@@ -307,6 +392,35 @@ export default function OverviewPage() {
 
         {/* Right rail */}
         <div className="flex flex-col gap-4">
+          {/* AI Architect — the front door */}
+          <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
+            <div
+              className="flex items-center gap-3 border-b border-[#ECEEEF] px-[18px] py-4"
+              style={{
+                background: "#FAFBFB",
+                backgroundImage: "radial-gradient(#D2D6DB 1px, transparent 1px)",
+                backgroundSize: "18px 18px",
+              }}
+            >
+              <ArchitectLogo size={34} />
+              <div>
+                <span className="vb-mono-label">AI Architect</span>
+                <p className="text-[13.5px] font-bold leading-tight text-[#0B0D0F]">Describe it. We build it.</p>
+              </div>
+            </div>
+            <div className="p-[18px]">
+              <p className="text-[12.5px] leading-[1.6] text-[#6B7280]">
+                A plain-English goal becomes agents, tools, connections and a runnable workflow on the canvas — simulation-first.
+              </p>
+              <Link
+                href={"/workflows/new/architect" as Route}
+                className="mt-3.5 flex h-9 w-full items-center justify-center gap-2 rounded-[9px] bg-[#007F4E] text-[13px] font-semibold text-white transition-colors hover:bg-[#006B45]"
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Architect a workflow
+              </Link>
+            </div>
+          </div>
+
           {/* Usage today */}
           <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-[18px]">
             <div className="mb-3 flex items-center justify-between">

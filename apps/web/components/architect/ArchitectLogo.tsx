@@ -1,38 +1,45 @@
 "use client";
 
 /**
- * ArchitectLogo — refined Vectorbea AI Workflow Architect mark.
- * Geometric node-graph + sparkle, clean vector SVG.
+ * ArchitectLogo — the AI Workflow Architect mark.
+ * Black tile + node graph with a green checkpoint diamond: the architect
+ * literally draws your workflow graph. Matches the LogoCube / control-plane
+ * brand language (black #0B0D0F, green #007F4E family).
  */
 export function ArchitectLogo({ size = 32 }: { size?: number }) {
   return (
     <div
-      className="flex items-center justify-center shrink-0 rounded-[10px]"
+      className="flex shrink-0 items-center justify-center rounded-[9px]"
       style={{
-        width: size, height: size,
-        background: "linear-gradient(135deg, #6366F1 0%, #2563EB 100%)",
-        boxShadow: "0 2px 8px rgba(99,102,241,0.35)",
+        width: size,
+        height: size,
+        background: "#0B0D0F",
+        boxShadow: "0 2px 10px rgba(11,13,15,0.28)",
       }}
     >
-      <svg width={size * 0.625} height={size * 0.625} viewBox="0 0 20 20" fill="none">
-        {/* Central node */}
-        <circle cx="10" cy="10" r="2.5" fill="white" />
-        {/* Top-left node */}
-        <circle cx="3.5" cy="3.5" r="1.5" fill="rgba(255,255,255,0.75)" />
-        {/* Top-right sparkle node */}
-        <circle cx="16.5" cy="3.5" r="1.5" fill="rgba(255,255,255,0.75)" />
-        {/* Bottom-left node */}
-        <circle cx="3.5" cy="16.5" r="1.5" fill="rgba(255,255,255,0.6)" />
-        {/* Bottom-right node */}
-        <circle cx="16.5" cy="16.5" r="1.5" fill="rgba(255,255,255,0.6)" />
-        {/* Connecting edges */}
-        <line x1="4.8" y1="4.8" x2="8.2" y2="8.2" stroke="rgba(255,255,255,0.7)" strokeWidth="1.25" strokeLinecap="round" />
-        <line x1="15.2" y1="4.8" x2="11.8" y2="8.2" stroke="rgba(255,255,255,0.7)" strokeWidth="1.25" strokeLinecap="round" />
-        <line x1="4.8" y1="15.2" x2="8.2" y2="11.8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.25" strokeLinecap="round" />
-        <line x1="15.2" y1="15.2" x2="11.8" y2="11.8" stroke="rgba(255,255,255,0.5)" strokeWidth="1.25" strokeLinecap="round" />
-        {/* Sparkle top-right accent */}
-        <path d="M16.5 1 L17 2.5 L18.5 3 L17 3.5 L16.5 5 L16 3.5 L14.5 3 L16 2.5 Z"
-          fill="rgba(255,255,255,0.9)" />
+      <svg width={size * 0.66} height={size * 0.66} viewBox="0 0 24 24" fill="none">
+        {/* Edges: trigger → agent → output, branch down-right */}
+        <path
+          d="M5 6.5 H11 M13.2 7.6 L17 11 M17 13 L13.2 16.4 M11 17.5 H5"
+          stroke="rgba(255,255,255,0.45)"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+        {/* Trigger node (top-left) */}
+        <rect x="2.6" y="4.5" width="4" height="4" rx="1.3" fill="#FFFFFF" fillOpacity="0.92" />
+        {/* Output node (bottom-left) */}
+        <rect x="2.6" y="15.5" width="4" height="4" rx="1.3" fill="#FFFFFF" fillOpacity="0.55" />
+        {/* Central checkpoint diamond — the durable signature */}
+        <rect
+          x="14.7" y="9.7" width="4.6" height="4.6" rx="1.1"
+          transform="rotate(45 17 12)"
+          fill="#00A65A"
+        />
+        {/* Sparkle: the AI accent */}
+        <path
+          d="M11.4 10.4 L12 12 L13.6 12.6 L12 13.2 L11.4 14.8 L10.8 13.2 L9.2 12.6 L10.8 12 Z"
+          fill="#FFFFFF"
+        />
       </svg>
     </div>
   );
@@ -44,8 +51,8 @@ export function ArchitectWordmark({ size = 32 }: { size?: number }) {
     <div className="flex items-center gap-2.5">
       <ArchitectLogo size={size} />
       <div>
-        <p className="text-[14px] font-bold text-slate-900 leading-none">AI Workflow Architect</p>
-        <p className="text-[11px] text-slate-500 mt-0.5 leading-none">Describe automation. Vectorbea builds the workflow.</p>
+        <p className="text-[14px] font-bold leading-none text-[#0B0D0F]">AI Workflow Architect</p>
+        <p className="mt-0.5 text-[11px] leading-none text-[#6B7280]">Describe automation. Vectorbea builds the workflow.</p>
       </div>
     </div>
   );

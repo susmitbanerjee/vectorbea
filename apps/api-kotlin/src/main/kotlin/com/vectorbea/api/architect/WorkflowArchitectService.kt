@@ -68,10 +68,16 @@ class WorkflowArchitectService(
 
     // ── Stage 1: Clarification check ─────────────────────────────────────────
 
-    fun checkClarification(session: ArchitectSession): List<String> {
+    /**
+     * Adaptive clarification: the LLM decides how many questions (0–5) the goal
+     * genuinely needs. Each question is a structured object:
+     *   { question, why, suggestions[] }
+     * Plain-string questions from older prompts are normalized into that shape.
+     */
+    fun checkClarification(session: ArchitectSession): List<Map<String, Any?>> {
         if (!config.architectEnabled) return emptyList()
         val prompt = WorkflowArchitectPromptBuilder.buildClarificationPrompt(session.userGoal)
-        val raw = try { callPlanningLlm(prompt, maxTokens = 500) } catch (e: Exception) {
+        val raw = try { callPlanningLlm(prompt, maxTokens = 900) } catch (e: Exception) {
             log.warn("[architect] clarification LLM call failed: {}", e.message)
             return emptyList()
         }
@@ -80,8 +86,10 @@ class WorkflowArchitectService(
             val parsed = mapper.readValue(raw, Map::class.java) as Map<String, Any>
             val needs  = parsed["needsClarification"] as? Boolean ?: false
             if (needs) {
-                @Suppress("UNCHECKED_CAST")
-                val questions = (parsed["questions"] as? List<*>)?.map { it.toString() } ?: emptyList()
+                val questions = (parsed["questions"] as? List<*>)
+                    ?.mapNotNull { normalizeClarifyQuestion(it) }
+                    ?.take(5)
+                    ?: emptyList()
                 if (questions.isNotEmpty()) {
                     repo.saveClarifications(session.id, mapper.writeValueAsString(questions))
                     repo.appendEvent(session.workspaceId, session.id, "ARCHITECT_CLARIFICATION_REQUESTED",
@@ -93,6 +101,22 @@ class WorkflowArchitectService(
             log.warn("[architect] clarification parse failed: {}", e.message)
             emptyList()
         }
+    }
+
+    private fun normalizeClarifyQuestion(entry: Any?): Map<String, Any?>? = when (entry) {
+        is String -> if (entry.isBlank()) null else mapOf(
+            "question" to entry, "why" to null, "suggestions" to emptyList<String>())
+        is Map<*, *> -> {
+            val q = entry["question"]?.toString()?.takeIf { it.isNotBlank() } ?: return null
+            mapOf(
+                "question"    to q,
+                "why"         to entry["why"]?.toString()?.takeIf { it.isNotBlank() },
+                "suggestions" to ((entry["suggestions"] as? List<*>)
+                    ?.mapNotNull { it?.toString()?.takeIf { s -> s.isNotBlank() } }
+                    ?.take(4) ?: emptyList<String>()),
+            )
+        }
+        else -> null
     }
 
     // ── Stage 2: Generate plan ────────────────────────────────────────────────

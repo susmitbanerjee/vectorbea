@@ -2,32 +2,40 @@
 
 import {
   AlertTriangle,
+  BarChart2,
   Check,
-  CheckCircle2,
   Clock,
+  Code2,
+  CreditCard,
   Crown,
   Eye,
+  KeyRound,
+  Lock,
   Mail,
-  Plus,
+  Rocket,
+  ScrollText,
   Shield,
   Trash2,
+  UserCircle,
   UserPlus,
-  Workflow,
+  Users,
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import type { Route } from "next";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/layout/app-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog, DialogContent, DialogDescription,
   DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Chip } from "@/components/ui/page-kit";
 import { useWorkspace } from "@/lib/workspace-context";
+import { cn } from "@/lib/utils";
 
 // ─── Member types ─────────────────────────────────────────────────────────────
 
@@ -52,21 +60,54 @@ interface PendingInvitation {
   createdAt: string;
 }
 
-const ROLE_CONFIG: Record<MemberRole, { label: string; icon: typeof Crown }> = {
-  owner:  { label: "Owner",  icon: Crown  },
-  admin:  { label: "Admin",  icon: Crown  },
-  editor: { label: "Editor", icon: Shield },
-  viewer: { label: "Viewer", icon: Eye    },
+const ROLE_CONFIG: Record<MemberRole, { label: string; icon: typeof Crown; tone: "green" | "teal" | "gray" | "violet" }> = {
+  owner:  { label: "Owner",  icon: Crown,  tone: "violet" },
+  admin:  { label: "Admin",  icon: Crown,  tone: "green"  },
+  editor: { label: "Editor", icon: Shield, tone: "teal"   },
+  viewer: { label: "Viewer", icon: Eye,    tone: "gray"   },
 };
+
+// ─── Settings directory ───────────────────────────────────────────────────────
+
+const DIRECTORY: { href: Route; label: string; desc: string; icon: React.ElementType; adminOnly?: boolean }[] = [
+  { href: "/settings/members" as never,              label: "Members",              desc: "Team & invitations",       icon: Users },
+  { href: "/settings/usage" as never,                label: "Usage & limits",       desc: "Runs, tokens, quotas",     icon: BarChart2 },
+  { href: "/settings/billing" as never,              label: "Billing",              desc: "Plan & payment",           icon: CreditCard },
+  { href: "/api-keys" as never,                      label: "API keys",             desc: "Programmatic access",      icon: KeyRound, adminOnly: true },
+  { href: "/settings/profile" as never,              label: "Profile",              desc: "Your account",             icon: UserCircle },
+  { href: "/settings/audit" as never,                label: "Audit log",            desc: "Workspace activity",       icon: ScrollText },
+  { href: "/settings/privacy" as never,              label: "Privacy",              desc: "Data & retention",         icon: Lock },
+  { href: "/settings/production-readiness" as never, label: "Production readiness", desc: "Go-live checklist",        icon: Rocket },
+  { href: "/settings/sdk" as never,                  label: "SDK",                  desc: "Client libraries",         icon: Code2 },
+];
+
+// ─── Local primitives ─────────────────────────────────────────────────────────
+
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn("rounded-[12px] border border-[#E0E3E6] bg-white", className)}>{children}</div>;
+}
+
+function PanelHead({ label, title, desc, action }: { label: string; title: string; desc?: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-[#ECEEEF] px-5 py-4">
+      <div>
+        <span className="vb-mono-label">{label}</span>
+        <p className="mt-0.5 text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">{title}</p>
+        {desc && <p className="mt-0.5 text-[12.5px] text-[#6B7280]">{desc}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
 
 function Avatar({ member }: { member: Member }) {
   const initials = member.displayName.slice(0, 2).toUpperCase();
   return member.avatarUrl ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={member.avatarUrl} alt={member.displayName}
-      className="h-8 w-8 rounded-full object-cover" />
+      className="h-8 w-8 rounded-full border border-[#E0E3E6] object-cover" />
   ) : (
-    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
+    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#9CCFBB] bg-[#E6F4EF] text-[11px] font-bold text-[#006B45]">
       {initials}
     </span>
   );
@@ -150,230 +191,254 @@ export default function SettingsPage() {
   };
 
   const isAdmin = role === "admin";
+  const seatPct = seatUsage.max > 0 ? Math.min(100, Math.round((seatUsage.used / seatUsage.max) * 100)) : 0;
+  const pendingInvites = invitations.filter(i => !i.acceptedAt && !i.revokedAt);
+  const visibleDirectory = DIRECTORY.filter(d => !d.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen">
-      <AppHeader title="Settings" subtitle="Workspace configuration and team management." />
+      <AppHeader eyebrow="Workspace" title="Settings" subtitle="Configuration, team and account management." />
 
-      <div className="grid gap-6 px-4 py-6 md:px-6 xl:grid-cols-2 xl:px-8">
+      <div className="space-y-4 px-4 py-6 md:px-6 xl:px-8">
 
-        {/* ── Workspace name ── */}
-        <Card className="animate-slide-up">
-          <CardHeader>
-            <CardTitle>Workspace</CardTitle>
-            <CardDescription>Your workspace display name.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Workspace name</label>
-              <Input defaultValue={activeWorkspace?.name ?? "My Workspace"} />
-            </div>
-            <div className="flex justify-end">
-              <Button onClick={() => toast.success("Workspace name saved.")}>
-                <Check className="h-4 w-4" />
-                Save
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ── Access & Plan ── */}
-        <Card className="animate-slide-up stagger-1">
-          <CardHeader>
-            <CardTitle>Access &amp; Plan</CardTitle>
-            <CardDescription>Current permissions and seat usage.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              { label: "Your role",  value: role,      icon: Shield   },
-              { label: "Plan",       value: planTier,  icon: Workflow },
-              { label: "Seats",      value: `${seatUsage.used} / ${seatUsage.max}`, icon: Crown },
-            ].map(({ label, value, icon: Icon }) => (
-              <div
-                key={label}
-                className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-2.5"
+        {/* ── Settings directory ── */}
+        <div className="animate-slide-up">
+          <span className="vb-mono-label mb-2.5 block">Browse settings</span>
+          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
+            {visibleDirectory.map(({ href, label, desc, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group flex items-start gap-2.5 rounded-[10px] border border-[#E0E3E6] bg-white p-3 transition-all hover:-translate-y-px hover:border-[#9CCFBB] hover:shadow-[0_4px_14px_rgba(11,13,15,0.05)]"
               >
-                <div className="flex items-center gap-2">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{label}</span>
-                </div>
-                <Badge variant="outline" className="capitalize">{value}</Badge>
-              </div>
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[#F3F4F5] text-[#6B7280] transition-colors group-hover:bg-[#E6F4EF] group-hover:text-[#007F4E]">
+                  <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[12.5px] font-semibold text-[#0B0D0F]">{label}</span>
+                  <span className="block truncate text-[11px] text-[#9CA3AF]">{desc}</span>
+                </span>
+              </Link>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+
+          {/* ── Workspace ── */}
+          <Panel className="animate-slide-up stagger-1">
+            <PanelHead label="General" title="Workspace" desc="Your workspace display name." />
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="mb-2 block font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">
+                  Workspace name
+                </label>
+                <Input defaultValue={activeWorkspace?.name ?? "My Workspace"} />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => toast.success("Workspace name saved.")}>
+                  <Check className="h-4 w-4" />
+                  Save
+                </Button>
+              </div>
+            </div>
+          </Panel>
+
+          {/* ── Access & Plan ── */}
+          <Panel className="animate-slide-up stagger-1">
+            <PanelHead label="Access" title="Plan & permissions" desc="Current role, plan tier and seat usage." />
+            <div className="space-y-3 p-5">
+              <div className="flex items-center justify-between rounded-[9px] border border-[#ECEEEF] bg-[#FAFBFB] px-4 py-2.5">
+                <span className="flex items-center gap-2 text-[13px] text-[#4B5563]"><Shield className="h-3.5 w-3.5 text-[#9CA3AF]" /> Your role</span>
+                <Chip tone={ROLE_CONFIG[(role as MemberRole)]?.tone ?? "gray"} dot={false}>
+                  <span className="capitalize">{role}</span>
+                </Chip>
+              </div>
+              <div className="flex items-center justify-between rounded-[9px] border border-[#ECEEEF] bg-[#FAFBFB] px-4 py-2.5">
+                <span className="flex items-center gap-2 text-[13px] text-[#4B5563]"><CreditCard className="h-3.5 w-3.5 text-[#9CA3AF]" /> Plan</span>
+                <Chip tone="green" dot={false}><span className="capitalize">{planTier}</span></Chip>
+              </div>
+              <div className="rounded-[9px] border border-[#ECEEEF] bg-[#FAFBFB] px-4 py-3">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-[13px] text-[#4B5563]"><Users className="h-3.5 w-3.5 text-[#9CA3AF]" /> Seats</span>
+                  <span className="font-mono text-[12.5px] font-semibold tabular-nums text-[#0B0D0F]">
+                    {seatUsage.used} / {seatUsage.max > 0 ? seatUsage.max : "∞"}
+                  </span>
+                </div>
+                {seatUsage.max > 0 && (
+                  <div className="h-[6px] overflow-hidden rounded-full bg-[#ECEEEF]">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${seatPct}%`, background: seatPct >= 90 ? "#DC2626" : "#007F4E" }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </Panel>
+        </div>
 
         {/* ── Members ── */}
-        <Card className="animate-slide-up stagger-2 xl:col-span-2">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Members</CardTitle>
-                <CardDescription>
-                  {members.length} member{members.length !== 1 ? "s" : ""}
-                  {seatUsage.max > 0 && ` · ${seatUsage.max - seatUsage.used} seat${seatUsage.max - seatUsage.used !== 1 ? "s" : ""} available`}
-                </CardDescription>
-              </div>
-              {isAdmin && (
-                <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-                  <DialogTrigger asChild>
-                    <Button size="sm" className="gap-2">
-                      <UserPlus className="h-4 w-4" />
-                      Invite member
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Invite a team member</DialogTitle>
-                      <DialogDescription>
-                        They&apos;ll receive an email with a link to join your workspace.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 pt-2">
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium">Email address</label>
-                        <Input
-                          type="email"
-                          placeholder="colleague@company.com"
-                          value={inviteEmail}
-                          onChange={e => setInviteEmail(e.target.value)}
-                          onKeyDown={e => e.key === "Enter" && void handleInvite()}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium">Role</label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {(["admin", "editor", "viewer"] as MemberRole[]).map(r => {
-                            const { label, icon: Icon } = ROLE_CONFIG[r];
-                            const active = inviteRole === r;
-                            return (
-                              <button
-                                key={r}
-                                type="button"
-                                onClick={() => setInviteRole(r)}
-                                className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition-colors ${
-                                  active
-                                    ? "border-primary bg-primary/5 text-primary"
-                                    : "border-border text-muted-foreground hover:bg-muted/40"
-                                }`}
-                              >
-                                <Icon className="h-4 w-4" />
-                                <span className="text-[12px] font-semibold">{label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground pt-1">
-                          {inviteRole === "admin"  && "Full access — can manage members, keys, and all settings."}
-                          {inviteRole === "editor" && "Can create and edit workflows, view audit logs."}
-                          {inviteRole === "viewer" && "Read-only access to workflows and dashboards."}
-                        </p>
-                      </div>
-                      <div className="flex justify-end gap-2 pt-1">
-                        <Button variant="ghost" onClick={() => setInviteOpen(false)}>Cancel</Button>
-                        <Button onClick={() => void handleInvite()} disabled={inviting} className="gap-2">
-                          <Mail className="h-4 w-4" />
-                          {inviting ? "Sending…" : "Send invite"}
-                        </Button>
-                      </div>
+        <Panel className="animate-slide-up stagger-2">
+          <PanelHead
+            label="Team"
+            title="Members"
+            desc={`${members.length} member${members.length !== 1 ? "s" : ""}${seatUsage.max > 0 ? ` · ${Math.max(0, seatUsage.max - seatUsage.used)} seat${seatUsage.max - seatUsage.used !== 1 ? "s" : ""} available` : ""}`}
+            action={isAdmin && (
+              <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    Invite member
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Invite a team member</DialogTitle>
+                    <DialogDescription>
+                      They&apos;ll receive an email with a link to join your workspace.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 pt-2">
+                    <div className="space-y-1.5">
+                      <label className="block font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Email address</label>
+                      <Input
+                        type="email"
+                        placeholder="colleague@company.com"
+                        value={inviteEmail}
+                        onChange={e => setInviteEmail(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && void handleInvite()}
+                      />
                     </div>
-                  </DialogContent>
-                </Dialog>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-1 p-0">
-            {loadingMembers ? (
-              <div className="space-y-px px-6 py-4">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="flex items-center gap-3 py-2.5">
-                    <div className="h-8 w-8 animate-pulse rounded-full bg-muted" />
-                    <div className="flex-1 space-y-1.5">
-                      <div className="h-3 w-32 animate-pulse rounded bg-muted" />
-                      <div className="h-2.5 w-24 animate-pulse rounded bg-muted" />
-                    </div>
-                    <div className="h-5 w-14 animate-pulse rounded-full bg-muted" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <>
-                {/* Active members */}
-                <div className="divide-y divide-border/40">
-                  {members.map(m => {
-                    const { label } = ROLE_CONFIG[m.role as MemberRole] ?? { label: m.role };
-                    return (
-                      <div key={m.id} className="flex items-center gap-3 px-6 py-3.5">
-                        <Avatar member={m} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13.5px] font-semibold text-foreground truncate">{m.displayName}</p>
-                          <p className="text-[11.5px] text-muted-foreground truncate">{m.email}</p>
-                        </div>
-                        <Badge variant="outline" className="text-[11px] capitalize shrink-0">{label}</Badge>
+                    <div className="space-y-1.5">
+                      <label className="block font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Role</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(["admin", "editor", "viewer"] as MemberRole[]).map(r => {
+                          const { label, icon: Icon } = ROLE_CONFIG[r];
+                          const active = inviteRole === r;
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => setInviteRole(r)}
+                              className={cn(
+                                "flex flex-col items-center gap-1.5 rounded-[10px] border p-3 text-center transition-colors",
+                                active
+                                  ? "border-[#9CCFBB] bg-[#E6F4EF]/60 text-[#006B45]"
+                                  : "border-[#E0E3E6] text-[#6B7280] hover:bg-[#FAFBFB]",
+                              )}
+                            >
+                              <Icon className="h-4 w-4" />
+                              <span className="text-[12px] font-semibold">{label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                  {members.length === 0 && (
-                    <div className="px-6 py-8 text-center">
-                      <p className="text-sm text-muted-foreground">No members found.</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Pending invitations */}
-                {invitations.filter(i => !i.acceptedAt && !i.revokedAt).length > 0 && (
-                  <>
-                    <div className="border-t border-border/40 px-6 pb-1 pt-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Pending invitations
+                      <p className="pt-1 text-[11px] leading-[1.5] text-[#9CA3AF]">
+                        {inviteRole === "admin"  && "Full access — can manage members, keys, and all settings."}
+                        {inviteRole === "editor" && "Can create and edit workflows, view audit logs."}
+                        {inviteRole === "viewer" && "Read-only access to workflows and dashboards."}
                       </p>
                     </div>
-                    <div className="divide-y divide-border/40">
-                      {invitations
-                        .filter(i => !i.acceptedAt && !i.revokedAt)
-                        .map(inv => (
-                          <div key={inv.id} className="flex items-center gap-3 px-6 py-3">
-                            <span className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 text-muted-foreground/40">
-                              <Clock className="h-3.5 w-3.5" />
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[13px] text-muted-foreground truncate">{inv.email}</p>
-                              <p className="text-[11px] text-muted-foreground/60">Invited · {ROLE_CONFIG[inv.role].label}</p>
-                            </div>
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => void revokeInvite(inv.id)}
-                                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                                title="Revoke invitation"
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button variant="ghost" onClick={() => setInviteOpen(false)}>Cancel</Button>
+                      <Button onClick={() => void handleInvite()} disabled={inviting} className="gap-2">
+                        <Mail className="h-4 w-4" />
+                        {inviting ? "Sending…" : "Send invite"}
+                      </Button>
                     </div>
-                  </>
-                )}
-              </>
+                  </div>
+                </DialogContent>
+              </Dialog>
             )}
-          </CardContent>
-        </Card>
+          />
+          {loadingMembers ? (
+            <div className="space-y-px px-5 py-4">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="flex items-center gap-3 py-2.5">
+                  <div className="h-8 w-8 animate-pulse rounded-full bg-[#F3F4F5]" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 w-32 animate-pulse rounded bg-[#F3F4F5]" />
+                    <div className="h-2.5 w-24 animate-pulse rounded bg-[#F3F4F5]" />
+                  </div>
+                  <div className="h-5 w-14 animate-pulse rounded-full bg-[#F3F4F5]" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Active members */}
+              <div className="divide-y divide-[#F3F4F5]">
+                {members.map(m => {
+                  const cfg = ROLE_CONFIG[m.role as MemberRole] ?? { label: m.role, tone: "gray" as const };
+                  return (
+                    <div key={m.id} className="flex items-center gap-3 px-5 py-3.5">
+                      <Avatar member={m} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13.5px] font-semibold text-[#0B0D0F]">{m.displayName}</p>
+                        <p className="truncate font-mono text-[11px] text-[#9CA3AF]">{m.email}</p>
+                      </div>
+                      <Chip tone={cfg.tone ?? "gray"} dot={false}>{cfg.label}</Chip>
+                    </div>
+                  );
+                })}
+                {members.length === 0 && (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-[13px] text-[#9CA3AF]">No members found.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Pending invitations */}
+              {pendingInvites.length > 0 && (
+                <>
+                  <div className="border-t border-[#ECEEEF] px-5 pb-1 pt-4">
+                    <span className="vb-mono-label">Pending invitations</span>
+                  </div>
+                  <div className="divide-y divide-[#F3F4F5]">
+                    {pendingInvites.map(inv => (
+                      <div key={inv.id} className="flex items-center gap-3 px-5 py-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-[#C9CED4] text-[#C9CED4]">
+                          <Clock className="h-3.5 w-3.5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-mono text-[12.5px] text-[#4B5563]">{inv.email}</p>
+                          <p className="text-[11px] text-[#9CA3AF]">Invited · {ROLE_CONFIG[inv.role].label}</p>
+                        </div>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => void revokeInvite(inv.id)}
+                            className="shrink-0 rounded-[6px] p-1 text-[#9CA3AF] transition-colors hover:bg-[#FEF2F2] hover:text-[#B91C1C]"
+                            title="Revoke invitation"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </Panel>
 
         {/* ── Danger zone ── */}
-        <Card className="animate-slide-up stagger-3 border-destructive/40 xl:col-span-2">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
-              <CardTitle>Danger zone</CardTitle>
+        <Panel className="animate-slide-up stagger-3 border-[#FECACA]">
+          <div className="flex items-start justify-between gap-3 border-b border-[#FEE2E2] px-5 py-4">
+            <div>
+              <span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-[#DC2626]">Danger zone</span>
+              <p className="mt-0.5 text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">Irreversible actions</p>
+              <p className="mt-0.5 text-[12.5px] text-[#6B7280]">Proceed with caution — these cannot be undone.</p>
             </div>
-            <CardDescription>Irreversible actions. Proceed with caution.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 md:flex-row md:items-center md:justify-between">
+            <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-[#DC2626]" />
+          </div>
+          <div className="p-5">
+            <div className="flex flex-col gap-3 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2]/60 p-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm font-medium">Reset workspace</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[13.5px] font-semibold text-[#0B0D0F]">Reset workspace</p>
+                <p className="mt-0.5 text-[12px] text-[#6B7280]">
                   Remove all agent jobs and run history. Audit logs are not deleted.
                 </p>
               </div>
@@ -399,8 +464,8 @@ export default function SettingsPage() {
                 </DialogContent>
               </Dialog>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
       </div>
     </div>

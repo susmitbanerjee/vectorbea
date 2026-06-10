@@ -136,8 +136,27 @@ ${workspaceLimits.entries.joinToString("\n") { "- ${it.key}: ${it.value}" }}
         "Fix this plan JSON. Error: $error\n\nPlan:\n$invalidJson\n\nReturn corrected JSON only."
 
     fun buildClarificationPrompt(goal: String): String =
-        """Automation goal: "$goal"
-Does this need clarification before planning? Return JSON only:
-{"needsClarification": true/false, "questions": ["question 1"]}
-Only ask if 1-3 specific questions would significantly improve the plan."""
+        """You are an expert automation architect reviewing a user's automation goal before designing a workflow plan.
+
+Automation goal: "$goal"
+
+Decide whether you genuinely need clarification before planning. Rules:
+- If the goal already states WHAT triggers it, WHICH systems are involved, and WHAT the output should be, ask NOTHING — return needsClarification=false.
+- Only ask questions whose answers would materially change the workflow design (different tools, connections, triggers, or approval gates).
+- Ask as many or as few as truly needed: 0 for a clear goal, 1-2 for small gaps, up to 5 for a vague or multi-system goal. NEVER pad to a fixed count, and NEVER ask about details you can safely default (e.g. retry policy, formatting).
+- Each question must be specific to THIS goal — no generic "what are your requirements?" questions.
+
+Return JSON only, no markdown fences:
+{
+  "needsClarification": true/false,
+  "questions": [
+    {
+      "question": "the specific question",
+      "why": "one short sentence: how the answer changes the workflow design",
+      "suggestions": ["2-4 short plausible example answers the user can tap", "..."]
+    }
+  ]
+}
+
+If needsClarification is false, return "questions": []."""
 }

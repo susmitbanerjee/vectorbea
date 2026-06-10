@@ -1,161 +1,355 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Bot, Check, CheckCircle2,
-  ChevronDown, ChevronRight, Info, Link2, Loader2, Play,
-  RefreshCw, Shield, Sparkles, Wrench, X, XCircle, Zap,
-  Eye, EyeOff, LayoutGrid, Network, FlaskConical,
+  AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Check, CheckCircle2,
+  ChevronDown, ChevronRight, Database, ExternalLink, Eye, EyeOff,
+  FlaskConical, Globe, Hammer, Inbox, Info, Link2, Loader2, Mail,
+  MessageSquare, Network, Package, PanelRight, PenLine, Play, Radar,
+  RefreshCw, Shield, Sparkles, TrendingUp, Webhook, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createArchitectSession, generatePlan, revisePlan, approvePlan,
   setSimulationPlaceholder, generateTools, generateAgents, createWorkflowFromPlan,
-  type ArchitectPlan, type ConnectionRequirement,
-  type GeneratedTool, type GeneratedAgent, type ReadinessIssue,
+  normalizeClarifyQuestions,
+  type ArchitectPlan, type ClarifyQuestion, type ConnectionRequirement,
+  type GeneratedTool, type GeneratedAgent, type PlanStep, type PlanEdge,
+  type ReadinessIssue,
 } from "@/lib/architect";
 import { ConnectionPickerModal } from "@/components/architect/ConnectionPickerModal";
 import { ArchitectLogo } from "@/components/architect/ArchitectLogo";
+import { NODE_META } from "@/components/workflow-builder/NodeIcon";
+import { ProviderIcon } from "@/components/ui/provider-icon";
+import { Chip, Console } from "@/components/ui/page-kit";
 import { track } from "@/lib/telemetry/client";
 import { cn } from "@/lib/utils";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+/* ── Motion: entrance + drawing keyframes (respects reduced-motion) ─────────── */
+
+const ARCH_CSS = `
+@keyframes archRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes archFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes archPing { 0% { transform: scale(1); opacity: .5; } 80%, 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes archDash { to { stroke-dashoffset: 0; } }
+@keyframes archFlow { to { stroke-dashoffset: -20; } }
+@keyframes archSpin { to { transform: rotate(360deg); } }
+.arch-screen { animation: archRise .45s cubic-bezier(.22,1,.36,1) both; }
+.arch-in     { animation: archRise .5s  cubic-bezier(.22,1,.36,1) both; }
+.arch-fade   { animation: archFade .45s ease both; }
+.arch-lift   { transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.arch-lift:hover { transform: translateY(-1px); border-color: #C9CED4; box-shadow: 0 6px 18px rgba(11,13,15,.06); }
+@media (prefers-reduced-motion: reduce) {
+  .arch-screen, .arch-in, .arch-fade { animation: none; }
+  .arch-lift, .arch-lift:hover { transition: none; transform: none; }
+}
+`;
+
+/** Staggered entrance delay for list items. */
+const stag = (i: number) => ({ animationDelay: `${Math.min(i * 60, 480)}ms` });
+
+// ── Types & constants ─────────────────────────────────────────────────────────
 
 type StepId = "goal" | "clarify" | "generating" | "plan" | "connections" | "confirm" | "building" | "done";
 
 const RAIL_STEPS: { id: StepId; label: string; desc: string }[] = [
-  { id: "goal",        label: "Describe",    desc: "Automation goal"       },
-  { id: "generating",  label: "Understand",  desc: "AI analysis"           },
-  { id: "plan",        label: "Plan",        desc: "Review blueprint"      },
-  { id: "connections", label: "Connections", desc: "Connect systems"       },
-  { id: "confirm",     label: "Confirm",     desc: "Tools & agents"        },
-  { id: "building",    label: "Build",       desc: "Workflow generation"   },
-  { id: "done",        label: "Ready",       desc: "Run simulation"        },
+  { id: "goal",        label: "Describe",  desc: "State the goal"     },
+  { id: "generating",  label: "Analyze",   desc: "AI reads the goal"  },
+  { id: "plan",        label: "Blueprint", desc: "Review the plan"    },
+  { id: "connections", label: "Connect",   desc: "Bind your systems"  },
+  { id: "confirm",     label: "Review",    desc: "Tools & agents"     },
+  { id: "building",    label: "Build",     desc: "Materialize graph"  },
+  { id: "done",        label: "Ready",     desc: "Open the canvas"    },
 ];
 
 const STEP_ORDER = RAIL_STEPS.map(s => s.id);
 
 const GEN_MESSAGES = [
-  "Reading your automation goal…",
-  "Detecting systems and data sources…",
-  "Identifying required tools and integrations…",
-  "Designing agent responsibilities…",
-  "Adding approval gates and safety checks…",
-  "Preparing workflow blueprint…",
+  "Reading your automation goal",
+  "Identifying systems and data sources",
+  "Selecting tools and integrations",
+  "Designing agent responsibilities",
+  "Placing approval gates and safety checks",
+  "Assembling the workflow blueprint",
 ];
 
 const BUILD_PHASES = [
-  { label: "Binding connections",         desc: "Linking your configured systems" },
-  { label: "Creating tools",              desc: "Building API and data connectors" },
-  { label: "Creating agents",             desc: "Configuring AI workers with prompts" },
-  { label: "Generating workflow graph",   desc: "Compiling node/edge structure" },
-  { label: "Validating mappings",         desc: "Checking data flow correctness" },
+  { label: "Binding connections",      desc: "Linking your configured systems" },
+  { label: "Creating tools",           desc: "API, data and messaging connectors" },
+  { label: "Creating agents",          desc: "AI workers with production prompts" },
+  { label: "Compiling workflow graph", desc: "Nodes, edges and data mappings" },
+  { label: "Validating readiness",     desc: "Connections, mappings, simulation" },
 ];
 
-const EXAMPLE_GOALS = [
-  "Monitor customer renewal pipeline and send risk alerts to Slack when score drops below 70",
-  "Every morning pull overnight support tickets, classify them with AI, update CRM priority, alert team",
-  "Daily pull sales data, analyze trends with AI, draft email summary, send to team at 9am",
-  "When order placed, check inventory, reserve stock, notify warehouse, send customer confirmation",
-  "Monitor competitor pricing weekly, summarize changes with AI, post to internal channel",
+const EXAMPLE_GOALS: { icon: React.ElementType; title: string; text: string }[] = [
+  { icon: TrendingUp, title: "Renewal risk alerts",
+    text: "Monitor customer renewal pipeline and send risk alerts to Slack when score drops below 70" },
+  { icon: Inbox, title: "Support ticket triage",
+    text: "Every morning pull overnight support tickets, classify them with AI, update CRM priority, alert team" },
+  { icon: BarChart3, title: "Daily sales digest",
+    text: "Daily pull sales data, analyze trends with AI, draft email summary, send to team at 9am" },
+  { icon: Package, title: "Order fulfillment",
+    text: "When order placed, check inventory, reserve stock, notify warehouse, send customer confirmation" },
+  { icon: Radar, title: "Competitor price watch",
+    text: "Monitor competitor pricing weekly, summarize changes with AI, post to internal channel" },
 ];
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+const PIPELINE: { icon: React.ElementType; label: string; desc: string }[] = [
+  { icon: PenLine,      label: "Describe", desc: "Plain English goal" },
+  { icon: Network,      label: "Plan",     desc: "Agents, tools, gates" },
+  { icon: Link2,        label: "Connect",  desc: "Secure BYOK setup" },
+  { icon: Hammer,       label: "Build",    desc: "Graph on the canvas" },
+  { icon: FlaskConical, label: "Simulate", desc: "Safe test run" },
+];
 
-function StatusPill({ step }: { step: StepId }) {
-  const labels: Record<string, { label: string; color: string }> = {
-    goal:        { label: "Draft",              color: "bg-slate-100 text-slate-600" },
-    clarify:     { label: "Clarifying",         color: "bg-blue-50 text-blue-700" },
-    generating:  { label: "Analyzing…",         color: "bg-indigo-50 text-indigo-700" },
-    plan:        { label: "Plan ready",         color: "bg-green-50 text-green-700" },
-    connections: { label: "Connections needed", color: "bg-amber-50 text-amber-700" },
-    confirm:     { label: "Review tools",       color: "bg-purple-50 text-purple-700" },
-    building:    { label: "Building…",          color: "bg-blue-50 text-blue-700" },
-    done:        { label: "Simulation ready",   color: "bg-green-50 text-green-700" },
-  };
-  const { label, color } = labels[step] ?? labels.goal;
+const STATUS_CHIP: Record<StepId, { label: string; tone: "green" | "teal" | "amber" | "red" | "gray" | "violet"; pulse?: boolean }> = {
+  goal:        { label: "Draft",        tone: "gray" },
+  clarify:     { label: "Clarifying",   tone: "amber" },
+  generating:  { label: "Analyzing",    tone: "teal", pulse: true },
+  plan:        { label: "Plan ready",   tone: "green" },
+  connections: { label: "Connections",  tone: "amber" },
+  confirm:     { label: "Review",       tone: "violet" },
+  building:    { label: "Building",     tone: "teal", pulse: true },
+  done:        { label: "Ready",        tone: "green" },
+};
+
+const CONN_STATUS: Record<ConnectionRequirement["status"], { label: string; tone: "green" | "teal" | "amber" | "red" | "gray"; pulse?: boolean }> = {
+  missing:                { label: "Missing",     tone: "red" },
+  selected_existing:      { label: "Connected",   tone: "green" },
+  created:                { label: "Created",     tone: "green" },
+  test_passed:            { label: "Tested",      tone: "green" },
+  test_failed:            { label: "Test failed", tone: "red" },
+  test_pending:           { label: "Testing",     tone: "teal", pulse: true },
+  simulation_placeholder: { label: "Simulated",   tone: "amber" },
+};
+
+const RISK_TONE: Record<string, "green" | "amber" | "red"> = { low: "green", medium: "amber", high: "red" };
+
+const READY_STATUSES = ["selected_existing", "created", "test_passed", "simulation_placeholder"];
+
+// ── Shared primitives ─────────────────────────────────────────────────────────
+
+function Card({ children, className, style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${color}`}>{label}</span>
+    <div className={cn("rounded-[12px] border border-[#E0E3E6] bg-white", className)} style={style}>
+      {children}
+    </div>
   );
 }
 
-function RailStep({
-  step, idx, currentIdx, onClick,
-}: { step: typeof RAIL_STEPS[0]; idx: number; currentIdx: number; onClick?: () => void }) {
-  const done    = idx < currentIdx;
-  const active  = idx === currentIdx;
-  const locked  = idx > currentIdx;
+function MonoLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p className={cn("font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-[#9CA3AF]", className)}>
+      {children}
+    </p>
+  );
+}
+
+function ScreenHead({ eyebrow, title, sub }: { eyebrow: string; title: React.ReactNode; sub?: React.ReactNode }) {
+  return (
+    <div>
+      <MonoLabel className="mb-2 text-[#007F4E]">{eyebrow}</MonoLabel>
+      <h1 className="text-[24px] font-bold tracking-[-0.02em] text-[#0B0D0F]">{title}</h1>
+      {sub && <p className="mt-1.5 max-w-xl text-[13.5px] leading-[1.6] text-[#6B7280]">{sub}</p>}
+    </div>
+  );
+}
+
+function PrimaryBtn({
+  onClick, disabled, children, className,
+}: { onClick?: () => void; disabled?: boolean; children: React.ReactNode; className?: string }) {
   return (
     <button
       type="button"
-      onClick={done || active ? onClick : undefined}
+      onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "w-full flex items-start gap-3 px-4 py-3 text-left transition-all rounded-xl",
-        active  && "bg-blue-50 border border-blue-200",
-        done    && "hover:bg-slate-50 cursor-pointer",
-        locked  && "opacity-40 cursor-default",
+        "inline-flex items-center gap-2 rounded-[9px] bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white shadow-sm transition-colors hover:bg-[#006B45] disabled:opacity-40",
+        className,
       )}
     >
-      <div className={cn(
-        "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold mt-0.5",
-        done   && "bg-green-500 text-white",
-        active && "bg-[#007F4E] text-white",
-        locked && "bg-slate-200 text-slate-400",
-      )}>
-        {done ? <Check className="h-3.5 w-3.5" /> : idx + 1}
-      </div>
-      <div className="min-w-0">
-        <p className={cn("text-[13px] font-semibold leading-snug",
-          active ? "text-blue-700" : done ? "text-slate-700" : "text-slate-400"
-        )}>{step.label}</p>
-        <p className="text-[11px] text-slate-400 mt-0.5 leading-none">{step.desc}</p>
-      </div>
+      {children}
     </button>
   );
 }
 
-function ConnStatusBadge({ status }: { status: ConnectionRequirement["status"] }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    missing:               { label: "Missing",      cls: "bg-red-50 text-red-700 border-red-200" },
-    selected_existing:     { label: "Connected",    cls: "bg-green-50 text-green-700 border-green-200" },
-    created:               { label: "Created",      cls: "bg-green-50 text-green-700 border-green-200" },
-    test_passed:           { label: "✓ Tested",     cls: "bg-green-50 text-green-700 border-green-200" },
-    test_failed:           { label: "Test failed",  cls: "bg-red-50 text-red-700 border-red-200" },
-    test_pending:          { label: "Testing…",     cls: "bg-blue-50 text-blue-700 border-blue-200" },
-    simulation_placeholder:{ label: "Sim mode",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
-  };
-  const { label, cls } = map[status] ?? { label: status, cls: "bg-slate-50 text-slate-600 border-slate-200" };
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${cls}`}>{label}</span>;
+function GhostBtn({
+  onClick, disabled, children, className,
+}: { onClick?: () => void; disabled?: boolean; children: React.ReactNode; className?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-[9px] border border-[#E0E3E6] bg-white px-4 py-2.5 text-[13px] font-medium text-[#4B5563] transition-colors hover:bg-[#F7F8F9] disabled:opacity-40",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
-function RiskBadge({ level }: { level: string }) {
-  const cls = level === "high" ? "bg-red-50 text-red-700 border-red-200"
-    : level === "medium"       ? "bg-amber-50 text-amber-700 border-amber-200"
-    :                            "bg-green-50 text-green-700 border-green-200";
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${cls}`}>{level}</span>;
+/** Checkpoint diamond marker — done / active / locked. */
+function DiamondMark({ state, size = 11 }: { state: "done" | "active" | "locked"; size?: number }) {
+  if (state === "done") {
+    return (
+      <span className="inline-block rotate-45 rounded-[2px]" style={{ width: size, height: size, background: "#007F4E" }} />
+    );
+  }
+  if (state === "active") {
+    return (
+      <span className="relative inline-flex" style={{ width: size, height: size }}>
+        <span
+          className="absolute inset-0 rotate-45 rounded-[2px]"
+          style={{ border: "2px solid #007F4E", background: "#FFFFFF", animation: "archPing 1.8s cubic-bezier(0,0,.2,1) infinite" }}
+        />
+        <span className="absolute inset-0 rotate-45 rounded-[2px]" style={{ border: "2px solid #007F4E", background: "#FFFFFF" }} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-block rotate-45 rounded-[2px]"
+      style={{ width: size - 2, height: size - 2, border: "2px solid #D7DBE0", background: "#FFFFFF" }}
+    />
+  );
 }
 
-// ── WorkflowStepList — responsive steps with parallel/branch treatment ────────
+/** Solid identity tile for a workflow node type — same colors as the canvas. */
+function NodeTile({ type, size = 30 }: { type: string; size?: number }) {
+  const meta = NODE_META[type as keyof typeof NODE_META] ?? NODE_META.tool;
+  const Icon = meta.icon;
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-[8px]"
+      style={{ width: size, height: size, background: meta.color }}
+    >
+      <Icon className="h-[15px] w-[15px] text-white" />
+    </span>
+  );
+}
 
-const STEP_TYPE_STYLES: Record<string, { cls: string; dot: string }> = {
-  trigger:  { cls: "bg-green-50 text-green-700 border-green-200",   dot: "bg-green-500" },
-  tool:     { cls: "bg-purple-50 text-purple-700 border-purple-200", dot: "bg-purple-500" },
-  agent:    { cls: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-500" },
-  approval: { cls: "bg-orange-50 text-orange-700 border-orange-200", dot: "bg-orange-500" },
-  branch:   { cls: "bg-amber-50 text-amber-700 border-amber-200",   dot: "bg-amber-500" },
-  parallel: { cls: "bg-cyan-50 text-cyan-700 border-cyan-200",      dot: "bg-cyan-500" },
-  join:     { cls: "bg-slate-50 text-slate-600 border-slate-200",   dot: "bg-slate-400" },
-  end:      { cls: "bg-slate-50 text-slate-500 border-slate-200",   dot: "bg-slate-300" },
-};
+/** Glyph tile for a connection requirement — provider logo when known. */
+function ConnGlyph({ type, providerHint, size = 32 }: { type: string; providerHint?: string | null; size?: number }) {
+  const t = `${type} ${providerHint ?? ""}`.toLowerCase();
+  const isLLM = /llm|openai|anthropic|claude|gemini|qwen|\bai\b/.test(t);
+  let Icon: React.ElementType = Globe;
+  if (/database|postgres|mysql|\bdb\b/.test(t)) Icon = Database;
+  else if (/email|smtp|resend|sendgrid|mail/.test(t)) Icon = Mail;
+  else if (/slack|chat|message/.test(t)) Icon = MessageSquare;
+  else if (/webhook/.test(t)) Icon = Webhook;
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white text-[#0B0D0F]"
+      style={{ width: size, height: size }}
+    >
+      {isLLM
+        ? <ProviderIcon providerType={providerHint ?? type} className="h-4 w-4" />
+        : <Icon className="h-4 w-4" strokeWidth={1.8} />}
+    </span>
+  );
+}
 
-function WorkflowStepList({
-  steps, edges,
-}: {
-  steps: import("@/lib/architect").PlanStep[];
-  edges: import("@/lib/architect").PlanEdge[];
-}) {
+/** Segmented confidence meter. */
+function ConfidenceMeter({ value }: { value: number }) {
+  const filled = Math.round(value * 10);
+  const color  = value >= 0.8 ? "#007F4E" : value >= 0.6 ? "#CA8A04" : "#DC2626";
+  return (
+    <div className="text-right">
+      <MonoLabel>Confidence</MonoLabel>
+      <div className="mt-1.5 flex items-center gap-2">
+        <div className="flex gap-[3px]">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <span
+              key={i}
+              className="h-[14px] w-[5px] rounded-[1.5px]"
+              style={{ background: i < filled ? color : "#E8EAEC" }}
+            />
+          ))}
+        </div>
+        <span className="font-mono text-[15px] font-semibold tabular-nums" style={{ color }}>
+          {Math.round(value * 100)}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Dark mono block for agent system prompts. */
+function PromptBlock({ text, maxH = 224 }: { text: string; maxH?: number }) {
+  return (
+    <div className="overflow-hidden rounded-[10px]" style={{ background: "#0B0D0F" }}>
+      <div className="flex items-center gap-2 border-b px-3.5 py-2" style={{ borderColor: "#1c1f22" }}>
+        <span className="h-1.5 w-1.5 rounded-full bg-[#34D399]" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#6B7280]">System prompt</span>
+      </div>
+      <pre
+        className="overflow-y-auto whitespace-pre-wrap px-3.5 py-3 font-mono text-[11px] leading-[1.7] text-[#D1D5DB]"
+        style={{ maxHeight: maxH }}
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+// ── Stage rail (desktop) ──────────────────────────────────────────────────────
+
+function StageRail({ currentIdx, clarifying }: { currentIdx: number; clarifying: boolean }) {
+  return (
+    <aside className="hidden w-[232px] shrink-0 flex-col overflow-y-auto border-r border-[#E0E3E6] bg-white lg:flex">
+      <div className="flex-1 px-5 py-6">
+        <MonoLabel className="mb-5">Pipeline</MonoLabel>
+        {RAIL_STEPS.map((s, i) => {
+          const state: "done" | "active" | "locked" = i < currentIdx ? "done" : i === currentIdx ? "active" : "locked";
+          const last = i === RAIL_STEPS.length - 1;
+          return (
+            <div key={s.id} className="flex gap-3">
+              <div className="flex w-[14px] flex-col items-center pt-[3px]">
+                <DiamondMark state={state} />
+                {!last && (
+                  <span
+                    className="my-1.5 w-px flex-1 transition-colors duration-500"
+                    style={{ background: i < currentIdx ? "#9CCFBB" : "#E8EAEC", minHeight: 22 }}
+                  />
+                )}
+              </div>
+              <div className={cn("min-w-0 pb-5", state === "locked" && "opacity-45")}>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-mono text-[10px] tabular-nums text-[#C9CED4]">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <p className={cn(
+                    "text-[13px] font-semibold leading-none",
+                    state === "active" ? "text-[#006B45]" : "text-[#0B0D0F]",
+                  )}>
+                    {s.label}
+                  </p>
+                </div>
+                <p className="mt-1 text-[11px] leading-none text-[#9CA3AF]">
+                  {s.id === "goal" && clarifying ? "Answering questions" : s.desc}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="border-t border-[#ECEEEF] p-4">
+        <p className="text-[11px] leading-[1.6] text-[#9CA3AF]">
+          The architect designs agents, tools, connections and approval gates end-to-end. No workflow expertise needed.
+        </p>
+      </div>
+    </aside>
+  );
+}
+
+// ── Workflow step list — parallel/branch aware, canvas identity colors ────────
+
+function WorkflowStepList({ steps, edges }: { steps: PlanStep[]; edges: PlanEdge[] }) {
   // Build dependency map: tempStepId → dependsOn tempStepIds
   const inbound: Record<string, string[]> = {};
   for (const e of edges ?? []) {
@@ -172,53 +366,44 @@ function WorkflowStepList({
       parallelGroups[src].push(to);
     }
   }
-  const parallelStepIds = new Set<string>();
   const usedParallelSources = new Set<string>();
-  Object.values(parallelGroups).forEach(grp => {
-    if (grp.length >= 2) grp.forEach(id => parallelStepIds.add(id));
-  });
-
   const rendered = new Set<string>();
 
   return (
-    <div className="space-y-2">
+    <div>
       {steps.map((s, i) => {
         if (rendered.has(s.tempStepId)) return null;
-
-        const style = STEP_TYPE_STYLES[s.nodeType] ?? STEP_TYPE_STYLES.tool;
         const isLast = i === steps.length - 1;
 
-        // ── Branch step: show if/else preview ──────────────────────────
+        // ── Branch step: if/else preview ─────────────────────────────────
         if (s.nodeType === "branch") {
-          const outgoing = (edges ?? []).filter(e => e.from === s.tempStepId);
-          const trueEdge = outgoing.find(e => e.type === "condition_true" || e.label?.toLowerCase().includes("true") || e.label?.toLowerCase().includes("yes"));
+          const outgoing  = (edges ?? []).filter(e => e.from === s.tempStepId);
+          const trueEdge  = outgoing.find(e => e.type === "condition_true"  || e.label?.toLowerCase().includes("true")  || e.label?.toLowerCase().includes("yes"));
           const falseEdge = outgoing.find(e => e.type === "condition_false" || e.label?.toLowerCase().includes("false") || e.label?.toLowerCase().includes("no"));
           rendered.add(s.tempStepId);
           return (
-            <div key={s.tempStepId} className="flex items-start gap-3">
-              <div className="flex flex-col items-center shrink-0">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-[11px] font-bold text-amber-700">{i+1}</div>
-                {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
-              </div>
-              <Card className="flex-1 p-3.5 mb-1.5 border-amber-200 bg-amber-50/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${style.cls}`}>branch</span>
-                  <p className="text-[13px] font-semibold text-slate-700">{s.name}</p>
+            <div key={s.tempStepId} className="arch-in flex items-stretch gap-3" style={stag(i)}>
+              <RailCol idx={i} last={isLast} />
+              <Card className="arch-lift mb-2 flex-1 p-3.5">
+                <div className="flex items-center gap-2.5">
+                  <NodeTile type="branch" />
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-semibold text-[#0B0D0F]">{s.name}</p>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">Branch</p>
+                  </div>
                 </div>
-                <div className="flex gap-2 flex-wrap">
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {trueEdge && (
-                    <div className="flex items-center gap-1.5 rounded-lg bg-green-50 border border-green-200 px-2.5 py-1.5 text-[11.5px]">
-                      <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      <span className="font-semibold text-green-700">IF TRUE</span>
-                      {trueEdge.label && <span className="text-green-600">→ {trueEdge.label}</span>}
-                    </div>
+                    <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-[#9CCFBB] bg-[#E6F4EF] px-2.5 py-1 text-[11.5px] font-medium text-[#006B45]">
+                      <span className="font-mono text-[10px] font-semibold">TRUE</span>
+                      {trueEdge.label && <span>→ {trueEdge.label}</span>}
+                    </span>
                   )}
                   {falseEdge && (
-                    <div className="flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-2.5 py-1.5 text-[11.5px]">
-                      <div className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                      <span className="font-semibold text-red-700">IF FALSE</span>
-                      {falseEdge.label && <span className="text-red-600">→ {falseEdge.label}</span>}
-                    </div>
+                    <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-1 text-[11.5px] font-medium text-[#B91C1C]">
+                      <span className="font-mono text-[10px] font-semibold">FALSE</span>
+                      {falseEdge.label && <span>→ {falseEdge.label}</span>}
+                    </span>
                   )}
                 </div>
               </Card>
@@ -226,7 +411,7 @@ function WorkflowStepList({
           );
         }
 
-        // ── Parallel group: show grouped lane cards ─────────────────────
+        // ── Parallel group: grouped lane cards ───────────────────────────
         const parallelSrc = Object.entries(parallelGroups).find(([src, grp]) =>
           grp.includes(s.tempStepId) && grp.length >= 2 && !usedParallelSources.has(src)
         );
@@ -235,58 +420,50 @@ function WorkflowStepList({
           usedParallelSources.add(src);
           grpIds.forEach(id => rendered.add(id));
           rendered.add(s.tempStepId);
-          const grpSteps = grpIds.map(id => steps.find(st => st.tempStepId === id)).filter(Boolean) as import("@/lib/architect").PlanStep[];
+          const grpSteps = grpIds.map(id => steps.find(st => st.tempStepId === id)).filter(Boolean) as PlanStep[];
           return (
-            <div key={`parallel-${src}`} className="flex items-start gap-3">
-              <div className="flex flex-col items-center shrink-0">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-100 text-[11px] font-bold text-cyan-700">{i+1}</div>
-                {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
-              </div>
-              <div className="flex-1 mb-1.5">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="h-px flex-1 bg-cyan-200" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-600 bg-cyan-50 border border-cyan-200 rounded-full px-2 py-0.5">Parallel group</span>
-                  <div className="h-px flex-1 bg-cyan-200" />
+            <div key={`parallel-${src}`} className="arch-in flex items-stretch gap-3" style={stag(i)}>
+              <RailCol idx={i} last={isLast} />
+              <div className="mb-2 flex-1">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="h-px flex-1 bg-[#C7D2FE]" />
+                  <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[#4F46E5]">
+                    Parallel × {grpSteps.length}
+                  </span>
+                  <span className="h-px flex-1 bg-[#C7D2FE]" />
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {grpSteps.map(gs => {
-                    const gs_style = STEP_TYPE_STYLES[gs.nodeType] ?? STEP_TYPE_STYLES.tool;
-                    return (
-                      <Card key={gs.tempStepId} className="flex items-center gap-2.5 px-3 py-2.5 border-cyan-100">
-                        <div className={`h-2 w-2 rounded-full shrink-0 ${gs_style.dot}`} />
-                        <div className="min-w-0">
-                          <span className={`rounded border text-[9.5px] font-bold px-1.5 py-0.5 ${gs_style.cls}`}>{gs.nodeType}</span>
-                          <p className="text-[12px] font-medium text-slate-700 mt-0.5 truncate">{gs.name}</p>
-                        </div>
-                      </Card>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-center mt-2">
-                  <div className="h-px w-1/2 bg-cyan-200" />
+                  {grpSteps.map(gs => (
+                    <Card key={gs.tempStepId} className="arch-lift flex items-center gap-2.5 px-3 py-2.5">
+                      <NodeTile type={gs.nodeType} size={26} />
+                      <div className="min-w-0">
+                        <p className="truncate text-[12.5px] font-medium text-[#0B0D0F]">{gs.name}</p>
+                        <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-[#9CA3AF]">{gs.nodeType}</p>
+                      </div>
+                    </Card>
+                  ))}
                 </div>
               </div>
             </div>
           );
         }
 
-        // ── Normal step ─────────────────────────────────────────────────
+        // ── Normal step ──────────────────────────────────────────────────
         rendered.add(s.tempStepId);
         return (
-          <div key={s.tempStepId} className="flex items-start gap-3">
-            <div className="flex flex-col items-center shrink-0">
-              <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white`}
-                style={{ background: style.dot.replace("bg-","#").length > 4 ? undefined : undefined }}
-              >
-                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold ${style.dot} text-white`}>{i+1}</div>
+          <div key={s.tempStepId} className="arch-in flex items-stretch gap-3" style={stag(i)}>
+            <RailCol idx={i} last={isLast} />
+            <Card className="arch-lift mb-2 flex flex-1 items-center gap-2.5 px-3.5 py-2.5">
+              <NodeTile type={s.nodeType} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-[#0B0D0F]">{s.name}</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF]">{s.nodeType}</p>
               </div>
-              {!isLast && <div className="w-px flex-1 bg-slate-200 mt-1 min-h-[16px]" />}
-            </div>
-            <Card className="flex-1 flex items-center gap-3 px-3.5 py-2.5 mb-1.5">
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold shrink-0 ${style.cls}`}>{s.nodeType}</span>
-              <p className="text-[13px] font-medium text-slate-700 truncate">{s.name}</p>
-              {s.toolTempId && <span className="ml-auto text-[10.5px] text-purple-500 shrink-0 truncate hidden sm:block">{s.toolTempId}</span>}
-              {s.agentTempId && <span className="ml-auto text-[10.5px] text-indigo-500 shrink-0 truncate hidden sm:block">{s.agentTempId}</span>}
+              {(s.toolTempId || s.agentTempId) && (
+                <span className="hidden shrink-0 truncate font-mono text-[10.5px] text-[#9CA3AF] sm:block">
+                  {s.toolTempId ?? s.agentTempId}
+                </span>
+              )}
             </Card>
           </div>
         );
@@ -295,15 +472,49 @@ function WorkflowStepList({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[10.5px] font-bold uppercase tracking-widest text-slate-400 mb-2">{children}</p>;
+function RailCol({ idx, last }: { idx: number; last: boolean }) {
+  return (
+    <div className="flex w-[22px] shrink-0 flex-col items-center pt-[10px]">
+      <span className="font-mono text-[10px] tabular-nums text-[#C9CED4]">{String(idx + 1).padStart(2, "0")}</span>
+      {!last && <span className="mt-1.5 w-px flex-1 bg-[#E8EAEC]" />}
+    </div>
+  );
 }
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+// ── Blueprint sketch — animated mini graph for the analyzing screen ───────────
+
+function BlueprintSketch() {
+  const edge = (d: string, delay: number) => (
+    <path
+      d={d}
+      stroke="#9CCFBB"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeDasharray="64"
+      strokeDashoffset="64"
+      style={{ animation: `archDash .7s ease forwards ${delay}s` }}
+    />
+  );
+  const node = (x: number, y: number, fill: string, delay: number, diamond = false) => (
+    <rect
+      x={x} y={y} width="16" height="16" rx="4"
+      fill={fill}
+      transform={diamond ? `rotate(45 ${x + 8} ${y + 8})` : undefined}
+      style={{ animation: `archFade .4s ease forwards ${delay}s`, opacity: 0 }}
+    />
+  );
   return (
-    <div className={cn("rounded-2xl border border-slate-200 bg-white", className)}>
-      {children}
-    </div>
+    <svg viewBox="0 0 320 96" className="w-full max-w-[340px]" aria-hidden>
+      {edge("M48 48 H104", 0.3)}
+      {edge("M128 48 H184", 0.9)}
+      {edge("M208 42 L256 20", 1.5)}
+      {edge("M208 54 L256 76", 1.7)}
+      {node(28, 40, "#2563EB", 0.1)}
+      {node(106, 40, "#7C3AED", 0.7)}
+      {node(186, 40, "#007F4E", 1.3, true)}
+      {node(254, 12, "#0891B2", 1.9)}
+      {node(254, 68, "#D97706", 2.1)}
+    </svg>
   );
 }
 
@@ -312,15 +523,15 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
 export default function ArchitectPage() {
   const router = useRouter();
   useEffect(() => { track("architect_opened"); }, []);
-  const [step, setStep]         = useState<StepId>("goal");
-  const [loading, setLoading]   = useState(false);
+  const [step, setStep]             = useState<StepId>("goal");
+  const [loading, setLoading]       = useState(false);
   const [buildPhase, setBuildPhase] = useState(0);
   const [genMsgIdx, setGenMsgIdx]   = useState(0);
 
   // Data
   const [goal, setGoal]             = useState("");
   const [answers, setAnswers]       = useState<Record<string, string>>({});
-  const [clarifyQ, setClarifyQ]     = useState<string[]>([]);
+  const [clarifyQ, setClarifyQ]     = useState<ClarifyQuestion[]>([]);
   const [sessionId, setSessionId]   = useState<string | null>(null);
   const [plan, setPlan]             = useState<ArchitectPlan | null>(null);
   const [connReqs, setConnReqs]     = useState<ConnectionRequirement[]>([]);
@@ -329,12 +540,12 @@ export default function ArchitectPage() {
   const [readiness, setReadiness]   = useState<{ status: string; issues: ReadinessIssue[] } | null>(null);
 
   // UI state
-  const [reviseText, setReviseText]     = useState("");
-  const [showRevise, setShowRevise]     = useState(false);
-  const [pickerReq, setPickerReq]       = useState<ConnectionRequirement | null>(null);
-  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+  const [reviseText, setReviseText]           = useState("");
+  const [showRevise, setShowRevise]           = useState(false);
+  const [pickerReq, setPickerReq]             = useState<ConnectionRequirement | null>(null);
+  const [expandedAgents, setExpandedAgents]   = useState<Set<string>>(new Set());
   const [expandedPrompts, setExpandedPrompts] = useState<Set<string>>(new Set());
-  const [rightOpen, setRightOpen]       = useState(true);
+  const [rightOpen, setRightOpen]             = useState(true);
 
   const goalRef = useRef<HTMLTextAreaElement>(null);
 
@@ -350,8 +561,9 @@ export default function ArchitectPage() {
     try {
       const sess = await createArchitectSession(goal.trim());
       setSessionId(sess.id);
-      if (sess.needsClarification && sess.clarificationQuestions?.length) {
-        setClarifyQ(sess.clarificationQuestions!);
+      const questions = normalizeClarifyQuestions(sess.clarificationQuestions);
+      if (sess.needsClarification && questions.length > 0) {
+        setClarifyQ(questions);
         setLoading(false);
         setStep("clarify");
         return;
@@ -502,81 +714,88 @@ export default function ArchitectPage() {
     }
   }
 
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const answeredCount = clarifyQ.filter(q => (answers[q.question] ?? "").trim().length > 0).length;
+  const readyConnCount = connReqs.filter(r => READY_STATUSES.includes(r.status)).length;
+  const statusChip = STATUS_CHIP[step];
+
   // ── Layout ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-[#F7F8FA]">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#F7F8F9]">
+      <style dangerouslySetInnerHTML={{ __html: ARCH_CSS }} />
+
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-6 z-20">
+      <header className="z-20 flex h-[58px] shrink-0 items-center justify-between border-b border-[#E0E3E6] bg-white px-4 lg:px-6">
         <div className="flex items-center gap-4">
-          <Link href={"/workflows/new" as never}
-            className="flex items-center gap-1.5 text-[12px] text-slate-400 hover:text-slate-700 transition-colors">
+          <Link
+            href={"/workflows/new" as never}
+            className="flex items-center gap-1.5 text-[12px] text-[#9CA3AF] transition-colors hover:text-[#0B0D0F]"
+          >
             <ArrowLeft className="h-3.5 w-3.5" /> Back
           </Link>
-          <div className="h-4 w-px bg-slate-200" />
+          <div className="h-4 w-px bg-[#E0E3E6]" />
           <ArchitectLogo size={30} />
           <div className="hidden sm:block">
-            <p className="text-[14px] font-bold text-slate-900 leading-none">AI Workflow Architect</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Describe → Plan → Build → Run</p>
+            <p className="font-mono text-[9.5px] font-medium uppercase leading-none tracking-[0.18em] text-[#007F4E]">
+              Vectorbea
+            </p>
+            <p className="mt-1 text-[14px] font-bold leading-none tracking-[-0.01em] text-[#0B0D0F]">
+              AI Workflow Architect
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <StatusPill step={step} />
-          <button type="button" onClick={() => setRightOpen(v => !v)}
-            className="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
-            <LayoutGrid className="h-3.5 w-3.5 text-slate-500" />
+          <Chip tone={statusChip.tone} pulse={statusChip.pulse}>{statusChip.label}</Chip>
+          <button
+            type="button"
+            onClick={() => setRightOpen(v => !v)}
+            title="Toggle blueprint panel"
+            className="hidden h-8 w-8 items-center justify-center rounded-[8px] border border-[#E0E3E6] transition-colors hover:bg-[#F7F8F9] lg:flex"
+          >
+            <PanelRight className="h-3.5 w-3.5 text-[#6B7280]" />
           </button>
         </div>
       </header>
 
-      {/* ── Body: rail + main + insight ────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* ── Body: rail + main + blueprint ──────────────────────────────────── */}
+      <div className="relative flex flex-1 overflow-hidden">
 
-        {/* ── Left step rail (desktop) ─────────────────────────────────────── */}
-        <aside className="hidden lg:flex w-[240px] shrink-0 flex-col border-r border-slate-200 bg-white overflow-y-auto">
-          <div className="p-3 space-y-0.5 flex-1">
-            {RAIL_STEPS.map((s, i) => (
-              <RailStep key={s.id} step={s} idx={i} currentIdx={currentStepIdx} />
-            ))}
-          </div>
-          <div className="border-t border-slate-100 p-4">
-            <p className="text-[10.5px] text-slate-400 font-medium">
-              AI plans your automation end-to-end. No workflow expertise needed.
-            </p>
-          </div>
-        </aside>
+        <StageRail currentIdx={currentStepIdx} clarifying={step === "clarify"} />
 
         {/* ── Mobile stepper ───────────────────────────────────────────────── */}
-        <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto px-4 py-2.5 border-b border-slate-200 bg-white shrink-0">
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-2 overflow-x-auto border-b border-[#E0E3E6] bg-white px-4 py-2.5 lg:hidden">
           {RAIL_STEPS.map((s, i) => (
-            <div key={s.id} className="flex items-center gap-1.5 shrink-0">
-              <div className={cn(
-                "flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold",
-                i < currentStepIdx  ? "bg-green-50 text-green-700" :
-                i === currentStepIdx ? "bg-blue-100 text-blue-700" : "text-slate-400"
-              )}>
-                {i < currentStepIdx && <Check className="h-3 w-3" />}
-                {s.label}
+            <div key={s.id} className="flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <DiamondMark state={i < currentStepIdx ? "done" : i === currentStepIdx ? "active" : "locked"} size={9} />
+                <span className={cn(
+                  "text-[11.5px] font-semibold",
+                  i === currentStepIdx ? "text-[#006B45]" : i < currentStepIdx ? "text-[#4B5563]" : "text-[#C9CED4]",
+                )}>
+                  {s.label}
+                </span>
               </div>
-              {i < RAIL_STEPS.length - 1 && <div className={`h-px w-3 ${i < currentStepIdx ? "bg-green-300" : "bg-slate-200"}`} />}
+              {i < RAIL_STEPS.length - 1 && (
+                <span className={cn("h-px w-3", i < currentStepIdx ? "bg-[#9CCFBB]" : "bg-[#E8EAEC]")} />
+              )}
             </div>
           ))}
         </div>
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[840px] mx-auto px-4 lg:px-8 py-6 lg:py-8 space-y-6">
+        <main className="flex-1 overflow-y-auto pt-12 lg:pt-0">
+          <div className="mx-auto max-w-[840px] space-y-6 px-4 py-6 lg:px-8 lg:py-8">
 
             {/* ── Screen 1: Goal ──────────────────────────────────────────── */}
             {step === "goal" && (
-              <div className="space-y-5">
-                <div>
-                  <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">What are you trying to automate?</h1>
-                  <p className="mt-2 text-[14px] text-slate-500 max-w-xl">
-                    Describe your automation in plain English. Vectorbea will design the agents, tools, connections, approvals, and workflow graph.
-                  </p>
-                </div>
+              <div className="arch-screen space-y-6">
+                <ScreenHead
+                  eyebrow="01 · Describe"
+                  title="What should Vectorbea build for you?"
+                  sub="Describe the automation in plain English. The architect designs the agents, tools, connections, approval gates and workflow graph — then builds it on the canvas."
+                />
 
-                <Card className="p-5">
+                <Card className="arch-in overflow-hidden transition-shadow focus-within:border-[#9CCFBB] focus-within:shadow-[0_0_0_3px_rgba(0,127,78,0.10)]" style={stag(1)}>
                   <textarea
                     ref={goalRef}
                     rows={6}
@@ -584,49 +803,58 @@ export default function ArchitectPage() {
                     onChange={e => setGoal(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGoalSubmit(); }}
                     placeholder="e.g. Every morning, pull sales data, analyze performance with AI, draft a summary email, and send it to the team at 9am…"
-                    className="w-full resize-none bg-transparent text-[14px] text-slate-800 placeholder:text-slate-400 focus:outline-none leading-relaxed"
+                    className="w-full resize-none bg-transparent p-5 text-[14px] leading-relaxed text-[#0B0D0F] placeholder:text-[#9CA3AF] focus:outline-none"
                   />
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
-                    <span className="text-[11px] text-slate-400">{goal.length} chars · ⌘↵ to submit</span>
-                    <button type="button" onClick={handleGoalSubmit}
-                      disabled={!goal.trim() || loading}
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 transition-colors shadow-sm">
+                  <div className="flex items-center justify-between border-t border-[#ECEEEF] bg-[#FAFBFB] px-5 py-3">
+                    <span className="font-mono text-[10.5px] text-[#9CA3AF]">
+                      {goal.length} chars · ⌘↵ to submit
+                    </span>
+                    <PrimaryBtn onClick={handleGoalSubmit} disabled={!goal.trim() || loading}>
                       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                       Architect my workflow
-                    </button>
+                    </PrimaryBtn>
                   </div>
                 </Card>
 
-                <div>
-                  <SectionLabel>Example automations</SectionLabel>
+                <div className="arch-in" style={stag(2)}>
+                  <MonoLabel className="mb-2.5">Start from an example</MonoLabel>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {EXAMPLE_GOALS.map(eg => (
-                      <button key={eg} type="button" onClick={() => { setGoal(eg); goalRef.current?.focus(); }}
-                        className="rounded-xl border border-slate-200 bg-white p-3.5 text-left text-[12.5px] text-slate-600 hover:border-blue-300 hover:bg-blue-50/40 transition-all">
-                        {eg}
+                    {EXAMPLE_GOALS.map(({ icon: Icon, title, text }) => (
+                      <button
+                        key={title}
+                        type="button"
+                        onClick={() => { setGoal(text); goalRef.current?.focus(); }}
+                        className="arch-lift group flex items-start gap-3 rounded-[12px] border border-[#E0E3E6] bg-white p-3.5 text-left"
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#9CCFBB] bg-[#E6F4EF] text-[#007F4E]">
+                          <Icon className="h-4 w-4" strokeWidth={1.8} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[12.5px] font-semibold text-[#0B0D0F]">{title}</span>
+                          <span className="mt-0.5 block text-[11.5px] leading-[1.5] text-[#6B7280]">{text}</span>
+                        </span>
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* What Vectorbea does */}
-                <Card className="p-5">
-                  <SectionLabel>What Vectorbea does for you</SectionLabel>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {[
-                      { icon: Sparkles, label: "Understand goal",      desc: "Extract systems, triggers, outputs" },
-                      { icon: Network,  label: "Design agents",         desc: "AI workers with real system prompts" },
-                      { icon: Wrench,   label: "Create tools",          desc: "API, DB, email connectors" },
-                      { icon: Link2,    label: "Ask for connections",   desc: "Secure BYOK setup" },
-                      { icon: Zap,      label: "Build workflow",        desc: "Visual step-by-step animation" },
-                      { icon: Play,     label: "Run simulation",        desc: "Safe test with no real calls" },
-                    ].map(({ icon: Icon, label, desc }) => (
-                      <div key={label} className="flex flex-col gap-1.5 rounded-xl border border-slate-100 bg-slate-50 p-3">
-                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100">
-                          <Icon className="h-3.5 w-3.5 text-blue-600" />
+                {/* How it works pipeline */}
+                <Card className="arch-in p-5" style={stag(3)}>
+                  <MonoLabel className="mb-4">How it works</MonoLabel>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-0">
+                    {PIPELINE.map(({ icon: Icon, label, desc }, i) => (
+                      <div key={label} className="flex flex-1 items-start gap-3 sm:flex-col sm:items-center sm:gap-0 sm:text-center">
+                        <div className="flex items-center sm:w-full">
+                          <span className={cn("hidden h-px flex-1 sm:block", i === 0 ? "bg-transparent" : "bg-[#E8EAEC]")} />
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-[#E0E3E6] bg-white text-[#0B0D0F]">
+                            <Icon className="h-4 w-4" strokeWidth={1.8} />
+                          </span>
+                          <span className={cn("hidden h-px flex-1 sm:block", i === PIPELINE.length - 1 ? "bg-transparent" : "bg-[#E8EAEC]")} />
                         </div>
-                        <p className="text-[12px] font-semibold text-slate-700">{label}</p>
-                        <p className="text-[11px] text-slate-400">{desc}</p>
+                        <div className="sm:mt-2.5">
+                          <p className="text-[12px] font-semibold text-[#0B0D0F]">{label}</p>
+                          <p className="mt-0.5 text-[10.5px] text-[#9CA3AF]">{desc}</p>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -634,77 +862,147 @@ export default function ArchitectPage() {
               </div>
             )}
 
-            {/* ── Screen 2: Clarify ───────────────────────────────────────── */}
+            {/* ── Screen 2: Clarify (adaptive 1–5 questions) ──────────────── */}
             {step === "clarify" && (
-              <div className="space-y-5">
-                <div>
-                  <h1 className="text-[22px] font-bold text-slate-900">A few quick questions</h1>
-                  <p className="mt-1 text-[13.5px] text-slate-500">These help Vectorbea design a more precise workflow plan.</p>
+              <div className="arch-screen space-y-5">
+                <ScreenHead
+                  eyebrow={`Clarify · ${clarifyQ.length} question${clarifyQ.length === 1 ? "" : "s"}`}
+                  title={clarifyQ.length === 1 ? "One detail will sharpen the plan" : "A few details will sharpen the plan"}
+                  sub="The architect only asks what changes the design. Answer what you can, or skip — sensible defaults are used for the rest."
+                />
+
+                <div className="space-y-3">
+                  {clarifyQ.map((q, i) => {
+                    const answered = (answers[q.question] ?? "").trim().length > 0;
+                    return (
+                      <Card key={i} className="arch-in p-4" style={stag(i)}>
+                        <div className="flex items-start gap-3">
+                          <span className={cn(
+                            "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] font-mono text-[10.5px] font-semibold",
+                            answered ? "bg-[#007F4E] text-white" : "border border-[#E0E3E6] bg-[#FAFBFB] text-[#9CA3AF]",
+                          )}>
+                            {answered ? <Check className="h-3.5 w-3.5" /> : String(i + 1).padStart(2, "0")}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13.5px] font-semibold leading-snug text-[#0B0D0F]">{q.question}</p>
+                            {q.why && (
+                              <p className="mt-1 flex items-start gap-1.5 text-[11.5px] leading-[1.5] text-[#6B7280]">
+                                <Info className="mt-[1px] h-3 w-3 shrink-0 text-[#007F4E]" />
+                                {q.why}
+                              </p>
+                            )}
+                            <input
+                              value={answers[q.question] ?? ""}
+                              onChange={e => setAnswers(a => ({ ...a, [q.question]: e.target.value }))}
+                              placeholder="Your answer…"
+                              className="mt-2.5 w-full rounded-[9px] border border-[#E0E3E6] bg-[#FAFBFB] px-3.5 py-2.5 text-[13px] text-[#0B0D0F] placeholder:text-[#9CA3AF] focus:border-[#9CCFBB] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
+                            />
+                            {(q.suggestions?.length ?? 0) > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {q.suggestions!.map(s => (
+                                  <button
+                                    key={s}
+                                    type="button"
+                                    onClick={() => setAnswers(a => ({ ...a, [q.question]: s }))}
+                                    className={cn(
+                                      "rounded-full border px-2.5 py-1 text-[11.5px] transition-colors",
+                                      (answers[q.question] ?? "") === s
+                                        ? "border-[#9CCFBB] bg-[#E6F4EF] font-medium text-[#006B45]"
+                                        : "border-[#E0E3E6] bg-white text-[#4B5563] hover:border-[#9CCFBB] hover:text-[#006B45]",
+                                    )}
+                                  >
+                                    {s}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
                 </div>
-                <Card className="p-5 space-y-4">
-                  {clarifyQ.map((q, i) => (
-                    <div key={i}>
-                      <label className="block text-[13px] font-medium text-slate-700 mb-1.5">{q}</label>
-                      <input value={answers[q] ?? ""} onChange={e => setAnswers(a => ({ ...a, [q]: e.target.value }))}
-                        placeholder="Your answer…"
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent" />
-                    </div>
-                  ))}
-                  <div className="flex gap-2 pt-1">
-                    <button type="button" onClick={handleClarifySubmit} disabled={loading}
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40">
-                      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+
+                <div className="arch-in flex flex-wrap items-center justify-between gap-3 pt-1" style={stag(clarifyQ.length)}>
+                  <span className="font-mono text-[11px] tabular-nums text-[#9CA3AF]">
+                    {answeredCount} of {clarifyQ.length} answered
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <GhostBtn onClick={() => doPlanGeneration(sessionId!, {})} disabled={loading}>
+                      Skip — use defaults
+                    </GhostBtn>
+                    <PrimaryBtn onClick={handleClarifySubmit} disabled={loading}>
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                       Generate plan
-                    </button>
-                    <button type="button" onClick={() => doPlanGeneration(sessionId!, {})} disabled={loading}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[13px] text-slate-600 hover:bg-slate-50">
-                      Skip & generate
-                    </button>
+                    </PrimaryBtn>
                   </div>
-                </Card>
+                </div>
               </div>
             )}
 
             {/* ── Screen 3: Generating ────────────────────────────────────── */}
             {step === "generating" && (
-              <div className="space-y-5">
-                <div>
-                  <h1 className="text-[22px] font-bold text-slate-900">Analyzing your automation…</h1>
-                  <p className="mt-1 text-[13.5px] text-slate-500">Vectorbea is designing the complete workflow blueprint.</p>
-                </div>
+              <div className="arch-screen space-y-5">
+                <ScreenHead
+                  eyebrow="02 · Analyze"
+                  title="Designing your blueprint"
+                  sub="The architect is reading the goal and assembling the complete workflow plan."
+                />
                 <Card className="overflow-hidden">
-                  {/* Blueprint grid background */}
-                  <div className="relative p-8" style={{
-                    background: "linear-gradient(135deg, #F0F4FF 0%, #F7F8FA 100%)",
-                    backgroundImage: "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
-                    backgroundSize: "24px 24px",
-                  }}>
-                    <div className="relative z-10 flex flex-col items-center gap-6 py-4">
+                  <div
+                    className="relative px-8 pb-6 pt-10"
+                    style={{
+                      background: "#FAFBFB",
+                      backgroundImage: "radial-gradient(#D2D6DB 1px, transparent 1px)",
+                      backgroundSize: "22px 22px",
+                    }}
+                  >
+                    <div className="relative z-10 flex flex-col items-center gap-5">
                       <div className="relative flex h-16 w-16 items-center justify-center">
-                        <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
-                        <div className="absolute inset-0 rounded-full border-4 border-t-blue-500 animate-spin" />
-                        <ArchitectLogo size={32} />
+                        <svg className="absolute inset-0" viewBox="0 0 64 64" style={{ animation: "archSpin 2.4s linear infinite" }}>
+                          <circle cx="32" cy="32" r="29" fill="none" stroke="#E0E3E6" strokeWidth="2.5" />
+                          <circle
+                            cx="32" cy="32" r="29" fill="none" stroke="#007F4E" strokeWidth="2.5"
+                            strokeLinecap="round" strokeDasharray="50 132"
+                          />
+                        </svg>
+                        <ArchitectLogo size={34} />
                       </div>
-                      <p className="text-[15px] font-semibold text-slate-800 text-center">{GEN_MESSAGES[genMsgIdx]}</p>
+                      <p key={genMsgIdx} className="arch-fade text-[14.5px] font-semibold text-[#0B0D0F]">
+                        {GEN_MESSAGES[genMsgIdx]}…
+                      </p>
+                      <BlueprintSketch />
                     </div>
                   </div>
-                  {/* Progress checklist */}
-                  <div className="p-5 border-t border-slate-100 space-y-2">
-                    {GEN_MESSAGES.map((msg, i) => (
-                      <div key={i} className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 text-[12.5px] transition-all",
-                        i < genMsgIdx  ? "text-green-700" :
-                        i === genMsgIdx ? "text-blue-700 bg-blue-50 font-medium" : "text-slate-400"
-                      )}>
-                        {i < genMsgIdx
-                          ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                          : i === genMsgIdx
-                            ? <Loader2 className="h-3.5 w-3.5 text-blue-500 shrink-0 animate-spin" />
-                            : <div className="h-3.5 w-3.5 rounded-full border border-slate-300 shrink-0" />
-                        }
-                        {msg}
-                      </div>
-                    ))}
+
+                  {/* Progress as a checkpoint timeline */}
+                  <div className="border-t border-[#ECEEEF] px-6 py-5">
+                    {GEN_MESSAGES.map((msg, i) => {
+                      const state: "done" | "active" | "locked" = i < genMsgIdx ? "done" : i === genMsgIdx ? "active" : "locked";
+                      const last = i === GEN_MESSAGES.length - 1;
+                      return (
+                        <div key={i} className="flex gap-3">
+                          <div className="flex w-[14px] flex-col items-center pt-[4px]">
+                            <DiamondMark state={state} size={10} />
+                            {!last && (
+                              <span
+                                className="my-1 w-px flex-1 transition-colors duration-500"
+                                style={{ background: i < genMsgIdx ? "#9CCFBB" : "#E8EAEC", minHeight: 10 }}
+                              />
+                            )}
+                          </div>
+                          <div className={cn("flex items-center gap-2 pb-3.5", state === "locked" && "opacity-40")}>
+                            <span className={cn(
+                              "text-[12.5px] leading-tight",
+                              state === "active" ? "font-semibold text-[#006B45]" : state === "done" ? "text-[#4B5563]" : "text-[#9CA3AF]",
+                            )}>
+                              {msg}
+                            </span>
+                            {state === "active" && <Loader2 className="h-3 w-3 animate-spin text-[#007F4E]" />}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </Card>
               </div>
@@ -712,68 +1010,74 @@ export default function ArchitectPage() {
 
             {/* ── Screen 4: Plan review ────────────────────────────────────── */}
             {step === "plan" && plan && (
-              <div className="space-y-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h1 className="text-[22px] font-bold text-slate-900">{plan.workflowName}</h1>
-                    <p className="mt-1 text-[13.5px] text-slate-500">{plan.goalSummary}</p>
+              <div className="arch-screen space-y-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <MonoLabel className="mb-2 text-[#007F4E]">03 · Blueprint ready</MonoLabel>
+                    <h1 className="text-[24px] font-bold tracking-[-0.02em] text-[#0B0D0F]">{plan.workflowName}</h1>
+                    <p className="mt-1.5 max-w-xl text-[13.5px] leading-[1.6] text-[#6B7280]">{plan.goalSummary}</p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="text-right">
-                      <p className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Confidence</p>
-                      <p className={`text-[20px] font-black ${plan.confidence >= 0.8 ? "text-green-600" : plan.confidence >= 0.6 ? "text-amber-600" : "text-red-500"}`}>
-                        {Math.round(plan.confidence * 100)}%
-                      </p>
-                    </div>
-                  </div>
+                  <ConfidenceMeter value={plan.confidence} />
                 </div>
 
-                {/* Stats row */}
-                <div className="grid grid-cols-4 gap-2.5">
+                {/* Composition tiles */}
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                   {[
-                    { label: "Connections", value: plan.requiredConnections?.length ?? 0, icon: Link2, color: "text-blue-600 bg-blue-50" },
-                    { label: "Tools",       value: plan.tools?.length ?? 0,               icon: Wrench, color: "text-purple-600 bg-purple-50" },
-                    { label: "Agents",      value: plan.agents?.length ?? 0,              icon: Bot,    color: "text-indigo-600 bg-indigo-50" },
-                    { label: "Steps",       value: plan.workflowSteps?.length ?? 0,       icon: Zap,    color: "text-amber-600 bg-amber-50" },
-                  ].map(({ label, value, icon: Icon, color }) => (
-                    <Card key={label} className="p-3.5 text-center">
-                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${color} mx-auto mb-2`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <p className="text-[20px] font-black text-slate-900">{value}</p>
-                      <p className="text-[10.5px] text-slate-400 font-medium">{label}</p>
-                    </Card>
-                  ))}
+                    { label: "Connections", value: plan.requiredConnections?.length ?? 0, type: "tool",    icon: Link2 },
+                    { label: "Tools",       value: plan.tools?.length ?? 0,               type: "tool",    icon: null },
+                    { label: "Agents",      value: plan.agents?.length ?? 0,              type: "agent",   icon: null },
+                    { label: "Steps",       value: plan.workflowSteps?.length ?? 0,       type: "trigger", icon: null },
+                  ].map(({ label, value, type, icon: FallbackIcon }, i) => {
+                    const meta = NODE_META[type as keyof typeof NODE_META] ?? NODE_META.tool;
+                    const Icon = FallbackIcon ?? meta.icon;
+                    const color = label === "Connections" ? "#0B0D0F" : meta.color;
+                    return (
+                      <Card key={label} className="arch-in p-3.5" style={stag(i)}>
+                        <div className="flex items-center justify-between">
+                          <MonoLabel>{label}</MonoLabel>
+                          <span className="flex h-6 w-6 items-center justify-center rounded-[6px]" style={{ background: `${color}14`, color }}>
+                            <Icon className="h-3.5 w-3.5" />
+                          </span>
+                        </div>
+                        <p className="mt-2 text-[24px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[#0B0D0F]">
+                          {value}
+                        </p>
+                      </Card>
+                    );
+                  })}
                 </div>
 
                 {/* Trigger */}
-                <Card className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 shrink-0">
-                    <Zap className="h-3.5 w-3.5 text-slate-600" />
+                <Card className="arch-in flex items-center gap-3 px-4 py-3.5" style={stag(2)}>
+                  <NodeTile type="trigger" size={32} />
+                  <div className="min-w-0 flex-1">
+                    <MonoLabel>Trigger</MonoLabel>
+                    <p className="mt-0.5 truncate text-[13px] font-medium capitalize text-[#0B0D0F]">
+                      {plan.trigger?.type} — <span className="normal-case">{plan.trigger?.description}</span>
+                    </p>
                   </div>
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Trigger</span>
-                    <p className="text-[13px] text-slate-700 font-medium capitalize">{plan.trigger?.type} — {plan.trigger?.description}</p>
-                  </div>
+                  {plan.trigger?.scheduleSuggestion && (
+                    <span className="hidden shrink-0 rounded-[6px] border border-[#E0E3E6] bg-[#FAFBFB] px-2 py-1 font-mono text-[10.5px] text-[#4B5563] sm:block">
+                      {plan.trigger.scheduleSuggestion}
+                    </span>
+                  )}
                 </Card>
 
-                {/* Connections */}
+                {/* Required connections */}
                 {(plan.requiredConnections?.length ?? 0) > 0 && (
-                  <div>
-                    <SectionLabel>Required Connections</SectionLabel>
+                  <div className="arch-in" style={stag(3)}>
+                    <MonoLabel className="mb-2.5">Required connections</MonoLabel>
                     <div className="grid gap-2.5 sm:grid-cols-2">
                       {plan.requiredConnections.map(c => (
-                        <Card key={c.tempConnectionId} className="p-3.5 flex items-start gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 shrink-0">
-                            <Link2 className="h-4 w-4 text-blue-600" />
-                          </div>
+                        <Card key={c.tempConnectionId} className="arch-lift flex items-start gap-3 p-3.5">
+                          <ConnGlyph type={c.type} providerHint={c.providerHint} />
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-[13px] font-semibold text-slate-700">{c.name}</p>
-                              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{c.type}</span>
-                              {c.requiredForSimulation && <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9.5px] font-bold text-blue-700">SIM REQUIRED</span>}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="text-[13px] font-semibold text-[#0B0D0F]">{c.name}</p>
+                              <span className="rounded-[5px] bg-[#F3F4F5] px-1.5 py-0.5 font-mono text-[9.5px] text-[#6B7280]">{c.type}</span>
+                              {c.requiredForSimulation && <Chip tone="teal" dot={false}>sim required</Chip>}
                             </div>
-                            <p className="text-[11.5px] text-slate-400 mt-0.5 truncate">{c.description}</p>
+                            <p className="mt-0.5 truncate text-[11.5px] text-[#9CA3AF]">{c.description}</p>
                           </div>
                         </Card>
                       ))}
@@ -783,23 +1087,21 @@ export default function ArchitectPage() {
 
                 {/* Tools */}
                 {(plan.tools?.length ?? 0) > 0 && (
-                  <div>
-                    <SectionLabel>Tools to create</SectionLabel>
+                  <div className="arch-in" style={stag(4)}>
+                    <MonoLabel className="mb-2.5">Tools to create</MonoLabel>
                     <div className="grid gap-2.5 sm:grid-cols-2">
                       {plan.tools.map(t => (
-                        <Card key={t.tempToolId} className="p-3.5 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 shrink-0">
-                              <Wrench className="h-3.5 w-3.5 text-purple-600" />
-                            </div>
+                        <Card key={t.tempToolId} className="arch-lift flex items-center justify-between gap-3 p-3.5">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <NodeTile type="tool" size={28} />
                             <div className="min-w-0">
-                              <p className="text-[13px] font-semibold text-slate-700 truncate">{t.name}</p>
-                              <p className="text-[11px] text-slate-400">{t.type}</p>
+                              <p className="truncate text-[13px] font-semibold text-[#0B0D0F]">{t.name}</p>
+                              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#9CA3AF]">{t.type}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <RiskBadge level={t.riskLevel} />
-                            {t.requiresApproval && <span className="rounded-full bg-orange-50 border border-orange-200 px-1.5 py-0.5 text-[9.5px] font-bold text-orange-700">APPROVAL</span>}
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <Chip tone={RISK_TONE[t.riskLevel] ?? "gray"} dot={false}>{t.riskLevel}</Chip>
+                            {t.requiresApproval && <Chip tone="amber" dot={false}>approval</Chip>}
                           </div>
                         </Card>
                       ))}
@@ -809,52 +1111,58 @@ export default function ArchitectPage() {
 
                 {/* Agents */}
                 {(plan.agents?.length ?? 0) > 0 && (
-                  <div>
-                    <SectionLabel>Agents to create</SectionLabel>
+                  <div className="arch-in" style={stag(5)}>
+                    <MonoLabel className="mb-2.5">Agents to create</MonoLabel>
                     <div className="space-y-2">
                       {plan.agents.map(a => {
                         const expanded = expandedAgents.has(a.tempAgentId);
                         const promptExpanded = expandedPrompts.has(a.tempAgentId);
                         return (
                           <Card key={a.tempAgentId} className="overflow-hidden">
-                            <button type="button" onClick={() => setExpandedAgents(s => { const n = new Set(s); n.has(a.tempAgentId) ? n.delete(a.tempAgentId) : n.add(a.tempAgentId); return n; })}
-                              className="w-full flex items-center gap-3 p-3.5 text-left hover:bg-slate-50 transition-colors">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 shrink-0">
-                                <Bot className="h-4 w-4 text-indigo-600" />
+                            <button
+                              type="button"
+                              onClick={() => setExpandedAgents(s => { const n = new Set(s); if (n.has(a.tempAgentId)) { n.delete(a.tempAgentId); } else { n.add(a.tempAgentId); } return n; })}
+                              className="flex w-full items-center gap-3 p-3.5 text-left transition-colors hover:bg-[#FAFBFB]"
+                            >
+                              <NodeTile type="agent" size={32} />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[13px] font-semibold text-[#0B0D0F]">{a.name}</p>
+                                <p className="truncate text-[11.5px] text-[#6B7280]">{a.role}</p>
                               </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-[13px] font-semibold text-slate-700">{a.name}</p>
-                                <p className="text-[11.5px] text-slate-400 truncate">{a.role}</p>
-                              </div>
-                              {expanded ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+                              {expanded
+                                ? <ChevronDown className="h-4 w-4 shrink-0 text-[#9CA3AF]" />
+                                : <ChevronRight className="h-4 w-4 shrink-0 text-[#9CA3AF]" />}
                             </button>
                             {expanded && (
-                              <div className="border-t border-slate-100 bg-slate-50 p-4 space-y-3">
+                              <div className="space-y-3 border-t border-[#ECEEEF] bg-[#FAFBFB] p-4">
                                 {a.allowedTempToolIds?.length > 0 && (
                                   <div>
-                                    <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Allowed Tools</p>
+                                    <MonoLabel className="mb-1.5">Allowed tools</MonoLabel>
                                     <div className="flex flex-wrap gap-1">
                                       {a.allowedTempToolIds.map(tid => (
-                                        <span key={tid} className="rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[10px] text-amber-800">{tid}</span>
+                                        <span key={tid} className="rounded-[6px] border border-[#A5F3FC] bg-[#ECFEFF] px-2 py-0.5 font-mono text-[10px] text-[#0E7490]">
+                                          {tid}
+                                        </span>
                                       ))}
                                     </div>
                                   </div>
                                 )}
                                 {a.systemPrompt && (
                                   <div>
-                                    <div className="flex items-center justify-between mb-1.5">
-                                      <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">System Prompt</p>
-                                      <button type="button" onClick={() => setExpandedPrompts(s => { const n = new Set(s); n.has(a.tempAgentId) ? n.delete(a.tempAgentId) : n.add(a.tempAgentId); return n; })}
-                                        className="flex items-center gap-1 text-[11px] text-[#007F4E] hover:text-[#006B45]">
+                                    <div className="mb-1.5 flex items-center justify-between">
+                                      <MonoLabel>System prompt</MonoLabel>
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedPrompts(s => { const n = new Set(s); if (n.has(a.tempAgentId)) { n.delete(a.tempAgentId); } else { n.add(a.tempAgentId); } return n; })}
+                                        className="flex items-center gap-1 text-[11px] font-medium text-[#007F4E] hover:text-[#006B45]"
+                                      >
                                         {promptExpanded ? <><EyeOff className="h-3 w-3" /> Hide</> : <><Eye className="h-3 w-3" /> View</>}
                                       </button>
                                     </div>
                                     {promptExpanded ? (
-                                      <pre className="text-[11px] text-slate-600 whitespace-pre-wrap font-mono leading-relaxed bg-white rounded-lg p-3 border border-slate-200 max-h-48 overflow-y-auto">
-                                        {a.systemPrompt}
-                                      </pre>
+                                      <PromptBlock text={a.systemPrompt} />
                                     ) : (
-                                      <p className="text-[11.5px] text-slate-500 italic">{a.systemPrompt.slice(0, 120)}…</p>
+                                      <p className="text-[11.5px] italic text-[#6B7280]">{a.systemPrompt.slice(0, 120)}…</p>
                                     )}
                                   </div>
                                 )}
@@ -867,119 +1175,167 @@ export default function ArchitectPage() {
                   </div>
                 )}
 
-                {/* Workflow steps — with parallel/branch visual treatment */}
+                {/* Workflow steps */}
                 {(plan.workflowSteps?.length ?? 0) > 0 && (
-                  <div>
-                    <SectionLabel>Workflow Steps</SectionLabel>
+                  <div className="arch-in" style={stag(6)}>
+                    <MonoLabel className="mb-2.5">Workflow steps</MonoLabel>
                     <WorkflowStepList steps={plan.workflowSteps} edges={plan.edges} />
                   </div>
                 )}
 
                 {/* Safety notes */}
                 {(plan.safetyNotes?.length ?? 0) > 0 && (
-                  <Card className="p-4 border-amber-200 bg-amber-50/40">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Shield className="h-4 w-4 text-amber-600" />
-                      <p className="text-[12.5px] font-bold text-amber-800">Safety Notes</p>
+                  <Card className="arch-in border-[#FDE68A] bg-[#FFFBEB] p-4" style={stag(7)}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-[#CA8A04]" />
+                      <p className="text-[12.5px] font-bold text-[#92400E]">Safety notes</p>
                     </div>
-                    <ul className="space-y-1">
-                      {plan.safetyNotes.map((n, i) => <li key={i} className="text-[12px] text-amber-700">• {n}</li>)}
+                    <ul className="space-y-1.5">
+                      {plan.safetyNotes.map((n, i) => (
+                        <li key={i} className="flex items-start gap-2 text-[12px] leading-[1.55] text-[#92400E]">
+                          <span className="mt-[5px] inline-block h-[6px] w-[6px] shrink-0 rotate-45 rounded-[1px] border border-[#CA8A04]" />
+                          {n}
+                        </li>
+                      ))}
                     </ul>
                   </Card>
                 )}
 
                 {/* Revise */}
                 {showRevise && (
-                  <Card className="p-4 border-blue-200 bg-blue-50/30 space-y-3">
-                    <p className="text-[13px] font-semibold text-blue-900">Revise the plan</p>
-                    <textarea rows={2} value={reviseText} onChange={e => setReviseText(e.target.value)}
+                  <Card className="arch-in space-y-3 p-4">
+                    <MonoLabel>Revise the plan</MonoLabel>
+                    <textarea
+                      rows={2}
+                      value={reviseText}
+                      onChange={e => setReviseText(e.target.value)}
                       placeholder='e.g. "Add approval before CRM update", "Remove database write", "Use webhook trigger"'
-                      className="w-full resize-none rounded-xl border border-blue-200 bg-white px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      className="w-full resize-none rounded-[9px] border border-[#E0E3E6] bg-[#FAFBFB] px-3.5 py-2.5 text-[13px] text-[#0B0D0F] placeholder:text-[#9CA3AF] focus:border-[#9CCFBB] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
+                    />
                     <div className="flex gap-2">
-                      <button type="button" onClick={handleRevise} disabled={!reviseText.trim() || loading}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#007F4E] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40">
-                        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Revise
-                      </button>
-                      <button type="button" onClick={() => setShowRevise(false)}
-                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[12.5px] text-slate-600 hover:bg-slate-50">Cancel</button>
+                      <PrimaryBtn onClick={handleRevise} disabled={!reviseText.trim() || loading} className="px-4 py-2 text-[12.5px]">
+                        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        Apply revision
+                      </PrimaryBtn>
+                      <GhostBtn onClick={() => setShowRevise(false)} className="px-4 py-2 text-[12.5px]">Cancel</GhostBtn>
                     </div>
                   </Card>
                 )}
 
                 {/* Actions */}
-                <div className="flex items-center gap-3 justify-between pt-1">
-                  <button type="button" onClick={() => setShowRevise(true)}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-medium text-slate-600 hover:bg-slate-50">
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <GhostBtn onClick={() => setShowRevise(true)}>
                     <RefreshCw className="h-3.5 w-3.5" /> Revise plan
-                  </button>
-                  <button type="button" onClick={handleApprovePlan} disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 shadow-sm">
+                  </GhostBtn>
+                  <PrimaryBtn onClick={handleApprovePlan} disabled={loading}>
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                    Approve &amp; Continue
-                  </button>
+                    Approve &amp; continue
+                  </PrimaryBtn>
                 </div>
               </div>
             )}
 
             {/* ── Screen 5: Connections ────────────────────────────────────── */}
             {step === "connections" && (
-              <div className="space-y-5">
-                <div>
-                  <h1 className="text-[22px] font-bold text-slate-900">Configure Connections</h1>
-                  <p className="mt-1 text-[13.5px] text-slate-500">
-                    Vectorbea needs these integrations to build and run your workflow. Secrets are encrypted end-to-end.
-                  </p>
-                </div>
+              <div className="arch-screen space-y-5">
+                <ScreenHead
+                  eyebrow="04 · Connect"
+                  title="Bind your systems"
+                  sub="The architect needs these integrations to build and run your workflow. Secrets stay encrypted end-to-end — BYOK."
+                />
 
-                <Card className="p-3.5 border-blue-200 bg-blue-50/40 flex items-start gap-3">
-                  <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-[12.5px] font-semibold text-blue-800">
-                      {connReqs.filter(r => ["test_passed","selected_existing","created","simulation_placeholder"].includes(r.status)).length} of {connReqs.length} connections ready
+                {/* Readiness summary */}
+                <Card className="arch-in p-4" style={stag(0)}>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[13px] font-semibold text-[#0B0D0F]">
+                      {readyConnCount} of {connReqs.length} connections ready
                     </p>
-                    <p className="text-[11.5px] text-blue-600 mt-0.5">SIM REQUIRED connections must be configured for simulation. Others can use placeholders.</p>
+                    <span className="font-mono text-[11px] tabular-nums text-[#9CA3AF]">
+                      {connReqs.length ? Math.round((readyConnCount / connReqs.length) * 100) : 0}%
+                    </span>
                   </div>
+                  <div className="mt-2.5 flex gap-1">
+                    {connReqs.map(r => (
+                      <span
+                        key={r.id}
+                        className="h-[6px] flex-1 rounded-full transition-colors duration-300"
+                        style={{ background: READY_STATUSES.includes(r.status) ? "#007F4E" : "#E8EAEC" }}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-2.5 flex items-start gap-1.5 text-[11.5px] leading-[1.5] text-[#6B7280]">
+                    <Info className="mt-[1px] h-3 w-3 shrink-0 text-[#007F4E]" />
+                    Connections marked “sim required” must be configured before simulation. Others can run on simulated placeholders.
+                  </p>
                 </Card>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {connReqs.map(req => {
-                    const isReady = ["selected_existing","created","test_passed","simulation_placeholder"].includes(req.status);
+                  {connReqs.map((req, i) => {
+                    const isReady = READY_STATUSES.includes(req.status);
+                    const sc = CONN_STATUS[req.status] ?? { label: req.status, tone: "gray" as const };
                     return (
-                      <Card key={req.id} className={`p-4 transition-all ${isReady ? "border-green-200 bg-green-50/20" : ""}`}>
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              <p className="text-[13px] font-semibold text-slate-800">{req.name}</p>
-                              <ConnStatusBadge status={req.status} />
-                              {req.requiredForSimulation && <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">SIM REQUIRED</span>}
+                      <Card
+                        key={req.id}
+                        className={cn("arch-in p-4 transition-colors", isReady && "border-[#9CCFBB]")}
+                        style={stag(i + 1)}
+                      >
+                        <div className="flex items-start gap-3">
+                          <ConnGlyph type={req.type} providerHint={req.providerHint} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="text-[13px] font-semibold text-[#0B0D0F]">{req.name}</p>
+                              <Chip tone={sc.tone} pulse={sc.pulse}>{sc.label}</Chip>
+                              {req.requiredForSimulation && <Chip tone="teal" dot={false}>sim required</Chip>}
                             </div>
-                            {req.description && <p className="text-[11.5px] text-slate-400">{req.description}</p>}
-                            {req.setupInstructions && <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1 mt-1.5">{req.setupInstructions}</p>}
-                            {req.testError && <p className="text-[11px] text-red-600 bg-red-50 rounded-lg px-2 py-1 mt-1.5">✗ {req.testError}</p>}
+                            {req.description && <p className="mt-0.5 text-[11.5px] leading-[1.5] text-[#9CA3AF]">{req.description}</p>}
                           </div>
-                          {isReady && <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />}
+                          {isReady && <CheckCircle2 className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#007F4E]" />}
                         </div>
+
+                        {req.setupInstructions && !isReady && (
+                          <p className="mt-2.5 rounded-[8px] border border-[#ECEEEF] bg-[#FAFBFB] px-2.5 py-1.5 text-[11px] leading-[1.5] text-[#6B7280]">
+                            {req.setupInstructions}
+                          </p>
+                        )}
+                        {req.testError && (
+                          <p className="mt-2.5 rounded-[8px] border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-1.5 text-[11px] leading-[1.5] text-[#B91C1C]">
+                            {req.testError}
+                          </p>
+                        )}
+
                         {!isReady && (
-                          <div className="flex flex-wrap gap-1.5">
-                            <button type="button" onClick={() => setPickerReq(req)}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-[#007F4E] px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-[#006B45]">
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPickerReq(req)}
+                              className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#007F4E] px-3 py-1.5 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#006B45]"
+                            >
                               <Link2 className="h-3 w-3" /> Select connection
                             </button>
-                            <Link href="/connections/new" target="_blank"
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11.5px] font-medium text-slate-600 hover:bg-slate-50">
-                              Create new ↗
+                            <Link
+                              href="/connections/new"
+                              target="_blank"
+                              className="inline-flex items-center gap-1 rounded-[8px] border border-[#E0E3E6] bg-white px-3 py-1.5 text-[11.5px] font-medium text-[#4B5563] transition-colors hover:bg-[#F7F8F9]"
+                            >
+                              Create new <ExternalLink className="h-3 w-3" />
                             </Link>
                             {!req.requiredForSimulation && (
-                              <button type="button" onClick={() => handleUsePlaceholder(req.id)}
-                                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11.5px] font-medium text-amber-700 hover:bg-amber-100">
-                                Sim placeholder
+                              <button
+                                type="button"
+                                onClick={() => handleUsePlaceholder(req.id)}
+                                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-1.5 text-[11.5px] font-medium text-[#92400E] transition-colors hover:bg-[#FEF3C7]"
+                              >
+                                <FlaskConical className="h-3 w-3" /> Simulate instead
                               </button>
                             )}
                           </div>
                         )}
                         {isReady && req.status !== "simulation_placeholder" && req.status !== "test_passed" && (
-                          <button type="button" onClick={() => setPickerReq(req)}
-                            className="text-[11px] text-slate-400 hover:text-slate-600 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => setPickerReq(req)}
+                            className="mt-2 text-[11px] text-[#9CA3AF] transition-colors hover:text-[#0B0D0F]"
+                          >
                             Change →
                           </button>
                         )}
@@ -989,75 +1345,75 @@ export default function ArchitectPage() {
                 </div>
 
                 <div className="flex items-center justify-between pt-1">
-                  <button type="button" onClick={() => setStep("plan")}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] text-slate-600 hover:bg-slate-50">
+                  <GhostBtn onClick={() => setStep("plan")}>
                     <ArrowLeft className="h-3.5 w-3.5" /> Back
-                  </button>
-                  <button type="button" onClick={() => setStep("confirm")} disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 shadow-sm">
+                  </GhostBtn>
+                  <PrimaryBtn onClick={() => setStep("confirm")} disabled={loading}>
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                    Continue
-                  </button>
+                    Continue to review
+                  </PrimaryBtn>
                 </div>
               </div>
             )}
 
             {/* ── Screen 6: Confirm tools/agents ──────────────────────────── */}
             {step === "confirm" && (
-              <div className="space-y-5">
-                <div>
-                  <h1 className="text-[22px] font-bold text-slate-900">Confirm Building Blocks</h1>
-                  <p className="mt-1 text-[13.5px] text-slate-500">
-                    Review what Vectorbea will create in your workspace, then click Build to start.
-                  </p>
-                </div>
+              <div className="arch-screen space-y-5">
+                <ScreenHead
+                  eyebrow="05 · Review"
+                  title="Confirm the building blocks"
+                  sub="This is exactly what will be created in your workspace. Review, then build."
+                />
 
-                {/* Fallback: show plan-level summary when materialized items not yet generated */}
+                {/* Fallback: plan-level summary when items not yet materialized */}
                 {genTools.length === 0 && genAgents.length === 0 && plan && (
-                  <Card className="p-5 border-blue-100 bg-blue-50/30">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Sparkles className="h-4 w-4 text-blue-500" />
-                      <p className="text-[13.5px] font-semibold text-blue-900">Plan ready to build</p>
+                  <Card className="arch-in p-5" style={stag(0)}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-[#007F4E]" />
+                      <p className="text-[13.5px] font-semibold text-[#0B0D0F]">Plan ready to build</p>
                     </div>
                     <div className="grid grid-cols-3 gap-2.5">
                       {[
-                        { label: "Tools",       value: plan.tools?.length ?? 0,               icon: Wrench },
-                        { label: "Agents",      value: plan.agents?.length ?? 0,              icon: Bot },
-                        { label: "Steps",       value: plan.workflowSteps?.length ?? 0,       icon: Zap },
-                      ].map(({ label, value, icon: Icon }) => (
-                        <div key={label} className="flex flex-col items-center gap-1 rounded-xl bg-white border border-blue-100 p-3">
-                          <Icon className="h-4 w-4 text-blue-500" />
-                          <span className="text-[16px] font-black text-slate-900">{value}</span>
-                          <span className="text-[10.5px] text-slate-400">{label}</span>
+                        { label: "Tools",  value: plan.tools?.length ?? 0,         type: "tool" },
+                        { label: "Agents", value: plan.agents?.length ?? 0,        type: "agent" },
+                        { label: "Steps",  value: plan.workflowSteps?.length ?? 0, type: "trigger" },
+                      ].map(({ label, value, type }) => (
+                        <div key={label} className="flex flex-col items-center gap-1.5 rounded-[10px] border border-[#ECEEEF] bg-[#FAFBFB] p-3.5">
+                          <NodeTile type={type} size={26} />
+                          <span className="text-[18px] font-semibold tabular-nums leading-none text-[#0B0D0F]">{value}</span>
+                          <MonoLabel>{label}</MonoLabel>
                         </div>
                       ))}
                     </div>
-                    <p className="mt-3 text-[12px] text-blue-700">Click <strong>Build Workflow</strong> to create tools and agents, then open the animated canvas.</p>
+                    <p className="mt-3.5 text-[12px] leading-[1.55] text-[#6B7280]">
+                      <strong className="font-semibold text-[#0B0D0F]">Build workflow</strong> creates the tools and agents, compiles the graph, then opens the animated canvas.
+                    </p>
                   </Card>
                 )}
 
                 {/* Tools */}
                 {genTools.length > 0 && (
-                  <div>
-                    <SectionLabel>Tools ({genTools.length})</SectionLabel>
+                  <div className="arch-in" style={stag(1)}>
+                    <MonoLabel className="mb-2.5">Tools ({genTools.length})</MonoLabel>
                     <div className="grid gap-2.5 sm:grid-cols-2">
-                      {genTools.map(t => (
-                        <Card key={t.id} className="p-3.5">
-                          <div className="flex items-center gap-2.5 mb-2">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-50 shrink-0">
-                              <Wrench className="h-3.5 w-3.5 text-purple-600" />
-                            </div>
+                      {genTools.map((t, i) => (
+                        <Card key={t.id} className="arch-in p-3.5" style={stag(i)}>
+                          <div className="flex items-center gap-2.5">
+                            <NodeTile type="tool" size={28} />
                             <div className="min-w-0 flex-1">
-                              <p className="text-[13px] font-semibold text-slate-700 truncate">{t.name}</p>
-                              <p className="text-[11px] text-slate-400">{t.type}</p>
+                              <p className="truncate text-[13px] font-semibold text-[#0B0D0F]">{t.name}</p>
+                              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#9CA3AF]">{t.type}</p>
                             </div>
-                            <RiskBadge level={t.riskLevel} />
+                            <Chip tone={RISK_TONE[t.riskLevel] ?? "gray"} dot={false}>{t.riskLevel}</Chip>
                           </div>
-                          <div className={`rounded-lg px-2 py-1 text-[10.5px] font-semibold ${
-                            t.status === "created" ? "bg-green-50 text-green-700" :
-                            t.status === "blocked_missing_connection" ? "bg-red-50 text-red-700" :
-                            "bg-slate-50 text-slate-500"}`}>
-                            {t.status === "created" ? "✓ Created" : t.status === "blocked_missing_connection" ? "⚠ Missing connection" : t.status}
+                          <div className="mt-2.5">
+                            {t.status === "created" ? (
+                              <Chip tone="green">Created</Chip>
+                            ) : t.status === "blocked_missing_connection" ? (
+                              <Chip tone="red">Missing connection</Chip>
+                            ) : (
+                              <Chip tone="gray">{t.status}</Chip>
+                            )}
                           </div>
                         </Card>
                       ))}
@@ -1067,39 +1423,37 @@ export default function ArchitectPage() {
 
                 {/* Agents */}
                 {genAgents.length > 0 && (
-                  <div>
-                    <SectionLabel>Agents ({genAgents.length})</SectionLabel>
+                  <div className="arch-in" style={stag(2)}>
+                    <MonoLabel className="mb-2.5">Agents ({genAgents.length})</MonoLabel>
                     <div className="space-y-2">
                       {genAgents.map(a => {
                         const promptExpanded = expandedPrompts.has(`confirm-${a.id}`);
                         return (
                           <Card key={a.id} className="p-3.5">
-                            <div className="flex items-start gap-2.5 mb-2">
-                              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 shrink-0 mt-0.5">
-                                <Bot className="h-3.5 w-3.5 text-indigo-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="text-[13px] font-semibold text-slate-700">{a.name}</p>
-                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                    a.status === "created" ? "bg-green-50 text-green-700" : "bg-slate-50 text-slate-500"}`}>
-                                    {a.status === "created" ? "✓ Created" : a.status}
-                                  </span>
+                            <div className="flex items-start gap-2.5">
+                              <NodeTile type="agent" size={30} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-[13px] font-semibold text-[#0B0D0F]">{a.name}</p>
+                                  {a.status === "created"
+                                    ? <Chip tone="green">Created</Chip>
+                                    : <Chip tone="gray">{a.status}</Chip>}
                                 </div>
-                                {a.role && <p className="text-[11.5px] text-slate-400 mt-0.5">{a.role}</p>}
+                                {a.role && <p className="mt-0.5 text-[11.5px] text-[#6B7280]">{a.role}</p>}
                               </div>
                               {a.systemPromptPreview && (
-                                <button type="button" onClick={() => setExpandedPrompts(s => { const n = new Set(s); const k = `confirm-${a.id}`; n.has(k) ? n.delete(k) : n.add(k); return n; })}
-                                  className="flex items-center gap-1 text-[11px] text-[#007F4E] hover:text-[#006B45] shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedPrompts(s => { const n = new Set(s); const k = `confirm-${a.id}`; if (n.has(k)) { n.delete(k); } else { n.add(k); } return n; })}
+                                  className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-[#007F4E] hover:text-[#006B45]"
+                                >
                                   {promptExpanded ? <><EyeOff className="h-3 w-3" /> Hide</> : <><Eye className="h-3 w-3" /> Prompt</>}
                                 </button>
                               )}
                             </div>
                             {promptExpanded && a.systemPromptPreview && (
-                              <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 mt-2">
-                                <p className="text-[11px] font-mono text-slate-600 leading-relaxed whitespace-pre-wrap">
-                                  {a.systemPromptPreview}
-                                </p>
+                              <div className="mt-2.5">
+                                <PromptBlock text={a.systemPromptPreview} maxH={160} />
                               </div>
                             )}
                           </Card>
@@ -1109,185 +1463,248 @@ export default function ArchitectPage() {
                   </div>
                 )}
 
-                <div className="flex items-center gap-3 justify-between pt-1">
-                  <button type="button" onClick={() => setStep("connections")}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] text-slate-600 hover:bg-slate-50">
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <GhostBtn onClick={() => setStep("connections")}>
                     <ArrowLeft className="h-3.5 w-3.5" /> Back
-                  </button>
-                  <button type="button" onClick={handleBuild} disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[#007F4E] px-5 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#006B45] disabled:opacity-40 shadow-sm">
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                    Build Workflow
-                  </button>
+                  </GhostBtn>
+                  <PrimaryBtn onClick={handleBuild} disabled={loading}>
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Hammer className="h-4 w-4" />}
+                    Build workflow
+                  </PrimaryBtn>
                 </div>
               </div>
             )}
 
             {/* ── Screen 7: Building ───────────────────────────────────────── */}
             {step === "building" && (
-              <div className="space-y-5">
-                <div>
-                  <h1 className="text-[22px] font-bold text-slate-900">Building your workflow…</h1>
-                  <p className="mt-1 text-[13.5px] text-slate-500">Vectorbea is creating tools, agents, and the workflow graph.</p>
-                </div>
+              <div className="arch-screen space-y-5">
+                <ScreenHead
+                  eyebrow="06 · Build"
+                  title="Materializing your workflow"
+                  sub="Creating tools, agents and the workflow graph. Every phase is checkpointed."
+                />
+
                 <Card className="overflow-hidden">
-                  <div className="relative p-6" style={{
-                    background: "linear-gradient(135deg, #EEF2FF 0%, #F7F8FA 100%)",
-                    backgroundImage: "radial-gradient(circle, #C7D2FE 1px, transparent 1px)",
-                    backgroundSize: "20px 20px",
-                  }}>
-                    <div className="flex items-center justify-center py-4">
-                      <div className="relative flex h-14 w-14 items-center justify-center">
-                        <div className="absolute inset-0 rounded-full bg-indigo-100 animate-ping opacity-40" />
-                        <div className="absolute inset-0 rounded-full border-4 border-t-indigo-500 animate-spin" />
-                        <ArchitectLogo size={28} />
-                      </div>
+                  <div
+                    className="px-6 py-5"
+                    style={{
+                      background: "#FAFBFB",
+                      backgroundImage: "radial-gradient(#D2D6DB 1px, transparent 1px)",
+                      backgroundSize: "22px 22px",
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <MonoLabel className="text-[#007F4E]">
+                        Phase {String(buildPhase + 1).padStart(2, "0")} / {String(BUILD_PHASES.length).padStart(2, "0")}
+                      </MonoLabel>
+                      <span className="font-mono text-[11px] tabular-nums text-[#9CA3AF]">
+                        {Math.round(((buildPhase + 1) / BUILD_PHASES.length) * 100)}%
+                      </span>
+                    </div>
+                    <div className="mt-2.5 h-[6px] overflow-hidden rounded-full bg-[#E8EAEC]">
+                      <div
+                        className="h-full rounded-full bg-[#007F4E] transition-all duration-700 ease-out"
+                        style={{ width: `${((buildPhase + 1) / BUILD_PHASES.length) * 100}%` }}
+                      />
                     </div>
                   </div>
-                  <div className="p-5 space-y-2.5">
-                    {BUILD_PHASES.map((phase, i) => (
-                      <div key={i} className={cn(
-                        "flex items-center gap-3 rounded-xl px-4 py-3 transition-all",
-                        i < buildPhase  ? "bg-green-50 border border-green-200" :
-                        i === buildPhase ? "bg-blue-50 border border-blue-200 shadow-sm" :
-                        "opacity-40"
-                      )}>
-                        {i < buildPhase
-                          ? <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-                          : i === buildPhase
-                            ? <Loader2 className="h-5 w-5 text-blue-500 shrink-0 animate-spin" />
-                            : <div className="h-5 w-5 rounded-full border-2 border-slate-300 shrink-0" />
-                        }
-                        <div>
-                          <p className={cn("text-[13px] font-semibold",
-                            i < buildPhase ? "text-green-800" : i === buildPhase ? "text-blue-800" : "text-slate-400"
-                          )}>{phase.label}</p>
-                          <p className="text-[11.5px] text-slate-400">{phase.desc}</p>
+
+                  <div className="border-t border-[#ECEEEF] px-6 py-5">
+                    {BUILD_PHASES.map((phase, i) => {
+                      const state: "done" | "active" | "locked" = i < buildPhase ? "done" : i === buildPhase ? "active" : "locked";
+                      const last = i === BUILD_PHASES.length - 1;
+                      return (
+                        <div key={i} className="flex gap-3.5">
+                          <div className="flex w-[14px] flex-col items-center pt-[5px]">
+                            <DiamondMark state={state} size={11} />
+                            {!last && (
+                              <span
+                                className="my-1 w-px flex-1 transition-colors duration-500"
+                                style={{ background: i < buildPhase ? "#9CCFBB" : "#E8EAEC", minHeight: 18 }}
+                              />
+                            )}
+                          </div>
+                          <div className={cn("flex-1 pb-5", state === "locked" && "opacity-40")}>
+                            <div className="flex items-center gap-2">
+                              <p className={cn(
+                                "text-[13px] font-semibold leading-none",
+                                state === "active" ? "text-[#006B45]" : "text-[#0B0D0F]",
+                              )}>
+                                {phase.label}
+                              </p>
+                              {state === "active" && <Loader2 className="h-3 w-3 animate-spin text-[#007F4E]" />}
+                              {state === "done" && <Check className="h-3 w-3 text-[#007F4E]" />}
+                            </div>
+                            <p className="mt-1 text-[11.5px] text-[#9CA3AF]">{phase.desc}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </Card>
+
+                {/* Runtime console — real phase log, the engineering signature */}
+                <Console
+                  title="architect · build"
+                  badge="durable"
+                  lines={[
+                    ...BUILD_PHASES.slice(0, buildPhase).map(p => ({
+                      lvl: "done", color: "#34D399", msg: p.label.toLowerCase(),
+                    })),
+                    { lvl: "run", color: "#5EEAD4", msg: `${BUILD_PHASES[buildPhase].label.toLowerCase()}…` },
+                  ]}
+                />
               </div>
             )}
 
             {/* ── Screen 8: Done ───────────────────────────────────────────── */}
             {step === "done" && (
-              <div className="space-y-5">
-                <div className="flex flex-col items-center text-center py-6">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-green-100 mb-4">
-                    <CheckCircle2 className="h-8 w-8 text-green-500" />
-                  </div>
-                  <h1 className="text-[24px] font-bold text-slate-900">Workflow Created!</h1>
-                  <p className="mt-2 text-[14px] text-slate-500">
-                    {genTools.filter(t => t.status === "created").length} tools and {genAgents.filter(a => a.status === "created").length} agents created. Opening canvas…
+              <div className="arch-screen space-y-5">
+                <div className="flex flex-col items-center py-8 text-center">
+                  <span className="relative mb-6 inline-flex h-12 w-12 items-center justify-center">
+                    <span
+                      className="absolute inset-0 rotate-45 rounded-[8px]"
+                      style={{ border: "3px solid #007F4E", animation: "archPing 2s cubic-bezier(0,0,.2,1) infinite" }}
+                    />
+                    <span className="absolute inset-0 flex rotate-45 items-center justify-center rounded-[8px] border-[3px] border-[#007F4E] bg-white" />
+                    <Check className="relative h-5 w-5 text-[#007F4E]" strokeWidth={3} />
+                  </span>
+                  <MonoLabel className="mb-2 text-[#007F4E]">07 · Ready</MonoLabel>
+                  <h1 className="text-[24px] font-bold tracking-[-0.02em] text-[#0B0D0F]">Workflow created</h1>
+                  <p className="mt-2 text-[13.5px] text-[#6B7280]">
+                    {genTools.filter(t => t.status === "created").length} tools and {genAgents.filter(a => a.status === "created").length} agents created. Opening the canvas…
                   </p>
+                  {readiness && (
+                    <div className="mt-4 flex items-center gap-2">
+                      <Chip tone={["simulation_ready", "real_ready"].includes(readiness.status) ? "green" : "amber"}>
+                        Simulation {["simulation_ready", "real_ready"].includes(readiness.status) ? "ready" : "pending"}
+                      </Chip>
+                      <Chip tone={readiness.status === "real_ready" ? "green" : "gray"}>
+                        Real execution {readiness.status === "real_ready" ? "ready" : "locked"}
+                      </Chip>
+                    </div>
+                  )}
                 </div>
 
                 {readiness?.issues && readiness.issues.length > 0 && (
-                  <Card className="p-4 space-y-2">
-                    <p className="text-[13px] font-semibold text-slate-700">Readiness Notes</p>
+                  <Card className="arch-in space-y-2 p-4">
+                    <MonoLabel className="mb-1">Readiness notes</MonoLabel>
                     {readiness.issues.map((issue, i) => (
-                      <div key={i} className={cn(
-                        "flex items-start gap-2 rounded-lg px-3 py-2 text-[12px]",
-                        issue.severity === "error" ? "bg-red-50 text-red-700" :
-                        issue.severity === "warning" ? "bg-amber-50 text-amber-700" :
-                        "bg-blue-50 text-blue-700"
-                      )}>
-                        {issue.severity === "error" ? <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /> :
-                         issue.severity === "warning" ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" /> :
-                         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />}
+                      <div
+                        key={i}
+                        className={cn(
+                          "flex items-start gap-2 rounded-[8px] border px-3 py-2 text-[12px] leading-[1.5]",
+                          issue.severity === "error"   ? "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]" :
+                          issue.severity === "warning" ? "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]" :
+                                                          "border-[#ECEEEF] bg-[#FAFBFB] text-[#4B5563]",
+                        )}
+                      >
+                        {issue.severity === "error" ? <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> :
+                         issue.severity === "warning" ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> :
+                         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
                         {issue.message}
                       </div>
                     ))}
                   </Card>
                 )}
 
-                <div className="flex items-center justify-center gap-2 animate-pulse">
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                  <span className="text-[13px] text-slate-500">Opening workflow canvas with animation…</span>
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#007F4E]" />
+                  <span className="text-[13px] text-[#6B7280]">Opening workflow canvas with build animation…</span>
                 </div>
               </div>
             )}
           </div>
         </main>
 
-        {/* ── Right insight panel ──────────────────────────────────────────── */}
+        {/* ── Right blueprint panel ─────────────────────────────────────────── */}
         {rightOpen && (
-          <aside className="hidden lg:flex w-[300px] shrink-0 flex-col border-l border-slate-200 bg-white overflow-y-auto">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <p className="text-[12px] font-bold uppercase tracking-wider text-slate-400">Workflow Blueprint</p>
-              <button type="button" onClick={() => setRightOpen(false)}
-                className="text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
+          <aside className="hidden w-[300px] shrink-0 flex-col overflow-y-auto border-l border-[#E0E3E6] bg-white lg:flex">
+            <div className="flex items-center justify-between border-b border-[#ECEEEF] p-4">
+              <MonoLabel>Blueprint</MonoLabel>
+              <button type="button" onClick={() => setRightOpen(false)} className="text-[#9CA3AF] transition-colors hover:text-[#0B0D0F]">
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
 
             {plan ? (
-              <div className="p-4 space-y-4 flex-1">
+              <div className="flex-1 space-y-4 p-4">
                 {/* Summary */}
                 <div>
-                  <p className="text-[13px] font-semibold text-slate-900">{plan.workflowName}</p>
-                  <p className="text-[11.5px] text-slate-500 mt-1 leading-snug">{plan.goalSummary}</p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 font-medium capitalize">{plan.trigger?.type}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.confidence >= 0.8 ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                      {Math.round(plan.confidence * 100)}% confident
+                  <p className="text-[13px] font-semibold text-[#0B0D0F]">{plan.workflowName}</p>
+                  <p className="mt-1 text-[11.5px] leading-[1.55] text-[#6B7280]">{plan.goalSummary}</p>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <span className="rounded-[5px] bg-[#F3F4F5] px-1.5 py-0.5 font-mono text-[10px] capitalize text-[#6B7280]">
+                      {plan.trigger?.type}
                     </span>
+                    <Chip tone={plan.confidence >= 0.8 ? "green" : "amber"} dot={false}>
+                      {Math.round(plan.confidence * 100)}% confident
+                    </Chip>
                   </div>
                 </div>
 
-                {/* Ingredients */}
-                <div className="border-t border-slate-100 pt-3">
-                  <SectionLabel>Build Ingredients</SectionLabel>
-                  <div className="space-y-2">
+                {/* Composition */}
+                <div className="border-t border-[#ECEEEF] pt-3.5">
+                  <MonoLabel className="mb-2">Composition</MonoLabel>
+                  <div className="space-y-0.5">
                     {[
-                      { label: "Agents",      value: plan.agents?.length ?? 0,              icon: Bot,    color: "text-indigo-600" },
-                      { label: "Tools",       value: plan.tools?.length ?? 0,               icon: Wrench, color: "text-purple-600" },
-                      { label: "Connections", value: plan.requiredConnections?.length ?? 0, icon: Link2,  color: "text-blue-600" },
-                      { label: "Steps",       value: plan.workflowSteps?.length ?? 0,       icon: Zap,    color: "text-amber-600" },
-                    ].map(({ label, value, icon: Icon, color }) => (
-                      <div key={label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-50">
+                      { label: "Agents",      value: plan.agents?.length ?? 0,              color: NODE_META.agent.color },
+                      { label: "Tools",       value: plan.tools?.length ?? 0,               color: NODE_META.tool.color },
+                      { label: "Connections", value: plan.requiredConnections?.length ?? 0, color: "#0B0D0F" },
+                      { label: "Steps",       value: plan.workflowSteps?.length ?? 0,       color: NODE_META.trigger.color },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="flex items-center justify-between rounded-[7px] px-2 py-1.5 transition-colors hover:bg-[#FAFBFB]">
                         <div className="flex items-center gap-2">
-                          <Icon className={`h-3.5 w-3.5 ${color}`} />
-                          <span className="text-[12px] text-slate-600">{label}</span>
+                          <span className="h-2 w-2 rounded-[2px]" style={{ background: color }} />
+                          <span className="text-[12px] text-[#4B5563]">{label}</span>
                         </div>
-                        <span className="text-[12px] font-bold text-slate-800">{value}</span>
+                        <span className="font-mono text-[12px] font-semibold tabular-nums text-[#0B0D0F]">{value}</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Connections readiness */}
+                {/* Connection readiness */}
                 {connReqs.length > 0 && (
-                  <div className="border-t border-slate-100 pt-3">
-                    <SectionLabel>Connections</SectionLabel>
+                  <div className="border-t border-[#ECEEEF] pt-3.5">
+                    <MonoLabel className="mb-2">Connections</MonoLabel>
                     <div className="space-y-1.5">
-                      {connReqs.map(req => (
-                        <div key={req.id} className="flex items-center justify-between gap-2">
-                          <p className="text-[11.5px] text-slate-600 truncate">{req.name}</p>
-                          <ConnStatusBadge status={req.status} />
-                        </div>
-                      ))}
+                      {connReqs.map(req => {
+                        const sc = CONN_STATUS[req.status] ?? { label: req.status, tone: "gray" as const };
+                        return (
+                          <div key={req.id} className="flex items-center justify-between gap-2">
+                            <p className="truncate text-[11.5px] text-[#4B5563]">{req.name}</p>
+                            <Chip tone={sc.tone} pulse={sc.pulse}>{sc.label}</Chip>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
 
                 {/* Readiness */}
                 {readiness && (
-                  <div className="border-t border-slate-100 pt-3">
-                    <SectionLabel>Readiness</SectionLabel>
+                  <div className="border-t border-[#ECEEEF] pt-3.5">
+                    <MonoLabel className="mb-2">Readiness</MonoLabel>
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <FlaskConical className="h-3.5 w-3.5 text-green-500" />
-                        <span className="text-[12px] text-slate-600">Simulation</span>
-                        <span className={`ml-auto text-[10.5px] font-bold ${["simulation_ready","real_ready"].includes(readiness.status) ? "text-green-600" : "text-red-500"}`}>
-                          {["simulation_ready","real_ready"].includes(readiness.status) ? "Ready" : "Not ready"}
+                        <FlaskConical className="h-3.5 w-3.5 text-[#007F4E]" />
+                        <span className="text-[12px] text-[#4B5563]">Simulation</span>
+                        <span className={cn(
+                          "ml-auto font-mono text-[10.5px] font-semibold",
+                          ["simulation_ready", "real_ready"].includes(readiness.status) ? "text-[#006B45]" : "text-[#DC2626]",
+                        )}>
+                          {["simulation_ready", "real_ready"].includes(readiness.status) ? "READY" : "NOT READY"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Play className="h-3.5 w-3.5 text-blue-500" />
-                        <span className="text-[12px] text-slate-600">Real execution</span>
-                        <span className={`ml-auto text-[10.5px] font-bold ${readiness.status === "real_ready" ? "text-green-600" : "text-slate-400"}`}>
-                          {readiness.status === "real_ready" ? "Ready" : "Admin required"}
+                        <Play className="h-3.5 w-3.5 text-[#0F766E]" />
+                        <span className="text-[12px] text-[#4B5563]">Real execution</span>
+                        <span className={cn(
+                          "ml-auto font-mono text-[10.5px] font-semibold",
+                          readiness.status === "real_ready" ? "text-[#006B45]" : "text-[#9CA3AF]",
+                        )}>
+                          {readiness.status === "real_ready" ? "READY" : "LOCKED"}
                         </span>
                       </div>
                     </div>
@@ -1296,12 +1713,12 @@ export default function ArchitectPage() {
 
                 {/* Safety */}
                 {(plan.safetyNotes?.length ?? 0) > 0 && (
-                  <div className="border-t border-slate-100 pt-3">
-                    <SectionLabel>Safety</SectionLabel>
-                    <div className="space-y-1">
+                  <div className="border-t border-[#ECEEEF] pt-3.5">
+                    <MonoLabel className="mb-2">Safety</MonoLabel>
+                    <div className="space-y-1.5">
                       {plan.safetyNotes.slice(0, 3).map((n, i) => (
-                        <p key={i} className="text-[11px] text-amber-700 flex items-start gap-1">
-                          <Shield className="h-3 w-3 mt-0.5 shrink-0" />{n}
+                        <p key={i} className="flex items-start gap-1.5 text-[11px] leading-[1.5] text-[#92400E]">
+                          <Shield className="mt-0.5 h-3 w-3 shrink-0 text-[#CA8A04]" />{n}
                         </p>
                       ))}
                     </div>
@@ -1309,15 +1726,18 @@ export default function ArchitectPage() {
                 )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center flex-1 p-6 text-center gap-4">
-                <div style={{
-                  width: 80, height: 80,
-                  backgroundImage: "radial-gradient(circle, #CBD5E1 1px, transparent 1px)",
-                  backgroundSize: "12px 12px", borderRadius: 16, opacity: 0.6,
-                }} />
+              <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+                <div
+                  className="rounded-[14px]"
+                  style={{
+                    width: 84, height: 84, opacity: 0.7,
+                    backgroundImage: "radial-gradient(#D2D6DB 1px, transparent 1px)",
+                    backgroundSize: "11px 11px",
+                  }}
+                />
                 <div>
-                  <p className="text-[13px] font-semibold text-slate-600">Blueprint appears here</p>
-                  <p className="text-[11.5px] text-slate-400 mt-1">Describe your automation to get started.</p>
+                  <p className="text-[13px] font-semibold text-[#4B5563]">Blueprint appears here</p>
+                  <p className="mt-1 text-[11.5px] text-[#9CA3AF]">Describe your automation to get started.</p>
                 </div>
               </div>
             )}
