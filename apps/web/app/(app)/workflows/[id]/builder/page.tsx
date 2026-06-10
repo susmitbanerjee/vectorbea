@@ -758,6 +758,19 @@ function WorkflowBuilderInner() {
         );
       });
       setUnsaved(true);
+
+      // Smart prompt — nudge the user to auto-map the target node's inputs.
+      const targetNode = nodes.find((n) => n.id === params.target);
+      const tType = targetNode?.data?.nodeType;
+      const HAS_INPUTS = new Set(["agent", "llm", "tool", "db_read", "db_write", "http_tool", "approval"]);
+      if (targetNode && params.target && tType && HAS_INPUTS.has(tType)) {
+        const tName = targetNode.data?.label || "this node";
+        const sName = sourceNode?.data?.label || "the previous node";
+        toast(`${sName} → ${tName} connected`, {
+          description: "Auto-map its inputs from upstream — no expressions needed.",
+          action: { label: "Map inputs", onClick: () => setSelectedNodeId(params.target as string) },
+        });
+      }
     },
     [nodes, setEdges],
   );

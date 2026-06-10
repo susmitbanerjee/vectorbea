@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Link2, Link2Off, AlertTriangle } from "lucide-react";
+import { ArrowRight, Link2, Link2Off, AlertTriangle, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeInputField, VisualMapping, FieldType, FieldSource } from "@/types/workflow-mapping";
 import { FieldPicker } from "./FieldPicker";
 import { compileMapping } from "@/lib/workflows/mapping-compiler";
+import { suggestForField } from "@/lib/workflows/auto-map";
 
 // ─── Type chip ────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,8 @@ export function InputMappingRow({ field, sources, onChange }: InputMappingRowPro
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const isMapped = field.mapping.type !== "unset";
+  // Suggest a best upstream match when this field isn't mapped yet.
+  const suggestion = !isMapped ? suggestForField(field, sources) : null;
   const hasIssue = field.validationStatus &&
     field.validationStatus !== "ok" && field.validationStatus !== "no_sample";
   const isWarning = field.validationStatus === "no_sample" ||
@@ -125,6 +128,23 @@ export function InputMappingRow({ field, sources, onChange }: InputMappingRowPro
             <p style={{ fontSize: 11.5, color: "#64748B" }}>{field.description}</p>
           )}
           <MappingSummary mapping={field.mapping} previewValue={field.previewValue} />
+
+          {/* One-click suggestion — no JSON, no picker needed */}
+          {suggestion && (
+            <button
+              type="button"
+              onClick={() => onChange(field.key, suggestion.mapping)}
+              className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#9CCFBB] bg-[#E6F4EF] px-2 py-1 text-left transition-colors hover:bg-[#d8ebe2]"
+              title={`Map ${field.label} from ${suggestion.sourceLabel} → ${suggestion.fieldLabel}`}
+            >
+              <Sparkles className="h-3 w-3 shrink-0 text-[#007F4E]" />
+              <span className="truncate text-[11px] font-medium text-[#006B45]">
+                {suggestion.sourceLabel} → {suggestion.fieldLabel}
+              </span>
+              {suggestion.needsConversion && <span className="shrink-0 text-[10px] text-[#B45309]">⚠ convert</span>}
+              <span className="shrink-0 rounded-full bg-white/70 px-1.5 text-[10px] font-bold text-[#006B45]">Use</span>
+            </button>
+          )}
         </div>
 
         {/* Map button */}

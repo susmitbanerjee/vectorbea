@@ -18,14 +18,18 @@ import {
   List,
   Settings2,
   Shield,
+  Sparkles,
   X,
   XCircle,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { AppSelectFromChildren } from "@/components/ui/app-select";
 import { getNodeMeta } from "./NodeIcon";
 import { InputMappingRow } from "./mapping/InputMappingRow";
+import { InputFieldBuilder } from "./mapping/InputFieldBuilder";
 import { ConditionBuilder } from "./mapping/ConditionBuilder";
+import { autoMapAll, countAutoMappable } from "@/lib/workflows/auto-map";
 import { buildAvailableFieldsForNode, getNodeOutputFields } from "@/lib/workflows/field-discovery";
 import { decompileExpression, compileMapping, compileConditionGroup } from "@/lib/workflows/mapping-compiler";
 import type { VisualMapping, VisualConditionGroup, NodeInputField, FieldType } from "@/types/workflow-mapping";
@@ -768,29 +772,6 @@ function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFN
   const cfg = data.triggerConfig ?? { triggerType: "manual" as const };
   function set(patch: Partial<typeof cfg>) { onChange({ ...data, triggerConfig: { ...cfg, ...patch } }); }
 
-  // Local draft string for the JSON textarea — lets user type freely; commits on valid JSON
-  const [schemaDraft, setSchemaDraft] = useState<string>(
-    cfg.inputSchema ? JSON.stringify(cfg.inputSchema, null, 2) : "",
-  );
-  const [schemaError, setSchemaError] = useState(false);
-
-  function handleSchemaChange(v: string) {
-    setSchemaDraft(v);
-    if (v.trim() === "") {
-      setSchemaError(false);
-      set({ inputSchema: undefined });
-      return;
-    }
-    try {
-      const parsed = JSON.parse(v) as Record<string, unknown>;
-      setSchemaError(false);
-      set({ inputSchema: parsed });
-    } catch {
-      setSchemaError(true);
-      // don't commit invalid JSON to the graph
-    }
-  }
-
   return (
     <div className="space-y-3">
       <div><ILabel>Label</ILabel><IInput value={data.label} onChange={(v) => onChange({ ...data, label: v })} /></div>
@@ -811,20 +792,9 @@ function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFN
         <div><ILabel>Webhook Path</ILabel><IInput mono value={cfg.webhookPath ?? ""} onChange={(v) => set({ webhookPath: v })} placeholder="/webhooks/my-workflow" /></div>
       )}
       <div>
-        <ILabel>Input Schema (JSON)</ILabel>
-        <ITextarea
-          rows={6}
-          mono
-          value={schemaDraft}
-          onChange={handleSchemaChange}
-          placeholder={`{\n  "type": "object",\n  "properties": {\n    "days_ahead": { "type": "integer" },\n    "limit": { "type": "integer" }\n  }\n}`}
-        />
-        {schemaError && (
-          <p className="mt-1 text-[10px] text-red-400">Invalid JSON — fix syntax to save.</p>
-        )}
-        {!schemaError && (
-          <p className="mt-1 text-[10px] text-muted-foreground/50">JSON Schema for workflow inputs. Saved automatically when valid.</p>
-        )}
+        <ILabel>Workflow inputs</ILabel>
+        <InputFieldBuilder schema={cfg.inputSchema} onChange={(schema) => set({ inputSchema: schema })} />
+        <p className="mt-1.5 text-[10.5px] text-muted-foreground/60">These become the variables every downstream node can map from.</p>
       </div>
       <div><ILabel>Description</ILabel><ITextarea rows={2} value={data.description ?? ""} onChange={(v) => onChange({ ...data, description: v })} placeholder="When does this trigger?" /></div>
     </div>
@@ -1091,6 +1061,24 @@ function NodeInspector({
     handleChange({ ...data, branchConfig: { ...data.branchConfig, conditionExpression: expr } });
   }
 
+  // One-click: auto-map every unmapped input to its best upstream match.
+  function applyAutoMap() {
+    const patch = autoMapAll(inputFields, fieldSources);
+    const n = Object.keys(patch).length;
+    if (n === 0) { toast("Nothing to auto-map yet — connect an upstream node first."); return; }
+    const updated = { ...visualMappings, ...patch };
+    setVisualMappings(updated);
+    const compiled = Object.fromEntries(
+      Object.entries(updated).map(([k, m]) => [k, compileMapping(m)]).filter(([, v]) => v),
+    );
+    const cfg = data;
+    if (cfg.nodeType === "agent") handleChange({ ...cfg, agentConfig: { ...cfg.agentConfig, inputMapping: compiled } });
+    else if (cfg.nodeType === "tool") handleChange({ ...cfg, toolConfig: { ...cfg.toolConfig, inputMapping: compiled } });
+    toast.success(`Auto-mapped ${n} input${n !== 1 ? "s" : ""}`);
+  }
+
+  const autoMappableCount = countAutoMappable(inputFields, fieldSources);
+
   const tabs: { id: InspectorTab; label: string; icon: React.ElementType }[] = [
     { id: "configure",  label: "Configure",  icon: Settings2 },
     ...(inputFields.length > 0 ? [{ id: "inputs" as InspectorTab, label: "Inputs", icon: List }] : []),
@@ -1165,9 +1153,37 @@ function NodeInspector({
 
         {activeTab === "inputs" && (
           <div className="space-y-2">
-            <p style={{ fontSize: 11, fontWeight: 700, color: "#64748B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
-              Input Mappings
-            </p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#64748B", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                Inputs
+              </p>
+              {autoMappableCount > 0 && (
+                <button
+                  type="button"
+                  onClick={applyAutoMap}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-[8px] bg-[#007F4E] px-2.5 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#006B45]"
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Auto-map {autoMappableCount}
+                </button>
+              )}
+            </div>
+
+            {/* Smart prompt — tells the user what can be mapped from upstream */}
+            {autoMappableCount > 0 && (
+              <div className="flex items-start gap-2.5 rounded-[10px] border border-[#9CCFBB] bg-[#E6F4EF] px-3 py-2.5">
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[#007F4E]" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12.5px] font-semibold text-[#0B0D0F]">
+                    {autoMappableCount} input{autoMappableCount !== 1 ? "s" : ""} can be mapped from upstream nodes
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] text-[#4B5563]">Map them automatically, or pick each one below — no expressions needed.</p>
+                </div>
+                <button type="button" onClick={applyAutoMap} className="shrink-0 self-center rounded-[7px] bg-[#0B0D0F] px-2.5 py-1 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+                  Map all
+                </button>
+              </div>
+            )}
+
             {inputFields.length === 0 ? (
               <p style={{ fontSize: 12, color: "#94A3B8", textAlign: "center", paddingTop: 24 }}>
                 No configurable inputs for this node type.
@@ -1182,7 +1198,7 @@ function NodeInspector({
             ))}
             <div className="pt-3" style={{ borderTop: "1px solid #F1F5F9", marginTop: 12 }}>
               <p style={{ fontSize: 11, color: "#94A3B8" }}>
-                Click <strong>Map</strong> on any field to connect it to an output from a previous node or the workflow input.
+                Each input shows a suggested upstream output — click <strong>Use</strong> to map it, or <strong>Map</strong> to choose another.
               </p>
             </div>
           </div>
