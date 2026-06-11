@@ -1,0 +1,285 @@
+# Dev / Staging / Prod — deployment runbook
+
+How Vectorbea is deployed across two environments using Git branches as the
+source of truth.
+
+| Branch   | Environment | Web (Vercel)            | API / Worker / Telemetry (Railway) | Database (Neon)     |
+| -------- | ----------- | ----------------------- | ---------------------------------- | ------------------- |
+| `dev`    | **staging** | `dev.vectorbea.com`     | Railway env: **staging**           | Neon **staging** DB |
+| `master` | **prod**    | `vectorbea.com`         | Railway env: **production**        | Neon **prod** DB    |
+
+**The rule:**
+- Push to `dev` → staging redeploys (Vercel `dev.vectorbea.com` + Railway `staging`).
+- Open a PR `dev → master`, merge it → prod redeploys (Vercel `vectorbea.com` + Railway `production`).
+
+> The repo's prod branch is **`master`** (not `main`). CI (`.github/workflows/ci.yml`)
+> and all deploy integrations are wired to `master` + `dev`.
+
+---
+
+## 0. One-time: domain plan
+
+| Service   | Prod                      | Staging                       |
+| --------- | ------------------------- | ----------------------------- |
+| Web       | `vectorbea.com`           | `dev.vectorbea.com`           |
+| API       | `api.vectorbea.com`       | `api-dev.vectorbea.com`       |
+| Telemetry | `telemetry.vectorbea.com` | `telemetry-dev.vectorbea.com` |
+
+Worker has no public domain (it consumes the Redis queue). Adjust the staging
+subdomains if you prefer `staging-*` — just keep them consistent with the env
+vars below.
+
+---
+
+## 1. Neon (Postgres)
+
+You've already created the staging DB. Confirm you have **two** connection strings:
+
+- **Prod**: the original Neon DB.
+- **Staging**: the new Neon DB.
+
+For each, grab the **pooled** connection string (Neon → project → Connection
+Details → "Pooled connection"). Use the pooled URL for the API and worker;
+migrations can use either.
+
+```
+# prod
+DATABASE_URL=postgresql://USER:PASS@ep-xxxx-pooler.REGION.aws.neon.tech/vectorbea?sslmode=require
+# staging
+DATABASE_URL=postgresql://USER:PASS@ep-yyyy-pooler.REGION.aws.neon.tech/vectorbea_staging?sslmode=require
+```
+
+> The worker/API JDBC layer auto-rewrites `postgresql://` → `jdbc:postgresql://`,
+> so the raw Neon URL works as-is. `sslmode=require` is honored.
+
+**Run migrations on the staging DB before first deploy.** Flyway migrations live
+in `apps/api-kotlin/src/main/resources/db/migration`. Point Flyway (or the API
+with `RUN_MIGRATIONS=true` on first boot) at the staging `DATABASE_URL`.
+
+---
+
+## 2. Railway — clone prod env → staging
+
+You've already cloned the Railway app and created the **staging** environment.
+Finish wiring it:
+
+### 2.1 Services per environment
+
+Each Railway environment (production + staging) should contain the same services,
+each built from this monorepo:
+
+| Service     | Root / Dockerfile               | Notes                          |
+| ----------- | ------------------------------- | ------------------------------ |
+| `api`       | `apps/api-kotlin/Dockerfile`    | public domain                  |
+| `worker`    | `apps/worker-kotlin/Dockerfile` | no domain; needs Redis         |
+| `telemetry` | `apps/telemetry/Dockerfile`     | public domain (admin-only)     |
+| `redis`     | Railway Redis plugin            | one per environment            |
+
+In each service: **Settings → Source → Branch**
+- production env services → deploy from **`master`**
+- staging env services → deploy from **`dev`**
+
+Enable **"Wait for CI"** (or "Check suites must pass") so a red CI run blocks the
+deploy.
+
+### 2.2 Redis
+
+Add a Railway Redis plugin in **each** environment (prod + staging are isolated
+queues). Railway injects `REDIS_URL`. Reference it in api + worker via
+`${{ Redis.REDIS_URL }}`.
+
+### 2.3 Environment variables
+
+Set these per service, per environment. Secrets (`*_SECRET`, `*_KEY`,
+`*_TOKEN`, `DATABASE_URL`) are **never** committed — set them only in Railway.
+
+**`api` service**
+```
+APP_ENV=production              # both envs run the prod code path; see note below
+VECTORBEA_ENV=prod              # staging → dev
+DATABASE_URL=<neon prod|staging>
+REDIS_URL=${{ Redis.REDIS_URL }}
+JWT_SECRET=<supabase jwt secret>
+SECRET_ENCRYPTION_KEY=<base64 32-byte key>     # same value across services in an env
+AI_ARCHITECT_ENABLED=true
+AI_ARCHITECT_API_KEY=<openai key>
+TELEMETRY_ENABLED=true
+TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
+TELEMETRY_INTERNAL_TOKEN=<shared internal token>
+CORS_ALLOWED_ORIGINS=https://vectorbea.com             # staging → https://dev.vectorbea.com
+```
+
+**`worker` service**
+```
+APP_ENV=production
+VECTORBEA_ENV=prod                              # staging → dev
+DATABASE_URL=<neon prod|staging>
+REDIS_URL=${{ Redis.REDIS_URL }}
+SECRET_ENCRYPTION_KEY=<same as api in this env>
+WORKER_CONCURRENCY=4
+# durability/robustness knobs (sensible defaults shown — override per load)
+WORKER_LEASE_TTL_SECONDS=60
+WORKER_DEFAULT_NODE_TIMEOUT_MS=120000
+WORKER_MAX_RUN_DURATION_MS=600000
+WORKER_MAX_BRANCH_THREADS=16
+TELEMETRY_ENABLED=true
+TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
+TELEMETRY_INTERNAL_TOKEN=<shared internal token>
+```
+
+**`telemetry` service** — see §4.
+
+> **Note on `APP_ENV` vs `VECTORBEA_ENV`:** `APP_ENV=production` selects the
+> hardened code path (fail-closed config validation, no dev fallbacks) and should
+> be `production` in **both** Railway environments. `VECTORBEA_ENV` (`prod` |
+> `dev`) is the **data tag** — it's what segments telemetry, beta controls, and
+> environment filtering. Staging uses `APP_ENV=production` + `VECTORBEA_ENV=dev`.
+
+### 2.4 Domains
+
+For api + telemetry services: **Settings → Networking → Custom Domain**, add the
+prod/staging subdomains from §0, then create the matching CNAME records at your
+DNS provider pointing to the Railway-provided target.
+
+---
+
+## 3. Vercel — branch → domain
+
+The web app (`apps/web`) is a Next.js app on Vercel. Vercel deploys **every**
+branch automatically; we pin two branches to two domains.
+
+### 3.1 Production branch
+
+**Project → Settings → Git → Production Branch → `master`.**
+Every merge to `master` triggers a Production deployment → `vectorbea.com`.
+
+### 3.2 Staging domain on the `dev` branch
+
+Vercel gives every non-prod branch a Preview URL. To pin `dev` to a stable
+subdomain:
+
+1. **Project → Settings → Domains → Add** `dev.vectorbea.com`.
+2. In the domain's config, set **Git Branch = `dev`** (this binds the domain to
+   the latest `dev` deployment instead of production).
+3. Add the CNAME Vercel shows you at your DNS provider.
+
+Now every push to `dev` updates `dev.vectorbea.com`; every merge to `master`
+updates `vectorbea.com`. PRs from feature branches still get throwaway preview
+URLs.
+
+### 3.3 Environment variables (per Vercel environment)
+
+**Project → Settings → Environment Variables.** Vercel has three scopes:
+*Production*, *Preview*, *Development*. Map:
+- **Production** scope → prod values (used by `master`/`vectorbea.com`).
+- **Preview** scope → staging values (used by `dev`/`dev.vectorbea.com` and PR previews).
+
+```
+# Production scope
+NEXT_PUBLIC_VECTORBEA_API_URL=https://api.vectorbea.com
+NEXT_PUBLIC_SUPABASE_URL=<prod supabase url>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<prod anon key>
+NEXT_PUBLIC_PRIVATE_BETA_MODE=true
+
+# Preview scope (staging)
+NEXT_PUBLIC_VECTORBEA_API_URL=https://api-dev.vectorbea.com
+NEXT_PUBLIC_SUPABASE_URL=<staging supabase url>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<staging anon key>
+NEXT_PUBLIC_PRIVATE_BETA_MODE=true
+```
+
+The build command is already pinned in `apps/web/vercel.json`
+(`npm run prisma:generate && next build`). Set the Vercel project **Root
+Directory** to `apps/web`.
+
+---
+
+## 4. Telemetry — app states & deployment
+
+### 4.1 The environment-state model
+
+Telemetry is **environment-aware**. Every event carries a `VECTORBEA_ENV` tag
+(`prod` | `dev`) set by whichever service emitted it. The dashboard's top-right
+**environment switcher** (`Production / Staging / Development / All`) filters on
+that tag, and the **Environments** page compares them side by side.
+
+This gives you two valid deployment shapes:
+
+**Recommended — one telemetry instance, all envs report in.**
+Deploy telemetry once (in prod). Point **both** prod and staging api/worker at
+the same `TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com`. Prod services
+send `VECTORBEA_ENV=prod`, staging services send `VECTORBEA_ENV=dev`. The
+Environments page then shows the real prod-vs-staging comparison the dashboard
+was built for. Simplest, lowest cost, and the most useful view.
+
+**Isolated — one telemetry instance per environment.**
+Run `telemetry` in both Railway envs with separate `DATABASE_URL`s. Each only
+ever sees its own env's data. Use this only if you need hard data isolation
+(e.g. staging load tests must not touch prod analytics).
+
+### 4.2 Telemetry env vars (Railway `telemetry` service)
+
+```
+APP_ENV=production
+VECTORBEA_ENV=prod                              # the instance's own tag
+PORT=8080
+DATABASE_URL=<telemetry DB>                     # its own DB/schema; can be a
+                                                # dedicated Neon DB
+RUN_MIGRATIONS=true                             # applies V100 telemetry schema on boot
+JWT_SECRET=<same supabase jwt secret as api>    # validates admin tokens
+TELEMETRY_INTERNAL_TOKEN=<shared internal token># must match api/worker
+ADMIN_EMAILS=you@vectorbea.com,teammate@...     # who can open the dashboard
+TELEMETRY_CORS_ALLOWED_ORIGINS=https://vectorbea.com,https://dev.vectorbea.com
+TELEMETRY_PUBLIC_URL=https://telemetry.vectorbea.com
+OTEL_ENABLED=false                              # true + endpoint to ship traces to Grafana
+```
+
+The dashboard is served by the service itself (static files under
+`apps/telemetry/.../static`). Open `https://telemetry.vectorbea.com`, paste an
+admin JWT (an `ADMIN_EMAILS` user's access token from `app.vectorbea.com`
+DevTools → Local Storage), and you're in.
+
+### 4.3 Auth
+
+- **Admin dashboard**: HS256 JWT signed with `JWT_SECRET` (same secret as the
+  API/Supabase). Only `ADMIN_EMAILS` addresses are admitted.
+- **Internal ingestion** (api/worker → telemetry): the shared
+  `TELEMETRY_INTERNAL_TOKEN`. Keep it identical across all services in an env.
+
+---
+
+## 5. Promotion flow (day to day)
+
+```
+feature branch ──PR──▶ dev ──────────────▶ staging redeploys
+                        │                    (dev.vectorbea.com + Railway staging)
+                        │  verify on staging
+                        ▼
+                       PR: dev ──▶ master ─▶ prod redeploys
+                                              (vectorbea.com + Railway production)
+```
+
+1. Branch off `dev`, open a PR into `dev`. CI runs (`master`/`dev` triggers).
+2. Merge to `dev` → staging redeploys. Smoke-test on `dev.vectorbea.com`.
+3. When staging is good, open a PR `dev → master`. CI runs again.
+4. Merge to `master` → prod redeploys.
+
+**Rollback:** Railway → service → Deployments → redeploy a previous build.
+Vercel → Deployments → promote a previous production deployment. DB migrations
+are forward-only — never auto-rollback schema; ship a corrective migration.
+
+---
+
+## 6. First-deploy checklist
+
+- [ ] Neon staging DB created; migrations applied.
+- [ ] Railway `staging` env: api/worker/telemetry/redis services, each on the `dev` branch.
+- [ ] Railway `production` env services on the `master` branch.
+- [ ] `SECRET_ENCRYPTION_KEY` identical across api+worker **within** each env (and different between prod and staging).
+- [ ] `TELEMETRY_INTERNAL_TOKEN` identical across api/worker/telemetry within each env.
+- [ ] Redis plugin added in both envs; `REDIS_URL` referenced.
+- [ ] Vercel: Production Branch = `master`; `dev.vectorbea.com` bound to `dev`.
+- [ ] Vercel env vars set in Production **and** Preview scopes.
+- [ ] DNS CNAMEs for all subdomains (api, telemetry, dev web) created.
+- [ ] CORS origins include the matching web domain for that env.
+- [ ] Telemetry: `ADMIN_EMAILS` set; dashboard reachable; an admin can sign in.

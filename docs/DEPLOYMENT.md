@@ -1,7 +1,7 @@
 # VectorBea Proxy — Deployment Guide
 
 > **Audience:** Engineers integrating the VectorBea Proxy sidecar into their own infrastructure.  
-> **Proxy image:** `ghcr.io/my-org/vectorbea-proxy:latest`  
+> **Proxy image:** `vectorbea/vectorbea-proxy:latest`  
 > **Support:** support@vectorbea.io
 
 ---
@@ -24,11 +24,22 @@
 
 ## Overview
 
-The VectorBea Proxy is a lightweight Kotlin sidecar that sits next to your application and intercepts outbound LLM calls. It:
+The VectorBea Proxy is a lightweight Kotlin sidecar and the recommended enterprise production ingestion layer for VectorBea. It sits next to your application and handles local workflow telemetry transport so your production agent does not need to call the VectorBea cloud directly on every step.
 
-- Resolves prompt templates from the VectorBea Hub at request time (no redeploy needed to update prompts).
-- Streams audit events back to the Hub for latency tracking, token counting, and cost attribution.
-- Handles retries, circuit-breaking, and back-pressure so your application code does not have to.
+It:
+
+- accepts semantic agent workflow events locally over localhost or a Unix domain socket
+- batches, buffers, retries, and redacts telemetry before forwarding
+- forwards workflow traces to VectorBea with a workspace ingest token
+- keeps heavy analysis in the VectorBea backend, where execution graphs, workflow maps, regressions, safety gates, governance, and ROI are computed
+- still supports the existing prompt and audit proxy paths for teams already using them
+
+Recommended integration modes:
+
+- Direct API: quick testing only
+- SDK: semantic workflow events from your app
+- Sidecar: recommended production transport
+- OpenTelemetry: standard traces, ideally forwarded through the Sidecar
 
 ```
 ┌─────────────────────────────────────────┐
@@ -100,7 +111,7 @@ services:
 
   # ── VectorBea Proxy sidecar ─────────────────────────────────────────────────
   vectorbea-proxy:
-    image: ghcr.io/my-org/vectorbea-proxy:latest
+    image: vectorbea/vectorbea-proxy:latest
     container_name: vectorbea-proxy
     restart: unless-stopped
     environment:
@@ -219,7 +230,7 @@ app:
 # ── VectorBea Proxy sidecar ───────────────────────────────────────────────────
 vectorbea:
   image:
-    repository: ghcr.io/my-org/vectorbea-proxy
+    repository: vectorbea/vectorbea-proxy
     tag: latest
     pullPolicy: IfNotPresent
   # Proxy listens on this port inside the Pod (localhost only).
@@ -481,27 +492,45 @@ my-app-7d9f6b8c4-xk2lp   2/2     Running   0          45s
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `VECTORBEA_API_KEY` | ✅ | — | API key from the VectorBea dashboard. Used to authenticate against the Hub. |
 | `VECTORBEA_HUB_URL` | ✅ | — | Base URL of the VectorBea Hub (`https://hub.vectorbea.io` for SaaS). |
-| `PORT` | ❌ | `8080` | Port the proxy HTTP server listens on. |
-| `LOG_LEVEL` | ❌ | `INFO` | Proxy log verbosity: `DEBUG`, `INFO`, `WARN`, `ERROR`. |
-| `AUDIT_BATCH_SIZE` | ❌ | `50` | Number of audit events to buffer before flushing to the Hub. |
-| `AUDIT_FLUSH_INTERVAL_MS` | ❌ | `5000` | Maximum milliseconds between audit flushes, regardless of batch size. |
+| `VECTORBEA_KEY` | ✅ | — | Existing sidecar key used for prompt fetches, audit flushes, and backward compatible deployments. |
+| `VECTORBEA_INGEST_URL` | ✅ | `${VECTORBEA_HUB_URL}/api/ingest/traces` | Backend workflow ingest endpoint used for sidecar-forwarded traces. |
+| `VECTORBEA_INGEST_TOKEN` | ✅ | falls back to `VECTORBEA_KEY` | Workspace ingest token used when forwarding workflow traces. |
+| `VECTORBEA_SERVICE_NAME` | ✅ | hostname fallback | Service name attached to sidecar-forwarded traces. |
+| `VECTORBEA_LOCAL_HTTP_PORT` | ❌ | `8080` | Local HTTP ingress port for SDK or app events. |
+| `VECTORBEA_SOCKET_PATH` | ❌ | unset | Preferred UDS gRPC socket path, typically `/var/run/vectorbea/vectorbea.sock`. |
+| `VECTORBEA_REDACT_SECRETS` | ❌ | `true` | Redacts auth headers, api keys, bearer tokens, and common secrets before forwarding. |
+| `VECTORBEA_CAPTURE_INPUTS` | ❌ | `true` | Include workflow inputs before redaction. |
+| `VECTORBEA_CAPTURE_OUTPUTS` | ❌ | `true` | Include workflow outputs before redaction. |
+| `VECTORBEA_BATCH_SIZE` | ❌ | `50` | Number of traces to forward per batch. |
+| `VECTORBEA_FLUSH_INTERVAL_MS` | ❌ | `5000` | Maximum milliseconds between workflow flushes. |
+| `VECTORBEA_MAX_QUEUE_SIZE` | ❌ | `10000` | In-memory trace queue limit before drop or back-pressure behavior. |
+| `VECTORBEA_FAIL_OPEN` | ❌ | `true` | If the local queue is full, accept the app request and drop the telemetry rather than blocking the app. |
 
 ---
 
 ## Health Checks
 
-The proxy exposes a single health endpoint:
+The proxy exposes a health endpoint and can also expose Prometheus-friendly metrics:
 
 ```
-GET /health  →  200 OK  {"status":"ok","version":"1.x.x"}
+GET /health
+GET /metrics
 ```
 
 Use this for:
 - Docker Compose `healthcheck`
 - Kubernetes liveness and readiness probes
 - Load balancer target group health checks
+
+`/health` includes:
+
+- sidecar version
+- queue size
+- last flush timestamp
+- last backend status
+- received, forwarded, failed, and dropped event counters
+- redaction count
 
 ---
 
@@ -518,13 +547,4 @@ Your `VECTORBEA_API_KEY` is invalid or expired. Regenerate it from the VectorBea
 The `promptName` in your request does not exist in the connected workspace. Check the VectorBea dashboard → **Prompts**.
 
 **`ImagePullBackOff` on the proxy container**  
-The GHCR image is private. Authenticate with:
-```bash
-echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-kubectl create secret docker-registry ghcr-pull-secret \
-  --docker-server=ghcr.io \
-  --docker-username=YOUR_GITHUB_USERNAME \
-  --docker-password=$GITHUB_TOKEN \
-  --namespace my-app
-```
-Then add `imagePullSecrets: [{name: ghcr-pull-secret}]` to your Pod spec or `values.yaml`.
+Confirm the image name is correct (`vectorbea/vectorbea-proxy:latest`) and that Docker Hub is reachable from your cluster. For air-gapped environments, mirror the image to your internal registry and update `values.vectorbea.image.repository` accordingly.

@@ -1,0 +1,111 @@
+---
+title: "Designing Event History as a Primitive for AI Workflows"
+description: "How we modeled the append-only event log that backs every Vectorbea run, and why we treat it as the source of truth rather than an audit trail bolted on afterward."
+date: "2026-02-02"
+author: "Susmit Banerjee"
+tags: ["event-sourcing", "architecture", "observability"]
+category: "Execution Engine"
+series: "building-vectorbea"
+part: 3
+featured: false
+---
+
+In the [first post in this series](/articles/why-long-running-ai-workflows-need-durable-execution),
+I mentioned that we made the event history the source of truth for a run's state. This post is
+about what that actually looks like in practice, and why we ended up there after starting
+somewhere simpler.
+
+## Where we started
+
+The first version had a `runs` table with a `status` column and a `current_step` column, updated
+in place as the run progressed. We logged events too, but the log was a side effect, written
+"for debugging," while the `runs` table was what the engine actually consulted to decide what to
+do next.
+
+This fell apart in a specific, recurring way: the log would say one thing happened, and the
+`runs` row would say another, because a crash happened between the two writes. Which one was
+correct? Neither was *designed* to be authoritative, so neither could be trusted blindly, and
+debugging meant reading both and guessing.
+
+<Callout type="decision" title="Design decision">
+We collapsed this into one source of truth: the event history is append-only and authoritative.
+A run's current status, current step, and accumulated state are all *derived* by replaying its
+events, either incrementally as new events arrive, or fully when needed (e.g. recovery after a
+crash). There is no separate mutable "current state" that can disagree with the log.
+</Callout>
+
+## What an event looks like
+
+Every event has a run ID, a sequence number (monotonically increasing per run), a type, a
+timestamp, and a JSON payload specific to that type. A handful of the core types:
+
+```text
+RUN_STARTED          { workflow_version, input }
+STEP_STARTED         { step_id, attempt }
+STEP_COMPLETED       { step_id, attempt, output, duration_ms }
+STEP_FAILED          { step_id, attempt, error_class, error_message }
+RETRY_SCHEDULED      { step_id, attempt, backoff_ms, reason }
+CHECKPOINT_WRITTEN   { step_id, checkpoint_id }
+APPROVAL_REQUESTED   { gate_id, step_id, payload, timeout_at }
+APPROVAL_GRANTED     { gate_id, actor, reason }
+APPROVAL_DENIED      { gate_id, actor, reason }
+RUN_COMPLETED        { output }
+RUN_FAILED           { error_class, error_message }
+```
+
+The sequence number matters more than it might look. It's what lets us answer "what's the state
+of this run as of event N" deterministically, and it's what lets a worker resuming a run know
+precisely where the last one left off, not "approximately," but exactly, down to the attempt
+count of the step that was running.
+
+## Append-only, on purpose
+
+Events are never updated or deleted. If we discover that an event's payload was wrong (it has
+happened, a serialization bug once wrote a truncated tool output into a `STEP_COMPLETED` event),
+the fix is to append a correcting event, not to edit history. This is the same instinct as
+double-entry bookkeeping: you don't erase a mistake, you record the correction, so the trail of
+*what we believed and when* survives.
+
+<Callout type="tradeoff" title="Tradeoff">
+Append-only storage means the table only grows, and "what is the current state" requires either
+replay or a maintained projection. We chose to maintain projections (a `run_summary` table,
+refreshed as events are appended) for the hot path, the UI's run list, while keeping full
+replay available for anything that needs the ground truth, like resume-after-crash and audits.
+This is more code than a single mutable table, but it means the projections can be rebuilt from
+scratch at any time if we ever find a bug in how they're maintained.
+</Callout>
+
+## Replay and audit are the same mechanism
+
+Once you have an append-only, ordered, typed event log, two things fall out almost for free:
+
+- **Replay**: reconstruct the state of a run at any point by folding events in order. This is
+  what powers "resume from checkpoint", the engine replays from the last checkpoint event
+  forward, rather than from the beginning, but the *mechanism* is identical to a full replay.
+- **Audit**: answer "who approved this, and when, and what was the workflow doing at that
+  moment?" by reading the same log a human would read to understand a bug. There's no separate
+  audit subsystem to keep in sync with reality, because the audit trail *is* reality.
+
+This matters more than it sounds for a product like Vectorbea, where workflows can take actions
+with real consequences (sending communications, calling paid APIs, modifying external systems).
+When something goes wrong, the question is never "can we find out what happened", it's always
+answerable, because the log is the same one the engine itself relies on to function.
+
+## What we'd do differently
+
+In the first version, we under-specified the event payload schemas, they were "whatever JSON
+made sense at the time," which meant that when we changed a step's output shape, old events
+became hard to replay correctly. We've since moved toward versioned event payloads (a
+`schema_version` field per event type, with explicit migration functions for replay). This is
+the kind of thing that's easy to skip early and expensive to retrofit, if you're building
+something similar, I'd bake in payload versioning from the start, even if version 1 is the only
+one that exists for a while.
+
+<Callout type="lesson" title="Lesson learned">
+Treat your event payloads like an API contract from day one. They will outlive the code that
+wrote them, and you will need to read old events with new code sooner than you think.
+</Callout>
+
+Next up in this series: how retries, resumption, and idempotency interact when the unit of work
+is a step rather than a whole workflow, and why "just retry it" is a much harder sentence to
+implement correctly than it is to say.

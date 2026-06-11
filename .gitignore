@@ -26,8 +26,6 @@ vectorbea-ui/node_modules/
 vectorbea-ui/out/
 
 # ── Gradle / JVM ─────────────────────────────────────────────────────────────
-vectorbea-backend/build/
-vectorbea-backend/.gradle/
 vectorbea-proxy/build/
 vectorbea-proxy/.gradle/
 *.class
@@ -35,7 +33,6 @@ vectorbea-proxy/.gradle/
 *.ear
 # Exclude compiled JARs but keep Gradle wrapper JARs (required for CI)
 *.jar
-!vectorbea-backend/gradle/wrapper/gradle-wrapper.jar
 !vectorbea-proxy/gradle/wrapper/gradle-wrapper.jar
 
 # ── Python ───────────────────────────────────────────────────────────────────
@@ -62,7 +59,6 @@ env/
 coverage/
 .nyc_output/
 test-results/
-vectorbea-backend/src/test/resources/*.tmp
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 *.pem

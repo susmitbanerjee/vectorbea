@@ -1,0 +1,109 @@
+---
+title: "Human Approval Gates in Agentic Systems"
+description: "Modeling 'wait for a human' as a first-class workflow step, waiting states, timeouts, escalation, and why the audit trail has to be airtight."
+date: "2026-03-09"
+author: "Susmit Banerjee"
+tags: ["agentic-systems", "human-in-the-loop", "ux"]
+category: "Agentic Systems"
+series: "building-vectorbea"
+part: 5
+featured: false
+---
+
+A workflow that can take real-world actions eventually needs a moment where it stops and asks a
+human "should I actually do this?" Vectorbea calls these approval gates, and they turned out to
+be one of the more interesting modeling problems in the whole system, not because the UI is
+hard, but because "waiting for a human" is a kind of state our execution engine wasn't originally
+designed to hold.
+
+## Approval as a workflow step, not a side channel
+
+The first instinct, and the one we initially built, was to treat approvals as something that
+happens *outside* the workflow: the workflow finishes a phase, fires a notification, and a
+separate system tracks whether someone approved the next phase. This created exactly the kind of
+two-sources-of-truth problem I described in the [event history post](/articles/designing-event-history-for-ai-workflows):
+the workflow's state and the approval system's state could disagree, and reconciling them was
+fragile.
+
+<Callout type="decision" title="Design decision">
+We modeled an approval gate as a regular step type, `APPROVAL_GATE`, that the engine executes
+like any other step. Executing it means: emit an `APPROVAL_REQUESTED` event, transition the run
+to a `WAITING_FOR_APPROVAL` status, write a checkpoint, and stop. The run is now durably paused,
+not running, not failed, just waiting, for as long as it takes.
+</Callout>
+
+This sounds like a small reframing, but it has a real consequence: a paused run looks, to the
+rest of the engine, exactly like a run that's between steps. Resume logic, checkpointing,
+event history, none of it needs special cases for "the workflow is currently waiting on a
+human." It's just a run sitting at a checkpoint, the same as if the worker process had been
+killed at that exact moment. We get correctness here largely for free, because we didn't invent
+a new kind of state, we reused one we'd already made durable.
+
+## Timeouts and escalation
+
+Humans don't always respond. An approval gate can specify a timeout, and what happens at that
+timeout is configurable per gate: auto-approve, auto-deny, or escalate to another approver. We
+implement the timeout itself as a scheduled event, when the gate is created, we enqueue a
+delayed check; if the gate is still pending when that check fires, the configured timeout
+behavior runs.
+
+<Callout type="warning" title="Be careful with auto-approve timeouts">
+Auto-approve-on-timeout is the option that looks convenient in a demo and dangerous in
+production. We make workflow authors explicitly opt into it per-gate, and we always emit an
+`APPROVAL_AUTO_GRANTED` event (distinct from `APPROVAL_GRANTED`) so the audit trail makes clear
+that no human actually looked at this. Silent auto-approval is how "human in the loop" quietly
+becomes "human theoretically in the loop."
+</Callout>
+
+## What the waiting state looks like to a worker
+
+One detail that took some iteration: when a run is `WAITING_FOR_APPROVAL`, it shouldn't occupy a
+worker slot. The naive implementation has a worker block on the step, polling for a decision ,
+which wastes a worker for however long the human takes (minutes to days). Instead, the worker
+that executes an `APPROVAL_GATE` step finishes its work the moment it emits the request event and
+checkpoint; it then picks up other work. A *separate* mechanism, triggered by the approval
+decision itself, whether that's a human clicking a button or a timeout firing, re-enqueues the
+run for a worker to pick up and continue.
+
+<Callout type="tradeoff" title="Tradeoff">
+Decoupling "request approval" from "resume after approval" means more moving parts (an event
+that re-enqueues the run), but it means a thousand runs waiting on approval cost us nothing in
+worker capacity, they're just rows in the database with a status, until something happens.
+The alternative, holding a worker per pending approval, doesn't scale past a small number of
+concurrent waits.
+</Callout>
+
+## The audit trail has to be airtight
+
+Approval gates exist because someone, somewhere, wants to be confident that a consequential
+action didn't happen without a person signing off on it. That means the record of *who* approved
+*what*, *when*, and *why* has to be trustworthy enough to stand up to scrutiny, possibly months
+later, possibly in a context where the person being asked is not the person who built the system.
+
+Because approval events go through the same event history as everything else, the answer to
+"who approved this and what did they see" is always: replay the run up to the
+`APPROVAL_REQUESTED` event, and look at the `APPROVAL_GRANTED` (or `_DENIED`, or
+`_AUTO_GRANTED`) event that follows it. The payload includes the actor, a timestamp, an optional
+reason string, and, this part we added after an early near-miss, a snapshot of *what the
+approver was shown* at decision time, since the underlying data could theoretically have changed
+between request and decision.
+
+<Callout type="lesson" title="Lesson learned">
+If a human is approving something based on what they see on a screen, record what they saw, not
+just what the system currently believes to be true. "The approver said yes" and "the approver
+said yes to *this specific summary*" are different claims, and only one of them is defensible
+later.
+</Callout>
+
+## What's still rough
+
+Our current approval UI is functional but plain, a list of pending approvals with the relevant
+context inline. We don't yet support delegation chains ("if Alice doesn't respond in 4 hours,
+ask Bob"), only single-level escalation. And we don't have a great answer yet for approvals that
+need *partial* information redacted before being shown to certain approvers, that's a real
+requirement we've heard from early users and haven't built. This is the kind of feature where
+getting the data model right early (which we think we did, by making approvals a step type) makes
+the UI work that follows much less risky, even if the UI itself still has a way to go.
+
+Next: BYOK, why we let customers bring their own LLM keys, what that buys them, what it costs
+us in complexity, and the security boundaries we drew around it.

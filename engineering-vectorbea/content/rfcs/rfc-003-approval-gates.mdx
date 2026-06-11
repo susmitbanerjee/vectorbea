@@ -1,0 +1,80 @@
+---
+title: "RFC-003: Human Approval Gates"
+description: "Proposing approval gates as a first-class step type that durably pauses a run, rather than an external system layered on top of workflow execution."
+date: "2026-02-26"
+author: "Susmit Banerjee"
+tags: ["agentic-systems", "human-in-the-loop", "rfc"]
+category: "RFC"
+---
+
+## Status
+
+Accepted and implemented (v1, March 2026). Delegation chains and partial-information redaction
+are explicitly deferred (see Open Questions).
+
+## Context
+
+Vectorbea workflows can take consequential, real-world actions. Several early design partners
+told us, independently, that they would not adopt an agentic workflow tool that couldn't pause
+for human sign-off before specific actions, not as a nice-to-have, but as a condition of trust.
+
+## Problem
+
+We need a way for a workflow to pause, possibly for hours or days, awaiting a human decision,
+and resume correctly afterward, without that pause requiring a worker to sit idle and without
+introducing a second system whose state can disagree with the run's.
+
+## Goals
+
+- A workflow author can mark a step as requiring approval before it executes.
+- A paused run consumes no worker capacity while waiting.
+- The decision (who, when, why, based on what information) is recorded durably and auditably.
+- Timeouts and configurable fallback behavior (auto-approve, auto-deny, escalate) are supported.
+- The mechanism reuses existing durability guarantees rather than inventing new ones.
+
+## Non-goals
+
+- Multi-level delegation chains in v1 (single-level escalation only).
+- Redacting information shown to different approvers based on role, deferred.
+- Real-time push notification to approvers (initial version uses polling/in-app surfacing plus
+  email; push can be layered on later).
+
+## Proposed design
+
+Model an approval gate as a step type, `APPROVAL_GATE`. Executing it appends an
+`APPROVAL_REQUESTED` event, transitions the run to `WAITING_FOR_APPROVAL`, writes a checkpoint,
+and returns, freeing the worker. A separate, lightweight mechanism (triggered by an approval
+decision, an auto-resolution timeout, or an escalation) re-enqueues the run for execution to
+continue. The decision itself, `APPROVAL_GRANTED`, `APPROVAL_DENIED`, or `APPROVAL_AUTO_GRANTED`
+, is appended as an event including actor, timestamp, optional reason, and a snapshot of the
+information the approver was shown.
+
+## Alternatives considered
+
+**A separate "approvals service" with its own state, notifying the workflow engine of decisions
+via webhook.** This is the architecture we initially prototyped. It requires keeping two systems'
+views of "is this approved yet" in sync, and reconciling them after either system's outage.
+Rejected for the same reason described in RFC-002, we don't want a second source of truth for
+run state.
+
+**Block a worker on the approval, polling for a decision.** Simplest to implement, but means
+worker capacity scales with the number of concurrently pending approvals, which could be in the
+hundreds for a customer with many long-running workflows. Rejected as not viable past small
+scale.
+
+## Tradeoffs
+
+Decoupling "request" from "resume" requires a re-enqueue mechanism that wouldn't exist in a
+blocking design, more moving parts. We accept this because it means pending approvals are
+"free" in terms of worker capacity; a thousand runs waiting on approval cost nothing but database
+rows until something happens.
+
+## Open questions
+
+- How should delegation chains work when an approver is unavailable, and how do we avoid making
+  the audit trail harder to follow as chains grow longer?
+- What's the right mechanism for redacting information per-approver without duplicating the
+  underlying data or creating yet another place state can drift?
+- Should there be a "bulk approval" mode for workflows that generate many similar approval
+  requests, and if so, how do we avoid it becoming a rubber-stamp that defeats the purpose of
+  having a human in the loop at all?

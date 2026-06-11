@@ -1,0 +1,730 @@
+/**
+ * Vectorbea Platform Seed Data — DEVELOPMENT ONLY
+ *
+ * This file is a development seed script. It must NEVER be imported by
+ * application runtime code. It lives in scripts/dev-seed/ specifically to
+ * keep it out of the lib/ import path.
+ *
+ * Usage: npm run db:seed:dev
+ *        (never auto-runs; never runs in production)
+ */
+
+if (process.env.NODE_ENV === "production") {
+  throw new Error("Seed data must not be loaded in production. NODE_ENV=production detected.");
+}
+
+import type {
+  Agent,
+  Tool,
+  Workflow,
+  AgentRun,
+  RunEvent,
+  RunCheckpoint,
+  ApprovalGate,
+  RunArtifact,
+} from "@/types/platform";
+
+// ─── Tools ────────────────────────────────────────────────────────────────────
+
+export const SEED_TOOLS: Tool[] = [
+  {
+    id: "tool-usage-metrics",
+    name: "usage-metrics-api.getCustomers",
+    slug: "usage-metrics-get-customers",
+    type: "http",
+    description: "Fetches customer usage metrics from the internal analytics API",
+    inputSchema: { type: "object", properties: { segment: { type: "string" }, limit: { type: "number" } } },
+    outputSchema: { type: "array", items: { type: "object" } },
+    riskLevel: "low",
+    timeoutMs: 10000,
+    retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
+    idempotent: true,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
+    authConnectionRef: "conn-internal-api",
+    httpConfig: {
+      method: "GET",
+      url: "https://api.internal/v2/customers",
+      headers: { "X-Source": "vectorbee" },
+    },
+    status: "active",
+    totalCalls: 1842,
+    lastUsedAt: "2026-05-22T14:30:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:30:00Z",
+  },
+  {
+    id: "tool-support-tickets",
+    name: "support-api.getRecentTickets",
+    slug: "support-api-get-recent-tickets",
+    type: "http",
+    description: "Retrieves recent support tickets for a customer",
+    inputSchema: { type: "object", properties: { customerId: { type: "string" }, days: { type: "number" } } },
+    outputSchema: { type: "array", items: { type: "object" } },
+    riskLevel: "low",
+    timeoutMs: 8000,
+    retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 500 },
+    idempotent: true,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
+    authConnectionRef: "conn-support-api",
+    httpConfig: {
+      method: "GET",
+      url: "https://support.internal/api/tickets",
+      headers: {},
+    },
+    status: "active",
+    totalCalls: 956,
+    lastUsedAt: "2026-05-22T14:31:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:31:00Z",
+  },
+  {
+    id: "tool-crm-get-renewals",
+    name: "crm-api.getRenewalAccounts",
+    slug: "crm-api-get-renewal-accounts",
+    type: "crm",
+    description: "Queries CRM for accounts with upcoming renewal dates",
+    inputSchema: { type: "object", properties: { windowDays: { type: "number" } } },
+    outputSchema: { type: "array", items: { type: "object" } },
+    riskLevel: "low",
+    timeoutMs: 12000,
+    retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
+    idempotent: true,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
+    authConnectionRef: "conn-salesforce",
+    status: "active",
+    totalCalls: 478,
+    lastUsedAt: "2026-05-22T14:32:00Z",
+    createdAt: "2026-01-15T10:00:00Z",
+    updatedAt: "2026-05-22T14:32:00Z",
+  },
+  {
+    id: "tool-crm-prepare-bulk",
+    name: "crm-api.prepareBulkUpdate",
+    slug: "crm-api-prepare-bulk-update",
+    type: "crm",
+    description: "Prepares a bulk renewal risk update payload for CRM staging",
+    inputSchema: { type: "object", properties: { updates: { type: "array" } } },
+    outputSchema: { type: "object", properties: { stagingId: { type: "string" }, count: { type: "number" } } },
+    riskLevel: "medium",
+    timeoutMs: 15000,
+    retryPolicy: { maxAttempts: 2, backoffType: "exponential", backoffMs: 2000 },
+    idempotent: false,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
+    authConnectionRef: "conn-salesforce",
+    status: "active",
+    totalCalls: 234,
+    lastUsedAt: "2026-05-22T14:45:00Z",
+    createdAt: "2026-01-15T10:00:00Z",
+    updatedAt: "2026-05-22T14:45:00Z",
+  },
+  {
+    id: "tool-crm-update-risk",
+    name: "crm-api.updateRenewalRisk",
+    slug: "crm-api-update-renewal-risk",
+    type: "crm",
+    description: "Commits renewal risk scores to CRM accounts — requires approval",
+    inputSchema: { type: "object", properties: { stagingId: { type: "string" } } },
+    outputSchema: { type: "object", properties: { updated: { type: "number" }, failed: { type: "number" } } },
+    riskLevel: "high",
+    timeoutMs: 30000,
+    retryPolicy: { maxAttempts: 1, backoffType: "fixed", backoffMs: 0 },
+    idempotent: false,
+    connectionId: "conn-internal-api",
+    connectionName: "Internal CRM API",
+    authConnectionRef: "conn-salesforce",
+    status: "active",
+    totalCalls: 198,
+    lastUsedAt: "2026-05-22T14:46:00Z",
+    createdAt: "2026-01-15T10:00:00Z",
+    updatedAt: "2026-05-22T14:46:00Z",
+  },
+  {
+    id: "tool-slack-post",
+    name: "slack.postMessage",
+    slug: "slack-post-message",
+    type: "slack",
+    description: "Posts a message to a Slack channel",
+    inputSchema: { type: "object", properties: { channel: { type: "string" }, text: { type: "string" } } },
+    outputSchema: { type: "object", properties: { ts: { type: "string" }, ok: { type: "boolean" } } },
+    riskLevel: "medium",
+    timeoutMs: 5000,
+    retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 500 },
+    idempotent: false,
+    connectionId: "conn-slack-workspace",
+    connectionName: "Acme Slack",
+    authConnectionRef: "conn-slack",
+    status: "active",
+    totalCalls: 1203,
+    lastUsedAt: "2026-05-22T14:50:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:50:00Z",
+  },
+];
+
+// ─── Agents ───────────────────────────────────────────────────────────────────
+
+export const SEED_AGENTS: Agent[] = [
+  {
+    id: "agent-orchestrator",
+    name: "Orchestrator Agent",
+    slug: "orchestrator-agent",
+    description: "Top-level coordinator that plans and delegates tasks to sub-agents",
+    role: "Orchestrator",
+    type: "router_agent",
+    llmConnectionId: "conn-openai-prod",
+    instructions: `You are the Orchestrator for the Customer Renewal Intelligence workflow.
+Your job is to:
+1. Receive the renewal window configuration
+2. Instruct the Customer Data Agent to fetch account data
+3. Pass accounts to the Risk Analysis Agent for scoring
+4. Route scored accounts to the CRM Update Agent
+5. Trigger the Notification Agent to send the summary
+
+Always produce a final structured summary with counts, high-risk accounts, and next actions.`,
+    modelProvider: "openai",
+    modelName: "gpt-4.1-mini",
+    temperature: 0.1,
+    maxIterations: 10,
+    allowedToolIds: [],
+    memoryPolicy: { type: "session" },
+    retryPolicy: { maxAttempts: 2, backoffType: "exponential", backoffMs: 2000 },
+    timeoutPolicy: { stepTimeoutMs: 60000, runTimeoutMs: 600000 },
+    approvalPolicy: { requireApproval: false },
+    status: "active",
+    totalRuns: 312,
+    lastUsedAt: "2026-05-22T14:30:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:30:00Z",
+  },
+  {
+    id: "agent-customer-data",
+    name: "Customer Data Agent",
+    slug: "customer-data-agent",
+    description: "Fetches and enriches customer data from CRM, usage metrics, and support",
+    role: "Data Retrieval",
+    type: "tool_agent",
+    llmConnectionId: null,
+    instructions: `You are the Customer Data Agent. Given a list of customer IDs or a segment filter:
+1. Call usage-metrics-api.getCustomers to fetch usage data
+2. Call crm-api.getRenewalAccounts to get renewal dates and ARR
+3. Call support-api.getRecentTickets for each account with open tickets
+4. Return a unified customer profile list with all enriched fields.`,
+    modelProvider: "openai",
+    modelName: "gpt-4.1-mini",
+    temperature: 0,
+    maxIterations: 15,
+    allowedToolIds: ["tool-usage-metrics", "tool-support-tickets", "tool-crm-get-renewals"],
+    memoryPolicy: { type: "session" },
+    retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
+    timeoutPolicy: { stepTimeoutMs: 120000, runTimeoutMs: 600000 },
+    approvalPolicy: { requireApproval: false },
+    status: "active",
+    totalRuns: 312,
+    lastUsedAt: "2026-05-22T14:31:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:31:00Z",
+  },
+  {
+    id: "agent-risk-analysis",
+    name: "Risk Analysis Agent",
+    slug: "risk-analysis-agent",
+    description: "Scores renewal risk for each customer using LLM-based reasoning over enriched profiles",
+    role: "Analysis",
+    type: "native_llm_agent",
+    llmConnectionId: "conn-openai-prod",
+    instructions: `You are the Risk Analysis Agent. Given a list of customer profiles:
+For each customer, analyze:
+- Usage trends (declining, stable, growing)
+- Support ticket severity and open count
+- Days to renewal
+- Contract ARR and historical churn signals
+
+Produce a risk score (0.0–1.0) and a risk tier (LOW/MEDIUM/HIGH/CRITICAL) with a 1–2 sentence rationale.`,
+    modelProvider: "openai",
+    modelName: "gpt-4.1",
+    temperature: 0.2,
+    maxIterations: 5,
+    allowedToolIds: [],
+    memoryPolicy: { type: "none" },
+    retryPolicy: { maxAttempts: 2, backoffType: "exponential", backoffMs: 3000 },
+    timeoutPolicy: { stepTimeoutMs: 90000, runTimeoutMs: 600000 },
+    approvalPolicy: { requireApproval: false },
+    status: "active",
+    totalRuns: 312,
+    lastUsedAt: "2026-05-22T14:40:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:40:00Z",
+  },
+  {
+    id: "agent-crm-update",
+    name: "CRM Update Agent",
+    slug: "crm-update-agent",
+    description: "Prepares and commits renewal risk scores to Salesforce — requires approval for writes",
+    role: "CRM Writer",
+    type: "tool_agent",
+    llmConnectionId: null,
+    instructions: `You are the CRM Update Agent. Given scored accounts:
+1. Call crm-api.prepareBulkUpdate to stage the updates
+2. Report the staging summary to the Orchestrator
+3. Wait for human approval before committing
+4. Upon approval, call crm-api.updateRenewalRisk with the staging ID
+5. Return final update counts.`,
+    modelProvider: "openai",
+    modelName: "gpt-4.1-mini",
+    temperature: 0,
+    maxIterations: 5,
+    allowedToolIds: ["tool-crm-prepare-bulk", "tool-crm-update-risk"],
+    memoryPolicy: { type: "session" },
+    retryPolicy: { maxAttempts: 1, backoffType: "fixed", backoffMs: 0 },
+    timeoutPolicy: { stepTimeoutMs: 60000, runTimeoutMs: 600000 },
+    approvalPolicy: {
+      requireApproval: true,
+      approvers: ["ops-team@acme.com"],
+      timeoutMs: 86400000,
+      onTimeout: "pause",
+    },
+    status: "active",
+    totalRuns: 312,
+    lastUsedAt: "2026-05-22T14:45:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:45:00Z",
+  },
+  {
+    id: "agent-notification",
+    name: "Notification Agent",
+    slug: "notification-agent",
+    description: "Sends Slack notifications with run summary and high-risk account highlights",
+    role: "Notifier",
+    type: "tool_agent",
+    llmConnectionId: null,
+    instructions: `You are the Notification Agent. Given a run summary:
+1. Format a clear Slack message with:
+   - Total accounts processed
+   - High/Critical risk count
+   - Top 3 high-risk accounts with rationale
+   - Link to the full run report
+2. Call slack.postMessage to #renewals-ops channel.`,
+    modelProvider: "openai",
+    modelName: "gpt-4.1-mini",
+    temperature: 0.3,
+    maxIterations: 3,
+    allowedToolIds: ["tool-slack-post"],
+    memoryPolicy: { type: "none" },
+    retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
+    timeoutPolicy: { stepTimeoutMs: 30000, runTimeoutMs: 600000 },
+    approvalPolicy: { requireApproval: false },
+    status: "active",
+    totalRuns: 312,
+    lastUsedAt: "2026-05-22T14:50:00Z",
+    createdAt: "2026-01-10T09:00:00Z",
+    updatedAt: "2026-05-22T14:50:00Z",
+  },
+];
+
+// ─── Workflow ─────────────────────────────────────────────────────────────────
+
+export const SEED_WORKFLOW: Workflow = {
+  id: "wf-renewal-intelligence",
+  name: "Customer Renewal Intelligence",
+  slug: "customer-renewal-intelligence",
+  description:
+    "Multi-agent pipeline that scores renewal risk for enterprise accounts, prepares CRM updates, and sends Slack notifications. Requires approval before writing to CRM.",
+  status: "active",
+  creationMode: "native",
+  currentVersion: "v3",
+  triggerType: "cron",
+  inputSchema: {
+    type: "object",
+    properties: {
+      scheduledAt: { type: "string", format: "date-time" },
+      renewalWindowDays: { type: "number", default: 30 },
+      customerSegment: { type: "string", enum: ["enterprise", "mid-market", "smb"], default: "enterprise" },
+      maxCustomers: { type: "number", default: 200 },
+      requireApprovalForCrmWrite: { type: "boolean", default: true },
+    },
+    required: ["renewalWindowDays"],
+  },
+  outputSchema: {
+    type: "object",
+    properties: {
+      totalProcessed: { type: "number" },
+      highRiskCount: { type: "number" },
+      crmUpdated: { type: "number" },
+      notificationSent: { type: "boolean" },
+    },
+  },
+  steps: [
+    {
+      id: "step-fetch-data",
+      name: "Fetch Customer Data",
+      type: "agent",
+      agentId: "agent-customer-data",
+      nextStepIds: ["step-risk-analysis"],
+      checkpointEnabled: true,
+      retryPolicy: { maxAttempts: 3, backoffType: "exponential", backoffMs: 1000 },
+    },
+    {
+      id: "step-risk-analysis",
+      name: "Analyze Renewal Risk",
+      type: "agent",
+      agentId: "agent-risk-analysis",
+      nextStepIds: ["step-approval"],
+      checkpointEnabled: true,
+    },
+    {
+      id: "step-approval",
+      name: "Approve CRM Update",
+      type: "approval",
+      nextStepIds: ["step-crm-update"],
+      checkpointEnabled: true,
+      approvalPolicy: {
+        requireApproval: true,
+        approvers: ["ops-team@acme.com"],
+        timeoutMs: 86400000,
+        onTimeout: "pause",
+      },
+    },
+    {
+      id: "step-crm-update",
+      name: "Update CRM Risk Scores",
+      type: "agent",
+      agentId: "agent-crm-update",
+      nextStepIds: ["step-notify"],
+      checkpointEnabled: true,
+    },
+    {
+      id: "step-notify",
+      name: "Send Slack Notification",
+      type: "agent",
+      agentId: "agent-notification",
+      nextStepIds: ["step-end"],
+      checkpointEnabled: false,
+    },
+    {
+      id: "step-end",
+      name: "Complete",
+      type: "end",
+      nextStepIds: [],
+      checkpointEnabled: false,
+    },
+  ],
+  agentIds: [
+    "agent-orchestrator",
+    "agent-customer-data",
+    "agent-risk-analysis",
+    "agent-crm-update",
+    "agent-notification",
+  ],
+  toolIds: [
+    "tool-usage-metrics",
+    "tool-support-tickets",
+    "tool-crm-get-renewals",
+    "tool-crm-prepare-bulk",
+    "tool-crm-update-risk",
+    "tool-slack-post",
+  ],
+  scheduleConfig: {
+    cronExpression: "0 7 * * 1",
+    timezone: "America/New_York",
+  },
+  retryPolicy: { maxAttempts: 2, backoffType: "exponential", backoffMs: 5000 },
+  budgetPolicy: { maxTokensPerRun: 200000, maxCostUsdPerRun: 5.0, maxRunsPerDay: 3 },
+  approvalPolicy: {
+    requireApproval: true,
+    approvers: ["ops-team@acme.com"],
+    timeoutMs: 86400000,
+    onTimeout: "pause",
+  },
+  totalRuns: 47,
+  successRate: 0.89,
+  lastRunAt: "2026-05-22T07:00:00Z",
+  lastRunStatus: "succeeded",
+  createdAt: "2026-01-10T09:00:00Z",
+  updatedAt: "2026-05-22T07:55:00Z",
+};
+
+// ─── Run A: Succeeded ─────────────────────────────────────────────────────────
+
+const checkpointsA: RunCheckpoint[] = [
+  {
+    id: "ckpt-a-1",
+    runId: "run-a-succeeded",
+    workflowId: "wf-renewal-intelligence",
+    workflowVersion: "v3",
+    stepId: "step-fetch-data",
+    agentId: "agent-customer-data",
+    sequence: 1,
+    state: { phase: "data_collection", customersFound: 184 },
+    input: { segment: "enterprise", windowDays: 30 },
+    outputSoFar: { customersEnriched: 184 },
+    createdAt: "2026-05-22T07:02:10Z",
+  },
+  {
+    id: "ckpt-a-2",
+    runId: "run-a-succeeded",
+    workflowId: "wf-renewal-intelligence",
+    workflowVersion: "v3",
+    stepId: "step-risk-analysis",
+    agentId: "agent-risk-analysis",
+    sequence: 2,
+    state: { phase: "risk_scored", highRisk: 12, critical: 3 },
+    input: { customers: 184 },
+    outputSoFar: { scored: 184, highRisk: 12 },
+    createdAt: "2026-05-22T07:08:45Z",
+  },
+];
+
+const artifactsA: RunArtifact[] = [
+  {
+    id: "artifact-a-1",
+    runId: "run-a-succeeded",
+    name: "renewal-risk-report-2026-05-22.json",
+    type: "report",
+    contentType: "application/json",
+    sizeBytes: 42800,
+    preview: '{"totalAccounts":184,"highRisk":12,"critical":3,"avgRiskScore":0.31}',
+    createdAt: "2026-05-22T07:45:00Z",
+  },
+];
+
+export const SEED_RUN_A: AgentRun = {
+  id: "run-a-succeeded",
+  workflowId: "wf-renewal-intelligence",
+  workflowName: "Customer Renewal Intelligence",
+  workflowVersion: "v3",
+  creationMode: "native",
+  status: "succeeded",
+  triggerType: "cron",
+  input: {
+    scheduledAt: "2026-05-22T07:00:00Z",
+    renewalWindowDays: 30,
+    customerSegment: "enterprise",
+    maxCustomers: 200,
+    requireApprovalForCrmWrite: true,
+  },
+  output: {
+    totalProcessed: 184,
+    highRiskCount: 12,
+    criticalCount: 3,
+    crmUpdated: 184,
+    notificationSent: true,
+  },
+  startedAt: "2026-05-22T07:00:12Z",
+  completedAt: "2026-05-22T07:55:44Z",
+  durationMs: 3332000,
+  totalTokens: 87420,
+  estimatedCostUsd: 0.43,
+  checkpoints: checkpointsA,
+  artifacts: artifactsA,
+  approvalGates: [],
+  replayAvailable: true,
+  createdAt: "2026-05-22T07:00:00Z",
+  updatedAt: "2026-05-22T07:55:44Z",
+};
+
+// ─── Run B: Failed ────────────────────────────────────────────────────────────
+
+export const SEED_RUN_B: AgentRun = {
+  id: "run-b-failed",
+  workflowId: "wf-renewal-intelligence",
+  workflowName: "Customer Renewal Intelligence",
+  workflowVersion: "v3",
+  creationMode: "native",
+  status: "failed",
+  triggerType: "cron",
+  input: {
+    scheduledAt: "2026-05-15T07:00:00Z",
+    renewalWindowDays: 30,
+    customerSegment: "enterprise",
+    maxCustomers: 200,
+    requireApprovalForCrmWrite: true,
+  },
+  startedAt: "2026-05-15T07:00:08Z",
+  completedAt: "2026-05-15T07:04:22Z",
+  durationMs: 254000,
+  totalTokens: 12100,
+  estimatedCostUsd: 0.06,
+  error: "RETRY_EXHAUSTED: crm-api.getRenewalAccounts returned HTTP 429 after 3 attempts. Last error: rate limit exceeded.",
+  checkpoints: [
+    {
+      id: "ckpt-b-1",
+      runId: "run-b-failed",
+      workflowId: "wf-renewal-intelligence",
+      workflowVersion: "v3",
+      stepId: "step-fetch-data",
+      agentId: "agent-customer-data",
+      sequence: 1,
+      state: { phase: "partial_fetch", customersFound: 0 },
+      input: { segment: "enterprise", windowDays: 30 },
+      outputSoFar: {},
+      createdAt: "2026-05-15T07:01:00Z",
+    },
+  ],
+  artifacts: [],
+  approvalGates: [],
+  replayAvailable: true,
+  createdAt: "2026-05-15T07:00:00Z",
+  updatedAt: "2026-05-15T07:04:22Z",
+};
+
+// ─── Run C: Waiting Approval ──────────────────────────────────────────────────
+
+const approvalGateC: ApprovalGate = {
+  id: "approval-c-1",
+  runId: "run-c-waiting",
+  stepId: "step-approval",
+  stepName: "Approve CRM Update",
+  workflowId: "wf-renewal-intelligence",
+  workflowName: "Customer Renewal Intelligence",
+  requestedAt: "2026-05-23T07:09:15Z",
+  expiresAt: "2026-05-24T07:09:15Z",
+  status: "pending",
+  requestedBy: "system",
+  context: {
+    totalAccounts: 191,
+    highRisk: 14,
+    critical: 4,
+    crmStagingId: "staging-2026-05-23-abc",
+    previewUrl: "/agent-runs/run-c-waiting/artifacts/staging-preview",
+  },
+};
+
+export const SEED_RUN_C: AgentRun = {
+  id: "run-c-waiting",
+  workflowId: "wf-renewal-intelligence",
+  workflowName: "Customer Renewal Intelligence",
+  workflowVersion: "v3",
+  creationMode: "native",
+  status: "waiting_for_approval",
+  triggerType: "cron",
+  input: {
+    scheduledAt: "2026-05-23T07:00:00Z",
+    renewalWindowDays: 30,
+    customerSegment: "enterprise",
+    maxCustomers: 200,
+    requireApprovalForCrmWrite: true,
+  },
+  currentStepId: "step-approval",
+  currentAgentId: "agent-crm-update",
+  startedAt: "2026-05-23T07:00:10Z",
+  completedAt: null,
+  durationMs: null,
+  totalTokens: 51200,
+  estimatedCostUsd: 0.25,
+  checkpoints: [
+    {
+      id: "ckpt-c-1",
+      runId: "run-c-waiting",
+      workflowId: "wf-renewal-intelligence",
+      workflowVersion: "v3",
+      stepId: "step-fetch-data",
+      agentId: "agent-customer-data",
+      sequence: 1,
+      state: { customersEnriched: 191 },
+      input: { segment: "enterprise", windowDays: 30 },
+      outputSoFar: { customersEnriched: 191 },
+      createdAt: "2026-05-23T07:02:30Z",
+    },
+    {
+      id: "ckpt-c-2",
+      runId: "run-c-waiting",
+      workflowId: "wf-renewal-intelligence",
+      workflowVersion: "v3",
+      stepId: "step-risk-analysis",
+      agentId: "agent-risk-analysis",
+      sequence: 2,
+      state: { scored: 191, highRisk: 14, critical: 4 },
+      input: { customers: 191 },
+      outputSoFar: { scored: 191 },
+      createdAt: "2026-05-23T07:08:00Z",
+    },
+  ],
+  artifacts: [],
+  approvalGates: [approvalGateC],
+  replayAvailable: true,
+  createdAt: "2026-05-23T07:00:00Z",
+  updatedAt: "2026-05-23T07:09:15Z",
+};
+
+// ─── Run Events ───────────────────────────────────────────────────────────────
+
+export const SEED_EVENTS_A: RunEvent[] = [
+  { id: "evt-a-01", runId: "run-a-succeeded", sequence: 1, timestamp: "2026-05-22T07:00:12Z", type: "RUN_CREATED", status: "ok", source: "native" },
+  { id: "evt-a-02", runId: "run-a-succeeded", sequence: 2, timestamp: "2026-05-22T07:00:13Z", type: "RUN_QUEUED", status: "ok", source: "native" },
+  { id: "evt-a-03", runId: "run-a-succeeded", sequence: 3, timestamp: "2026-05-22T07:00:14Z", type: "RUN_STARTED", status: "ok", source: "native", durationMs: 0 },
+  { id: "evt-a-04", runId: "run-a-succeeded", sequence: 4, timestamp: "2026-05-22T07:00:15Z", type: "STEP_SCHEDULED", status: "ok", source: "native", stepId: "step-fetch-data" },
+  { id: "evt-a-05", runId: "run-a-succeeded", sequence: 5, timestamp: "2026-05-22T07:00:16Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", stepId: "step-fetch-data" },
+  { id: "evt-a-06", runId: "run-a-succeeded", sequence: 6, timestamp: "2026-05-22T07:00:18Z", type: "LLM_CALL_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", modelName: "gpt-4.1-mini", tokens: 0 },
+  { id: "evt-a-07", runId: "run-a-succeeded", sequence: 7, timestamp: "2026-05-22T07:00:22Z", type: "LLM_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", modelName: "gpt-4.1-mini", tokens: 820, cost: 0.0006, durationMs: 4100 },
+  { id: "evt-a-08", runId: "run-a-succeeded", sequence: 8, timestamp: "2026-05-22T07:00:23Z", type: "TOOL_CALL_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", toolId: "tool-usage-metrics", toolName: "usage-metrics-api.getCustomers" },
+  { id: "evt-a-09", runId: "run-a-succeeded", sequence: 9, timestamp: "2026-05-22T07:00:29Z", type: "TOOL_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", toolId: "tool-usage-metrics", toolName: "usage-metrics-api.getCustomers", durationMs: 6100, output: { customersReturned: 184 } },
+  { id: "evt-a-10", runId: "run-a-succeeded", sequence: 10, timestamp: "2026-05-22T07:00:30Z", type: "TOOL_CALL_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", toolId: "tool-crm-get-renewals", toolName: "crm-api.getRenewalAccounts" },
+  { id: "evt-a-11", runId: "run-a-succeeded", sequence: 11, timestamp: "2026-05-22T07:00:41Z", type: "TOOL_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", toolId: "tool-crm-get-renewals", toolName: "crm-api.getRenewalAccounts", durationMs: 11200 },
+  { id: "evt-a-12", runId: "run-a-succeeded", sequence: 12, timestamp: "2026-05-22T07:02:10Z", type: "CHECKPOINT_CREATED", status: "ok", source: "native", stepId: "step-fetch-data" },
+  { id: "evt-a-13", runId: "run-a-succeeded", sequence: 13, timestamp: "2026-05-22T07:02:12Z", type: "AGENT_COMPLETED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", durationMs: 116000 },
+  { id: "evt-a-14", runId: "run-a-succeeded", sequence: 14, timestamp: "2026-05-22T07:02:13Z", type: "AGENT_HANDOFF", status: "ok", source: "native", agentId: "agent-orchestrator", agentName: "Orchestrator Agent" },
+  { id: "evt-a-15", runId: "run-a-succeeded", sequence: 15, timestamp: "2026-05-22T07:02:15Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", stepId: "step-risk-analysis" },
+  { id: "evt-a-16", runId: "run-a-succeeded", sequence: 16, timestamp: "2026-05-22T07:02:20Z", type: "LLM_CALL_STARTED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", modelName: "gpt-4.1", tokens: 0 },
+  { id: "evt-a-17", runId: "run-a-succeeded", sequence: 17, timestamp: "2026-05-22T07:08:10Z", type: "LLM_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", modelName: "gpt-4.1", tokens: 38400, cost: 0.23, durationMs: 350000 },
+  { id: "evt-a-18", runId: "run-a-succeeded", sequence: 18, timestamp: "2026-05-22T07:08:45Z", type: "CHECKPOINT_CREATED", status: "ok", source: "native", stepId: "step-risk-analysis" },
+  { id: "evt-a-19", runId: "run-a-succeeded", sequence: 19, timestamp: "2026-05-22T07:08:46Z", type: "AGENT_COMPLETED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", durationMs: 391000 },
+  { id: "evt-a-20", runId: "run-a-succeeded", sequence: 20, timestamp: "2026-05-22T07:08:47Z", type: "APPROVAL_REQUESTED", status: "ok", source: "native", stepId: "step-approval", metadata: { stagingId: "staging-2026-05-22-xyz", accountCount: 184 } },
+  { id: "evt-a-21", runId: "run-a-succeeded", sequence: 21, timestamp: "2026-05-22T07:15:03Z", type: "APPROVAL_APPROVED", status: "ok", source: "native", stepId: "step-approval", metadata: { approvedBy: "ops-team@acme.com" } },
+  { id: "evt-a-22", runId: "run-a-succeeded", sequence: 22, timestamp: "2026-05-22T07:15:05Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-crm-update", agentName: "CRM Update Agent", stepId: "step-crm-update" },
+  { id: "evt-a-23", runId: "run-a-succeeded", sequence: 23, timestamp: "2026-05-22T07:15:10Z", type: "TOOL_CALL_STARTED", status: "ok", source: "native", agentId: "agent-crm-update", agentName: "CRM Update Agent", toolId: "tool-crm-update-risk", toolName: "crm-api.updateRenewalRisk" },
+  { id: "evt-a-24", runId: "run-a-succeeded", sequence: 24, timestamp: "2026-05-22T07:15:41Z", type: "TOOL_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-crm-update", agentName: "CRM Update Agent", toolId: "tool-crm-update-risk", toolName: "crm-api.updateRenewalRisk", durationMs: 31000, output: { updated: 184, failed: 0 } },
+  { id: "evt-a-25", runId: "run-a-succeeded", sequence: 25, timestamp: "2026-05-22T07:15:50Z", type: "ARTIFACT_CREATED", status: "ok", source: "native", metadata: { name: "renewal-risk-report-2026-05-22.json" } },
+  { id: "evt-a-26", runId: "run-a-succeeded", sequence: 26, timestamp: "2026-05-22T07:15:52Z", type: "AGENT_COMPLETED", status: "ok", source: "native", agentId: "agent-crm-update", agentName: "CRM Update Agent", durationMs: 47000 },
+  { id: "evt-a-27", runId: "run-a-succeeded", sequence: 27, timestamp: "2026-05-22T07:15:55Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-notification", agentName: "Notification Agent", stepId: "step-notify" },
+  { id: "evt-a-28", runId: "run-a-succeeded", sequence: 28, timestamp: "2026-05-22T07:16:02Z", type: "TOOL_CALL_STARTED", status: "ok", source: "native", agentId: "agent-notification", agentName: "Notification Agent", toolId: "tool-slack-post", toolName: "slack.postMessage" },
+  { id: "evt-a-29", runId: "run-a-succeeded", sequence: 29, timestamp: "2026-05-22T07:16:04Z", type: "TOOL_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-notification", agentName: "Notification Agent", toolId: "tool-slack-post", toolName: "slack.postMessage", durationMs: 1200 },
+  { id: "evt-a-30", runId: "run-a-succeeded", sequence: 30, timestamp: "2026-05-22T07:16:08Z", type: "AGENT_COMPLETED", status: "ok", source: "native", agentId: "agent-notification", agentName: "Notification Agent", durationMs: 13000 },
+  { id: "evt-a-31", runId: "run-a-succeeded", sequence: 31, timestamp: "2026-05-22T07:55:44Z", type: "RUN_SUCCEEDED", status: "ok", source: "native", durationMs: 3332000, tokens: 87420, cost: 0.43 },
+];
+
+export const SEED_EVENTS_B: RunEvent[] = [
+  { id: "evt-b-01", runId: "run-b-failed", sequence: 1, timestamp: "2026-05-15T07:00:08Z", type: "RUN_CREATED", status: "ok", source: "native" },
+  { id: "evt-b-02", runId: "run-b-failed", sequence: 2, timestamp: "2026-05-15T07:00:09Z", type: "RUN_STARTED", status: "ok", source: "native" },
+  { id: "evt-b-03", runId: "run-b-failed", sequence: 3, timestamp: "2026-05-15T07:00:10Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent" },
+  { id: "evt-b-04", runId: "run-b-failed", sequence: 4, timestamp: "2026-05-15T07:00:15Z", type: "TOOL_CALL_STARTED", status: "ok", source: "native", toolId: "tool-crm-get-renewals", toolName: "crm-api.getRenewalAccounts" },
+  { id: "evt-b-05", runId: "run-b-failed", sequence: 5, timestamp: "2026-05-15T07:01:00Z", type: "TOOL_CALL_FAILED", status: "error", source: "native", toolId: "tool-crm-get-renewals", toolName: "crm-api.getRenewalAccounts", error: "HTTP 429 Too Many Requests", durationMs: 45000 },
+  { id: "evt-b-06", runId: "run-b-failed", sequence: 6, timestamp: "2026-05-15T07:01:05Z", type: "RETRY_SCHEDULED", status: "ok", source: "native", metadata: { attempt: 2, delayMs: 2000 } },
+  { id: "evt-b-07", runId: "run-b-failed", sequence: 7, timestamp: "2026-05-15T07:01:07Z", type: "RETRY_STARTED", status: "ok", source: "native", metadata: { attempt: 2 } },
+  { id: "evt-b-08", runId: "run-b-failed", sequence: 8, timestamp: "2026-05-15T07:02:00Z", type: "TOOL_CALL_FAILED", status: "error", source: "native", toolId: "tool-crm-get-renewals", toolName: "crm-api.getRenewalAccounts", error: "HTTP 429 Too Many Requests", durationMs: 53000 },
+  { id: "evt-b-09", runId: "run-b-failed", sequence: 9, timestamp: "2026-05-15T07:02:05Z", type: "RETRY_SCHEDULED", status: "ok", source: "native", metadata: { attempt: 3, delayMs: 4000 } },
+  { id: "evt-b-10", runId: "run-b-failed", sequence: 10, timestamp: "2026-05-15T07:02:09Z", type: "RETRY_STARTED", status: "ok", source: "native", metadata: { attempt: 3 } },
+  { id: "evt-b-11", runId: "run-b-failed", sequence: 11, timestamp: "2026-05-15T07:03:20Z", type: "TOOL_CALL_FAILED", status: "error", source: "native", toolId: "tool-crm-get-renewals", toolName: "crm-api.getRenewalAccounts", error: "HTTP 429 Too Many Requests", durationMs: 71000 },
+  { id: "evt-b-12", runId: "run-b-failed", sequence: 12, timestamp: "2026-05-15T07:03:25Z", type: "RETRY_EXHAUSTED", status: "error", source: "native", error: "Max retries reached (3/3)" },
+  { id: "evt-b-13", runId: "run-b-failed", sequence: 13, timestamp: "2026-05-15T07:04:22Z", type: "RUN_FAILED", status: "error", source: "native", error: "RETRY_EXHAUSTED: crm-api.getRenewalAccounts returned HTTP 429 after 3 attempts.", durationMs: 254000 },
+];
+
+export const SEED_EVENTS_C: RunEvent[] = [
+  { id: "evt-c-01", runId: "run-c-waiting", sequence: 1, timestamp: "2026-05-23T07:00:10Z", type: "RUN_CREATED", status: "ok", source: "native" },
+  { id: "evt-c-02", runId: "run-c-waiting", sequence: 2, timestamp: "2026-05-23T07:00:11Z", type: "RUN_STARTED", status: "ok", source: "native" },
+  { id: "evt-c-03", runId: "run-c-waiting", sequence: 3, timestamp: "2026-05-23T07:00:12Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent" },
+  { id: "evt-c-04", runId: "run-c-waiting", sequence: 4, timestamp: "2026-05-23T07:00:15Z", type: "LLM_CALL_STARTED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", modelName: "gpt-4.1-mini" },
+  { id: "evt-c-05", runId: "run-c-waiting", sequence: 5, timestamp: "2026-05-23T07:00:20Z", type: "LLM_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", modelName: "gpt-4.1-mini", tokens: 810, durationMs: 5000 },
+  { id: "evt-c-06", runId: "run-c-waiting", sequence: 6, timestamp: "2026-05-23T07:00:22Z", type: "TOOL_CALL_STARTED", status: "ok", source: "native", toolId: "tool-usage-metrics", toolName: "usage-metrics-api.getCustomers" },
+  { id: "evt-c-07", runId: "run-c-waiting", sequence: 7, timestamp: "2026-05-23T07:00:29Z", type: "TOOL_CALL_COMPLETED", status: "ok", source: "native", toolId: "tool-usage-metrics", toolName: "usage-metrics-api.getCustomers", durationMs: 7000 },
+  { id: "evt-c-08", runId: "run-c-waiting", sequence: 8, timestamp: "2026-05-23T07:02:30Z", type: "CHECKPOINT_CREATED", status: "ok", source: "native", stepId: "step-fetch-data" },
+  { id: "evt-c-09", runId: "run-c-waiting", sequence: 9, timestamp: "2026-05-23T07:02:32Z", type: "AGENT_COMPLETED", status: "ok", source: "native", agentId: "agent-customer-data", agentName: "Customer Data Agent", durationMs: 140000 },
+  { id: "evt-c-10", runId: "run-c-waiting", sequence: 10, timestamp: "2026-05-23T07:02:35Z", type: "AGENT_STARTED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent" },
+  { id: "evt-c-11", runId: "run-c-waiting", sequence: 11, timestamp: "2026-05-23T07:02:40Z", type: "LLM_CALL_STARTED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", modelName: "gpt-4.1" },
+  { id: "evt-c-12", runId: "run-c-waiting", sequence: 12, timestamp: "2026-05-23T07:08:00Z", type: "LLM_CALL_COMPLETED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", modelName: "gpt-4.1", tokens: 41200, cost: 0.25, durationMs: 320000 },
+  { id: "evt-c-13", runId: "run-c-waiting", sequence: 13, timestamp: "2026-05-23T07:08:00Z", type: "CHECKPOINT_CREATED", status: "ok", source: "native", stepId: "step-risk-analysis" },
+  { id: "evt-c-14", runId: "run-c-waiting", sequence: 14, timestamp: "2026-05-23T07:08:01Z", type: "AGENT_COMPLETED", status: "ok", source: "native", agentId: "agent-risk-analysis", agentName: "Risk Analysis Agent", durationMs: 326000 },
+  { id: "evt-c-15", runId: "run-c-waiting", sequence: 15, timestamp: "2026-05-23T07:09:15Z", type: "APPROVAL_REQUESTED", status: "pending", source: "native", stepId: "step-approval", metadata: { stagingId: "staging-2026-05-23-abc", accountCount: 191, highRisk: 14 } },
+];
+
+// ─── All seed data exports ─────────────────────────────────────────────────────
+
+export const ALL_SEED_RUNS = [SEED_RUN_A, SEED_RUN_B, SEED_RUN_C];
+export const ALL_SEED_EVENTS: Record<string, RunEvent[]> = {
+  "run-a-succeeded": SEED_EVENTS_A,
+  "run-b-failed": SEED_EVENTS_B,
+  "run-c-waiting": SEED_EVENTS_C,
+};

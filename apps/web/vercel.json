@@ -1,0 +1,1 @@
+{ "buildCommand": "npm run prisma:generate && next build" }

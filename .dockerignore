@@ -1,0 +1,29 @@
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+**/node_modules
+**/.next
+**/dist
+**/out
+
+# ── Gradle build artifacts (each service rebuilds inside Docker) ──────────────
+apps/api-kotlin/build
+apps/worker-kotlin/build
+packages/recovery-kotlin/build
+**/.gradle
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git
+.github
+
+# ── Local secrets / env ───────────────────────────────────────────────────────
+**/.env
+**/.env.local
+**/.env.*.local
+
+# ── Logs / temp ───────────────────────────────────────────────────────────────
+**/*.log
+**/tmp
+**/.DS_Store
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+**/.idea
+**/.vscode

@@ -1,0 +1,50 @@
+{
+  "name": "@vectorbea-ai/node",
+  "version": "0.2.8",
+  "description": "Official Node.js / TypeScript SDK for the VectorBea prompt management platform",
+  "license": "MIT",
+  "author": "VectorBea <support@vectorbea.com>",
+  "homepage": "https://vectorbea.com/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/susmitbanerjee/vectorbea.git"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/types/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && tsc -p tsconfig.types.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "rm -rf dist",
+    "scan": "bash scripts/scan-secrets.sh",
+    "prepublishOnly": "npm run build && npm run scan && npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "vectorbea",
+    "llm",
+    "prompt",
+    "ai",
+    "sdk",
+    "typescript"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

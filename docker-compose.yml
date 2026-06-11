@@ -1,0 +1,162 @@
+version: "3.9"
+
+# =============================================================================
+# Vectorbea — Docker Compose (local development + full-stack mode)
+#
+# QUICKSTART (infra only — run apps natively for hot-reload):
+#   cp .env.example .env
+#   docker compose up postgres redis -d
+#   # Terminal 1: npm run dev:web
+#   # Terminal 2: cd apps/api-kotlin && ./gradlew run
+#   # Terminal 3: cd apps/worker-kotlin && ./gradlew run
+#
+# FULL-STACK (all services containerised, no hot-reload):
+#   cp .env.example .env
+#   docker compose up -d
+#   # web    → http://localhost:3000
+#   # api    → http://localhost:8080
+#   # worker → background (no exposed port)
+#
+# INFRA ONLY:
+#   docker compose up postgres redis -d
+#
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vectorbea
+      POSTGRES_PASSWORD: vectorbea
+      POSTGRES_DB: vectorbea
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vectorbea -d vectorbea"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ── Kotlin API ──────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./apps/api-kotlin
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      PORT: 8080
+      APP_ENV: development
+      DATABASE_URL: jdbc:postgresql://postgres:5432/vectorbea?user=${POSTGRES_USER:-vectorbea}&password=${POSTGRES_PASSWORD:-vectorbea}
+      REDIS_URL: redis://redis:6379
+      REDIS_TLS_ENABLED: "false"
+      RUN_MIGRATIONS: "true"
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      SECRET_KEY_VERSION: "1"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_VERSION: "0.1.0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # ── Kotlin Worker ───────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./apps/worker-kotlin
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WORKER_METRICS_PORT:-9090}:9090"
+    environment:
+      APP_ENV: development
+      DATABASE_URL: jdbc:postgresql://postgres:5432/vectorbea?user=${POSTGRES_USER:-vectorbea}&password=${POSTGRES_PASSWORD:-vectorbea}
+      REDIS_URL: redis://redis:6379
+      REDIS_TLS_ENABLED: "false"
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      WORKER_QUEUE_STREAM: workflow-runs
+      WORKER_QUEUE_GROUP: workflow-workers
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      WORKER_POLL_BLOCK_MS: 5000
+      REDIS_COMMAND_TIMEOUT_MS: 10000
+      WORKER_HEARTBEAT_INTERVAL_MS: 15000
+      WORKER_HEARTBEAT_TTL_SECONDS: 60
+      METRICS_PORT: 9090
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_VERSION: "0.1.0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  # ── Next.js Web ─────────────────────────────────────────────────────────────
+  # Run natively (npm run dev:web) for hot-reload during development.
+  # This container is for full-stack / staging-like local testing only.
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      # Point web at the containerised API
+      NEXT_PUBLIC_VECTORBEA_API_URL: http://api:8080
+      # Auth
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      MOCK_ORG_ID: ${MOCK_ORG_ID:-org_acme_vectorbea_seed}
+      MOCK_USER_ID: ${MOCK_USER_ID:-user_seed_owner_vectorbea}
+      # Billing (optional)
+      LEMON_SQUEEZY_API_KEY: ${LEMON_SQUEEZY_API_KEY:-}
+      LEMON_SQUEEZY_WEBHOOK_SECRET: ${LEMON_SQUEEZY_WEBHOOK_SECRET:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  postgres_data:
+  redis_data:

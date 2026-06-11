@@ -1,0 +1,124 @@
+---
+title: "Self-Correction Loops for Failed Workflows: Blind Retry Isn't Intelligence"
+description: "The difference between retrying a failed step and helping a workflow understand why it failed, error classification, bounded self-correction, and where we draw the line and call a human."
+date: "2026-05-05"
+author: "Susmit Banerjee"
+tags: ["agentic-systems", "self-correction", "reliability"]
+category: "Agentic Systems"
+series: "building-vectorbea"
+part: 9
+featured: false
+---
+
+"Self-correcting agent" is one of those phrases that sounds impressive in a pitch and means
+something fairly mundane in implementation: when a step fails, instead of (or in addition to)
+retrying it unchanged, give the LLM information about *why* it failed and let it try a different
+approach. This post is about how we built that into Vectorbea, where it helps, where it's
+dangerous, and why "blind retry" and "self-correction" are not the same axis as "less
+intelligent" versus "more intelligent."
+
+## Blind retry has a place
+
+To be clear upfront: plain retries, same inputs, same approach, maybe with backoff, are the
+right tool for a large class of failures. Transient network errors, provider rate limits,
+momentary downstream unavailability: these aren't problems with the *approach*, they're problems
+with *timing*, and retrying unchanged is exactly correct. Feeding "the API returned a 503" back
+into an LLM and asking it to "try a different strategy" would be solving a problem that doesn't
+exist while spending tokens to do it.
+
+The first question we ask when a step fails, programmatically, before anything resembling
+"intelligence" gets involved, is: **what kind of failure is this?**
+
+<Callout type="note" title="The first question to ask">
+Before deciding *how* to respond to a failure, classify *what kind* of failure it is. Most of
+the apparent intelligence in a self-correction system comes from routing the right failures into
+the loop and keeping everything else out of it.
+</Callout>
+
+## Error classification
+
+We classify failures into rough buckets, each of which implies a different response:
+
+```text
+TRANSIENT      : network blip, timeout, 5xx. Response: retry unchanged, with backoff.
+RATE_LIMITED   : provider quota hit. Response: defer and re-queue (see cost-budgets post).
+INVALID_INPUT  : the step's inputs don't satisfy its preconditions. Response: usually terminal;
+                   self-correction rarely helps because the problem is upstream.
+TOOL_ERROR     : the tool/API returned a structured error the LLM could plausibly act on
+                   (e.g. "ticket ID not found", "field X is required"). Response: candidate
+                   for self-correction.
+REASONING_ERROR, the LLM's output didn't satisfy a validation check (schema mismatch, failed
+                   a guard condition). Response: candidate for self-correction.
+UNKNOWN        : doesn't fit a known pattern. Response: terminal, escalate to a human.
+```
+
+Only `TOOL_ERROR` and `REASONING_ERROR` are routed into a self-correction loop. Everything else
+either has a deterministic correct response (retry, defer) or is unlikely to be helped by giving
+an LLM another shot at it.
+
+<Callout type="decision" title="Design decision">
+We made error classification an explicit, inspectable step in the failure path, not a hidden
+heuristic buried in a prompt. The classification is recorded in the event history alongside the
+failure, which means we can audit *why* the engine chose to self-correct versus retry versus
+escalate, and adjust the classification rules when we get them wrong.
+</Callout>
+
+## What a self-correction loop actually does
+
+When a step lands in `TOOL_ERROR` or `REASONING_ERROR`, we construct a follow-up prompt that
+includes: the original task, the action that was attempted, the specific error returned, and an
+instruction to either retry with corrected parameters or choose a different approach. The LLM's
+response becomes a new attempt at the step, going through the same idempotency and checkpointing
+machinery as any other attempt (see the [retries post](/articles/retries-resume-and-idempotency)).
+
+This is bounded, explicitly:
+
+- A **maximum correction attempt count** per step (we default to 2, enough to recover from a
+  malformed argument or a misremembered field name, not enough to spiral).
+- A **similarity check** between successive attempts, if the LLM proposes essentially the same
+  action that just failed, we don't spend another round-trip on it; we escalate instead.
+- An overall **cost ceiling** tying back into the [budget system](/articles/cost-budgets-and-rate-limits),
+  so a self-correction loop can't become the unbounded-spend scenario I described in that post.
+
+<Callout type="tradeoff" title="Tradeoff">
+Bounding self-correction tightly means we'll occasionally give up on a problem an unbounded loop
+might eventually have solved. We think that's the right tradeoff for a system that takes
+real-world actions: a workflow that "eventually" gets it right after fifteen attempts and a
+noticeable chunk of someone's budget is not obviously better than one that tries twice, fails
+cleanly, and hands off to a human who can solve it in thirty seconds with context the system
+doesn't have.
+</Callout>
+
+## When to hand off to a human
+
+This is where self-correction loops connect back to [approval gates](/articles/human-approval-gates-in-agentic-systems) ,
+not as a pre-action checkpoint, but as a failure-recovery mechanism. When a step exhausts its
+correction attempts, the engine doesn't just mark the run failed and walk away; depending on how
+the workflow is configured, it can raise a `HUMAN_REVIEW_REQUESTED` event that pauses the run
+(durably, the same as an approval gate) and surfaces the failure, including the full chain of
+attempts and the LLM's own explanations of what it tried, to a person who can either fix the
+underlying issue and resume the run, or decide it's not worth pursuing.
+
+<Callout type="lesson" title="Lesson learned">
+The most valuable thing a self-correction loop can produce, even when it fails to solve the
+problem, is a *clear account of what it tried and why*. We initially threw away intermediate
+attempts and only kept the final error. Once we started preserving the whole chain in the event
+history, human handoff got dramatically faster, the person picking it up doesn't have to
+reconstruct what happened, they can read it.
+</Callout>
+
+## Safety boundaries
+
+A self-correcting loop is, by construction, a system that tries things autonomously when its
+first attempt didn't work. That's exactly the situation where you want the *strongest* version
+of the safety mechanisms described elsewhere in this series, not the weakest. Concretely:
+self-correction attempts still go through approval gates if the workflow has them configured on
+that step; they're still subject to budgets and rate limits; and the
+[BYOK boundaries](/articles/byok-architecture-for-ai-saas) and idempotency guarantees apply
+identically to a self-corrected attempt as to a first attempt. We were careful not to build a
+"fast path" that bypasses any of these, the temptation to do so, in the name of letting the loop
+"just work," is real, and we think resisting it is one of the more important decisions in this
+whole area.
+
+This is intentionally a conservative design. We'd rather a workflow occasionally stop and ask for
+help than confidently take the wrong action three more times in a row.

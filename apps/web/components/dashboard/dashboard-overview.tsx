@@ -1,0 +1,318 @@
+"use client";
+
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Activity,
+  AlertTriangle,
+  ClipboardList,
+  CheckCircle2,
+  FileText,
+  Layers,
+  RefreshCw,
+  Tag,
+  ShieldAlert,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import type { AuditLogView, DashboardSummary } from "@/lib/api";
+import { AppHeader } from "@/components/layout/app-header";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricCard } from "@/components/dashboard/metric-card";
+import { RecentAuditTable } from "@/components/dashboard/recent-audit-table";
+import { RequestsChart } from "@/components/dashboard/requests-chart";
+import { RolloutStatus } from "@/components/ui/rollout-status";
+import { TrustBar, coreTrustSignals } from "@/components/ui/trust-bar";
+import { cn } from "@/lib/utils";
+
+type DashboardOverviewProps = {
+  workspaceId: string | null;
+  initialAuditLogs: AuditLogView[];
+  initialSummary: DashboardSummary;
+};
+
+async function getResponseMessage(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  return payload?.error ?? fallback;
+}
+
+export function DashboardOverview({
+  workspaceId,
+  initialAuditLogs,
+  initialSummary,
+}: DashboardOverviewProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [auditLogs, setAuditLogs] = useState(initialAuditLogs);
+  const [dashboardSummary, setDashboardSummary] = useState(initialSummary);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setAuditLogs(initialAuditLogs);
+  }, [initialAuditLogs]);
+
+  useEffect(() => {
+    setDashboardSummary(initialSummary);
+  }, [initialSummary]);
+
+  // Guards against overlapping in-flight requests. If the previous poll
+  // hasn't returned yet when the next interval fires, we skip that tick
+  // rather than queuing a second parallel fetch for the same data.
+  const fetchingRef = useRef(false);
+
+  const refreshDashboard = useCallback(
+    async ({ showToast = false }: { showToast?: boolean } = {}) => {
+      if (!workspaceId) return;
+      if (fetchingRef.current && !showToast) return; // skip silent polls while one is in-flight
+
+      try {
+        fetchingRef.current = true;
+        setRefreshing(true);
+
+        const [summaryResponse, auditResponse] = await Promise.all([
+          fetch(`/api/dashboard/summary?workspaceId=${encodeURIComponent(workspaceId)}`),
+          fetch(`/api/audit?workspaceId=${encodeURIComponent(workspaceId)}`),
+        ]);
+
+        if (!summaryResponse.ok) {
+          throw new Error(
+            await getResponseMessage(summaryResponse, "Unable to refresh dashboard summary."),
+          );
+        }
+
+        if (!auditResponse.ok) {
+          throw new Error(
+            await getResponseMessage(auditResponse, "Unable to refresh audit activity."),
+          );
+        }
+
+        const [nextSummary, nextAuditLogs] = await Promise.all([
+          summaryResponse.json() as Promise<DashboardSummary>,
+          auditResponse.json() as Promise<AuditLogView[]>,
+        ]);
+
+        setDashboardSummary(nextSummary);
+        setAuditLogs(nextAuditLogs);
+
+        if (showToast) {
+          toast.success("Dashboard refreshed.");
+        }
+      } catch (error) {
+        if (showToast) {
+          toast.error(error instanceof Error ? error.message : "Failed to refresh dashboard.");
+        }
+      } finally {
+        fetchingRef.current = false;
+        setRefreshing(false);
+      }
+    },
+    [workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+
+    const interval = window.setInterval(() => {
+      // Skip background tabs — fire immediately when the tab becomes visible again
+      if (document.visibilityState === "hidden") return;
+      void refreshDashboard();
+    }, 15_000);
+
+    // Catch the tab coming back into focus after being hidden
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshDashboard();
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshDashboard, workspaceId]);
+
+  const handleManualRefresh = () => {
+    void refreshDashboard({ showToast: true });
+    startTransition(() => {
+      router.refresh();
+    });
+  };
+
+  const query = searchParams.get("q")?.trim().toLowerCase() ?? "";
+  const filteredLogs = useMemo(
+    () =>
+      query
+        ? auditLogs.filter((log) =>
+            `${log.promptName} ${log.versionTag}`.toLowerCase().includes(query),
+          )
+        : auditLogs,
+    [auditLogs, query],
+  );
+  const runtimeLogs = useMemo(
+    () => filteredLogs.filter((log) => log.useType === "runtime"),
+    [filteredLogs],
+  );
+  const auditChangeLogs = useMemo(
+    () => filteredLogs.filter((log) => log.useType === "audit"),
+    [filteredLogs],
+  );
+
+  const signals: Array<{
+    label: string;
+    value: string;
+    icon: ReactNode;
+    variant: "success" | "secondary" | "outline";
+  }> = [
+    {
+      label: "Publish status",
+      value: filteredLogs.length > 0 ? "Healthy" : "No activity yet",
+      icon: <CheckCircle2 className="h-4 w-4 text-muted-foreground" />,
+      variant: filteredLogs.length > 0 ? "success" : "secondary",
+    },
+    {
+      label: "Recent audit events",
+      value: filteredLogs.length.toString(),
+      icon: <Layers className="h-4 w-4 text-muted-foreground" />,
+      variant: "outline",
+    },
+    {
+      label: "Latest version",
+      value: filteredLogs[0]?.versionTag ?? "No data",
+      icon: <Tag className="h-4 w-4 text-muted-foreground" />,
+      variant: "secondary",
+    },
+    {
+      label: "Latest prompt",
+      value: filteredLogs[0]?.promptName ?? "No data",
+      icon: <FileText className="h-4 w-4 text-muted-foreground" />,
+      variant: "secondary",
+    },
+  ];
+
+  const suffix = workspaceId ? `?workspaceId=${workspaceId}` : "";
+  const latestAudit = filteredLogs[0] ?? null;
+
+  return (
+    <div className="min-h-screen">
+      <AppHeader
+        title="Dashboard"
+        subtitle="Governance overview — pending approvals, blocked releases, open incidents, and evidence status."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={handleManualRefresh}
+              disabled={!workspaceId || refreshing || isPending}
+            >
+              <RefreshCw className={cn("h-4 w-4", (refreshing || isPending) && "animate-spin")} />
+              {refreshing || isPending ? "Refreshing..." : "Refresh"}
+            </Button>
+            <a
+              href={`/api/audit${suffix}`}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(buttonVariants({ variant: "outline" }))}
+            >
+              Export JSON
+            </a>
+            <a href={workspaceId ? `/registry/systems?org=${workspaceId}` : "/registry/systems"} className={cn(buttonVariants())}>
+              Register AI system
+            </a>
+          </>
+        }
+      />
+
+      <div className="space-y-6 px-4 py-6 md:px-6 xl:px-8">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="API calls (24h)"
+            value={dashboardSummary.totalAiSystems ?? 0}
+            icon={<Activity className="h-5 w-5" />}
+            staggerIndex={0}
+          />
+          <MetricCard
+            label="Missing evidence"
+            value={dashboardSummary.systemsMissingEvidence ?? 0}
+            icon={<ClipboardList className="h-5 w-5" />}
+            staggerIndex={1}
+          />
+          <MetricCard
+            label="Blocked releases"
+            value={dashboardSummary.blockedReleases ?? 0}
+            icon={<ShieldAlert className="h-5 w-5" />}
+            staggerIndex={2}
+          />
+          <MetricCard
+            label="Open incidents"
+            value={dashboardSummary.openIncidents ?? 0}
+            icon={<AlertTriangle className="h-5 w-5" />}
+            staggerIndex={3}
+          />
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
+          <RequestsChart />
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1.5">
+                  <CardTitle>Workspace signals</CardTitle>
+                  <CardDescription>Derived from recent audit events.</CardDescription>
+                </div>
+                <Badge variant="outline">Live</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <TrustBar
+                signals={coreTrustSignals.slice(0, 4)}
+                variant="compact"
+              />
+              {latestAudit ? (
+                <RolloutStatus
+                  version={latestAudit.versionTag}
+                  label={latestAudit.promptName}
+                  stage="full"
+                  progress={100}
+                  target={100}
+                  policy="Manual gate"
+                  startedAt={latestAudit.timestamp}
+                  variant="card"
+                />
+              ) : null}
+              {signals.map((signal) => (
+                <div
+                  key={signal.label}
+                  className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 px-4 py-3 transition-colors hover:bg-muted/50"
+                >
+                  <div className="flex items-center gap-2.5">
+                    {signal.icon}
+                    <span className="text-sm text-muted-foreground">{signal.label}</span>
+                  </div>
+                  <Badge variant={signal.variant}>{signal.value}</Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-2">
+          <RecentAuditTable
+            logs={runtimeLogs}
+            title="Recent API Calls"
+            description="Runtime prompt calls coming from active sidecars."
+            typeLabel="Runtime"
+          />
+          <RecentAuditTable
+            logs={auditChangeLogs}
+            title="Recent Audits"
+            description="Prompt changes made from the dashboard UI."
+            typeLabel="Audit"
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
