@@ -116,36 +116,39 @@ export function WorkspaceSwitcher() {
     });
   };
 
+  // Avoid the "My Workspace / MY WORKSPACE" stutter: only show the org line
+  // when it actually differs from the workspace name.
+  const workspaceName = activeWorkspace?.name ?? "Select workspace";
+  const orgName = activeWorkspace?.organizationName ?? "";
+  const showOrgLine = !!orgName && orgName.trim().toLowerCase() !== workspaceName.trim().toLowerCase();
+  const subtitle = showOrgLine
+    ? orgName
+    : workspaces.length > 1
+      ? `${workspaces.length} workspaces`
+      : "Workspace";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group flex w-full items-center justify-between gap-2 rounded-[10px] text-left transition-all hover:bg-[#FAFAFB]"
-          style={{
-            background: "#FFFFFF",
-            border: "1px solid #E1E5EA",
-            padding: "10px 12px",
-            minHeight: 56,
-          }}
+          className="group flex w-full items-center justify-between gap-2 rounded-[10px] border border-[#E0E3E6] bg-white px-3 py-2 text-left transition-colors hover:border-[#C9CED4] hover:bg-[#F7F8F9]"
+          style={{ minHeight: 52 }}
         >
           <div className="flex min-w-0 items-center gap-2.5">
-            <div
-              className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-md"
-              style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}
-            >
-              <Layers3 className="h-3.5 w-3.5" style={{ color: "#2563EB" }} />
+            <div className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] bg-[#0B0D0F]">
+              <Layers3 className="h-3.5 w-3.5 text-white" strokeWidth={2} />
             </div>
             <div className="min-w-0">
-              <p className="truncate" style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.25 }}>
-                {activeWorkspace?.name ?? "Vectorbea Demo"}
+              <p className="truncate text-[13.5px] font-semibold leading-[1.25] text-[#0B0D0F]">
+                {workspaceName}
               </p>
-              <p style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.065em", color: "#6B7280", marginTop: 2 }}>
-                {activeWorkspace?.organizationName ?? "Development"}
+              <p className="mt-px truncate text-[11px] font-medium leading-[1.3] text-[#9CA3AF]">
+                {subtitle}
               </p>
             </div>
           </div>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 transition-colors" style={{ color: "#9CA3AF" }} />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-[#9CA3AF] transition-colors group-hover:text-[#6B7280]" />
         </button>
       </DropdownMenuTrigger>
 
@@ -161,12 +164,16 @@ export function WorkspaceSwitcher() {
           ) : (
             Object.entries(grouped).map(([orgId, { orgName, items }]) => (
               <div key={orgId}>
-                <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2.5">
-                  <Building2 className="h-3 w-3 text-muted-foreground/60" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                    {orgName}
-                  </span>
-                </div>
+                {/* Org header only when it disambiguates (multiple orgs) —
+                    a single org repeating the workspace name reads as a stutter */}
+                {Object.keys(grouped).length > 1 && (
+                  <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2.5">
+                    <Building2 className="h-3 w-3 text-muted-foreground/60" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                      {orgName}
+                    </span>
+                  </div>
+                )}
 
                 {items.map((ws) => {
                   const isActive = ws.id === activeWorkspace?.id;
@@ -176,7 +183,8 @@ export function WorkspaceSwitcher() {
                       type="button"
                       onClick={() => setActiveWorkspaceId(ws.id)}
                       className={cn(
-                        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 pl-6 text-left text-sm transition-colors",
+                        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
+                        Object.keys(grouped).length > 1 && "pl-6",
                         isActive
                           ? "bg-primary/10 text-primary"
                           : "text-foreground hover:bg-accent/40",

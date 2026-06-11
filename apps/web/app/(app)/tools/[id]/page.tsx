@@ -230,11 +230,8 @@ export default function ToolDetailPage() {
         </div>
 
         <div className="flex items-start gap-4">
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-            style={{ background: "rgba(34,211,238,0.1)", border: "1px solid rgba(34,211,238,0.2)" }}
-          >
-            <Wrench className="h-6 w-6 text-cyan-700" />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] bg-[#0F766E]">
+            <Wrench className="h-6 w-6 text-white" strokeWidth={1.9} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -244,7 +241,7 @@ export default function ToolDetailPage() {
               <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", RISK_COLORS[tool.riskLevel])}>
                 {RISK_LABELS[tool.riskLevel]}
               </span>
-              <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 capitalize">
+              <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium capitalize text-teal-700">
                 {displayToolType(tool)}
               </span>
               <span className={cn(
@@ -264,9 +261,8 @@ export default function ToolDetailPage() {
             <button
               type="button"
               onClick={startEdit}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-              style={{ background: "var(--surface-2)" }}
-            >
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-[#E0E3E6] px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                         >
               <Pencil className="h-3.5 w-3.5" />
               Edit
             </button>
@@ -276,7 +272,7 @@ export default function ToolDetailPage() {
                 type="button"
                 onClick={cancelEdit}
                 disabled={saving}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E0E3E6] px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
               >
                 <X className="h-3.5 w-3.5" /> Cancel
               </button>
@@ -284,7 +280,7 @@ export default function ToolDetailPage() {
                 type="button"
                 onClick={() => void saveEdit()}
                 disabled={saving}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#2563EB] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-40"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0B0D0F] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
               >
                 {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                 Save
@@ -297,7 +293,7 @@ export default function ToolDetailPage() {
       {/* Tab bar */}
       <div
         className="sticky top-0 z-10 mt-4 px-6 lg:px-8"
-        style={{ borderBottom: "1px solid #E2E8F0", background: "#FFFFFF" }}
+        style={{ borderBottom: "1px solid #E0E3E6", background: "#FFFFFF" }}
       >
         <div className="flex gap-0 overflow-x-auto">
           {TABS.map(({ id: tid, label, icon: Icon }) => (
@@ -315,7 +311,7 @@ export default function ToolDetailPage() {
               <Icon className="h-3.5 w-3.5" />
               {label}
               {tid === "calls" && calls.length > 0 && (
-                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "#F1F5F9", color: "#64748B" }}>
+                <span className="ml-1 rounded-full px-1.5 py-px font-mono text-[10px] tabular-nums" style={{ background: "#F3F4F5", color: "#6B7280" }}>
                   {calls.length}
                 </span>
               )}
@@ -330,7 +326,7 @@ export default function ToolDetailPage() {
         {/* Overview */}
         {tab === "overview" && (
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4">
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Identity</h2>
               {editing && draft ? (
                 <div className="space-y-3">
@@ -339,9 +335,8 @@ export default function ToolDetailPage() {
                     <input
                       value={draft.name}
                       onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    />
+                      className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                         />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">Description</label>
@@ -349,9 +344,8 @@ export default function ToolDetailPage() {
                       value={draft.description}
                       onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                       rows={3}
-                      className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    />
+                      className="w-full rounded-lg border border-[#E0E3E6] px-2.5 py-1.5 text-[12px]"
+                                         />
                   </div>
                   <div className="divide-y divide-border/30">
                     <KVRow label="ID" value={<code className="font-mono text-[11px]">{tool.id}</code>} />
@@ -371,7 +365,7 @@ export default function ToolDetailPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4">
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Usage</h2>
               <div className="divide-y divide-border/30">
                 <KVRow label="Total calls" value={(tool.totalCalls ?? 0).toLocaleString()} />
@@ -382,7 +376,7 @@ export default function ToolDetailPage() {
             </div>
 
             {(tool.httpConfig || (editing && tool.type === "http")) && (
-              <div className="rounded-xl border border-border/60 p-5 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
+              <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5 lg:col-span-2">
                 <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>HTTP Endpoint</h2>
                 {editing && draft ? (
                   <div className="space-y-3">
@@ -390,9 +384,8 @@ export default function ToolDetailPage() {
                       <select
                         value={draft.httpMethod}
                         onChange={(e) => setDraft({ ...draft, httpMethod: e.target.value })}
-                        className="h-8 shrink-0 rounded-lg border border-border/60 px-2 text-[12px]"
-                        style={{ background: "var(--surface-2)" }}
-                      >
+                        className="h-8 shrink-0 rounded-lg border border-[#E0E3E6] px-2 text-[12px]"
+                                             >
                         {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
                           <option key={m} value={m}>{m}</option>
                         ))}
@@ -401,9 +394,8 @@ export default function ToolDetailPage() {
                         value={draft.httpUrl}
                         onChange={(e) => setDraft({ ...draft, httpUrl: e.target.value })}
                         placeholder="https://api.example.com/v1/resource"
-                        className="h-8 flex-1 rounded-lg border border-border/60 px-2.5 font-mono text-[12px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="h-8 flex-1 rounded-lg border border-[#E0E3E6] px-2.5 font-mono text-[12px]"
+                                             />
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] text-muted-foreground">Headers (JSON)</label>
@@ -411,9 +403,8 @@ export default function ToolDetailPage() {
                         value={draft.httpHeaders}
                         onChange={(e) => setDraft({ ...draft, httpHeaders: e.target.value })}
                         rows={4}
-                        className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 font-mono text-[11px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="w-full rounded-lg border border-[#E0E3E6] px-2.5 py-1.5 font-mono text-[11px]"
+                                             />
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] text-muted-foreground">Body template</label>
@@ -421,15 +412,14 @@ export default function ToolDetailPage() {
                         value={draft.httpBodyTemplate}
                         onChange={(e) => setDraft({ ...draft, httpBodyTemplate: e.target.value })}
                         rows={4}
-                        className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 font-mono text-[11px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="w-full rounded-lg border border-[#E0E3E6] px-2.5 py-1.5 font-mono text-[11px]"
+                                             />
                     </div>
                   </div>
                 ) : tool.httpConfig ? (
                   <>
                     <div className="flex items-center gap-2">
-                      <code className="rounded bg-sky-50 px-2 py-0.5 font-mono text-[11px] text-sky-700">
+                      <code className="rounded border border-teal-200 bg-teal-50 px-2 py-0.5 font-mono text-[11px] text-teal-700">
                         {tool.httpConfig.method}
                       </code>
                       <code className="flex-1 truncate font-mono text-[12px] text-muted-foreground">
@@ -454,7 +444,7 @@ export default function ToolDetailPage() {
               </div>
             )}
 
-            <div className="rounded-xl border border-border/60 px-5 py-3.5 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-3.5 lg:col-span-2">
               <div className="flex flex-wrap gap-4 text-[12px]">
                 <span className="text-muted-foreground">Timeout: <strong className="text-foreground">{tool.timeoutMs >= 1000 ? `${tool.timeoutMs / 1000}s` : `${tool.timeoutMs}ms`}</strong></span>
                 <span className="text-muted-foreground">Idempotent: <strong className="text-foreground">{tool.idempotent ? "Yes" : "No"}</strong></span>
@@ -467,16 +457,16 @@ export default function ToolDetailPage() {
         {/* Schema */}
         {tab === "schema" && (
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-xl border border-border/60 overflow-hidden" style={{ background: "var(--surface-1)" }}>
-              <div className="border-b border-border/60 px-5 py-3">
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white overflow-hidden">
+              <div className="border-b border-[#E0E3E6] px-5 py-3">
                 <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Input Schema</h2>
               </div>
               <pre className="overflow-x-auto p-5 font-mono text-[11px] leading-5 text-muted-foreground">
                 {JSON.stringify(tool.inputSchema, null, 2) || "{}"}
               </pre>
             </div>
-            <div className="rounded-xl border border-border/60 overflow-hidden" style={{ background: "var(--surface-1)" }}>
-              <div className="border-b border-border/60 px-5 py-3">
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white overflow-hidden">
+              <div className="border-b border-[#E0E3E6] px-5 py-3">
                 <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Output Schema</h2>
               </div>
               <pre className="overflow-x-auto p-5 font-mono text-[11px] leading-5 text-muted-foreground">
@@ -489,7 +479,7 @@ export default function ToolDetailPage() {
         {/* Auth */}
         {tab === "auth" && (
           <div className="space-y-5">
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4">
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Connection</h2>
               {editing && draft ? (
                 <div>
@@ -497,9 +487,8 @@ export default function ToolDetailPage() {
                   <select
                     value={draft.connectionId}
                     onChange={(e) => setDraft({ ...draft, connectionId: e.target.value })}
-                    className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                    style={{ background: "var(--surface-2)" }}
-                  >
+                    className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                     >
                     <option value="">No connection</option>
                     {connections.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -525,16 +514,15 @@ export default function ToolDetailPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4">
               <h2 className="mb-2 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Manage connections</h2>
               <p className="mb-3 text-[12px] text-muted-foreground">
                 Create and manage named connections in the Connections settings page.
                 Each connection stores credentials securely and can be referenced by any tool.
               </p>
               <Link
-                href={"/settings/sdk" as never}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                style={{ background: "var(--surface-2)" }}
+                href={"/connections" as never}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E0E3E6] bg-white px-3 text-[12px] font-medium text-[#4B5563] transition-colors hover:bg-[#F7F8F9] hover:text-[#0B0D0F]"
               >
                 <KeyRound className="h-3.5 w-3.5" />
                 Open Connections
@@ -547,13 +535,13 @@ export default function ToolDetailPage() {
         {tab === "calls" && (
           <div className="space-y-3">
             {calls.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+              <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#E0E3E6] bg-white py-16 text-center">
                 <History className="h-8 w-8 text-muted-foreground/20" />
                 <p className="text-sm text-muted-foreground">No calls recorded for this tool yet.</p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border/60" style={{ background: "var(--surface-1)" }}>
-                <div className="border-b border-border/60 px-5 py-3">
+              <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white">
+                <div className="border-b border-[#E0E3E6] px-5 py-3">
                   <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
                     {calls.length} recent call{calls.length !== 1 ? "s" : ""}
                   </h2>
@@ -589,7 +577,7 @@ export default function ToolDetailPage() {
         {/* Policies */}
         {tab === "policies" && (
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4">
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Retry Policy</h2>
               <div className="divide-y divide-border/30">
                 <KVRow label="Max attempts" value={tool.retryPolicy.maxAttempts} />
@@ -598,7 +586,7 @@ export default function ToolDetailPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4">
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Execution</h2>
               {editing && draft ? (
                 <div className="space-y-3">
@@ -608,18 +596,16 @@ export default function ToolDetailPage() {
                       type="number"
                       value={draft.timeoutMs}
                       onChange={(e) => setDraft({ ...draft, timeoutMs: Number(e.target.value) })}
-                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    />
+                      className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                         />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">Risk level</label>
                     <select
                       value={draft.riskLevel}
                       onChange={(e) => setDraft({ ...draft, riskLevel: e.target.value as Tool["riskLevel"] })}
-                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    >
+                      className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                         >
                       {(["low", "medium", "high", "critical"] as const).map((r) => (
                         <option key={r} value={r}>{RISK_LABELS[r]}</option>
                       ))}
@@ -636,7 +622,7 @@ export default function ToolDetailPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4 lg:col-span-2">
               <h2 className="mb-2 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Risk implications</h2>
               <p className="text-[12px] text-muted-foreground leading-5">
                 {tool.riskLevel === "low" && "This tool only reads data. It is safe to retry without side effects."}

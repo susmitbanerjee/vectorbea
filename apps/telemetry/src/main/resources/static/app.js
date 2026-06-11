@@ -8,7 +8,6 @@ const PAGES = {
   architect:    { title: 'AI Architect',    sub: 'Architect usage and conversion funnel' },
   workflows:    { title: 'Workflows',       sub: 'Workflow and run activity' },
   environments: { title: 'Environments',   sub: 'Dev / Stage / Prod comparison' },
-  revenue:      { title: 'Revenue',         sub: 'Monetization telemetry (disabled)' },
 };
 
 const App = (() => {
@@ -143,13 +142,61 @@ const App = (() => {
       architect:    loadArchitect,
       workflows:    loadWorkflows,
       environments: loadEnvironments,
-      revenue:      loadRevenue,
     };
     const fn = loaders[page];
     if (fn) fn().catch(e => { setContent(errorBlock(e.message)); });
   }
 
   // ── Overview ──────────────────────────────────────────────────────────────
+
+  // Category colors for the activity chart (green/teal engineering palette)
+  const CAT_COLORS = {
+    run: '#00A65A', simulation: '#0F766E', real_execution: '#34D399',
+    workflow: '#007F4E', architect: '#5EEAD4', connection: '#2DD4BF',
+    user: '#9CA3AF', onboarding: '#6EE7B7', beta: '#A7F3D0',
+    approval: '#FBBF24', recovery: '#F87171', usage_limit: '#FB923C',
+    agent: '#86EFAC', tool: '#4ADE80', workspace: '#D1D5DB',
+  };
+
+  /** Stacked daily-activity bar chart from /summary timeseries rows. */
+  function activityChart(rows) {
+    if (!rows || rows.length === 0) {
+      return emptyBlock('i-overview', 'No events in this window', 'Events will appear here as soon as clients start reporting.');
+    }
+    // bucket by day
+    const days = {};
+    for (const r of rows) {
+      const d = (r.day || '').slice(0, 10);
+      if (!days[d]) days[d] = { total: 0, cats: {} };
+      days[d].cats[r.category] = (days[d].cats[r.category] || 0) + Number(r.count);
+      days[d].total += Number(r.count);
+    }
+    const keys = Object.keys(days).sort();
+    const max = Math.max(1, ...keys.map(k => days[k].total));
+    const W = 940, H = 180, PAD = 28, bw = Math.max(6, Math.min(48, (W - PAD * 2) / keys.length - 8));
+    const bars = keys.map((k, i) => {
+      const x = PAD + i * ((W - PAD * 2) / keys.length) + 4;
+      let y = H - 24;
+      const segs = Object.entries(days[k].cats).map(([cat, n]) => {
+        const h = Math.max(1, (n / max) * (H - 48));
+        y -= h;
+        return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="1.5" fill="${CAT_COLORS[cat] || '#4B5563'}"><title>${k} · ${cat}: ${n}</title></rect>`;
+      }).join('');
+      const label = `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="9" fill="#6B7280" font-family="monospace">${k.slice(5)}</text>`;
+      const total = `<text x="${x + bw / 2}" y="${y - 5}" text-anchor="middle" font-size="9.5" fill="#9CA3AF" font-family="monospace">${days[k].total}</text>`;
+      return segs + label + total;
+    }).join('');
+    const legend = Object.keys(
+      rows.reduce((acc, r) => { acc[r.category] = 1; return acc; }, {})
+    ).map(cat =>
+      `<span class="chart-legend-item"><span class="chart-legend-dot" style="background:${CAT_COLORS[cat] || '#4B5563'}"></span>${cat}</span>`
+    ).join('');
+    return `
+      <div class="chart-wrap">
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block">${bars}</svg>
+        <div class="chart-legend">${legend}</div>
+      </div>`;
+  }
 
   async function loadOverview() {
     const [sum, eng] = await Promise.all([
@@ -162,6 +209,16 @@ const App = (() => {
     const incidents = eng.openIncidents || [];
 
     setContent(`
+      <div class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Event Activity</div>
+            <div class="section-sub">All telemetry events per day · stacked by category · last ${currentDays}d</div>
+          </div>
+        </div>
+        ${activityChart(sum.timeseries)}
+      </div>
+
       <div class="section">
         <div class="section-header">
           <div><div class="section-title">Business Snapshot</div></div>
@@ -475,54 +532,6 @@ const App = (() => {
                 </div>
               </div>`;
           }).join('')}
-        </div>
-      </div>
-    `);
-  }
-
-  // ── Revenue ───────────────────────────────────────────────────────────────
-
-  async function loadRevenue() {
-    const data = await api(`/api/dashboard/revenue`);
-    const metrics = data.metrics || {};
-
-    setContent(`
-      <div class="disabled-banner">
-        <div class="banner-icon">${icon('i-revenue', 'ic-lg')}</div>
-        <h2>${data.message || 'Monetization is disabled.'}</h2>
-        <p>Revenue telemetry schema is scaffolded and ready. Activation will happen when
-        business account and compliance requirements are met. No Stripe or Razorpay
-        integration is currently active.</p>
-        <div class="schema-badge">${icon('i-check', 'ic ic-sm')} Schema ready — revenue_events &amp; revenue_daily_rollups</div>
-      </div>
-
-      <div class="section">
-        <div class="section-header"><div class="section-title">Future Metrics (Disabled)</div></div>
-        <div class="cards-grid">
-          ${disabledCard('MRR')}
-          ${disabledCard('ARR')}
-          ${disabledCard('Paid Workspaces')}
-          ${disabledCard('Conversion Rate')}
-          ${disabledCard('Churn Rate')}
-          ${disabledCard('Avg Revenue / Workspace')}
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-header"><div class="section-title">Planned Revenue Events</div></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Event</th><th>Status</th></tr></thead>
-            <tbody>
-              ${['subscription_created','subscription_upgraded','subscription_downgraded',
-                 'subscription_cancelled','invoice_paid','invoice_failed',
-                 'trial_started','trial_converted','overage_recorded','refund_issued']
-                .map(e => `<tr>
-                  <td><code style="font-size:12px;color:var(--muted)">${e}</code></td>
-                  <td><span class="tag yellow">Inactive</span></td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
         </div>
       </div>
     `);

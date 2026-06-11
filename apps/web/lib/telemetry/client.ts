@@ -12,8 +12,13 @@
  *  - Environment is auto-detected from NEXT_PUBLIC_VECTORBEA_ENV.
  */
 
-const TELEMETRY_ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED === 'true'
-const TELEMETRY_ENDPOINT = process.env.NEXT_PUBLIC_TELEMETRY_ENDPOINT ?? ''
+// Default ON: events go to the same-origin proxy (/api/telemetry/events),
+// which no-ops server-side when TELEMETRY_ENDPOINT isn't configured.
+// Set NEXT_PUBLIC_TELEMETRY_ENABLED=false to hard-disable in the browser.
+const TELEMETRY_ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED !== 'false'
+// Legacy direct mode: if a public endpoint is set, post straight to it
+// (requires the localStorage token copy). Otherwise use the cookie-auth proxy.
+const DIRECT_ENDPOINT = process.env.NEXT_PUBLIC_TELEMETRY_ENDPOINT ?? ''
 const VECTORBEA_ENV = process.env.NEXT_PUBLIC_VECTORBEA_ENV ?? 'dev'
 
 export interface TrackOptions {
@@ -40,7 +45,7 @@ export function track(
   eventName: string,
   options: TrackOptions = {}
 ): void {
-  if (!TELEMETRY_ENABLED || !TELEMETRY_ENDPOINT) return
+  if (!TELEMETRY_ENABLED || typeof window === 'undefined') return
 
   const { properties = {}, ...ids } = options
 
@@ -68,18 +73,33 @@ export function track(
 
 async function sendBestEffort(payload: object): Promise<void> {
   try {
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('vectorbea-access-token')
-      : null
-    if (!token) return  // not signed in — skip silently
+    const body = JSON.stringify(payload)
 
-    await fetch(`${TELEMETRY_ENDPOINT}/api/telemetry/events`, {
+    if (DIRECT_ENDPOINT) {
+      // Legacy direct mode — needs the localStorage token copy.
+      const token = localStorage.getItem('vectorbea-access-token')
+      if (!token) return
+      await fetch(`${DIRECT_ENDPOINT}/api/telemetry/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body,
+        keepalive: true,
+      })
+      return
+    }
+
+    // Same-origin proxy — authenticated by the httpOnly session cookie.
+    // sendBeacon survives page navigations; fall back to keepalive fetch.
+    const url = '/api/telemetry/events'
+    if (navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) return
+    await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
     })
   } catch {
     // Silently ignore — telemetry must not affect UX

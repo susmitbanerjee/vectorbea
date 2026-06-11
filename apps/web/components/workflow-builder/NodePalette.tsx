@@ -78,28 +78,25 @@ function PaletteItem({ item, onAdd }: { item: PaletteItem; onAdd: () => void }) 
       draggable
       onDragStart={onDragStart}
       onClick={onAdd}
-      className="group relative flex cursor-grab items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-all duration-150 hover:border-slate-200 hover:bg-white hover:shadow-sm active:cursor-grabbing active:scale-[0.98] active:opacity-80"
+      className="group relative flex cursor-grab items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 transition-all duration-150 hover:border-[#E0E3E6] hover:bg-[#FAFBFB] active:cursor-grabbing active:scale-[0.98] active:opacity-80"
       title={`Drag to canvas or click to add — ${item.description}`}
       style={{ userSelect: "none" }}
     >
-      {/* Solid colored type tile + white glyph — distinct & premium */}
+      {/* Flat solid type tile + white glyph — distinct per type, no gloss */}
       <span
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]"
-        style={{
-          background: meta.color,
-          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 4px rgba(0,0,0,0.12), 0 2px 5px ${meta.color}40`,
-        }}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]"
+        style={{ background: meta.color, boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.06)" }}
       >
         <Icon
-          strokeWidth={1.9}
-          style={{ color: "#FFFFFF", width: 16, height: 16 }}
+          strokeWidth={2}
+          style={{ color: "#FFFFFF", width: 15, height: 15 }}
         />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[12.5px] font-semibold leading-snug text-slate-800 transition-colors group-hover:text-slate-900">
+        <p className="text-[12.5px] font-semibold leading-snug text-[#0B0D0F]">
           {meta.label}
         </p>
-        <p className="mt-0.5 text-[10.5px] leading-snug text-slate-400 group-hover:text-slate-500 transition-colors line-clamp-1">
+        <p className="mt-px text-[10.5px] leading-snug text-[#9CA3AF] line-clamp-1 transition-colors group-hover:text-[#6B7280]">
           {item.description}
         </p>
       </div>
@@ -202,8 +199,8 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Panel title */}
-      <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: "1px solid #E2E8F0" }}>
-        <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400">
+      <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: "1px solid #ECEEEF" }}>
+        <span className="font-mono text-[9.5px] font-medium uppercase tracking-[0.16em] text-[#9CA3AF]">
           Node Palette
         </span>
       </div>
@@ -272,8 +269,8 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
       </div>
 
       {/* Drag hint */}
-      <div className="px-3 py-2.5" style={{ borderTop: "1px solid #E2E8F0" }}>
-        <p className="text-[10px] text-slate-400 text-center tracking-wide">
+      <div className="px-3 py-2.5" style={{ borderTop: "1px solid #ECEEEF" }}>
+        <p className="text-center font-mono text-[9.5px] tracking-wide text-[#9CA3AF]">
           ⠿ drag to canvas · click to add
         </p>
       </div>

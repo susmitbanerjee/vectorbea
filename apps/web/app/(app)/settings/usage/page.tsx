@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, withWorkspace } from "@/lib/api/client";
 import {
   Activity, AlertTriangle, Bot, CalendarClock, CheckCircle2, Clock,
-  FileText, FlaskConical, GitBranch, Layers, Loader2, Lock, Mail,
+  FileText, FlaskConical, GitBranch, Layers, Loader2, Mail,
   RefreshCw, Timer, Users, Webhook, Zap,
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
@@ -153,8 +153,8 @@ export default function UsagePage() {
               </p>
             </div>
 
-            {/* ── Quota hero + execution mode ── */}
-            <div className="animate-slide-up stagger-1 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+            {/* ── Quota hero ── */}
+            <div className="animate-slide-up stagger-1">
               {/* Today's runs */}
               <Panel className="p-5">
                 <div className="flex items-start justify-between">
@@ -194,55 +194,6 @@ export default function UsagePage() {
                       {pct >= 100 ? "Daily limit reached" : "Approaching daily limit"}
                     </span>
                   )}
-                </div>
-              </Panel>
-
-              {/* Execution mode */}
-              <Panel className="p-5">
-                <MonoLabel>Execution mode</MonoLabel>
-                <p className="mt-0.5 text-[15px] font-bold tracking-[-0.01em] text-[#0B0D0F]">What can run</p>
-                <div className="mt-4 space-y-2.5">
-                  <div className={cn(
-                    "flex items-center gap-3 rounded-[10px] border p-3.5",
-                    status?.canRunSimulation ? "border-[#9CCFBB] bg-[#E6F4EF]/40" : "border-[#ECEEEF] bg-[#FAFBFB]",
-                  )}>
-                    <span className={cn(
-                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]",
-                      status?.canRunSimulation ? "bg-[#0F766E]" : "bg-[#E0E3E6]",
-                    )}>
-                      <FlaskConical className="h-4 w-4 text-white" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-[#0B0D0F]">Simulation</p>
-                      <p className="text-[11.5px] text-[#6B7280]">Safe test runs, no real calls</p>
-                    </div>
-                    <Chip tone={status?.canRunSimulation ? "green" : "red"} dot={false}>
-                      {status?.canRunSimulation ? "Enabled" : "Disabled"}
-                    </Chip>
-                  </div>
-
-                  <div className={cn(
-                    "flex items-center gap-3 rounded-[10px] border p-3.5",
-                    status?.canRunRealExecution ? "border-[#9CCFBB] bg-[#E6F4EF]/40" : "border-[#ECEEEF] bg-[#FAFBFB]",
-                  )}>
-                    <span className={cn(
-                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px]",
-                      status?.canRunRealExecution ? "bg-[#007F4E]" : "bg-[#E0E3E6]",
-                    )}>
-                      {status?.canRunRealExecution
-                        ? <Zap className="h-4 w-4 text-white" />
-                        : <Lock className="h-4 w-4 text-[#6B7280]" />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-[#0B0D0F]">Real execution</p>
-                      <p className="text-[11.5px] text-[#6B7280]">
-                        {status?.canRunRealExecution ? "Live side effects enabled" : "Admin approval required"}
-                      </p>
-                    </div>
-                    <Chip tone={status?.canRunRealExecution ? "green" : "gray"} dot={false}>
-                      {status?.canRunRealExecution ? "Enabled" : "Locked"}
-                    </Chip>
-                  </div>
                 </div>
               </Panel>
             </div>

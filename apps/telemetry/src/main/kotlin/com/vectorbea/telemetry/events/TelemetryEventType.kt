@@ -76,6 +76,7 @@ object EventNames {
         "workflow_run_cancelled",
         "workflow_run_recovered",
         "workflow_run_continued_as_new",
+        "workflow_debug_run_queued",
     )
     val CONNECTION = setOf(
         "connection_created",
@@ -131,6 +132,10 @@ object EventNames {
         "member_invited",
         "member_joined",
         "workspace_settings_updated",
+        // Generic product-analytics events emitted by the web app
+        "page_viewed",
+        "user_signed_out",
+        "docs_viewed",
     )
     val REVENUE_FUTURE = setOf(
         "revenue_event_placeholder",

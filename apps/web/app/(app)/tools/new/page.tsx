@@ -33,7 +33,7 @@ const RISK_LEVELS: { level: RiskLevel; label: string; description: string; color
 
 function SectionHeader({ label }: { label: string }) {
   return (
-    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+    <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">
       {label}
     </p>
   );
@@ -42,17 +42,17 @@ function SectionHeader({ label }: { label: string }) {
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-        {label}{required && <span className="ml-0.5 text-red-400">*</span>}
+      <label className="mb-1.5 block text-[12.5px] font-medium text-[#374151]">
+        {label}{required && <span className="ml-0.5 text-[#DC2626]">*</span>}
       </label>
       {children}
     </div>
   );
 }
 
-const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary";
-const selectCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] focus:outline-none";
-const monoCls = `${inputCls} font-mono text-[12px]`;
+const inputCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
+const selectCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
+const monoCls = `${inputCls} h-auto py-2 font-mono text-[12px]`;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -193,24 +193,25 @@ export default function NewToolPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-7 lg:p-8 max-w-[1320px]">
+    <div className="mx-auto max-w-3xl space-y-4 px-6 py-7 lg:px-8">
       {/* Breadcrumb */}
-      <Link href={"/tools" as never} className="flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground">
+      <Link href={"/tools" as never} className="flex items-center gap-1.5 text-[12.5px] font-medium text-[#6B7280] transition-colors hover:text-[#0B0D0F]">
         <ArrowLeft className="h-3.5 w-3.5" />
         Tool Registry
       </Link>
 
-      <div>
-        <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+      <div className="pb-1">
+        <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Tools</p>
+        <h1 className="mt-1 text-[22px] font-bold tracking-[-0.01em] text-[#0B0D0F]">
           New Tool
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-[13px] text-[#6B7280]">
           Register a tool that agents can call during workflow execution.
         </p>
       </div>
 
       {/* ── Tool Info ────────────────────────────────────────────────── */}
-      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Tool Info" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Name" required>
@@ -230,7 +231,7 @@ export default function NewToolPage() {
       </section>
 
       {/* ── Risk Level ───────────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Risk Level" />
         <div className="grid grid-cols-2 gap-2">
           {RISK_LEVELS.map((r) => (
@@ -238,16 +239,16 @@ export default function NewToolPage() {
               key={r.level}
               type="button"
               onClick={() => setRiskLevel(r.level)}
-              className="rounded-lg border p-3 text-left transition-all"
+              className="rounded-[10px] border bg-white p-3 text-left transition-all hover:border-[#C9CED4]"
               style={{
-                background: riskLevel === r.level ? `${r.color}12` : "var(--surface-2)",
-                borderColor: riskLevel === r.level ? `${r.color}40` : "rgba(148,163,184,0.15)",
+                background: riskLevel === r.level ? `${r.color}0D` : "#FFFFFF",
+                borderColor: riskLevel === r.level ? r.color : "#E0E3E6",
               }}
             >
-              <p className="text-[12px] font-semibold" style={{ color: riskLevel === r.level ? r.color : "var(--text-primary)" }}>
+              <p className="text-[12.5px] font-semibold" style={{ color: riskLevel === r.level ? r.color : "#0B0D0F" }}>
                 {r.label}
               </p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">{r.description}</p>
+              <p className="mt-0.5 text-[11.5px] leading-[1.5] text-[#6B7280]">{r.description}</p>
             </button>
           ))}
         </div>
@@ -255,11 +256,11 @@ export default function NewToolPage() {
 
       {/* ── HTTP Config ──────────────────────────────────────────────── */}
       {type === "http" && (
-        <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
           <SectionHeader label="HTTP Config" />
           <div className="flex gap-3">
             <select
-              className="w-24 shrink-0 rounded-lg border border-border bg-background px-3 py-2 font-mono text-[12px] focus:outline-none"
+              className="h-9 w-24 shrink-0 rounded-[8px] border border-[#E0E3E6] bg-white px-3 font-mono text-[12px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
               value={method}
               onChange={(e) => setMethod(e.target.value as typeof method)}
             >
@@ -291,16 +292,15 @@ export default function NewToolPage() {
 
       {/* ── Connection ───────────────────────────────────────────────── */}
       {needsConnection && (
-        <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
           <SectionHeader label="Connection" />
           {compatibleConnections.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-5 rounded-lg border border-border/40" style={{ background: "var(--surface-2)" }}>
-              <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>No compatible connections found</p>
-              <p className="text-[11px] text-muted-foreground">Add a connection of the correct type before registering this tool.</p>
+            <div className="flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-[#D7DBE0] bg-[#FAFBFB] py-5">
+              <p className="text-[12.5px] font-semibold text-[#0B0D0F]">No compatible connections found</p>
+              <p className="text-[12px] text-[#6B7280]">Add a connection of the correct type before registering this tool.</p>
               <Link
                 href={"/connections/new" as never}
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
-                style={{ background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#9CCFBB] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-[#006B45] transition-colors hover:bg-[#E6F4EF]"
               >
                 Add Connection
               </Link>
@@ -317,9 +317,9 @@ export default function NewToolPage() {
                   <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-muted-foreground">
+              <p className="mt-1 text-[11px] text-[#9CA3AF]">
                 Only connections compatible with this tool type are shown.{" "}
-                <Link href={"/connections" as never} className="text-primary hover:underline">Manage connections</Link>
+                <Link href={"/connections" as never} className="font-medium text-[#007F4E] hover:underline">Manage connections</Link>
               </p>
             </Field>
           )}
@@ -328,17 +328,17 @@ export default function NewToolPage() {
 
       {/* ── DB Config ────────────────────────────────────────────────── */}
       {(type === "database_read" || type === "database_write") && (
-        <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
           <SectionHeader label="Database Config" />
 
           {/* Schema picker — shown when a database connection is selected */}
           {connectionId ? (
             <div className="space-y-1.5">
-              <p className="text-[12px] font-medium text-muted-foreground">Browse schema</p>
-              <p className="text-[11px] text-muted-foreground/60">
+              <p className="text-[12.5px] font-medium text-[#374151]">Browse schema</p>
+              <p className="text-[11.5px] text-[#6B7280]">
                 Select a table and columns — the SQL template and schemas will be generated automatically.
                 {schemaSelection && (
-                  <span className="ml-1 font-semibold text-primary">
+                  <span className="ml-1 font-semibold text-[#007F4E]">
                     ✓ {schemaSelection.schema}.{schemaSelection.table} ({schemaSelection.columns.length} columns)
                   </span>
                 )}
@@ -349,7 +349,7 @@ export default function NewToolPage() {
               />
             </div>
           ) : (
-            <div className="rounded-lg border border-border/40 bg-muted/20 p-3 text-[11px] text-muted-foreground">
+            <div className="rounded-[10px] border border-[#ECEEEF] bg-[#FAFBFB] p-3 text-[12px] text-[#6B7280]">
               Select a database connection above to browse its schema and auto-generate the SQL template.
             </div>
           )}
@@ -366,8 +366,8 @@ export default function NewToolPage() {
                   : "INSERT INTO llm_answers (fact, answer, created_at)\nVALUES ({{fact}}, {{answer}}, now())"
               }
             />
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Use <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{"{{paramName}}"}</code> for parameters that agents will fill at runtime. They map to <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">$1, $2…</code> in SQL-appearance order.
+            <p className="mt-1.5 text-[11.5px] text-[#6B7280]">
+              Use <code className="rounded border border-[#E0E3E6] bg-[#F7F8F9] px-1 py-0.5 font-mono text-[10.5px] text-[#374151]">{"{{paramName}}"}</code> for parameters that agents will fill at runtime. They map to <code className="rounded border border-[#E0E3E6] bg-[#F7F8F9] px-1 py-0.5 font-mono text-[10.5px] text-[#374151]">$1, $2…</code> in SQL-appearance order.
             </p>
           </Field>
 
@@ -388,13 +388,13 @@ export default function NewToolPage() {
             <label className="flex cursor-pointer items-center gap-2.5">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded accent-primary"
+                className="h-4 w-4 rounded accent-[#007F4E]"
                 checked={dbRequireApproval}
                 onChange={(e) => setDbRequireApproval(e.target.checked)}
               />
               <div>
-                <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Require human approval before writing</p>
-                <p className="text-[11px] text-muted-foreground">Workflow will pause and wait for approval before executing this SQL</p>
+                <p className="text-[12.5px] font-medium text-[#0B0D0F]">Require human approval before writing</p>
+                <p className="text-[11.5px] text-[#6B7280]">Workflow will pause and wait for approval before executing this SQL</p>
               </div>
             </label>
           )}
@@ -402,7 +402,7 @@ export default function NewToolPage() {
       )}
 
       {/* ── Schema ───────────────────────────────────────────────────── */}
-      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Input / Output Schema" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Input Schema (JSON Schema)">
@@ -415,7 +415,7 @@ export default function NewToolPage() {
       </section>
 
       {/* ── Retry Policy ─────────────────────────────────────────────── */}
-      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Retry Policy" />
         <div className="grid grid-cols-3 gap-4">
           <Field label="Max attempts">
@@ -434,7 +434,7 @@ export default function NewToolPage() {
       </section>
 
       {/* ── Options ──────────────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Options" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Timeout (ms)">
@@ -442,10 +442,10 @@ export default function NewToolPage() {
           </Field>
           <div className="flex items-end pb-2">
             <label className="flex cursor-pointer items-center gap-2.5">
-              <input type="checkbox" className="h-4 w-4 rounded accent-primary" checked={idempotent} onChange={(e) => setIdempotent(e.target.checked)} />
+              <input type="checkbox" className="h-4 w-4 rounded accent-[#007F4E]" checked={idempotent} onChange={(e) => setIdempotent(e.target.checked)} />
               <div>
-                <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Idempotent</p>
-                <p className="text-[11px] text-muted-foreground">Safe to call multiple times with same args</p>
+                <p className="text-[12.5px] font-medium text-[#0B0D0F]">Idempotent</p>
+                <p className="text-[11.5px] text-[#6B7280]">Safe to call multiple times with same args</p>
               </div>
             </label>
           </div>
@@ -453,13 +453,13 @@ export default function NewToolPage() {
       </section>
 
       {/* ── Actions ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-end gap-3 pb-8">
+      <div className="flex items-center justify-end gap-2 pb-8 pt-1">
         {type === "http" && (
           <button
             type="button"
             onClick={handleTest}
             disabled={testing || !url.trim()}
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-4 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[13px] font-medium text-[#374151] transition-colors hover:bg-[#F7F8F9] disabled:opacity-50"
           >
             {testing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <TestTube className="h-3.5 w-3.5" />}
             Test
@@ -467,7 +467,7 @@ export default function NewToolPage() {
         )}
         <Link
           href={"/tools" as never}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-4 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[13px] font-medium text-[#6B7280] transition-colors hover:bg-[#F7F8F9] hover:text-[#0B0D0F]"
         >
           Cancel
         </Link>
@@ -475,7 +475,7 @@ export default function NewToolPage() {
           type="button"
           onClick={() => void handleCreate()}
           disabled={saving || !name.trim()}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#0B0D0F] px-5 text-[13px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-50"
         >
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           Register Tool

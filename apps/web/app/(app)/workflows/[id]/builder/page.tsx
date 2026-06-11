@@ -1154,30 +1154,31 @@ function WorkflowBuilderInner() {
           </>
         );
       })()}
-      {/* ── Topbar ──────────────────────────────────────────────────────────── */}
+      {/* ── Topbar — floating island over the canvas ─────────────────────────── */}
       <div
-        className="flex shrink-0 items-center gap-0 px-4"
+        className="z-30 mx-3 mt-2 flex shrink-0 items-center gap-0 rounded-[12px] px-3"
         style={{
-          minHeight: 44,
-          background: "rgba(255,255,255,0.92)",
-          borderBottom: "1px solid #E2E8F0",
+          minHeight: 46,
+          background: "rgba(255,255,255,0.94)",
+          border: "1px solid #E0E3E6",
+          boxShadow: "0 8px 28px rgba(11,13,15,0.08), 0 1px 2px rgba(11,13,15,0.04)",
           backdropFilter: "blur(12px)",
         }}
       >
         {/* Breadcrumb */}
         <Link
           href={`/workflows/${workflow.id}` as never}
-          className="flex items-center gap-1.5 text-[12px] text-slate-400 transition-colors hover:text-slate-600"
+          className="flex items-center gap-1.5 rounded-[7px] px-1.5 py-1 text-[12px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F5] hover:text-[#0B0D0F]"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span className="max-w-[140px] truncate">{workflow.name}</span>
         </Link>
-        <span className="mx-2 text-slate-300">/</span>
-        <span className="text-[12px] font-semibold text-slate-700">Builder</span>
+        <span className="mx-2 text-[#C9CED4]">/</span>
+        <span className="text-[12px] font-semibold text-[#0B0D0F]">Builder</span>
 
         {/* Version + saved state */}
         <div className="ml-3 flex items-center gap-1.5">
-          <span className="rounded border border-slate-200 bg-slate-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+          <span className="rounded border border-[#E0E3E6] bg-[#F7F8F9] px-1.5 py-px font-mono text-[9px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
             v1
           </span>
           {unsaved && (
@@ -1192,12 +1193,12 @@ function WorkflowBuilderInner() {
           </div>
 
           {/* Divider */}
-          <div className="h-5 w-px bg-slate-200 mr-3" />
+          <div className="h-5 w-px bg-[#E0E3E6] mr-3" />
 
           {/* History link */}
           <Link
             href={`/workflows/${workflow.id}` as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[8px] px-3 text-[12px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F5] hover:text-[#0B0D0F]"
           >
             <Clock className="h-3 w-3" />
             History
@@ -1214,12 +1215,12 @@ function WorkflowBuilderInner() {
             </button>
           )}
 
-          <div className="ml-1 flex items-center rounded-[10px] border border-slate-200">
+          <div className="ml-1 flex items-center rounded-[9px] border border-[#E0E3E6] bg-white">
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={saving || running}
-              className="inline-flex h-8 items-center gap-1.5 rounded-l-[10px] border-r border-slate-200 px-3 text-[12px] font-medium text-slate-500 transition-all hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-l-[9px] border-r border-[#E0E3E6] px-3 text-[12px] font-medium text-[#4B5563] transition-all hover:bg-[#F7F8F9] hover:text-[#0B0D0F] disabled:opacity-40"
             >
               {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
               Save
@@ -1228,7 +1229,7 @@ function WorkflowBuilderInner() {
               type="button"
               onClick={() => void handleTestRun()}
               disabled={testRunning || running}
-              className="inline-flex h-8 items-center gap-1.5 rounded-r-[10px] px-3 text-[12px] font-medium text-slate-500 transition-all hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-r-[9px] px-3 text-[12px] font-medium text-[#4B5563] transition-all hover:bg-[#F7F8F9] hover:text-[#0B0D0F] disabled:opacity-40"
             >
               {testRunning ? (
                 <RefreshCw className="h-3 w-3 animate-spin" />
@@ -1240,7 +1241,7 @@ function WorkflowBuilderInner() {
           </div>
 
           {/* Divider */}
-          <div className="h-5 w-px bg-slate-200 mx-3" />
+          <div className="h-5 w-px bg-[#E0E3E6] mx-3" />
 
           {/* Run / Live controls */}
           {activeRunId ? (
@@ -1285,8 +1286,8 @@ function WorkflowBuilderInner() {
                 type="button"
                 onClick={() => void handleRun()}
                 disabled={saving || running || debugRunning}
-                className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] bg-[#007F4E] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#006B45] disabled:opacity-40"
-                style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.28)" }}
+                className="inline-flex h-[34px] items-center gap-1.5 rounded-[9px] bg-[#007F4E] px-4 text-[12px] font-semibold text-white transition-all hover:bg-[#006B45] disabled:opacity-40"
+                style={{ boxShadow: "0 2px 8px rgba(0,127,78,0.28)" }}
               >
                 {running ? (
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -1300,7 +1301,7 @@ function WorkflowBuilderInner() {
                 onClick={() => void handleDebugRun()}
                 disabled={saving || running || debugRunning}
                 title="Run with full variable resolution capture — per-run, doesn't change your workflow"
-                className="inline-flex h-[38px] items-center gap-1.5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 text-[12px] font-semibold text-amber-700 transition-all hover:bg-amber-100 disabled:opacity-40"
+                className="inline-flex h-[34px] items-center gap-1.5 rounded-[9px] border border-amber-200 bg-amber-50 px-4 text-[12px] font-semibold text-amber-700 transition-all hover:bg-amber-100 disabled:opacity-40"
               >
                 {debugRunning ? (
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -1336,10 +1337,17 @@ function WorkflowBuilderInner() {
       )}
 
       {/* ── Three-column layout ─────────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 gap-0 overflow-hidden pt-2">
 
-        {/* Left: Node Palette */}
-        <div className="w-[220px] shrink-0 overflow-hidden" style={{ borderRight: "1px solid #E2E8F0", background: "#FFFFFF" }}>
+        {/* Left: Node Palette — floating island */}
+        <div
+          className="z-20 mb-3 ml-3 w-[220px] shrink-0 overflow-hidden rounded-[12px]"
+          style={{
+            background: "#FFFFFF",
+            border: "1px solid #E0E3E6",
+            boxShadow: "0 8px 28px rgba(11,13,15,0.06)",
+          }}
+        >
           <NodePalette onAddNode={handleAddNode} onApplyTemplate={handleApplyTemplate} />
         </div>
 
@@ -1492,12 +1500,16 @@ function WorkflowBuilderInner() {
           })()}
         </div>
 
-        {/* Right: Inspector — hidden while the debug Node Inspector drawer is open
-            so the two panels don't sandwich the canvas */}
+        {/* Right: Inspector — floating island; hidden while the debug Node
+            Inspector drawer is open so the two panels don't sandwich the canvas */}
         <div className={cn(
-          "shrink-0 overflow-hidden transition-all duration-150",
-          inspectorNodeId ? "w-0" : "w-80",
-        )} style={{ borderLeft: inspectorNodeId ? "none" : "1px solid #E2E8F0", background: "#FFFFFF" }}>
+          "z-20 shrink-0 overflow-hidden rounded-[12px] transition-all duration-150",
+          inspectorNodeId ? "w-0 border-0" : "mb-3 mr-3 w-80",
+        )} style={inspectorNodeId ? { background: "#FFFFFF" } : {
+          background: "#FFFFFF",
+          border: "1px solid #E0E3E6",
+          boxShadow: "0 8px 28px rgba(11,13,15,0.06)",
+        }}>
           <WorkflowInspector
             selectedNode={selectedNode}
             nodes={nodes as Node<WFNodeData>[]}
@@ -1513,29 +1525,31 @@ function WorkflowBuilderInner() {
 
       {/* Run-with-input dialog — collects values matching the trigger's input schema */}
       {runInputDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-border/60 bg-white p-5 shadow-xl">
-            <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
-              {runInputDialog.mode === "debug" ? "Debug Run — provide input" : "Run workflow — provide input"}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B0D0F]/40 px-4">
+          <div className="w-full max-w-md rounded-[14px] border border-[#E0E3E6] bg-white p-5 shadow-[0_24px_60px_rgba(11,13,15,0.18)]">
+            <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">
+              {runInputDialog.mode === "debug" ? "Debug run" : "Run workflow"}
+            </p>
+            <h2 className="mt-0.5 text-[16px] font-bold tracking-[-0.01em] text-[#0B0D0F]">
+              Provide trigger input
             </h2>
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <p className="mt-1 text-[12.5px] text-[#6B7280]">
               This workflow&apos;s trigger expects the following input values.
             </p>
-            <div className="mt-4 space-y-3 max-h-[60vh] overflow-y-auto">
+            <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto">
               {Object.entries((runInputDialog.schema.properties ?? {}) as Record<string, { type?: string; description?: string }>).map(([key, prop]) => {
                 const required = ((runInputDialog.schema.required ?? []) as string[]).includes(key);
                 return (
                   <div key={key}>
-                    <label className="mb-1 block text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
-                      {key}{required && <span className="ml-0.5 text-red-600">*</span>}
-                      {prop.type && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">({prop.type})</span>}
+                    <label className="mb-1 block text-[12.5px] font-medium text-[#374151]">
+                      {key}{required && <span className="ml-0.5 text-[#DC2626]">*</span>}
+                      {prop.type && <span className="ml-1.5 font-mono text-[10px] font-normal text-[#9CA3AF]">({prop.type})</span>}
                     </label>
                     <input
                       value={runInputValues[key] ?? ""}
                       onChange={(e) => setRunInputValues((v) => ({ ...v, [key]: e.target.value }))}
                       placeholder={prop.description ?? ""}
-                      className="h-9 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
+                      className="h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
                     />
                   </div>
                 );
@@ -1545,14 +1559,14 @@ function WorkflowBuilderInner() {
               <button
                 type="button"
                 onClick={() => setRunInputDialog(null)}
-                className="inline-flex h-9 items-center rounded-lg border border-border/60 px-3.5 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                className="inline-flex h-9 items-center rounded-[8px] border border-[#E0E3E6] bg-white px-3.5 text-[12.5px] font-medium text-[#6B7280] transition-colors hover:bg-[#F7F8F9] hover:text-[#0B0D0F]"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={confirmRunInputDialog}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#2563EB] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#1D4ED8]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#007F4E] px-3.5 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#006B45]"
               >
                 <Play className="h-3.5 w-3.5 fill-white" />
                 {runInputDialog.mode === "debug" ? "Start Debug Run" : "Run"}

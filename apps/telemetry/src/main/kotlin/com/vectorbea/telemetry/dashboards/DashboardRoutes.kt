@@ -43,9 +43,11 @@ class DashboardRoutes(
         val filters = filtersFrom(req)
         val business = analyticsQuery.businessSummary(filters)
         val users = analyticsQuery.userSummary(filters)
+        val timeseries = analyticsQuery.dailyActivity(filters)
         Response.ok(req.exchange, mapOf(
             "business" to business,
             "users" to users,
+            "timeseries" to timeseries,
             "filters" to mapOf(
                 "environment" to (filters.environment ?: "all"),
                 "dateFrom" to filters.dateFrom.toString(),

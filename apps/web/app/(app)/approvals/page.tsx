@@ -21,6 +21,46 @@ function fmtTime(ts: string | null | undefined) {
   return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * Render an approval message that may contain unresolved {{steps.x.output.y}}
+ * template expressions. Instead of dumping the raw token, show a readable
+ * field chip (last path segment, humanized) — values resolve at runtime.
+ */
+function TemplateText({ text }: { text: string }) {
+  const parts = text.split(/(\{\{[^}]+\}\})/g);
+  const hasTokens = parts.length > 1;
+  return (
+    <div>
+      <p className="text-[13px] leading-[1.9] text-[#374151]">
+        {parts.map((part, i) => {
+          const m = /^\{\{\s*([^}]+?)\s*\}\}$/.exec(part);
+          if (!m) return <span key={i}>{part}</span>;
+          const path = m[1]!;
+          const segs = path.split(".");
+          const field = (segs[segs.length - 1] ?? path).replace(/[_-]/g, " ");
+          // "steps.risk_scorer.output.risk_score" → source "risk scorer"
+          const source = segs[0] === "steps" && segs.length > 2 ? segs[1]!.replace(/[_-]/g, " ") : null;
+          return (
+            <span
+              key={i}
+              title={source ? `From step "${source}" — resolves at runtime` : "Resolves at runtime"}
+              className="mx-0.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-[6px] border border-[#BFDBD2] bg-[#EFF7F3] px-1.5 py-px align-middle font-mono text-[11px] font-medium leading-[1.6] text-[#0E6E4C]"
+            >
+              <Diamond size={6} />
+              {field}
+            </span>
+          );
+        })}
+      </p>
+      {hasTokens && (
+        <p className="mt-1.5 font-mono text-[10.5px] text-[#9CA3AF]">
+          highlighted fields are filled from step outputs when the run reaches this gate
+        </p>
+      )}
+    </div>
+  );
+}
+
 function statusChip(status: ApprovalItem["status"]) {
   switch (status) {
     case "PENDING":  return <Chip tone="amber" pulse>Awaiting decision</Chip>;
@@ -199,7 +239,10 @@ export default function ApprovalsPage() {
                   {pending && <div className="mt-3"><PausedTimeline nodeId={a.nodeId} /></div>}
 
                   {a.message && (
-                    <p className="mt-3 rounded-[8px] border border-[#ECEEEF] bg-[#FAFBFB] px-3 py-2 text-[13px] leading-[1.5] text-[#4B5563]">{a.message}</p>
+                    <div className="mt-3 rounded-[10px] border border-[#ECEEEF] bg-[#FAFBFB] px-3.5 py-3">
+                      <p className="mb-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Decision context</p>
+                      <TemplateText text={a.message} />
+                    </div>
                   )}
                 </div>
 

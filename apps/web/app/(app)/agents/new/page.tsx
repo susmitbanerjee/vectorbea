@@ -37,7 +37,7 @@ const MEMORY_TYPES: { type: MemoryPolicy["type"]; label: string; description: st
 
 function SectionHeader({ label }: { label: string }) {
   return (
-    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+    <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">
       {label}
     </p>
   );
@@ -46,16 +46,16 @@ function SectionHeader({ label }: { label: string }) {
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-        {label}{required && <span className="ml-0.5 text-red-400">*</span>}
+      <label className="mb-1.5 block text-[12.5px] font-medium text-[#374151]">
+        {label}{required && <span className="ml-0.5 text-[#DC2626]">*</span>}
       </label>
       {children}
     </div>
   );
 }
 
-const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary";
-const selectCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] focus:outline-none";
+const inputCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
+const selectCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -175,24 +175,25 @@ export default function NewAgentPage() {
   const needsLlmConnection = LLM_AGENT_TYPES.has(type);
 
   return (
-    <div className="mx-auto max-w-2xl p-7 lg:p-8 max-w-[1320px]">
+    <div className="mx-auto max-w-3xl space-y-4 px-6 py-7 lg:px-8">
       {/* Breadcrumb */}
-      <Link href={"/agents" as never} className="flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground">
+      <Link href={"/agents" as never} className="flex items-center gap-1.5 text-[12.5px] font-medium text-[#6B7280] transition-colors hover:text-[#0B0D0F]">
         <ArrowLeft className="h-3.5 w-3.5" />
         Agent Registry
       </Link>
 
-      <div>
-        <h1 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+      <div className="pb-1">
+        <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Agents</p>
+        <h1 className="mt-1 text-[22px] font-bold tracking-[-0.01em] text-[#0B0D0F]">
           New Agent
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-[13px] text-[#6B7280]">
           Register a reusable agent definition. Workflows reference agents by ID.
         </p>
       </div>
 
       {/* ── Identity ─────────────────────────────────────────────────── */}
-      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Identity" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Name" required>
@@ -219,7 +220,7 @@ export default function NewAgentPage() {
       </section>
 
       {/* ── Agent Type ───────────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Agent Type" />
         <div className="grid grid-cols-2 gap-2">
           {AGENT_TYPES.map((t) => (
@@ -227,15 +228,14 @@ export default function NewAgentPage() {
               key={t.type}
               type="button"
               onClick={() => setType(t.type)}
-              className={`rounded-lg border p-3 text-left transition-all ${
+              className={`rounded-[10px] border p-3 text-left transition-all ${
                 type === t.type
-                  ? "border-primary/40 bg-primary/5"
-                  : "border-border/60 hover:border-border"
+                  ? "border-[#007F4E] bg-[#E6F4EF]/40 ring-1 ring-[#007F4E]/15"
+                  : "border-[#E0E3E6] bg-white hover:border-[#C9CED4] hover:bg-[#FAFBFB]"
               }`}
-              style={{ background: type === t.type ? undefined : "var(--surface-2)" }}
             >
-              <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{t.label}</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">{t.description}</p>
+              <p className="text-[12.5px] font-semibold text-[#0B0D0F]">{t.label}</p>
+              <p className="mt-0.5 text-[11.5px] leading-[1.5] text-[#6B7280]">{t.description}</p>
             </button>
           ))}
         </div>
@@ -243,17 +243,16 @@ export default function NewAgentPage() {
 
       {/* ── LLM Connection ───────────────────────────────────────────── */}
       {needsLlmConnection && (
-        <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+        <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
           <SectionHeader label="LLM Connection" />
 
           {llmConnections.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-6 rounded-lg border border-border/40" style={{ background: "var(--surface-2)" }}>
-              <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>No LLM provider configured</p>
-              <p className="text-[11px] text-muted-foreground">Add an LLM Provider connection before creating a native LLM agent.</p>
+            <div className="flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-[#D7DBE0] bg-[#FAFBFB] py-6">
+              <p className="text-[13px] font-semibold text-[#0B0D0F]">No LLM provider configured</p>
+              <p className="text-[12px] text-[#6B7280]">Add an LLM Provider connection before creating a native LLM agent.</p>
               <Link
                 href={"/connections/new" as never}
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
-                style={{ background: "rgba(56,189,248,0.1)", color: "#38BDF8", border: "1px solid rgba(56,189,248,0.2)" }}
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#9CCFBB] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-[#006B45] transition-colors hover:bg-[#E6F4EF]"
               >
                 Add LLM Provider Connection
               </Link>
@@ -288,11 +287,11 @@ export default function NewAgentPage() {
       )}
 
       {/* ── Instructions ─────────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="System Prompt / Instructions" />
         <textarea
           rows={9}
-          className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 font-mono text-[12px] leading-5 focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full resize-none rounded-[8px] border border-[#E0E3E6] bg-white px-3 py-2 font-mono text-[12px] leading-5 text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
           placeholder={`You are a ${role || "specialized"} agent. Your goal is to...\n\nWhen given a task, you should:\n1. ...`}
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
@@ -300,15 +299,15 @@ export default function NewAgentPage() {
       </section>
 
       {/* ── Allowed Tools ────────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <div className="flex items-center justify-between">
           <SectionHeader label="Allowed Tools" />
-          <span className="text-[11px] text-muted-foreground">{selectedTools.length} selected</span>
+          <span className="font-mono text-[11px] tabular-nums text-[#9CA3AF]">{selectedTools.length} selected</span>
         </div>
         {tools.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-[12.5px] text-[#6B7280]">
             No tools registered yet.{" "}
-            <Link href={"/tools/new" as never} className="text-primary hover:underline">Register a tool →</Link>
+            <Link href={"/tools/new" as never} className="font-medium text-[#007F4E] hover:underline">Register a tool →</Link>
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-1.5">
@@ -316,21 +315,21 @@ export default function NewAgentPage() {
               <label
                 key={t.id}
                 className={cn(
-                  "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
+                  "flex cursor-pointer items-start gap-2.5 rounded-[10px] border px-3 py-2.5 transition-colors",
                   selectedTools.includes(t.id)
-                    ? "border-primary/30 bg-primary/5"
-                    : "border-border/40 hover:border-border",
+                    ? "border-[#007F4E] bg-[#E6F4EF]/40"
+                    : "border-[#E0E3E6] bg-white hover:border-[#C9CED4]",
                 )}
               >
                 <input
                   type="checkbox"
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded accent-primary"
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded accent-[#007F4E]"
                   checked={selectedTools.includes(t.id)}
                   onChange={() => toggleTool(t.id)}
                 />
                 <div className="min-w-0">
-                  <p className="truncate text-[12px] font-medium">{t.name}</p>
-                  <p className="text-[10px] text-muted-foreground capitalize">{t.type.replace(/_/g, " ")} · {t.riskLevel.replace(/_/g, " ")}</p>
+                  <p className="truncate text-[12.5px] font-medium text-[#0B0D0F]">{t.name}</p>
+                  <p className="text-[10.5px] capitalize text-[#9CA3AF]">{t.type.replace(/_/g, " ")} · {t.riskLevel.replace(/_/g, " ")}</p>
                 </div>
               </label>
             ))}
@@ -339,7 +338,7 @@ export default function NewAgentPage() {
       </section>
 
       {/* ── Memory Policy ────────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Memory Policy" />
         <div className="grid grid-cols-2 gap-2">
           {MEMORY_TYPES.map((m) => (
@@ -347,20 +346,21 @@ export default function NewAgentPage() {
               key={m.type}
               type="button"
               onClick={() => setMemoryType(m.type)}
-              className={`rounded-lg border p-3 text-left transition-all ${
-                memoryType === m.type ? "border-primary/40 bg-primary/5" : "border-border/60 hover:border-border"
+              className={`rounded-[10px] border p-3 text-left transition-all ${
+                memoryType === m.type
+                  ? "border-[#007F4E] bg-[#E6F4EF]/40 ring-1 ring-[#007F4E]/15"
+                  : "border-[#E0E3E6] bg-white hover:border-[#C9CED4] hover:bg-[#FAFBFB]"
               }`}
-              style={{ background: memoryType === m.type ? undefined : "var(--surface-2)" }}
             >
-              <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{m.label}</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">{m.description}</p>
+              <p className="text-[12.5px] font-semibold text-[#0B0D0F]">{m.label}</p>
+              <p className="mt-0.5 text-[11.5px] leading-[1.5] text-[#6B7280]">{m.description}</p>
             </button>
           ))}
         </div>
       </section>
 
       {/* ── Retry & Timeout ──────────────────────────────────────────── */}
-      <section className="space-y-4 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Retry & Timeout" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Max retry attempts">
@@ -387,20 +387,20 @@ export default function NewAgentPage() {
       </section>
 
       {/* ── Approval Policy ──────────────────────────────────────────── */}
-      <section className="space-y-3 rounded-xl border border-border/60 p-5" style={{ background: "var(--surface-1)" }}>
+      <section className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
         <SectionHeader label="Approval Policy" />
         <label className="flex cursor-pointer items-start gap-2.5">
           <input
             type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded accent-primary"
+            className="mt-0.5 h-4 w-4 rounded accent-[#007F4E]"
             checked={requireApproval}
             onChange={(e) => setRequireApproval(e.target.checked)}
           />
           <div>
-            <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+            <p className="text-[13px] font-medium text-[#0B0D0F]">
               Require approval before this agent executes
             </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
+            <p className="mt-0.5 text-[11.5px] text-[#6B7280]">
               Run will pause at this agent and wait for a human decision.
             </p>
           </div>
@@ -419,10 +419,10 @@ export default function NewAgentPage() {
       </section>
 
       {/* ── Actions ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-end gap-3 pb-8">
+      <div className="flex items-center justify-end gap-2 pb-8 pt-1">
         <Link
           href={"/agents" as never}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-4 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[13px] font-medium text-[#6B7280] transition-colors hover:bg-[#F7F8F9] hover:text-[#0B0D0F]"
         >
           Cancel
         </Link>
@@ -430,7 +430,7 @@ export default function NewAgentPage() {
           type="button"
           onClick={() => void handleCreate()}
           disabled={saving || !name.trim()}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#0B0D0F] px-5 text-[13px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-50"
         >
           {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           Create Agent

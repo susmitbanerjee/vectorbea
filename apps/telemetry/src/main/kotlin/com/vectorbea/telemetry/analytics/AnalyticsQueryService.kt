@@ -66,6 +66,10 @@ class AnalyticsQueryService(private val repo: AnalyticsRepository) {
         repo.countByEventName(filters.environment, filters.dateFrom, filters.dateTo)
             .map { EventCount(it["eventName"] as String, it["eventCategory"] as String, it["count"] as Long) }
 
+    /** Daily event counts per category for the activity chart. */
+    fun dailyActivity(filters: DashboardFilters): List<Map<String, Any?>> =
+        repo.dailyCounts(filters.environment, filters.dateFrom, filters.dateTo)
+
     fun architectFunnel(filters: DashboardFilters): Map<String, Long> {
         val events = listOf(
             "architect_opened",
