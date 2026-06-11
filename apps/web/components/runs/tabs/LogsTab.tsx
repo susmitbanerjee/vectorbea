@@ -359,8 +359,8 @@ export function LogsTab({ run, viewMode, rawEvents }: LogsTabProps) {
         <span>Message</span>
       </div>
 
-      {/* ── Log rows ──────────────────────────────────────────────────────── */}
-      <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
+      {/* ── Log rows — grows with content, page scrolls (like Execution View) ── */}
+      <div>
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-20">
             <Terminal className="h-8 w-8 text-[#2A2E33]" />

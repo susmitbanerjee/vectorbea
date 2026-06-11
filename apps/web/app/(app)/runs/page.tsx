@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import {
   Check,
@@ -16,7 +17,6 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Search,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -114,7 +114,7 @@ function Pagination({
           type="button"
           disabled={current <= 1}
           onClick={() => onPage(current - 1)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E0E3E6] bg-white text-[#374151] transition-colors hover:bg-[#F7F8F9] disabled:opacity-40"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -133,8 +133,8 @@ function Pagination({
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-lg border text-[12px] font-medium transition-colors",
                 p === current
-                  ? "border-[#111827] bg-[#111827] text-white"
-                  : "border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB]",
+                  ? "border-[#0B0D0F] bg-[#0B0D0F] text-white"
+                  : "border-[#E0E3E6] bg-white text-[#374151] hover:bg-[#F7F8F9]",
               )}
             >
               {p}
@@ -147,7 +147,7 @@ function Pagination({
           type="button"
           disabled={current >= total}
           onClick={() => onPage(current + 1)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40 transition-colors"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E0E3E6] bg-white text-[#374151] transition-colors hover:bg-[#F7F8F9] disabled:opacity-40"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -258,6 +258,7 @@ function timeRangeMs(range: TimeRange): number | null {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RunsPage() {
+  const router = useRouter();
   const [result, setResult]           = useState<PaginatedResult<AgentRun> | null>(null);
   const [loading, setLoading]         = useState(true);
   const [search, setSearch]           = useState("");
@@ -272,8 +273,8 @@ export default function RunsPage() {
 
   const PAGE_SIZE = 15;
 
-  const load = useCallback(async (p = 1) => {
-    setLoading(true);
+  const load = useCallback(async (p = 1, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await getRuns({
         search:   search || undefined,
@@ -284,11 +285,11 @@ export default function RunsPage() {
       // Hard-cap items to PAGE_SIZE even if API returns more (stale build safety)
       setResult({ ...data, items: data.items.slice(0, PAGE_SIZE) });
     } catch {
-      toast.error("Failed to load runs.");
+      if (!silent) toast.error("Failed to load runs.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [search, statusFilter, timeRange]);
+  }, [search, statusFilter]);
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -304,6 +305,14 @@ export default function RunsPage() {
     void load(1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, timeRange]);
+
+  // Live mode: while anything is running or queued, refresh quietly every 10s
+  const hasActive = (result?.items ?? []).some(r => r.status === "running" || r.status === "queued");
+  useEffect(() => {
+    if (!hasActive) return;
+    const t = setInterval(() => { void load(page, true); }, 10_000);
+    return () => clearInterval(t);
+  }, [hasActive, page, load]);
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -364,9 +373,12 @@ export default function RunsPage() {
           <div className="mt-1 flex items-center gap-2.5">
             <h1 className="text-[24px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Runs</h1>
             {liveCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#99F6E4] bg-[#F0FDFA] px-2.5 py-1 text-[11px] font-semibold text-[#0F766E]">
-                <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse" />
-                {liveCount} live
+              <span
+                title="Auto-refreshing every 10s while runs are active"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#99F6E4] bg-[#F0FDFA] px-2.5 py-1 text-[11px] font-semibold text-[#0F766E]"
+              >
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-500" />
+                {liveCount} live · auto-refresh
               </span>
             )}
           </div>
@@ -472,11 +484,11 @@ export default function RunsPage() {
         ) : displayRuns.length === 0 ? (
           // Empty state
           <div className="flex flex-col items-center gap-3 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-[#E5E7EB] bg-[#F9FAFB]">
-              <Play className="h-5 w-5 text-[#9CA3AF]" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-[11px] border border-[#9CCFBB] bg-[#E6F4EF]">
+              <Play className="h-5 w-5 text-[#007F4E]" />
             </div>
             <div className="space-y-1">
-              <p className="text-[14px] font-semibold text-[#111827]">No runs found</p>
+              <p className="text-[14px] font-semibold text-[#0B0D0F]">No runs found</p>
               <p className="text-[12px] text-[#6B7280]">
                 {statusFilter || search || timeRange !== "all"
                   ? "Try adjusting your filters or time range."
@@ -486,7 +498,7 @@ export default function RunsPage() {
             {!statusFilter && !search && timeRange === "all" && (
               <Link
                 href={"/workflows/new" as Route}
-                className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#111827] px-4 text-[12px] font-medium text-white hover:bg-[#1f2937] transition-colors"
+                className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[12px] font-medium text-white transition-colors hover:bg-[#1F2428]"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Create your first workflow
@@ -548,20 +560,28 @@ export default function RunsPage() {
                   return (
                     <tr
                       key={run.id}
+                      onClick={() => router.push(`/runs/${run.id}` as Route)}
                       className={cn(
-                        "group relative transition-colors hover:bg-[#FAFAFA]",
+                        "group relative cursor-pointer transition-colors hover:bg-[#FAFBFB]",
                         isFailed && "bg-red-50/40 hover:bg-red-50/60",
                       )}
                     >
-                      {/* Workflow name + copy-ID */}
+                      {/* Workflow name + copy-ID + failure preview */}
                       <td className="px-6 py-4">
                         <Link
                           href={`/runs/${run.id}` as Route}
-                          className="block truncate text-[13.5px] font-semibold text-[#111827] hover:underline"
+                          onClick={e => e.stopPropagation()}
+                          className="block truncate text-[13.5px] font-semibold text-[#0B0D0F] hover:underline"
                         >
                           {run.workflowName?.trim() || `Run ${run.id.slice(0, 8)}`}
                         </Link>
-                        <CopyId id={run.id} />
+                        {isFailed && run.error ? (
+                          <p title={run.error} className="mt-0.5 max-w-[280px] truncate font-mono text-[10.5px] text-[#B91C1C]">
+                            {run.error}
+                          </p>
+                        ) : (
+                          <CopyId id={run.id} />
+                        )}
                       </td>
 
                       {/* Status */}
@@ -630,7 +650,8 @@ export default function RunsPage() {
                       <td className="px-4 py-4">
                         <Link
                           href={`/runs/${run.id}` as Route}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9CA3AF] opacity-0 transition-all group-hover:opacity-100 hover:bg-[#F3F4F6] hover:text-[#374151]"
+                          onClick={e => e.stopPropagation()}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9CA3AF] opacity-0 transition-all hover:bg-[#F3F4F5] hover:text-[#0B0D0F] group-hover:opacity-100"
                         >
                           <ChevronRight className="h-4 w-4" />
                         </Link>

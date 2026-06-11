@@ -5,18 +5,13 @@ import {
   BarChart2,
   Check,
   Clock,
-  Code2,
   CreditCard,
   Crown,
   Eye,
   KeyRound,
-  Lock,
   Mail,
-  Rocket,
-  ScrollText,
   Shield,
   Trash2,
-  UserCircle,
   UserPlus,
   Users,
   XCircle,
@@ -70,15 +65,9 @@ const ROLE_CONFIG: Record<MemberRole, { label: string; icon: typeof Crown; tone:
 // ─── Settings directory ───────────────────────────────────────────────────────
 
 const DIRECTORY: { href: Route; label: string; desc: string; icon: React.ElementType; adminOnly?: boolean }[] = [
-  { href: "/settings/members" as never,              label: "Members",              desc: "Team & invitations",       icon: Users },
-  { href: "/settings/usage" as never,                label: "Usage & limits",       desc: "Runs, tokens, quotas",     icon: BarChart2 },
-  { href: "/settings/billing" as never,              label: "Billing",              desc: "Plan & payment",           icon: CreditCard },
-  { href: "/api-keys" as never,                      label: "API keys",             desc: "Programmatic access",      icon: KeyRound, adminOnly: true },
-  { href: "/settings/profile" as never,              label: "Profile",              desc: "Your account",             icon: UserCircle },
-  { href: "/settings/audit" as never,                label: "Audit log",            desc: "Workspace activity",       icon: ScrollText },
-  { href: "/settings/privacy" as never,              label: "Privacy",              desc: "Data & retention",         icon: Lock },
-  { href: "/settings/production-readiness" as never, label: "Production readiness", desc: "Go-live checklist",        icon: Rocket },
-  { href: "/settings/sdk" as never,                  label: "SDK",                  desc: "Client libraries",         icon: Code2 },
+  { href: "/settings/members" as never, label: "Members",        desc: "Team & invitations",   icon: Users },
+  { href: "/settings/usage" as never,   label: "Usage & limits", desc: "Runs, tokens, quotas", icon: BarChart2 },
+  { href: "/api-keys" as never,         label: "API keys",       desc: "Programmatic access",  icon: KeyRound, adminOnly: true },
 ];
 
 // ─── Local primitives ─────────────────────────────────────────────────────────
@@ -204,7 +193,7 @@ export default function SettingsPage() {
         {/* ── Settings directory ── */}
         <div className="animate-slide-up">
           <span className="vb-mono-label mb-2.5 block">Browse settings</span>
-          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             {visibleDirectory.map(({ href, label, desc, icon: Icon }) => (
               <Link
                 key={href}
