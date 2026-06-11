@@ -48,17 +48,17 @@ const TYPE_CARDS: {
 
 // ─── Field helpers ────────────────────────────────────────────────────────────
 
-const inputCls = "w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30";
-const selectCls = "w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[12px] focus:outline-none";
+const inputCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
+const selectCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
 
 function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-        {label}{required && <span className="ml-0.5 text-red-400">*</span>}
+      <label className="mb-1.5 block text-[12.5px] font-medium text-[#374151]">
+        {label}{required && <span className="ml-0.5 text-[#DC2626]">*</span>}
       </label>
       {children}
-      {hint && <p className="mt-1 text-[10px] text-muted-foreground/40">{hint}</p>}
+      {hint && <p className="mt-1 text-[11px] text-[#9CA3AF]">{hint}</p>}
     </div>
   );
 }
@@ -66,13 +66,13 @@ function Field({ label, required, hint, children }: { label: string; required?: 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40">{title}</p>
+      <p className="mb-3 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">{title}</p>
       <div className="space-y-3">{children}</div>
     </div>
   );
 }
 
-function Divider() { return <div className="border-t border-border/30" />; }
+function Divider() { return <div className="border-t border-[#F1F2F4]" />; }
 
 // ─── IP copy widget ───────────────────────────────────────────────────────────
 
@@ -84,32 +84,32 @@ function OutboundIPs() {
     setTimeout(() => setCopied(false), 2000);
   }
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-      <p className="mb-2 text-[12px] font-semibold text-amber-800">Network access requirements</p>
-      <p className="mb-3 text-[11px] text-muted-foreground/70">
+    <div className="rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] p-4">
+      <p className="mb-2 text-[12.5px] font-semibold text-[#92400E]">Network access requirements</p>
+      <p className="mb-3 text-[12px] leading-[1.55] text-[#6B7280]">
         For Vectorbea Cloud to reach your database or API, add these IPs to your firewall, VPC security group,
         API gateway, or database allowlist.
       </p>
-      <div className="mb-3 rounded-lg border border-border/40 bg-background/40 p-3 font-mono text-[11px] text-muted-foreground">
+      <div className="mb-3 rounded-[8px] border border-[#E0E3E6] bg-white p-3 font-mono text-[11.5px] leading-[1.7] text-[#374151]">
         {VECTORBEE_OUTBOUND_IPS.map((ip) => <div key={ip}>{ip}</div>)}
       </div>
       <button
         type="button"
         onClick={copy}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-all",
+          "inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-[12px] font-medium transition-all",
           copied
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground",
+            ? "border-[#9CCFBB] bg-[#E6F4EF] text-[#006B45]"
+            : "border-[#E0E3E6] bg-white text-[#4B5563] hover:bg-[#F7F8F9]",
         )}
       >
         {copied ? <Check className="h-3 w-3" /> : <ClipboardCopy className="h-3 w-3" />}
         {copied ? "Copied!" : "Copy IPs"}
       </button>
-      <div className="mt-3 rounded-lg border border-border/30 bg-muted/5 p-3 text-[11px] text-muted-foreground/60">
-        <strong className="font-medium text-foreground/60">Using a private runner?</strong> Self-hosted workers
+      <div className="mt-3 rounded-[8px] border border-[#ECEEEF] bg-white/60 p-3 text-[11.5px] leading-[1.55] text-[#6B7280]">
+        <strong className="font-medium text-[#374151]">Using a private runner?</strong> Self-hosted workers
         use your own network egress. Whitelisting depends on your deployment. See{" "}
-        <Link href={"/workers" as never} className="text-primary hover:underline">Workers</Link>.
+        <Link href={"/workers" as never} className="font-medium text-[#007F4E] hover:underline">Workers</Link>.
       </div>
     </div>
   );
@@ -224,7 +224,7 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
         <Field label="Connection string" hint="Full connection URL including credentials. Stored securely.">
           <input className={inputCls} type="password" value={connString} onChange={(e) => setConnString(e.target.value)} placeholder="postgres://user:pass@host:5432/db" />
         </Field>
-        <p className="text-[10px] text-muted-foreground/40">— or enter individually —</p>
+        <p className="text-[11px] text-[#9CA3AF]">— or enter individually —</p>
         <div className="grid grid-cols-3 gap-2">
           <div className="col-span-2">
             <Field label="Host">
@@ -251,18 +251,18 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
       <Divider />
 
       <Section title="Options">
-        <label className="flex cursor-pointer items-center gap-2.5 text-[12px] text-muted-foreground">
-          <input type="checkbox" className="h-3.5 w-3.5 rounded" checked={sslRequired} onChange={(e) => setSslRequired(e.target.checked)} />
+        <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-[#374151]">
+          <input type="checkbox" className="h-3.5 w-3.5 rounded accent-[#007F4E]" checked={sslRequired} onChange={(e) => setSslRequired(e.target.checked)} />
           Require SSL / TLS
         </label>
-        <label className="flex cursor-pointer items-center gap-2.5 text-[12px] text-muted-foreground">
-          <input type="checkbox" className="h-3.5 w-3.5 rounded" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
+        <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-[#374151]">
+          <input type="checkbox" className="h-3.5 w-3.5 rounded accent-[#007F4E]" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
           Read-only connection (prevents any writes)
         </label>
       </Section>
 
       {showPrivateWarning && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
+        <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 text-[12px] leading-[1.55] text-[#92400E]">
           <strong>Private address detected.</strong> This host appears to be on a private network. Vectorbea Cloud
           cannot reach it unless you whitelist our outbound IPs or use a private runner.
         </div>
@@ -318,7 +318,7 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
       </Section>
 
       {showPrivateWarning && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
+        <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 text-[12px] leading-[1.55] text-[#92400E]">
           <strong>Private address detected.</strong> This URL appears private. Vectorbea Cloud cannot reach it
           without IP whitelisting or a private runner.
         </div>
@@ -424,15 +424,22 @@ function StepIndicator({ step, total }: { step: number; total: number }) {
         return (
           <div key={s} className="flex items-center">
             <div className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold border transition-all",
-              done ? "border-primary/50 bg-primary/20 text-primary" : active ? "border-primary bg-primary/20 text-primary" : "border-border/40 text-muted-foreground/40",
+              "flex h-7 w-7 items-center justify-center rounded-full border text-[11.5px] font-semibold transition-all",
+              done
+                ? "border-[#007F4E] bg-[#007F4E] text-white"
+                : active
+                  ? "border-[#007F4E] bg-[#E6F4EF] text-[#006B45]"
+                  : "border-[#E0E3E6] bg-white text-[#9CA3AF]",
             )}>
               {done ? <Check className="h-3.5 w-3.5" /> : s}
             </div>
-            <span className={cn("ml-1.5 mr-4 text-[11px] font-medium hidden sm:inline", active ? "text-foreground" : "text-muted-foreground/40")}>
+            <span className={cn(
+              "ml-1.5 mr-4 hidden text-[12px] font-medium sm:inline",
+              active ? "text-[#0B0D0F]" : done ? "text-[#4B5563]" : "text-[#9CA3AF]",
+            )}>
               {label}
             </span>
-            {s < total && <div className="mr-4 h-px w-8 bg-border/30" />}
+            {s < total && <div className={cn("mr-4 h-px w-8", done ? "bg-[#9CCFBB]" : "bg-[#E0E3E6]")} />}
           </div>
         );
       })}
@@ -664,17 +671,18 @@ export default function NewConnectionPage() {
     <div className="mx-auto max-w-2xl px-6 py-8">
       {/* Header */}
       <div className="mb-6 flex items-center gap-3">
-        <Link href={"/connections" as never} className="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground">
+        <Link href={"/connections" as never} className="flex items-center gap-1.5 text-[12.5px] font-medium text-[#6B7280] transition-colors hover:text-[#0B0D0F]">
           <ArrowLeft className="h-3.5 w-3.5" />
           Connections
         </Link>
-        <span className="text-muted-foreground/30">/</span>
-        <span className="text-[12px] font-semibold">New Connection</span>
+        <span className="text-[#C9CED4]">/</span>
+        <span className="text-[12.5px] font-semibold text-[#0B0D0F]">New Connection</span>
       </div>
 
       <div className="mb-6">
-        <h1 className="text-[22px] font-bold text-foreground">New Connection</h1>
-        <p className="mt-1 text-[13px] text-muted-foreground">Connect an LLM provider, database, API, or service to use in agents and tools.</p>
+        <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Connections</p>
+        <h1 className="mt-1 text-[22px] font-bold tracking-[-0.01em] text-[#0B0D0F]">New Connection</h1>
+        <p className="mt-1 text-[13px] text-[#6B7280]">Connect an LLM provider, database, API, or service to use in agents and tools.</p>
       </div>
 
       <div className="mb-8">
@@ -684,7 +692,7 @@ export default function NewConnectionPage() {
       {/* Step 1: Choose type */}
       {step === 1 && (
         <div>
-          <p className="mb-4 text-[13px] font-semibold text-foreground">What are you connecting?</p>
+          <p className="mb-4 text-[13.5px] font-semibold text-[#0B0D0F]">What are you connecting?</p>
           <div className="grid gap-3 sm:grid-cols-2">
             {TYPE_CARDS.map((card) => {
               const Icon = card.icon;
@@ -694,20 +702,22 @@ export default function NewConnectionPage() {
                   type="button"
                   onClick={() => { setType(card.type); setStep(2); }}
                   className={cn(
-                    "flex items-start gap-3 rounded-xl border p-4 text-left transition-all hover:border-border",
-                    type === card.type ? "border-primary/50 bg-primary/5" : "border-border/40 bg-card/40",
+                    "flex items-start gap-3 rounded-[12px] border bg-white p-4 text-left transition-all",
+                    type === card.type
+                      ? "border-[#007F4E] ring-2 ring-[#007F4E]/12"
+                      : "border-[#E0E3E6] hover:border-[#C9CED4] hover:bg-[#FAFBFB]",
                   )}
                 >
                   <span
-                    className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-                    style={{ background: `${card.color}15`, border: `1px solid ${card.color}30` }}
+                    className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px]"
+                    style={{ background: card.color }}
                   >
-                    <Icon className="h-4.5 w-4.5" style={{ color: card.color }} />
+                    <Icon className="h-[18px] w-[18px] text-white" strokeWidth={1.9} />
                   </span>
                   <div>
-                    <p className="text-[13px] font-semibold text-foreground">{card.label}</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground/60">{card.description}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground/40">{card.examples}</p>
+                    <p className="text-[13.5px] font-semibold text-[#0B0D0F]">{card.label}</p>
+                    <p className="mt-0.5 text-[12px] leading-[1.5] text-[#6B7280]">{card.description}</p>
+                    <p className="mt-1.5 font-mono text-[10.5px] text-[#9CA3AF]">{card.examples}</p>
                   </div>
                 </button>
               );
@@ -718,8 +728,8 @@ export default function NewConnectionPage() {
 
       {/* Step 2: Configure */}
       {step === 2 && type && (
-        <div className="rounded-2xl border border-border/40 bg-card/60 p-6">
-          <p className="mb-5 text-[13px] font-semibold text-foreground">
+        <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-6">
+          <p className="mb-5 text-[13.5px] font-semibold text-[#0B0D0F]">
             Configure {TYPE_CARDS.find((c) => c.type === type)?.label}
           </p>
 
@@ -753,17 +763,17 @@ export default function NewConnectionPage() {
                 </Field>
               </Section>
               <Divider />
-              <p className="text-[12px] text-muted-foreground/60">Full configuration for this connection type is coming soon. You can save as draft.</p>
+              <p className="text-[12px] text-[#9CA3AF]">Full configuration for this connection type is coming soon. You can save as draft.</p>
             </div>
           )}
 
-          <div className="mt-5 flex items-center justify-between border-t border-border/30 pt-5">
-            <button type="button" onClick={() => setStep(1)} className="text-[12px] text-muted-foreground hover:text-foreground">← Back</button>
+          <div className="mt-5 flex items-center justify-between border-t border-[#F1F2F4] pt-5">
+            <button type="button" onClick={() => setStep(1)} className="text-[12.5px] font-medium text-[#6B7280] transition-colors hover:text-[#0B0D0F]">← Back</button>
             <button
               type="button"
               onClick={() => setStep(needsNetworkStep ? 3 : totalSteps)}
               disabled={!name.trim()}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
             >
               Continue <ArrowRight className="h-3.5 w-3.5" />
             </button>
@@ -773,15 +783,15 @@ export default function NewConnectionPage() {
 
       {/* Step 3: Network */}
       {step === 3 && needsNetworkStep && (
-        <div className="rounded-2xl border border-border/40 bg-card/60 p-6">
-          <p className="mb-5 text-[13px] font-semibold text-foreground">Network access</p>
+        <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-6">
+          <p className="mb-5 text-[13.5px] font-semibold text-[#0B0D0F]">Network access</p>
           <OutboundIPs />
-          <div className="mt-5 flex items-center justify-between border-t border-border/30 pt-5">
-            <button type="button" onClick={() => setStep(2)} className="text-[12px] text-muted-foreground hover:text-foreground">← Back</button>
+          <div className="mt-5 flex items-center justify-between border-t border-[#F1F2F4] pt-5">
+            <button type="button" onClick={() => setStep(2)} className="text-[12.5px] font-medium text-[#6B7280] transition-colors hover:text-[#0B0D0F]">← Back</button>
             <button
               type="button"
               onClick={() => setStep(4)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#23272B]"
             >
               Continue <ArrowRight className="h-3.5 w-3.5" />
             </button>
@@ -791,29 +801,29 @@ export default function NewConnectionPage() {
 
       {/* Step 3/4: Test & Save */}
       {((step === 3 && !needsNetworkStep) || step === 4) && (
-        <div className="rounded-2xl border border-border/40 bg-card/60 p-6">
-          <p className="mb-1 text-[13px] font-semibold text-foreground">Test &amp; save</p>
-          <p className="mb-5 text-[12px] text-muted-foreground/60">Run a test to verify credentials and connectivity before saving.</p>
+        <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-6">
+          <p className="mb-1 text-[13.5px] font-semibold text-[#0B0D0F]">Test &amp; save</p>
+          <p className="mb-5 text-[12.5px] text-[#6B7280]">Run a test to verify credentials and connectivity before saving.</p>
 
-          <div className="mb-5 rounded-xl border border-border/40 bg-muted/5 p-4">
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/40">Summary</p>
-            <div className="space-y-1 text-[12px] text-muted-foreground">
-              <div className="flex justify-between"><span>Name</span><span className="font-medium text-foreground">{name}</span></div>
-              <div className="flex justify-between"><span>Type</span><span className="font-medium text-foreground capitalize">{type?.replace(/_/g, " ")}</span></div>
-              <div className="flex justify-between"><span>Environment</span><span className="font-medium text-foreground capitalize">{environment}</span></div>
+          <div className="mb-5 rounded-[10px] border border-[#ECEEEF] bg-[#FAFBFB] p-4">
+            <p className="mb-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">Summary</p>
+            <div className="space-y-1.5 text-[12.5px] text-[#6B7280]">
+              <div className="flex justify-between"><span>Name</span><span className="font-medium text-[#0B0D0F]">{name}</span></div>
+              <div className="flex justify-between"><span>Type</span><span className="font-medium capitalize text-[#0B0D0F]">{type?.replace(/_/g, " ")}</span></div>
+              <div className="flex justify-between"><span>Environment</span><span className="font-medium capitalize text-[#0B0D0F]">{environment}</span></div>
             </div>
           </div>
 
           {testResult === "ok" && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              <p className="text-[12px] text-emerald-800">Connection test passed. Ready to save.</p>
+            <div className="mb-4 flex items-center gap-2.5 rounded-[10px] border border-[#9CCFBB] bg-[#E6F4EF]/60 px-4 py-3">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-[#007F4E]" />
+              <p className="text-[12.5px] font-medium text-[#006B45]">Connection test passed. Ready to save.</p>
             </div>
           )}
           {testResult === "failed" && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-              <ShieldCheck className="h-4 w-4 text-red-600 shrink-0" />
-              <p className="text-[12px] text-red-700">Test failed. Check credentials and network access. You can still save as draft.</p>
+            <div className="mb-4 flex items-center gap-2.5 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+              <ShieldCheck className="h-4 w-4 shrink-0 text-[#DC2626]" />
+              <p className="text-[12.5px] font-medium text-[#B91C1C]">Test failed. Check credentials and network access. You can still save as draft.</p>
             </div>
           )}
 
@@ -822,16 +832,16 @@ export default function NewConnectionPage() {
               type="button"
               onClick={() => void handleTest()}
               disabled={testing}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/50 px-4 text-[12px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[12.5px] font-medium text-[#374151] transition-colors hover:bg-[#F7F8F9] disabled:opacity-40"
             >
-              {testing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              <RefreshCw className={cn("h-3.5 w-3.5", testing && "animate-spin")} />
               Test connection
             </button>
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={saving}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Save connection
@@ -840,23 +850,25 @@ export default function NewConnectionPage() {
               type="button"
               onClick={() => void handleSave(true)}
               disabled={saving}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/40 px-4 text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[12.5px] text-[#6B7280] transition-colors hover:bg-[#F7F8F9] hover:text-[#0B0D0F] disabled:opacity-40"
             >
               Save as draft (skip test)
             </button>
           </div>
 
-          <div className="mt-5 border-t border-border/30 pt-4">
-            <button type="button" onClick={() => setStep(needsNetworkStep ? 3 : 2)} className="text-[12px] text-muted-foreground hover:text-foreground">← Back</button>
+          <div className="mt-5 border-t border-[#F1F2F4] pt-4">
+            <button type="button" onClick={() => setStep(needsNetworkStep ? 3 : 2)} className="text-[12.5px] font-medium text-[#6B7280] transition-colors hover:text-[#0B0D0F]">← Back</button>
           </div>
         </div>
       )}
 
       {/* Security note */}
-      <div className="mt-6 rounded-xl border border-border/30 bg-muted/5 p-4 text-[11px] text-muted-foreground/50">
-        <ShieldCheck className="mb-1.5 inline h-3.5 w-3.5 text-muted-foreground/40" />
-        {" "}Secrets are stored through the configured secrets backend. They are never displayed after save and are not
-        included in run events or audit logs.
+      <div className="mt-6 flex items-start gap-2.5 rounded-[12px] border border-[#ECEEEF] bg-[#FAFBFB] p-4 text-[12px] leading-[1.55] text-[#6B7280]">
+        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#9CA3AF]" />
+        <span>
+          Secrets are stored through the configured secrets backend. They are never displayed after save and are not
+          included in run events or audit logs.
+        </span>
       </div>
     </div>
   );

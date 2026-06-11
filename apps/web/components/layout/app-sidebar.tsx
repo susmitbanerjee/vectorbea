@@ -7,6 +7,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   BarChart2,
+  BookOpen,
   Bot,
   CalendarClock,
   CheckCircle2,
@@ -89,6 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/schedules" as never, label: "Schedules", icon: CalendarClock },
       { href: "/settings" as never,  label: "Settings",  icon: Settings2 },
+      { href: "/docs" as never,      label: "Docs",      icon: BookOpen },
     ],
   },
 ];

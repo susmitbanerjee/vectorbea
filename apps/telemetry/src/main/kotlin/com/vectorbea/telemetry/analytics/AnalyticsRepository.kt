@@ -124,6 +124,36 @@ class AnalyticsRepository(private val ds: DataSource) {
         }
     }
 
+    /** Events per day per category — feeds the dashboard activity chart. */
+    fun dailyCounts(env: String?, dateFrom: Instant, dateTo: Instant): List<Map<String, Any?>> {
+        val (envSql, envParams) = EnvironmentFilter.sqlFragment(env)
+        val sql = """
+            SELECT date_trunc('day', occurred_at) AS day, event_category, COUNT(*) AS count
+            FROM analytics_events
+            WHERE $envSql AND occurred_at >= ? AND occurred_at <= ?
+            GROUP BY day, event_category
+            ORDER BY day ASC
+        """.trimIndent()
+        return ds.withConnection { conn ->
+            conn.prepareStatement(sql).use { stmt ->
+                var p = 1
+                for (param in envParams) stmt.setString(p++, param)
+                stmt.setTimestamp(p++, Timestamp.from(dateFrom))
+                stmt.setTimestamp(p, Timestamp.from(dateTo))
+                val rs = stmt.executeQuery()
+                val results = mutableListOf<Map<String, Any?>>()
+                while (rs.next()) {
+                    results += mapOf(
+                        "day" to rs.getTimestamp("day").toInstant().toString(),
+                        "category" to rs.getString("event_category"),
+                        "count" to rs.getLong("count"),
+                    )
+                }
+                results
+            }
+        }
+    }
+
     fun countDistinctByCategory(env: String?, category: String, dateFrom: Instant, dateTo: Instant): Long {
         val (envSql, envParams) = EnvironmentFilter.sqlFragment(env)
         val sql = """

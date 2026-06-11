@@ -56,7 +56,7 @@ const RISK_COLORS: Record<Tool["riskLevel"], string> = {
 const STATUS_DOT: Record<AgentRun["status"], string> = {
   succeeded:            "bg-emerald-400",
   failed:               "bg-red-400",
-  running:              "bg-sky-400 animate-pulse",
+  running:              "bg-teal-500 animate-pulse",
   waiting_for_approval: "bg-amber-400",
   queued:               "bg-slate-400",
   paused:               "bg-slate-400",
@@ -252,11 +252,8 @@ export default function AgentDetailPage() {
         </div>
 
         <div className="flex items-start gap-4">
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-            style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.2)" }}
-          >
-            <Bot className="h-6 w-6 text-violet-600" />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] bg-[#7C3AED]">
+            <Bot className="h-6 w-6 text-white" strokeWidth={1.9} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -285,9 +282,8 @@ export default function AgentDetailPage() {
               <button
                 type="button"
                 onClick={startEdit}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                style={{ background: "var(--surface-2)" }}
-              >
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E0E3E6] px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                             >
                 <Pencil className="h-3.5 w-3.5" />
                 Edit
               </button>
@@ -297,7 +293,7 @@ export default function AgentDetailPage() {
                   type="button"
                   onClick={cancelEdit}
                   disabled={saving}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E0E3E6] px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                 >
                   <X className="h-3.5 w-3.5" /> Cancel
                 </button>
@@ -305,7 +301,7 @@ export default function AgentDetailPage() {
                   type="button"
                   onClick={() => void saveEdit()}
                   disabled={saving}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#2563EB] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-40"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0B0D0F] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
                 >
                   {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                   Save
@@ -314,9 +310,8 @@ export default function AgentDetailPage() {
             )}
             <Link
               href={"/agents/new" as never}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-              style={{ background: "var(--surface-1)" }}
-            >
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E0E3E6] px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                         >
               Clone
             </Link>
             <button
@@ -335,7 +330,7 @@ export default function AgentDetailPage() {
       {/* Tab bar */}
       <div
         className="sticky top-0 z-10 mt-4 px-6 lg:px-8"
-        style={{ borderBottom: "1px solid #E2E8F0", background: "#FFFFFF" }}
+        style={{ borderBottom: "1px solid #E0E3E6", background: "#FFFFFF" }}
       >
         <div className="flex gap-0 overflow-x-auto">
           {TABS.map(({ id: tid, label, icon: Icon }) => (
@@ -353,12 +348,12 @@ export default function AgentDetailPage() {
               <Icon className="h-3.5 w-3.5" />
               {label}
               {tid === "tools" && allowedTools.length > 0 && (
-                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "#F1F5F9", color: "#64748B" }}>
+                <span className="ml-1 rounded-full px-1.5 py-px font-mono text-[10px] tabular-nums" style={{ background: "#F3F4F5", color: "#6B7280" }}>
                   {allowedTools.length}
                 </span>
               )}
               {tid === "runs" && runs.length > 0 && (
-                <span className="ml-1 rounded-full px-1.5 py-px text-[10px] tabular-nums" style={{ background: "#F1F5F9", color: "#64748B" }}>
+                <span className="ml-1 rounded-full px-1.5 py-px font-mono text-[10px] tabular-nums" style={{ background: "#F3F4F5", color: "#6B7280" }}>
                   {runs.length}
                 </span>
               )}
@@ -373,7 +368,7 @@ export default function AgentDetailPage() {
         {/* Overview */}
         {tab === "overview" && (
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Identity</h2>
               {editing && draft ? (
                 <div className="space-y-3">
@@ -382,18 +377,16 @@ export default function AgentDetailPage() {
                     <input
                       value={draft.name}
                       onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    />
+                      className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                         />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">Role</label>
                     <input
                       value={draft.role}
                       onChange={(e) => setDraft({ ...draft, role: e.target.value })}
-                      className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    />
+                      className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                         />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">Description</label>
@@ -401,9 +394,8 @@ export default function AgentDetailPage() {
                       value={draft.description}
                       onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                       rows={3}
-                      className="w-full rounded-lg border border-border/60 px-2.5 py-1.5 text-[12px]"
-                      style={{ background: "var(--surface-2)" }}
-                    />
+                      className="w-full rounded-lg border border-[#E0E3E6] px-2.5 py-1.5 text-[12px]"
+                                         />
                   </div>
                   <div className="divide-y divide-border/30">
                     <KVRow label="ID" value={<code className="font-mono text-[11px]">{agent.id}</code>} />
@@ -426,7 +418,7 @@ export default function AgentDetailPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Model Config</h2>
               {editing && draft ? (
                 <div className="space-y-3">
@@ -436,18 +428,16 @@ export default function AgentDetailPage() {
                       <input
                         value={draft.modelProvider}
                         onChange={(e) => setDraft({ ...draft, modelProvider: e.target.value })}
-                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                             />
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] text-muted-foreground">Model</label>
                       <input
                         value={draft.modelName}
                         onChange={(e) => setDraft({ ...draft, modelName: e.target.value })}
-                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 font-mono text-[12px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 font-mono text-[12px]"
+                                             />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -458,9 +448,8 @@ export default function AgentDetailPage() {
                         step="0.1"
                         value={draft.temperature}
                         onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })}
-                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                             />
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] text-muted-foreground">Max iterations</label>
@@ -468,9 +457,8 @@ export default function AgentDetailPage() {
                         type="number"
                         value={draft.maxIterations}
                         onChange={(e) => setDraft({ ...draft, maxIterations: Number(e.target.value) })}
-                        className="h-8 w-full rounded-lg border border-border/60 px-2.5 text-[12px]"
-                        style={{ background: "var(--surface-2)" }}
-                      />
+                        className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
+                                             />
                     </div>
                   </div>
                 </div>
@@ -484,7 +472,7 @@ export default function AgentDetailPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4 lg:col-span-2" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Quick stats</h2>
               <div className="grid grid-cols-3 gap-4">
                 {[
@@ -504,8 +492,8 @@ export default function AgentDetailPage() {
 
         {/* Instructions */}
         {tab === "instructions" && (
-          <div className="rounded-xl border border-border/60 overflow-hidden" style={{ background: "var(--surface-1)" }}>
-            <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
+          <div className="rounded-[12px] border border-[#E0E3E6] bg-white overflow-hidden" style={{ background: "var(--surface-1)" }}>
+            <div className="flex items-center justify-between border-b border-[#E0E3E6] px-5 py-3">
               <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>System Prompt</h2>
               <span className="text-[11px] text-muted-foreground">{(agent.instructions ?? "").length} chars</span>
             </div>
@@ -544,7 +532,7 @@ export default function AgentDetailPage() {
             </div>
             {editing && draft ? (
               allTools.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+                <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#E0E3E6] bg-white py-16 text-center" style={{ background: "var(--surface-1)" }}>
                   <Wrench className="h-8 w-8 text-muted-foreground/20" />
                   <p className="text-sm text-muted-foreground">No tools registered yet.</p>
                 </div>
@@ -559,12 +547,12 @@ export default function AgentDetailPage() {
                         onClick={() => toggleAllowedTool(tool.id)}
                         className={cn(
                           "group flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
-                          checked ? "border-primary/40" : "border-border/60 hover:border-border",
+                          checked ? "border-primary/40" : "border-[#E0E3E6] hover:border-border",
                         )}
-                        style={{ background: checked ? "rgba(37,99,235,0.05)" : "var(--surface-1)" }}
+                        style={{ background: checked ? "rgba(0,127,78,0.06)" : "#FFFFFF" }}
                       >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.15)" }}>
-                          <Wrench className="h-4 w-4 text-cyan-700" />
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[#0F766E]">
+                          <Wrench className="h-4 w-4 text-white" strokeWidth={1.9} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="truncate text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
@@ -574,7 +562,7 @@ export default function AgentDetailPage() {
                         </div>
                         <div className={cn(
                           "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-                          checked ? "border-primary bg-primary text-white" : "border-border/60",
+                          checked ? "border-primary bg-primary text-white" : "border-[#E0E3E6]",
                         )}>
                           {checked && <Check className="h-3 w-3" />}
                         </div>
@@ -584,7 +572,7 @@ export default function AgentDetailPage() {
                 </div>
               )
             ) : allowedTools.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+              <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#E0E3E6] bg-white py-16 text-center" style={{ background: "var(--surface-1)" }}>
                 <Wrench className="h-8 w-8 text-muted-foreground/20" />
                 <p className="text-sm text-muted-foreground">No tools allowed for this agent.</p>
               </div>
@@ -594,11 +582,10 @@ export default function AgentDetailPage() {
                   <Link
                     key={tool.id}
                     href={`/tools/${tool.id}` as never}
-                    className="group flex items-start gap-3 rounded-xl border border-border/60 p-4 transition-colors hover:border-border"
-                    style={{ background: "var(--surface-1)" }}
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.15)" }}>
-                      <Wrench className="h-4 w-4 text-cyan-700" />
+                    className="group flex items-start gap-3 rounded-[12px] border border-[#E0E3E6] bg-white p-4 transition-colors hover:border-border"
+                                     >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[#0F766E]">
+                      <Wrench className="h-4 w-4 text-white" strokeWidth={1.9} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-[13px] font-medium group-hover:underline" style={{ color: "var(--text-primary)" }}>
@@ -606,14 +593,14 @@ export default function AgentDetailPage() {
                       </p>
                       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{tool.description}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1">
-                        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-px text-[9px] text-cyan-700 capitalize">
+                        <span className="rounded-full border border-teal-600/20 bg-teal-600/10 px-1.5 py-px text-[10px] capitalize text-teal-700">
                           {tool.type.replace(/_/g, " ")}
                         </span>
                         <span className={cn("rounded-full border px-1.5 py-px text-[9px]", RISK_COLORS[tool.riskLevel])}>
                           {tool.riskLevel.replace(/_/g, " ")}
                         </span>
                         {tool.idempotent && (
-                          <span className="rounded-full border border-slate-500/20 bg-slate-500/10 px-1.5 py-px text-[9px] text-slate-400">
+                          <span className="rounded-full border border-[#E0E3E6] bg-[#F3F4F5] px-1.5 py-px text-[10px] text-[#6B7280]">
                             idempotent
                           </span>
                         )}
@@ -630,7 +617,7 @@ export default function AgentDetailPage() {
         {/* Policies */}
         {tab === "policies" && (
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Memory Policy</h2>
               <div className="divide-y divide-border/30">
                 <KVRow label="Type" value={agent.memoryPolicy?.type ?? "—"} />
@@ -640,7 +627,7 @@ export default function AgentDetailPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Retry Policy</h2>
               <div className="divide-y divide-border/30">
                 <KVRow label="Max attempts" value={agent.retryPolicy?.maxAttempts ?? "—"} />
@@ -649,7 +636,7 @@ export default function AgentDetailPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Timeout Policy</h2>
               <div className="divide-y divide-border/30">
                 <KVRow label="Step timeout" value={agent.timeoutPolicy ? `${agent.timeoutPolicy.stepTimeoutMs / 1000}s` : "—"} />
@@ -657,7 +644,7 @@ export default function AgentDetailPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border/60 px-5 py-4" style={{ background: "var(--surface-1)" }}>
+            <div className="rounded-[12px] border border-[#E0E3E6] bg-white px-5 py-4" style={{ background: "var(--surface-1)" }}>
               <h2 className="mb-3 text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Approval Policy</h2>
               <div className="divide-y divide-border/30">
                 <KVRow
@@ -685,13 +672,13 @@ export default function AgentDetailPage() {
         {tab === "runs" && (
           <div className="space-y-3">
             {runs.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+              <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#E0E3E6] bg-white py-16 text-center" style={{ background: "var(--surface-1)" }}>
                 <History className="h-8 w-8 text-muted-foreground/20" />
                 <p className="text-sm text-muted-foreground">No runs recorded for this agent yet.</p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border/60" style={{ background: "var(--surface-1)" }}>
-                <div className="border-b border-border/60 px-5 py-3">
+              <div className="overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-white" style={{ background: "var(--surface-1)" }}>
+                <div className="border-b border-[#E0E3E6] px-5 py-3">
                   <h2 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
                     {runs.length} run{runs.length !== 1 ? "s" : ""} involving this agent
                   </h2>
@@ -723,7 +710,7 @@ export default function AgentDetailPage() {
 
         {/* Versions */}
         {tab === "versions" && (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-border/60 py-16 text-center" style={{ background: "var(--surface-1)" }}>
+          <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[#E0E3E6] bg-white py-16 text-center" style={{ background: "var(--surface-1)" }}>
             <Clock className="h-8 w-8 text-muted-foreground/20" />
             <p className="text-sm font-medium text-muted-foreground">Version history is not yet available.</p>
             <p className="text-[11px] text-muted-foreground/60">Agent versions will be tracked when you save changes.</p>

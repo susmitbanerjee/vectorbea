@@ -96,27 +96,29 @@ function CopyButton({ value }: { value: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="ml-1.5 rounded p-0.5 transition-colors hover:bg-white/10"
+      className="ml-1.5 rounded p-0.5 transition-colors hover:bg-[#F3F4F5]"
       title="Copy"
     >
-      {copied ? <Check className="h-3 w-3 text-green-400" /> : <ClipboardCopy className="h-3 w-3 text-muted-foreground" />}
+      {copied ? <Check className="h-3 w-3 text-[#007F4E]" /> : <ClipboardCopy className="h-3 w-3 text-[#9CA3AF]" />}
     </button>
   );
 }
 
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-2.5" style={{ borderBottom: "1px solid rgba(148,163,184,0.07)" }}>
-      <span className="w-40 shrink-0 text-[11px] font-medium" style={{ color: "var(--text-faint)" }}>{label}</span>
-      <div className="flex-1 text-[12px]" style={{ color: "var(--text-primary)" }}>{children}</div>
+    <div className="flex items-start gap-3 border-b border-[#F1F2F4] py-2.5 last:border-b-0">
+      <span className="w-40 shrink-0 text-[12px] text-[#6B7280]">{label}</span>
+      <div className="flex-1 text-[12.5px] font-medium text-[#0B0D0F]">{children}</div>
     </div>
   );
 }
 
 function SectionCard({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-card/60 p-4">
-      {title && <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>{title}</p>}
+    <div className="rounded-[12px] border border-[#E0E3E6] bg-white p-5">
+      {title && (
+        <p className="mb-3 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">{title}</p>
+      )}
       {children}
     </div>
   );
@@ -150,7 +152,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         <InfoRow label="Allowed Models">
           <div className="flex flex-wrap gap-1">
             {c.allowedModels.map(m => (
-              <span key={m} className="rounded px-1.5 py-0.5 font-mono text-[10px]" style={{ background: "var(--surface-2)", color: "var(--text-primary)" }}>{m}</span>
+              <span key={m} className="rounded border border-[#E0E3E6] bg-[#F7F8F9] px-1.5 py-0.5 font-mono text-[10.5px] text-[#374151]">{m}</span>
             ))}
           </div>
         </InfoRow>
@@ -189,7 +191,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         {(c.allowedPaths ?? []).length > 0 && (
           <InfoRow label="Allowed Paths">
             <div className="flex flex-wrap gap-1">
-              {(c.allowedPaths ?? []).map(p => <span key={p} className="font-mono text-[10px]" style={{ color: "#2563EB" }}>{p}</span>)}
+              {(c.allowedPaths ?? []).map(p => <span key={p} className="font-mono text-[10.5px] text-[#0F766E]">{p}</span>)}
             </div>
           </InfoRow>
         )}
@@ -207,7 +209,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
           <InfoRow label="Resources">
             <div className="flex flex-wrap gap-1">
               {c.allowedResources.map(r => (
-                <span key={r} className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: "var(--surface-2)", color: "var(--text-primary)" }}>{r}</span>
+                <span key={r} className="rounded border border-[#E0E3E6] bg-[#F7F8F9] px-1.5 py-0.5 text-[10.5px] text-[#374151]">{r}</span>
               ))}
             </div>
           </InfoRow>
@@ -225,7 +227,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
         {c.allowedTools.length > 0 && (
           <InfoRow label="Allowed Tools">
             <div className="flex flex-wrap gap-1">
-              {c.allowedTools.map(t => <span key={t} className="font-mono text-[10px]" style={{ color: "#D97706" }}>{t}</span>)}
+              {c.allowedTools.map(t => <span key={t} className="font-mono text-[10.5px] text-[#92400E]">{t}</span>)}
             </div>
           </InfoRow>
         )}
@@ -256,7 +258,7 @@ function ConfigSummary({ connection }: { connection: Connection }) {
     );
   }
 
-  return <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>No configuration details.</p>;
+  return <p className="text-[12px] text-[#9CA3AF]">No configuration details.</p>;
 }
 
 // ─── Tab panels ───────────────────────────────────────────────────────────────
@@ -266,41 +268,41 @@ function OverviewTab({ connection }: { connection: Connection }) {
   const statusMeta = STATUS_META[connection.status];
   const StatusIcon = statusMeta.icon;
 
+  const stats: { label: string; content: React.ReactNode }[] = [
+    {
+      label: "Status",
+      content: (
+        <span className="inline-flex items-center gap-1.5 text-[13.5px] font-semibold" style={{ color: statusMeta.color }}>
+          <StatusIcon className="h-4 w-4" />
+          {statusMeta.label}
+        </span>
+      ),
+    },
+    { label: "Last tested", content: <span className="text-[13.5px] font-semibold text-[#0B0D0F]">{relativeTime(connection.lastTestedAt)}</span> },
+    { label: "Latency", content: <span className="text-[13.5px] font-semibold tabular-nums text-[#0B0D0F]">{connection.lastTestLatencyMs !== null ? `${connection.lastTestLatencyMs}ms` : "—"}</span> },
+    { label: "Environment", content: <span className="text-[13.5px] font-semibold capitalize text-[#0B0D0F]">{connection.environment || "—"}</span> },
+    {
+      label: "Type",
+      content: (
+        <span className="inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-[#0B0D0F]">
+          <typeMeta.icon className="h-4 w-4" style={{ color: typeMeta.color }} />
+          {typeMeta.label}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Status bar */}
-      <SectionCard>
-        <div className="flex flex-wrap items-center gap-6">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>Status</p>
-            <div className="mt-1 flex items-center gap-1.5">
-              <StatusIcon className="h-3.5 w-3.5" style={{ color: statusMeta.color }} />
-              <span className="text-[13px] font-semibold" style={{ color: statusMeta.color }}>{statusMeta.label}</span>
-            </div>
+      {/* Status strip */}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[12px] border border-[#E0E3E6] bg-[#ECEEEF] sm:grid-cols-3 lg:grid-cols-5">
+        {stats.map(({ label, content }) => (
+          <div key={label} className="bg-white px-4 py-3.5">
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">{label}</p>
+            <div className="mt-1.5">{content}</div>
           </div>
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>Last Tested</p>
-            <p className="mt-1 text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{relativeTime(connection.lastTestedAt)}</p>
-          </div>
-          {connection.lastTestLatencyMs !== null && (
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>Latency</p>
-              <p className="mt-1 text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{connection.lastTestLatencyMs}ms</p>
-            </div>
-          )}
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>Environment</p>
-            <p className="mt-1 text-[13px] font-medium capitalize" style={{ color: "var(--text-primary)" }}>{connection.environment}</p>
-          </div>
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>Type</p>
-            <div className="mt-1 flex items-center gap-1">
-              <typeMeta.icon className="h-3.5 w-3.5" style={{ color: typeMeta.color }} />
-              <span className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{typeMeta.label}</span>
-            </div>
-          </div>
-        </div>
-      </SectionCard>
+        ))}
+      </div>
 
       {/* Config */}
       <SectionCard title="Configuration">
@@ -309,18 +311,18 @@ function OverviewTab({ connection }: { connection: Connection }) {
 
       {/* Usage summary */}
       <SectionCard title="Used By">
-        <div className="flex gap-8">
-          <div>
-            <p className="text-[22px] font-bold" style={{ color: "var(--text-primary)" }}>{connection.usedByAgentIds.length}</p>
-            <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>Agents</p>
+        <div className="grid grid-cols-2 divide-x divide-[#ECEEEF]">
+          <div className="pr-6">
+            <p className="text-[26px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[#0B0D0F]">{connection.usedByAgentIds.length}</p>
+            <p className="mt-1.5 text-[12px] text-[#6B7280]">Agents</p>
           </div>
-          <div>
-            <p className="text-[22px] font-bold" style={{ color: "var(--text-primary)" }}>{connection.usedByToolIds.length}</p>
-            <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>Tools</p>
+          <div className="pl-6">
+            <p className="text-[26px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[#0B0D0F]">{connection.usedByToolIds.length}</p>
+            <p className="mt-1.5 text-[12px] text-[#6B7280]">Tools</p>
           </div>
         </div>
         {connection.usedByAgentIds.length === 0 && connection.usedByToolIds.length === 0 && (
-          <p className="mt-1 text-[12px]" style={{ color: "var(--text-faint)" }}>Not yet used by any agent or tool.</p>
+          <p className="mt-3 border-t border-[#F1F2F4] pt-3 text-[12px] text-[#9CA3AF]">Not yet used by any agent or tool.</p>
         )}
       </SectionCard>
 
@@ -367,11 +369,11 @@ function CredentialsTab({ connection, onUpdated }: { connection: Connection; onU
   return (
     <div className="space-y-4">
       {/* Security note */}
-      <div className="flex items-start gap-2.5 rounded-xl border border-border/40 bg-card/60 p-4">
-        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-green-400" />
+      <div className="flex items-start gap-3 rounded-[12px] border border-[#9CCFBB] bg-[#E6F4EF]/50 p-4">
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#007F4E]" />
         <div>
-          <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Secrets are stored securely</p>
-          <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
+          <p className="text-[12.5px] font-semibold text-[#0B0D0F]">Secrets are stored securely</p>
+          <p className="mt-0.5 text-[12px] leading-[1.55] text-[#4B5563]">
             Raw credentials are never displayed after saving. Secrets are stored through the platform secrets backend (AES-256-GCM encrypted). Only masked values are shown here.
           </p>
         </div>
@@ -382,13 +384,13 @@ function CredentialsTab({ connection, onUpdated }: { connection: Connection; onU
         <InfoRow label="Secret Ref">
           {connection.secretRef
             ? <><span className="font-mono text-[11px]">{connection.secretRef}</span><CopyButton value={connection.secretRef} /></>
-            : <span style={{ color: "var(--text-faint)" }}>None — set a secret below</span>
+            : <span className="font-normal text-[#9CA3AF]">None — set a secret below</span>
           }
         </InfoRow>
         <InfoRow label="Masked Value">
           {connection.secretMasked
             ? <span className="font-mono text-[12px]">{connection.secretMasked}</span>
-            : <span style={{ color: "var(--text-faint)" }}>No secret configured</span>
+            : <span className="font-normal text-[#9CA3AF]">No secret configured</span>
           }
         </InfoRow>
         <InfoRow label="Auth Type">{connection.authType}</InfoRow>
@@ -396,7 +398,7 @@ function CredentialsTab({ connection, onUpdated }: { connection: Connection; onU
 
       {/* Set / rotate form */}
       <SectionCard title={hasSecret ? "Rotate Secret" : "Set Secret"}>
-        <p className="mb-3 text-[11px]" style={{ color: "var(--text-faint)" }}>
+        <p className="mb-3 text-[12px] leading-[1.55] text-[#6B7280]">
           {hasSecret
             ? "Enter a new value to re-encrypt and replace the stored secret. The connection ID and all agent/tool references remain unchanged."
             : "This connection has no secret yet. Enter the API key or credential to encrypt and store it."}
@@ -407,20 +409,20 @@ function CredentialsTab({ connection, onUpdated }: { connection: Connection; onU
             value={newSecret}
             onChange={(e) => setNewSecret(e.target.value)}
             placeholder={connection.authType === "connection_string" ? "postgres://user:pass@host:5432/db" : "sk-… or paste your API key"}
-            className="flex-1 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30"
+            className="h-9 flex-1 rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
             onKeyDown={(e) => { if (e.key === "Enter") void handleSaveSecret(); }}
           />
           <button
             type="button"
             onClick={() => void handleSaveSecret()}
             disabled={saving || !newSecret.trim()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-[12px] font-semibold text-primary-foreground disabled:opacity-40 transition-opacity"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
             {hasSecret ? "Rotate" : "Save Secret"}
           </button>
         </div>
-        <p className="mt-2 text-[10px]" style={{ color: "var(--text-faint)" }}>
+        <p className="mt-2 text-[11px] text-[#9CA3AF]">
           The value is encrypted immediately on submission and never stored in plaintext. After saving, run a connection test to verify.
         </p>
       </SectionCard>
@@ -461,11 +463,11 @@ function NetworkTab({ connection }: { connection: Connection }) {
 
       {/* Private runner note */}
       {np.privateRunnerRequired && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <Server className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+        <div className="flex items-start gap-3 rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] p-4">
+          <Server className="mt-0.5 h-4 w-4 shrink-0 text-[#CA8A04]" />
           <div>
-            <p className="text-[12px] font-semibold text-amber-800">Private Runner Required</p>
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
+            <p className="text-[12.5px] font-semibold text-[#92400E]">Private Runner Required</p>
+            <p className="mt-0.5 text-[12px] leading-[1.55] text-[#6B7280]">
               This host is on a private network. Deploy a Vectorbea private runner inside your network perimeter. The runner has outbound access to your private host and connects back to the Vectorbea control plane.
             </p>
           </div>
@@ -474,11 +476,11 @@ function NetworkTab({ connection }: { connection: Connection }) {
 
       {/* Whitelist note */}
       {np.requireWhitelist && !np.privateRunnerRequired && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+        <div className="flex items-start gap-3 rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] p-4">
+          <Shield className="mt-0.5 h-4 w-4 shrink-0 text-[#CA8A04]" />
           <div>
-            <p className="text-[12px] font-semibold text-amber-800">Firewall Whitelisting Required</p>
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>
+            <p className="text-[12.5px] font-semibold text-[#92400E]">Firewall Whitelisting Required</p>
+            <p className="mt-0.5 text-[12px] leading-[1.55] text-[#6B7280]">
               This host requires inbound access from Vectorbea. Add the outbound IPs below to your firewall allowlist.
             </p>
           </div>
@@ -487,17 +489,16 @@ function NetworkTab({ connection }: { connection: Connection }) {
 
       {/* Outbound IPs */}
       <SectionCard title="Vectorbea Outbound IPs">
-        <p className="mb-3 text-[11px]" style={{ color: "var(--text-faint)" }}>
+        <p className="mb-3 text-[12px] text-[#6B7280]">
           Allow inbound connections from these IPs in your firewall or security group rules.
         </p>
         <div className="flex flex-wrap gap-2 mb-3">
           {VECTORBEE_OUTBOUND_IPS.map(ip => (
             <div
               key={ip}
-              className="flex items-center gap-1.5 rounded-lg border border-border/40 px-3 py-1.5"
-              style={{ background: "var(--surface-2)" }}
+              className="flex items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-[#F7F8F9] px-3 py-1.5"
             >
-              <span className="font-mono text-[12px]" style={{ color: "var(--text-primary)" }}>{ip}</span>
+              <span className="font-mono text-[12px] text-[#0B0D0F]">{ip}</span>
               <CopyButton value={ip} />
             </div>
           ))}
@@ -505,10 +506,9 @@ function NetworkTab({ connection }: { connection: Connection }) {
         <button
           type="button"
           onClick={copyAllIPs}
-          className="flex items-center gap-1.5 rounded-md border border-border/40 px-3 py-1.5 text-[11px] font-medium transition-colors hover:bg-white/5"
-          style={{ color: "var(--text-faint)" }}
+          className="flex items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] px-3 py-1.5 text-[12px] font-medium text-[#4B5563] transition-colors hover:bg-[#F7F8F9]"
         >
-          {copied ? <Check className="h-3 w-3 text-green-400" /> : <ClipboardCopy className="h-3 w-3" />}
+          {copied ? <Check className="h-3 w-3 text-[#007F4E]" /> : <ClipboardCopy className="h-3 w-3" />}
           {copied ? "Copied all IPs" : "Copy all IPs"}
         </button>
       </SectionCard>
@@ -522,10 +522,10 @@ function UsageTab({ connection }: { connection: Connection }) {
   return (
     <div className="space-y-4">
       {!hasUsage && (
-        <div className="flex flex-col items-center py-12 gap-3" style={{ color: "var(--text-faint)" }}>
-          <BarChart3 className="h-8 w-8 opacity-30" />
-          <p className="text-[13px]">Not yet used by any agent or tool.</p>
-          <p className="text-[11px] opacity-70">Usage data will appear here once this connection is referenced.</p>
+        <div className="flex flex-col items-center gap-3 rounded-[12px] border border-dashed border-[#D7DBE0] bg-[#FAFBFB] py-12 text-[#9CA3AF]">
+          <BarChart3 className="h-8 w-8 text-[#C9CED4]" />
+          <p className="text-[13px] font-medium text-[#4B5563]">Not yet used by any agent or tool.</p>
+          <p className="text-[12px]">Usage data will appear here once this connection is referenced.</p>
         </div>
       )}
 
@@ -533,8 +533,8 @@ function UsageTab({ connection }: { connection: Connection }) {
         <SectionCard title={`Agents (${connection.usedByAgentIds.length})`}>
           <div className="space-y-1">
             {connection.usedByAgentIds.map(id => (
-              <div key={id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-white/5">
-                <span className="font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>{id}</span>
+              <div key={id} className="flex items-center gap-2 rounded-[7px] px-2 py-1.5 transition-colors hover:bg-[#F7F8F9]">
+                <span className="font-mono text-[11px] text-[#4B5563]">{id}</span>
               </div>
             ))}
           </div>
@@ -545,8 +545,8 @@ function UsageTab({ connection }: { connection: Connection }) {
         <SectionCard title={`Tools (${connection.usedByToolIds.length})`}>
           <div className="space-y-1">
             {connection.usedByToolIds.map(id => (
-              <div key={id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-white/5">
-                <span className="font-mono text-[11px]" style={{ color: "var(--text-faint)" }}>{id}</span>
+              <div key={id} className="flex items-center gap-2 rounded-[7px] px-2 py-1.5 transition-colors hover:bg-[#F7F8F9]">
+                <span className="font-mono text-[11px] text-[#4B5563]">{id}</span>
               </div>
             ))}
           </div>
@@ -581,31 +581,31 @@ function TestHistoryTab({ connection }: { connection: Connection }) {
 
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center py-12 gap-3" style={{ color: "var(--text-faint)" }}>
-        <Activity className="h-8 w-8 opacity-30" />
-        <p className="text-[13px]">No test history yet.</p>
-        <p className="text-[11px] opacity-70">Run a connection test to see results here.</p>
+      <div className="flex flex-col items-center gap-3 rounded-[12px] border border-dashed border-[#D7DBE0] bg-[#FAFBFB] py-12 text-[#9CA3AF]">
+        <Activity className="h-8 w-8 text-[#C9CED4]" />
+        <p className="text-[13px] font-medium text-[#4B5563]">No test history yet.</p>
+        <p className="text-[12px]">Run a connection test to see results here.</p>
       </div>
     );
   }
 
   return (
     <SectionCard title="Recent Tests">
-      <div className="divide-y divide-border/20">
+      <div className="divide-y divide-[#F1F2F4]">
         {entries.map((entry, i) => (
           <div key={i} className="flex items-center gap-3 py-2.5">
             {entry.status === "ok"
-              ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />
-              : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
+              ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#007F4E]" />
+              : <XCircle className="h-3.5 w-3.5 shrink-0 text-[#DC2626]" />
             }
             <div className="flex-1 min-w-0">
-              <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
+              <p className="text-[12.5px] font-medium text-[#0B0D0F]">
                 {entry.status === "ok" ? "Test passed" : "Test failed"}
-                {entry.latencyMs !== null && <span className="ml-2 text-[11px]" style={{ color: "var(--text-faint)" }}>{entry.latencyMs}ms</span>}
+                {entry.latencyMs !== null && <span className="ml-2 font-mono text-[11px] font-normal text-[#9CA3AF]">{entry.latencyMs}ms</span>}
               </p>
-              {entry.error && <p className="text-[11px] text-red-600">{entry.error}</p>}
+              {entry.error && <p className="text-[11.5px] text-[#DC2626]">{entry.error}</p>}
             </div>
-            <span className="text-[11px] shrink-0" style={{ color: "var(--text-faint)" }}>{formatDate(entry.timestamp)}</span>
+            <span className="shrink-0 text-[11.5px] text-[#9CA3AF]">{formatDate(entry.timestamp)}</span>
           </div>
         ))}
       </div>
@@ -621,21 +621,21 @@ function EventsTab({ connection }: { connection: Connection }) {
 
   return (
     <SectionCard title="Runtime Events">
-      <p className="mb-3 text-[11px]" style={{ color: "var(--text-faint)" }}>
+      <p className="mb-3 text-[12px] text-[#6B7280]">
         Connection events emitted during workflow runs. Full event stream available in the Runs tab.
       </p>
       {events.length === 0 ? (
-        <p className="text-[12px]" style={{ color: "var(--text-faint)" }}>No events recorded yet.</p>
+        <p className="text-[12px] text-[#9CA3AF]">No events recorded yet.</p>
       ) : (
-        <div className="divide-y divide-border/20">
+        <div className="divide-y divide-[#F1F2F4]">
           {events.map((ev, i) => (
             <div key={i} className="py-2.5 flex items-start gap-3">
-              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "#2563EB" }} />
+              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#0F766E]" />
               <div className="flex-1 min-w-0">
-                <span className="font-mono text-[10px]" style={{ color: "#2563EB" }}>{ev.type}</span>
-                <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-faint)" }}>{ev.detail}</p>
+                <span className="font-mono text-[10.5px] font-medium text-[#0F766E]">{ev.type}</span>
+                <p className="mt-0.5 text-[11.5px] text-[#6B7280]">{ev.detail}</p>
               </div>
-              <span className="text-[10px] shrink-0" style={{ color: "var(--text-faint)" }}>{formatDate(ev.ts)}</span>
+              <span className="shrink-0 text-[11px] text-[#9CA3AF]">{formatDate(ev.ts)}</span>
             </div>
           ))}
         </div>
@@ -646,25 +646,25 @@ function EventsTab({ connection }: { connection: Connection }) {
 
 // ─── Settings / Edit tab ─────────────────────────────────────────────────────
 
-const inputCls = "w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/30";
-const selectCls = "w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary/40";
+const inputCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
+const selectCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
 
 function FormField({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-        {label}{required && <span className="ml-0.5 text-red-600">*</span>}
+      <label className="mb-1.5 block text-[12.5px] font-medium text-[#374151]">
+        {label}{required && <span className="ml-0.5 text-[#DC2626]">*</span>}
       </label>
       {children}
-      {hint && <p className="mt-1 text-[10px] text-muted-foreground/40">{hint}</p>}
+      {hint && <p className="mt-1 text-[11px] text-[#9CA3AF]">{hint}</p>}
     </div>
   );
 }
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-card/60 p-4 space-y-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40">{title}</p>
+    <div className="space-y-3 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
+      <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">{title}</p>
       {children}
     </div>
   );
@@ -774,12 +774,12 @@ function SettingsTab({ connection, onUpdated }: { connection: Connection; onUpda
             <option value="production">Production</option>
           </select>
         </FormField>
-        <div className="flex items-center gap-4 pt-1">
-          <div className="text-[11px] text-muted-foreground/60">
-            <span className="font-medium">Type:</span> {connection.type.replace(/_/g, " ")}
+        <div className="flex items-center gap-4 border-t border-[#F1F2F4] pt-3">
+          <div className="text-[12px] text-[#6B7280]">
+            <span className="font-medium text-[#374151]">Type:</span> <span className="capitalize">{connection.type.replace(/_/g, " ")}</span>
           </div>
-          <div className="text-[11px] text-muted-foreground/60">
-            <span className="font-medium">Provider:</span> {connection.provider}
+          <div className="text-[12px] text-[#6B7280]">
+            <span className="font-medium text-[#374151]">Provider:</span> {connection.provider}
           </div>
         </div>
       </FormSection>
@@ -814,12 +814,12 @@ function SettingsTab({ connection, onUpdated }: { connection: Connection; onUpda
           </FormField>
           <div className="flex items-center gap-6">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={sslRequired} onChange={(e) => setSslRequired(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
-              <span className="text-[12px] text-muted-foreground">Require SSL</span>
+              <input type="checkbox" checked={sslRequired} onChange={(e) => setSslRequired(e.target.checked)} className="h-3.5 w-3.5 accent-[#007F4E]" />
+              <span className="text-[12.5px] text-[#374151]">Require SSL</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
-              <span className="text-[12px] text-muted-foreground">Read-only</span>
+              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[#007F4E]" />
+              <span className="text-[12.5px] text-[#374151]">Read-only</span>
             </label>
           </div>
         </FormSection>
@@ -879,7 +879,7 @@ function SettingsTab({ connection, onUpdated }: { connection: Connection; onUpda
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-[13px] font-semibold text-primary-foreground disabled:opacity-40 transition-opacity"
+          className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#0B0D0F] px-5 text-[13px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
         >
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           Save changes
@@ -932,7 +932,7 @@ export default function ConnectionDetailPage() {
   if (loading || !connection) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: "var(--text-faint)" }} />
+        <Loader2 className="h-6 w-6 animate-spin text-[#C9CED4]" />
       </div>
     );
   }
@@ -945,35 +945,31 @@ export default function ConnectionDetailPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
-      <div
-        className="flex shrink-0 items-center gap-3 px-6 py-4"
-        style={{ borderBottom: "1px solid rgba(148,163,184,0.08)" }}
-      >
+      <div className="flex shrink-0 items-center gap-3 border-b border-[#E0E3E6] bg-white px-6 py-4">
         <Link
           href={"/connections" as never}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors hover:bg-white/5"
-          style={{ color: "var(--text-faint)" }}
+          className="flex items-center gap-1.5 rounded-[7px] px-2 py-1 text-[12.5px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F5] hover:text-[#0B0D0F]"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Connections
         </Link>
 
-        <span style={{ color: "var(--text-faint)" }}>/</span>
+        <span className="text-[#C9CED4]">/</span>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <div
-            className="flex h-6 w-6 items-center justify-center rounded-md"
-            style={{ background: `${typeMeta.color}18`, border: `1px solid ${typeMeta.color}30` }}
+            className="flex h-7 w-7 items-center justify-center rounded-[7px]"
+            style={{ background: typeMeta.color }}
           >
-            <TypeIcon className="h-3.5 w-3.5" style={{ color: typeMeta.color }} />
+            <TypeIcon className="h-4 w-4 text-white" />
           </div>
-          <span className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>{connection.name}</span>
+          <span className="text-[14.5px] font-bold tracking-[-0.01em] text-[#0B0D0F]">{connection.name}</span>
           <div
             className="flex items-center gap-1 rounded-full px-2 py-0.5"
             style={{ background: statusMeta.bg, border: `1px solid ${statusMeta.border}` }}
           >
             <StatusIcon className="h-3 w-3" style={{ color: statusMeta.color }} />
-            <span className="text-[10px] font-medium" style={{ color: statusMeta.color }}>{statusMeta.label}</span>
+            <span className="text-[10.5px] font-semibold" style={{ color: statusMeta.color }}>{statusMeta.label}</span>
           </div>
         </div>
 
@@ -983,8 +979,7 @@ export default function ConnectionDetailPage() {
           type="button"
           onClick={() => void handleTest()}
           disabled={testing}
-          className="flex items-center gap-1.5 rounded-md border border-border/40 bg-card/60 px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-          style={{ color: "var(--text-primary)" }}
+          className="flex h-8 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] font-medium text-[#374151] transition-colors hover:bg-[#F7F8F9] disabled:opacity-50"
         >
           {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           Test Connection
@@ -993,8 +988,7 @@ export default function ConnectionDetailPage() {
         <button
           type="button"
           onClick={() => setTab("settings")}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white/5"
-          style={{ background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}
+          className="flex h-8 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-3 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#23272B]"
         >
           <Pencil className="h-3.5 w-3.5" />
           Edit
@@ -1002,10 +996,7 @@ export default function ConnectionDetailPage() {
       </div>
 
       {/* ── Tabs ────────────────────────────────────────────────────────────── */}
-      <div
-        className="flex shrink-0 items-center gap-1 px-6"
-        style={{ borderBottom: "1px solid rgba(148,163,184,0.08)" }}
-      >
+      <div className="flex shrink-0 items-center gap-1 border-b border-[#E0E3E6] bg-white px-6">
         {TABS.map(t => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -1015,12 +1006,11 @@ export default function ConnectionDetailPage() {
               type="button"
               onClick={() => setTab(t.id)}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-2.5 text-[12px] font-medium transition-colors border-b-2 -mb-px",
+                "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-[12.5px] font-medium transition-colors",
                 active
-                  ? "border-[#2563EB] text-[#2563EB]"
-                  : "border-transparent hover:text-foreground"
+                  ? "border-[#007F4E] text-[#006B45]"
+                  : "border-transparent text-[#6B7280] hover:text-[#0B0D0F]"
               )}
-              style={{ color: active ? "#2563EB" : "var(--text-faint)" }}
             >
               <Icon className="h-3.5 w-3.5" />
               {t.label}
@@ -1030,8 +1020,8 @@ export default function ConnectionDetailPage() {
       </div>
 
       {/* ── Body ────────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="mx-auto max-w-3xl">
+      <div className="flex-1 overflow-y-auto bg-[#FAFBFB] px-6 py-5">
+        <div className="mx-auto max-w-4xl">
           {tab === "overview"     && <OverviewTab connection={connection} />}
           {tab === "credentials"  && <CredentialsTab connection={connection} onUpdated={setConnection} />}
           {tab === "network"      && <NetworkTab connection={connection} />}

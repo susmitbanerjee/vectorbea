@@ -479,10 +479,6 @@ export default function OverviewPage() {
                     <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, Math.round((betaUsage.runsToday / betaUsage.maxRunsPerDay) * 100))}%`, background: betaUsage.runsToday >= betaUsage.maxRunsPerDay * 0.8 ? "#DC2626" : "#007F4E", transition: "width 0.4s ease" }} />
                   </div>
                 </div>
-                <div className="flex items-center justify-between border-t border-[#ECEEEF] pt-3">
-                  <span className="text-[12px] text-[#6B7280]">Execution</span>
-                  <span className="rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: betaUsage.canRunRealExecution ? "#E6F4EF" : "#FFFBEB", color: betaUsage.canRunRealExecution ? "#006B45" : "#92400E" }}>{betaUsage.canRunRealExecution ? "Real enabled" : "Simulation only"}</span>
-                </div>
               </div>
             ) : (
               <div className="space-y-2"><div style={{ height: 6, borderRadius: 99, background: "#ECEEEF" }} /><p className="font-mono text-[12px] text-[#9CA3AF]">Loading usage…</p></div>
