@@ -4,6 +4,8 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.NoOpConnectionResolver
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
+import com.vectorbea.worker.durable.HistoryLimitChecker
+import com.vectorbea.worker.durable.StepExecutionGuard
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
@@ -13,14 +15,20 @@ import com.vectorbea.worker.mapping.MappingResolver
 import com.vectorbea.worker.runtime.debug.DebugSnapshotWriter
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
+import com.vectorbea.worker.runtime.executor.NodeExecutor
 import com.vectorbea.worker.runtime.executor.NodeExecutorRegistry
 import com.vectorbea.worker.runtime.executor.NodeResult
 import com.vectorbea.worker.runtime.executor.TransformNodeExecutor
 import com.vectorbea.worker.runtime.graph.*
+import org.slf4j.MDC
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import javax.sql.DataSource
 
 /**
@@ -53,6 +61,16 @@ class WorkflowRuntime(
     connectionResolver: ConnectionResolver? = null,
     dbPoolManager: ClientDbPoolManager? = null,
     private val debugWriter: DebugSnapshotWriter? = null,
+    /** Idempotency guard — prevents duplicate side effects on redelivery/recovery. */
+    private val stepGuard: StepExecutionGuard = StepExecutionGuard(dataSource),
+    /** Optional history-size watchdog — warns, then stops runaway runs. */
+    private val historyChecker: HistoryLimitChecker? = null,
+    /** Default per-node timeout when the node doesn't set its own (0 disables). */
+    private val defaultNodeTimeoutMs: Long =
+        (System.getenv("WORKER_DEFAULT_NODE_TIMEOUT_MS") ?: "120000").toLong(),
+    /** Hard wall-clock budget for a single run (0 disables). */
+    private val maxRunDurationMs: Long =
+        (System.getenv("WORKER_MAX_RUN_DURATION_MS") ?: "600000").toLong(),
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -64,11 +82,39 @@ class WorkflowRuntime(
     )
     private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
 
+    companion object {
+        /** Safety cap on configured per-node retries. */
+        private const val MAX_NODE_RETRIES = 5
+        /** Cap on a single backoff sleep between node retries. */
+        private const val MAX_BACKOFF_MS = 30_000L
+
+        /** Node types with external side effects — guarded for idempotency. */
+        private val GUARDED_NODE_TYPES = setOf(
+            NodeType.LLM, NodeType.HTTP, NodeType.DB_QUERY,
+            NodeType.DB_WRITE, NodeType.TOOL, NodeType.AGENT,
+        )
+    }
+
     // Dedicated pool for parallel branch execution.
-    // Use a cached thread pool so N parallel branches actually run N threads concurrently.
-    // A fixed pool of size 2 on a 2-CPU container would queue branches 3,4 behind 1,2,
-    // making 4-way parallel look sequential to the user.
-    private val branchExecutor: ExecutorService = Executors.newCachedThreadPool()
+    // Threads are created on demand (so N parallel branches actually run N-wide)
+    // but BOUNDED: under saturation CallerRunsPolicy degrades gracefully to
+    // executing the branch on the submitting thread instead of growing without
+    // limit or deadlocking.
+    private val maxBranchThreads =
+        (System.getenv("WORKER_MAX_BRANCH_THREADS") ?: "16").toInt().coerceIn(2, 128)
+    private val branchExecutor: ExecutorService = ThreadPoolExecutor(
+        0, maxBranchThreads, 60L, TimeUnit.SECONDS,
+        SynchronousQueue(),
+        { r -> Thread(r).also { it.name = "wf-branch-${it.id}"; it.isDaemon = false } },
+        ThreadPoolExecutor.CallerRunsPolicy(),
+    )
+
+    // Pool used to enforce per-node execution timeouts. Thread count is naturally
+    // bounded by (worker concurrency × branch threads) since each caller blocks
+    // on its own future.
+    private val nodeTimeoutExecutor: ExecutorService = Executors.newCachedThreadPool { r ->
+        Thread(r).also { it.name = "wf-node-${it.id}"; it.isDaemon = true }
+    }
 
     sealed class ExecutionResult {
         data class Succeeded(val output: Map<String, Any>) : ExecutionResult()
@@ -172,14 +218,15 @@ class WorkflowRuntime(
         } catch (_: Exception) { emptyMap() }
 
         val ctx = RuntimeContext(
-            runId             = runId,
-            workspaceId       = workspaceId,
-            environmentId     = environmentId,
-            workflowVersionId = workflowVersionId,
-            workflowId        = workflowId,
-            workflowInput     = workflowInput,
-            graph             = graph,
-            debugMode         = debugMode,
+            runId                 = runId,
+            workspaceId           = workspaceId,
+            environmentId         = environmentId,
+            workflowVersionId     = workflowVersionId,
+            workflowId            = workflowId,
+            workflowInput         = workflowInput,
+            graph                 = graph,
+            debugMode             = debugMode,
+            forceReexecuteNodeIds = pendingNodeIds,
         )
 
         // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)
@@ -226,8 +273,17 @@ class WorkflowRuntime(
         cancellationCheck: () -> Boolean = { false },
     ): ExecutionResult {
         val maxIterations = graph.nodes.size * 10 + 100 // safety cap
+        val dagStartedAtMs = System.currentTimeMillis()
 
         for (iteration in 0..maxIterations) {
+            // Hard wall-clock budget — a hung node or pathological graph must
+            // not occupy a worker thread indefinitely.
+            if (maxRunDurationMs > 0 && System.currentTimeMillis() - dagStartedAtMs > maxRunDurationMs) {
+                val msg = "Run exceeded maximum duration (${maxRunDurationMs}ms) — aborting"
+                log.error("[runtime] {} [runId={}]", msg, ctx.runId)
+                return ExecutionResult.Failed(msg)
+            }
+
             // Check for cancellation (every 5 iterations to avoid excessive DB reads)
             if (iteration % 5 == 0 && cancellationCheck()) {
                 log.info("[runtime] run cancelled by external request [runId={}]", ctx.runId)
@@ -359,15 +415,144 @@ class WorkflowRuntime(
         else
             registry.executorFor(node)
 
-        val result = try {
-            executor.execute(node, resolvedInputs, ctx)
-        } catch (e: Exception) {
-            NodeResult.Failed(sanitizeError(e))
-        }
+        val result = executeGuardedWithRetry(node, executor, resolvedInputs, ctx, source)
 
         captureNodeResultSnapshot(node, ctx, resolvedInputs, result, nodeStartedAt)
 
         return applyNodeResult(node, result, scheduler, ctx, source, stepOutputView)
+    }
+
+    // ── Guarded execution: idempotency + retry policy + timeout ──────────────
+
+    /**
+     * Execute [node] with three layers of protection:
+     *
+     *  1. Idempotency (side-effecting node types only): before each attempt the
+     *     [StepExecutionGuard] is consulted. If a previous worker already
+     *     completed this node (crash recovery, redelivered message), the cached
+     *     output from [StepOutputStore] is reused and the node is NOT re-executed
+     *     — no duplicate HTTP calls, emails, or DB writes.
+     *     Nodes in [RuntimeContext.forceReexecuteNodeIds] (explicit RETRY_NODE)
+     *     bypass the guard so deliberate retries always run.
+     *
+     *  2. Retry policy: when the node declares retryPolicy.maxAttempts > 0,
+     *     transient failures are retried in-place with exponential backoff
+     *     (capped at [MAX_BACKOFF_MS] per sleep, [MAX_NODE_RETRIES] attempts).
+     *
+     *  3. Timeout: each attempt runs under the node's timeoutPolicy.timeoutMs
+     *     (falling back to [defaultNodeTimeoutMs]) so a hung executor cannot
+     *     occupy a worker thread forever.
+     */
+    private fun executeGuardedWithRetry(
+        node: WorkflowNode,
+        executor: NodeExecutor,
+        resolvedInputs: Map<String, Any>,
+        ctx: RuntimeContext,
+        source: String,
+    ): NodeResult {
+        val guarded = node.nodeType in GUARDED_NODE_TYPES && node.id !in ctx.forceReexecuteNodeIds
+        val maxAttempts = 1 + node.retryPolicy.maxAttempts.coerceIn(0, MAX_NODE_RETRIES)
+
+        var attempt = 0
+        var result: NodeResult = NodeResult.Failed("not executed")
+
+        while (attempt < maxAttempts) {
+            attempt++
+
+            // ── Idempotency check ─────────────────────────────────────────────
+            if (guarded) {
+                val acq = stepGuard.tryAcquire(
+                    ctx.runId, ctx.workspaceId, ctx.environmentId, node.id, attempt)
+                if (acq.alreadyCompleted) {
+                    val cached = runCatching { stepOutputStore.loadRaw(ctx.runId, node.id) }.getOrNull()
+                    if (cached != null) {
+                        log.info("[runtime] node already completed in a previous attempt — using cached output " +
+                            "[nodeId={}, runId={}, attempt={}]", node.id, ctx.runId, attempt)
+                        emitEvent(ctx, EventType.STEP_SKIPPED, "running", source,
+                            title   = "Skipped re-execution: ${nodeLabel(node)}",
+                            summary = "Node completed in a previous attempt — cached output reused (idempotency guard)",
+                            stepId  = node.id)
+                        return NodeResult.Completed(cached)
+                    }
+                    // Completed but no cached output (persist failed earlier) — fall through and re-execute.
+                    log.warn("[runtime] guard says completed but no cached output — re-executing [nodeId={}, runId={}]",
+                        node.id, ctx.runId)
+                }
+                // ALREADY_RUNNING: with run leases another live executor should not exist;
+                // a stale 'running' row is from a crashed attempt — proceed (fail-open).
+            }
+
+            // ── Execute with timeout ──────────────────────────────────────────
+            result = executeWithTimeout(node, executor, resolvedInputs, ctx)
+
+            when (result) {
+                is NodeResult.Completed -> {
+                    if (guarded) stepGuard.markCompleted(ctx.runId, node.id, attempt)
+                    return result
+                }
+                is NodeResult.ApprovalPaused, is NodeResult.Unsupported -> return result
+                is NodeResult.Failed -> {
+                    if (guarded) stepGuard.markFailed(ctx.runId, node.id, attempt,
+                        """{"reason":${jsonStr(result.reason.take(300))}}""")
+                    if (attempt < maxAttempts) {
+                        val backoff = (node.retryPolicy.backoffMs *
+                            Math.pow(node.retryPolicy.backoffMultiplier, (attempt - 1).toDouble()))
+                            .toLong().coerceIn(100L, MAX_BACKOFF_MS)
+                        log.warn("[runtime] node failed — retrying {}/{} after {}ms [nodeId={}, runId={}]: {}",
+                            attempt, maxAttempts - 1, backoff, node.id, ctx.runId, result.reason.take(120))
+                        emitEvent(ctx, EventType.RETRY_STARTED, "running", source,
+                            title   = "Retrying: ${nodeLabel(node)} (attempt ${attempt + 1}/$maxAttempts)",
+                            summary = "Previous attempt failed: ${result.reason.take(150)}. Backing off ${backoff}ms.",
+                            stepId  = node.id)
+                        try { Thread.sleep(backoff) } catch (e: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            return NodeResult.Failed("Retry interrupted for node '${node.id}'")
+                        }
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    /** Run a single executor attempt under a wall-clock timeout. */
+    private fun executeWithTimeout(
+        node: WorkflowNode,
+        executor: NodeExecutor,
+        resolvedInputs: Map<String, Any>,
+        ctx: RuntimeContext,
+    ): NodeResult {
+        val timeoutMs = node.timeoutPolicy.timeoutMs.takeIf { it > 0 } ?: defaultNodeTimeoutMs
+        if (timeoutMs <= 0) {
+            // Timeouts disabled — execute inline
+            return try { executor.execute(node, resolvedInputs, ctx) }
+            catch (e: Exception) { NodeResult.Failed(sanitizeError(e)) }
+        }
+
+        val mdc = MDC.getCopyOfContextMap()
+        val future = nodeTimeoutExecutor.submit<NodeResult> {
+            val previous = MDC.getCopyOfContextMap()
+            if (mdc != null) MDC.setContextMap(mdc)
+            try {
+                executor.execute(node, resolvedInputs, ctx)
+            } finally {
+                if (previous != null) MDC.setContextMap(previous) else MDC.clear()
+            }
+        }
+        return try {
+            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            future.cancel(true)
+            log.error("[runtime] node timed out after {}ms [nodeId={}, runId={}]", timeoutMs, node.id, ctx.runId)
+            NodeResult.Failed("Node '${node.id}' timed out after ${timeoutMs}ms")
+        } catch (e: java.util.concurrent.ExecutionException) {
+            val cause = e.cause
+            NodeResult.Failed(sanitizeError(if (cause is Exception) cause else Exception(e.message)))
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            future.cancel(true)
+            NodeResult.Failed("Node '${node.id}' execution interrupted")
+        }
     }
 
     // ── Debug snapshot capture (Debug Run only) ──────────────────────────────
@@ -598,7 +783,9 @@ class WorkflowRuntime(
                 writeCheckpoint(node.id, ctx, source)
             }
 
-            null // continue
+            // History watchdog — warn early, stop runaway runs before they
+            // bloat run_events beyond operability. Null → continue the DAG.
+            enforceHistoryLimits(ctx, source)
         }
 
         is NodeResult.Failed -> {
@@ -898,6 +1085,33 @@ class WorkflowRuntime(
         }.onFailure { e ->
             log.warn("[runtime] checkpoint write failed [nodeId={}, runId={}]: {}", nodeId, ctx.runId, e.message)
         }
+    }
+
+    /**
+     * Check run-history growth against configured limits.
+     * Returns a Failed result when the run MUST stop, null to continue.
+     */
+    private fun enforceHistoryLimits(ctx: RuntimeContext, source: String): ExecutionResult.Failed? {
+        val checker = historyChecker ?: return null
+        val res = runCatching { checker.check(ctx.runId) }.getOrNull() ?: return null
+
+        if (res.warningTriggered) {
+            emitEvent(ctx, EventType.HISTORY_LIMIT_WARNING, "running", source,
+                title   = "Run history approaching limit",
+                summary = "events=${res.eventCount}, size=${res.sizeBytes / 1024}KB — consider splitting this workflow")
+            emitEvent(ctx, EventType.CONTINUE_AS_NEW_RECOMMENDED, "running", source,
+                title   = "Continue-as-new recommended",
+                summary = "Run history is large; restarting the run with carried-over state is recommended.")
+        }
+
+        if (res.status == HistoryLimitChecker.LimitStatus.REQUIRED) {
+            val msg = "Run history exceeded the maximum allowed size " +
+                "(events=${res.eventCount}, size=${res.sizeBytes / 1024}KB). " +
+                "Execution stopped to protect the platform — split the workflow into smaller runs."
+            log.error("[runtime] {} [runId={}]", msg, ctx.runId)
+            return ExecutionResult.Failed(msg)
+        }
+        return null
     }
 
     private fun hasRunningBranches(ctx: RuntimeContext, graph: WorkflowGraph): Boolean =

@@ -1,5 +1,6 @@
 package com.vectorbea.worker.runtime
 
+import com.vectorbea.worker.durable.RunLeaseManager
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
@@ -18,6 +19,9 @@ import java.sql.PreparedStatement
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -40,8 +44,14 @@ class RunProcessor(
     private val checkpointStore: CheckpointStore = CheckpointStore(dataSource),
     private val recoveryService: WorkerRecoveryService? = try { WorkerRecoveryService(dataSource) } catch (_: Exception) { null },
     private val telemetry: TelemetryClient? = null,
+    private val leaseManager: RunLeaseManager = RunLeaseManager(dataSource),
 ) {
     private val log = logger()
+
+    /** Shared scheduler for periodic lease renewal — one tick per in-flight run. */
+    private val leaseRenewer = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "lease-renewer").also { it.isDaemon = true }
+    }
 
     /**
      * Entry point — called from the consumer thread pool for each job.
@@ -63,6 +73,32 @@ class RunProcessor(
         log.info("[processor] claimed job [type={}, runId={}, retry={}]",
             job.jobType, job.runId, job.retryCount)
 
+        // ── Run lease: exclusive execution ownership ──────────────────────────
+        // Acquire BEFORE any status transition so a redelivered/duplicate job
+        // for a run another worker is actively executing is dropped here.
+        // If we can't determine the workspace (run missing), skip the lease and
+        // let the handler log the missing run.
+        val leaseRun = runCatching { loadRun(job.runId) }.getOrNull()
+        var lease: RunLeaseManager.Lease? = null
+        var renewal: ScheduledFuture<*>? = null
+        if (leaseRun != null) {
+            val acquired = leaseManager.acquire(job.runId, leaseRun.workspaceId, workerId)
+            if (acquired == null) {
+                log.warn("[processor] lease held by another worker — skipping job [runId={}, type={}]",
+                    job.runId, job.jobType)
+                WorkerMetrics.activeTasks.dec()
+                heartbeat.taskFinished()
+                mdcClearAll()
+                return
+            }
+            lease = acquired
+            val renewEveryMs = (leaseManager.leaseTtlSeconds * 1000L / 3).coerceAtLeast(5_000L)
+            renewal = leaseRenewer.scheduleWithFixedDelay({
+                val ok = leaseManager.renew(job.runId, workerId, acquired.token)
+                if (!ok) log.warn("[processor] lease renewal failed [runId={}]", job.runId)
+            }, renewEveryMs, renewEveryMs, TimeUnit.MILLISECONDS)
+        }
+
         try {
             when (job.jobType) {
                 WorkflowRunJob.JobType.START_RUN  -> processStartRun(job, start)
@@ -80,6 +116,9 @@ class RunProcessor(
                 job.runId, durationMs, e)
             runCatching { markRunFailed(job, sanitizeError(e), start) }
         } finally {
+            renewal?.cancel(false)
+            if (lease != null) leaseManager.release(job.runId, workerId)
+            eventStore.forgetRun(job.runId)
             WorkerMetrics.activeTasks.dec()
             heartbeat.taskFinished()
             mdcClearAll()
@@ -136,7 +175,9 @@ class RunProcessor(
             return
         }
 
-        // 2. Transition: queued → running
+        // 2. Transition: queued → running. The CAS is authoritative: if it fails,
+        // the run was already claimed (duplicate/redelivered message) or reached a
+        // terminal state. Executing anyway would double-run side effects — bail out.
         val updated = updateRunStatus(
             runId      = job.runId,
             status     = "running",
@@ -145,9 +186,9 @@ class RunProcessor(
             fromStatus = "queued",
         )
         if (!updated) {
-            log.warn("[processor] could not transition run to RUNNING (already running or not found?) [runId={}]",
-                job.runId)
-            // Still continue — another worker may have grabbed it; emit a started event cautiously
+            log.warn("[processor] START_RUN skipped — run not in 'queued' state (current={}) [runId={}]. " +
+                "Likely a duplicate or redelivered message.", loadRun(job.runId)?.status, job.runId)
+            return
         }
 
         // 3. Emit RUN_STARTED
@@ -229,14 +270,21 @@ class RunProcessor(
             return
         }
 
-        // Transition from waiting_for_approval → running (best-effort CAS)
-        updateRunStatus(
-            runId      = job.runId,
-            status     = "running",
-            startedAt  = start,
-            workerId   = workerId,
-            fromStatus = "waiting_for_approval",
+        // Transition → running from any resumable state. The CAS is authoritative:
+        // if the run is already 'running' another worker owns it; if terminal, the
+        // resume is stale. Either way, executing would duplicate side effects.
+        val resumed = updateRunStatus(
+            runId        = job.runId,
+            status       = "running",
+            startedAt    = start,
+            workerId     = workerId,
+            fromStatuses = listOf("waiting_for_approval", "recovering", "waiting_for_timer", "queued"),
         )
+        if (!resumed) {
+            log.warn("[processor] RESUME_RUN skipped — run not in a resumable state (current={}) [runId={}]",
+                loadRun(job.runId)?.status, job.runId)
+            return
+        }
 
         eventStore.appendEvent(RunEvent(
             runId         = job.runId,
@@ -314,13 +362,18 @@ class RunProcessor(
             return
         }
 
-        updateRunStatus(
+        val claimed = updateRunStatus(
             runId      = job.runId,
             status     = "running",
             startedAt  = start,
             workerId   = workerId,
             fromStatus = run.status,
         )
+        if (!claimed) {
+            log.warn("[processor] RETRY_NODE skipped — run status changed concurrently (expected={}, current={}) [runId={}]",
+                run.status, loadRun(job.runId)?.status, job.runId)
+            return
+        }
 
         eventStore.appendEvent(RunEvent(
             runId         = job.runId,
@@ -382,13 +435,18 @@ class RunProcessor(
         }
         if (!verifyWorkspaceMatch(job, run)) return
 
-        updateRunStatus(
+        val claimed = updateRunStatus(
             runId      = job.runId,
             status     = "running",
             startedAt  = start,
             workerId   = workerId,
             fromStatus = run.status,
         )
+        if (!claimed) {
+            log.warn("[processor] REPLAY_RUN skipped — run status changed concurrently (expected={}, current={}) [runId={}]",
+                run.status, loadRun(job.runId)?.status, job.runId)
+            return
+        }
 
         eventStore.appendEvent(RunEvent(
             runId         = job.runId,
@@ -640,25 +698,27 @@ class RunProcessor(
             }
         }
 
-    /** CAS-style update: only transitions from [fromStatus]→[status] to prevent double-claiming. */
+    /** CAS-style update: only transitions from one of [fromStatuses]→[status] to prevent double-claiming. */
     private fun updateRunStatus(
         runId: UUID,
         status: String,
         startedAt: Instant,
         workerId: String,
         fromStatus: String = "queued",
+        fromStatuses: List<String> = listOf(fromStatus),
     ): Boolean =
         dataSource.connection.use { conn ->
+            val placeholders = fromStatuses.joinToString(",") { "?" }
             conn.prepareStatement(
                 """UPDATE agent_runs SET
                    status = ?, started_at = ?, current_step_id = ?, updated_at = now()
-                   WHERE id = ? AND status = ?"""
+                   WHERE id = ? AND status IN ($placeholders)"""
             ).use { stmt ->
                 stmt.setString(1, status)
                 stmt.setTimestamp(2, Timestamp.from(startedAt))
                 stmt.setString(3, "worker:$workerId")
                 stmt.setObject(4, runId)
-                stmt.setString(5, fromStatus)
+                fromStatuses.forEachIndexed { i, s -> stmt.setString(5 + i, s) }
                 stmt.executeUpdate() > 0
             }
         }
@@ -670,11 +730,15 @@ class RunProcessor(
         durationMs: Long,
         outputJson: String?,
         errorJson: String? = null,
-    ) {
-        dataSource.connection.use { conn ->
+    ): Boolean {
+        return dataSource.connection.use { conn ->
             // Aggregate token_count and estimated_cost from run_events so the
             // agent_runs row reflects total usage for the entire run.
             // run_events stores per-LLM-call tokens; SUM collapses them here.
+            //
+            // Terminal-state guard: a run that already reached succeeded/failed/
+            // cancelled must never be overwritten — the loser of a duplicate
+            // execution would otherwise clobber the winner's result.
             conn.prepareStatement(
                 """UPDATE agent_runs SET
                    status = ?, completed_at = ?, duration_ms = ?,
@@ -687,7 +751,8 @@ class RunProcessor(
                        SELECT COALESCE(SUM(estimated_cost), 0.0)
                        FROM run_events WHERE run_id = ? AND estimated_cost IS NOT NULL
                    )
-                   WHERE id = ?"""
+                   WHERE id = ?
+                     AND status NOT IN ('succeeded', 'failed', 'cancelled')"""
             ).use { stmt ->
                 stmt.setString(1, status)
                 stmt.setTimestamp(2, Timestamp.from(completedAt))
@@ -697,7 +762,12 @@ class RunProcessor(
                 stmt.setObject(6, runId)   // token_count subquery
                 stmt.setObject(7, runId)   // estimated_cost subquery
                 stmt.setObject(8, runId)   // WHERE id
-                stmt.executeUpdate()
+                val updated = stmt.executeUpdate() > 0
+                if (!updated) {
+                    log.warn("[processor] terminal update skipped — run already terminal [runId={}, attemptedStatus={}]",
+                        runId, status)
+                }
+                updated
             }
         }
     }

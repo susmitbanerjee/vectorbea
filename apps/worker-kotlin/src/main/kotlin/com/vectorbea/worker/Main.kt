@@ -118,6 +118,14 @@ fun main() {
     )
     log.info("[startup] connector infrastructure ready")
 
+    // Durable execution primitives — wired INTO the runtime/processor:
+    //  - leaseManager:  exclusive run ownership (acquired per job, renewed, released)
+    //  - stepGuard:     node-level idempotency across crash recovery / redelivery
+    //  - historyChecker: event-history growth watchdog
+    val leaseManager   = RunLeaseManager(database.dataSource)
+    val historyChecker = HistoryLimitChecker(database.dataSource)
+    val stepGuard      = StepExecutionGuard(database.dataSource)
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -128,6 +136,8 @@ fun main() {
         connectionResolver = connectionResolver,
         dbPoolManager      = dbPoolManager,
         debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
+        stepGuard          = stepGuard,
+        historyChecker     = historyChecker,
     )
     val telemetry = TelemetryClient.fromEnv()
     val processor = RunProcessor(
@@ -138,8 +148,9 @@ fun main() {
         runtime         = workflowRuntime,
         checkpointStore = checkpointStore,
         telemetry       = telemetry,
+        leaseManager    = leaseManager,
     )
-    log.info("[startup] run processor ready")
+    log.info("[startup] run processor ready (lease + idempotency guards active)")
 
     // ── 7. Queue consumer ─────────────────────────────────────────────────────
     val consumer = WorkflowQueueConsumer(config, redis.commands, processor)
@@ -155,10 +166,6 @@ fun main() {
     consumer.start()
 
     // ── Durable execution services ────────────────────────────────────────────
-    val leaseManager = RunLeaseManager(database.dataSource)
-    val historyChecker = HistoryLimitChecker(database.dataSource)
-    val stepGuard = StepExecutionGuard(database.dataSource)
-
     // Timer scheduler — fires durable timers without blocking workers
     val timerScheduler = TimerScheduler(
         dataSource = database.dataSource,

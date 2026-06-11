@@ -222,7 +222,9 @@ private fun stubHttp(statusCode: Int, body: String): HttpClient {
             responseBodyHandler: HttpResponse.BodyHandler<T>,
         ): HttpResponse<T> = object : HttpResponse<T> {
             override fun statusCode()  = statusCode
-            override fun body(): T     = body as T
+            // Executor reads the body as a bounded stream (BodyHandlers.ofInputStream)
+            @Suppress("UNCHECKED_CAST")
+            override fun body(): T     = body.byteInputStream() as T
             override fun headers()     = java.net.http.HttpHeaders.of(emptyMap()) { _, _ -> true }
             override fun request()     = request
             override fun previousResponse() = java.util.Optional.empty<HttpResponse<T>>()

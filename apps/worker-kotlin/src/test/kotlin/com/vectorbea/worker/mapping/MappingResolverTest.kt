@@ -59,11 +59,12 @@ class MappingResolverTest {
     }
 
     @Test
-    fun `throws for missing workflow input key`() {
+    fun `missing workflow input key resolves to null so callers can default it`() {
+        // Intentional leniency: triggers without input must not hard-fail mapping —
+        // the caller supplies defaults or passes NULL (e.g. SQL params).
         val c = ctx(input = emptyMap())
-        assertThrows<MappingException> {
-            MappingResolver.resolveTemplateString("{{ workflow.input.missing }}", c, view())
-        }
+        val result = MappingResolver.resolveTemplateString("{{ workflow.input.missing }}", c, view())
+        assertNull(result)
     }
 
     // ── run.* resolution ──────────────────────────────────────────────────────

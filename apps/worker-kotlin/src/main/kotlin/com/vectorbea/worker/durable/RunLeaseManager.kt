@@ -18,7 +18,7 @@ import javax.sql.DataSource
  */
 class RunLeaseManager(
     private val dataSource: DataSource,
-    private val leaseTtlSeconds: Long = (System.getenv("WORKER_LEASE_TTL_SECONDS") ?: "60").toLong(),
+    val leaseTtlSeconds: Long = (System.getenv("WORKER_LEASE_TTL_SECONDS") ?: "60").toLong(),
 ) {
     private val log = logger()
 
@@ -100,8 +100,14 @@ class RunLeaseManager(
     }
 
     /**
-     * Find runs that appear stale: status RUNNING but lease expired or missing.
-     * Called by the recovery loop to detect crashed workers.
+     * Find runs that appear stale: status RUNNING and either
+     *   - the lease exists but expired more than 30s ago (worker crashed mid-run), or
+     *   - no lease exists AND the run has made no progress for 120s
+     *     (worker crashed between claiming the job and acquiring the lease).
+     *
+     * A merely missing lease is NOT enough on its own: every event append bumps
+     * agent_runs.updated_at, so an actively-executing run is never "quiet" —
+     * this prevents the recovery loop from double-executing healthy runs.
      */
     fun findStaleRuns(workspaceId: UUID? = null, limit: Int = 20): List<StaleLease> {
         return try {
@@ -114,7 +120,10 @@ class RunLeaseManager(
                        FROM agent_runs ar
                        LEFT JOIN run_leases rl ON rl.run_id = ar.id
                        WHERE ar.status = 'running'
-                         AND (rl.id IS NULL OR rl.expires_at < now() - INTERVAL '30 seconds')
+                         AND (
+                              (rl.id IS NOT NULL AND rl.expires_at < now() - INTERVAL '30 seconds')
+                           OR (rl.id IS NULL     AND ar.updated_at < now() - INTERVAL '120 seconds')
+                         )
                          $wsFilter
                        ORDER BY ar.updated_at ASC
                        LIMIT $limit"""

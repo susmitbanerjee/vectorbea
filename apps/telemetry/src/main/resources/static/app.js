@@ -92,7 +92,11 @@ const App = (() => {
   function updateEnvBadge() {
     const badge = document.getElementById('env-badge');
     badge.className = `env-badge ${currentEnv === 'all' ? 'prod' : currentEnv}`;
-    badge.textContent = `● ${currentEnv}`;
+    badge.innerHTML = `<span class="dot"></span> ${currentEnv}`;
+  }
+
+  function icon(id, cls = 'ic') {
+    return `<svg class="${cls}"><use href="#${id}"/></svg>`;
   }
 
   function setHeader(page) {
@@ -194,7 +198,7 @@ const App = (() => {
           </div>
         </div>
         ${services.length === 0
-          ? `<div class="empty"><div class="icon">⚙️</div><p>No snapshots yet — wire up service collectors to see health data.</p></div>`
+          ? emptyBlock('i-engineering', 'No service snapshots yet', 'Wire up service collectors to see health data.')
           : `<div class="services-grid">${services.map(serviceCard).join('')}</div>`}
       </div>
 
@@ -252,8 +256,8 @@ const App = (() => {
             <tbody>
               ${topEvents.slice(0, 20).map(e => `
                 <tr>
-                  <td><code style="font-size:12px;color:var(--accent)">${e.name}</code></td>
-                  <td><span class="tag purple">${e.category}</span></td>
+                  <td><code>${e.name}</code></td>
+                  <td><span class="tag teal">${e.category}</span></td>
                   <td><strong>${fmt(e.count)}</strong></td>
                 </tr>`).join('')}
             </tbody>
@@ -262,7 +266,7 @@ const App = (() => {
       </div>` : `
       <div class="section">
         <div class="section-header"><div class="section-title">Top Events</div></div>
-        <div class="empty"><div class="icon">📊</div><p>No events yet. Wire up the telemetry clients in api-kotlin, worker-kotlin, and web.</p></div>
+        ${emptyBlock('i-business', 'No events yet', 'Wire up the telemetry clients in api-kotlin, worker-kotlin, and web.')}
       </div>`}
     `);
   }
@@ -281,10 +285,10 @@ const App = (() => {
             <div class="section-title">Service Health</div>
             <div class="section-sub">Latest snapshot per service · Full traces in Grafana</div>
           </div>
-          <a href="#" onclick="App.openGrafana()" class="btn btn-ghost btn-sm">Open Grafana ↗</a>
+          <a href="#" onclick="App.openGrafana()" class="btn btn-ghost btn-sm link-ext">Open Grafana ${icon('i-external', 'ic ic-sm')}</a>
         </div>
         ${services.length === 0
-          ? emptyBlock('⚙️', 'No service snapshots yet', 'Deploy api-kotlin and worker-kotlin with TELEMETRY_ENABLED=true to see health data here.')
+          ? emptyBlock('i-engineering', 'No service snapshots yet', 'Deploy api-kotlin and worker-kotlin with TELEMETRY_ENABLED=true to see health data here.')
           : `<div class="services-grid">${services.map(serviceCard).join('')}</div>`}
       </div>
 
@@ -296,7 +300,7 @@ const App = (() => {
           </div>
         </div>
         ${incidents.length === 0
-          ? emptyBlock('✅', 'No open incidents', 'All clear.')
+          ? emptyBlock('i-check', 'No open incidents', 'All clear.')
           : `<div class="table-wrap">${incidentTable(incidents)}</div>`}
       </div>
 
@@ -385,7 +389,7 @@ const App = (() => {
           ${card('Plans Generated', f['architect_plan_generated'], '', '')}
           ${card('Plans Approved', f['architect_plan_approved'], '', 'green')}
           ${card('Workflows Created', f['architect_workflow_created'], '', 'green')}
-          ${card('Goal→Workflow Rate', pct(f['architect_workflow_created'], f['architect_goal_submitted']), '', 'accent')}
+          ${card('Goal-to-Workflow Rate', pct(f['architect_workflow_created'], f['architect_goal_submitted']), '', 'accent')}
         </div>
       </div>
     `);
@@ -424,14 +428,14 @@ const App = (() => {
             <tbody>
               ${events.map(e => `
                 <tr>
-                  <td><code style="font-size:12px;color:var(--accent)">${e.name}</code></td>
-                  <td><span class="tag purple">${e.category}</span></td>
+                  <td><code>${e.name}</code></td>
+                  <td><span class="tag teal">${e.category}</span></td>
                   <td><strong>${fmt(e.count)}</strong></td>
                 </tr>`).join('')}
             </tbody>
           </table>
         </div>
-      </div>` : emptyBlock('↻', 'No workflow events yet', 'Wire up the telemetry clients to start tracking workflow activity.')}
+      </div>` : emptyBlock('i-workflows', 'No workflow events yet', 'Wire up the telemetry clients to start tracking workflow activity.')}
     `);
   }
 
@@ -484,12 +488,12 @@ const App = (() => {
 
     setContent(`
       <div class="disabled-banner">
-        <div class="icon">💳</div>
+        <div class="banner-icon">${icon('i-revenue', 'ic-lg')}</div>
         <h2>${data.message || 'Monetization is disabled.'}</h2>
         <p>Revenue telemetry schema is scaffolded and ready. Activation will happen when
         business account and compliance requirements are met. No Stripe or Razorpay
         integration is currently active.</p>
-        <div class="schema-badge">✓ Schema ready — revenue_events &amp; revenue_daily_rollups</div>
+        <div class="schema-badge">${icon('i-check', 'ic ic-sm')} Schema ready — revenue_events &amp; revenue_daily_rollups</div>
       </div>
 
       <div class="section">
@@ -531,15 +535,15 @@ const App = (() => {
   }
 
   function loading() {
-    return `<div class="loading"><div class="spinner"></div> Loading...</div>`;
+    return `<div class="loading"><div class="spinner"></div> Loading…</div>`;
   }
 
   function errorBlock(msg) {
-    return `<div class="empty"><div class="icon">⚠️</div><p style="color:var(--red)">${msg}</p></div>`;
+    return `<div class="empty"><div class="empty-icon">${icon('i-alert', 'ic-lg')}</div><strong>Something went wrong</strong><p style="color:var(--red)">${msg}</p></div>`;
   }
 
-  function emptyBlock(icon, title, sub) {
-    return `<div class="empty"><div class="icon">${icon}</div><strong>${title}</strong><p style="margin-top:6px">${sub}</p></div>`;
+  function emptyBlock(iconId, title, sub) {
+    return `<div class="empty"><div class="empty-icon">${icon(iconId, 'ic-lg')}</div><strong>${title}</strong><p>${sub}</p></div>`;
   }
 
   function card(label, value, sub, colorClass) {
@@ -565,7 +569,7 @@ const App = (() => {
     return `<div class="service-card">
       <div class="service-header">
         <div class="service-name">${s.serviceName || 'unknown'}</div>
-        <span><span class="status-dot ${dotClass}"></span>${s.status || 'unknown'}</span>
+        <span class="status-chip"><span class="status-dot ${dotClass}"></span>${s.status || 'unknown'}</span>
       </div>
       <div class="service-metrics">
         ${s.p95LatencyMs != null ? metricRow('p95 latency', `${s.p95LatencyMs}ms`) : ''}
@@ -628,7 +632,7 @@ const App = (() => {
       <div class="card-label">Grafana</div>
       <div style="font-size:14px;font-weight:600;margin-bottom:4px">${title}</div>
       <div class="card-sub">${sub}</div>
-      <div style="margin-top:8px;font-size:11px;color:var(--accent)">Open ↗</div>
+      <div class="link-ext" style="margin-top:8px;font-size:11px;color:var(--accent)">Open ${icon('i-external', 'ic ic-sm')}</div>
     </div>`;
   }
 
@@ -669,7 +673,7 @@ const App = (() => {
 
   function toast(msg, type = 'success') {
     const el = document.getElementById('toast');
-    el.textContent = (type === 'success' ? '✓ ' : '⚠ ') + msg;
+    el.innerHTML = `${icon(type === 'success' ? 'i-check' : 'i-alert', 'ic ic-sm')}<span>${msg}</span>`;
     el.className = `toast ${type} show`;
     setTimeout(() => { el.className = 'toast'; }, 3000);
   }

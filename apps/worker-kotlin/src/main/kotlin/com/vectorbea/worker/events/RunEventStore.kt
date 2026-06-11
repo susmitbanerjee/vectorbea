@@ -194,6 +194,14 @@ open class RunEventStore(
         return seq
     }
 
+    /**
+     * Drop the per-run sequence lock once a run reaches a terminal state.
+     * Without this the lock map grows for the lifetime of the JVM.
+     */
+    open fun forgetRun(runId: UUID) {
+        runLocks.remove(runId)
+    }
+
     // ── DB insert ─────────────────────────────────────────────────────────────
 
     /**
@@ -216,11 +224,29 @@ open class RunEventStore(
      *   exhausted by event writes. Zero dropped events, no deadlock.
      */
     private fun insertEvent(event: RunEvent): Int {
-        // Get (or create) the per-run lock — ~48 bytes per entry, negligible
+        // Get (or create) the per-run lock — ~48 bytes per entry; evicted on run
+        // completion via [forgetRun].
         val lock = runLocks.computeIfAbsent(event.runId) { java.util.concurrent.locks.ReentrantLock() }
         lock.lock()
         try {
-            return doInsert(event)
+            // The in-memory lock serializes writers within THIS worker only.
+            // If another worker writes events for the same run concurrently
+            // (e.g. a brief lease handover), the UNIQUE(run_id, sequence)
+            // constraint trips — retry with a freshly read sequence instead
+            // of dropping the event.
+            var lastError: Exception? = null
+            repeat(3) { attempt ->
+                try {
+                    return doInsert(event)
+                } catch (e: java.sql.SQLException) {
+                    if (e.sqlState == "23505") { // unique_violation — sequence race with another worker
+                        lastError = e
+                        log.warn("[events] sequence conflict, retrying ({}/3) [runId={}, type={}]",
+                            attempt + 1, event.runId, event.type.value)
+                    } else throw e
+                }
+            }
+            throw lastError ?: IllegalStateException("event insert failed after retries")
         } catch (e: Exception) {
             log.error("[events] failed to insert event [runId={}, type={}]: {}",
                 event.runId, event.type.value, e.message)

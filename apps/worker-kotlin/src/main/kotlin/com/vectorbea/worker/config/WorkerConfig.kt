@@ -76,13 +76,19 @@ data class WorkerConfig(
                 ?: "worker-${java.net.InetAddress.getLocalHost().hostName}-${ProcessHandle.current().pid()}"
             val workerName = env("WORKER_NAME") ?: workerId
 
+            val concurrency = env("WORKER_CONCURRENCY")?.toIntOrNull()?.coerceIn(1, 32) ?: 4
+
             val config = WorkerConfig(
                 workerId = workerId,
                 workerName = workerName,
                 appEnv = appEnv,
                 version = env("APP_VERSION") ?: "0.1.0",
                 dbUrl = dbUrl ?: "jdbc:postgresql://localhost:5432/vectorbea",
-                dbMaxPoolSize = env("DB_POOL_MAX_SIZE")?.toIntOrNull() ?: 5,
+                // Each in-flight run needs several short-lived connections (status,
+                // events, checkpoints, step outputs) plus background loops
+                // (heartbeat, timers, crash recovery). Size the pool to the
+                // concurrency so event writes don't starve under load.
+                dbMaxPoolSize = env("DB_POOL_MAX_SIZE")?.toIntOrNull() ?: (concurrency * 2 + 6),
                 dbConnectionTimeoutMs = env("DB_CONNECTION_TIMEOUT_MS")?.toLongOrNull() ?: 30_000L,
                 redisUrl = redisUrl ?: "redis://localhost:6379",
                 redisTlsEnabled = env("REDIS_TLS_ENABLED")?.lowercase() == "true",
@@ -90,7 +96,7 @@ data class WorkerConfig(
                 secretEncryptionKey = secretKey,
                 queueStream = env("WORKER_QUEUE_STREAM") ?: "workflow-runs",
                 queueGroup = env("WORKER_QUEUE_GROUP") ?: "workflow-workers",
-                concurrency = env("WORKER_CONCURRENCY")?.toIntOrNull()?.coerceIn(1, 32) ?: 4,
+                concurrency = concurrency,
                 pollBlockMs = env("WORKER_POLL_BLOCK_MS")?.toLongOrNull() ?: 5_000L,
                 pollBatchSize = env("WORKER_POLL_BATCH_SIZE")?.toIntOrNull()?.coerceIn(1, 50) ?: 10,
                 heartbeatIntervalMs = env("WORKER_HEARTBEAT_INTERVAL_MS")?.toLongOrNull() ?: 15_000L,

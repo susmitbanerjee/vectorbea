@@ -81,8 +81,8 @@ export function Mermaid({ chart, encodedChart }: { chart?: string; encodedChart?
 
   if (error) {
     return (
-      <div className="my-6 overflow-x-auto rounded-xl border border-amber-300 bg-amber-50 p-4">
-        <p className="mb-2 text-xs font-medium text-amber-800">
+      <div className="my-6 overflow-x-auto rounded-xl border border-red-200 bg-red-50 p-4">
+        <p className="mb-2 text-xs font-medium text-red-700">
           Diagram failed to render: {error}
         </p>
         <pre className="overflow-x-auto text-xs text-slate-500">{resolvedChart}</pre>

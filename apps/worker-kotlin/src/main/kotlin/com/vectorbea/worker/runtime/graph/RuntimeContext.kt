@@ -30,6 +30,11 @@ class RuntimeContext(
     val graph: WorkflowGraph,
     /** True for "Debug Run" — when set, the runtime captures per-node debug snapshots. */
     val debugMode: Boolean = false,
+    /**
+     * Nodes the operator explicitly asked to re-execute (RETRY_NODE / resume overrides).
+     * The step-idempotency guard is bypassed for these so a deliberate retry always runs.
+     */
+    val forceReexecuteNodeIds: Set<String> = emptySet(),
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()
@@ -194,8 +199,11 @@ class RuntimeContext(
             workspaceId = workspaceId,
             environmentId = environmentId,
             workflowVersionId = workflowVersionId,
+            workflowId = workflowId,
             workflowInput = workflowInput,
             graph = graph,
+            debugMode = debugMode,
+            forceReexecuteNodeIds = forceReexecuteNodeIds,
         )
         child.sequence = sequence
         // Copy parent outputs and edge selections so child can reference prior steps

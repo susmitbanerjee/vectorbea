@@ -209,9 +209,13 @@ class WorkflowQueueConsumer(
     }
 
     private fun readMessages(): List<StreamMessage<String, String>>? {
+        // Backpressure: never read more than the remaining processing capacity,
+        // so a large batch can't overshoot the job pool.
+        val capacity = (config.concurrency - inFlight.get()).coerceAtLeast(1)
+        val count = minOf(config.pollBatchSize, capacity).toLong()
         return redis.xreadgroup(
             consumer,
-            XReadArgs.Builder.count(config.pollBatchSize.toLong()).block(config.pollBlockMs),
+            XReadArgs.Builder.count(count).block(config.pollBlockMs),
             XReadArgs.StreamOffset.lastConsumed(config.queueStream),
         )
     }
@@ -220,11 +224,12 @@ class WorkflowQueueConsumer(
         val msgId = msg.id
         val fields = msg.body
 
-        // Parse the job — malformed messages are ack'd and skipped
+        // Parse the job — malformed messages go to the dead-letter stream, then ack
         val job = try {
             WorkflowRunJob.parse(msgId, fields)
         } catch (e: WorkflowRunJob.ParseException) {
-            log.warn("[queue] malformed message — ack-ing to clear [msgId={}]: {}", msgId, e.message)
+            log.warn("[queue] malformed message — dead-lettering [msgId={}]: {}", msgId, e.message)
+            sendToDeadLetter(msgId, fields, "parse_error: ${e.message?.take(300)}")
             ackMessage(msgId)
             return
         }
@@ -239,13 +244,40 @@ class WorkflowQueueConsumer(
                 // RunProcessor.process catches all exceptions and writes RUN_FAILED.
                 ackMessage(msgId)
             } catch (e: Exception) {
-                // Extremely unlikely — processor.process never throws
+                // Extremely unlikely — processor.process never throws.
+                // Preserve the message in the DLQ before clearing the PEL.
                 log.error("[queue] unexpected exception from processor [msgId={}, runId={}]: {}",
                     msgId, job.runId, e.message, e)
+                sendToDeadLetter(msgId, fields, "processor_error: ${e.message?.take(300)}")
                 ackMessage(msgId)
             } finally {
                 inFlight.decrementAndGet()
             }
+        }
+    }
+
+    /**
+     * Copy a poison message to the dead-letter stream `{stream}:dlq` so it can
+     * be inspected and replayed by an operator. Best-effort: a DLQ failure must
+     * never block the main consumer. The DLQ stream is capped (~1000 entries,
+     * approximate trimming) to bound memory.
+     */
+    private fun sendToDeadLetter(originalMsgId: String, fields: Map<String, String>, reason: String) {
+        try {
+            val dlqFields = HashMap(fields).apply {
+                put("_dlq_reason", reason)
+                put("_dlq_original_id", originalMsgId)
+                put("_dlq_worker", config.workerId)
+                put("_dlq_at", java.time.Instant.now().toString())
+            }
+            redis.xadd(
+                "${config.queueStream}:dlq",
+                io.lettuce.core.XAddArgs.Builder.maxlen(1_000L).approximateTrimming(),
+                dlqFields,
+            )
+            log.info("[queue] message dead-lettered [msgId={}, dlq={}:dlq]", originalMsgId, config.queueStream)
+        } catch (e: Exception) {
+            log.error("[queue] failed to write dead-letter entry [msgId={}]: {}", originalMsgId, e.message)
         }
     }
 

@@ -227,7 +227,8 @@ class WorkflowRuntimeTest {
     @Test
     fun `unsupported node (TOOL) emits NODE_TYPE_UNSUPPORTED and fails run by default`() {
         val trigger = node("t1", NodeType.TRIGGER)
-        val tool    = node("tool1", NodeType.TOOL)  // TOOL is unsupported
+        // TOOL gained a real executor — use UNKNOWN, which is genuinely unsupported
+        val tool    = node("tool1", NodeType.UNKNOWN)
         val end     = node("end", NodeType.END)
 
         val graph = WorkflowGraph(

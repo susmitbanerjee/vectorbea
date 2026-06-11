@@ -165,7 +165,11 @@ class HttpNodeExecutor(
             summary = "$method ${sanitizeUrlForLog(rawUrl)}")
 
         val (statusCode, responseBody, responseHeaders) = try {
-            doRequest(rawUrl, method, authHeader, extraHeaders, bodyJson, timeoutMs)
+            doRequest(rawUrl, method, authHeader, extraHeaders, bodyJson, timeoutMs, maxRespBytes)
+        } catch (e: ResponseTooLargeException) {
+            return NodeResult.Failed(
+                "HTTP response exceeded size limit for node '${node.id}': > ${e.limitBytes} bytes"
+            )
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startMs
             log.warn("[http] request failed [nodeId={}, method={}, durationMs={}]: {}",
@@ -174,13 +178,6 @@ class HttpNodeExecutor(
         }
 
         val durationMs = System.currentTimeMillis() - startMs
-
-        if (responseBody.length > maxRespBytes) {
-            return NodeResult.Failed(
-                "HTTP response exceeded size limit for node '${node.id}': " +
-                        "${responseBody.length} > $maxRespBytes bytes"
-            )
-        }
 
         val success = statusCode in 200..299
         emitEvent(context, node.id, EventType.HTTP_REQUEST_COMPLETED, if (success) "success" else "failed",
@@ -234,6 +231,10 @@ class HttpNodeExecutor(
 
     // ── HTTP execution ────────────────────────────────────────────────────────
 
+    /** Thrown when a response exceeds the configured size cap mid-stream. */
+    private class ResponseTooLargeException(val limitBytes: Long) :
+        Exception("HTTP response exceeded $limitBytes bytes")
+
     private fun doRequest(
         url: String,
         method: String,
@@ -241,6 +242,7 @@ class HttpNodeExecutor(
         extraHeaders: Map<String, String>,
         bodyJson: String?,
         timeoutMs: Long,
+        maxResponseBytes: Long,
     ): Triple<Int, String, Map<String, List<String>>> {
         val reqBuilder = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -267,8 +269,26 @@ class HttpNodeExecutor(
 
         reqBuilder.method(method, bodyPublisher)
 
-        val response = httpClient.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString())
-        return Triple(response.statusCode(), response.body() ?: "", response.headers().map())
+        // Stream the body and enforce the size cap WHILE reading — a huge
+        // (or malicious) response is aborted at the limit instead of being
+        // buffered fully into memory first.
+        val response = httpClient.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofInputStream())
+        val body = response.body().use { ins -> readBounded(ins, maxResponseBytes) }
+        return Triple(response.statusCode(), body, response.headers().map())
+    }
+
+    private fun readBounded(ins: java.io.InputStream, maxBytes: Long): String {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8_192)
+        var total = 0L
+        while (true) {
+            val n = ins.read(buf)
+            if (n == -1) break
+            total += n
+            if (total > maxBytes) throw ResponseTooLargeException(maxBytes)
+            out.write(buf, 0, n)
+        }
+        return out.toString(Charsets.UTF_8.name())
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
