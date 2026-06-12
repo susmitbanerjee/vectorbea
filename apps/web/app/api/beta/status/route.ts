@@ -7,7 +7,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function apiBase(): string {
-  return (process.env.VECTORBEA_API_URL ?? process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? "http://localhost:8080")
+  return (
+    process.env.VECTORBEA_API_URL ??
+    process.env.NEXT_PUBLIC_VECTORBEA_API_URL ??
+    process.env.API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080"
+  )
     .trim().replace(/\/$/, "");
 }
 
