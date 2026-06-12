@@ -197,25 +197,25 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
 
     fun upsertBetaApplication(
         email: String, supabaseUserId: UUID?, appUserId: UUID?,
-        fullName: String?, company: String?, useCase: String?, currentTools: String?,
+        fullName: String?, company: String?, role: String?, useCase: String?, currentTools: String?,
         painPoint: String?, workflowsPerWeek: String?, teamSize: String?, byokReady: Boolean?,
     ): BetaApplication = executeReturning("""
         INSERT INTO beta_applications
-          (email, supabase_user_id, app_user_id, full_name, company_name, use_case,
+          (email, supabase_user_id, app_user_id, full_name, company_name, role_title, use_case,
            current_tools, pain_point, workflows_per_week, team_size, byok_ready)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (email) DO UPDATE SET
           supabase_user_id=EXCLUDED.supabase_user_id, app_user_id=EXCLUDED.app_user_id,
-          full_name=EXCLUDED.full_name, company_name=EXCLUDED.company_name,
+          full_name=EXCLUDED.full_name, company_name=EXCLUDED.company_name, role_title=EXCLUDED.role_title,
           use_case=EXCLUDED.use_case, current_tools=EXCLUDED.current_tools,
           pain_point=EXCLUDED.pain_point, workflows_per_week=EXCLUDED.workflows_per_week,
           team_size=EXCLUDED.team_size, byok_ready=EXCLUDED.byok_ready, updated_at=now()
         RETURNING id, app_user_id, email, full_name, company_name, use_case, status, created_at
     """.trimIndent(), {
         setString(1, email); setObject(2, supabaseUserId); setObject(3, appUserId)
-        setString(4, fullName); setString(5, company); setString(6, useCase)
-        setString(7, currentTools); setString(8, painPoint); setString(9, workflowsPerWeek)
-        setString(10, teamSize); setBoolean(11, byokReady ?: false)
+        setString(4, fullName); setString(5, company); setString(6, role); setString(7, useCase)
+        setString(8, currentTools); setString(9, painPoint); setString(10, workflowsPerWeek)
+        setString(11, teamSize); setBoolean(12, byokReady ?: false)
     }) { rs -> BetaApplication(
         id          = UUID.fromString(rs.getString("id")),
         appUserId   = rs.getString("app_user_id")?.let { UUID.fromString(it) },

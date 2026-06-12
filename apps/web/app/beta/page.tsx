@@ -89,10 +89,14 @@ export default function BetaWaitlistPage() {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("verified") === "1") {
       setJustVerified(true);
     }
-    betaFetch<{ betaStatus: string }>("/api/beta/status")
+    betaFetch<{ betaStatus: string; applicationStatus?: string | null; alreadySubmitted?: boolean }>("/api/beta/status")
       .then(res => {
-        if (res.betaStatus && res.betaStatus !== "waitlisted") {
-          setExistingStatus(res.betaStatus);
+        if (res.betaStatus === "approved") {
+          window.location.assign("/dashboard");
+          return;
+        }
+        if (res.alreadySubmitted || (res.betaStatus && res.betaStatus !== "waitlisted")) {
+          setExistingStatus(res.applicationStatus ?? res.betaStatus);
           setAlreadySub(true);
         }
       })

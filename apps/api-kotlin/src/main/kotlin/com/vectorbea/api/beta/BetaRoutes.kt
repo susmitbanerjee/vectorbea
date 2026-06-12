@@ -9,6 +9,7 @@ import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
 import com.vectorbea.api.users.AppUserRepository
 import com.vectorbea.api.telemetry.TelemetryClient
+import java.util.Base64
 import java.util.UUID
 
 /**
@@ -52,6 +53,8 @@ class BetaRoutes(
         val principal = req.principal ?: throw ApiError.Unauthorized("Authentication required")
         val user = userRepo.findById(principal.appUserId)
         val betaStatus = user?.betaStatus ?: "waitlisted"
+        val existingApplication = (principal.email ?: user?.email)
+            ?.let { runCatching { betaRepo.findApplicationByEmail(it) }.getOrNull() }
         val canAccess  = betaStatus == "approved"
 
         // Workspace is optional for beta status — waitlisted users have no workspace yet
@@ -67,6 +70,8 @@ class BetaRoutes(
 
         return Response.ok(mapOf(
             "betaStatus"           to betaStatus,
+            "applicationStatus"    to existingApplication?.status,
+            "alreadySubmitted"     to (existingApplication != null),
             "canAccessProduct"     to canAccess,
             "canRunSimulation"     to (canAccess && (controls?.simulationEnabled ?: true)),
             "canRunRealExecution"  to (canAccess && (controls?.realExecutionEnabled ?: false)),
@@ -130,6 +135,7 @@ class BetaRoutes(
             appUserId       = principal.appUserId,
             fullName        = body["fullName"] as? String,
             company         = body["company"] as? String,
+            role            = body["role"] as? String,
             useCase         = body["useCase"] as? String,
             currentTools    = body["currentTools"] as? String,
             painPoint       = body["painPoint"] as? String,
@@ -139,7 +145,7 @@ class BetaRoutes(
         )
 
         // Send admin notification email via Resend (best-effort — never block the response)
-        runCatching { sendAdminNotification(email, body) }
+        runCatching { sendBetaApplicationAdminEmail(email, body) }
             .onFailure { log.warn("[beta] admin notification email failed: {}", it.message) }
 
         // Full structured application data for the telemetry funnel.
@@ -167,7 +173,13 @@ class BetaRoutes(
 
     private fun sendAdminNotification(applicantEmail: String, body: Map<String, Any?>) {
         val resendKey = System.getenv("RESEND_API_KEY") ?: return
-        val adminEmails = config.adminEmails.ifEmpty { return }
+        val adminEmails = config.adminEmails.ifEmpty {
+            listOfNotNull(System.getenv("SUPPORT_EMAIL"), System.getenv("ADMIN_EMAIL"))
+                .flatMap { it.split(",") }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }.ifEmpty { return }
         val appUrl      = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL") ?: "https://app.vectorbea.com"
 
         val fullName  = body["fullName"]  as? String ?: "—"
@@ -252,6 +264,10 @@ class BetaRoutes(
                 betaRepo.ensureUsagePolicy(wsId)
             }
         }
+        app?.email?.let { email ->
+            runCatching { sendBetaDecisionEmail(email, approved = true) }
+                .onFailure { log.warn("[beta] approval email failed: {}", it.message) }
+        }
 
         telemetry?.track("beta_application_approved", "beta",
             appUserId = app?.appUserId?.toString(),
@@ -272,6 +288,10 @@ class BetaRoutes(
         val apps = betaRepo.listBetaApplications()
         val app  = apps.find { it.id == id }
         if (app?.appUserId != null) userRepo.setBetaStatus(app.appUserId, "rejected")
+        app?.email?.let { email ->
+            runCatching { sendBetaDecisionEmail(email, approved = false) }
+                .onFailure { log.warn("[beta] rejection email failed: {}", it.message) }
+        }
 
         telemetry?.track("beta_application_rejected", "beta",
             properties = mapOf("applicationId" to id.toString()))
@@ -325,6 +345,162 @@ class BetaRoutes(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private fun sendBetaApplicationAdminEmail(applicantEmail: String, body: Map<String, Any?>) {
+        val resendKey = System.getenv("RESEND_API_KEY") ?: return
+        val adminEmails = config.adminEmails.ifEmpty { return }
+        val appUrl = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL") ?: "https://app.vectorbea.com"
+        val reviewUrl = "$appUrl/admin/beta/applications"
+
+        val fullName = body["fullName"] as? String ?: "Not provided"
+        val company = body["company"] as? String ?: "Not provided"
+        val role = body["role"] as? String ?: "Not provided"
+        val useCase = body["useCase"] as? String ?: "Not provided"
+        val tools = body["currentTools"] as? String ?: "Not provided"
+        val pain = body["painPoint"] as? String ?: "Not provided"
+        val runs = body["workflowsPerWeek"] as? String ?: "Not provided"
+        val teamSize = body["teamSize"] as? String ?: "Not provided"
+        val byokReady = (body["byokReady"] as? Boolean) ?: false
+
+        fun row(label: String, value: String) =
+            """<tr><td style="padding:6px 14px 6px 0;color:#6B7280;font-size:13px;vertical-align:top;white-space:nowrap;">${escapeHtml(label)}</td><td style="padding:6px 0;color:#0B0D0F;font-size:13px;">${escapeHtml(value)}</td></tr>"""
+
+        val html = """
+            <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:620px;color:#0B0D0F;">
+            ${logoHtml(appUrl)}
+            <p style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#6B7280;margin:0 0 8px;">Beta access request</p>
+            <h2 style="font-size:22px;line-height:1.25;margin:0 0 18px;">${escapeHtml(fullName)} wants access</h2>
+            <table style="border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+              ${row("Email", applicantEmail)}
+              ${row("Environment", config.appEnv)}
+              ${row("Company", company)}
+              ${row("Role", role)}
+              ${row("Runs per week", runs)}
+              ${row("Team size", teamSize)}
+              ${row("Current tools", tools)}
+              ${row("Pain point", pain)}
+              ${row("BYOK ready", if (byokReady) "Yes" else "No")}
+            </table>
+            <div style="white-space:pre-wrap;border:1px solid #E0E3E6;border-radius:10px;padding:14px;font-size:13px;line-height:1.6;color:#374151;margin:0 0 18px;">${escapeHtml(useCase.take(1000))}</div>
+            <p style="margin:0 0 18px;">
+              <a href="$reviewUrl" style="background:#0B0D0F;color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;">Review application</a>
+            </p>
+            <p style="font-size:12px;color:#6B7280;margin:0;">Open the admin panel to approve or reject this request.</p>
+            </div>
+        """.trimIndent()
+
+        val text = """
+            New beta access request
+
+            Name: $fullName
+            Email: $applicantEmail
+            Environment: ${config.appEnv}
+            Company: $company
+            Role: $role
+            Runs per week: $runs
+            Team size: $teamSize
+            Current tools: $tools
+            Pain point: $pain
+            BYOK ready: ${if (byokReady) "Yes" else "No"}
+
+            Use case:
+            $useCase
+
+            Review application:
+            $reviewUrl
+        """.trimIndent()
+
+        val res = sendResendEmail(
+            resendKey = resendKey,
+            to = adminEmails.toList(),
+            subject = "New beta application: $fullName ($applicantEmail)",
+            html = html,
+            text = text,
+            includeLogoAttachment = true,
+        )
+        log.info("[beta] admin notification sent to {} HTTP {}", adminEmails, res.statusCode())
+    }
+
+    private fun sendBetaDecisionEmail(email: String, approved: Boolean) {
+        val resendKey = System.getenv("RESEND_API_KEY") ?: return
+        val appUrl = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL") ?: "https://app.vectorbea.com"
+        val subject = if (approved) "Welcome to Vectorbea" else "Vectorbea access request update"
+        val body = if (approved) {
+            """
+            <p style="font-size:16px;line-height:1.6;color:#374151;margin:0 0 18px;">Your Vectorbea access request has been approved.</p>
+            <p style="font-size:16px;line-height:1.6;color:#374151;margin:0 0 22px;">You can now sign in and start with your default workspace.</p>
+            <p style="margin:0;"><a href="$appUrl/signin" style="background:#0B0D0F;color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;">Open Vectorbea</a></p>
+            """.trimIndent()
+        } else {
+            """
+            <p style="font-size:16px;line-height:1.6;color:#374151;margin:0 0 18px;">Thank you for your interest in Vectorbea.</p>
+            <p style="font-size:16px;line-height:1.6;color:#374151;margin:0;">We are sorry, but we cannot approve your access request right now.</p>
+            """.trimIndent()
+        }
+        val html = """
+            <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;color:#0B0D0F;">
+            ${logoHtml(appUrl)}
+            <h2 style="font-size:22px;line-height:1.25;margin:0 0 16px;">${if (approved) "Welcome to Vectorbea" else "Access request update"}</h2>
+            $body
+            </div>
+        """.trimIndent()
+        val text = if (approved) {
+            "Your Vectorbea access request has been approved.\n\nSign in here:\n$appUrl/signin"
+        } else {
+            "Thank you for your interest in Vectorbea.\n\nWe are sorry, but we cannot approve your access request right now."
+        }
+
+        sendResendEmail(
+            resendKey = resendKey,
+            to = listOf(email),
+            subject = subject,
+            html = html,
+            text = text,
+            includeLogoAttachment = true,
+        )
+    }
+
+    private fun sendResendEmail(
+        resendKey: String,
+        to: List<String>,
+        subject: String,
+        html: String,
+        text: String,
+        includeLogoAttachment: Boolean = false,
+    ): java.net.http.HttpResponse<String> {
+        val payload = mutableMapOf<String, Any>(
+            "from" to (System.getenv("EMAIL_FROM") ?: System.getenv("FROM_EMAIL") ?: "Vectorbea <noreply@vectorbea.com>"),
+            "to" to to,
+            "subject" to subject,
+            "html" to html,
+            "text" to text,
+        )
+        if (includeLogoAttachment) {
+            payload["attachments"] = listOf(mapOf(
+                "filename" to "vectorbea-logo.svg",
+                "content" to LOGO_SVG_BASE64,
+            ))
+        }
+
+        val http = java.net.http.HttpClient.newHttpClient()
+        val req = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create("https://api.resend.com/emails"))
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer $resendKey")
+            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
+            .timeout(java.time.Duration.ofSeconds(10))
+            .build()
+        return http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString())
+    }
+
+    private fun logoHtml(appUrl: String): String =
+        """<p style="margin:0 0 18px;"><img src="$appUrl/icon.svg" width="32" height="32" alt="Vectorbea" style="display:block;border:0;border-radius:8px;" /></p>"""
+
+    private fun escapeHtml(value: String): String =
+        value.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+
     private fun requireAdmin(req: Request): com.vectorbea.api.auth.AuthPrincipal {
         val principal = req.principal ?: throw ApiError.Unauthorized("Authentication required")
         val user = userRepo.findById(principal.appUserId)
@@ -333,5 +509,25 @@ class BetaRoutes(
             throw ApiError.Forbidden("Admin access required")
         }
         return principal
+    }
+
+    companion object {
+        private val LOGO_SVG_BASE64 = Base64.getEncoder().encodeToString(
+            """
+            <svg width="64" height="64" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="32" height="32" rx="8" fill="#0B0D0F"/>
+              <g stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <ellipse cx="11.6" cy="11.4" rx="3" ry="2.1" fill="#00A65A" fill-opacity="0.9"/>
+                <ellipse cx="20.4" cy="11.4" rx="3" ry="2.1" fill="#00A65A" fill-opacity="0.9"/>
+                <ellipse cx="16" cy="18" rx="4" ry="5" fill="#007F4E"/>
+                <path d="M12.4 16.4h7.2"/>
+                <path d="M12.2 19h7.6"/>
+                <path d="M12.8 21.6h6.4"/>
+                <path d="M14.2 12.8 13 10" stroke-opacity="0.85"/>
+                <path d="M17.8 12.8 19 10" stroke-opacity="0.85"/>
+              </g>
+            </svg>
+            """.trimIndent().toByteArray(Charsets.UTF_8)
+        )
     }
 }
