@@ -92,8 +92,10 @@ export async function getUserBetaStatus(id: string): Promise<{ betaStatus: strin
     if (!rows[0]) return null;
     return { betaStatus: rows[0].beta_status, isPlatformAdmin: rows[0].is_platform_admin };
   } catch {
-    // V015 migration not yet applied — default to approved so existing users aren't blocked
-    return { betaStatus: "approved", isPlatformAdmin: false };
+    // FAIL CLOSED: if the status can't be read, treat as waitlisted. V015
+    // backfilled all pre-existing users to 'approved', so this only ever
+    // gates users we can't positively identify as approved.
+    return { betaStatus: "waitlisted", isPlatformAdmin: false };
   }
 }
 

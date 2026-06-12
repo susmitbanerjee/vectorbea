@@ -14,7 +14,16 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token") ?? "";
-  const claims = token ? await verifyEmailVerificationToken(token) : null;
+
+  // Injection hardening — the token is the ONLY user-controlled input here:
+  //  - shape-check (3-part base64url JWT, bounded length) before any crypto work
+  //  - signature + purpose claim ("email_verify") verified with the server secret,
+  //    so a token can't be forged or repurposed from a session JWT
+  //  - the token is never echoed into HTML/response, and every redirect target
+  //    below is a hardcoded same-origin path (no open redirect)
+  const looksLikeJwt = token.length > 0 && token.length <= 2048 &&
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token);
+  const claims = looksLikeJwt ? await verifyEmailVerificationToken(token) : null;
 
   if (!claims) {
     return NextResponse.redirect(new URL("/verify-email?error=invalid_or_expired", request.url));

@@ -4,13 +4,8 @@ import { useState, useEffect } from "react";
 import { CheckCircle2, Clock, Loader2, LogOut, XCircle } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
-import { apiFetch, setAccessToken } from "@/lib/api/client";
+import { setAccessToken } from "@/lib/api/client";
 import { track } from "@/lib/telemetry/client";
-
-function betaUrl(path: string): string {
-  const base = (process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? "http://localhost:8080").trimEnd().replace(/\/$/, "");
-  return base + path;
-}
 
 function ensureTokenFromCookie() {
   if (typeof document === "undefined") return;
@@ -19,6 +14,18 @@ function ensureTokenFromCookie() {
     setAccessToken(decodeURIComponent(match[1]));
     document.cookie = "vb-token-transfer=; max-age=0; path=/";
   }
+}
+
+/**
+ * Same-origin call to the beta proxy routes — authenticated by the httpOnly
+ * session cookie, so it works even right after the email-verification click
+ * (when no localStorage token copy exists yet).
+ */
+async function betaFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { cache: "no-store", ...init });
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+  return data;
 }
 
 function Label({ children, required, hint }: { children: React.ReactNode; required?: boolean; hint?: string }) {
@@ -83,7 +90,7 @@ export default function BetaWaitlistPage() {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("verified") === "1") {
       setJustVerified(true);
     }
-    apiFetch<{ betaStatus: string }>(betaUrl("/api/beta/status"))
+    betaFetch<{ betaStatus: string }>("/api/beta/status")
       .then(res => {
         if (res.betaStatus && res.betaStatus !== "waitlisted") {
           setExistingStatus(res.betaStatus);
@@ -103,8 +110,9 @@ export default function BetaWaitlistPage() {
     setLoading(true);
     ensureTokenFromCookie();
     try {
-      const res = await apiFetch<{ alreadySubmitted?: boolean; status?: string }>(
-        betaUrl("/api/beta/apply"), { method: "POST", json: form }
+      const res = await betaFetch<{ alreadySubmitted?: boolean; status?: string }>(
+        "/api/beta/apply",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) },
       );
       if (res.alreadySubmitted) {
         setExistingStatus(res.status ?? "waitlisted");

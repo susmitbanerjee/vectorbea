@@ -59,7 +59,7 @@ export async function sendVerificationEmail(
     return { sent: false };
   }
 
-  const result = await sendEmail({ to: email, subject: "Verify your email — Vectorbea", html, text });
+  const result = await sendEmail({ to: email, subject: "Verify your email for Vectorbea", html, text });
   if (!result.ok) {
     // Server-side detail only; never returned to the browser.
     console.error(`[verify-email] send failed for ${email}: ${result.error}`);

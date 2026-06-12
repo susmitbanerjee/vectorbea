@@ -57,14 +57,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
     // ── Private beta gate ──────────────────────────────────────────────────
     if (PRIVATE_BETA) {
-      let betaStatus = "approved"; // default safe for existing users pre-migration
+      // FAIL CLOSED: unknown status = waitlisted. Pre-existing users were
+      // backfilled to 'approved' by V015, so they are unaffected.
+      let betaStatus = "waitlisted";
       try {
         const bs = await getUserBetaStatus(user.id);
-        betaStatus = bs?.betaStatus ?? "approved";
+        betaStatus = bs?.betaStatus ?? "waitlisted";
         // Platform admins always bypass the gate
         if (bs?.isPlatformAdmin) betaStatus = "approved";
       } catch {
-        // Migration not yet applied — let them through
+        // fall through with waitlisted
       }
 
       const isApproved = betaStatus === "approved";
