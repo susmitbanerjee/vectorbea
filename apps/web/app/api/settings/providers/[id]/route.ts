@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (dbError) throw new Error(dbError.message);
     return NextResponse.json(data);
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }
 
@@ -61,6 +61,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     if (dbError) throw new Error(dbError.message);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }

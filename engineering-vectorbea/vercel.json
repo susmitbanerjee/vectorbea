@@ -1,0 +1,3 @@
+{
+  "ignoreCommand": "bash -c 'if [ \"$VERCEL_GIT_COMMIT_REF\" != \"master\" ]; then echo \"skip: blog deploys only from master\"; exit 0; fi; git diff --quiet HEAD^ HEAD -- .'"
+}

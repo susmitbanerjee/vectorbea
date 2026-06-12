@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(keys);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load API keys" },
+      { error: "Failed to load API keys" },
       { status: 500 },
     );
   }
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create API key" },
+      { error: "Failed to create API key" },
       { status: 500 },
     );
   }

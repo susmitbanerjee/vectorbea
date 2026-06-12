@@ -19,6 +19,6 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json(await getWorkspaceMetrics(workspaceId, window, prompt, environment));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }

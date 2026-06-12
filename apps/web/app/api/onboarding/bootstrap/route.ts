@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to bootstrap onboarding" },
+      { error: "Failed to bootstrap onboarding" },
       { status: 500 },
     );
   }

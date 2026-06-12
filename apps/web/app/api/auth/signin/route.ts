@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyCredentials } from "@/lib/auth/neon-auth";
 import { signToken } from "@/lib/auth/jwt";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+import { trackServer } from "@/lib/telemetry/server";
 
 export const runtime = "nodejs";
 export const dynamic  = "force-dynamic";
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
     }
 
     const token = await signToken({ sub: user.id, email: user.email });
+    trackServer("user_signed_in", "onboarding", { appUserId: user.id });
 
     const res = NextResponse.json({
       user:        { id: user.id, email: user.email, fullName: user.full_name },

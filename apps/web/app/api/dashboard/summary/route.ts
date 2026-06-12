@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
     } as DashboardSummary);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load dashboard summary" },
+      { error: "Failed to load dashboard summary" },
       { status: 500 },
     );
   }

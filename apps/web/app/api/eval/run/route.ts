@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
           estimatedCostUsd: 0,
           score: null,
           scoreReasoning: null,
-          error: error instanceof Error ? error.message : "Model call failed",
+          error: "Model call failed",
         };
       }
     }),

@@ -122,6 +122,7 @@ const TOC = [
   { id: "durability",     label: "How durability works" },
   { id: "use-cases",      label: "Use cases" },
   { id: "concepts",       label: "Core concepts" },
+  { id: "unified-io",     label: "Unified I/O & mapping" },
   { id: "first-workflow", label: "Your first workflow" },
   { id: "architect",      label: "AI Workflow Architect" },
 ];
@@ -343,8 +344,48 @@ export default function DocsPage() {
             </div>
           </Section>
 
-          {/* 6. First workflow */}
-          <Section id="first-workflow" label="06 · Tutorial" title="Build your first workflow, step by step">
+          {/* 6. Unified I/O */}
+          <Section id="unified-io" label="06 · Data flow" title="Unified I/O — how data moves between nodes">
+            <P>
+              Every node in a workflow has a <B>typed input and output contract</B>. Tools declare JSON
+              schemas, agents produce structured outputs, and triggers define the fields a run starts with.
+              Because every output is checkpointed with its shape, downstream nodes can reference upstream
+              data <B>without writing any JSON or template code</B> — Vectorbea&apos;s unified I/O system wires
+              it visually.
+            </P>
+            <Panel>
+              <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]">The model</p>
+              <div className="mt-3 space-y-2.5">
+                {[
+                  { k: "Outputs", v: "Every node publishes its validated output as named, typed fields (e.g. risk_scorer.output.risk_score: number). These are persisted at the checkpoint — which is also why resume works." },
+                  { k: "Inputs", v: "Every node declares the fields it needs (from the tool's input schema, the agent's expected input, or the trigger's input fields)." },
+                  { k: "Mappings", v: "An input mapping connects an upstream output field to a downstream input field. Mappings are stored on the node and compiled to the runtime's template form ({{steps.node.output.field}}) under the hood — you never write that by hand." },
+                ].map(({ k, v }) => (
+                  <div key={k} className="flex gap-3">
+                    <span className="w-20 shrink-0 font-mono text-[11px] font-semibold text-[#007F4E]">{k}</span>
+                    <p className="text-[13px] leading-[1.65] text-[#4B5563]">{v}</p>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+            <P><B>Working with mappings in the builder:</B></P>
+            <Steps steps={[
+              { title: "Define the trigger's input fields", body: <>Select the trigger node → its config shows an <B>input field builder</B> — add fields as name + type + required rows (no JSON Schema editing). These become the run&apos;s starting data and are what the Run dialog asks for.</> },
+              { title: "Connect nodes, then open Inputs", body: <>Drag an edge between two nodes, select the downstream node, and open the <B>Inputs</B> tab in the inspector. Every required input field is listed with its type.</> },
+              { title: "Auto-map the obvious matches", body: <>When upstream outputs match input names/types, a green <B>&quot;N inputs can be mapped — Map all&quot;</B> banner appears. One click applies every confident match. Individual fields also show a one-click suggestion chip (<i>source → field · Use</i>) when a likely match exists.</> },
+              { title: "Pick the rest from the field list", body: <>For anything not auto-mapped, click the field and choose from a <B>typed picker of all upstream outputs</B> — grouped by node, filtered to compatible types. Static values can be typed in directly.</> },
+              { title: "Validation catches gaps before you run", body: <>The inspector&apos;s issue counter and the Valid badge flag unmapped required inputs and type mismatches. A workflow with unresolved required inputs won&apos;t pass validation.</> },
+            ]} />
+            <P>
+              At runtime the worker resolves each mapping against the <B>checkpointed step outputs</B> —
+              so even after a crash-resume or an approval wait, downstream nodes see exactly the same
+              upstream values. The same fields appear in approval-gate messages and in the run&apos;s debug
+              view, where you can inspect every resolved input per node.
+            </P>
+          </Section>
+
+          {/* 7. First workflow */}
+          <Section id="first-workflow" label="07 · Tutorial" title="Build your first workflow, step by step">
             <Steps steps={[
               { title: "Add a connection", body: <>Go to <B>Connections → New Connection</B>. Pick <B>LLM Provider</B>, paste your API key (encrypted on save), and run <B>Test &amp; save</B>. Repeat for your database or API if the workflow needs data.</> },
               { title: "Register a tool", body: <>Go to <B>Tools → New Tool</B>. For a database read: choose <B>Database (Read)</B>, bind the DB connection, browse the schema, and let Vectorbea generate the SQL template and input/output schemas. Set an honest risk level.</> },
@@ -358,7 +399,7 @@ export default function DocsPage() {
           </Section>
 
           {/* 7. Architect */}
-          <Section id="architect" label="07 · Accelerator" title="AI Workflow Architect">
+          <Section id="architect" label="08 · Accelerator" title="AI Workflow Architect">
             <P>
               The Architect turns a <B>plain-English goal into a runnable workflow</B>. Describe the outcome —
               &quot;every Monday, pull contracts renewing in 30 days, score churn risk, and email the account
@@ -373,7 +414,7 @@ export default function DocsPage() {
             <div className="flex items-center justify-between gap-4 rounded-[12px] border border-[#9CCFBB] bg-[#E6F4EF]/50 p-5">
               <div className="flex items-center gap-3">
                 <Sparkles className="h-5 w-5 shrink-0 text-[#007F4E]" />
-                <p className="text-[13.5px] font-medium text-[#0B0D0F]">Fastest way to a working workflow — describe it, then refine on the canvas.</p>
+                <p className="text-[13.5px] font-medium text-[#0B0D0F]">Fastest way to a working workflow — describe it, then refine on the canvas. One Architect build per workspace per month.</p>
               </div>
               <Link
                 href={"/workflows/new/architect" as Route}

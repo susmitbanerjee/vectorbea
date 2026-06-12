@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     }));
     return NextResponse.json(mapped);
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }
 
@@ -125,6 +125,6 @@ export async function POST(request: NextRequest) {
       updatedAt: row.updated_at,
     }, { status: 201 });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }

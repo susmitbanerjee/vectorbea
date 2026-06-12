@@ -22,9 +22,11 @@ export async function createUser(email: string, password: string, fullName?: str
   const hash = await bcrypt.hash(password, 12);
   const userId = crypto.randomUUID();
 
+  // email_verified=FALSE — password signups must confirm via the verification
+  // mail before reaching the beta application. (OAuth users are provider-verified.)
   const rows = await sql`
     INSERT INTO app_users (id, supabase_user_id, email, full_name, password_hash, status, email_verified)
-    VALUES (${userId}, ${userId}, ${email.toLowerCase().trim()}, ${fullName ?? null}, ${hash}, 'active', TRUE)
+    VALUES (${userId}, ${userId}, ${email.toLowerCase().trim()}, ${fullName ?? null}, ${hash}, 'active', FALSE)
     RETURNING id, email, full_name, avatar_url` as Row[];
 
   const user = rows[0]! as NeonUser;
@@ -56,6 +58,20 @@ export async function verifyCredentials(email: string, password: string): Promis
   const ok = await bcrypt.compare(password, user.password_hash as string);
   if (!ok) return null;
   return { id: user.id, email: user.email, full_name: user.full_name, avatar_url: user.avatar_url } as NeonUser;
+}
+
+/** True when the user's email address has been confirmed. */
+export async function isEmailVerified(userId: string): Promise<boolean> {
+  const sql = db();
+  const rows = await sql`
+    SELECT email_verified FROM app_users WHERE id = ${userId} LIMIT 1` as { email_verified: boolean }[];
+  return rows[0]?.email_verified === true;
+}
+
+/** Marks the user's email as verified (idempotent). */
+export async function markEmailVerified(userId: string): Promise<void> {
+  const sql = db();
+  await sql`UPDATE app_users SET email_verified = TRUE, updated_at = now() WHERE id = ${userId}`;
 }
 
 export async function getUserById(id: string): Promise<NeonUser | null> {

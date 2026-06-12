@@ -40,6 +40,8 @@ class WorkflowArchitectService(
 
     companion object {
         const val MAX_DAILY_REQUESTS = 20
+        /** Architect is a heavyweight accelerator — one full build per workspace per calendar month. */
+        const val MAX_MONTHLY_SESSIONS = 1
         const val MAX_GOAL_LENGTH    = 4000
         const val MAX_REVISIONS      = 5
     }
@@ -55,11 +57,15 @@ class WorkflowArchitectService(
     fun checkDailyLimit(workspaceId: UUID): Boolean =
         repo.getDailyPlanningRequests(workspaceId) < MAX_DAILY_REQUESTS
 
+    /** One architect build per workspace per calendar month. */
+    fun checkMonthlyLimit(workspaceId: UUID): Boolean =
+        repo.getMonthlySessionCount(workspaceId) < MAX_MONTHLY_SESSIONS
+
     // ── Stage 1: Create session ───────────────────────────────────────────────
 
     fun createSession(workspaceId: UUID, environmentId: UUID, userId: UUID, goal: String): ArchitectSession {
         require(goal.length <= MAX_GOAL_LENGTH) { "Goal text exceeds $MAX_GOAL_LENGTH characters" }
-        require(checkDailyLimit(workspaceId)) { "Daily AI Architect limit reached ($MAX_DAILY_REQUESTS/day)" }
+        require(checkMonthlyLimit(workspaceId)) { "AI Architect limit reached ($MAX_MONTHLY_SESSIONS per month)" }
         val session = repo.create(workspaceId, environmentId, userId, goal)
         repo.appendEvent(workspaceId, session.id, "ARCHITECT_SESSION_CREATED", "Session created", goal.take(200))
         repo.incrementUsage(workspaceId)

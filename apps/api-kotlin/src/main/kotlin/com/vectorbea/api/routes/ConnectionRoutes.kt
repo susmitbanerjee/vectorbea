@@ -123,6 +123,7 @@ class ConnectionRoutes(
     private val repo: ConnectionRepository,
     private val cache: CacheService,
     private val secretService: SecretService? = null,
+    private val telemetry: com.vectorbea.api.telemetry.TelemetryClient? = null,
 ) {
     private val log = LoggerFactory.getLogger(ConnectionRoutes::class.java)
     fun register(router: Router) {
@@ -189,6 +190,11 @@ class ConnectionRoutes(
             )
         )
         invalidateListCache(ctx.workspaceId, envId)
+        telemetry?.track("connection_created", "connection",
+            workspaceId = ctx.workspaceId.toString(),
+            connectionId = conn.id.toString(),
+            appUserId = req.principal?.appUserId?.toString(),
+            properties = mapOf("type" to type, "provider" to provider))
         return Response.created(conn.toResponse())
     }
 

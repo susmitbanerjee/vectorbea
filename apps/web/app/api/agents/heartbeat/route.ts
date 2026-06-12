@@ -192,8 +192,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Failed to process agent heartbeat.",
+        error: "Failed to process agent heartbeat.",
       },
       { status: 500 },
     );

@@ -29,7 +29,7 @@ export async function DELETE(
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to revoke API key" },
+      { error: "Failed to revoke API key" },
       { status: 500 },
     );
   }

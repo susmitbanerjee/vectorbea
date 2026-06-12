@@ -65,9 +65,10 @@ class WorkflowArchitectRoutes(
             ?: throw ApiError.ValidationError("'goal' is required")
         if (goal.length > WorkflowArchitectService.MAX_GOAL_LENGTH)
             throw ApiError.ValidationError("Goal exceeds ${WorkflowArchitectService.MAX_GOAL_LENGTH} chars")
-        if (!service.checkDailyLimit(ctx.workspaceId))
+        if (!service.checkMonthlyLimit(ctx.workspaceId))
             return Response.json(429, mapOf("error" to "ARCHITECT_USAGE_LIMIT_EXCEEDED",
-                "message" to "Daily AI Architect limit reached. Try again tomorrow."))
+                "message" to "The AI Architect can build one workflow per month per workspace. " +
+                    "Your next build unlocks at the start of next month — meanwhile you can edit any workflow on the canvas."))
         val envId  = ctx.environmentId ?: throw ApiError.ValidationError("X-Environment-Id header is required")
         val userId = req.principal?.appUserId ?: throw ApiError.Unauthorized("Authentication required")
 

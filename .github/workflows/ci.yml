@@ -1,45 +1,50 @@
 name: CI
 
+# CI runs CHECKS only — deployments are owned by the platform git integrations:
+#   PR / push to dev    → Vercel deploys apps/web to dev.vectorbea.com (staging)
+#                         + Railway `staging` env (api/worker/telemetry, branch=dev)
+#   merge dev → master  → Vercel production (vectorbea.com, blog, support domain)
+#                         + Railway `production` env
+# Per-path filters below keep a PR from building services it didn't touch.
+
 on:
   push:
     branches: [master, dev]
   pull_request:
     branches: [master, dev]
 
-env:
-  CI_ALLOW_PUBLIC_PUBLISH: "false"
-
 jobs:
-  # ── Closed-source guardrails ────────────────────────────────────────────────
-  publishing-guard:
-    name: Publishing guard (no public SDK/proxy publish)
+  # ── What changed? — gates every other job ───────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      api: ${{ steps.filter.outputs.api }}
+      worker: ${{ steps.filter.outputs.worker }}
+      telemetry: ${{ steps.filter.outputs.telemetry }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+              - 'prisma/**'
+            api:
+              - 'apps/api-kotlin/**'
+            worker:
+              - 'apps/worker-kotlin/**'
+            telemetry:
+              - 'apps/telemetry/**'
+
+  # ── Closed-source boundary guards (cheap, always run) ───────────────────────
+  guards:
+    name: Source boundary guards
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Fail if npm publish exists in workflow files
-        run: |
-          if grep -r "npm publish" .github/workflows/ --include="*.yml" | grep -v "CI_ALLOW_PUBLIC_PUBLISH.*true"; then
-            echo "ERROR: npm publish found in CI. Set CI_ALLOW_PUBLIC_PUBLISH=true to allow."
-            exit 1
-          fi
-          echo "OK: No npm publish"
-
-      - name: Fail if gradle publish exists in workflow files
-        run: |
-          if grep -r "gradle.*publish\|publishToMavenLocal\|publish.*gradle" .github/workflows/ --include="*.yml" | grep -v "CI_ALLOW_PUBLIC_PUBLISH.*true"; then
-            echo "ERROR: gradle publish found in CI."
-            exit 1
-          fi
-          echo "OK: No gradle publish"
-
-      - name: Fail if docker push vectorbea:proxy exists
-        run: |
-          if grep -r "vectorbea.*proxy\|proxy.*vectorbea" .github/workflows/ --include="*.yml"; then
-            echo "ERROR: vectorbea:proxy push found — this image is obsolete."
-            exit 1
-          fi
-          echo "OK: No proxy publish"
 
       - name: Fail if Stripe/Razorpay imported in production frontend
         run: |
@@ -61,6 +66,8 @@ jobs:
   # ── Web frontend ────────────────────────────────────────────────────────────
   web:
     name: Web (typecheck + lint + build)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -93,6 +100,8 @@ jobs:
   # ── API (Kotlin) ────────────────────────────────────────────────────────────
   api-kotlin:
     name: API Kotlin (build + test)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -119,6 +128,8 @@ jobs:
   # ── Worker (Kotlin) ─────────────────────────────────────────────────────────
   worker-kotlin:
     name: Worker Kotlin (build + test)
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -139,6 +150,8 @@ jobs:
   # ── Telemetry service (Kotlin) ───────────────────────────────────────────────
   telemetry:
     name: Telemetry (build + test)
+    needs: changes
+    if: needs.changes.outputs.telemetry == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

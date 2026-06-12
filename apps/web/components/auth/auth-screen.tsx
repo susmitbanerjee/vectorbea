@@ -51,6 +51,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
         error?: string;
         accessToken?: string;
         user?: { id: string; email: string };
+        requiresVerification?: boolean;
       };
 
       if (!res.ok) {
@@ -60,6 +61,12 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
 
       // Store token so API calls can send Authorization header to the Kotlin API
       if (data.accessToken) setAccessToken(data.accessToken);
+
+      // New signups confirm their email first, then land on the beta application
+      if (isSignup && data.requiresVerification) {
+        window.location.assign("/verify-email");
+        return;
+      }
 
       // Redirect to dashboard (cookie also set server-side for SSR auth)
       window.location.assign("/dashboard");

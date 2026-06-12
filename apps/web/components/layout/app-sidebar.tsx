@@ -59,6 +59,8 @@ type NavItem = {
   badge?: string;
   /** Live count key resolved against the workspace summary. */
   countKey?: "pendingApprovals";
+  /** Open in a new tab (e.g. standalone docs). */
+  newTab?: boolean;
 };
 
 type NavGroup = {
@@ -90,7 +92,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/schedules" as never, label: "Schedules", icon: CalendarClock },
       { href: "/settings" as never,  label: "Settings",  icon: Settings2 },
-      { href: "/docs" as never,      label: "Docs",      icon: BookOpen },
     ],
   },
 ];
@@ -213,7 +214,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
           href={fullHref as Route}
           title={count > 0 ? `${item.label} (${count})` : item.label}
           aria-current={active ? "page" : undefined}
+          {...(item.newTab ? { target: "_blank", rel: "noopener" } : {})}
           onClick={() => {
+            if (item.newTab) return;
             if (pathname === item.href || pendingHref === fullHref) return;
             setPendingHref(fullHref);
             startTransition(() => {});
@@ -247,7 +250,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         key={item.href}
         href={fullHref as Route}
         aria-current={active ? "page" : undefined}
+        {...(item.newTab ? { target: "_blank", rel: "noopener" } : {})}
         onClick={() => {
+          if (item.newTab) return;
           if (pathname === item.href || pendingHref === fullHref) return;
           setPendingHref(fullHref);
           startTransition(() => {});
@@ -372,11 +377,31 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
         )}
       </nav>
 
-      {/* ── Bottom: collapse + user ──────────────────────────────────────── */}
+      {/* ── Bottom: docs + collapse + user ───────────────────────────────── */}
       <div
         className={cn("pb-3 pt-2", collapsed ? "px-[13px]" : "px-3.5")}
         style={{ borderTop: "1px solid #ECEEEF" }}
       >
+        {/* Docs — separate from nav (opens a new tab) */}
+        <a
+          href="/docs"
+          target="_blank"
+          rel="noopener"
+          title="Documentation (opens in a new tab)"
+          className={cn(
+            "mb-1 flex w-full items-center rounded-[8px] px-2.5 py-1.5 text-[#4B5563] transition-colors hover:bg-[#F3F4F5] hover:text-[#0B0D0F]",
+            collapsed ? "justify-center" : "gap-2",
+          )}
+        >
+          <BookOpen className="h-[15px] w-[15px] shrink-0 text-[#9CA3AF]" strokeWidth={1.9} />
+          {!collapsed && (
+            <>
+              <span style={{ fontSize: 12.5, fontWeight: 500 }}>Docs</span>
+              <span className="ml-auto font-mono text-[9px] uppercase tracking-[0.08em] text-[#C9CED4]">↗</span>
+            </>
+          )}
+        </a>
+
         {/* Collapse toggle */}
         <button
           type="button"

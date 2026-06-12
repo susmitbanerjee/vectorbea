@@ -43,7 +43,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Cap batch size; fill user attribution when the client didn't set it.
-  const events = batch.events.slice(0, 50).map((e) => ({ appUserId: claims.sub, ...e }));
+  // Environment is overwritten with the server's value when configured — the
+  // server knows the deployment truth; browser bundles can carry a stale default.
+  const serverEnv = process.env.VECTORBEA_ENV ?? process.env.NEXT_PUBLIC_VECTORBEA_ENV;
+  const events = batch.events.slice(0, 50).map((e) => ({
+    appUserId: claims.sub,
+    ...e,
+    ...(serverEnv ? { environment: serverEnv } : {}),
+  }));
 
   try {
     await fetch(`${endpoint}/internal/telemetry/events`, {

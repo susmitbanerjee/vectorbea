@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { TelemetryPageViews } from "@/components/layout/telemetry-page-views";
+import { SupportWidget } from "@/components/support/support-widget";
 import { OAuthTokenTransfer } from "@/components/layout/OAuthTokenTransfer";
 import {
   getAuthenticatedUserFromCookies,
@@ -19,8 +20,10 @@ export const dynamic = "force-dynamic";
 // If JWT_SECRET is not set the app degrades gracefully (shows UI without data).
 const REQUIRE_AUTH = !!process.env.JWT_SECRET;
 
-// Private beta mode — when true, unapproved users are redirected to /beta
-const PRIVATE_BETA = process.env.NEXT_PUBLIC_PRIVATE_BETA_MODE === "true";
+// Private beta mode — when active, unapproved users are redirected to /beta.
+// Default ON: forgetting the env var must fail CLOSED (waitlisted users were
+// landing in an empty app when this var was unset). Set to "false" to disable.
+const PRIVATE_BETA = process.env.NEXT_PUBLIC_PRIVATE_BETA_MODE !== "false";
 
 // Paths within the (app) group that waitlisted users may access
 const BETA_OPEN_PATHS = ["/beta", "/settings/usage"];
@@ -38,6 +41,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
     if (!user) {
       redirect("/signin");
+    }
+
+    // ── Email verification gate (before the beta gate) ─────────────────────
+    // Password signups must confirm their address before applying for access.
+    try {
+      const { isEmailVerified } = await import("@/lib/auth/neon-auth");
+      if (!(await isEmailVerified(user.id))) {
+        redirect("/verify-email");
+      }
+    } catch (err) {
+      // redirect() throws internally — re-throw; swallow only DB failures
+      if (err && typeof err === "object" && "digest" in err) throw err;
     }
 
     // ── Private beta gate ──────────────────────────────────────────────────
@@ -83,6 +98,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <div className="flex h-screen overflow-hidden" style={{ background: "var(--bg-app)" }}>
           <OAuthTokenTransfer />
           <TelemetryPageViews />
+          <SupportWidget />
           <AppSidebar summary={null} user={profile} />
           <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "var(--bg-app)" }}>{children}</main>
         </div>

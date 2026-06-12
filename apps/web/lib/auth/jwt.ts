@@ -24,6 +24,33 @@ export async function signToken(payload: JwtPayload): Promise<string> {
     .sign(getSecret());
 }
 
+/**
+ * Sign a short-lived, purpose-scoped email-verification token (24h).
+ * Stateless: no DB storage — the signature + purpose claim are the proof.
+ */
+export async function signEmailVerificationToken(userId: string, email: string): Promise<string> {
+  return new SignJWT({ email, purpose: "email_verify" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime("24h")
+    .sign(getSecret());
+}
+
+/** Verify an email-verification token. Returns userId+email or null. */
+export async function verifyEmailVerificationToken(
+  token: string,
+): Promise<{ userId: string; email: string } | null> {
+  try {
+    if (!RAW_SECRET) return null;
+    const { payload } = await jwtVerify(token, getSecret());
+    if (!payload.sub || payload["purpose"] !== "email_verify") return null;
+    return { userId: payload.sub, email: (payload["email"] as string) ?? "" };
+  } catch {
+    return null;
+  }
+}
+
 /** Verify and decode a JWT. Returns null if invalid/expired or if JWT_SECRET is not set. */
 export async function verifyToken(token: string): Promise<JwtPayload | null> {
   try {
