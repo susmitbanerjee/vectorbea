@@ -1,6 +1,6 @@
 import "server-only";
 import { sendEmail, emailConfigured } from "@/lib/server/email";
-import { signEmailVerificationToken } from "@/lib/auth/jwt";
+import { createVerificationToken } from "@/lib/auth/verification-tokens";
 
 /**
  * Sends the branded email-verification mail.
@@ -13,7 +13,9 @@ export async function sendVerificationEmail(
   email: string,
   fullName?: string | null,
 ): Promise<{ sent: boolean }> {
-  const token = await signEmailVerificationToken(userId, email);
+  // Opaque single-use token — never a JWT in the mail (no decodable payload,
+  // no replay after use, hash-at-rest in the DB).
+  const token = await createVerificationToken(userId, email);
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const verifyUrl = `${appUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
   const firstName = (fullName ?? "").trim().split(/\s+/)[0] || "there";

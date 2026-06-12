@@ -142,9 +142,21 @@ class BetaRoutes(
         runCatching { sendAdminNotification(email, body) }
             .onFailure { log.warn("[beta] admin notification email failed: {}", it.message) }
 
+        // Full structured application data for the telemetry funnel.
+        // Free-text fields are truncated; the use case itself stays out of
+        // telemetry (only its length) — it can contain sensitive detail.
         telemetry?.track("beta_application_submitted", "beta",
             appUserId = principal.appUserId.toString(),
-            properties = mapOf("company" to (body["company"] as? String)))
+            properties = mapOf(
+                "company"          to (body["company"] as? String)?.take(120),
+                "role"             to (body["role"] as? String)?.take(120),
+                "workflowsPerWeek" to (body["workflowsPerWeek"] as? String)?.take(40),
+                "teamSize"         to (body["teamSize"] as? String)?.take(40),
+                "byokReady"        to (body["byokReady"] as? Boolean ?: false),
+                "currentTools"     to (body["currentTools"] as? String)?.take(200),
+                "painPoint"        to (body["painPoint"] as? String)?.take(200),
+                "useCaseLength"    to ((body["useCase"] as? String)?.length ?: 0),
+            ))
 
         return Response.created(mapOf(
             "id"      to application.id.toString(),

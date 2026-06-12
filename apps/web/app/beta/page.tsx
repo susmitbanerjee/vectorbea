@@ -5,7 +5,6 @@ import { CheckCircle2, Clock, Loader2, LogOut, XCircle } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { setAccessToken } from "@/lib/api/client";
-import { track } from "@/lib/telemetry/client";
 
 function ensureTokenFromCookie() {
   if (typeof document === "undefined") return;
@@ -119,7 +118,8 @@ export default function BetaWaitlistPage() {
         setAlreadySub(true);
       } else {
         setSubmitted(true);
-        track("beta_application_submitted", { properties: { company: form.company } });
+        // No client-side telemetry here — the Kotlin API emits the canonical
+        // beta_application_submitted with full structured properties.
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit. Please try again.");
