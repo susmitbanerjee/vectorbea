@@ -1,13 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, LogOut, MailCheck, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
-/** Client half of /verify-email — resend + refresh actions. */
+const AUTOSEND_KEY = "vb-verif-last-autosend";
+const AUTOSEND_MIN_GAP_MS = 2 * 60_000;
+
+/** Client half of /verify-email — auto-send on arrival + resend/refresh actions. */
 export function VerifyEmailScreen({ email, error }: { email: string; error?: string }) {
   const [resending, setResending] = useState(false);
   const [resent, setResent] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
+
+  // Users can land here from SIGN-IN (not just signup), where no mail was ever
+  // sent. Fire one automatically, guarded so refreshes don't spam the inbox.
+  useEffect(() => {
+    const last = Number(localStorage.getItem(AUTOSEND_KEY) ?? 0);
+    if (Date.now() - last < AUTOSEND_MIN_GAP_MS) return;
+    localStorage.setItem(AUTOSEND_KEY, String(Date.now()));
+    void fetch("/api/auth/resend-verification", { method: "POST" })
+      .then(async (res) => {
+        const data = (await res.json().catch(() => ({}))) as { alreadyVerified?: boolean };
+        if (data.alreadyVerified) { window.location.assign("/beta"); return; }
+        if (!res.ok && res.status !== 429) setSendFailed(true);
+      })
+      .catch(() => { /* network blip — manual resend still available */ });
+  }, []);
 
   async function handleResend() {
     setResending(true);
@@ -19,10 +38,12 @@ export function VerifyEmailScreen({ email, error }: { email: string; error?: str
         return;
       }
       if (!res.ok) {
+        setSendFailed(true);
         toast.error(data.error ?? "Could not resend right now. Try again shortly.");
         return;
       }
       setResent(true);
+      setSendFailed(false);
       toast.success("Verification email sent.");
     } catch {
       toast.error("Network error. Try again shortly.");
@@ -59,6 +80,11 @@ export function VerifyEmailScreen({ email, error }: { email: string; error?: str
             Click it to confirm your address — then you&apos;ll land on the private-beta application.
           </p>
 
+          {sendFailed && (
+            <div className="mt-4 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-3.5 py-2.5 text-[12.5px] font-medium text-[#B91C1C]">
+              We couldn&apos;t send the email just now. Wait a minute and hit <b>Resend</b> — if it keeps failing, contact support.
+            </div>
+          )}
           {error === "invalid_or_expired" && (
             <div className="mt-4 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-2.5 text-[12.5px] font-medium text-[#92400E]">
               That link is invalid or has expired. Send yourself a fresh one below.

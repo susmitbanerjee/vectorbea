@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
-import { isEmailVerified } from "@/lib/auth/neon-auth";
+import { isEmailVerified, markEmailVerified } from "@/lib/auth/neon-auth";
+import { emailConfigured } from "@/lib/server/email";
 import { VerifyEmailScreen } from "@/components/auth/verify-email-screen";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,14 @@ export default async function VerifyEmailPage({
 
   try {
     if (await isEmailVerified(user.id)) redirect("/beta");
+
+    // No email provider configured → the mail can never arrive. Don't trap
+    // the user on this screen: heal the account and continue to /beta.
+    if (!emailConfigured()) {
+      console.warn(`[verify-email] no email provider configured — auto-verifying ${user.email}`);
+      await markEmailVerified(user.id);
+      redirect("/beta");
+    }
   } catch (err) {
     // redirect() throws internally — re-throw those, swallow only DB errors
     if (err && typeof err === "object" && "digest" in err) throw err;

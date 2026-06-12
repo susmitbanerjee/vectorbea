@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
-import { getUserById, isEmailVerified } from "@/lib/auth/neon-auth";
+import { getUserById, isEmailVerified, markEmailVerified } from "@/lib/auth/neon-auth";
 import { sendVerificationEmail } from "@/lib/auth/verification-email";
+import { emailConfigured } from "@/lib/server/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,14 @@ export async function POST() {
     return NextResponse.json({ ok: true, alreadyVerified: true });
   }
 
+  // No email provider configured → this account can NEVER receive the mail.
+  // Heal it: auto-verify instead of leaving the user stuck on the screen.
+  if (!emailConfigured()) {
+    console.warn(`[verify-email] no email provider configured — auto-verifying ${user.email}`);
+    await markEmailVerified(user.id);
+    return NextResponse.json({ ok: true, alreadyVerified: true });
+  }
+
   const last = lastSent.get(user.id) ?? 0;
   if (Date.now() - last < COOLDOWN_MS) {
     return NextResponse.json({ error: "Please wait a minute before requesting another email." }, { status: 429 });
@@ -29,7 +38,13 @@ export async function POST() {
   lastSent.set(user.id, Date.now());
 
   const profile = await getUserById(user.id);
-  await sendVerificationEmail(user.id, user.email, profile?.full_name);
-  // Always generic — never leak provider/config state to the browser.
+  const { sent } = await sendVerificationEmail(user.id, user.email, profile?.full_name);
+  if (!sent) {
+    // Honest but generic — details (provider/config) stay in server logs.
+    return NextResponse.json(
+      { error: "We couldn't send the email right now. Please try again in a few minutes." },
+      { status: 502 },
+    );
+  }
   return NextResponse.json({ ok: true });
 }
