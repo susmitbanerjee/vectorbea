@@ -26,11 +26,16 @@ export async function POST(req: NextRequest) {
   const apiKey    = process.env.RESEND_API_KEY;
   const fromEmail = process.env.EMAIL_FROM ?? process.env.FROM_EMAIL;
 
-  if (!apiKey) {
-    return NextResponse.json({ error: "RESEND_API_KEY is not configured. Add it to Vercel environment variables." }, { status: 500 });
-  }
-  if (!fromEmail) {
-    return NextResponse.json({ error: "EMAIL_FROM is not configured. Add it to Vercel environment variables." }, { status: 500 });
+  // Config problems are an operator concern — log the specifics server-side,
+  // never echo env-var/deployment details into user-visible run output.
+  if (!apiKey || !fromEmail) {
+    console.error(
+      `[email/send] not configured: ${!apiKey ? "RESEND_API_KEY missing. " : ""}${!fromEmail ? "EMAIL_FROM/FROM_EMAIL missing." : ""} Set these in the deployment environment.`,
+    );
+    return NextResponse.json(
+      { error: "Email sending is not available right now. Contact your workspace admin." },
+      { status: 503 },
+    );
   }
 
   let body: { to: unknown; subject?: string; html?: string; from?: string };
@@ -71,10 +76,11 @@ export async function POST(req: NextRequest) {
 
   const data = await res.json() as Record<string, unknown>;
   if (!res.ok) {
+    // Full provider response stays in server logs only
     console.error("[email/send] Resend error:", data);
     return NextResponse.json(
-      { error: (data.message as string | undefined) ?? "Resend API error", resend: data },
-      { status: res.status },
+      { error: "The email could not be sent. Check the recipient address and try again." },
+      { status: res.status >= 500 ? 502 : 400 },
     );
   }
 

@@ -176,6 +176,10 @@ class RunRoutes(
             val maxRuns = policy?.maxRunsPerDay ?: (appConfig?.betaDefaultMaxRunsPerDay ?: 20)
             val todayRuns = beta.getDailyRunCount(ctx.workspaceId)
             if (todayRuns >= maxRuns) {
+                telemetry?.track("usage_limit_blocked", "usage_limit",
+                    workspaceId = ctx.workspaceId.toString(),
+                    appUserId = req.principal?.appUserId?.toString(),
+                    properties = mapOf("limit" to "runs_per_day", "max" to maxRuns))
                 throw ApiError.TooManyRequests("BETA_USAGE_LIMIT_EXCEEDED: Daily run limit of $maxRuns reached. Resets at midnight UTC.")
             }
         }
@@ -284,6 +288,21 @@ class RunRoutes(
             workflowId = workflowId.toString(),
             appUserId = req.principal?.appUserId?.toString(),
             properties = mapOf("mode" to requestedMode, "triggerType" to body.triggerType))
+
+        // Mode-specific start events feed the business dashboard (simulation vs real)
+        if (requestedMode == "simulation") {
+            telemetry?.track("simulation_run_started", "simulation",
+                workspaceId = ctx.workspaceId.toString(),
+                runId = run.id.toString(),
+                workflowId = workflowId.toString(),
+                appUserId = req.principal?.appUserId?.toString())
+        } else {
+            telemetry?.track("real_execution_started", "real_execution",
+                workspaceId = ctx.workspaceId.toString(),
+                runId = run.id.toString(),
+                workflowId = workflowId.toString(),
+                appUserId = req.principal?.appUserId?.toString())
+        }
 
         return Response.accepted(mapOf(
             "runId" to run.id.toString(),

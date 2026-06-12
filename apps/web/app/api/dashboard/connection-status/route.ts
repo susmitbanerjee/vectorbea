@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(status);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load connection status" },
+      { error: "Failed to load connection status" },
       { status: 500 },
     );
   }

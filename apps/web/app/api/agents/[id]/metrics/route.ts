@@ -70,7 +70,7 @@ export async function GET(
     return NextResponse.json((data ?? []).map(toMetricPoint));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load agent metrics." },
+      { error: "Failed to load agent metrics." },
       { status: 500 },
     );
   }

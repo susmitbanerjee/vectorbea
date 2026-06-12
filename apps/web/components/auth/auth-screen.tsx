@@ -20,7 +20,9 @@ const BENEFITS = [
   "Token & cost visibility per run",
 ];
 
-export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
+export function AuthScreen({ mode, next }: { mode: Mode; next?: string }) {
+  // Only ever honor same-site paths — never absolute URLs (open-redirect guard)
+  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -51,6 +53,7 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
         error?: string;
         accessToken?: string;
         user?: { id: string; email: string };
+        requiresVerification?: boolean;
       };
 
       if (!res.ok) {
@@ -61,8 +64,15 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
       // Store token so API calls can send Authorization header to the Kotlin API
       if (data.accessToken) setAccessToken(data.accessToken);
 
-      // Redirect to dashboard (cookie also set server-side for SSR auth)
-      window.location.assign("/dashboard");
+      // New signups confirm their email first, then land on the beta application
+      if (isSignup && data.requiresVerification) {
+        window.location.assign("/verify-email");
+        return;
+      }
+
+      // Honor ?next=… (e.g. /beta after email verification); default dashboard.
+      // The (app) layout gates re-route unverified/waitlisted users regardless.
+      window.location.assign(safeNext ?? "/dashboard");
     } catch {
       setError("Network error. Please check your connection and try again.");
     } finally {
@@ -254,9 +264,9 @@ export function AuthScreen({ mode }: { mode: Mode; next?: string }) {
                 {/* OAuth buttons */}
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { label: "GitHub",    href: "/api/auth/github",    icon: <GitHubMark    className="h-[18px] w-[18px]" /> },
-                    { label: "Google",    href: "/api/auth/google",    icon: <GoogleMark    className="h-[18px] w-[18px]" /> },
-                    { label: "Microsoft", href: "/api/auth/microsoft", icon: <MicrosoftMark className="h-[18px] w-[18px]" /> },
+                    { label: "GitHub",    href: `/api/auth/github${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`,    icon: <GitHubMark    className="h-[18px] w-[18px]" /> },
+                    { label: "Google",    href: `/api/auth/google${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`,    icon: <GoogleMark    className="h-[18px] w-[18px]" /> },
+                    { label: "Microsoft", href: `/api/auth/microsoft${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`, icon: <MicrosoftMark className="h-[18px] w-[18px]" /> },
                   ].map(({ label, href, icon }) => (
                     <a
                       key={label}

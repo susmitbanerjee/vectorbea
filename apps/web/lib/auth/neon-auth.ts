@@ -22,9 +22,11 @@ export async function createUser(email: string, password: string, fullName?: str
   const hash = await bcrypt.hash(password, 12);
   const userId = crypto.randomUUID();
 
+  // email_verified=FALSE — password signups must confirm via the verification
+  // mail before reaching the beta application. (OAuth users are provider-verified.)
   const rows = await sql`
     INSERT INTO app_users (id, supabase_user_id, email, full_name, password_hash, status, email_verified)
-    VALUES (${userId}, ${userId}, ${email.toLowerCase().trim()}, ${fullName ?? null}, ${hash}, 'active', TRUE)
+    VALUES (${userId}, ${userId}, ${email.toLowerCase().trim()}, ${fullName ?? null}, ${hash}, 'active', FALSE)
     RETURNING id, email, full_name, avatar_url` as Row[];
 
   const user = rows[0]! as NeonUser;
@@ -58,11 +60,33 @@ export async function verifyCredentials(email: string, password: string): Promis
   return { id: user.id, email: user.email, full_name: user.full_name, avatar_url: user.avatar_url } as NeonUser;
 }
 
+// ─── Identity resolution ──────────────────────────────────────────────────────
+// The JWT `sub` is app_users.id for password accounts, but supabase_user_id
+// for OAuth accounts (a Supabase UUID or "google:…"/"microsoft:…" — NOT the
+// row's UUID id, and not even castable to UUID). Every lookup must therefore
+// match on either column, comparing id as text to avoid UUID cast errors.
+
+/** True when the user's email address has been confirmed. */
+export async function isEmailVerified(userId: string): Promise<boolean> {
+  const sql = db();
+  const rows = await sql`
+    SELECT email_verified FROM app_users
+    WHERE id::text = ${userId} OR supabase_user_id = ${userId} LIMIT 1` as { email_verified: boolean }[];
+  return rows[0]?.email_verified === true;
+}
+
+/** Marks the user's email as verified (idempotent). */
+export async function markEmailVerified(userId: string): Promise<void> {
+  const sql = db();
+  await sql`UPDATE app_users SET email_verified = TRUE, updated_at = now()
+    WHERE id::text = ${userId} OR supabase_user_id = ${userId}`;
+}
+
 export async function getUserById(id: string): Promise<NeonUser | null> {
   const sql = db();
   const rows = await sql`
     SELECT id, email, full_name, avatar_url FROM app_users
-    WHERE id = ${id} AND status = 'active' LIMIT 1` as Row[];
+    WHERE (id::text = ${id} OR supabase_user_id = ${id}) AND status = 'active' LIMIT 1` as Row[];
   return rows[0] ? (rows[0] as NeonUser) : null;
 }
 
@@ -72,20 +96,29 @@ export async function getUserBetaStatus(id: string): Promise<{ betaStatus: strin
     const rows = await sql`
       SELECT COALESCE(beta_status, 'waitlisted') as beta_status,
              COALESCE(is_platform_admin, false) as is_platform_admin
-      FROM app_users WHERE id = ${id} LIMIT 1` as { beta_status: string; is_platform_admin: boolean }[];
+      FROM app_users
+      WHERE id::text = ${id} OR supabase_user_id = ${id} LIMIT 1` as { beta_status: string; is_platform_admin: boolean }[];
     if (!rows[0]) return null;
     return { betaStatus: rows[0].beta_status, isPlatformAdmin: rows[0].is_platform_admin };
   } catch {
-    // V015 migration not yet applied — default to approved so existing users aren't blocked
-    return { betaStatus: "approved", isPlatformAdmin: false };
+    // FAIL CLOSED: if the status can't be read, treat as waitlisted. V015
+    // backfilled all pre-existing users to 'approved', so this only ever
+    // gates users we can't positively identify as approved.
+    return { betaStatus: "waitlisted", isPlatformAdmin: false };
   }
 }
 
 export async function getUserWorkspaces(userId: string) {
   const sql = db();
+  // Resolve through app_users so OAuth subs ("google:…", supabase UUIDs)
+  // find their memberships — workspace_members.user_id is always app_users.id.
   const rows = await sql`
     SELECT w.id, w.name, w.slug, wm.role
-    FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id
-    WHERE wm.user_id = ${userId} AND wm.status = 'active' ORDER BY w.name` as Row[];
+    FROM workspace_members wm
+    JOIN workspaces w ON w.id = wm.workspace_id
+    JOIN app_users au ON au.id = wm.user_id
+    WHERE (au.id::text = ${userId} OR au.supabase_user_id = ${userId})
+      AND wm.status = 'active'
+    ORDER BY w.name` as Row[];
   return rows as { id: string; name: string; slug: string; role: string }[];
 }

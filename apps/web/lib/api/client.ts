@@ -131,6 +131,59 @@ export interface RequestOptions extends Omit<RequestInit, "body" | "headers"> {
   headers?: Record<string, string>;
 }
 
+// ─── Circuit breaker ──────────────────────────────────────────────────────────
+// Per-origin breaker for backend calls: after N consecutive transport/5xx
+// failures the circuit opens and requests fail fast for a cooldown period
+// (one half-open probe is let through to test recovery). Protects the UI from
+// hammering a struggling backend and gives users an honest, immediate error.
+
+const BREAKER_FAILURE_THRESHOLD = 5;
+const BREAKER_COOLDOWN_MS = 30_000;
+
+type BreakerState = { failures: number; openedAt: number; probing: boolean };
+const breakers = new Map<string, BreakerState>();
+
+function originOf(url: string): string {
+  try { return new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost").origin; }
+  catch { return "unknown"; }
+}
+
+function breakerFor(origin: string): BreakerState {
+  let b = breakers.get(origin);
+  if (!b) { b = { failures: 0, openedAt: 0, probing: false }; breakers.set(origin, b); }
+  return b;
+}
+
+/** Throws fast when the circuit is open; marks a half-open probe otherwise. */
+function breakerPreCheck(origin: string): void {
+  const b = breakerFor(origin);
+  if (b.failures < BREAKER_FAILURE_THRESHOLD) return;
+  const elapsed = Date.now() - b.openedAt;
+  if (elapsed < BREAKER_COOLDOWN_MS) {
+    if (!b.probing) {
+      throw new ApiError(503, "Service is temporarily unavailable — please try again in a moment.");
+    }
+    // another probe already in flight → also fail fast
+    throw new ApiError(503, "Service is temporarily unavailable — please try again in a moment.");
+  }
+  // Cooldown over → allow this request through as the recovery probe
+  b.probing = true;
+}
+
+function breakerRecordSuccess(origin: string): void {
+  const b = breakerFor(origin);
+  b.failures = 0;
+  b.probing = false;
+}
+
+function breakerRecordFailure(origin: string): void {
+  const b = breakerFor(origin);
+  b.failures += 1;
+  b.probing = false;
+  if (b.failures === BREAKER_FAILURE_THRESHOLD) b.openedAt = Date.now();
+  if (b.failures > BREAKER_FAILURE_THRESHOLD) b.openedAt = Date.now(); // re-open after failed probe
+}
+
 /**
  * Low-level typed fetch.  Resolves path against apiBase() so callers can pass
  * either absolute URLs or /api-relative paths and get the right host in all
@@ -143,6 +196,8 @@ export async function apiFetch<T = unknown>(
   const { json, text, headers: extraHeaders, ...init } = opts;
 
   const url = path.startsWith("http") ? path : `${apiBase()}${path}`;
+  const origin = originOf(url);
+  breakerPreCheck(origin);
 
   const workspaceId = getActiveWorkspaceId();
   const environmentId = getActiveEnvironmentId();
@@ -158,12 +213,23 @@ export async function apiFetch<T = unknown>(
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(url, {
-    cache: "no-store",
-    ...init,
-    headers,
-    body: json !== undefined ? JSON.stringify(json) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      cache: "no-store",
+      ...init,
+      headers,
+      body: json !== undefined ? JSON.stringify(json) : undefined,
+    });
+  } catch (err) {
+    // Transport failure (network down, DNS, CORS) — counts toward the breaker
+    breakerRecordFailure(origin);
+    throw err;
+  }
+
+  // 5xx = backend struggling → breaker; 4xx = caller issue → not a breaker event
+  if (res.status >= 500) breakerRecordFailure(origin);
+  else breakerRecordSuccess(origin);
 
   if (!res.ok) {
     let message = `API error ${res.status}`;

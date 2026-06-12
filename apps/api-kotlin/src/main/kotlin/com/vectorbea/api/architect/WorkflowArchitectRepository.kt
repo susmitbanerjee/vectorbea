@@ -145,6 +145,13 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         { setObject(1, workspaceId) }, { it.getInt(1) },
     ) ?: 0
 
+    /** Architect sessions created by this workspace in the current calendar month. */
+    fun getMonthlySessionCount(workspaceId: UUID): Int = queryOne(
+        "SELECT COUNT(*) FROM workflow_architect_sessions " +
+        "WHERE workspace_id=? AND created_at >= date_trunc('month', now())",
+        { setObject(1, workspaceId) }, { it.getInt(1) },
+    ) ?: 0
+
     fun getRevisionCount(sessionId: UUID): Int = queryOne(
         "SELECT COUNT(*) FROM workflow_architect_events WHERE session_id=? AND event_type='ARCHITECT_PLAN_REVISED'",
         { setObject(1, sessionId) }, { it.getInt(1) },

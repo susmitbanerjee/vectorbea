@@ -28,7 +28,7 @@ export async function GET() {
   } catch (err) {
     checks.database = {
       ok: false,
-      detail: err instanceof Error ? err.message : String(err),
+      detail: "unavailable",
     };
   }
 
@@ -49,7 +49,7 @@ export async function GET() {
   } catch (err) {
     checks.redis = {
       ok: false,
-      detail: err instanceof Error ? err.message : String(err),
+      detail: "unavailable",
     };
   }
 
@@ -80,7 +80,7 @@ export async function GET() {
     } catch (err) {
       checks.seed_org = {
         ok: false,
-        detail: err instanceof Error ? err.message : String(err),
+        detail: "unavailable",
       };
     }
   }

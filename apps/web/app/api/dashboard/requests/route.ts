@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(points);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load dashboard requests" },
+      { error: "Failed to load dashboard requests" },
       { status: 500 },
     );
   }

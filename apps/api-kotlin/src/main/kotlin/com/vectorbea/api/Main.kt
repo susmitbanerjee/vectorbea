@@ -239,7 +239,7 @@ fun main() {
     MetricsRoutes().register(router)
 
     if (connectionRepo != null) {
-        ConnectionRoutes(connectionRepo, cacheService, secretService).register(router)
+        ConnectionRoutes(connectionRepo, cacheService, secretService, telemetry).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
     } else log.warn("ConnectionRoutes disabled — no database")

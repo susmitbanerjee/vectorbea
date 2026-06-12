@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ inserted: rows.length }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to insert audit logs" },
+      { error: "Failed to insert audit logs" },
       { status: 500 },
     );
   }

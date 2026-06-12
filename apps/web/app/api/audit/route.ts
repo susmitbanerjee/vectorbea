@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(logs);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load audit logs" },
+      { error: "Failed to load audit logs" },
       { status: 500 },
     );
   }

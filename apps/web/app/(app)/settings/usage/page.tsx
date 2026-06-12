@@ -109,7 +109,7 @@ export default function UsagePage() {
   const pct  = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
 
   const features = [
-    { label: "AI Workflow Architect", desc: "Plain English → running workflow", enabled: true, architect: true, icon: Zap },
+    { label: "AI Workflow Architect", desc: "Plain English → running workflow · 1 build/month", enabled: true, architect: true, icon: Zap },
     { label: "Schedules",        desc: "Cron-triggered workflows",      enabled: status?.allowSchedules ?? false,       icon: CalendarClock },
     { label: "Webhooks",         desc: "HTTP-triggered workflows",      enabled: status?.allowWebhooks ?? false,        icon: Webhook },
     { label: "Iterative agents", desc: "Multi-turn agent loops",        enabled: status?.allowIterativeAgents ?? false, icon: Bot },
@@ -204,10 +204,10 @@ export default function UsagePage() {
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
                 <LimitTile icon={GitBranch}     label="Workflows"      value={status?.maxWorkflows ?? 3}        sub="max active" />
                 <LimitTile icon={Layers}        label="Steps"          value={status?.maxStepsPerWorkflow ?? 5} sub="per workflow" />
-                <LimitTile icon={Timer}         label="Run duration"   value="5m"                               sub="max per run" />
+                <LimitTile icon={Timer}         label="Run duration"   value="∞"                                sub="durable by design" />
                 <LimitTile icon={FileText}      label="Log retention"  value={`${status?.logRetentionDays ?? 7}d`} sub="then purged" />
                 <LimitTile icon={Users}         label="Team"           value={status?.maxTeamMembers ?? 1}      sub="members" />
-                <LimitTile icon={Activity}      label="LLM providers"  value={status?.maxLlmProviders ?? 1}     sub="BYOK keys" />
+                <LimitTile icon={Activity}      label="AI Architect"   value="1"                                sub="build / month" />
               </div>
             </div>
 

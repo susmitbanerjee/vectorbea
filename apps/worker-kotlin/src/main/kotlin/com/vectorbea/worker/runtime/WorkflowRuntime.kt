@@ -68,9 +68,14 @@ class WorkflowRuntime(
     /** Default per-node timeout when the node doesn't set its own (0 disables). */
     private val defaultNodeTimeoutMs: Long =
         (System.getenv("WORKER_DEFAULT_NODE_TIMEOUT_MS") ?: "120000").toLong(),
-    /** Hard wall-clock budget for a single run (0 disables). */
+    /**
+     * Hard wall-clock budget for a single run (0 disables).
+     * UNLIMITED by default — long-running durable workflows are the product's
+     * core proposition; runs may legitimately wait hours or days at approval
+     * gates and timers. Set WORKER_MAX_RUN_DURATION_MS only as an emergency brake.
+     */
     private val maxRunDurationMs: Long =
-        (System.getenv("WORKER_MAX_RUN_DURATION_MS") ?: "600000").toLong(),
+        (System.getenv("WORKER_MAX_RUN_DURATION_MS") ?: "0").toLong(),
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createUser } from "@/lib/auth/neon-auth";
+import { createUser, markEmailVerified } from "@/lib/auth/neon-auth";
 import { signToken } from "@/lib/auth/jwt";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+import { sendVerificationEmail } from "@/lib/auth/verification-email";
+import { emailConfigured } from "@/lib/server/email";
+import { trackServer } from "@/lib/telemetry/server";
 
 export const runtime = "nodejs";
 export const dynamic  = "force-dynamic";
@@ -18,10 +21,23 @@ export async function POST(req: NextRequest) {
 
     const user  = await createUser(email, password, fullName);
     const token = await signToken({ sub: user.id, email: user.email });
+    // createUser provisions the user's first workspace
+    trackServer("workspace_created", "onboarding", { appUserId: user.id });
+
+    // Email verification: send the confirmation mail. When no email provider
+    // is configured (local dev), auto-verify so the flow isn't bricked.
+    let requiresVerification = true;
+    if (emailConfigured()) {
+      await sendVerificationEmail(user.id, user.email, user.full_name);
+    } else {
+      await markEmailVerified(user.id);
+      requiresVerification = false;
+    }
 
     const res = NextResponse.json({
       user:        { id: user.id, email: user.email, fullName: user.full_name },
       accessToken: token,                // frontend stores for Kotlin API calls
+      requiresVerification,
     }, { status: 201 });
 
     res.cookies.set(AUTH_COOKIE_NAME, token, {

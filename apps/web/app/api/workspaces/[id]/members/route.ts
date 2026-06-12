@@ -56,7 +56,7 @@ export async function GET(
     return NextResponse.json(members);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load members" },
+      { error: "Failed to load members" },
       { status: 500 },
     );
   }

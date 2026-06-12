@@ -28,7 +28,7 @@ export async function GET() {
     return NextResponse.json(organizations);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load organizations" },
+      { error: "Failed to load organizations" },
       { status: 500 },
     );
   }
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create organization" },
+      { error: "Failed to create organization" },
       { status: 500 },
     );
   }
