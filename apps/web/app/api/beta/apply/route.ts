@@ -17,6 +17,12 @@ function apiBase(): string {
     .trim().replace(/\/$/, "");
 }
 
+function requestOrigin(request: NextRequest): string {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const proto = request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol.replace(":", "");
+  return host ? `${proto}://${host}` : request.nextUrl.origin;
+}
+
 /**
  * POST /api/beta/apply — same-origin proxy to the Kotlin API.
  *
@@ -42,7 +48,11 @@ export async function POST(request: NextRequest) {
   try {
     upstream = await fetch(`${apiBase()}/api/beta/apply`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Vectorbea-App-Url": requestOrigin(request),
+      },
       body: JSON.stringify(form),
       signal: AbortSignal.timeout(10_000),
     });

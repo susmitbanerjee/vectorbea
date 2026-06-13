@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { CheckCircle2, Clock, Loader2, LogOut, XCircle } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
-import { setAccessToken } from "@/lib/api/client";
+import { clearAccessToken, setAccessToken } from "@/lib/api/client";
 
 function ensureTokenFromCookie() {
   if (typeof document === "undefined") return;
@@ -73,6 +73,7 @@ export default function BetaWaitlistPage() {
   const [loading, setLoading]               = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [justVerified, setJustVerified]     = useState(false);
+  const [signingOut, setSigningOut]         = useState(false);
   const [form, setForm] = useState({
     fullName: "", company: "", role: "", useCase: "",
     currentTools: "", painPoint: "", workflowsPerWeek: "", teamSize: "",
@@ -82,6 +83,13 @@ export default function BetaWaitlistPage() {
   function set(key: string, value: string | boolean) {
     setForm(prev => ({ ...prev, [key]: value }));
   }
+
+  const handleSignOut = useCallback(async () => {
+    setSigningOut(true);
+    clearAccessToken();
+    try { await fetch("/api/auth/session", { method: "DELETE" }); } catch {}
+    window.location.href = "/signin";
+  }, []);
 
   useEffect(() => {
     ensureTokenFromCookie();
@@ -103,6 +111,15 @@ export default function BetaWaitlistPage() {
       .catch(() => {})
       .finally(() => setCheckingStatus(false));
   }, []);
+
+  useEffect(() => {
+    if (checkingStatus || signingOut) return;
+    const waitingForReview =
+      submitted || (alreadySubmitted && existingStatus !== "approved" && existingStatus !== "rejected");
+    if (!waitingForReview) return;
+    const timer = window.setTimeout(() => { void handleSignOut(); }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [checkingStatus, submitted, alreadySubmitted, existingStatus, signingOut, handleSignOut]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -130,11 +147,6 @@ export default function BetaWaitlistPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  async function handleSignOut() {
-    try { await fetch("/api/auth/signout", { method: "POST" }); } catch {}
-    window.location.href = "/signin";
   }
 
   return (
@@ -169,12 +181,12 @@ export default function BetaWaitlistPage() {
 
           {/* Already submitted / status state */}
           {!checkingStatus && alreadySubmitted && (
-            <StatusScreen status={existingStatus} onSignOut={handleSignOut} />
+            <StatusScreen status={existingStatus} onSignOut={handleSignOut} signingOut={signingOut} />
           )}
 
           {/* Submitted success */}
           {!checkingStatus && !alreadySubmitted && submitted && (
-            <SuccessScreen onSignOut={handleSignOut} />
+            <SuccessScreen onSignOut={handleSignOut} signingOut={signingOut} />
           )}
 
           {/* Application form */}
@@ -329,7 +341,7 @@ export default function BetaWaitlistPage() {
 }
 
 /* ── Success screen ────────────────────────────────────────────────────────── */
-function SuccessScreen({ onSignOut }: { onSignOut: () => void }) {
+function SuccessScreen({ onSignOut, signingOut }: { onSignOut: () => void; signingOut: boolean }) {
   return (
     <div className="space-y-8">
       <div>
@@ -386,14 +398,14 @@ function SuccessScreen({ onSignOut }: { onSignOut: () => void }) {
 
       <button type="button" onClick={onSignOut}
         className="flex items-center gap-1.5 text-[12.5px] text-[#9CA3AF] hover:text-[#4B5563] transition-colors">
-        <LogOut className="h-3.5 w-3.5" /> Sign out
+        <LogOut className="h-3.5 w-3.5" /> {signingOut ? "Signing out..." : "Sign out"}
       </button>
     </div>
   );
 }
 
 /* ── Status screen (already submitted / approved / rejected) ───────────────── */
-function StatusScreen({ status, onSignOut }: { status: string | null; onSignOut: () => void }) {
+function StatusScreen({ status, onSignOut, signingOut }: { status: string | null; onSignOut: () => void; signingOut: boolean }) {
   const isApproved = status === "approved";
   const isRejected = status === "rejected";
   const isWaiting  = !isApproved && !isRejected;
@@ -449,7 +461,7 @@ function StatusScreen({ status, onSignOut }: { status: string | null; onSignOut:
         {" "}·{" "}
         <button type="button" onClick={onSignOut}
           className="text-[#9CA3AF] hover:text-[#374151] transition-colors">
-          Sign out
+          {signingOut ? "Signing out..." : "Sign out"}
         </button>
       </p>
     </div>

@@ -53,6 +53,7 @@ data class BetaApplication(
     val fullName: String?,
     val companyName: String?,
     val useCase: String?,
+    val sourceAppUrl: String?,
     val status: String,
     val createdAt: Instant,
 )
@@ -182,7 +183,7 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
     // ── Beta applications ─────────────────────────────────────────────────────
 
     fun findApplicationByEmail(email: String): BetaApplication? = queryOne(
-        "SELECT id,app_user_id,email,full_name,company_name,use_case,status,created_at FROM beta_applications WHERE LOWER(email)=LOWER(?) LIMIT 1",
+        "SELECT id,app_user_id,email,full_name,company_name,use_case,source_app_url,status,created_at FROM beta_applications WHERE LOWER(email)=LOWER(?) LIMIT 1",
         { setString(1, email) },
     ) { rs -> BetaApplication(
         id          = UUID.fromString(rs.getString("id")),
@@ -191,6 +192,7 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         fullName    = rs.getString("full_name"),
         companyName = rs.getString("company_name"),
         useCase     = rs.getString("use_case"),
+        sourceAppUrl = rs.getString("source_app_url"),
         status      = rs.getString("status"),
         createdAt   = rs.getTimestamp("created_at").toInstant(),
     )}
@@ -199,23 +201,25 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         email: String, supabaseUserId: UUID?, appUserId: UUID?,
         fullName: String?, company: String?, role: String?, useCase: String?, currentTools: String?,
         painPoint: String?, workflowsPerWeek: String?, teamSize: String?, byokReady: Boolean?,
+        sourceAppUrl: String?,
     ): BetaApplication = executeReturning("""
         INSERT INTO beta_applications
           (email, supabase_user_id, app_user_id, full_name, company_name, role_title, use_case,
-           current_tools, pain_point, workflows_per_week, team_size, byok_ready)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           current_tools, pain_point, workflows_per_week, team_size, byok_ready, source_app_url)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (email) DO UPDATE SET
           supabase_user_id=EXCLUDED.supabase_user_id, app_user_id=EXCLUDED.app_user_id,
           full_name=EXCLUDED.full_name, company_name=EXCLUDED.company_name, role_title=EXCLUDED.role_title,
           use_case=EXCLUDED.use_case, current_tools=EXCLUDED.current_tools,
           pain_point=EXCLUDED.pain_point, workflows_per_week=EXCLUDED.workflows_per_week,
-          team_size=EXCLUDED.team_size, byok_ready=EXCLUDED.byok_ready, updated_at=now()
-        RETURNING id, app_user_id, email, full_name, company_name, use_case, status, created_at
+          team_size=EXCLUDED.team_size, byok_ready=EXCLUDED.byok_ready,
+          source_app_url=EXCLUDED.source_app_url, updated_at=now()
+        RETURNING id, app_user_id, email, full_name, company_name, use_case, source_app_url, status, created_at
     """.trimIndent(), {
         setString(1, email); setObject(2, supabaseUserId); setObject(3, appUserId)
         setString(4, fullName); setString(5, company); setString(6, role); setString(7, useCase)
         setString(8, currentTools); setString(9, painPoint); setString(10, workflowsPerWeek)
-        setString(11, teamSize); setBoolean(12, byokReady ?: false)
+        setString(11, teamSize); setBoolean(12, byokReady ?: false); setString(13, sourceAppUrl)
     }) { rs -> BetaApplication(
         id          = UUID.fromString(rs.getString("id")),
         appUserId   = rs.getString("app_user_id")?.let { UUID.fromString(it) },
@@ -223,12 +227,13 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         fullName    = rs.getString("full_name"),
         companyName = rs.getString("company_name"),
         useCase     = rs.getString("use_case"),
+        sourceAppUrl = rs.getString("source_app_url"),
         status      = rs.getString("status"),
         createdAt   = rs.getTimestamp("created_at").toInstant(),
     )}
 
     fun listBetaApplications(status: String? = null): List<BetaApplication> = query(
-        "SELECT id,app_user_id,email,full_name,company_name,use_case,status,created_at " +
+        "SELECT id,app_user_id,email,full_name,company_name,use_case,source_app_url,status,created_at " +
         "FROM beta_applications" + (if (status != null) " WHERE status=?" else "") +
         " ORDER BY created_at DESC",
         { if (status != null) setString(1, status) },
@@ -239,9 +244,18 @@ class BetaAccessRepository(dataSource: DataSource) : BaseRepository(dataSource) 
         fullName    = rs.getString("full_name"),
         companyName = rs.getString("company_name"),
         useCase     = rs.getString("use_case"),
+        sourceAppUrl = rs.getString("source_app_url"),
         status      = rs.getString("status"),
         createdAt   = rs.getTimestamp("created_at").toInstant(),
     )}
+
+    fun updateBetaApplicationSourceUrlByEmail(email: String, sourceAppUrl: String?) {
+        if (sourceAppUrl.isNullOrBlank()) return
+        execute("UPDATE beta_applications SET source_app_url=?, updated_at=now() WHERE LOWER(email)=LOWER(?)") {
+            setString(1, sourceAppUrl)
+            setString(2, email)
+        }
+    }
 
     fun updateBetaApplicationStatus(id: UUID, status: String, reviewedBy: UUID?, reason: String?) {
         execute("""
