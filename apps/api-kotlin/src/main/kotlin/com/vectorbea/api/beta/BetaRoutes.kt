@@ -9,6 +9,7 @@ import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
 import com.vectorbea.api.users.AppUserRepository
 import com.vectorbea.api.telemetry.TelemetryClient
+import java.net.URI
 import java.util.Base64
 import java.util.UUID
 
@@ -110,10 +111,12 @@ class BetaRoutes(
         val body = req.bodyAs<Map<String, Any?>>()
         val email = (body["email"] as? String ?: principal.email ?: "").trim()
         if (email.isBlank()) throw ApiError.ValidationError("email is required")
+        val sourceAppUrl = appUrlForRequest(req)
 
         // Block re-submission if an application already exists for this email
         val existing = betaRepo.findApplicationByEmail(email)
         if (existing != null) {
+            betaRepo.updateBetaApplicationSourceUrlByEmail(email, sourceAppUrl)
             val msg = when (existing.status) {
                 "waitlisted" -> "Your application is under evaluation. We review every request manually and will reach out soon."
                 "approved"   -> "Your application has already been approved. Please sign in to access Vectorbea."
@@ -142,10 +145,11 @@ class BetaRoutes(
             workflowsPerWeek = body["workflowsPerWeek"] as? String,
             teamSize        = body["teamSize"] as? String,
             byokReady       = body["byokReady"] as? Boolean,
+            sourceAppUrl    = sourceAppUrl,
         )
 
         // Send admin notification email via Resend (best-effort — never block the response)
-        runCatching { sendBetaApplicationAdminEmail(email, body) }
+        runCatching { sendBetaApplicationAdminEmail(email, body, sourceAppUrl) }
             .onFailure { log.warn("[beta] admin notification email failed: {}", it.message) }
 
         // Full structured application data for the telemetry funnel.
@@ -265,7 +269,7 @@ class BetaRoutes(
             }
         }
         app?.email?.let { email ->
-            runCatching { sendBetaDecisionEmail(email, approved = true) }
+            runCatching { sendBetaDecisionEmail(email, approved = true, sourceAppUrl = app.sourceAppUrl) }
                 .onFailure { log.warn("[beta] approval email failed: {}", it.message) }
         }
 
@@ -289,7 +293,7 @@ class BetaRoutes(
         val app  = apps.find { it.id == id }
         if (app?.appUserId != null) userRepo.setBetaStatus(app.appUserId, "rejected")
         app?.email?.let { email ->
-            runCatching { sendBetaDecisionEmail(email, approved = false) }
+            runCatching { sendBetaDecisionEmail(email, approved = false, sourceAppUrl = app.sourceAppUrl) }
                 .onFailure { log.warn("[beta] rejection email failed: {}", it.message) }
         }
 
@@ -345,10 +349,10 @@ class BetaRoutes(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun sendBetaApplicationAdminEmail(applicantEmail: String, body: Map<String, Any?>) {
+    private fun sendBetaApplicationAdminEmail(applicantEmail: String, body: Map<String, Any?>, sourceAppUrl: String?) {
         val resendKey = System.getenv("RESEND_API_KEY") ?: return
         val adminEmails = config.adminEmails.ifEmpty { return }
-        val appUrl = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL") ?: "https://app.vectorbea.com"
+        val appUrl = canonicalAppUrl(sourceAppUrl) ?: defaultAppUrl()
         val reviewUrl = "$appUrl/admin/beta/applications"
 
         val fullName = body["fullName"] as? String ?: "Not provided"
@@ -420,9 +424,9 @@ class BetaRoutes(
         log.info("[beta] admin notification sent to {} HTTP {}", adminEmails, res.statusCode())
     }
 
-    private fun sendBetaDecisionEmail(email: String, approved: Boolean) {
+    private fun sendBetaDecisionEmail(email: String, approved: Boolean, sourceAppUrl: String?) {
         val resendKey = System.getenv("RESEND_API_KEY") ?: return
-        val appUrl = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL") ?: "https://app.vectorbea.com"
+        val appUrl = canonicalAppUrl(sourceAppUrl) ?: defaultAppUrl()
         val subject = if (approved) "Welcome to Vectorbea" else "Vectorbea access request update"
         val body = if (approved) {
             """
@@ -491,6 +495,35 @@ class BetaRoutes(
             .build()
         return http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString())
     }
+
+    private fun appUrlForRequest(req: Request): String =
+        canonicalAppUrl(req.header("x-vectorbea-app-url"))
+            ?: canonicalAppUrl(req.header("origin"))
+            ?: defaultAppUrl()
+
+    private fun defaultAppUrl(): String =
+        canonicalAppUrl(System.getenv("APP_URL"))
+            ?: canonicalAppUrl(System.getenv("NEXT_PUBLIC_APP_URL"))
+            ?: "https://app.vectorbea.com"
+
+    private fun canonicalAppUrl(raw: String?): String? {
+        val value = raw?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() } ?: return null
+        val uri = runCatching { URI.create(if ("://" in value) value else "https://$value") }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase()?.takeIf { it == "https" || it == "http" } ?: return null
+        val host = uri.host?.lowercase() ?: return null
+        if (!isAllowedAppHost(host)) return null
+        val port = uri.port
+        val portPart = if (port > 0 && !((scheme == "https" && port == 443) || (scheme == "http" && port == 80))) ":$port" else ""
+        return "$scheme://$host$portPart"
+    }
+
+    private fun isAllowedAppHost(host: String): Boolean =
+        host == "localhost" ||
+            host == "127.0.0.1" ||
+            host == "vectorbea.com" ||
+            host.endsWith(".vectorbea.com") ||
+            host == "vectorbea.app" ||
+            host.endsWith(".vectorbea.app")
 
     private fun logoHtml(appUrl: String): String =
         """<p style="margin:0 0 18px;"><img src="$appUrl/icon.svg" width="32" height="32" alt="Vectorbea" style="display:block;border:0;border-radius:8px;" /></p>"""
