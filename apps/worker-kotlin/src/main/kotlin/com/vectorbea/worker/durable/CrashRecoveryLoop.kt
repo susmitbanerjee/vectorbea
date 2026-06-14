@@ -108,7 +108,7 @@ class CrashRecoveryLoop(
     private fun markRecovering(runId: UUID): Boolean {
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                "UPDATE agent_runs SET status='recovering', updated_at=now() WHERE id=? AND status='running'"
+                "UPDATE agent_runs SET status='recovering', updated_at=now() WHERE id=? AND status IN ('running','yielded')"
             ).use { stmt ->
                 stmt.setObject(1, runId)
                 return stmt.executeUpdate() > 0

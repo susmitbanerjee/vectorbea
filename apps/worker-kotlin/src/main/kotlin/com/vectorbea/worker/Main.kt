@@ -8,12 +8,16 @@ import com.vectorbea.worker.db.Database
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.heartbeat.WorkerHeartbeat
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.fairness.TenantConcurrencyLimiter
 import com.vectorbea.worker.metrics.WorkerMetrics
+import com.vectorbea.worker.queue.ExecutionPoolRouter
+import com.vectorbea.worker.queue.JobClassifier
 import com.vectorbea.worker.queue.WorkflowQueueConsumer
 import com.vectorbea.worker.redis.RedisProvider
 import com.vectorbea.worker.runtime.RunProcessor
 import com.vectorbea.worker.runtime.StepOutputStore
 import com.vectorbea.worker.runtime.WorkflowRuntime
+import com.vectorbea.worker.runtime.budget.ExecutionBudget
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.durable.CrashRecoveryLoop
@@ -126,6 +130,10 @@ fun main() {
     val historyChecker = HistoryLimitChecker(database.dataSource)
     val stepGuard      = StepExecutionGuard(database.dataSource)
 
+    // Per-tick cooperative-yield budget — bounds how much work a run does per
+    // worker thread before it checkpoints and re-enqueues a RESUME_RUN.
+    val executionBudget = ExecutionBudget.fromEnv()
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -138,6 +146,7 @@ fun main() {
         debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
         stepGuard          = stepGuard,
         historyChecker     = historyChecker,
+        executionBudget    = executionBudget,
     )
     val telemetry = TelemetryClient.fromEnv()
     val processor = RunProcessor(
@@ -149,11 +158,34 @@ fun main() {
         checkpointStore = checkpointStore,
         telemetry       = telemetry,
         leaseManager    = leaseManager,
+        // Durably re-enqueue continuation jobs after a yield (survives crash).
+        reEnqueue       = { job ->
+            redis.commands.xadd(config.queueStream, job.toStreamFields())
+            WorkerMetrics.redisXadd.inc()
+        },
     )
-    log.info("[startup] run processor ready (lease + idempotency guards active)")
+    log.info("[startup] run processor ready (lease + idempotency guards + cooperative yield active)")
 
-    // ── 7. Queue consumer ─────────────────────────────────────────────────────
-    val consumer = WorkflowQueueConsumer(config, redis.commands, processor)
+    // ── 7. Execution pools, classifier, tenant fairness, queue consumer ───────
+    val poolRouter = ExecutionPoolRouter(
+        shortConcurrency  = config.shortConcurrency,
+        longConcurrency   = config.longConcurrency,
+        agentConcurrency  = config.agentConcurrency,
+        systemConcurrency = config.systemConcurrency,
+    )
+    val jobClassifier = JobClassifier(database.dataSource)
+    val tenantLimiter = TenantConcurrencyLimiter(
+        maxRunsPerTenant      = config.maxActiveRunsPerTenant,
+        maxAgentRunsPerTenant = config.maxActiveAgentRunsPerTenant,
+        maxLongRunsPerTenant  = config.maxActiveLongRunsPerTenant,
+        maxShortRunsPerTenant = config.maxActiveShortRunsPerTenant,
+    )
+    val consumer = WorkflowQueueConsumer(
+        config, redis.commands, processor,
+        router = poolRouter,
+        classifier = jobClassifier,
+        tenantLimiter = tenantLimiter,
+    )
     try {
         consumer.ensureConsumerGroup()
     } catch (e: Exception) {

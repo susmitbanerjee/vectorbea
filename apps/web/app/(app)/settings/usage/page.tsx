@@ -34,6 +34,26 @@ interface UsageStatus {
   message: string;
 }
 
+interface ArchitectUsage {
+  used: number;
+  limit: number;
+  remaining: number;
+  periodDays: number;
+  locked: boolean;
+  lastBuildAt?: string | null;
+  resetAt?: string | null;
+}
+
+/** Format an ISO timestamp as a readable local date + time, or null if invalid. */
+function formatDateTime(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, {
+    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
 function MonoLabel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <p className={cn("font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[#9CA3AF]", className)}>
@@ -93,15 +113,26 @@ function LimitTile({ icon: Icon, label, value, sub }: { icon: React.ElementType;
 
 export default function UsagePage() {
   const [status, setStatus] = useState<UsageStatus | null>(null);
+  const [architect, setArchitect] = useState<ArchitectUsage | null>(null);
   const [loading, setLoading] = useState(true);
 
   function load() {
     setLoading(true);
+    // Architect usage is best-effort — never block the page if it fails.
+    apiFetch<ArchitectUsage>(withWorkspace("/api/architect/usage"))
+      .then(setArchitect).catch(() => setArchitect(null));
     apiFetch<UsageStatus>(withWorkspace("/api/beta/status"))
       .then(setStatus).catch(() => {}).finally(() => setLoading(false));
   }
 
   useEffect(() => { load(); }, []);
+
+  const architectReset = formatDateTime(architect?.resetAt);
+  const architectDesc = architect
+    ? (architect.locked && architectReset
+        ? `Plain English → running workflow · resets ${architectReset}`
+        : `Plain English → running workflow · 1 build / ${architect.periodDays} days`)
+    : "Plain English → running workflow · 1 build / 30 days";
 
   const approved = status?.betaStatus === "approved";
   const used = status?.runsToday ?? 0;
@@ -109,7 +140,7 @@ export default function UsagePage() {
   const pct  = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
 
   const features = [
-    { label: "AI Workflow Architect", desc: "Plain English → running workflow · 1 build/month", enabled: true, architect: true, icon: Zap },
+    { label: "AI Workflow Architect", desc: architectDesc, enabled: true, architect: true, icon: Zap },
     { label: "Schedules",        desc: "Cron-triggered workflows",      enabled: status?.allowSchedules ?? false,       icon: CalendarClock },
     { label: "Webhooks",         desc: "HTTP-triggered workflows",      enabled: status?.allowWebhooks ?? false,        icon: Webhook },
     { label: "Iterative agents", desc: "Multi-turn agent loops",        enabled: status?.allowIterativeAgents ?? false, icon: Bot },
@@ -207,7 +238,12 @@ export default function UsagePage() {
                 <LimitTile icon={Timer}         label="Run duration"   value="∞"                                sub="durable by design" />
                 <LimitTile icon={FileText}      label="Log retention"  value={`${status?.logRetentionDays ?? 7}d`} sub="then purged" />
                 <LimitTile icon={Users}         label="Team"           value={status?.maxTeamMembers ?? 1}      sub="members" />
-                <LimitTile icon={Activity}      label="AI Architect"   value="1"                                sub="build / month" />
+                <LimitTile
+                  icon={Activity}
+                  label="AI Architect"
+                  value={architect ? `${architect.used}/${architect.limit}` : "1"}
+                  sub={architect?.locked && architectReset ? `unlocks ${architectReset}` : `builds / ${architect?.periodDays ?? 30} days`}
+                />
               </div>
             </div>
 

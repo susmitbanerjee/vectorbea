@@ -236,8 +236,15 @@ export async function apiFetch<T = unknown>(
     let body: unknown;
     try {
       body = await res.json();
-      if (body && typeof body === "object" && "error" in body) {
-        message = String((body as { error: unknown }).error);
+      if (body && typeof body === "object") {
+        // Prefer the human-readable `message` the API provides; fall back to the
+        // machine `error` code only when no message is present.
+        const b = body as { error?: unknown; message?: unknown };
+        if (typeof b.message === "string" && b.message.trim()) {
+          message = b.message;
+        } else if ("error" in b) {
+          message = String(b.error);
+        }
       }
     } catch {
       message = (await res.text().catch(() => message)) || message;

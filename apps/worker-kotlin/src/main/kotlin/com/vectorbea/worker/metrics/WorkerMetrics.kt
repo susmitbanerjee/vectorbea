@@ -113,6 +113,33 @@ object WorkerMetrics {
     // Counter: connector failures.  Labels: connector_type
     internal val connectorFailures = WCounter("worker_connector_failures_total", "Total connector call failures", listOf("connector_type"))
 
+    // ── Scheduling / fairness / durable-tick metrics ────────────────────────────
+    // Gauge: in-flight runs per execution pool.  Labels: pool
+    internal val activeRunsByPool = WGauge("worker_active_runs_by_pool", "In-flight runs per execution pool", listOf("pool"))
+    // Gauge: free execution slots per pool.  Labels: pool
+    internal val poolCapacityAvailable = WGauge("worker_pool_capacity_available", "Free execution slots per pool", listOf("pool"))
+    // Counters: queue consumer accounting.  Labels: job_type where useful
+    internal val messagesRead     = WCounter("worker_messages_read",     "Stream messages read from Redis",            emptyList())
+    internal val messagesAck      = WCounter("worker_messages_ack",      "Stream messages acknowledged after processing", emptyList())
+    internal val messagesDeferred = WCounter("worker_messages_deferred", "Messages buffered/deferred (pool saturated)",   listOf("job_type"))
+    internal val tenantThrottled  = WCounter("worker_tenant_throttled",  "Times a tenant was throttled",               emptyList())
+    internal val poolSaturated    = WCounter("worker_pool_saturated",    "Times a pool had no capacity for a ready job", listOf("pool"))
+    internal val runYields        = WCounter("worker_run_yields",        "Runs that yielded mid-execution (budget exhausted)", listOf("reason"))
+    internal val runReenqueued    = WCounter("worker_run_reenqueued",    "RESUME_RUN jobs re-enqueued after a yield",   emptyList())
+    // Histogram: per-tick execution duration
+    internal val runTickDuration  = WHistogram("worker_run_tick_duration_ms", "Duration of a single run execution tick", listOf("job_type"))
+
+    // ── Redis-pressure metrics ──────────────────────────────────────────────────
+    internal val redisXadd        = WCounter("worker_redis_stream_xadd",        "XADD writes issued by the worker (re-enqueue + DLQ)", emptyList())
+    internal val redisXreadgroup  = WCounter("worker_redis_stream_xreadgroup",  "XREADGROUP calls issued by the worker",              emptyList())
+    internal val redisXack        = WCounter("worker_redis_stream_xack",        "XACK calls issued by the worker",                    emptyList())
+    internal val pelParked        = WCounter("worker_pel_parked",               "Messages left unacked in the PEL (pool saturated)",  listOf("pool"))
+    internal val pelReclaimed     = WCounter("worker_pel_reclaimed",            "Messages reclaimed from the PEL via XAUTOCLAIM",     emptyList())
+    // Gauge: current adaptive poll backoff (ms)
+    internal val pollBackoffMs    = WGauge("worker_poll_backoff_ms",            "Current adaptive poll-loop backoff in ms",           emptyList())
+    // Gauge: local prefetch buffer size per pool
+    internal val localBufferSize  = WGauge("worker_local_buffer_size",          "Messages buffered locally awaiting a free slot",     listOf("pool"))
+
     // ── Exposition ────────────────────────────────────────────────────────────
 
     fun scrape(): String = buildString {
@@ -122,6 +149,12 @@ object WorkerMetrics {
             runDuration,
             llmCallDuration, httpToolDuration, dbToolDuration,
             connectorFailures,
+            activeRunsByPool, poolCapacityAvailable,
+            messagesRead, messagesAck, messagesDeferred,
+            tenantThrottled, poolSaturated,
+            runYields, runReenqueued, runTickDuration,
+            redisXadd, redisXreadgroup, redisXack,
+            pelParked, pelReclaimed, pollBackoffMs, localBufferSize,
         ).forEach { m ->
             try {
                 append(when (m) {

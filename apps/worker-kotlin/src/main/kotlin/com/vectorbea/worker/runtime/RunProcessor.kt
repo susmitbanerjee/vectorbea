@@ -45,6 +45,13 @@ class RunProcessor(
     private val recoveryService: WorkerRecoveryService? = try { WorkerRecoveryService(dataSource) } catch (_: Exception) { null },
     private val telemetry: TelemetryClient? = null,
     private val leaseManager: RunLeaseManager = RunLeaseManager(dataSource),
+    /**
+     * Durably re-enqueue a continuation job after a cooperative yield. Default is
+     * a no-op (safe for tests); production wires this to a Redis XADD so the
+     * RESUME_RUN survives a worker crash. If this fails, crash-recovery backstops
+     * the orphaned 'yielded' run.
+     */
+    private val reEnqueue: (WorkflowRunJob) -> Unit = {},
 ) {
     private val log = logger()
 
@@ -231,7 +238,7 @@ class RunProcessor(
             environmentId     = run.environmentId,
             workflowVersionId = run.workflowVersionId,
             graph             = graph,
-            inputJson         = job.inputJson,
+            inputJson         = effectiveInput(run, job),
             source            = "worker:$workerId",
             cancellationCheck = { isCancellationRequested(job.runId) },
             debugMode         = job.debugMode,
@@ -278,7 +285,7 @@ class RunProcessor(
             status       = "running",
             startedAt    = start,
             workerId     = workerId,
-            fromStatuses = listOf("waiting_for_approval", "recovering", "waiting_for_timer", "queued"),
+            fromStatuses = listOf("waiting_for_approval", "recovering", "waiting_for_timer", "yielded", "queued"),
         )
         if (!resumed) {
             log.warn("[processor] RESUME_RUN skipped — run not in a resumable state (current={}) [runId={}]",
@@ -321,7 +328,7 @@ class RunProcessor(
             environmentId     = run.environmentId,
             workflowVersionId = run.workflowVersionId,
             graph             = graph,
-            inputJson         = job.inputJson,
+            inputJson         = effectiveInput(run, job),
             snapshot          = snapshot,
             pendingNodeIds    = pendingOverrides,
             source            = "worker:$workerId",
@@ -407,7 +414,7 @@ class RunProcessor(
             environmentId     = run.environmentId,
             workflowVersionId = run.workflowVersionId,
             graph             = graph,
-            inputJson         = job.inputJson,
+            inputJson         = effectiveInput(run, job),
             snapshot          = snapshot,
             pendingNodeIds    = setOf(nodeId),
             source            = "worker:$workerId",
@@ -479,7 +486,7 @@ class RunProcessor(
             environmentId     = run.environmentId,
             workflowVersionId = run.workflowVersionId,
             graph             = graph,
-            inputJson         = job.inputJson,
+            inputJson         = effectiveInput(run, job),
             source            = "worker:$workerId",
             cancellationCheck = { isCancellationRequested(job.runId) },
             debugMode         = job.debugMode,
@@ -602,6 +609,43 @@ class RunProcessor(
                     job.runId, execResult.approvalId)
             }
 
+            is WorkflowRuntime.ExecutionResult.Yielded -> {
+                // The run consumed its per-tick budget. Progress is already
+                // checkpointed by the runtime. Move running → yielded and durably
+                // re-enqueue a RESUME_RUN so another (bounded) tick continues.
+                // The thread is released as soon as this returns.
+                val moved = updateRunStatus(
+                    runId = job.runId, status = "yielded",
+                    startedAt = start, workerId = workerId, fromStatus = "running",
+                )
+                if (!moved) {
+                    log.warn("[processor] yield skipped status transition — run no longer 'running' [runId={}]", job.runId)
+                }
+                val resumeJob = job.copy(
+                    streamMessageId = "",
+                    jobType = WorkflowRunJob.JobType.RESUME_RUN,
+                    triggeredBy = "yielded",
+                    nodeId = null,
+                    checkpointId = null,
+                    retryCount = 0,
+                )
+                runCatching { reEnqueue(resumeJob) }.onFailure { e ->
+                    // Not fatal: the run sits in 'yielded' and crash-recovery will
+                    // re-enqueue it once the lease-quiet window elapses.
+                    log.error("[processor] yield re-enqueue failed [runId={}] — crash-recovery will backstop: {}",
+                        job.runId, e.message)
+                }
+                eventStore.appendEvent(RunEvent(
+                    runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
+                    type = EventType.RUN_REENQUEUED, status = "yielded", source = "worker:$workerId",
+                    title = "Run re-enqueued after yield",
+                    summary = "Budget exhausted (${execResult.reason}); continuation queued as RESUME_RUN.",
+                ))
+                WorkerMetrics.runYields.inc(execResult.reason)
+                WorkerMetrics.runReenqueued.inc()
+                log.info("[processor] run yielded and re-enqueued [runId={}, reason={}]", job.runId, execResult.reason)
+            }
+
             is WorkflowRuntime.ExecutionResult.Failed -> {
                 markRunFailed(job, execResult.reason, start)
             }
@@ -661,13 +705,15 @@ class RunProcessor(
         val workflowId: UUID,
         val workflowVersionId: UUID,
         val status: String,
+        /** Authoritative run input — the DB is the source of truth, not the Redis message. */
+        val inputJson: String?,
     )
 
     private fun loadRun(runId: UUID): RunRow? =
         dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT id, workspace_id, environment_id, workflow_id,
-                   workflow_version_id, status
+                   workflow_version_id, status, input_json::text AS input_json
                    FROM agent_runs WHERE id = ?"""
             ).use { stmt ->
                 stmt.setObject(1, runId)
@@ -680,10 +726,24 @@ class RunProcessor(
                         workflowId = UUID.fromString(rs.getString("workflow_id")),
                         workflowVersionId = UUID.fromString(rs.getString("workflow_version_id")),
                         status = rs.getString("status"),
+                        inputJson = rs.getString("input_json"),
                     )
                 }
             }
         }
+
+    /**
+     * Authoritative run input.
+     *
+     * If the message carried an inputJson (legacy messages, current START_RUN,
+     * continue-as-new), we use it verbatim — byte-identical to the previous
+     * behavior, so no run's input semantics change. Only when the message OMITS
+     * input (slim RESUME_RUN re-enqueues, oversized-omitted START_RUN) do we read
+     * the authoritative value from agent_runs.input_json (the source of truth).
+     */
+    private fun effectiveInput(run: RunRow, job: WorkflowRunJob): String =
+        if (job.inputProvided) job.inputJson
+        else run.inputJson?.takeIf { it.isNotBlank() } ?: job.inputJson
 
     /** Load graph_json from workflow_versions for the given version UUID. */
     private fun loadWorkflowGraphJson(workflowVersionId: UUID): String? =

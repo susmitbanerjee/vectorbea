@@ -31,7 +31,7 @@ class WorkflowArchitectService(
     private val toolRepo: ToolRepository,
     private val agentRepo: AgentRepository,
     private val connectionRepo: ConnectionRepository,
-    @Suppress("unused") private val dataSource: DataSource,
+    private val dataSource: DataSource,
     private val config: AppConfig,
 ) {
     private val log    = LoggerFactory.getLogger(WorkflowArchitectService::class.java)
@@ -40,11 +40,33 @@ class WorkflowArchitectService(
 
     companion object {
         const val MAX_DAILY_REQUESTS = 20
-        /** Architect is a heavyweight accelerator — one full build per workspace per calendar month. */
-        const val MAX_MONTHLY_SESSIONS = 1
+        /** Architect is a heavyweight accelerator — one full build per workspace per rolling window. */
+        const val MAX_BUILDS_PER_PERIOD = 1
+        /** Length of the rolling cooldown window, in days. */
+        const val BUILD_PERIOD_DAYS = 30
         const val MAX_GOAL_LENGTH    = 4000
         const val MAX_REVISIONS      = 5
+        /** Namespaced classid for architect-build advisory locks (avoids clashing with other advisory locks). */
+        const val BUILD_LOCK_CLASSID = 0x41524348  // "ARCH"
     }
+
+    /** Snapshot of a workspace's architect build allowance — surfaced to the UI. */
+    data class ArchitectUsage(
+        val used: Int,
+        val limit: Int,
+        val periodDays: Int,
+        val lastBuildAt: java.time.Instant?,
+        /** When the next build unlocks (lastBuild + period). Null when not currently locked. */
+        val resetAt: java.time.Instant?,
+        val locked: Boolean,
+    )
+
+    /** Thrown when a build would exceed the rolling build limit. Carries usage for the UI. */
+    class BuildLimitExceededException(val usage: ArchitectUsage) :
+        RuntimeException("ARCHITECT_USAGE_LIMIT_EXCEEDED")
+
+    /** Thrown when another build is already running for this workspace (advisory lock held). */
+    class BuildInProgressException : RuntimeException("ARCHITECT_BUILD_IN_PROGRESS")
 
     fun isEnabled(): Boolean = config.architectEnabled
 
@@ -57,15 +79,39 @@ class WorkflowArchitectService(
     fun checkDailyLimit(workspaceId: UUID): Boolean =
         repo.getDailyPlanningRequests(workspaceId) < MAX_DAILY_REQUESTS
 
-    /** One architect build per workspace per calendar month. */
-    fun checkMonthlyLimit(workspaceId: UUID): Boolean =
-        repo.getMonthlySessionCount(workspaceId) < MAX_MONTHLY_SESSIONS
+    /** One architect build per workspace per rolling [BUILD_PERIOD_DAYS]-day window. */
+    fun checkBuildLimit(workspaceId: UUID): Boolean =
+        repo.getBuildsInPeriod(workspaceId, BUILD_PERIOD_DAYS) < MAX_BUILDS_PER_PERIOD
+
+    /**
+     * Authoritative build-time check (abuse-proof). A session that already produced
+     * a workflow may re-run idempotently; otherwise builds from OTHER sessions in the
+     * window count, so a user can't bypass the limit with extra sessions.
+     */
+    fun canBuildWorkflow(session: ArchitectSession): Boolean {
+        if (session.generatedWorkflowId != null) return true
+        return repo.getBuildsInPeriodExcludingSession(session.workspaceId, session.id, BUILD_PERIOD_DAYS) < MAX_BUILDS_PER_PERIOD
+    }
+
+    /** Current build allowance + exact reset time for this workspace. */
+    fun getUsage(workspaceId: UUID): ArchitectUsage {
+        val used      = repo.getBuildsInPeriod(workspaceId, BUILD_PERIOD_DAYS)
+        val lastBuild = repo.getLastBuildAt(workspaceId)
+        val locked    = used >= MAX_BUILDS_PER_PERIOD
+        val resetAt   = if (locked) lastBuild?.plus(java.time.Duration.ofDays(BUILD_PERIOD_DAYS.toLong())) else null
+        return ArchitectUsage(
+            used = used, limit = MAX_BUILDS_PER_PERIOD, periodDays = BUILD_PERIOD_DAYS,
+            lastBuildAt = lastBuild, resetAt = resetAt, locked = locked,
+        )
+    }
 
     // ── Stage 1: Create session ───────────────────────────────────────────────
 
     fun createSession(workspaceId: UUID, environmentId: UUID, userId: UUID, goal: String): ArchitectSession {
         require(goal.length <= MAX_GOAL_LENGTH) { "Goal text exceeds $MAX_GOAL_LENGTH characters" }
-        require(checkMonthlyLimit(workspaceId)) { "AI Architect limit reached ($MAX_MONTHLY_SESSIONS per month)" }
+        // Early feedback only — the authoritative gate is enforced at build time
+        // (createWorkflow) so multiple open sessions cannot bypass the limit.
+        require(checkBuildLimit(workspaceId)) { "AI Architect build limit reached ($MAX_BUILDS_PER_PERIOD per $BUILD_PERIOD_DAYS days)" }
         val session = repo.create(workspaceId, environmentId, userId, goal)
         repo.appendEvent(workspaceId, session.id, "ARCHITECT_SESSION_CREATED", "Session created", goal.take(200))
         repo.incrementUsage(workspaceId)
@@ -474,10 +520,20 @@ class WorkflowArchitectService(
             { "Session must be in plan_approved stage. Current: ${session.status}/${session.currentStage}" }
         require(session.generatedPlanJson != null) { "No plan found" }
 
-        repo.updateStatus(session.id, "creating_workflow")
-        repo.appendEvent(session.workspaceId, session.id, "ARCHITECT_WORKFLOW_CREATION_STARTED", "Creating workflow")
-
+        // ABUSE + RACE GUARD: serialize concurrent builds for this workspace with a
+        // per-workspace Postgres advisory lock, then re-check the limit while holding
+        // it. This makes the check-then-build atomic — two simultaneous createWorkflow
+        // calls can't both pass. A second concurrent build fast-fails (BUILD_IN_PROGRESS).
+        val lockConn = acquireBuildLock(session.workspaceId)
+            ?: throw BuildInProgressException()
         try {
+            // Authoritative limit check — race-free while the lock is held.
+            if (!canBuildWorkflow(session)) throw BuildLimitExceededException(getUsage(session.workspaceId))
+
+            repo.updateStatus(session.id, "creating_workflow")
+            repo.appendEvent(session.workspaceId, session.id, "ARCHITECT_WORKFLOW_CREATION_STARTED", "Creating workflow")
+
+            try {
             // Apply any connection bindings passed in
             if (connectionBindings.isNotEmpty()) {
                 val connReqs = repo.listConnectionRequirements(session.id).associateBy { it.tempConnectionId }
@@ -590,6 +646,52 @@ class WorkflowArchitectService(
             repo.appendEvent(session.workspaceId, session.id, "ARCHITECT_WORKFLOW_CREATION_FAILED",
                 "Workflow creation failed", e.message?.take(300))
             throw e
+        }
+        } finally {
+            releaseBuildLock(lockConn, session.workspaceId)
+        }
+    }
+
+    // ── Build serialization (per-workspace advisory lock) ─────────────────────
+
+    /** Stable 32-bit object id for a workspace's build advisory lock. */
+    private fun workspaceLockObjId(workspaceId: UUID): Int =
+        (workspaceId.mostSignificantBits xor workspaceId.leastSignificantBits).toInt()
+
+    /**
+     * Non-blocking attempt to acquire the per-workspace build advisory lock on a
+     * dedicated connection. Returns the connection (caller MUST pass it to
+     * [releaseBuildLock] in a finally), or null if another build already holds the
+     * lock for this workspace. Held on a session-level lock, so if the process dies
+     * the lock auto-releases when the connection closes — no permanently stuck slot.
+     */
+    private fun acquireBuildLock(workspaceId: UUID): java.sql.Connection? {
+        val conn = dataSource.connection
+        return try {
+            val acquired = conn.prepareStatement("SELECT pg_try_advisory_lock(?, ?)").use { st ->
+                st.setInt(1, BUILD_LOCK_CLASSID)
+                st.setInt(2, workspaceLockObjId(workspaceId))
+                st.executeQuery().use { rs -> rs.next() && rs.getBoolean(1) }
+            }
+            if (acquired) conn else { runCatching { conn.close() }; null }
+        } catch (e: Exception) {
+            runCatching { conn.close() }
+            throw IllegalStateException("Could not acquire architect build lock: ${e.message}", e)
+        }
+    }
+
+    /** Release the build advisory lock and return the connection to the pool. */
+    private fun releaseBuildLock(conn: java.sql.Connection, workspaceId: UUID) {
+        try {
+            conn.prepareStatement("SELECT pg_advisory_unlock(?, ?)").use { st ->
+                st.setInt(1, BUILD_LOCK_CLASSID)
+                st.setInt(2, workspaceLockObjId(workspaceId))
+                st.executeQuery().use {}
+            }
+        } catch (e: Exception) {
+            log.warn("[architect] advisory unlock failed (auto-releases on connection close): {}", e.message)
+        } finally {
+            runCatching { conn.close() }
         }
     }
 

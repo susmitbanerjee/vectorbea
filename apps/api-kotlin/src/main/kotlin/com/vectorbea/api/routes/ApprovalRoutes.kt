@@ -178,7 +178,8 @@ class ApprovalRoutes(
                     workflowVersionId = run.workflowVersionId.toString(),
                     jobType           = JobType.RESUME_RUN,
                     resumeFromNodeId  = approval.stepId,
-                    inputJson         = run.inputJson,
+                    reason            = "approval",
+                    // inputJson intentionally omitted — RESUME_RUN loads it from the DB.
                 ))
             }.onFailure { e ->
                 log.error("[approval] failed to enqueue RESUME_RUN for runId={}: {}", approval.runId, e.message)

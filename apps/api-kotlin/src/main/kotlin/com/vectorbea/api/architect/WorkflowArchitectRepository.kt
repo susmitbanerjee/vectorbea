@@ -145,12 +145,38 @@ class WorkflowArchitectRepository(dataSource: DataSource) : BaseRepository(dataS
         { setObject(1, workspaceId) }, { it.getInt(1) },
     ) ?: 0
 
-    /** Architect sessions created by this workspace in the current calendar month. */
-    fun getMonthlySessionCount(workspaceId: UUID): Int = queryOne(
+    /**
+     * Architect workflows actually *built* for this workspace within the rolling
+     * [periodDays]-day window. Only sessions that produced a workflow
+     * (generated_workflow_id set) count — abandoned/exploratory sessions do not.
+     * This means a user cannot burn the limit just by opening sessions.
+     */
+    fun getBuildsInPeriod(workspaceId: UUID, periodDays: Int): Int = queryOne(
         "SELECT COUNT(*) FROM workflow_architect_sessions " +
-        "WHERE workspace_id=? AND created_at >= date_trunc('month', now())",
-        { setObject(1, workspaceId) }, { it.getInt(1) },
+        "WHERE workspace_id=? AND generated_workflow_id IS NOT NULL " +
+        "AND COALESCE(workflow_graph_generated_at, created_at) >= now() - (? * INTERVAL '1 day')",
+        { setObject(1, workspaceId); setInt(2, periodDays) }, { it.getInt(1) },
     ) ?: 0
+
+    /**
+     * Like [getBuildsInPeriod] but excludes [excludeSessionId]. Used at build time
+     * so a re-run of the SAME session is allowed, while builds from OTHER sessions
+     * still count — closing the "open N sessions while the count is 0, then build
+     * them all" bypass.
+     */
+    fun getBuildsInPeriodExcludingSession(workspaceId: UUID, excludeSessionId: UUID, periodDays: Int): Int = queryOne(
+        "SELECT COUNT(*) FROM workflow_architect_sessions " +
+        "WHERE workspace_id=? AND id<>? AND generated_workflow_id IS NOT NULL " +
+        "AND COALESCE(workflow_graph_generated_at, created_at) >= now() - (? * INTERVAL '1 day')",
+        { setObject(1, workspaceId); setObject(2, excludeSessionId); setInt(3, periodDays) }, { it.getInt(1) },
+    ) ?: 0
+
+    /** Timestamp of the workspace's most recent architect build (for cooldown/reset display). */
+    fun getLastBuildAt(workspaceId: UUID): Instant? = queryOne(
+        "SELECT MAX(COALESCE(workflow_graph_generated_at, created_at)) FROM workflow_architect_sessions " +
+        "WHERE workspace_id=? AND generated_workflow_id IS NOT NULL",
+        { setObject(1, workspaceId) }, { it.getTimestamp(1)?.toInstant() },
+    )
 
     fun getRevisionCount(sessionId: UUID): Int = queryOne(
         "SELECT COUNT(*) FROM workflow_architect_events WHERE session_id=? AND event_type='ARCHITECT_PLAN_REVISED'",
