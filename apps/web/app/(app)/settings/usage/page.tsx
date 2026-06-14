@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, withWorkspace } from "@/lib/api/client";
 import {
   Activity, AlertTriangle, Bot, CalendarClock, CheckCircle2, Clock,
-  FileText, FlaskConical, GitBranch, Layers, Loader2, Mail,
+  FileText, GitBranch, Layers, Loader2, Mail,
   RefreshCw, Timer, Users, Webhook, Zap,
 } from "lucide-react";
 import { AppHeader } from "@/components/layout/app-header";
@@ -213,19 +213,13 @@ export default function UsagePage() {
                   <QuotaMeter used={used} max={max} />
                 </div>
 
-                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[#ECEEEF] pt-3.5">
-                  <Chip tone="teal" dot={false}>
-                    <FlaskConical className="mr-0.5 h-3 w-3" /> {status?.simulationRunsToday ?? 0} simulation
-                  </Chip>
-                  <Chip tone="green" dot={false}>
-                    <Zap className="mr-0.5 h-3 w-3" /> {status?.realRunsToday ?? 0} real
-                  </Chip>
-                  {pct >= 80 && (
-                    <span className="ml-auto text-[11.5px] font-medium text-[#DC2626]">
+                {pct >= 80 && (
+                  <div className="mt-4 flex items-center border-t border-[#ECEEEF] pt-3.5">
+                    <span className="text-[11.5px] font-medium text-[#DC2626]">
                       {pct >= 100 ? "Daily limit reached" : "Approaching daily limit"}
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
               </Panel>
             </div>
 

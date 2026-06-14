@@ -19,6 +19,7 @@ import {
   type GeneratedTool, type GeneratedAgent, type PlanStep, type PlanEdge,
   type ReadinessIssue,
 } from "@/lib/architect";
+import { ApiError } from "@/lib/api/client";
 import { ConnectionPickerModal } from "@/components/architect/ConnectionPickerModal";
 import { ArchitectLogo } from "@/components/architect/ArchitectLogo";
 import { NODE_META } from "@/components/workflow-builder/NodeIcon";
@@ -530,6 +531,8 @@ export default function ArchitectPage() {
 
   // Data
   const [goal, setGoal]             = useState("");
+  // Guardrail rejection notice shown inline on the goal screen (off-topic prompts).
+  const [guardrailNotice, setGuardrailNotice] = useState<string | null>(null);
   const [answers, setAnswers]       = useState<Record<string, string>>({});
   const [clarifyQ, setClarifyQ]     = useState<ClarifyQuestion[]>([]);
   const [sessionId, setSessionId]   = useState<string | null>(null);
@@ -555,6 +558,7 @@ export default function ArchitectPage() {
   async function handleGoalSubmit() {
     if (!goal.trim()) return;
     track("architect_goal_submitted");
+    setGuardrailNotice(null);
     setLoading(true);
     setStep("generating");
     setGenMsgIdx(0);
@@ -570,7 +574,14 @@ export default function ArchitectPage() {
       }
       await doPlanGeneration(sess.id, {});
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to start session");
+      // Guardrail rejection: the goal isn't a workflow-design request. Show a
+      // helpful inline notice instead of a generic error toast.
+      if (e instanceof ApiError && e.status === 422) {
+        setGuardrailNotice(e.message || "That doesn't look like an automation to build. Try describing a workflow.");
+        track("architect_goal_rejected");
+      } else {
+        toast.error(e instanceof Error ? e.message : "Failed to start session");
+      }
       setStep("goal");
     } finally { setLoading(false); }
   }
@@ -795,12 +806,22 @@ export default function ArchitectPage() {
                   sub="Describe the automation in plain English. The architect designs the agents, tools, connections, approval gates and workflow graph — then builds it on the canvas."
                 />
 
+                {guardrailNotice && (
+                  <div className="arch-in flex items-start gap-2.5 rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] p-3.5" style={stag(1)}>
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#B45309]" />
+                    <div>
+                      <p className="text-[12.5px] font-semibold text-[#92400E]">This isn&apos;t something the Architect can build</p>
+                      <p className="mt-0.5 text-[12px] leading-[1.5] text-[#92400E]/90">{guardrailNotice}</p>
+                    </div>
+                  </div>
+                )}
+
                 <Card className="arch-in overflow-hidden transition-shadow focus-within:border-[#9CCFBB] focus-within:shadow-[0_0_0_3px_rgba(0,127,78,0.10)]" style={stag(1)}>
                   <textarea
                     ref={goalRef}
                     rows={6}
                     value={goal}
-                    onChange={e => setGoal(e.target.value)}
+                    onChange={e => { setGoal(e.target.value); if (guardrailNotice) setGuardrailNotice(null); }}
                     onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGoalSubmit(); }}
                     placeholder="e.g. Every morning, pull sales data, analyze performance with AI, draft a summary email, and send it to the team at 9am…"
                     className="w-full resize-none bg-transparent p-5 text-[14px] leading-relaxed text-[#0B0D0F] placeholder:text-[#9CA3AF] focus:outline-none"

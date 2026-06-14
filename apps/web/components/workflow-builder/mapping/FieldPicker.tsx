@@ -19,6 +19,7 @@ import {
   GitBranch, Zap, Hash,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AppSelect } from "@/components/ui/app-select";
 import type {
   FieldSource, NodeOutputField, VisualMapping, VisualMappingField,
   TransformType, FieldType,
@@ -372,15 +373,12 @@ export function FieldPicker({
             {!showAdvanced && selectedField && (
               <>
                 <label style={{ fontSize: 12, color: "#64748B" }}>Transform:</label>
-                <select
+                <AppSelect
+                  className="h-7 w-[150px] text-[12px]"
                   value={transform}
-                  onChange={e => setTransform(e.target.value as TransformType)}
-                  className="h-7 appearance-none rounded-lg border border-slate-200 bg-white px-2 pr-6 text-[12px] text-slate-700 outline-none"
-                >
-                  {(Object.entries(TRANSFORM_LABELS) as [TransformType, string][]).map(([k, label]) => (
-                    <option key={k} value={k}>{label}</option>
-                  ))}
-                </select>
+                  onValueChange={(v) => setTransform(v as TransformType)}
+                  options={(Object.entries(TRANSFORM_LABELS) as [TransformType, string][]).map(([k, label]) => ({ value: k, label }))}
+                />
               </>
             )}
             {compat === "needs_conversion" && (

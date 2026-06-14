@@ -54,7 +54,8 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-import { inputCls, selectCls } from "@/lib/ui/field-styles";
+import { inputCls } from "@/lib/ui/field-styles";
+import { AppSelect } from "@/components/ui/app-select";
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -208,11 +209,16 @@ export default function NewAgentPage() {
           </div>
           <div className="col-span-2">
             <Field label="Status">
-              <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value as Agent["status"])}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="deprecated">Deprecated</option>
-              </select>
+              <AppSelect
+                className="w-full"
+                value={status}
+                onValueChange={(v) => setStatus(v as Agent["status"])}
+                options={[
+                  { value: "active", label: "Active" },
+                  { value: "inactive", label: "Inactive" },
+                  { value: "deprecated", label: "Deprecated" },
+                ]}
+              />
             </Field>
           </div>
         </div>
@@ -259,20 +265,20 @@ export default function NewAgentPage() {
           ) : (
             <div className="grid grid-cols-2 gap-4">
               <Field label="LLM Provider Connection" required>
-                <select
-                  className={selectCls}
+                <AppSelect
+                  className="w-full"
                   value={llmConnectionId}
-                  onChange={(e) => handleLlmConnectionChange(e.target.value)}
-                >
-                  {llmConnections.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
-                  ))}
-                </select>
+                  onValueChange={handleLlmConnectionChange}
+                  options={llmConnections.map((c) => ({ value: c.id, label: `${c.name} (${c.provider})` }))}
+                />
               </Field>
               <Field label="Model" required>
-                <select className={selectCls} value={model} onChange={(e) => setModel(e.target.value)}>
-                  {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+                <AppSelect
+                  className="w-full"
+                  value={model}
+                  onValueChange={setModel}
+                  options={availableModels.map((m) => ({ value: m, label: m }))}
+                />
               </Field>
               <Field label="Temperature">
                 <input type="number" min="0" max="2" step="0.05" className={inputCls} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
@@ -366,10 +372,15 @@ export default function NewAgentPage() {
             <input type="number" min="0" max="10" className={inputCls} value={retryAttempts} onChange={(e) => setRetryAttempts(e.target.value)} />
           </Field>
           <Field label="Backoff type">
-            <select className={selectCls} value={retryBackoff} onChange={(e) => setRetryBackoff(e.target.value as RetryPolicy["backoffType"])}>
-              <option value="exponential">Exponential</option>
-              <option value="fixed">Fixed</option>
-            </select>
+            <AppSelect
+              className="w-full"
+              value={retryBackoff}
+              onValueChange={(v) => setRetryBackoff(v as RetryPolicy["backoffType"])}
+              options={[
+                { value: "exponential", label: "Exponential" },
+                { value: "fixed", label: "Fixed" },
+              ]}
+            />
           </Field>
           <Field label="Backoff base (ms)">
             <input type="number" min="0" className={inputCls} value={retryBackoffMs} onChange={(e) => setRetryBackoffMs(e.target.value)} />
@@ -407,11 +418,16 @@ export default function NewAgentPage() {
         {requireApproval && (
           <div className="mt-2">
             <Field label="On approval timeout">
-              <select className={selectCls} value={onTimeout} onChange={(e) => setOnTimeout(e.target.value as ApprovalPolicy["onTimeout"])}>
-                <option value="pause">Keep paused</option>
-                <option value="auto_approve">Auto-approve</option>
-                <option value="auto_reject">Auto-reject</option>
-              </select>
+              <AppSelect
+                className="w-full"
+                value={onTimeout ?? "pause"}
+                onValueChange={(v) => setOnTimeout(v as ApprovalPolicy["onTimeout"])}
+                options={[
+                  { value: "pause", label: "Keep paused" },
+                  { value: "auto_approve", label: "Auto-approve" },
+                  { value: "auto_reject", label: "Auto-reject" },
+                ]}
+              />
             </Field>
           </div>
         )}

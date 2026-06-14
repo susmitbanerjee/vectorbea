@@ -23,7 +23,13 @@ import com.vectorbea.api.repository.UpdateWorkflowRequest
 import com.vectorbea.api.repository.Workflow
 import com.vectorbea.api.repository.WorkflowRepository
 import com.vectorbea.api.repository.WorkflowVersion
+import com.vectorbea.api.schedule.CronExpression
+import com.vectorbea.api.schedule.ScheduleRepository
 import com.vectorbea.api.telemetry.TelemetryClient
+import org.slf4j.LoggerFactory
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 // ── Request bodies ────────────────────────────────────────────────────────────
 
@@ -115,7 +121,10 @@ class WorkflowRoutes(
     private val repo: WorkflowRepository,
     private val cache: CacheService,
     private val telemetry: TelemetryClient? = null,
+    private val scheduleRepo: ScheduleRepository? = null,
 ) {
+    private val log = LoggerFactory.getLogger(WorkflowRoutes::class.java)
+
     fun register(router: Router) {
         router.get("/api/workflows", ::list)
         router.post("/api/workflows", ::create)
@@ -239,7 +248,45 @@ class WorkflowRoutes(
         repo.setCurrentVersion(workflowId, ctx.workspaceId, version.id)
         cache.del(CacheKeys.workflowVersion(ctx.workspaceId.toString(), version.id.toString()))
 
+        // Materialize a cron schedule from the trigger config (creates / updates /
+        // removes the workflow's schedule). Never fail the save if this errors.
+        syncSchedule(ctx.workspaceId, wf.environmentId, workflowId, body.triggerConfig)
+
         return Response.created(version.toResponse())
+    }
+
+    /**
+     * Keeps the `schedules` row in sync with the workflow's trigger config:
+     *  - cron / schedule trigger with a valid expression → upsert an enabled schedule
+     *  - anything else → remove any existing schedule
+     */
+    private fun syncSchedule(
+        workspaceId: java.util.UUID,
+        environmentId: java.util.UUID,
+        workflowId: java.util.UUID,
+        triggerConfig: Map<String, Any>?,
+    ) {
+        val sched = scheduleRepo ?: return
+        try {
+            val tc = triggerConfig ?: emptyMap()
+            val triggerType = (tc["triggerType"] ?: tc["type"])?.toString()?.lowercase()
+            val cron = (tc["cronExpression"] ?: tc["cron"])?.toString()?.trim()
+            val tz = (tc["timezone"] ?: tc["tz"])?.toString()?.takeIf { it.isNotBlank() } ?: "UTC"
+
+            val isCron = triggerType in setOf("cron", "schedule") && !cron.isNullOrBlank()
+            if (isCron && CronExpression.isValid(cron!!)) {
+                val zone = runCatching { ZoneId.of(tz) }.getOrDefault(ZoneOffset.UTC)
+                val nextFire = CronExpression.parse(cron).nextAfter(Instant.now(), zone)
+                scheduleRepo.upsertForWorkflow(workspaceId, environmentId, workflowId, cron, tz, nextFire)
+                log.info("[schedule] upserted cron schedule for workflow {} (cron='{}', tz={})", workflowId, cron, tz)
+            } else {
+                val removed = scheduleRepo.deleteForWorkflow(workflowId)
+                if (removed > 0) log.info("[schedule] removed schedule for workflow {} (trigger no longer cron)", workflowId)
+                if (isCron) log.warn("[schedule] ignoring invalid cron '{}' for workflow {}", cron, workflowId)
+            }
+        } catch (e: Exception) {
+            log.error("[schedule] failed to sync schedule for workflow {}: {}", workflowId, e.message)
+        }
     }
 
     private fun listVersions(req: Request): Response {

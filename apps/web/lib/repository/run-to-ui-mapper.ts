@@ -146,7 +146,7 @@ export function mapRunToUiModel(run: AgentRun, events: RunEvent[]): AgentRunUiMo
   const approvals: ApprovalUiModel[] = run.approvalGates.map((gate) => ({
     id: gate.id,
     title: `Approval Required — ${gate.stepName}`,
-    message: `This step requires approval before proceeding. Context: ${JSON.stringify(gate.context ?? {})}`,
+    message: `This step is paused and requires a human decision before the run can proceed.`,
     status: gate.status === "pending" ? "PENDING" : gate.status === "approved" ? "APPROVED" : gate.status === "rejected" ? "REJECTED" : "EXPIRED",
     relatedAgent: run.currentAgentId ?? "system",
     relatedStep: gate.stepId,

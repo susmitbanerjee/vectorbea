@@ -54,7 +54,8 @@ export type ObjectStorageProvider =
   | "s3"
   | "gcs"
   | "azure_blob"
-  | "r2";
+  | "r2"
+  | "minio";
 
 // ─── Auth types ───────────────────────────────────────────────────────────────
 
@@ -142,6 +143,8 @@ export interface VectorStoreConnectionConfig {
   provider: VectorStoreProvider;
   indexName: string;
   embeddingModel?: string;
+  /** Index host / API endpoint used to reach (and test) the store. */
+  endpoint?: string;
 }
 
 export interface ObjectStorageConnectionConfig {
@@ -149,6 +152,10 @@ export interface ObjectStorageConnectionConfig {
   bucket: string;
   region?: string;
   prefix?: string;
+  /** Bucket or service endpoint URL used to reach (and test) the store. */
+  endpoint?: string;
+  /** Non-secret access key id (the secret key is stored via the secrets backend). */
+  accessKeyId?: string;
 }
 
 export type ConnectionConfig =

@@ -23,7 +23,7 @@ import {
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
-import type { ConnectionType, LlmProvider, DatabaseProvider, SaasProvider, AuthType } from "@/types/connections";
+import type { ConnectionType, LlmProvider, DatabaseProvider, SaasProvider, AuthType, VectorStoreProvider, ObjectStorageProvider } from "@/types/connections";
 import { LLM_PROVIDER_MODELS, VECTORBEE_OUTBOUND_IPS, isPrivateHost } from "@/types/connections";
 import { createConnection, testConnection } from "@/lib/repository";
 
@@ -48,7 +48,14 @@ const TYPE_CARDS: {
 
 // ─── Field helpers ────────────────────────────────────────────────────────────
 
-import { inputCls, selectCls } from "@/lib/ui/field-styles";
+import { inputCls } from "@/lib/ui/field-styles";
+import { AppSelect, type AppSelectOption } from "@/components/ui/app-select";
+
+const ENV_OPTIONS: AppSelectOption[] = [
+  { value: "development", label: "Development" },
+  { value: "staging", label: "Staging" },
+  { value: "production", label: "Production" },
+];
 
 function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
@@ -132,21 +139,22 @@ function LlmForm({ name, setName, provider, setProvider, apiKey, setApiKey, base
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OpenAI Production" />
         </Field>
         <Field label="Provider" required>
-          <select className={selectCls} value={provider} onChange={(e) => { setProvider(e.target.value as LlmProvider); setDefaultModel(""); }}>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="azure_openai">Azure OpenAI</option>
-            <option value="google_gemini">Google Gemini</option>
-            <option value="aws_bedrock">AWS Bedrock</option>
-            <option value="openai_compatible">OpenAI-compatible endpoint</option>
-          </select>
+          <AppSelect
+            className="w-full"
+            value={provider}
+            onValueChange={(v) => { setProvider(v as LlmProvider); setDefaultModel(""); }}
+            options={[
+              { value: "openai", label: "OpenAI" },
+              { value: "anthropic", label: "Anthropic" },
+              { value: "azure_openai", label: "Azure OpenAI" },
+              { value: "google_gemini", label: "Google Gemini" },
+              { value: "aws_bedrock", label: "AWS Bedrock" },
+              { value: "openai_compatible", label: "OpenAI-compatible endpoint" },
+            ]}
+          />
         </Field>
         <Field label="Environment">
-          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-            <option value="development">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
-          </select>
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
         </Field>
       </Section>
 
@@ -167,10 +175,16 @@ function LlmForm({ name, setName, provider, setProvider, apiKey, setApiKey, base
 
       <Section title="Model defaults">
         <Field label="Default model">
-          <select className={selectCls} value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)}>
-            <option value="">— select —</option>
-            {models.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
+          <AppSelect
+            className="w-full"
+            value={defaultModel}
+            onValueChange={setDefaultModel}
+            placeholder="— select —"
+            options={[
+              { value: "", label: "— select —" },
+              ...models.map((m) => ({ value: m, label: m })),
+            ]}
+          />
         </Field>
       </Section>
     </div>
@@ -198,22 +212,23 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. CRM PostgreSQL Prod" />
         </Field>
         <Field label="Database type" required>
-          <select className={selectCls} value={dbProvider} onChange={(e) => setDbProvider(e.target.value as DatabaseProvider)}>
-            <option value="postgresql">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
-            <option value="sqlserver">SQL Server</option>
-            <option value="mongodb">MongoDB</option>
-            <option value="snowflake">Snowflake</option>
-            <option value="bigquery">BigQuery</option>
-            <option value="redshift">Redshift</option>
-          </select>
+          <AppSelect
+            className="w-full"
+            value={dbProvider}
+            onValueChange={(v) => setDbProvider(v as DatabaseProvider)}
+            options={[
+              { value: "postgresql", label: "PostgreSQL" },
+              { value: "mysql", label: "MySQL" },
+              { value: "sqlserver", label: "SQL Server" },
+              { value: "mongodb", label: "MongoDB" },
+              { value: "snowflake", label: "Snowflake" },
+              { value: "bigquery", label: "BigQuery" },
+              { value: "redshift", label: "Redshift" },
+            ]}
+          />
         </Field>
         <Field label="Environment">
-          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-            <option value="development">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
-          </select>
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
         </Field>
       </Section>
 
@@ -288,11 +303,7 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
           <input className={inputCls} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com" />
         </Field>
         <Field label="Environment">
-          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-            <option value="development">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
-          </select>
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
         </Field>
       </Section>
 
@@ -300,14 +311,19 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
 
       <Section title="Authentication">
         <Field label="Auth type">
-          <select className={selectCls} value={authType} onChange={(e) => setAuthType(e.target.value as AuthType)}>
-            <option value="none">None</option>
-            <option value="api_key">API key header</option>
-            <option value="bearer">Bearer token</option>
-            <option value="basic">Basic auth</option>
-            <option value="oauth2">OAuth 2.0 (placeholder)</option>
-            <option value="custom">Custom header</option>
-          </select>
+          <AppSelect
+            className="w-full"
+            value={authType}
+            onValueChange={(v) => setAuthType(v as AuthType)}
+            options={[
+              { value: "none", label: "None" },
+              { value: "api_key", label: "API key header" },
+              { value: "bearer", label: "Bearer token" },
+              { value: "basic", label: "Basic auth" },
+              { value: "oauth2", label: "OAuth 2.0 (placeholder)" },
+              { value: "custom", label: "Custom header" },
+            ]}
+          />
         </Field>
         {authType !== "none" && (
           <Field label="Secret / token" hint="Stored through secrets backend. Never displayed after save.">
@@ -340,21 +356,22 @@ function SaasForm({ name, setName, saasProvider, setSaasProvider, token, setToke
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Gmail" />
         </Field>
         <Field label="Provider" required>
-          <select className={selectCls} value={saasProvider} onChange={(e) => setSaasProvider(e.target.value as SaasProvider)}>
-            <option value="gmail">Gmail / Email</option>
-            <option value="salesforce">Salesforce</option>
-            <option value="hubspot">HubSpot</option>
-            <option value="zendesk">Zendesk</option>
-            <option value="jira">Jira</option>
-            <option value="github">GitHub</option>
-          </select>
+          <AppSelect
+            className="w-full"
+            value={saasProvider}
+            onValueChange={(v) => setSaasProvider(v as SaasProvider)}
+            options={[
+              { value: "gmail", label: "Gmail / Email" },
+              { value: "salesforce", label: "Salesforce" },
+              { value: "hubspot", label: "HubSpot" },
+              { value: "zendesk", label: "Zendesk" },
+              { value: "jira", label: "Jira" },
+              { value: "github", label: "GitHub" },
+            ]}
+          />
         </Field>
         <Field label="Environment">
-          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-            <option value="development">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
-          </select>
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
         </Field>
       </Section>
       <Divider />
@@ -384,11 +401,7 @@ function McpForm({ name, setName, serverUrl, setServerUrl, transport, setTranspo
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Internal MCP Server" />
         </Field>
         <Field label="Environment">
-          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-            <option value="development">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
-          </select>
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
         </Field>
       </Section>
       <Divider />
@@ -397,15 +410,144 @@ function McpForm({ name, setName, serverUrl, setServerUrl, transport, setTranspo
           <input className={inputCls} value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} placeholder="https://mcp.example.com/sse" />
         </Field>
         <Field label="Transport">
-          <select className={selectCls} value={transport} onChange={(e) => setTransport(e.target.value as "http" | "sse")}>
-            <option value="http">HTTP</option>
-            <option value="sse">Server-Sent Events (SSE)</option>
-          </select>
+          <AppSelect
+            className="w-full"
+            value={transport}
+            onValueChange={(v) => setTransport(v as "http" | "sse")}
+            options={[
+              { value: "http", label: "HTTP" },
+              { value: "sse", label: "Server-Sent Events (SSE)" },
+            ]}
+          />
         </Field>
         <Field label="Auth token (optional)" hint="Stored through secrets backend">
           <input className={inputCls} type="password" value={authToken} onChange={(e) => setAuthToken(e.target.value)} placeholder="Bearer token or API key" />
         </Field>
       </Section>
+    </div>
+  );
+}
+
+function VectorStoreForm({ name, setName, provider, setProvider, endpoint, setEndpoint, indexName, setIndexName, apiKey, setApiKey, environment, setEnvironment }: {
+  name: string; setName: (v: string) => void;
+  provider: string; setProvider: (v: string) => void;
+  endpoint: string; setEndpoint: (v: string) => void;
+  indexName: string; setIndexName: (v: string) => void;
+  apiKey: string; setApiKey: (v: string) => void;
+  environment: string; setEnvironment: (v: string) => void;
+}) {
+  const showPrivateWarning = isPrivateHost(endpoint);
+  return (
+    <div className="space-y-5">
+      <Section title="Identity">
+        <Field label="Connection name" required>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pinecone Production" />
+        </Field>
+        <Field label="Provider" required>
+          <AppSelect
+            className="w-full"
+            value={provider}
+            onValueChange={setProvider}
+            options={[
+              { value: "pinecone", label: "Pinecone" },
+              { value: "weaviate", label: "Weaviate" },
+              { value: "qdrant", label: "Qdrant" },
+              { value: "pgvector", label: "pgvector (PostgreSQL)" },
+              { value: "redis", label: "Redis" },
+            ]}
+          />
+        </Field>
+        <Field label="Environment">
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
+        </Field>
+      </Section>
+      <Divider />
+      <Section title="Endpoint">
+        <Field label="Endpoint URL" required hint={provider === "pgvector" ? "PostgreSQL host or connection string" : "Index host / API endpoint — used by Test connection."}>
+          <input className={inputCls} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://my-index-abc123.svc.pinecone.io" />
+        </Field>
+        <Field label="Index / collection (optional)">
+          <input className={inputCls} value={indexName} onChange={(e) => setIndexName(e.target.value)} placeholder="documents" />
+        </Field>
+      </Section>
+      <Divider />
+      <Section title="Credentials">
+        <Field label="API key" hint="Stored through secrets backend. Never displayed after save.">
+          <input className={inputCls} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="••••••••" />
+        </Field>
+      </Section>
+      {showPrivateWarning && (
+        <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 text-[12px] leading-[1.55] text-[#92400E]">
+          <strong>Private address detected.</strong> Vectorbea Cloud cannot reach this endpoint without IP whitelisting or a private runner.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ObjectStorageForm({ name, setName, provider, setProvider, endpoint, setEndpoint, bucket, setBucket, region, setRegion, accessKey, setAccessKey, secretKey, setSecretKey, environment, setEnvironment }: {
+  name: string; setName: (v: string) => void;
+  provider: string; setProvider: (v: string) => void;
+  endpoint: string; setEndpoint: (v: string) => void;
+  bucket: string; setBucket: (v: string) => void;
+  region: string; setRegion: (v: string) => void;
+  accessKey: string; setAccessKey: (v: string) => void;
+  secretKey: string; setSecretKey: (v: string) => void;
+  environment: string; setEnvironment: (v: string) => void;
+}) {
+  const showPrivateWarning = isPrivateHost(endpoint);
+  return (
+    <div className="space-y-5">
+      <Section title="Identity">
+        <Field label="Connection name" required>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Artifacts S3 Prod" />
+        </Field>
+        <Field label="Provider" required>
+          <AppSelect
+            className="w-full"
+            value={provider}
+            onValueChange={setProvider}
+            options={[
+              { value: "s3", label: "Amazon S3" },
+              { value: "gcs", label: "Google Cloud Storage" },
+              { value: "azure_blob", label: "Azure Blob" },
+              { value: "r2", label: "Cloudflare R2" },
+              { value: "minio", label: "MinIO / S3-compatible" },
+            ]}
+          />
+        </Field>
+        <Field label="Environment">
+          <AppSelect className="w-full" value={environment} onValueChange={setEnvironment} options={ENV_OPTIONS} />
+        </Field>
+      </Section>
+      <Divider />
+      <Section title="Bucket">
+        <Field label="Endpoint URL" required hint="Bucket or service endpoint — used by Test connection to verify reachability.">
+          <input className={inputCls} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://my-bucket.s3.us-east-1.amazonaws.com" />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Bucket (optional)">
+            <input className={inputCls} value={bucket} onChange={(e) => setBucket(e.target.value)} placeholder="my-bucket" />
+          </Field>
+          <Field label="Region (optional)">
+            <input className={inputCls} value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" />
+          </Field>
+        </div>
+      </Section>
+      <Divider />
+      <Section title="Credentials">
+        <Field label="Access key ID">
+          <input className={inputCls} value={accessKey} onChange={(e) => setAccessKey(e.target.value)} placeholder="AKIA…" />
+        </Field>
+        <Field label="Secret access key" hint="Stored through secrets backend. Never displayed after save.">
+          <input className={inputCls} type="password" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder="••••••••" />
+        </Field>
+      </Section>
+      {showPrivateWarning && (
+        <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 text-[12px] leading-[1.55] text-[#92400E]">
+          <strong>Private address detected.</strong> Vectorbea Cloud cannot reach this endpoint without IP whitelisting or a private runner.
+        </div>
+      )}
     </div>
   );
 }
@@ -493,6 +635,20 @@ export default function NewConnectionPage() {
   const [transport, setTransport] = useState<"http" | "sse">("sse");
   const [mcpToken, setMcpToken] = useState("");
 
+  // Vector store
+  const [vectorProvider, setVectorProvider] = useState("pinecone");
+  const [vectorEndpoint, setVectorEndpoint] = useState("");
+  const [vectorIndex, setVectorIndex] = useState("");
+  const [vectorApiKey, setVectorApiKey] = useState("");
+
+  // Object storage
+  const [storageProvider, setStorageProvider] = useState("s3");
+  const [storageEndpoint, setStorageEndpoint] = useState("");
+  const [storageBucket, setStorageBucket] = useState("");
+  const [storageRegion, setStorageRegion] = useState("");
+  const [storageAccessKey, setStorageAccessKey] = useState("");
+  const [storageSecretKey, setStorageSecretKey] = useState("");
+
   const needsNetworkStep = type === "database" || type === "http_api" || type === "mcp_server";
   const totalSteps = needsNetworkStep ? 4 : 3;
 
@@ -546,24 +702,40 @@ export default function NewConnectionPage() {
         provider = "mcp";
         connAuthType = mcpToken ? "bearer" : "none";
         config = { serverUrl: mcpUrl, transport, allowedTools: [] };
+      } else if (type === "vector_store") {
+        provider = vectorProvider;
+        connAuthType = vectorApiKey ? "api_key" : "none";
+        config = { provider: vectorProvider as VectorStoreProvider, endpoint: vectorEndpoint, indexName: vectorIndex };
+      } else if (type === "object_storage") {
+        provider = storageProvider;
+        connAuthType = storageSecretKey ? "basic" : "none";
+        config = { provider: storageProvider as ObjectStorageProvider, endpoint: storageEndpoint, bucket: storageBucket, region: storageRegion, accessKeyId: storageAccessKey };
       } else {
         provider = type;
         config = {} as Parameters<typeof createConnection>[0]["config"];
       }
 
       // Determine if the target host is private (RFC1918 / .internal / localhost)
-      const targetHost = type === "database" ? (host || connString) : (type === "http_api" ? httpBaseUrl : type === "mcp_server" ? mcpUrl : "");
+      const targetHost =
+        type === "database"       ? (host || connString) :
+        type === "http_api"       ? httpBaseUrl :
+        type === "mcp_server"     ? mcpUrl :
+        type === "vector_store"   ? vectorEndpoint :
+        type === "object_storage" ? storageEndpoint :
+        "";
       const isPrivate = isPrivateHost(targetHost);
 
       // Resolve the plaintext secret for this connection type.
       // Sent to the server as plaintextSecret — never stored raw; the API encrypts
       // it server-side and returns only a masked display value + opaque secretRef.
       const plaintextSecret =
-        type === "llm_provider" ? apiKey :
-        type === "database"     ? (connString || (password ? `postgres://${username}:${password}@${host}:${port}/${database}` : "")) :
-        type === "http_api"     ? (authType !== "none" ? secret : "") :
-        type === "saas"         ? saasToken :
-        type === "mcp_server"   ? mcpToken :
+        type === "llm_provider"   ? apiKey :
+        type === "database"       ? (connString || (password ? `postgres://${username}:${password}@${host}:${port}/${database}` : "")) :
+        type === "http_api"       ? (authType !== "none" ? secret : "") :
+        type === "saas"           ? saasToken :
+        type === "mcp_server"     ? mcpToken :
+        type === "vector_store"   ? vectorApiKey :
+        type === "object_storage" ? storageSecretKey :
         "";
 
       // Map frontend display types to backend API types
@@ -747,23 +919,11 @@ export default function NewConnectionPage() {
           {type === "mcp_server" && (
             <McpForm name={name} setName={setName} serverUrl={mcpUrl} setServerUrl={setMcpUrl} transport={transport} setTransport={setTransport} authToken={mcpToken} setAuthToken={setMcpToken} environment={environment} setEnvironment={setEnvironment} />
           )}
-          {(type === "vector_store" || type === "object_storage") && (
-            <div className="space-y-5">
-              <Section title="Identity">
-                <Field label="Connection name" required>
-                  <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pinecone Production" />
-                </Field>
-                <Field label="Environment">
-                  <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-                    <option value="development">Development</option>
-                    <option value="staging">Staging</option>
-                    <option value="production">Production</option>
-                  </select>
-                </Field>
-              </Section>
-              <Divider />
-              <p className="text-[12px] text-[#9CA3AF]">Full configuration for this connection type is coming soon. You can save as draft.</p>
-            </div>
+          {type === "vector_store" && (
+            <VectorStoreForm name={name} setName={setName} provider={vectorProvider} setProvider={setVectorProvider} endpoint={vectorEndpoint} setEndpoint={setVectorEndpoint} indexName={vectorIndex} setIndexName={setVectorIndex} apiKey={vectorApiKey} setApiKey={setVectorApiKey} environment={environment} setEnvironment={setEnvironment} />
+          )}
+          {type === "object_storage" && (
+            <ObjectStorageForm name={name} setName={setName} provider={storageProvider} setProvider={setStorageProvider} endpoint={storageEndpoint} setEndpoint={setStorageEndpoint} bucket={storageBucket} setBucket={setStorageBucket} region={storageRegion} setRegion={setStorageRegion} accessKey={storageAccessKey} setAccessKey={setStorageAccessKey} secretKey={storageSecretKey} setSecretKey={setStorageSecretKey} environment={environment} setEnvironment={setEnvironment} />
           )}
 
           <div className="mt-5 flex items-center justify-between border-t border-[#F1F2F4] pt-5">

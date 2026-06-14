@@ -68,6 +68,18 @@ class WorkflowArchitectService(
     /** Thrown when another build is already running for this workspace (advisory lock held). */
     class BuildInProgressException : RuntimeException("ARCHITECT_BUILD_IN_PROGRESS")
 
+    /** Outcome of the goal-relevance guardrail. */
+    data class GuardrailResult(
+        val inScope: Boolean,
+        val category: String,
+        val reason: String,
+        val redirect: String?,
+    )
+
+    /** Thrown when a goal is not a legitimate workflow-design request. Carries the guardrail verdict for the UI. */
+    class GoalOutOfScopeException(val result: GuardrailResult) :
+        RuntimeException("ARCHITECT_GOAL_OUT_OF_SCOPE")
+
     fun isEnabled(): Boolean = config.architectEnabled
 
     private fun defaultLimits(): Map<String, Any> = mapOf(
@@ -112,10 +124,67 @@ class WorkflowArchitectService(
         // Early feedback only — the authoritative gate is enforced at build time
         // (createWorkflow) so multiple open sessions cannot bypass the limit.
         require(checkBuildLimit(workspaceId)) { "AI Architect build limit reached ($MAX_BUILDS_PER_PERIOD per $BUILD_PERIOD_DAYS days)" }
+
+        // Guardrail: reject off-topic / abusive prompts BEFORE spending a session or
+        // counting usage, so the architect never produces code or answers unrelated
+        // to building a workflow.
+        val guard = classifyGoal(goal)
+        if (!guard.inScope) {
+            log.info("[architect] goal rejected by guardrail [workspaceId={}, category={}]", workspaceId, guard.category)
+            throw GoalOutOfScopeException(guard)
+        }
+
         val session = repo.create(workspaceId, environmentId, userId, goal)
         repo.appendEvent(workspaceId, session.id, "ARCHITECT_SESSION_CREATED", "Session created", goal.take(200))
         repo.incrementUsage(workspaceId)
         return session
+    }
+
+    // ── Guardrail: is this goal actually a workflow-design request? ─────────────
+
+    /** Generic redirect used when the classifier doesn't supply a helpful one. */
+    private val DEFAULT_REDIRECT =
+        "Describe an automation you'd like to build — e.g. a trigger, the systems involved, and what should happen."
+
+    /**
+     * Classifies whether [goal] is a genuine request to design an automation workflow.
+     * Off-topic prompts (code generation, general questions, prompt-injection, gibberish)
+     * are rejected. Fails OPEN — if the classifier itself errors, we allow the goal through
+     * (the planning prompts are independently hardened against off-topic output).
+     */
+    fun classifyGoal(goal: String): GuardrailResult {
+        val trimmed = goal.trim()
+        // Cheap deterministic reject — no point spending an LLM call on empty/near-empty input.
+        if (trimmed.length < 6) {
+            return GuardrailResult(
+                inScope = false, category = "gibberish",
+                reason = "The goal is too short to describe a workflow.",
+                redirect = DEFAULT_REDIRECT,
+            )
+        }
+        if (!config.architectEnabled || config.architectApiKey == null) {
+            // Architect can't run at all without an LLM; let the normal flow surface that error.
+            return GuardrailResult(true, "workflow", "Guardrail skipped (LLM not configured).", null)
+        }
+
+        return try {
+            val raw = callPlanningLlm(
+                WorkflowArchitectPromptBuilder.buildGuardrailPrompt(trimmed),
+                maxTokens = 200,
+            )
+            @Suppress("UNCHECKED_CAST")
+            val parsed = mapper.readValue(raw, Map::class.java) as Map<String, Any?>
+            val inScope = parsed["inScope"] as? Boolean ?: true
+            val category = parsed["category"]?.toString()?.takeIf { it.isNotBlank() } ?: "other"
+            val reason = parsed["reason"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: "This request isn't about building an automation workflow."
+            val redirect = parsed["redirect"]?.toString()?.takeIf { it.isNotBlank() } ?: DEFAULT_REDIRECT
+            GuardrailResult(inScope, category, reason, if (inScope) null else redirect)
+        } catch (e: Exception) {
+            // Fail open — don't block legitimate users on a transient classifier failure.
+            log.warn("[architect] guardrail classification failed, allowing goal: {}", e.message)
+            GuardrailResult(true, "workflow", "Guardrail check unavailable.", null)
+        }
     }
 
     // ── Stage 1: Clarification check ─────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { CheckCircle2, Clock, MessageSquare, User, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toApprovalContextEntries } from "@/lib/approval-display";
 import type { ApprovalUiModel } from "@/types/agent-run-ui";
 
 function fmt(ts?: string) {
@@ -39,6 +40,7 @@ export function ApprovalsTab({ approvals, onApprove, onReject }: ApprovalsTabPro
       {approvals.map(ap => {
         const scfg = getStatusCfg(ap.status);
         const StatusIcon = scfg.icon;
+        const contextEntries = toApprovalContextEntries(ap.payloadPreview);
         return (
           <div key={ap.id} className={cn("rounded-xl border p-5 space-y-4", scfg.border, scfg.bg)}>
             {/* Header */}
@@ -60,15 +62,27 @@ export function ApprovalsTab({ approvals, onApprove, onReject }: ApprovalsTabPro
               {ap.message}
             </p>
 
-            {/* Payload preview */}
-            {ap.payloadPreview !== undefined && ap.payloadPreview !== null && (
+            {/* Decision context — sanitized key/value rows.
+                Environment-variable and secret-looking fields are never shown. */}
+            {contextEntries.length > 0 && (
               <div>
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  Payload preview
+                  Decision context
                 </p>
-                <pre className="max-h-40 overflow-auto rounded-lg bg-[#0f0f0f] p-3 text-[11px] text-[#e5e7eb]">
-                  {JSON.stringify(ap.payloadPreview as Record<string, unknown>, null, 2)}
-                </pre>
+                <div className="overflow-hidden rounded-lg border border-border/40 bg-muted/10">
+                  {contextEntries.map((entry, i) => (
+                    <div
+                      key={entry.key}
+                      className={cn(
+                        "flex items-start justify-between gap-4 px-3.5 py-2",
+                        i > 0 && "border-t border-border/30",
+                      )}
+                    >
+                      <span className="shrink-0 text-[12px] font-medium text-muted-foreground">{entry.label}</span>
+                      <span className="min-w-0 break-words text-right text-[12px] font-medium text-foreground">{entry.value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { AppSelect } from "@/components/ui/app-select";
 import type { RunEvent, Tool } from "@/types/platform";
 import type { Connection } from "@/types/connections";
 import { getTool, getCallsForTool, updateTool, getConnections } from "@/lib/repository";
@@ -381,15 +382,12 @@ export default function ToolDetailPage() {
                 {editing && draft ? (
                   <div className="space-y-3">
                     <div className="flex gap-2">
-                      <select
+                      <AppSelect
+                        className="h-8 w-24 shrink-0 rounded-lg text-[12px]"
                         value={draft.httpMethod}
-                        onChange={(e) => setDraft({ ...draft, httpMethod: e.target.value })}
-                        className="h-8 shrink-0 rounded-lg border border-[#E0E3E6] px-2 text-[12px]"
-                                             >
-                        {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
+                        onValueChange={(v) => setDraft({ ...draft, httpMethod: v })}
+                        options={["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => ({ value: m, label: m }))}
+                      />
                       <input
                         value={draft.httpUrl}
                         onChange={(e) => setDraft({ ...draft, httpUrl: e.target.value })}
@@ -484,16 +482,15 @@ export default function ToolDetailPage() {
               {editing && draft ? (
                 <div>
                   <label className="mb-1 block text-[11px] text-muted-foreground">Connection</label>
-                  <select
+                  <AppSelect
+                    className="h-8 w-full rounded-lg text-[12px]"
                     value={draft.connectionId}
-                    onChange={(e) => setDraft({ ...draft, connectionId: e.target.value })}
-                    className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
-                                     >
-                    <option value="">No connection</option>
-                    {connections.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                    onValueChange={(v) => setDraft({ ...draft, connectionId: v })}
+                    options={[
+                      { value: "", label: "No connection" },
+                      ...connections.map((c) => ({ value: c.id, label: c.name })),
+                    ]}
+                  />
                 </div>
               ) : tool.authConnectionRef ? (
                 <div className="divide-y divide-border/30">
@@ -601,15 +598,12 @@ export default function ToolDetailPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">Risk level</label>
-                    <select
+                    <AppSelect
+                      className="h-8 w-full rounded-lg text-[12px]"
                       value={draft.riskLevel}
-                      onChange={(e) => setDraft({ ...draft, riskLevel: e.target.value as Tool["riskLevel"] })}
-                      className="h-8 w-full rounded-lg border border-[#E0E3E6] px-2.5 text-[12px]"
-                                         >
-                      {(["low", "medium", "high", "critical"] as const).map((r) => (
-                        <option key={r} value={r}>{RISK_LABELS[r]}</option>
-                      ))}
-                    </select>
+                      onValueChange={(v) => setDraft({ ...draft, riskLevel: v as Tool["riskLevel"] })}
+                      options={(["low", "medium", "high", "critical"] as const).map((r) => ({ value: r, label: RISK_LABELS[r] }))}
+                    />
                   </div>
                   <KVRow label="Idempotent" value={tool.idempotent ? "Yes" : "No"} />
                 </div>

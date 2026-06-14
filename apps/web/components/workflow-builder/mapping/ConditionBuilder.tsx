@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus, Trash2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AppSelect } from "@/components/ui/app-select";
 import type {
   VisualConditionGroup, VisualCondition,
   VisualMappingField, ConditionOperator, FieldSource, FieldType,
@@ -91,15 +92,12 @@ function ConditionRow({
       />
 
       {/* Operator */}
-      <select
+      <AppSelect
+        className="h-7 w-[150px] text-[11.5px]"
         value={condition.operator}
-        onChange={e => onChange({ ...condition, operator: e.target.value as ConditionOperator })}
-        className="h-7 appearance-none rounded-lg border border-slate-200 bg-white px-2 pr-6 text-[11.5px] font-medium text-slate-700 outline-none focus:border-[#9CCFBB]"
-      >
-        {(Object.entries(OPERATOR_LABELS) as [ConditionOperator, string][]).map(([op, label]) => (
-          <option key={op} value={op}>{label}</option>
-        ))}
-      </select>
+        onValueChange={(v) => onChange({ ...condition, operator: v as ConditionOperator })}
+        options={(Object.entries(OPERATOR_LABELS) as [ConditionOperator, string][]).map(([op, label]) => ({ value: op, label }))}
+      />
 
       {/* Right value */}
       {needsRight && (

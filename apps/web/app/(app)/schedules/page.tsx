@@ -2,11 +2,35 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, ExternalLink, Pause, Play, RefreshCw, ArrowRight, Clock } from "lucide-react";
+import { CalendarClock, ExternalLink, Pause, Play, RefreshCw, Clock } from "lucide-react";
+
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/lib/workspace-context";
+import { cronToHumanText } from "@/lib/cron-humanizer";
+import { reportError } from "@/lib/errors";
 import { Chip, FilterTabs, EmptyHint } from "@/components/ui/page-kit";
+
+/** Extracts the server's human-readable message from a failed response. */
+async function serverMessage(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { message?: unknown; error?: unknown };
+    const msg = body?.message ?? body?.error;
+    if (typeof msg === "string" && msg.trim()) return msg;
+  } catch {
+    /* non-JSON body — fall through */
+  }
+  return `HTTP ${res.status}`;
+}
+
+/** Format an ISO timestamp for the schedule cards; falls back to the raw value. */
+function fmtFireTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_VECTORBEA_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -26,10 +50,12 @@ export default function SchedulesPage() {
   const { activeWorkspaceId } = useWorkspace();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"ALL" | "ACTIVE" | "PAUSED">("ALL");
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       if (!activeWorkspaceId) { setSchedules([]); return; }
       const token = typeof window !== "undefined" ? localStorage.getItem("vectorbea-access-token") : null;
@@ -37,17 +63,43 @@ export default function SchedulesPage() {
         `${API_BASE}/api/schedules?workspaceId=${encodeURIComponent(activeWorkspaceId)}`,
         { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "X-Workspace-Id": activeWorkspaceId } },
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await serverMessage(res));
       const data: unknown = await res.json();
       setSchedules(Array.isArray(data) ? (data as Schedule[]) : []);
-    } catch {
+    } catch (e) {
       setSchedules([]);
+      setError(reportError("schedules.load", e, "We couldn't load your schedules. Please try again."));
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => { void load(); }, [activeWorkspaceId]);
+
+  async function toggleSchedule(s: Schedule) {
+    if (!activeWorkspaceId) return;
+    const next = s.status !== "ACTIVE";
+    // Optimistic update
+    setSchedules((prev) => prev.map((x) => (x.id === s.id ? { ...x, status: next ? "ACTIVE" : "PAUSED" } : x)));
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("vectorbea-access-token") : null;
+      const res = await fetch(`${API_BASE}/api/schedules/${s.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          "X-Workspace-Id": activeWorkspaceId,
+        },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) throw new Error(await serverMessage(res));
+      void load();
+    } catch (e) {
+      // Revert optimistic update and tell the user what happened
+      setSchedules((prev) => prev.map((x) => (x.id === s.id ? { ...x, status: s.status } : x)));
+      toast.error(reportError("schedules.toggle", e, `We couldn't ${next ? "resume" : "pause"} this schedule. Please try again.`));
+    }
+  }
 
   const filtered = schedules.filter((s) => filter === "ALL" || s.status === filter);
   const activeCount = schedules.filter((s) => s.status === "ACTIVE").length;
@@ -82,6 +134,20 @@ export default function SchedulesPage() {
           </Link>
         </div>
       </div>
+
+      {/* Error banner — friendly message, matching the console log */}
+      {error && !loading && (
+        <div className="flex items-start justify-between gap-3 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+          <p className="text-[13px] text-[#B91C1C]">{error}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="shrink-0 rounded-[7px] border border-[#FCA5A5] bg-white px-2.5 py-1 text-[12px] font-semibold text-[#B91C1C] transition-colors hover:bg-[#FEF2F2]"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Filter */}
       {schedules.length > 0 && (
@@ -119,33 +185,34 @@ export default function SchedulesPage() {
                     <CalendarClock className="h-[18px] w-[18px]" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <Link href={`/agent-jobs/${s.jobId}` as never} className="block truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#0B0D0F] hover:text-[#007F4E]">
+                    <Link href={`/workflows/${s.jobId}` as never} className="block truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#0B0D0F] hover:text-[#007F4E]">
                       {s.jobName}
                     </Link>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-[6px] border border-[#E0E3E6] bg-[#F3F4F5] px-1.5 py-0.5 font-mono text-[11px] text-[#4B5563]">{s.cron}</span>
+                      <span className="inline-flex items-center gap-1 rounded-[6px] border border-[#9CCFBB] bg-[#E6F4EF] px-1.5 py-0.5 font-mono text-[11px] text-[#006B45]" title={`Cron: ${s.cron}`}>
+                        <CalendarClock className="h-3 w-3" /> Next {fmtFireTime(s.nextRun) ?? "—"}
+                      </span>
                       <span className="truncate font-mono text-[11px] text-[#9CA3AF]">{s.timezone}</span>
                     </div>
                   </div>
                   {active ? <Chip tone="green">Active</Chip> : <Chip tone="amber">Paused</Chip>}
                 </div>
 
-                {/* Human-readable */}
-                <p className="-mt-1 px-4 pb-3 text-[12.5px] text-[#4B5563]">{s.humanReadable}</p>
+                {/* Human-readable — humanized client-side from the cron expression */}
+                <p className="-mt-1 px-4 pb-3 text-[12.5px] text-[#4B5563]">{cronToHumanText(s.cron, s.timezone)}</p>
 
                 {/* Footer — next/last fire */}
                 <div className="mt-auto flex items-center justify-between border-t border-[#ECEEEF] bg-[#FAFBFB] px-4 py-2.5">
                   <span className="flex items-center gap-3 font-mono text-[11.5px]">
-                    <span className={cn("inline-flex items-center gap-1", active ? "text-[#006B45]" : "text-[#9CA3AF]")}>
-                      <ArrowRight className="h-3 w-3" /> next {s.nextRun ?? "—"}
+                    <span className="inline-flex items-center gap-1 text-[#9CA3AF]" title="Last run">
+                      <Clock className="h-3 w-3" /> last {fmtFireTime(s.lastRun) ?? "never"}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-[#9CA3AF]"><Clock className="h-3 w-3" /> {s.lastRun ?? "never"}</span>
                   </span>
                   <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button type="button" title={active ? "Pause" : "Resume"} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
+                    <button type="button" onClick={() => void toggleSchedule(s)} title={active ? "Pause" : "Resume"} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
                       {active ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                     </button>
-                    <Link href={`/agent-jobs/${s.jobId}` as never} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
+                    <Link href={`/workflows/${s.jobId}` as never} className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6B7280] hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">
                       <ExternalLink className="h-3.5 w-3.5" />
                     </Link>
                   </div>

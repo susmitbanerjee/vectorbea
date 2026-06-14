@@ -162,17 +162,32 @@ export async function getWorkflowGraph(workflowId: string): Promise<WorkflowGrap
 }
 
 /**
+ * Pulls the trigger node's config out of the graph so it can be persisted on the
+ * version's `triggerConfig`. The cron expression / timezone live on the trigger
+ * node in the canvas; without this, the backend never sees them and no schedule
+ * is created.
+ */
+function extractTriggerConfig(graph: WorkflowGraph): Record<string, unknown> {
+  const triggerNode = graph.nodes?.find(
+    (n) => n.type === "trigger" || n.data?.nodeType === "trigger",
+  );
+  const cfg = triggerNode?.data?.triggerConfig;
+  return cfg && typeof cfg === "object" ? (cfg as unknown as Record<string, unknown>) : {};
+}
+
+/**
  * Saves the graph by creating a new workflow version.
  * Calls POST /api/workflows/:id/versions with the full graph.
  */
 export async function saveWorkflowGraph(workflowId: string, graph: WorkflowGraph): Promise<void> {
+  const triggerConfig = extractTriggerConfig(graph);
   await api<WorkflowVersion>(withWorkspace(`/api/workflows/${workflowId}/versions`), {
     method: "POST",
     body: JSON.stringify({
       graph,
-      inputSchema: {},
+      inputSchema: (triggerConfig.inputSchema as Record<string, unknown>) ?? {},
       outputSchema: {},
-      triggerConfig: {},
+      triggerConfig,
       retryPolicy: {},
       timeoutPolicy: {},
       budgetPolicy: {},
@@ -195,13 +210,14 @@ export async function getWorkflowVersions(workflowId: string): Promise<WorkflowV
 }
 
 export async function saveWorkflowVersion(workflowId: string, graph: WorkflowGraph): Promise<WorkflowVersion> {
+  const triggerConfig = extractTriggerConfig(graph);
   return api<WorkflowVersion>(withWorkspace(`/api/workflows/${workflowId}/versions`), {
     method: "POST",
     body: JSON.stringify({
       graph,
-      inputSchema: {},
+      inputSchema: (triggerConfig.inputSchema as Record<string, unknown>) ?? {},
       outputSchema: {},
-      triggerConfig: {},
+      triggerConfig,
       retryPolicy: {},
       timeoutPolicy: {},
       budgetPolicy: {},

@@ -230,6 +230,7 @@ fun main() {
     val runRepo = ds?.let { RunRepository(it) }
     val runEventRepo = ds?.let { RunEventRepository(it) }
     val approvalRepo = ds?.let { ApprovalRepository(it) }
+    val scheduleRepo = ds?.let { com.vectorbea.api.schedule.ScheduleRepository(it) }
 
     // 7. Router + routes
     val router = Router()
@@ -253,8 +254,13 @@ fun main() {
     } else log.warn("ToolRoutes disabled — no database")
 
     if (workflowRepo != null) {
-        WorkflowRoutes(workflowRepo, cacheService, telemetry).register(router)
+        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo).register(router)
     } else log.warn("WorkflowRoutes disabled — no database")
+
+    // Cron schedules: read API + the firing loop (see WorkflowScheduler).
+    if (scheduleRepo != null) {
+        com.vectorbea.api.routes.ScheduleRoutes(scheduleRepo).register(router)
+    } else log.warn("ScheduleRoutes disabled — no database")
 
     // Dashboard summary — requires DB for metric queries
     if (ds != null) {
@@ -323,12 +329,28 @@ fun main() {
         AgentIterationRoutes(ds).register(router)
     } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
+    // 7b. Cron scheduler — fires due workflow schedules onto the queue
+    val workflowScheduler = if (scheduleRepo != null && workflowRepo != null &&
+        runRepo != null && runEventRepo != null && workflowQueue != null) {
+        com.vectorbea.api.schedule.WorkflowScheduler(
+            schedules = scheduleRepo,
+            workflowRepo = workflowRepo,
+            runRepo = runRepo,
+            eventRepo = runEventRepo,
+            queue = workflowQueue,
+        ).also { it.start() }
+    } else {
+        log.warn("WorkflowScheduler disabled — requires database + queue")
+        null
+    }
+
     // 8. HTTP server
     val server = HttpServer(config, router, authMiddleware)
 
     // 9. Graceful shutdown
     Runtime.getRuntime().addShutdownHook(Thread {
         log.info("Shutdown signal received — stopping server...")
+        workflowScheduler?.stop()
         server.stop(delaySeconds = 5)
         database?.close()
         redis?.close()
