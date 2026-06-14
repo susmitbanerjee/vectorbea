@@ -12,6 +12,8 @@ import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.mapping.InMemoryStepOutputView
 import com.vectorbea.worker.mapping.MappingResolver
+import com.vectorbea.worker.runtime.budget.ExecutionBudget
+import com.vectorbea.worker.runtime.budget.ExecutionBudgetTracker
 import com.vectorbea.worker.runtime.debug.DebugSnapshotWriter
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
@@ -67,7 +69,11 @@ class WorkflowRuntime(
     private val historyChecker: HistoryLimitChecker? = null,
     /** Default per-node timeout when the node doesn't set its own (0 disables). */
     private val defaultNodeTimeoutMs: Long =
-        (System.getenv("WORKER_DEFAULT_NODE_TIMEOUT_MS") ?: "120000").toLong(),
+        (System.getenv("DEFAULT_NODE_TIMEOUT_MS") ?: System.getenv("WORKER_DEFAULT_NODE_TIMEOUT_MS") ?: "60000").toLong(),
+    /** Per-class default timeouts for external calls (used when the node sets none). */
+    private val httpNodeTimeoutMs: Long  = (System.getenv("HTTP_NODE_TIMEOUT_MS")  ?: "30000").toLong(),
+    private val llmNodeTimeoutMs: Long   = (System.getenv("LLM_NODE_TIMEOUT_MS")   ?: "90000").toLong(),
+    private val agentNodeTimeoutMs: Long = (System.getenv("AGENT_NODE_TIMEOUT_MS") ?: "120000").toLong(),
     /**
      * Hard wall-clock budget for a single run (0 disables).
      * UNLIMITED by default — long-running durable workflows are the product's
@@ -76,6 +82,13 @@ class WorkflowRuntime(
      */
     private val maxRunDurationMs: Long =
         (System.getenv("WORKER_MAX_RUN_DURATION_MS") ?: "0").toLong(),
+    /**
+     * Per-tick execution budget for cooperative yielding. When non-null, a run
+     * executes only a bounded slice (nodes + wall-clock) per worker thread, then
+     * checkpoints and yields so the thread is released and the run is re-enqueued
+     * as RESUME_RUN. Null = unbounded (historical behavior — used by unit tests).
+     */
+    private val executionBudget: ExecutionBudget? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -126,6 +139,12 @@ class WorkflowRuntime(
         data class Failed(val reason: String) : ExecutionResult()
         data class WaitingForApproval(val approvalId: String, val nodeId: String) : ExecutionResult()
         data class Cancelled(val reason: String = "Run cancelled by request") : ExecutionResult()
+        /**
+         * The per-tick budget was exhausted mid-run. Progress is checkpointed;
+         * the caller must re-enqueue a RESUME_RUN to continue. [checkpointNodeId]
+         * is the label the yield checkpoint was saved under.
+         */
+        data class Yielded(val reason: String, val checkpointNodeId: String?) : ExecutionResult()
     }
 
     /**
@@ -276,9 +295,19 @@ class WorkflowRuntime(
         source: String,
         stepOutputView: InMemoryStepOutputView,
         cancellationCheck: () -> Boolean = { false },
+        /**
+         * Whether to enforce the per-tick yield budget at this level. Only the
+         * top-level run yields; parallel branch sub-DAGs run unbounded (they are
+         * still bounded by per-node timeouts) so the parallel merge never has to
+         * reason about a partially-yielded branch.
+         */
+        enforceBudget: Boolean = true,
     ): ExecutionResult {
         val maxIterations = graph.nodes.size * 10 + 100 // safety cap
         val dagStartedAtMs = System.currentTimeMillis()
+
+        // Per-tick cooperative-yield budget (null = unbounded / historical behavior).
+        val tracker = if (enforceBudget) executionBudget?.let { ExecutionBudgetTracker(it) } else null
 
         for (iteration in 0..maxIterations) {
             // Hard wall-clock budget — a hung node or pathological graph must
@@ -293,6 +322,12 @@ class WorkflowRuntime(
             if (iteration % 5 == 0 && cancellationCheck()) {
                 log.info("[runtime] run cancelled by external request [runId={}]", ctx.runId)
                 return ExecutionResult.Cancelled()
+            }
+
+            // Cooperative yield (wall-clock dimension) — checked before doing more
+            // work so a single slow-but-not-timed-out node still yields promptly.
+            if (tracker != null && !tracker.canContinue()) {
+                return yieldRun(ctx, source, tracker)
             }
 
             // Check for completion
@@ -329,6 +364,8 @@ class WorkflowRuntime(
             for (parallelNode in parallelNodes) {
                 val result = executeParallelNode(parallelNode, scheduler, ctx, source, stepOutputView, cancellationCheck)
                 if (result != null) return result
+                tracker?.recordNode()
+                if (tracker != null && !tracker.canContinue()) return yieldRun(ctx, source, tracker)
             }
 
             // Execute sequential nodes one by one
@@ -336,6 +373,10 @@ class WorkflowRuntime(
                 if (!ctx.isPending(node.id)) continue // may have been marked during parallel
                 val result = executeSingleNode(node, scheduler, ctx, source, stepOutputView)
                 if (result != null) return result
+                // Count this node against the per-tick budget; yield (checkpoint +
+                // RESUME_RUN) when exhausted so we never pin the worker thread.
+                tracker?.recordNode()
+                if (tracker != null && !tracker.canContinue()) return yieldRun(ctx, source, tracker)
             }
         }
 
@@ -527,7 +568,7 @@ class WorkflowRuntime(
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
     ): NodeResult {
-        val timeoutMs = node.timeoutPolicy.timeoutMs.takeIf { it > 0 } ?: defaultNodeTimeoutMs
+        val timeoutMs = node.timeoutPolicy.timeoutMs.takeIf { it > 0 } ?: defaultTimeoutFor(node.nodeType)
         if (timeoutMs <= 0) {
             // Timeouts disabled — execute inline
             return try { executor.execute(node, resolvedInputs, ctx) }
@@ -927,7 +968,8 @@ class WorkflowRuntime(
                     stepOutputView.getExtracted(id)?.let { branchView.putExtracted(id, it) }
                     stepOutputView.getValidated(id)?.let { branchView.putValidated(id, it) }
                 }
-                val branchResult = runDag(ctx.graph, branchScheduler, branchCtx, source, branchView, cancellationCheck)
+                val branchResult = runDag(ctx.graph, branchScheduler, branchCtx, source, branchView,
+                    cancellationCheck, enforceBudget = false)
                 Triple(entryNodeId, branchCtx, branchResult)
             }, branchExecutor)
         }
@@ -951,6 +993,7 @@ class WorkflowRuntime(
                 is ExecutionResult.Failed             -> "failed: ${result.reason.take(120)}"
                 is ExecutionResult.WaitingForApproval -> "waiting_for_approval"
                 is ExecutionResult.Cancelled          -> "cancelled"
+                is ExecutionResult.Yielded            -> "yielded" // branches run unbounded; defensive
             }
             log.info("[runtime] branch {} → {} [parallelId={}]", entryNodeId, status, parallelNode.id)
         }
@@ -1079,6 +1122,29 @@ class WorkflowRuntime(
         return sb.toString()
     }
 
+    /**
+     * Cooperative yield: persist a checkpoint of current progress, emit
+     * RUN_YIELDED, and return [ExecutionResult.Yielded]. The processor turns this
+     * into a re-enqueued RESUME_RUN. A checkpoint is ALWAYS written here
+     * (regardless of node checkpoint policy) so resume continues exactly here
+     * without re-executing completed nodes.
+     */
+    private fun yieldRun(
+        ctx: RuntimeContext,
+        source: String,
+        tracker: ExecutionBudgetTracker,
+    ): ExecutionResult.Yielded {
+        val reason = tracker.exhaustedReason() ?: "BUDGET_EXHAUSTED"
+        val lastNode = ctx.completedNodeIds().lastOrNull() ?: "__yield__"
+        writeCheckpoint(lastNode, ctx, source)
+        emitEvent(ctx, EventType.RUN_YIELDED, "yielded", source,
+            title   = "Run yielded after a bounded execution tick",
+            summary = "Budget exhausted ($reason) — progress checkpointed; the run will resume.",
+            meta    = tracker.snapshotJson())
+        log.info("[runtime] run yielded [runId={}, reason={}, lastNode={}]", ctx.runId, reason, lastNode)
+        return ExecutionResult.Yielded(reason, lastNode)
+    }
+
     private fun writeCheckpoint(nodeId: String, ctx: RuntimeContext, source: String) {
         runCatching {
             val snap = ctx.snapshot()
@@ -1129,6 +1195,14 @@ class WorkflowRuntime(
             acc.putAll(ctx.getOutput(node.id))
             acc
         }
+    }
+
+    /** Per-class default timeout for external-call nodes; falls back to the global default. */
+    private fun defaultTimeoutFor(nodeType: NodeType): Long = when (nodeType) {
+        NodeType.HTTP                 -> httpNodeTimeoutMs
+        NodeType.LLM                  -> llmNodeTimeoutMs
+        NodeType.AGENT                -> agentNodeTimeoutMs
+        else                          -> defaultNodeTimeoutMs
     }
 
     private fun nodeLabel(node: WorkflowNode): String =

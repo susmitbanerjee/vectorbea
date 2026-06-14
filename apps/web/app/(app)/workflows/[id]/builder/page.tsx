@@ -1046,7 +1046,7 @@ function WorkflowBuilderInner() {
       );
       setLiveRunStatus("queued");
       setActiveRunId(runId);
-      toast.success("Workflow started — watch nodes animate live on the canvas.");
+      toast.success("Workflow started");
     } catch {
       toast.error("Failed to start workflow.");
     } finally {

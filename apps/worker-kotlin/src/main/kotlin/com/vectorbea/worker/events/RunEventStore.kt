@@ -162,6 +162,15 @@ open class RunEventStore(
         RUN_RECOVERY_COMPLETED("RUN_RECOVERY_COMPLETED"),
         // Durable execution — failure incidents
         FAILURE_INCIDENT_CREATED("FAILURE_INCIDENT_CREATED"),
+        // Durable execution — cooperative yielding (durable, low-frequency timeline events)
+        RUN_YIELDED("RUN_YIELDED"),
+        RUN_REENQUEUED("RUN_REENQUEUED"),
+        // Scheduling-fairness signals. NOTE: these are operational and HIGH-FREQUENCY
+        // under load — they are exposed ONLY via metrics/logs (WorkerMetrics.tenantThrottled
+        // / poolSaturated) and MUST NOT be appendEvent'd to run_events per poll.
+        // Kept here only so a deliberate, rate-limited timeline write could opt in later.
+        TENANT_THROTTLED("TENANT_THROTTLED"),
+        POOL_SATURATED("POOL_SATURATED"),
         // Agent Brain — iterative loop events
         AGENT_ITERATION_STARTED("AGENT_ITERATION_STARTED"),
         AGENT_ACTION_SELECTED("AGENT_ACTION_SELECTED"),

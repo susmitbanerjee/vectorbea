@@ -457,42 +457,76 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
     <div className="space-y-3">
       <div><ILabel>Step Label</ILabel><IInput value={data.label} onChange={(v) => onChange({ ...data, label: v })} /></div>
 
-      {/* ── Built-in email toggle at the top ── */}
-      <div
-        className="flex items-center justify-between rounded-xl border px-3 py-2.5 cursor-pointer"
-        style={{
-          borderColor: isBuiltinEmail ? "#BBF7D0" : "#E2E8F0",
-          background:  isBuiltinEmail ? "#F0FDF4" : "#F8FAFC",
-        }}
-        onClick={() => {
-          const next = !isBuiltinEmail;
-          set({
-            builtinEmail: next,
-            toolType: next ? "builtin_email" : undefined,
-            toolId: next ? undefined : cfg.toolId,
-          } as Parameters<typeof set>[0]);
-        }}
-        role="button" tabIndex={0}
-        onKeyDown={e => e.key === "Enter" && set({ builtinEmail: !isBuiltinEmail, toolType: !isBuiltinEmail ? "builtin_email" : undefined } as Parameters<typeof set>[0])}
-      >
-        <div>
-          <p className="text-[12px] font-semibold" style={{ color: isBuiltinEmail ? "#15803D" : "#334155" }}>
-            📧 Use built-in email (Resend)
-          </p>
-          <p className="text-[10.5px] mt-0.5" style={{ color: isBuiltinEmail ? "#16A34A" : "#94A3B8" }}>
-            {isBuiltinEmail
-              ? "Uses RESEND_API_KEY from platform config — no connection needed"
-              : "Enable to send email without configuring a tool connection"}
-          </p>
-        </div>
+      {/* ── Registered tool selector (primary; hidden when built-in email is on) ── */}
+      {!isBuiltinEmail && (
+        <>
+          <div><ILabel>Registered Tool</ILabel>
+            <ISelect value={cfg.toolId ?? ""} onChange={(v) => {
+              const t = tools.find((x) => x.id === v);
+              const uiToolType = (t?.config as Record<string, unknown> | undefined)?.uiToolType as string | undefined;
+              set({
+                toolId: v || undefined,
+                toolName: t?.name,
+                toolType: uiToolType ?? t?.type,
+                riskLevel: t?.riskLevel,
+                ...(uiToolType ? { uiToolType } : {}),
+              } as Parameters<typeof set>[0]);
+            }}>
+              <option value="">— select tool —</option>
+              {tools.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
+            </ISelect>
+          </div>
+
+          {tool && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] space-y-1">
+              <div className="flex justify-between"><span className="text-slate-500">Risk</span><span className="font-semibold text-slate-700 capitalize">{(tool.riskLevel ?? "").replace(/_/g, " ")}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Idempotent</span><span className={tool.idempotent ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{tool.idempotent ? "yes" : "no"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Timeout</span><span className="text-slate-700">{tool.timeoutMs}ms</span></div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Built-in email — SECONDARY option. Only shown when built-in email is
+            already on, or when no registered tool is chosen. This stops the
+            "Use built-in email (Resend)" UI from surfacing on non-email tool nodes. ── */}
+      {(isBuiltinEmail || !cfg.toolId) && (
         <div
-          className="relative ml-3 h-5 w-9 shrink-0 rounded-full transition-colors"
-          style={{ background: isBuiltinEmail ? "#16A34A" : "#CBD5E1" }}
+          className="flex items-center justify-between rounded-xl border px-3 py-2.5 cursor-pointer"
+          style={{
+            borderColor: isBuiltinEmail ? "#BBF7D0" : "#E2E8F0",
+            background:  isBuiltinEmail ? "#F0FDF4" : "#F8FAFC",
+          }}
+          onClick={() => {
+            const next = !isBuiltinEmail;
+            set({
+              builtinEmail: next,
+              toolType: next ? "builtin_email" : undefined,
+              toolId: next ? undefined : cfg.toolId,
+            } as Parameters<typeof set>[0]);
+          }}
+          role="button" tabIndex={0}
+          onKeyDown={e => e.key === "Enter" && set({ builtinEmail: !isBuiltinEmail, toolType: !isBuiltinEmail ? "builtin_email" : undefined } as Parameters<typeof set>[0])}
         >
-          <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
-            style={{ transform: isBuiltinEmail ? "translateX(16px)" : "translateX(2px)" }} />
+          <div>
+            <p className="text-[12px] font-semibold" style={{ color: isBuiltinEmail ? "#15803D" : "#334155" }}>
+              📧 Use built-in email (Resend)
+            </p>
+            <p className="text-[10.5px] mt-0.5" style={{ color: isBuiltinEmail ? "#16A34A" : "#94A3B8" }}>
+              {isBuiltinEmail
+                ? "Uses RESEND_API_KEY from platform config — no connection needed"
+                : "Enable to send email without configuring a tool connection"}
+            </p>
+          </div>
+          <div
+            className="relative ml-3 h-5 w-9 shrink-0 rounded-full transition-colors"
+            style={{ background: isBuiltinEmail ? "#16A34A" : "#CBD5E1" }}
+          >
+            <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
+              style={{ transform: isBuiltinEmail ? "translateX(16px)" : "translateX(2px)" }} />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Built-in email fields ── */}
       {isBuiltinEmail && (
@@ -537,34 +571,9 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
         </div>
       )}
 
-      {/* ── Registered tool selector (hidden when built-in email is on) ── */}
+      {/* ── Input / Output mapping (only when using a registered tool) ── */}
       {!isBuiltinEmail && (
         <>
-          <div><ILabel>Registered Tool</ILabel>
-            <ISelect value={cfg.toolId ?? ""} onChange={(v) => {
-              const t = tools.find((x) => x.id === v);
-              const uiToolType = (t?.config as Record<string, unknown> | undefined)?.uiToolType as string | undefined;
-              set({
-                toolId: v || undefined,
-                toolName: t?.name,
-                toolType: uiToolType ?? t?.type,
-                riskLevel: t?.riskLevel,
-                ...(uiToolType ? { uiToolType } : {}),
-              } as Parameters<typeof set>[0]);
-            }}>
-              <option value="">— select tool —</option>
-              {tools.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
-            </ISelect>
-          </div>
-
-          {tool && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] space-y-1">
-              <div className="flex justify-between"><span className="text-slate-500">Risk</span><span className="font-semibold text-slate-700 capitalize">{(tool.riskLevel ?? "").replace(/_/g, " ")}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Idempotent</span><span className={tool.idempotent ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{tool.idempotent ? "yes" : "no"}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Timeout</span><span className="text-slate-700">{tool.timeoutMs}ms</span></div>
-            </div>
-          )}
-
           {/* ── Input Mapping ── */}
           <MappingEditor
             label="Input Mapping"

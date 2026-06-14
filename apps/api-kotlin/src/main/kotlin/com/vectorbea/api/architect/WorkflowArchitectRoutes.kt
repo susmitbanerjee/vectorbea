@@ -45,6 +45,37 @@ class WorkflowArchitectRoutes(
         router.post("/api/architect/sessions/:id/connection-requirements/:reqId/test",             ::testConnection)
         // Workspace connections list (for picker)
         router.get ("/api/architect/connections",                                                   ::listConnections)
+        // Build allowance + reset time (for settings / pre-flight)
+        router.get ("/api/architect/usage",                                                          ::getUsage)
+    }
+
+    // ── GET /api/architect/usage ──────────────────────────────────────────────
+
+    private fun getUsage(req: Request): Response {
+        val ctx = req.context()
+        return Response.ok(usageToMap(service.getUsage(ctx.workspaceId)))
+    }
+
+    /** Serialize an architect usage snapshot for the UI. */
+    private fun usageToMap(u: WorkflowArchitectService.ArchitectUsage): Map<String, Any?> = mapOf(
+        "used"        to u.used,
+        "limit"       to u.limit,
+        "remaining"   to (u.limit - u.used).coerceAtLeast(0),
+        "periodDays"  to u.periodDays,
+        "locked"      to u.locked,
+        "lastBuildAt" to u.lastBuildAt?.toString(),
+        "resetAt"     to u.resetAt?.toString(),
+    )
+
+    /** Uniform 429 with reset details so the UI can tell the user exactly when it unlocks. */
+    private fun limitExceededResponse(u: WorkflowArchitectService.ArchitectUsage): Response {
+        val resetMsg = u.resetAt?.let { " Your next build unlocks on $it." } ?: ""
+        return Response.json(429, mapOf(
+            "error"   to "ARCHITECT_USAGE_LIMIT_EXCEEDED",
+            "message" to ("The AI Architect can build ${u.limit} workflow per ${u.periodDays} days per workspace." +
+                resetMsg + " Meanwhile you can edit any workflow on the canvas."),
+            "usage"   to usageToMap(u),
+        ))
     }
 
     private fun enabledGuard(): Response? = if (!service.isEnabled()) Response.json(403, mapOf(
@@ -65,10 +96,8 @@ class WorkflowArchitectRoutes(
             ?: throw ApiError.ValidationError("'goal' is required")
         if (goal.length > WorkflowArchitectService.MAX_GOAL_LENGTH)
             throw ApiError.ValidationError("Goal exceeds ${WorkflowArchitectService.MAX_GOAL_LENGTH} chars")
-        if (!service.checkMonthlyLimit(ctx.workspaceId))
-            return Response.json(429, mapOf("error" to "ARCHITECT_USAGE_LIMIT_EXCEEDED",
-                "message" to "The AI Architect can build one workflow per month per workspace. " +
-                    "Your next build unlocks at the start of next month — meanwhile you can edit any workflow on the canvas."))
+        if (!service.checkBuildLimit(ctx.workspaceId))
+            return limitExceededResponse(service.getUsage(ctx.workspaceId))
         val envId  = ctx.environmentId ?: throw ApiError.ValidationError("X-Environment-Id header is required")
         val userId = req.principal?.appUserId ?: throw ApiError.Unauthorized("Authentication required")
 
@@ -252,7 +281,14 @@ class WorkflowArchitectRoutes(
         val bindings = (req.bodyAs<Map<String, Any?>>()["connectionBindings"] as? Map<String, String>) ?: emptyMap()
         val session  = sessionOrNotFound(id, ctx.workspaceId)
         val result   = try { service.createWorkflow(session, bindings) }
-        catch (e: IllegalArgumentException) {
+        catch (e: WorkflowArchitectService.BuildLimitExceededException) {
+            return limitExceededResponse(e.usage)
+        } catch (e: WorkflowArchitectService.BuildInProgressException) {
+            return Response.json(409, mapOf(
+                "error"   to "ARCHITECT_BUILD_IN_PROGRESS",
+                "message" to "Another workflow build is already running for this workspace. " +
+                    "Please wait for it to finish, then try again."))
+        } catch (e: IllegalArgumentException) {
             return Response.json(400, mapOf("error" to "INVALID_REQUEST", "message" to (e.message ?: "Invalid request.")))
         } catch (e: Exception) {
             return Response.json(500, mapOf("error" to "WORKFLOW_CREATION_FAILED", "message" to (e.message ?: "Workflow creation failed.")))

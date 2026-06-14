@@ -90,15 +90,19 @@ class DurableRunRoutes(
                   (id, workspace_id, environment_id, workflow_id, workflow_version_id,
                    status, trigger_type, creation_mode, input_json,
                    idempotency_key, continued_from_run_id, continuation_sequence)
-                VALUES (?,?,?,?,?, 'queued','manual','native','{}', null, ?,?)
+                VALUES (?,?,?,?,?, 'queued','manual','native', ?::jsonb, null, ?,?)
             """.trimIndent()).use { stmt ->
                 stmt.setObject(1, newRunId)
                 stmt.setObject(2, ctx.workspaceId)
                 stmt.setObject(3, run.environmentId)
                 stmt.setObject(4, run.workflowId)
                 stmt.setObject(5, workflowVersionId)
-                stmt.setObject(6, runId)
-                stmt.setInt(7, continuationSeq)
+                // Persist the carried-over state AS the new run's input so the DB is
+                // the source of truth (the worker can load it without the Redis message
+                // carrying a large payload).
+                stmt.setString(6, stateJson)
+                stmt.setObject(7, runId)
+                stmt.setInt(8, continuationSeq)
                 stmt.executeUpdate()
             }
 

@@ -47,6 +47,13 @@ data class WorkflowRunJob(
     val requestedByUserId: String? = null,
     /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
     val debugMode: Boolean = false,
+    /**
+     * Whether the Redis message actually carried an inputJson field. Slim messages
+     * (RESUME_RUN re-enqueues, oversized-omitted START_RUN) set this false, telling
+     * the worker to load the authoritative input from agent_runs.input_json instead.
+     * Defaults true so legacy messages and direct constructions are unaffected.
+     */
+    val inputProvided: Boolean = true,
 ) {
     enum class JobType {
         START_RUN,
@@ -78,8 +85,11 @@ data class WorkflowRunJob(
                 jobType = JobType.fromString(fields["jobType"] ?: fields["job_type"]),
                 runId = parseUuid(runIdStr, "runId", messageId),
                 workflowId = parseUuid(workflowIdStr, "workflowId", messageId),
-                triggeredBy = fields["triggeredBy"] ?: fields["triggered_by"] ?: "unknown",
+                triggeredBy = fields["triggeredBy"] ?: fields["triggered_by"] ?: fields["reason"] ?: "unknown",
+                // inputJson may be absent on slim messages; the worker loads the
+                // authoritative input from agent_runs.input_json. Default "{}".
                 inputJson = fields["inputJson"] ?: fields["input_json"] ?: "{}",
+                inputProvided = fields.containsKey("inputJson") || fields.containsKey("input_json"),
                 retryCount = fields["retryCount"]?.toIntOrNull() ?: 0,
                 nodeId = fields["nodeId"] ?: fields["node_id"] ?: fields["resumeFromNodeId"],
                 checkpointId = (fields["checkpointId"] ?: fields["checkpoint_id"])
@@ -96,6 +106,30 @@ data class WorkflowRunJob(
             catch (e: IllegalArgumentException) {
                 throw ParseException("Invalid UUID for '$field' in message $msgId: $value")
             }
+    }
+
+    /**
+     * Serialize this job back into Redis Stream fields (the inverse of [parse]).
+     * Used to durably re-enqueue a RESUME_RUN after a cooperative yield.
+     *
+     * SECURITY/SIZE: carries ONLY IDs and small control fields. In particular it
+     * NEVER carries inputJson — the run input lives in agent_runs.input_json and
+     * the worker loads it from there (the DB is the source of truth). This keeps
+     * RESUME_RUN messages tiny and bounds Redis payload size.
+     */
+    fun toStreamFields(): Map<String, String> = buildMap {
+        put("jobType", jobType.name)
+        put("runId", runId.toString())
+        put("workflowId", workflowId.toString())
+        put("triggeredBy", triggeredBy)
+        put("reason", triggeredBy)
+        put("retryCount", retryCount.toString())
+        nodeId?.let { put("nodeId", it) }
+        checkpointId?.let { put("checkpointId", it.toString()) }
+        workspaceId?.let { put("workspaceId", it.toString()) }
+        requestedByUserId?.let { put("requestedByUserId", it) }
+        if (debugMode) put("debugMode", "true")
+        // NOTE: inputJson intentionally omitted — see KDoc.
     }
 
     class ParseException(message: String) : Exception(message)

@@ -50,8 +50,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-const inputCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
-const selectCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
+import { inputCls, selectCls, selectCompactCls } from "@/lib/ui/field-styles";
 const monoCls = `${inputCls} h-auto py-2 font-mono text-[12px]`;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -260,7 +259,7 @@ export default function NewToolPage() {
           <SectionHeader label="HTTP Config" />
           <div className="flex gap-3">
             <select
-              className="h-9 w-24 shrink-0 rounded-[8px] border border-[#E0E3E6] bg-white px-3 font-mono text-[12px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
+              className={`w-24 shrink-0 font-mono ${selectCompactCls}`}
               value={method}
               onChange={(e) => setMethod(e.target.value as typeof method)}
             >

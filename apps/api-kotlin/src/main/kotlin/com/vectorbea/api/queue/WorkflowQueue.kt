@@ -38,6 +38,12 @@ data class WorkflowRunJob(
     val requestedByUserId: String? = null,
     /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
     val debugMode: Boolean = false,
+    /**
+     * Why this job was enqueued: "manual" | "approval" | "timer" | "retry" | "yielded".
+     * Carried as the message `reason`/`triggeredBy`; the worker uses it for job
+     * classification (e.g. approval/timer/recovery → SYSTEM pool).
+     */
+    val reason: String = "manual",
 )
 
 enum class JobType {

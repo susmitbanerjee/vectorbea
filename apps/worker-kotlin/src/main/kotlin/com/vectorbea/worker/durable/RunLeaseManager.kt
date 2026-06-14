@@ -119,7 +119,7 @@ class RunLeaseManager(
                               rl.worker_id, rl.expires_at
                        FROM agent_runs ar
                        LEFT JOIN run_leases rl ON rl.run_id = ar.id
-                       WHERE ar.status = 'running'
+                       WHERE ar.status IN ('running', 'yielded')
                          AND (
                               (rl.id IS NOT NULL AND rl.expires_at < now() - INTERVAL '30 seconds')
                            OR (rl.id IS NULL     AND ar.updated_at < now() - INTERVAL '120 seconds')

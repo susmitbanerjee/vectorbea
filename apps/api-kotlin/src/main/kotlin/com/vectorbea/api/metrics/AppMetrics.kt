@@ -50,6 +50,29 @@ object AppMetrics {
         "command",
     )
 
+    // ── Workflow queue (Redis Streams producer) ───────────────────────────────
+
+    /** XADD writes to the workflow-runs stream. Labels: job_type */
+    val redisStreamXadd: Counter = counter(
+        "api_redis_stream_xadd_total",
+        "Total XADD writes to the workflow run stream",
+        "job_type",
+    )
+
+    /** Total bytes of queue message payloads written (sum). Labels: job_type */
+    val redisStreamPayloadBytes: Counter = counter(
+        "api_redis_stream_payload_bytes_total",
+        "Total workflow queue message payload bytes written to Redis",
+        "job_type",
+    )
+
+    /** Messages whose input was omitted from Redis because it exceeded the size guard. */
+    val redisStreamInputOmitted: Counter = counter(
+        "api_redis_stream_input_omitted_total",
+        "Queue messages where oversized inputJson was omitted (worker loads it from DB)",
+        "job_type",
+    )
+
     // ── Workflow run state gauges ─────────────────────────────────────────────
 
     /** Runs currently in 'queued' state (approximate point-in-time). */
