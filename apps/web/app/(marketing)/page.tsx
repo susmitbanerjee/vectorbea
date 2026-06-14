@@ -62,19 +62,19 @@ function DurableRunPanel() {
     { icon: <ShieldCheck className="h-3 w-3" />, c: "#0F766E", t: "ApprovalRequested", s: "waiting · Finance Ops", time: "09:01:24", live: true },
   ];
   return (
-    <div className="overflow-hidden rounded-[14px] border bg-white" style={{ borderColor: "#E0E3E6", boxShadow: "0 24px 60px rgba(11,13,15,0.10)" }}>
+    <div className="w-full overflow-hidden rounded-[14px] border bg-white" style={{ borderColor: "#E0E3E6", boxShadow: "0 24px 60px rgba(11,13,15,0.10)" }}>
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "#ECEEEF" }}>
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[12px] text-[#6B7280]">run_a1f3 · renewals-ai</span>
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-3 sm:px-4" style={{ borderColor: "#ECEEEF" }}>
+        <div className="min-w-0">
+          <span className="block truncate font-mono text-[12px] text-[#6B7280]">run_a1f3 · renewals-ai</span>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold" style={{ background: "#F0FDFA", borderColor: "#99F6E4", color: "#0F766E" }}>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold" style={{ background: "#F0FDFA", borderColor: "#99F6E4", color: "#0F766E" }}>
           <span className="h-1.5 w-1.5 rounded-full bg-teal-500" style={{ animation: "pulse 1.8s ease-in-out infinite" }} />
           Running
         </span>
       </div>
       {/* Event rail */}
-      <div className="px-4 py-4">
+      <div className="px-3 py-4 sm:px-4">
         {events.map((e, i) => {
           const last = i === events.length - 1;
           if ("kind" in e) {
@@ -102,10 +102,10 @@ function DurableRunPanel() {
                 </span>
                 {!last && <span className="my-1 w-px flex-1" style={{ background: "#E0E3E6", minHeight: 14 }} />}
               </div>
-              <div className="flex-1 pb-3">
-                <div className="flex items-center justify-between">
-                  <p className="font-mono text-[12.5px] font-medium text-[#0B0D0F]">{e.t}</p>
-                  <span className="font-mono text-[10.5px] text-[#9CA3AF]">{e.time}</span>
+              <div className="min-w-0 flex-1 pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="min-w-0 truncate font-mono text-[12.5px] font-medium text-[#0B0D0F]">{e.t}</p>
+                  <span className="shrink-0 font-mono text-[10.5px] text-[#9CA3AF]">{e.time}</span>
                 </div>
                 <p className="text-[11.5px] text-[#6B7280]">{e.s}</p>
               </div>
@@ -114,9 +114,9 @@ function DurableRunPanel() {
         })}
       </div>
       {/* Resume action */}
-      <div className="flex items-center justify-between border-t px-4 py-3" style={{ borderColor: "#ECEEEF", background: "#FAFBFB" }}>
-        <span className="flex items-center gap-1.5 text-[11.5px] text-[#6B7280]"><Diamond className="h-3 w-3 text-[#007F4E]" /> last checkpoint 09:01:18</span>
-        <button className="inline-flex items-center gap-1.5 rounded-[7px] border bg-white px-2.5 py-1 text-[11.5px] font-semibold" style={{ borderColor: "#9CCFBB", color: "#006B45" }}>
+      <div className="flex flex-col items-stretch justify-between gap-2 border-t px-3 py-3 sm:flex-row sm:items-center sm:px-4" style={{ borderColor: "#ECEEEF", background: "#FAFBFB" }}>
+        <span className="flex items-center gap-1.5 text-[11.5px] text-[#6B7280]"><Diamond className="h-3 w-3 shrink-0 text-[#007F4E]" /> last checkpoint 09:01:18</span>
+        <button className="inline-flex w-full items-center justify-center gap-1.5 rounded-[7px] border bg-white px-2.5 py-1 text-[11.5px] font-semibold sm:w-auto" style={{ borderColor: "#9CCFBB", color: "#006B45" }}>
           <CornerDownLeft className="h-3 w-3" /> Resume from checkpoint
         </button>
       </div>
@@ -166,12 +166,12 @@ function AnatomyBand() {
     { icon: CheckCircle2, label: "Complete", c: "#007F4E" },
   ];
   return (
-    <div className="relative rounded-[14px] border bg-white p-7" style={{ borderColor: "#E0E3E6" }}>
-      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1">
+    <div className="relative rounded-[14px] border bg-white p-4 sm:p-7" style={{ borderColor: "#E0E3E6" }}>
+      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-2">
         {steps.map((s, i) => {
           const Icon = s.icon;
           return (
-            <div key={i} className="flex items-center gap-2">
+            <div key={i} className="flex shrink-0 items-center gap-2">
               <div className="flex flex-col items-center gap-2">
                 <span
                   className="flex h-11 w-11 items-center justify-center rounded-[11px] border"
@@ -193,8 +193,8 @@ function AnatomyBand() {
         })}
       </div>
       {/* Resume-from-checkpoint arc */}
-      <div className="mt-5 flex items-center gap-2 rounded-[10px] border px-4 py-2.5" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
-        <Checkpoint />
+      <div className="mt-5 flex items-start gap-2 rounded-[10px] border px-3 py-2.5 sm:items-center sm:px-4" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
+        <span className="mt-1 shrink-0 sm:mt-0"><Checkpoint /></span>
         <span className="text-[12.5px] font-medium text-[#006B45]">
           Tool call failed at step 3 — resumed from the last checkpoint, not the beginning. No work lost.
         </span>
@@ -209,21 +209,20 @@ export default function MarketingPage() {
     <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "#F7F8F9", color: "#0B0D0F" }}>
       {/* ── NAV ───────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 w-full backdrop-blur" style={{ background: "rgba(247,248,249,0.85)", borderBottom: "1px solid #E0E3E6" }}>
-        <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between gap-4 px-6 py-3.5">
-          <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-2.5">
+        <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between gap-3 px-4 py-3.5 sm:px-6 lg:px-8 2xl:max-w-[1360px]">
+          <div className="flex min-w-0 items-center gap-8">
+            <Link href="/" className="flex min-w-0 items-center gap-2.5">
               <LogoCube />
               <span className="text-[16px] font-semibold tracking-[-0.01em]">Vectorbea</span>
             </Link>
             <nav className="hidden items-center gap-1 md:flex">
-              {["Product", "Docs", "Pricing", "Changelog"].map((l) => (
-                <a key={l} href="#" className="rounded-[7px] px-3 py-1.5 text-[13.5px] font-medium text-[#4B5563] transition-colors hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">{l}</a>
-              ))}
+              <a href="#product" className="rounded-[7px] px-3 py-1.5 text-[13.5px] font-medium text-[#4B5563] transition-colors hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">Product</a>
+              <Link href="/docs" className="rounded-[7px] px-3 py-1.5 text-[13.5px] font-medium text-[#4B5563] transition-colors hover:bg-[#ECEEEF] hover:text-[#0B0D0F]">Docs</Link>
             </nav>
           </div>
-          <div className="flex items-center gap-3">
-            <Link href="/signin" className="text-[13.5px] font-medium text-[#4B5563] transition-colors hover:text-[#0B0D0F]">Sign in</Link>
-            <Link href="/signup" className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 py-2 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+          <div className="flex shrink-0 items-center gap-3">
+            <Link href="/signin" className="hidden text-[13.5px] font-medium text-[#4B5563] transition-colors hover:text-[#0B0D0F] sm:inline">Sign in</Link>
+            <Link href="/signup" className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-3 py-2 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1c1f22] sm:px-4">
               Start free <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
@@ -231,34 +230,34 @@ export default function MarketingPage() {
       </header>
 
       {/* ── HERO — asymmetric split ───────────────────────────────────────── */}
-      <section className="mx-auto w-full max-w-[1180px] px-6 pt-16 pb-20">
-        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
+      <section className="mx-auto w-full max-w-[1180px] px-4 pb-16 pt-12 sm:px-6 sm:pb-20 sm:pt-16 lg:px-8 lg:pb-28 2xl:max-w-[1360px]">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] xl:gap-14">
           {/* Left */}
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
+            <span className="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
               <Checkpoint size={9} />
               <span className="font-mono text-[11px] font-medium tracking-[0.02em] text-[#006B45]">Durable execution for AI agents</span>
             </span>
 
-            <h1 className="mt-6 text-balance font-bold leading-[1.03] tracking-[-0.035em]" style={{ fontSize: "clamp(42px, 5.4vw, 68px)" }}>
-              Agents that resume,<br />not restart.
+            <h1 className="mt-6 text-balance text-[38px] font-bold leading-[1.03] tracking-[-0.035em] sm:text-[52px] lg:text-[64px] 2xl:text-[68px]">
+              Agents that resume,<br className="hidden sm:block" /> not restart.
             </h1>
 
-            <p className="mt-6 max-w-[52ch] text-[18px] leading-[1.6] text-[#4B5563]">
+            <p className="mt-6 max-w-[52ch] text-[16px] leading-[1.65] text-[#4B5563] sm:text-[18px]">
               Vectorbea is the control plane for long-running agentic workflows. Every node checkpoints as it runs —
               so a failed tool call, a rate limit, or a 3-day approval picks up exactly where it left off.
             </p>
 
-            <div className="mt-8 flex flex-wrap items-center gap-4">
-              <Link href="/signup" className="inline-flex items-center gap-2 rounded-[9px] bg-[#0B0D0F] px-6 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+            <div className="mt-8 flex flex-col gap-3 min-[420px]:flex-row min-[420px]:flex-wrap min-[420px]:items-center sm:gap-4">
+              <Link href="/signup" className="inline-flex items-center justify-center gap-2 rounded-[9px] bg-[#0B0D0F] px-6 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
                 Start free <ArrowRight className="h-4 w-4" />
               </Link>
-              <a href="#" className="inline-flex items-center gap-2 text-[15px] font-semibold text-[#0B0D0F]">
+              <Link href="/docs" className="inline-flex items-center justify-center gap-2 text-[15px] font-semibold text-[#0B0D0F] min-[420px]:justify-start">
                 <Terminal className="h-4 w-4 text-[#6B7280]" /> Read the docs
-              </a>
+              </Link>
             </div>
 
-            <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="mt-7 grid gap-x-6 gap-y-2 min-[420px]:flex min-[420px]:flex-wrap min-[420px]:items-center">
               {["Event-sourced runs", "Human approvals", "BYOK models", "Replay any run"].map((h) => (
                 <span key={h} className="flex items-center gap-1.5 text-[13px] text-[#6B7280]">
                   <CheckCircle2 className="h-3.5 w-3.5 text-[#007F4E]" /> {h}
@@ -268,9 +267,9 @@ export default function MarketingPage() {
           </div>
 
           {/* Right — signature durable run + console */}
-          <div className="relative">
+          <div className="relative min-w-0">
             <DurableRunPanel />
-            <div className="mt-4 lg:absolute lg:-bottom-10 lg:-left-10 lg:mt-0 lg:w-[330px]">
+            <div className="mt-4 lg:absolute lg:-bottom-10 lg:-left-10 lg:mt-0 lg:w-[330px] xl:-left-12">
               <RuntimeConsole />
             </div>
           </div>
@@ -278,12 +277,12 @@ export default function MarketingPage() {
       </section>
 
       {/* ── ANATOMY OF A RUN ──────────────────────────────────────────────── */}
-      <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
-        <div className="mx-auto w-full max-w-[1180px] px-6 py-20">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <section id="product" className="w-full scroll-mt-16 border-t" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-16 sm:px-6 sm:py-20 lg:px-8 2xl:max-w-[1360px]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between md:gap-8">
             <div>
               <MonoLabel>Anatomy of a run</MonoLabel>
-              <h2 className="mt-3 max-w-[18ch] font-bold leading-[1.08] tracking-[-0.03em]" style={{ fontSize: "clamp(28px, 3.6vw, 44px)" }}>
+              <h2 className="mt-3 max-w-[18ch] text-[28px] font-bold leading-[1.08] tracking-[-0.03em] sm:text-[36px] lg:text-[44px]">
                 Failure is a checkpoint, not a restart.
               </h2>
             </div>
@@ -298,17 +297,17 @@ export default function MarketingPage() {
 
       {/* ── BENTO — capabilities ──────────────────────────────────────────── */}
       <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#F7F8F9" }}>
-        <div className="mx-auto w-full max-w-[1180px] px-6 py-20">
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-16 sm:px-6 sm:py-20 lg:px-8 2xl:max-w-[1360px]">
           <MonoLabel>One control plane</MonoLabel>
-          <h2 className="mt-3 max-w-[22ch] font-bold leading-[1.08] tracking-[-0.03em]" style={{ fontSize: "clamp(28px, 3.8vw, 48px)" }}>
+          <h2 className="mt-3 max-w-[22ch] text-[28px] font-bold leading-[1.08] tracking-[-0.03em] sm:text-[38px] lg:text-[48px]">
             Canvas, observability, and recovery — together.
           </h2>
 
           <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6 lg:auto-rows-[200px]">
             {/* Big canvas tile */}
             <div className="overflow-hidden rounded-[14px] border bg-white md:col-span-3 lg:col-span-4 lg:row-span-2" style={{ borderColor: "#E0E3E6" }}>
-              <div className="flex items-center justify-between px-5 pt-5">
-                <div>
+              <div className="flex items-center justify-between px-4 pt-5 sm:px-5">
+                <div className="min-w-0">
                   <MonoLabel>Visual canvas</MonoLabel>
                   <h3 className="mt-1.5 text-[19px] font-bold tracking-[-0.01em]">See the whole workflow.</h3>
                 </div>
@@ -375,23 +374,23 @@ export default function MarketingPage() {
 
       {/* ── CTA ───────────────────────────────────────────────────────────── */}
       <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#FFFFFF" }}>
-        <div className="mx-auto w-full max-w-[1180px] px-6 py-28 text-center">
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-20 text-center sm:px-6 sm:py-28 lg:px-8 2xl:max-w-[1360px]">
           <div className="mx-auto mb-6 flex w-fit items-center gap-2 rounded-full border px-3 py-1" style={{ borderColor: "#9CCFBB", background: "#E6F4EF" }}>
             <Checkpoint size={9} />
             <span className="font-mono text-[11px] font-medium text-[#006B45]">Resume, don&apos;t restart</span>
           </div>
-          <h2 className="mx-auto max-w-[18ch] font-bold leading-[1.05] tracking-[-0.035em]" style={{ fontSize: "clamp(34px, 5vw, 60px)" }}>
+          <h2 className="mx-auto max-w-[18ch] text-[34px] font-bold leading-[1.05] tracking-[-0.035em] sm:text-[48px] lg:text-[60px]">
             Build agents your team can trust in production.
           </h2>
-          <p className="mx-auto mt-5 max-w-[52ch] text-[17px] leading-[1.6] text-[#4B5563]">
+          <p className="mx-auto mt-5 max-w-[52ch] text-[16px] leading-[1.65] text-[#4B5563] sm:text-[17px]">
             Not another AI demo. Vectorbea is the durable execution layer for agentic automation — observable,
             recoverable, and debuggable from the first run.
           </p>
-          <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
-            <Link href="/signup" className="inline-flex items-center gap-2 rounded-[9px] bg-[#0B0D0F] px-7 py-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
+          <div className="mt-9 flex flex-col items-stretch justify-center gap-3 min-[420px]:flex-row min-[420px]:flex-wrap min-[420px]:items-center sm:gap-4">
+            <Link href="/signup" className="inline-flex items-center justify-center gap-2 rounded-[9px] bg-[#0B0D0F] px-7 py-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
               Start free <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href="/signin" className="inline-flex items-center gap-2 rounded-[9px] border bg-white px-7 py-3.5 text-[15px] font-semibold text-[#0B0D0F] transition-colors hover:bg-[#F3F4F5]" style={{ borderColor: "#E0E3E6" }}>
+            <Link href="/signin" className="inline-flex items-center justify-center gap-2 rounded-[9px] border bg-white px-7 py-3.5 text-[15px] font-semibold text-[#0B0D0F] transition-colors hover:bg-[#F3F4F5]" style={{ borderColor: "#E0E3E6" }}>
               View a run timeline <ChevronRight className="h-4 w-4 text-[#9CA3AF]" />
             </Link>
           </div>
@@ -400,16 +399,17 @@ export default function MarketingPage() {
 
       {/* ── FOOTER ────────────────────────────────────────────────────────── */}
       <footer className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#F7F8F9" }}>
-        <div className="mx-auto flex w-full max-w-[1180px] flex-col items-center justify-between gap-4 px-6 py-10 sm:flex-row">
+        <div className="mx-auto flex w-full max-w-[1180px] flex-col items-center justify-between gap-4 px-4 py-10 text-center sm:flex-row sm:px-6 sm:text-left lg:px-8 2xl:max-w-[1360px]">
           <div className="flex items-center gap-2.5">
             <LogoCube size={22} />
             <span className="text-[14px] font-semibold">Vectorbea</span>
           </div>
           <p className="font-mono text-[12px] text-[#9CA3AF]">Durable agentic automation. Built for production.</p>
           <div className="flex items-center gap-6">
-            {["Privacy", "Terms", "Docs"].map((l) => (
+            {["Privacy", "Terms"].map((l) => (
               <a key={l} href="#" className="text-[13px] text-[#6B7280] transition-colors hover:text-[#0B0D0F]">{l}</a>
             ))}
+            <Link href="/docs" className="text-[13px] text-[#6B7280] transition-colors hover:text-[#0B0D0F]">Docs</Link>
           </div>
         </div>
       </footer>

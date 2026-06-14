@@ -43,20 +43,20 @@ export function BrowserShell({
 }) {
   return (
     <div
-      className={`overflow-hidden rounded-[14px] border bg-white ${className}`}
+      className={`min-w-0 overflow-hidden rounded-[14px] border bg-white ${className}`}
       style={{ borderColor: "#E0E3E6", boxShadow: "0 24px 70px rgba(11,13,15,0.10), 0 6px 20px rgba(11,13,15,0.05)" }}
     >
       {/* Chrome bar */}
-      <div className="flex items-center justify-between px-4" style={{ height: 44, borderBottom: "1px solid #ECEEEF", background: "#FBFBFC" }}>
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 px-3 sm:px-4" style={{ height: 44, borderBottom: "1px solid #ECEEEF", background: "#FBFBFC" }}>
+        <div className="min-w-0 flex items-center gap-3">
           <div className="flex gap-1.5">
             <span className="h-[11px] w-[11px] rounded-full" style={{ background: "#E0E3E6" }} />
             <span className="h-[11px] w-[11px] rounded-full" style={{ background: "#E0E3E6" }} />
             <span className="h-[11px] w-[11px] rounded-full" style={{ background: "#E0E3E6" }} />
           </div>
-          <span className="hidden font-mono text-[12px] text-[#6B7280] sm:inline">{breadcrumb}</span>
+          <span className="hidden truncate font-mono text-[12px] text-[#6B7280] sm:inline">{breadcrumb}</span>
         </div>
-        <span className="font-mono text-[12px] text-[#9CA3AF]">{right}</span>
+        <span className="shrink-0 font-mono text-[12px] text-[#9CA3AF]">{right}</span>
       </div>
       {children}
     </div>
@@ -92,27 +92,27 @@ function Chevron() {
 
 export function ProductTopBar() {
   return (
-    <div className="flex items-center justify-between px-3.5" style={{ height: 52, borderBottom: "1px solid #ECEEEF", background: "#FFFFFF" }}>
-      <div className="flex items-center gap-2.5">
+    <div className="flex items-center justify-between gap-3 px-3.5" style={{ height: 52, borderBottom: "1px solid #ECEEEF", background: "#FFFFFF" }}>
+      <div className="min-w-0 flex items-center gap-2.5">
         <Cube />
         <span className="text-[#C9CED4]">/</span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-[14px] font-semibold text-[#0B0D0F]">acme-corp</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[14px] font-semibold text-[#0B0D0F]">acme-corp</span>
           <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ background: "#007F4E" }}>Pro</span>
           <Chevron />
         </span>
-        <span className="text-[#C9CED4]">/</span>
-        <span className="flex items-center gap-1.5">
+        <span className="hidden text-[#C9CED4] sm:inline">/</span>
+        <span className="hidden min-w-0 items-center gap-1.5 sm:flex">
           <span className="text-[14px] font-medium text-[#4B5563]">renewals-ai</span>
           <Chevron />
         </span>
-        <span className="text-[#C9CED4]">/</span>
-        <span className="flex items-center gap-1.5">
+        <span className="hidden text-[#C9CED4] md:inline">/</span>
+        <span className="hidden items-center gap-1.5 md:flex">
           <span className="text-[14px] font-medium text-[#4B5563]">production</span>
           <Chevron />
         </span>
       </div>
-      <span className="h-[26px] w-[26px] rounded-full" style={{ background: "#00A65A", boxShadow: "0 0 0 3px #E6F4EF" }} />
+      <span className="h-[26px] w-[26px] shrink-0 rounded-full" style={{ background: "#00A65A", boxShadow: "0 0 0 3px #E6F4EF" }} />
     </div>
   );
 }
@@ -126,7 +126,7 @@ export function IconRail() {
     { icon: Settings, active: false },
   ];
   return (
-    <div className="flex w-[52px] shrink-0 flex-col items-center gap-1 py-3" style={{ borderRight: "1px solid #ECEEEF", background: "#FFFFFF" }}>
+    <div className="hidden w-[52px] shrink-0 flex-col items-center gap-1 py-3 sm:flex" style={{ borderRight: "1px solid #ECEEEF", background: "#FFFFFF" }}>
       {items.map(({ icon: Icon, active }, i) => (
         <span
           key={i}
@@ -194,9 +194,9 @@ export function MockNode({
       {/* Footer / sub-rows */}
       {subRows.length > 0
         ? subRows.map((r, i) => (
-            <div key={i} className="flex items-center justify-between px-3 py-2" style={{ borderTop: "1px solid #ECEEEF", background: "#FAFBFB" }}>
-              <span className="flex items-center gap-2 text-[12px] font-mono text-[#4B5563]">
-                <span className="text-[#9CA3AF]">{r.icon}</span>
+            <div key={i} className="flex items-center justify-between gap-2 px-3 py-2" style={{ borderTop: "1px solid #ECEEEF", background: "#FAFBFB" }}>
+              <span className="min-w-0 flex items-center gap-2 font-mono text-[12px] text-[#4B5563]">
+                <span className="shrink-0 text-[#9CA3AF]">{r.icon}</span>
                 {r.label}
                 {r.meta && <span className="text-[10.5px] text-[#9CA3AF]">{r.meta}</span>}
               </span>
@@ -242,16 +242,16 @@ function FloatingButton({ children, className = "" }: { children: ReactNode; cla
 
 export function CanvasMock({ height = 520, compact = false }: { height?: number; compact?: boolean }) {
   return (
-    <div className="flex" style={{ height }}>
+    <div className="flex min-w-0" style={{ height }}>
       <IconRail />
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative min-w-0 flex-1 overflow-hidden">
         {/* Unpublished banner */}
-        <div className="flex items-center justify-between px-4" style={{ height: 42, background: "#E6F4EF", borderBottom: "1px solid #9CCFBB" }}>
-          <span className="flex items-center gap-2 text-[13px] font-medium" style={{ color: "#006B45" }}>
-            <GitBranch className="h-4 w-4" />
-            You have 3 unpublished changes
+        <div className="flex items-center justify-between gap-3 px-3 sm:px-4" style={{ height: 42, background: "#E6F4EF", borderBottom: "1px solid #9CCFBB" }}>
+          <span className="min-w-0 flex items-center gap-2 text-[13px] font-medium" style={{ color: "#006B45" }}>
+            <GitBranch className="h-4 w-4 shrink-0" />
+            <span className="truncate">You have 3 unpublished changes</span>
           </span>
-          <div className="flex items-center gap-2">
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
             <button className="rounded-[7px] border bg-white px-3 py-1 text-[12.5px] font-semibold" style={{ borderColor: "#9CCFBB", color: "#006B45" }}>Apply</button>
             <button className="px-2 py-1 text-[12.5px] font-medium text-[#9CA3AF]">Discard Changes</button>
           </div>
@@ -260,24 +260,49 @@ export function CanvasMock({ height = 520, compact = false }: { height?: number;
         {/* Dotted canvas */}
         <div className="vb-canvas-dots relative" style={{ height: height - 42 }}>
           {/* History — top left */}
-          <div className="absolute left-4 top-4 z-10">
+          <div className="absolute left-3 top-3 z-10 sm:left-4 sm:top-4">
             <FloatingButton className="!px-2.5 !py-1.5 gap-1.5">
               <Clock className="h-3.5 w-3.5 text-[#6B7280]" />
-              <span className="text-[12.5px] font-medium text-[#4B5563]">History</span>
+              <span className="hidden text-[12.5px] font-medium text-[#4B5563] min-[420px]:inline">History</span>
             </FloatingButton>
           </div>
           {/* Add — top right */}
-          <div className="absolute right-4 top-4 z-10">
+          <div className="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
             <div className="flex items-center gap-2 rounded-[9px] border border-dashed px-3 py-1.5" style={{ borderColor: "#C9CED4", background: "rgba(255,255,255,0.7)" }}>
               <span className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-white" style={{ background: "#007F4E" }}>
                 <Plus className="h-3 w-3" strokeWidth={2.5} />
               </span>
-              <span className="text-[12.5px] font-semibold text-[#0B0D0F]">Add</span>
+              <span className="hidden text-[12.5px] font-semibold text-[#0B0D0F] min-[420px]:inline">Add</span>
             </div>
           </div>
 
+          {compact && (
+            <div className="absolute inset-x-3 top-14 z-[2] flex flex-col gap-3 sm:hidden">
+              <MockNode
+                inline
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#EEF2FF", color: "#4F46E5" }}><Webhook className="h-4 w-4" /></span>}
+                title="renewal-trigger"
+                subtitle="Schedule · daily 09:00"
+                visibility="Public"
+                dotColor="#9CA3AF"
+              />
+              <div className="flex justify-center">
+                <span className="h-6 w-px" style={{ background: "#9CCFBB" }} />
+              </div>
+              <MockNode
+                inline
+                selected
+                icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#E6F4EF", color: "#007F4E" }}><Bot className="h-4 w-4" /></span>}
+                title="risk-scoring-agent"
+                subtitle="gpt-4o-mini · BYOK OpenAI"
+                visibility="Private"
+                dotColor="#0F766E"
+              />
+            </div>
+          )}
+
           {/* Edges */}
-          <svg className="pointer-events-none absolute inset-0 h-full w-full" style={{ zIndex: 1 }}>
+          <svg className={`pointer-events-none absolute inset-0 h-full w-full ${compact ? "hidden sm:block" : "block"}`} style={{ zIndex: 1 }}>
             <defs>
               <marker id="mk-arrow" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto">
                 <path d="M0 1 L5.5 3.5 L0 6 L1.5 3.5 Z" fill="#8B8F94" />
@@ -296,7 +321,7 @@ export function CanvasMock({ height = 520, compact = false }: { height?: number;
 
           {/* Nodes */}
           {compact ? (
-            <>
+            <div className="hidden sm:block">
               <MockNode
                 style={{ left: 28, top: 56, zIndex: 2 }}
                 icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#EEF2FF", color: "#4F46E5" }}><Webhook className="h-4 w-4" /></span>}
@@ -314,7 +339,7 @@ export function CanvasMock({ height = 520, compact = false }: { height?: number;
                 visibility="Private"
                 dotColor="#0F766E"
               />
-            </>
+            </div>
           ) : (
             <>
               <MockNode
@@ -363,7 +388,7 @@ export function CanvasMock({ height = 520, compact = false }: { height?: number;
             </div>
           )}
           {/* Zoom controls — bottom right */}
-          <div className="absolute bottom-4 right-4 z-10">
+          <div className="absolute bottom-3 right-3 z-10 sm:bottom-4 sm:right-4">
             <FloatingButton>
               <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Minus className="h-3.5 w-3.5" /></span>
               <span className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#6B7280]"><Plus className="h-3.5 w-3.5" /></span>
