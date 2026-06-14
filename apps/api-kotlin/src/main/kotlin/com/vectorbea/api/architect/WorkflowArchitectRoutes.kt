@@ -101,7 +101,16 @@ class WorkflowArchitectRoutes(
         val envId  = ctx.environmentId ?: throw ApiError.ValidationError("X-Environment-Id header is required")
         val userId = req.principal?.appUserId ?: throw ApiError.Unauthorized("Authentication required")
 
-        val session   = service.createSession(ctx.workspaceId, envId, userId, goal)
+        val session   = try {
+            service.createSession(ctx.workspaceId, envId, userId, goal)
+        } catch (e: WorkflowArchitectService.GoalOutOfScopeException) {
+            return Response.json(422, mapOf(
+                "error"    to "ARCHITECT_GOAL_OUT_OF_SCOPE",
+                "message"  to (e.result.redirect ?: "The AI Workflow Architect only helps you design automation workflows."),
+                "reason"   to e.result.reason,
+                "category" to e.result.category,
+            ))
+        }
         val questions = try { service.checkClarification(session) } catch (_: Exception) { emptyList() }
         return Response.created(mapOf(
             "id"                      to session.id.toString(),

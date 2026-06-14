@@ -37,6 +37,7 @@ import {
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { AppSelect } from "@/components/ui/app-select";
 import type { Connection, ConnectionType, NetworkStatus, ConnectionStatus } from "@/types/connections";
 import { VECTORBEE_OUTBOUND_IPS } from "@/types/connections";
 import { getConnection, testConnection, updateConnection } from "@/lib/repository";
@@ -647,7 +648,6 @@ function EventsTab({ connection }: { connection: Connection }) {
 // ─── Settings / Edit tab ─────────────────────────────────────────────────────
 
 const inputCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[13px] text-[#0B0D0F] placeholder:text-[#B6BCC2] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
-const selectCls = "h-9 w-full rounded-[8px] border border-[#E0E3E6] bg-white px-3 text-[12.5px] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15";
 
 function FormField({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
@@ -768,11 +768,16 @@ function SettingsTab({ connection, onUpdated }: { connection: Connection; onUpda
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Connection name" />
         </FormField>
         <FormField label="Environment">
-          <select className={selectCls} value={environment} onChange={(e) => setEnvironment(e.target.value as "development" | "staging" | "production")}>
-            <option value="development">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
-          </select>
+          <AppSelect
+            className="w-full"
+            value={environment}
+            onValueChange={(v) => setEnvironment(v as "development" | "staging" | "production")}
+            options={[
+              { value: "development", label: "Development" },
+              { value: "staging", label: "Staging" },
+              { value: "production", label: "Production" },
+            ]}
+          />
         </FormField>
         <div className="flex items-center gap-4 border-t border-[#F1F2F4] pt-3">
           <div className="text-[12px] text-[#6B7280]">

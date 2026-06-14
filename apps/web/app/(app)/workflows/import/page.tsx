@@ -38,6 +38,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
+import { AppSelect } from "@/components/ui/app-select";
 import { createWorkflow, createAgent, createTool } from "@/lib/repository";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1009,9 +1010,12 @@ function EndpointSection() {
         </Field>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Method">
-            <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value)}>
-              {["POST", "GET", "PUT", "PATCH"].map((m) => <option key={m}>{m}</option>)}
-            </select>
+            <AppSelect
+              className="w-full"
+              value={method}
+              onValueChange={setMethod}
+              options={["POST", "GET", "PUT", "PATCH"].map((m) => ({ value: m, label: m }))}
+            />
           </Field>
           <Field label="Timeout (ms)">
             <input className={inputCls} type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(e.target.value)} />

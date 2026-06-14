@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { Logo } from "@/components/ui/Logo";
+import { envBadgeLabel } from "@/lib/env";
 import type { DashboardSummary } from "@/lib/api";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { cn } from "@/lib/utils";
@@ -337,9 +338,12 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   Vectorbea
                 </span>
               </Link>
-              <span className="rounded-full border border-[#9CCFBB] bg-[#E6F4EF] px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.1em] text-[#006B45]">
-                Dev
-              </span>
+              {/* Environment badge — hidden in production so customers never see a "Dev" tag. */}
+              {envBadgeLabel() && (
+                <span className="rounded-full border border-[#9CCFBB] bg-[#E6F4EF] px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.1em] text-[#006B45]">
+                  {envBadgeLabel()}
+                </span>
+              )}
             </div>
             <WorkspaceSwitcher />
           </>

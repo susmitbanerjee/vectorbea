@@ -489,7 +489,7 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
 
       {/* ── Built-in email — SECONDARY option. Only shown when built-in email is
             already on, or when no registered tool is chosen. This stops the
-            "Use built-in email (Resend)" UI from surfacing on non-email tool nodes. ── */}
+            built-in email UI from surfacing on non-email tool nodes. ── */}
       {(isBuiltinEmail || !cfg.toolId) && (
         <div
           className="flex items-center justify-between rounded-xl border px-3 py-2.5 cursor-pointer"
@@ -510,11 +510,11 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
         >
           <div>
             <p className="text-[12px] font-semibold" style={{ color: isBuiltinEmail ? "#15803D" : "#334155" }}>
-              📧 Use built-in email (Resend)
+              📧 Use built-in email
             </p>
             <p className="text-[10.5px] mt-0.5" style={{ color: isBuiltinEmail ? "#16A34A" : "#94A3B8" }}>
               {isBuiltinEmail
-                ? "Uses RESEND_API_KEY from platform config — no connection needed"
+                ? "No connection needed · 15 emails / month included"
                 : "Enable to send email without configuring a tool connection"}
             </p>
           </div>
@@ -566,7 +566,7 @@ function ToolConfig({ data, onChange, tools }: { data: WFNodeData; onChange: (d:
           <div
             className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10.5px] text-emerald-700"
           >
-            ✓ Sends via Resend using platform RESEND_API_KEY + EMAIL_FROM — no connection required.
+            ✓ Sent with Vectorbea&apos;s built-in email — no connection required. Limited to 15 emails per month; connect your own provider to send more.
           </div>
         </div>
       )}

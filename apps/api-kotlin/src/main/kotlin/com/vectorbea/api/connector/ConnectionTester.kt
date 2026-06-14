@@ -22,23 +22,37 @@ class ConnectionTester(private val secretService: SecretService) {
 
     private val log = LoggerFactory.getLogger(ConnectionTester::class.java)
 
+    /** Types where a test is meaningless without credentials. */
+    private val SECRET_REQUIRED_TYPES = setOf("llm", "database", "http")
+
     fun test(connection: Connection): ConnectionTestResult {
         log.info("Testing connection [id={}, type={}, provider={}]",
             connection.id, connection.type, connection.provider)
 
+        val type = connection.type.lowercase()
+
         // Resolve secret — scoped to connection's workspace to prevent cross-tenant leakage
         val resolvedSecret: String? = resolveSecret(connection.secretRef, connection.workspaceId)
-            ?: return ConnectionTestResult.failed(
+
+        // LLM, database and HTTP connections cannot be meaningfully tested without
+        // credentials. The reachability-style types (MCP / vector store / object
+        // storage) can still be tested unauthenticated, so they don't require one.
+        if (type in SECRET_REQUIRED_TYPES && resolvedSecret == null) {
+            return ConnectionTestResult.failed(
                 0, "SECRET_MISSING",
                 "No secret configured for this connection. Add credentials first."
             )
+        }
 
         return try {
-            when (connection.type.lowercase()) {
-                "llm"      -> testLlm(connection, resolvedSecret)
-                "database" -> testDatabase(connection, resolvedSecret)
-                "http"     -> testHttp(connection, resolvedSecret)
-                else       -> ConnectionTestResult.failed(0, "UNSUPPORTED_TYPE",
+            when (type) {
+                "llm"                          -> testLlm(connection, resolvedSecret)
+                "database"                     -> testDatabase(connection, resolvedSecret)
+                "http"                         -> testHttp(connection, resolvedSecret)
+                "tool", "mcp", "mcp_server"    -> testMcp(connection, resolvedSecret)
+                "vector_store", "vector", "vectorstore" -> testVectorStore(connection, resolvedSecret)
+                "object_storage", "object-storage", "storage", "blob" -> testObjectStorage(connection, resolvedSecret)
+                else -> ConnectionTestResult.failed(0, "UNSUPPORTED_TYPE",
                     "Connection type '${connection.type}' is not yet testable")
             }
         } finally {
@@ -64,6 +78,36 @@ class ConnectionTester(private val secretService: SecretService) {
             "llm"      -> testLlmUnsaved(provider, authType, plaintextSecret, config)
             "database" -> testDatabaseUnsaved(provider, plaintextSecret, config)
             "http"     -> testHttpUnsaved(provider, authType, plaintextSecret, config)
+            "tool", "mcp", "mcp_server" -> {
+                val serverUrl = firstNonBlank(config, "serverUrl", "server_url", "url", "baseUrl", "base_url")
+                    ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR", "MCP connection requires a server URL.")
+                HttpTester.test(HttpTester.HttpTestInput(
+                    url = serverUrl,
+                    authType = if (plaintextSecret.isNullOrBlank()) "none" else "bearer",
+                    apiKey = plaintextSecret, username = null, password = null,
+                ))
+            }
+            "vector_store", "vector", "vectorstore" -> {
+                val endpoint = firstNonBlank(config, "endpoint", "url", "host", "baseUrl", "base_url")
+                    ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR", "Vector store connection requires an endpoint URL.")
+                val url = if (endpoint.startsWith("http")) endpoint else "https://$endpoint"
+                val (at, header) = when {
+                    provider.lowercase().contains("pinecone") -> "api_key" to "Api-Key"
+                    provider.lowercase().contains("qdrant")   -> "api_key" to "api-key"
+                    else                                       -> "bearer" to null
+                }
+                HttpTester.test(HttpTester.HttpTestInput(
+                    url = url,
+                    authType = if (plaintextSecret.isNullOrBlank()) "none" else at,
+                    apiKey = plaintextSecret, username = null, password = null, apiKeyHeaderName = header,
+                ))
+            }
+            "object_storage", "object-storage", "storage", "blob" -> {
+                val endpoint = firstNonBlank(config, "endpoint", "url", "bucketUrl", "bucket_url", "baseUrl", "base_url")
+                    ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR", "Object storage connection requires an endpoint or bucket URL.")
+                val url = if (endpoint.startsWith("http")) endpoint else "https://$endpoint"
+                HttpTester.testReachability(url)
+            }
             else       -> ConnectionTestResult.failed(0, "UNSUPPORTED_TYPE",
                 "Connection type '$type' is not yet testable")
         }
@@ -229,7 +273,84 @@ class ConnectionTester(private val secretService: SecretService) {
         ))
     }
 
+    // ── MCP server (stored as type "tool") ─────────────────────────────────────
+
+    /**
+     * MCP servers speak HTTP or SSE. A reachability + auth check against the server
+     * URL confirms the endpoint is live and the token (if any) is accepted.
+     */
+    private fun testMcp(conn: Connection, secret: String?): ConnectionTestResult {
+        val config = parseConfig(conn.configJson)
+        val serverUrl = firstNonBlank(config, "serverUrl", "server_url", "url", "baseUrl", "base_url")
+            ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR",
+                "MCP connection requires a server URL. Add the MCP server URL first.")
+        return HttpTester.test(HttpTester.HttpTestInput(
+            url = serverUrl,
+            authType = if (secret.isNullOrBlank()) "none" else "bearer",
+            apiKey = secret,
+            username = null,
+            password = null,
+        ))
+    }
+
+    // ── Vector store ────────────────────────────────────────────────────────────
+
+    /**
+     * Vector stores are reached over HTTP with a provider-specific API-key header
+     * (pgvector is just Postgres, so it routes to the database tester).
+     */
+    private fun testVectorStore(conn: Connection, secret: String?): ConnectionTestResult {
+        val provider = conn.provider.lowercase()
+        if (provider.contains("pgvector") || provider.contains("postgres")) {
+            return testDatabase(conn, secret)
+        }
+        val config = parseConfig(conn.configJson)
+        val endpoint = firstNonBlank(config, "endpoint", "url", "host", "baseUrl", "base_url")
+            ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR",
+                "Vector store connection requires an endpoint URL. Add it first.")
+        val url = if (endpoint.startsWith("http")) endpoint else "https://$endpoint"
+        // Provider-specific API-key header; default to Bearer (Weaviate, others).
+        val (authType, headerName) = when {
+            provider.contains("pinecone") -> "api_key" to "Api-Key"
+            provider.contains("qdrant")   -> "api_key" to "api-key"
+            else                          -> "bearer" to null
+        }
+        return HttpTester.test(HttpTester.HttpTestInput(
+            url = url,
+            authType = if (secret.isNullOrBlank()) "none" else authType,
+            apiKey = secret,
+            username = null,
+            password = null,
+            apiKeyHeaderName = headerName,
+        ))
+    }
+
+    // ── Object storage ──────────────────────────────────────────────────────────
+
+    /**
+     * Object stores (S3 / GCS / Azure Blob / R2 / MinIO) require request signing
+     * (SigV4) for authenticated calls, which we don't perform here. A reachability
+     * check against the endpoint/bucket URL confirms the host is live — a 401/403
+     * still proves the endpoint exists and is serving.
+     */
+    private fun testObjectStorage(conn: Connection, @Suppress("UNUSED_PARAMETER") secret: String?): ConnectionTestResult {
+        val config = parseConfig(conn.configJson)
+        val endpoint = firstNonBlank(config, "endpoint", "url", "bucketUrl", "bucket_url", "baseUrl", "base_url")
+            ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR",
+                "Object storage connection requires an endpoint or bucket URL. Add it first.")
+        val url = if (endpoint.startsWith("http")) endpoint else "https://$endpoint"
+        return HttpTester.testReachability(url)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** First non-blank string value among [keys] in [config]. */
+    private fun firstNonBlank(config: Map<String, Any?>, vararg keys: String): String? {
+        for (k in keys) {
+            (config[k] as? String)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return null
+    }
 
     @Suppress("UNCHECKED_CAST")
     private fun parseConfig(json: String): Map<String, Any?> = try {

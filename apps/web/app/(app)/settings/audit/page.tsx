@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
+import { AppSelect } from "@/components/ui/app-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AuditEvent } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -136,22 +137,24 @@ export default function AuditPage() {
               className="rounded-xl border border-[#D8CFC2] bg-white pl-8 pr-3 py-1.5 text-xs text-[#111111] focus:border-[#2563EB] focus:outline-none w-52"
             />
           </div>
-          <select
+          <AppSelect
+            className="h-8 w-[160px] text-xs"
             value={filterEvent}
-            onChange={(e) => setFilterEvent(e.target.value)}
-            className="rounded-xl border border-[#D8CFC2] bg-white px-2 py-1.5 text-xs text-[#374151] focus:outline-none"
-          >
-            <option value="">All event types</option>
-            {eventTypes.map((t) => <option key={t} value={t}>{eventTypeLabel(t)}</option>)}
-          </select>
-          <select
+            onValueChange={setFilterEvent}
+            options={[
+              { value: "", label: "All event types" },
+              ...eventTypes.map((t) => ({ value: t, label: eventTypeLabel(t) })),
+            ]}
+          />
+          <AppSelect
+            className="h-8 w-[160px] text-xs"
             value={filterEntity}
-            onChange={(e) => setFilterEntity(e.target.value)}
-            className="rounded-xl border border-[#D8CFC2] bg-white px-2 py-1.5 text-xs text-[#374151] focus:outline-none"
-          >
-            <option value="">All entity types</option>
-            {entityTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+            onValueChange={setFilterEntity}
+            options={[
+              { value: "", label: "All entity types" },
+              ...entityTypes.map((t) => ({ value: t, label: t })),
+            ]}
+          />
           <input
             type="date"
             value={filterFrom}

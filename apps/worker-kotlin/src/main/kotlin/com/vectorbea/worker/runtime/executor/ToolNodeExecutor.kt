@@ -43,6 +43,10 @@ class ToolNodeExecutor(
     private val log    = logger()
     private val mapper = jacksonObjectMapper()
 
+    /** Monthly cap on platform-subsidised built-in emails, per workspace. */
+    private val builtinEmailMonthlyLimit: Int =
+        System.getenv("BUILTIN_EMAIL_MONTHLY_LIMIT")?.toIntOrNull()?.takeIf { it > 0 } ?: 15
+
     private val httpExecutor    by lazy { HttpNodeExecutor(connectionResolver, eventStore) }
     private val dbReadExecutor  by lazy { DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore) }
     private val dbWriteExecutor by lazy { DbWriteNodeExecutor(connectionResolver, dbPoolManager,
@@ -877,14 +881,15 @@ class ToolNodeExecutor(
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
     ): NodeResult {
-        // APP_URL must be set in Railway to point at the Vercel Next.js app.
-        // Without it we cannot reach /api/email/send.
-        val appUrl = System.getenv("APP_URL")
-            ?: System.getenv("NEXT_PUBLIC_APP_URL")
-            ?: return NodeResult.Failed(
-                "Built-in email: APP_URL environment variable is not set in the worker. " +
-                "Add APP_URL=https://dev.vectorbea.com (your Vercel app URL) to Railway Variables."
-            )
+        // APP_URL must be set so the worker can reach the email-send endpoint.
+        // This is an operator config issue — keep the user message friendly and put
+        // the fix instructions in the logs.
+        val appUrl = System.getenv("APP_URL") ?: System.getenv("NEXT_PUBLIC_APP_URL")
+        if (appUrl == null) {
+            val friendly = "Built-in email is temporarily unavailable. Please try again later or contact support."
+            log.error("[builtin-email] $friendly | detail=APP_URL/NEXT_PUBLIC_APP_URL not set in worker; cannot reach /api/email/send")
+            return NodeResult.Failed(friendly)
+        }
 
         val platformSecret = System.getenv("VECTORBEA_INGEST_SECRET") ?: ""
 
@@ -901,6 +906,15 @@ class ToolNodeExecutor(
             return NodeResult.Failed(
                 "Built-in email: 'To (recipient emails)' is empty. " +
                 "Open the workflow builder, click the email tool node, and fill in the To field."
+            )
+        }
+
+        // Abuse-proof monthly cap: atomically reserve a slot for this workspace.
+        // If exhausted, fail the node with a clear, actionable message.
+        if (!reserveBuiltinEmailQuota(ctx.workspaceId)) {
+            return NodeResult.Failed(
+                "Built-in email limit reached: $builtinEmailMonthlyLimit emails per month per workspace. " +
+                "Connect your own email provider (a tool connection) to send more."
             )
         }
 
@@ -927,10 +941,14 @@ class ToolNodeExecutor(
             val body = response.body() ?: ""
 
             if (response.statusCode() !in 200..299) {
-                log.warn("[builtin-email] HTTP ${response.statusCode()}: $body")
-                return NodeResult.Failed(
-                    "Built-in email HTTP ${response.statusCode()}: $body".take(400)
-                )
+                refundBuiltinEmailQuota(ctx.workspaceId)  // no email went out — don't consume quota
+                val friendly = if (response.statusCode() in 400..499)
+                    "We couldn't send the email — please check the recipient address and content, then try again."
+                else
+                    "The email service is temporarily unavailable. Please try again shortly."
+                // Same friendly message in the log, plus technical detail for ops.
+                log.warn("[builtin-email] $friendly | detail=HTTP ${response.statusCode()} body=${body.take(300)}")
+                return NodeResult.Failed(friendly)
             }
 
             log.info("[builtin-email] sent successfully to=$toRaw")
@@ -941,13 +959,71 @@ class ToolNodeExecutor(
                 "sent"       to true,
                 "messageId"  to (parsed["messageId"] ?: ""),
                 "recipients" to toRaw,
-                "provider"   to "resend",
+                "provider"   to "builtin",
             ))
         } catch (e: Exception) {
-            // Show exception class + message so "null" never appears
+            refundBuiltinEmailQuota(ctx.workspaceId)  // send threw — don't consume quota
+            val friendly = "We couldn't send the email due to a temporary problem. Please try again shortly."
+            // Same friendly message in the log, plus technical detail for ops.
             val detail = "${e::class.simpleName}: ${e.message ?: "no message"}"
-            log.error("[builtin-email] failed: $detail")
-            NodeResult.Failed("Built-in email failed ($detail). Check that APP_URL=$appUrl is reachable from Railway.")
+            log.error("[builtin-email] $friendly | detail=$detail endpoint=$emailUrl")
+            NodeResult.Failed(friendly)
+        }
+    }
+
+    /** Current UTC quota period, e.g. "2026-06". */
+    private fun currentEmailPeriod(): String =
+        java.time.YearMonth.now(java.time.ZoneOffset.UTC).toString()
+
+    /**
+     * Atomically reserve one built-in-email slot for [workspaceId] this month.
+     * Returns true if a slot was reserved (under the monthly limit), false if the
+     * cap is already reached. The INSERT … ON CONFLICT … WHERE makes the
+     * check-and-increment a single statement, so it is race-free across workers.
+     */
+    private fun reserveBuiltinEmailQuota(workspaceId: UUID): Boolean = try {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO builtin_email_usage (workspace_id, period_month, sent_count, updated_at)
+                VALUES (?, ?, 1, now())
+                ON CONFLICT (workspace_id, period_month)
+                DO UPDATE SET sent_count = builtin_email_usage.sent_count + 1, updated_at = now()
+                WHERE builtin_email_usage.sent_count < ?
+                RETURNING sent_count
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setObject(1, workspaceId)
+                stmt.setString(2, currentEmailPeriod())
+                stmt.setInt(3, builtinEmailMonthlyLimit)
+                stmt.executeQuery().use { rs -> rs.next() }  // a returned row == reserved
+            }
+        }
+    } catch (e: Exception) {
+        // The quota store is in the same DB the run already depends on; a failure
+        // here is exceptional. Allow the send rather than hard-blocking on a blip.
+        log.warn("[builtin-email] quota reservation failed, allowing send: {}", e.message)
+        true
+    }
+
+    /** Release a previously reserved slot when the send did not actually go out. */
+    private fun refundBuiltinEmailQuota(workspaceId: UUID) {
+        try {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """
+                    UPDATE builtin_email_usage
+                       SET sent_count = GREATEST(sent_count - 1, 0), updated_at = now()
+                     WHERE workspace_id = ? AND period_month = ?
+                    """.trimIndent()
+                ).use { stmt ->
+                    stmt.setObject(1, workspaceId)
+                    stmt.setString(2, currentEmailPeriod())
+                    stmt.executeUpdate()
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[builtin-email] quota refund failed: {}", e.message)
         }
     }
 }

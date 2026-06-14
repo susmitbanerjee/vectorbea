@@ -50,7 +50,8 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-import { inputCls, selectCls, selectCompactCls } from "@/lib/ui/field-styles";
+import { inputCls } from "@/lib/ui/field-styles";
+import { AppSelect } from "@/components/ui/app-select";
 const monoCls = `${inputCls} h-auto py-2 font-mono text-[12px]`;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -217,9 +218,12 @@ export default function NewToolPage() {
             <input className={monoCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="crm-api.getRenewalAccounts" />
           </Field>
           <Field label="Type">
-            <select className={selectCls} value={type} onChange={(e) => setType(e.target.value as ToolType)}>
-              {TOOL_TYPES.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
-            </select>
+            <AppSelect
+              className="w-full"
+              value={type}
+              onValueChange={(v) => setType(v as ToolType)}
+              options={TOOL_TYPES.map((t) => ({ value: t.type, label: t.label }))}
+            />
           </Field>
           <div className="col-span-2">
             <Field label="Description">
@@ -258,13 +262,12 @@ export default function NewToolPage() {
         <section className="space-y-4 rounded-[12px] border border-[#E0E3E6] bg-white p-5">
           <SectionHeader label="HTTP Config" />
           <div className="flex gap-3">
-            <select
-              className={`w-24 shrink-0 font-mono ${selectCompactCls}`}
+            <AppSelect
+              className="w-24 shrink-0 font-mono"
               value={method}
-              onChange={(e) => setMethod(e.target.value as typeof method)}
-            >
-              {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => <option key={m}>{m}</option>)}
-            </select>
+              onValueChange={(v) => setMethod(v as typeof method)}
+              options={["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => ({ value: m, label: m }))}
+            />
             <input
               className={`flex-1 ${monoCls}`}
               placeholder="https://api.example.com/v2/endpoint"
@@ -306,16 +309,15 @@ export default function NewToolPage() {
             </div>
           ) : (
             <Field label="Connection" required>
-              <select
-                className={selectCls}
+              <AppSelect
+                className="w-full"
                 value={connectionId}
-                onChange={(e) => { setConnectionId(e.target.value); setSchemaSelection(null); }}
-              >
-                <option value="">None</option>
-                {compatibleConnections.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>
-                ))}
-              </select>
+                onValueChange={(v) => { setConnectionId(v); setSchemaSelection(null); }}
+                options={[
+                  { value: "", label: "None" },
+                  ...compatibleConnections.map((c) => ({ value: c.id, label: `${c.name} (${c.provider})` })),
+                ]}
+              />
               <p className="mt-1 text-[11px] text-[#9CA3AF]">
                 Only connections compatible with this tool type are shown.{" "}
                 <Link href={"/connections" as never} className="font-medium text-[#007F4E] hover:underline">Manage connections</Link>
@@ -421,10 +423,15 @@ export default function NewToolPage() {
             <input type="number" min="0" max="10" className={inputCls} value={retryAttempts} onChange={(e) => setRetryAttempts(e.target.value)} />
           </Field>
           <Field label="Backoff type">
-            <select className={selectCls} value={retryBackoff} onChange={(e) => setRetryBackoff(e.target.value as RetryPolicy["backoffType"])}>
-              <option value="exponential">Exponential</option>
-              <option value="fixed">Fixed</option>
-            </select>
+            <AppSelect
+              className="w-full"
+              value={retryBackoff}
+              onValueChange={(v) => setRetryBackoff(v as RetryPolicy["backoffType"])}
+              options={[
+                { value: "exponential", label: "Exponential" },
+                { value: "fixed", label: "Fixed" },
+              ]}
+            />
           </Field>
           <Field label="Backoff base (ms)">
             <input type="number" min="0" className={inputCls} value={retryBackoffMs} onChange={(e) => setRetryBackoffMs(e.target.value)} />

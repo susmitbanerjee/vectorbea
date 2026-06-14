@@ -221,7 +221,7 @@ function hydrateArchitectNode(data: WFNodeData): WFNodeData {
     const emailNode = isEmailNode(d.label, d.toolType);
 
     if (emailNode) {
-      // Email: use built-in Resend. Promote architect inputMappings (real step IDs) into emailBody.
+      // Email: use built-in sender. Promote architect inputMappings (real step IDs) into emailBody.
       const existingCfg = (d.toolConfig ?? {}) as Record<string, unknown>;
       // Architect plan writes inputMappings: {to, subject, body} with real {{steps.X.output.Y}}
       const planMappings = ((d as Record<string, unknown>).inputMappings ?? {}) as Record<string, string>;

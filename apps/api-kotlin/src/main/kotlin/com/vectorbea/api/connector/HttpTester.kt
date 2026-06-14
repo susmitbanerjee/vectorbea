@@ -67,6 +67,48 @@ object HttpTester {
         }
     }
 
+    /**
+     * Reachability-only test: any HTTP response (even 4xx) proves the host is live
+     * and serving. Used for endpoints we can't fully authenticate against without
+     * request signing (e.g. S3/GCS object-storage buckets), where a 401/403 still
+     * confirms the endpoint exists and is reachable.
+     */
+    fun testReachability(rawUrl: String): ConnectionTestResult {
+        val start = System.currentTimeMillis()
+        try {
+            SsrfGuard.validate(rawUrl)
+        } catch (e: SsrfGuard.SsrfBlockedException) {
+            return ConnectionTestResult.privateHost(0)
+        } catch (e: IllegalArgumentException) {
+            return ConnectionTestResult.failed(0, "INVALID_URL", "Malformed URL: ${e.message}")
+        }
+        return try {
+            val attempt: (String) -> Int = { method ->
+                val conn = URL(rawUrl).openConnection() as HttpURLConnection
+                conn.requestMethod = method
+                conn.connectTimeout = CONNECT_TIMEOUT_MS
+                conn.readTimeout = READ_TIMEOUT_MS
+                conn.setRequestProperty("User-Agent", "vectorbee-connection-tester/1.0")
+                conn.instanceFollowRedirects = false
+                val code = conn.responseCode
+                conn.disconnect()
+                code
+            }
+            val status = try { attempt("HEAD") } catch (_: Exception) { attempt("GET") }
+            val latency = System.currentTimeMillis() - start
+            if (status in 200..499)
+                ConnectionTestResult.connected(latency, "Endpoint reachable (HTTP $status)")
+            else
+                ConnectionTestResult.failed(latency, "SERVER_ERROR", "Server returned $status")
+        } catch (e: SsrfGuard.SsrfBlockedException) {
+            ConnectionTestResult.privateHost(System.currentTimeMillis() - start)
+        } catch (e: Exception) {
+            val (code, msg) = classifyException(e)
+            log.warn("Reachability test failed errorClass={}", e.javaClass.simpleName)
+            ConnectionTestResult.failed(System.currentTimeMillis() - start, code, msg)
+        }
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private fun buildTestUrl(input: HttpTestInput): String {

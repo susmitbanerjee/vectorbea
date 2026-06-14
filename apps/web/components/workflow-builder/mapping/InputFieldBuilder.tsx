@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { Plus, Trash2, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AppSelect } from "@/components/ui/app-select";
 
 type FieldKind = "string" | "number" | "integer" | "boolean" | "object" | "array";
 
@@ -89,13 +90,12 @@ export function InputFieldBuilder({
                 placeholder="field_name"
                 className="h-8 min-w-0 flex-1 rounded-[6px] border border-[#E0E3E6] bg-white px-2 font-mono text-[12.5px] text-[#0B0D0F] outline-none transition-colors placeholder:text-[#9CA3AF] focus:border-[#9CCFBB] focus:ring-2 focus:ring-[#E6F4EF]"
               />
-              <select
+              <AppSelect
+                className="h-8 w-[120px] shrink-0 rounded-[6px] text-[12px]"
                 value={r.type}
-                onChange={(e) => update(r.id, { type: e.target.value as FieldKind })}
-                className="h-8 shrink-0 rounded-[6px] border border-[#E0E3E6] bg-white px-1.5 text-[12px] text-[#4B5563] outline-none focus:border-[#9CCFBB]"
-              >
-                {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+                onValueChange={(v) => update(r.id, { type: v as FieldKind })}
+                options={TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              />
               <button
                 type="button"
                 onClick={() => update(r.id, { required: !r.required })}
