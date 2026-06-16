@@ -1,0 +1,79 @@
+---
+title: "When One Slow Workflow Stalls Everyone: Fair Scheduling for a Shared Worker Fleet"
+description: "A handful of long-running AI workflows could make everything else feel slow, even with capacity to spare. This is the story of head-of-line blocking on our worker fleet and how we removed it."
+date: "2026-06-16"
+author: "Susmit Banerjee"
+tags: ["infrastructure", "workers", "scheduling", "reliability"]
+category: "Infrastructure"
+series: "building-vectorbea"
+part: 11
+featured: false
+---
+
+A while back we wrote about [how our workers pull work from Redis Streams](/articles/worker-scaling-with-redis-streams), and that post ended by admitting it would probably need a sequel. This is the sequel.
+
+The trigger was a class of bug report that's uniquely frustrating because every dashboard says you're fine: *"the product feels slow."* Not down. Not erroring. Just sluggish to start. We'd look at the fleet, see CPU and memory comfortably in the green, the queue barely backed up, and no obvious culprit. And yet a customer running a tiny two-step workflow would watch it sit there, unstarted, while somewhere else a heavy AI workflow churned through its work.
+
+It turned out this wasn't a capacity problem at all. It was a fairness problem.
+
+## The symptom: idle capacity, waiting work
+
+AI workflows vary enormously in how long they take. A deterministic "fetch this, transform it, write it there" workflow finishes in well under a second. An agent-driven workflow, one that reasons in a loop, calls tools, makes model requests, waits on slow third-party APIs, can run for minutes.
+
+When those two kinds of work share the same fleet, the long ones can quietly hold the fleet hostage. We'd see a burst of heavy workflows from one or two workspaces, and new runs from *everyone else* would queue up behind them, even though the machines had plenty of headroom left. The work that could have finished instantly was stuck behind the work that takes minutes.
+
+This is a textbook case of **head-of-line blocking**: a few slow items at the front of the line hold up a long tail of fast items behind them.
+
+## The root cause: a run that owns a worker until it's done
+
+Each worker process runs a fixed number of concurrent execution slots. In the original model, the contract was simple: a run claims a slot and holds it from the first step to the last. For a short workflow, that's a few milliseconds of ownership and nobody notices. For a long agentic workflow, it's minutes.
+
+Stack up enough long runs and every slot is occupied, not because the machine is busy in any meaningful sense, but because each slot is *reserved* by a run that is mostly waiting on a slow model or a slow API. There were no free slots left to even *begin* a short workflow, so short workflows waited. The fleet was busy holding the door, not doing work.
+
+<Callout type="decision" title="The principle we landed on">
+A workflow run must not own a worker slot from start to finish. The worker should behave like a stateless executor that performs a bounded amount of work and then steps aside, rather than a thread that one run can hold for as long as it likes.
+</Callout>
+
+## The insight: we'd already built the hard part
+
+The good news was that we didn't need a new execution engine. We needed to use the one we had more honestly.
+
+Vectorbea's runtime is built on [durable execution](/articles/why-long-running-ai-workflows-need-durable-execution): every run continuously checkpoints its progress, and any worker can pick up a run from its latest checkpoint and continue. We were already leaning on this for waits, a run paused at a [human approval gate](/articles/human-approval-gates-in-agentic-systems) or sleeping on a timer doesn't sit on a slot burning a thread; it checkpoints, releases the slot, and gets resumed when the wait ends.
+
+The realization was almost embarrassingly simple: we were doing the right thing for runs that were *waiting*, and the wrong thing for runs that were merely *busy*. A run grinding through a long sequence of steps is no more entitled to monopolize a slot than a run waiting on a human. The same checkpoint-and-release mechanism could apply to both.
+
+## Cooperative yielding: progress in small, durable slices
+
+So we changed the contract. Instead of executing a workflow to completion in one sitting, a worker now executes a bounded slice of it, then checkpoints, steps aside, and re-queues the remainder. The run resumes on the next available slot, possibly on a different worker entirely, and carries on exactly where it left off.
+
+The effect is that a long workflow no longer blocks the line. It makes steady progress, interleaved with everyone else's work, taking its turn rather than taking over. Short workflows slip in between the slices of long ones and finish promptly, the way they always should have.
+
+<Callout type="tradeoff" title="How often to yield">
+Yielding more aggressively makes scheduling fairer but adds coordination overhead, each handoff is a little more bookkeeping and a little more queue traffic. Yield too rarely and you're back to head-of-line blocking. We deliberately tuned the default toward releasing on a time budget rather than chopping every workflow into tiny pieces, so medium-sized workflows that finish quickly aren't paying for machinery they don't need. Fairness you don't have to amplify traffic to get is the better kind.
+</Callout>
+
+Because every slice ends in a checkpoint, this also made the system *more* robust, not less. A worker that dies in the middle of a slice is still a non-event, the run simply resumes from its last checkpoint on a healthy worker, the same recovery path we already trusted.
+
+## Lanes: different shapes of work shouldn't compete
+
+Cooperative yielding fixes "a long run can't hog a slot forever." It doesn't, on its own, fix "a flood of heavy work can still crowd out everything else." For that, we stopped treating all work as interchangeable.
+
+A timer waking a run, an approval resuming one, a small deterministic workflow, and a sprawling agent are genuinely different kinds of work with different cost profiles. So we split the fleet into a few isolated lanes by workload shape, each with its own dedicated capacity. A surge of heavy agent work fills the lane meant for heavy agent work, and stops there. Short workflows and internal system operations keep their own guaranteed capacity that the heavy lane can't touch.
+
+The result is that one noisy category of work can no longer drain the entire pool. The blast radius of a spike is contained to the lane it belongs in.
+
+## Fairness between customers, not just between workloads
+
+Lanes solve "long versus short." They don't, by themselves, solve "one customer versus another." A single workspace running a large batch of heavy workflows could still fill the heavy lane and make *that* lane unfair, even if short work elsewhere stayed snappy.
+
+So we added a second layer: a cap on how much of the heavy capacity any one workspace can hold at the same time. A workspace running a big job still gets served, and served well, but it can't quietly occupy every heavy slot and starve its neighbors. In a multi-tenant system, that kind of fairness has to be a designed property of the scheduler, not a setting someone remembers to flip later.
+
+<Callout type="lesson" title="What we'd tell our past selves">
+"There's plenty of capacity" and "work is getting served fairly" are completely different claims, and it's easy to watch the first while quietly failing the second. Utilization graphs would have told us the fleet was healthy for as long as we cared to look. The signal that actually mattered was *time-to-start* for small runs while big runs were in flight, and we weren't watching it closely enough until customers were.
+</Callout>
+
+## What changed, in plain terms
+
+For the people using Vectorbea, the difference is undramatic in exactly the way good infrastructure work should be: short workflows start promptly even while heavy ones are running, long workflows still finish, they just share the road, and the fleet's capacity goes toward throughput instead of being pinned down by a few slow runs. Nobody has to know that under the hood a "run" is now a sequence of small, resumable slices being fairly dealt out across lanes. They just notice that the fast thing is fast again.
+
+There's nuance we've glossed over here, how slices are sized, how the lanes are balanced, how the fairness limits behave under real contention, and some of it we're still tuning as we watch it in production. But the shape of the fix is the part worth remembering: the smallest unit of work you can pause and resume is the most flexible thing to schedule, and fairness in a shared system is something you build in, not something you find later.
