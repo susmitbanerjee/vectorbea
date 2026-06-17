@@ -14,13 +14,17 @@ import {
   GitBranch,
   KeyRound,
   LayoutDashboard,
+  LayoutTemplate,
   List,
   Loader2,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
+  ScrollText,
   Settings2,
+  Shapes,
+  Users,
   Wrench,
 } from "lucide-react";
 
@@ -40,7 +44,7 @@ const SIDEBAR_W_COLLAPSED = 64;
 // ─── Route helpers ────────────────────────────────────────────────────────────
 
 function isSettingsRoute(p: string) {
-  return p === "/settings" || p.startsWith("/settings/") ||
+  return p === "/settings" || (p.startsWith("/settings/") && !p.startsWith("/settings/members") && !p.startsWith("/settings/usage")) ||
     p === "/api-keys" || p.startsWith("/api-keys/");
 }
 
@@ -69,13 +73,12 @@ type NavGroup = {
   items: NavItem[];
 };
 
-// Grouped nav — 3 sections
+// Grouped nav — 4 sections
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Project",
+    label: "Home",
     items: [
       { href: "/dashboard" as never,   label: "Overview",   icon: LayoutDashboard },
-      { href: "/workflows" as never,   label: "Workflows",  icon: GitBranch },
       { href: "/runs" as never,        label: "Runs",       icon: List },
       { href: "/approvals" as never,   label: "Approvals",  icon: CheckCircle2, countKey: "pendingApprovals" },
     ],
@@ -83,16 +86,27 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Build",
     items: [
-      { href: "/agents" as never,      label: "Agents",     icon: Bot },
-      { href: "/tools" as never,       label: "Tools",      icon: Wrench },
-      { href: "/connections" as never, label: "Connections",icon: Plug },
+      { href: "/workflows" as never,    label: "Workflows",    icon: GitBranch },
+      { href: "/agents" as never,       label: "Agents",       icon: Bot },
+      { href: "/tools" as never,        label: "Tools",        icon: Wrench },
+      { href: "/integrations" as never, label: "Integrations", icon: Shapes },
+      { href: "/connections" as never,  label: "Connections",  icon: Plug },
+      { href: "/templates" as never,    label: "Templates",    icon: LayoutTemplate },
     ],
   },
   {
     label: "Operate",
     items: [
-      { href: "/schedules" as never, label: "Schedules", icon: CalendarClock },
-      { href: "/settings" as never,  label: "Settings",  icon: Settings2 },
+      { href: "/schedules" as never,     label: "Schedules", icon: CalendarClock },
+      { href: "/settings/usage" as never, label: "Usage",    icon: BarChart2 },
+      { href: "/audit-logs" as never,    label: "Logs",      icon: ScrollText },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { href: "/settings/members" as never, label: "Team",     icon: Users, minRole: "admin" as const },
+      { href: "/settings" as never,         label: "Settings", icon: Settings2 },
     ],
   },
 ];
@@ -100,9 +114,8 @@ const NAV_GROUPS: NavGroup[] = [
 // All nav items flat (for active detection)
 const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items);
 
-// Settings sub-nav
+// Settings sub-nav (API keys shown inline under Settings in Admin group)
 const SETTINGS_SUB_NAV: NavItem[] = [
-  { href: "/settings/usage" as never, label: "Usage & Limits", icon: BarChart2, isSubItem: true, subItemGroup: isSettingsRoute },
   { href: "/api-keys" as never, label: "API Keys", icon: KeyRound, isSubItem: true, subItemGroup: isSettingsRoute, minRole: "admin" },
 ];
 
@@ -372,8 +385,8 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                 </span>
                 <div className="space-y-px">
                   {filterByRole(group.items).map(item => navLink(item))}
-                  {/* Settings sub-items appear inline under Settings */}
-                  {group.label === "Operate" && filterByRole(SETTINGS_SUB_NAV).map(item => navLink(item))}
+                  {/* API Keys sub-item appears inline under Settings in Admin group */}
+                  {group.label === "Admin" && filterByRole(SETTINGS_SUB_NAV).map(item => navLink(item))}
                 </div>
               </div>
             ))}

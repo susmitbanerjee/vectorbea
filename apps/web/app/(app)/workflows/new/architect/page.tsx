@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Check, CheckCircle2,
@@ -551,6 +551,14 @@ export default function ArchitectPage() {
   const [rightOpen, setRightOpen]             = useState(true);
 
   const goalRef = useRef<HTMLTextAreaElement>(null);
+  const searchParams = useSearchParams();
+
+  // Pre-fill the goal from a ?prompt= query param (e.g. when launched from a template).
+  useEffect(() => {
+    const seeded = searchParams.get("prompt");
+    if (seeded) setGoal((prev) => (prev ? prev : seeded));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const currentStepIdx = STEP_ORDER.indexOf(step === "clarify" ? "goal" : step);
 

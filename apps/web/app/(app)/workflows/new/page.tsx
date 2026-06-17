@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, ArrowRight, Bot, CalendarClock,
-  GitBranch, Play, RefreshCw, Save,
+  ArrowLeft, ArrowRight, Bot, CalendarClock, Download,
+  GitBranch, LayoutTemplate, Play, RefreshCw, Save,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -74,7 +74,26 @@ export default function NewWorkflowPage() {
           </Link>
           <div>
             <h1 className="text-[26px] font-bold tracking-[-0.02em] text-[#0B0D0F]">New workflow</h1>
-            <p className="mt-1 text-[14px] text-[#6B7280]">Choose how to create your workflow, then configure the basics.</p>
+            <p className="mt-1 text-[14px] text-[#6B7280]">Start from a template, describe it with AI, build from scratch, or import an existing flow.</p>
+          </div>
+          {/* Secondary entry points — template & import */}
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <Link
+              href={"/templates" as never}
+              className="group inline-flex items-center gap-2 rounded-[9px] border border-[#E0E3E6] bg-white px-3.5 py-2 text-[13px] font-semibold text-[#4B5563] transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB] hover:text-[#0B0D0F]"
+            >
+              <LayoutTemplate className="h-4 w-4 text-[#7C3AED]" />
+              Start from a template
+              <ArrowRight className="h-3.5 w-3.5 text-[#C9CED4] transition-transform group-hover:translate-x-0.5" />
+            </Link>
+            <Link
+              href={"/workflows/import" as never}
+              className="group inline-flex items-center gap-2 rounded-[9px] border border-[#E0E3E6] bg-white px-3.5 py-2 text-[13px] font-semibold text-[#4B5563] transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB] hover:text-[#0B0D0F]"
+            >
+              <Download className="h-4 w-4 text-[#2563EB]" />
+              Import workflow
+              <ArrowRight className="h-3.5 w-3.5 text-[#C9CED4] transition-transform group-hover:translate-x-0.5" />
+            </Link>
           </div>
         </div>
 

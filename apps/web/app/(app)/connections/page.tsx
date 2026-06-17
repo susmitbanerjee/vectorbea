@@ -168,7 +168,7 @@ export default function ConnectionsPage() {
         <div>
           <span className="vb-mono-label">Build</span>
           <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Connections</h1>
-          <p className="mt-1 max-w-[60ch] text-[13.5px] text-[#6B7280]">LLM providers, databases, APIs, SaaS, MCP servers, and storage — secrets encrypted, never shown.</p>
+          <p className="mt-1 max-w-[60ch] text-[13.5px] text-[#6B7280]">Authenticated accounts, API keys, and credentials used by your workflows and agents. Secrets are encrypted and never shown.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button type="button" onClick={() => void load()} title="Refresh" className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#E0E3E6] bg-white transition-colors hover:bg-[#F3F4F5]">
@@ -204,8 +204,13 @@ export default function ConnectionsPage() {
         <EmptyHint
           icon={Plug}
           title="No connections yet"
-          desc="Connect an LLM provider, database, or API to start running agents."
-          action={<Link href={"/connections/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> New connection</Link>}
+          desc="Connect Gmail, Slack, OpenAI, or another app to start building workflows."
+          action={
+            <div className="flex items-center gap-2">
+              <Link href={"/integrations" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[13px] font-semibold text-[#4B5563] hover:bg-[#F3F4F5]">Browse integrations</Link>
+              <Link href={"/connections/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> New connection</Link>
+            </div>
+          }
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">

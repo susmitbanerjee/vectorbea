@@ -841,7 +841,7 @@ function ValidationSummary({ validation, nodes, edges }: { validation: Validatio
           validation.replaySupport === "partial" ? "border-amber-200 bg-amber-50 text-amber-700" :
           "border-slate-200 bg-slate-50 text-slate-600")}>
           <span className="font-semibold">Replay: </span>
-          {validation.replaySupport === "full" ? "Full replay available" :
+          {validation.replaySupport === "full" ? "Replay available" :
            validation.replaySupport === "partial" ? "Partial replay (add checkpoints)" :
            "No replay configured"}
         </div>

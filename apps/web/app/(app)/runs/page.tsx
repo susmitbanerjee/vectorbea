@@ -369,7 +369,7 @@ export default function RunsPage() {
       {/* ── Page header ─────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <span className="vb-mono-label">Observability</span>
+          <span className="vb-mono-label">Home</span>
           <div className="mt-1 flex items-center gap-2.5">
             <h1 className="text-[24px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Runs</h1>
             {liveCount > 0 && (
