@@ -974,8 +974,8 @@ function WorkflowBuilderInner() {
     try {
       await doSave();
       toast.success("Workflow saved.");
-    } catch {
-      toast.error("Failed to save.");
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Failed to save.");
     } finally {
       setSaving(false);
     }
