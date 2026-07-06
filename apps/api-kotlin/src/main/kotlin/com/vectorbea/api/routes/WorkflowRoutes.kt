@@ -229,6 +229,7 @@ class WorkflowRoutes(
         // graph is required for a new version
         val graph = body.graph ?: throw ApiError.ValidationError("graph is required")
         validateGraphShape(graph)
+        validateCronTrigger(body.triggerConfig)
 
         val version = repo.createVersion(
             CreateWorkflowVersionRequest(
@@ -253,6 +254,25 @@ class WorkflowRoutes(
         syncSchedule(ctx.workspaceId, wf.environmentId, workflowId, body.triggerConfig)
 
         return Response.created(version.toResponse())
+    }
+
+    /**
+     * A cron trigger with an unparseable expression must fail the save — otherwise
+     * syncSchedule silently drops the schedule and the workflow never fires.
+     * A blank expression is allowed (work-in-progress draft); the builder flags it.
+     */
+    private fun validateCronTrigger(triggerConfig: Map<String, Any>?) {
+        val tc = triggerConfig ?: return
+        val triggerType = (tc["triggerType"] ?: tc["type"])?.toString()?.lowercase()
+        if (triggerType !in setOf("cron", "schedule")) return
+        val cron = (tc["cronExpression"] ?: tc["cron"])?.toString()?.trim()
+        if (cron.isNullOrBlank()) return
+        if (!CronExpression.isValid(cron)) {
+            throw ApiError.ValidationError(
+                "Invalid cron expression '$cron' — expected 5 fields (minute hour day month weekday), " +
+                "e.g. '0 7 * * 1,5' for 07:00 on Mondays and Fridays."
+            )
+        }
     }
 
     /**

@@ -4,6 +4,7 @@
 
 import type { Node, Edge } from "@xyflow/react";
 import type { WFNodeData, WFEdgeData, ValidationResult, ValidationIssue } from "@/types/workflow-graph";
+import { validateCronExpression } from "@/lib/workflows/cron-validation";
 
 type WFNode = Node<WFNodeData>;
 type WFEdge = Edge<WFEdgeData>;
@@ -111,6 +112,28 @@ export function validateWorkflowGraph(nodes: WFNode[], edges: WFEdge[]): Validat
   for (const node of nodes.filter((n) => n.data.nodeType === "llm")) {
     if (!node.data.llmConfig?.model) {
       issues.push({ nodeId: node.id, severity: "error", code: "LLM_NO_MODEL", message: `"${node.data.label}" has no model selected.` });
+    }
+  }
+
+  // 11. Cron triggers need a valid 5-field expression — the API refuses to
+  // schedule an invalid one, so the workflow would silently never run.
+  for (const node of triggerNodes) {
+    const tc = node.data.triggerConfig;
+    if (tc?.triggerType !== "cron") continue;
+    const expr = tc.cronExpression?.trim() ?? "";
+    if (!expr) {
+      issues.push({
+        nodeId: node.id, severity: "error", code: "TRIGGER_NO_CRON",
+        message: `"${node.data.label}" is a schedule trigger with no cron expression — it will never run.`,
+      });
+    } else {
+      const err = validateCronExpression(expr);
+      if (err) {
+        issues.push({
+          nodeId: node.id, severity: "error", code: "TRIGGER_INVALID_CRON",
+          message: `"${node.data.label}" has an invalid cron "${expr}": ${err}`,
+        });
+      }
     }
   }
 

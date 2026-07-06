@@ -30,6 +30,7 @@ import { InputMappingRow } from "./mapping/InputMappingRow";
 import { InputFieldBuilder } from "./mapping/InputFieldBuilder";
 import { ConditionBuilder } from "./mapping/ConditionBuilder";
 import { autoMapAll, countAutoMappable } from "@/lib/workflows/auto-map";
+import { validateCronExpression } from "@/lib/workflows/cron-validation";
 import { buildAvailableFieldsForNode, getNodeOutputFields } from "@/lib/workflows/field-discovery";
 import { decompileExpression, compileMapping, compileConditionGroup } from "@/lib/workflows/mapping-compiler";
 import type { VisualMapping, VisualConditionGroup, NodeInputField, FieldType } from "@/types/workflow-mapping";
@@ -777,6 +778,18 @@ function EndConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeD
   );
 }
 
+function CronHint({ expression }: { expression: string }) {
+  const expr = expression.trim();
+  if (!expr) {
+    return <p className="mt-1.5 text-[10.5px] text-muted-foreground/60">5 fields: minute hour day month weekday — e.g. <code className="font-mono">0 7 * * 1,5</code> for 07:00 Mon &amp; Fri.</p>;
+  }
+  const error = validateCronExpression(expr);
+  if (error) {
+    return <p className="mt-1.5 text-[10.5px] text-red-600">{error} The schedule will not run until this is fixed.</p>;
+  }
+  return <p className="mt-1.5 text-[10.5px] text-emerald-600">Valid cron expression.</p>;
+}
+
 function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFNodeData) => void }) {
   const cfg = data.triggerConfig ?? { triggerType: "manual" as const };
   function set(patch: Partial<typeof cfg>) { onChange({ ...data, triggerConfig: { ...cfg, ...patch } }); }
@@ -794,7 +807,11 @@ function TriggerConfig({ data, onChange }: { data: WFNodeData; onChange: (d: WFN
         </ISelect>
       </div>
       {cfg.triggerType === "cron" && <>
-        <div><ILabel>Cron Expression</ILabel><IInput mono value={cfg.cronExpression ?? ""} onChange={(v) => set({ cronExpression: v })} placeholder="0 7 * * 1-5" /></div>
+        <div>
+          <ILabel>Cron Expression</ILabel>
+          <IInput mono value={cfg.cronExpression ?? ""} onChange={(v) => set({ cronExpression: v })} placeholder="0 7 * * 1-5" />
+          <CronHint expression={cfg.cronExpression ?? ""} />
+        </div>
         <div><ILabel>Timezone</ILabel><IInput value={cfg.timezone ?? ""} onChange={(v) => set({ timezone: v })} placeholder="America/New_York" /></div>
       </>}
       {cfg.triggerType === "webhook" && (
