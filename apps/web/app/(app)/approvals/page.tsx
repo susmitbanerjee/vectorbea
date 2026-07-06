@@ -170,10 +170,10 @@ export default function ApprovalsPage() {
               <ShieldCheck className="h-5 w-5" />
             </span>
             <div>
-              <span className="vb-mono-label">Governance</span>
-              <h1 className="mt-0.5 text-[22px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Approval gates</h1>
+              <span className="vb-mono-label">Home</span>
+              <h1 className="mt-0.5 text-[22px] font-bold leading-tight tracking-[-0.025em] text-[#0B0D0F]">Approvals</h1>
               <p className="mt-1 max-w-[52ch] text-[13.5px] text-[#6B7280]">
-                Runs pause at a gate and <span className="font-medium text-[#0B0D0F]">resume from the last checkpoint</span> once a human decides — no work is lost while waiting.
+                Review human approval requests before workflows continue. Runs <span className="font-medium text-[#0B0D0F]">resume from the last checkpoint</span> once you decide — no work is lost while waiting.
               </p>
             </div>
           </div>

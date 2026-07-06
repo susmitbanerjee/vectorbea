@@ -106,6 +106,7 @@ export default function ToolsPage() {
         <div>
           <span className="vb-mono-label">Build</span>
           <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Tools</h1>
+          <p className="mt-0.5 text-[13px] text-[#6B7280]">Reusable callable actions your agents and workflows can invoke.</p>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[12.5px] text-[#6B7280]">
             {loading ? "loading…" : (
               <>
@@ -153,7 +154,10 @@ export default function ToolsPage() {
           title={tools.length === 0 ? "No tools registered" : "No tools match your filters"}
           desc={tools.length === 0 ? "Tools let agents call APIs, databases, and services. Register one to use it in a workflow." : undefined}
           action={tools.length === 0 ? (
-            <Link href={"/tools/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> Register first tool</Link>
+            <div className="flex items-center gap-2">
+              <Link href={"/integrations" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[13px] font-semibold text-[#4B5563] hover:bg-[#F3F4F5]">Browse integrations</Link>
+              <Link href={"/tools/new" as never} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white hover:bg-[#1c1f22]"><Plus className="h-3.5 w-3.5" /> New tool</Link>
+            </div>
           ) : undefined}
         />
       ) : (

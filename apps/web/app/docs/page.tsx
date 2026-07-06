@@ -319,7 +319,7 @@ export default function DocsPage() {
                 icon={ShieldCheck} tint="#CA8A04" title="Approvals" href={"/approvals" as Route} hrefLabel="Open Approvals"
                 what={<>An approval gate is a <B>node that pauses a run for a human decision</B>. The run checkpoints, parks (no compute is consumed), and appears in the Approvals queue with its decision context — template fields in the gate message are filled from upstream step outputs when the run arrives. <B>Approve &amp; resume</B> continues the run from the checkpoint; <B>Reject</B> ends it. Both decisions are recorded with who and when, for the audit trail.</>}
                 manage={[
-                  <><B>Add a gate:</B> in the builder, add an <B>Approval Gate</B> node from the Governance group and place it before any risky step.</>,
+                  <><B>Add an approval:</B> in the builder, add a <B>Human Approval</B> step from the Human group and place it before any risky step.</>,
                   <><B>Decide:</B> Approvals page → pending gate → review the context → Approve &amp; resume, or Reject.</>,
                   <><B>Per-agent / per-tool:</B> agents have an approval policy, and database write tools have a &quot;require approval&quot; flag — both inject gates without canvas changes.</>,
                 ]}
@@ -392,7 +392,7 @@ export default function DocsPage() {
               { title: "Create an agent", body: <>Go to <B>Agents → New Agent</B> → Native LLM Agent. Choose the LLM connection and model, write the system prompt, and tick the tools it may call. Set retry/timeout policies (the defaults are sane).</> },
               { title: "Compose the workflow", body: <>Go to <B>Workflows → New → blank canvas</B>. Add a <B>Trigger</B> (manual, schedule, or webhook), then your tool and agent nodes from the palette (or press <code className="rounded border border-[#E0E3E6] bg-[#F7F8F9] px-1 font-mono text-[11px]">⌘K</code>). Connect nodes by dragging between handles.</> },
               { title: "Map inputs — no JSON required", body: <>Select a node → <B>Inputs</B> tab. Vectorbea suggests mappings from upstream outputs (&quot;<B>Map all</B>&quot; applies every confident match); each field can also be picked manually from a typed field list.</> },
-              { title: "Add governance", body: <>Place an <B>Approval Gate</B> before anything irreversible (sending email, writing data). Add a <B>Checkpoint</B> node after expensive stages to make resume points explicit.</> },
+              { title: "Add governance", body: <>Place a <B>Human Approval</B> step before anything irreversible (sending email, writing data). Add a <B>Checkpoint</B> node after expensive stages to make resume points explicit.</> },
               { title: "Simulate, then run", body: <>Hit <B>Test</B> for a simulation run — no real side effects. Inspect the run timeline and logs. When it looks right, <B>Run</B> for real execution (subject to your workspace execution mode).</> },
               { title: "Observe and operate", body: <>Open <B>Runs</B> to watch executions live. If something fails, the Recovery tab explains why and offers <B>Resume from checkpoint</B>. Add a <B>Schedule</B> to run it automatically.</> },
             ]} />

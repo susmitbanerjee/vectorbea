@@ -22,35 +22,45 @@ interface PaletteItem {
 
 const PALETTE_SECTIONS: { label: string; items: PaletteItem[] }[] = [
   {
-    label: "Core",
+    label: "Start",
     items: [
       { nodeType: "trigger", description: "Start on schedule, webhook, or manual trigger" },
-      { nodeType: "end", description: "Mark workflow as complete" },
     ],
   },
   {
     label: "AI",
     items: [
       { nodeType: "agent", description: "Reason, plan, extract, classify, or generate" },
-      { nodeType: "llm", description: "Direct LLM inference with a configured model" },
-      { nodeType: "tool", description: "Call a registered tool or external API" },
+      { nodeType: "llm", description: "Direct model call — summarize, extract, classify" },
     ],
   },
   {
-    label: "Control Flow",
+    label: "Logic",
     items: [
-      { nodeType: "branch", description: "Route using deterministic conditions" },
-      { nodeType: "parallel", description: "Fan-out to multiple concurrent branches" },
-      { nodeType: "join", description: "Merge and synchronize branches" },
-      { nodeType: "timer", description: "Sleep, delay, or wait for a duration" },
+      { nodeType: "branch", description: "Route using conditions" },
+      { nodeType: "parallel", description: "Run multiple branches at once" },
+      { nodeType: "join", description: "Merge and combine branches" },
+      { nodeType: "timer", description: "Pause for a duration or until a time" },
     ],
   },
   {
-    label: "Governance",
+    label: "Apps",
     items: [
-      { nodeType: "approval", description: "Pause until a human approves or rejects" },
-      { nodeType: "checkpoint", description: "Enable replay from this exact point" },
-      { nodeType: "artifact", description: "Store and name an output artifact" },
+      { nodeType: "tool", description: "Call a tool, app action, or external API" },
+    ],
+  },
+  {
+    label: "Human",
+    items: [
+      { nodeType: "approval", description: "Pause until a person approves or rejects" },
+    ],
+  },
+  {
+    label: "Output",
+    items: [
+      { nodeType: "artifact", description: "Save and name a result" },
+      { nodeType: "checkpoint", description: "Enable replay from this point" },
+      { nodeType: "end", description: "Mark the workflow complete" },
     ],
   },
 ];
@@ -133,10 +143,12 @@ function TemplateItem({ template, onApply }: { template: WorkflowTemplate; onApp
 // ─── Section (collapsible) ────────────────────────────────────────────────────
 
 const SECTION_ACCENT: Record<string, string> = {
-  Core: "#94a3b8",
+  Start: "#2563EB",
   AI: "#7C3AED",
-  "Control Flow": "#0891B2",
-  Governance: "#D97706",
+  Logic: "#0891B2",
+  Apps: "#0F766E",
+  Human: "#D97706",
+  Output: "#059669",
 };
 
 function Section({
@@ -201,8 +213,9 @@ export function NodePalette({ onAddNode, onApplyTemplate }: NodePaletteProps) {
       {/* Panel title */}
       <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: "1px solid #ECEEEF" }}>
         <span className="font-mono text-[9.5px] font-medium uppercase tracking-[0.16em] text-[#9CA3AF]">
-          Node Palette
+          Steps
         </span>
+        <span className="ml-auto font-mono text-[9.5px] text-[#C9CED4]">drag or click to add</span>
       </div>
 
       {/* Search */}

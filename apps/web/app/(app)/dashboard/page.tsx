@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import {
   Activity, AlertTriangle, ArrowRight, Bot, Clock, Coins, GitBranch,
-  Play, Plug, Plus, RefreshCw, ShieldCheck, Sparkles, Timer, Wrench,
+  Play, Plug, Plus, RefreshCw, ShieldCheck, Shapes, Sparkles, Timer, Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, ResponsiveContainer, Tooltip } from "recharts";
@@ -199,12 +199,12 @@ export default function OverviewPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <span className="vb-mono-label">Control plane</span>
+          <span className="vb-mono-label">Home</span>
           <div className="mt-1 flex flex-wrap items-center gap-2.5">
             <h1 className="text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Overview</h1>
             {statusPill && <Chip tone={statusPill.tone} pulse={statusPill.tone !== "green"}>{statusPill.text}</Chip>}
           </div>
-          <p className="mt-1 text-[13.5px] text-[#6B7280]">Live state of your durable agent workflows.</p>
+          <p className="mt-1 text-[13.5px] text-[#6B7280]">Monitor your AI workflows, approvals, and execution health in one place.</p>
         </div>
         <div className="flex items-center gap-2">
           {pending > 0 && (
@@ -212,6 +212,9 @@ export default function OverviewPage() {
               <ShieldCheck className="h-4 w-4" /> {pending} approval{pending !== 1 ? "s" : ""}
             </Link>
           )}
+          <Link href={"/workflows/new/architect" as Route} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[#9CCFBB] bg-white px-3.5 text-[13px] font-semibold text-[#007F4E] transition-colors hover:bg-[#F3FBF8]">
+            <Sparkles className="h-3.5 w-3.5" /> Architect
+          </Link>
           <Link href={"/workflows/new" as Route} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#1c1f22]">
             <Plus className="h-3.5 w-3.5" /> New workflow
           </Link>
@@ -245,7 +248,7 @@ export default function OverviewPage() {
           </div>
           <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
             <Link href={"/workflows/new" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#007F4E14", border: "1px solid #007F4E33", color: "#007F4E" }}><GitBranch className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Create workflow</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Build a durable AI workflow</p></div></Link>
-            <Link href={"/connections" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#7C3AED14", border: "1px solid #7C3AED33", color: "#7C3AED" }}><Plug className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Add connection</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Connect an LLM provider</p></div></Link>
+            <Link href={"/integrations" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#7C3AED14", border: "1px solid #7C3AED33", color: "#7C3AED" }}><Shapes className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Browse integrations</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Connect Gmail, Slack, OpenAI…</p></div></Link>
             <Link href={"/agents/new" as Route} className="group flex items-start gap-3 rounded-[10px] border border-[#E0E3E6] bg-white p-3.5 transition-colors hover:border-[#C9CED4] hover:bg-[#FAFBFB]"><span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[9px]" style={{ background: "#0F766E14", border: "1px solid #0F766E33", color: "#0F766E" }}><Bot className="h-4 w-4" /></span><div><p className="text-[13.5px] font-semibold text-[#0B0D0F]">Register agent</p><p className="mt-0.5 text-[12px] text-[#6B7280]">Define an agent persona</p></div></Link>
           </div>
         </div>
@@ -492,8 +495,8 @@ export default function OverviewPage() {
               {[
                 { href: "/agents", label: "Agents", icon: Bot, color: "#7C3AED" },
                 { href: "/tools", label: "Tools", icon: Wrench, color: "#0F766E" },
-                { href: "/schedules", label: "Schedules", icon: Clock, color: "#CA8A04" },
-                { href: "/connections", label: "Connections", icon: Plug, color: "#2563EB" },
+                { href: "/integrations", label: "Integrations", icon: Shapes, color: "#2563EB" },
+                { href: "/connections", label: "Connections", icon: Plug, color: "#4B5563" },
                 { href: "/approvals", label: "Approval gates", icon: ShieldCheck, color: "#007F4E" },
               ].map(({ href, label, icon: Icon, color }) => (
                 <Link key={href} href={href as Route} className="group flex items-center gap-2.5 rounded-[8px] px-2.5 transition-colors hover:bg-[#F3F4F5]" style={{ height: 38 }}>

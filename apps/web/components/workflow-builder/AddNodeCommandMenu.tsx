@@ -20,23 +20,23 @@ interface MenuEntry {
   subtitle: string;
 }
 
-// Reference-style categories mapped onto Vectorbea node types.
+// Categories mapped onto Vectorbea node types — aligned with the Steps palette.
 const ENTRIES: MenuEntry[] = [
-  { nodeType: "trigger", category: "Trigger", subtitle: "Start on a schedule, webhook, or manual run" },
-  { nodeType: "agent", category: "Agent", subtitle: "Reason, plan, extract, classify, or generate" },
-  { nodeType: "llm", category: "Agent", subtitle: "Direct LLM inference with a configured model" },
-  { nodeType: "tool", category: "Tool", subtitle: "Call a registered tool or external API" },
-  { nodeType: "branch", category: "Logic", subtitle: "Branch execution on deterministic conditions" },
-  { nodeType: "parallel", category: "Logic", subtitle: "Fan-out to multiple concurrent branches" },
-  { nodeType: "join", category: "Logic", subtitle: "Merge and synchronize parallel branches" },
-  { nodeType: "timer", category: "Logic", subtitle: "Sleep, delay, or wait for a duration" },
+  { nodeType: "trigger", category: "Start", subtitle: "Start on a schedule, webhook, or manual run" },
+  { nodeType: "agent", category: "AI", subtitle: "Reason, plan, extract, classify, or generate" },
+  { nodeType: "llm", category: "AI", subtitle: "Direct model call — summarize, extract, classify" },
+  { nodeType: "tool", category: "Apps", subtitle: "Call a tool, app action, or external API" },
+  { nodeType: "branch", category: "Logic", subtitle: "Route execution on conditions" },
+  { nodeType: "parallel", category: "Logic", subtitle: "Run multiple branches at once · fan-out" },
+  { nodeType: "join", category: "Logic", subtitle: "Wait for and combine branches · join" },
+  { nodeType: "timer", category: "Logic", subtitle: "Pause for a duration or until a time" },
   { nodeType: "approval", category: "Human", subtitle: "Pause until a person approves or rejects" },
-  { nodeType: "checkpoint", category: "Data", subtitle: "Enable durable replay from this point" },
-  { nodeType: "artifact", category: "Data", subtitle: "Store and name an output artifact" },
-  { nodeType: "end", category: "Other", subtitle: "Mark the workflow as complete" },
+  { nodeType: "checkpoint", category: "Output", subtitle: "Enable durable replay from this point" },
+  { nodeType: "artifact", category: "Output", subtitle: "Save and name a result" },
+  { nodeType: "end", category: "Output", subtitle: "Mark the workflow as complete" },
 ];
 
-const CATEGORY_ORDER = ["Trigger", "Agent", "Logic", "Tool", "Data", "Human", "Other"];
+const CATEGORY_ORDER = ["Start", "AI", "Logic", "Apps", "Human", "Output"];
 
 interface AddNodeCommandMenuProps {
   open: boolean;

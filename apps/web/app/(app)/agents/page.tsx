@@ -114,7 +114,8 @@ export default function AgentsPage() {
         <div>
           <span className="vb-mono-label">Build</span>
           <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.03em] text-[#0B0D0F]">Agents</h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[12.5px] text-[#6B7280]">
+          <p className="mt-0.5 text-[13px] text-[#6B7280]">AI workers that reason, decide, and call tools inside your workflows.</p>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[12.5px] text-[#6B7280]">
             {loading ? "loading…" : (
               <>
                 <span className="font-semibold text-[#0B0D0F]">{agents.length}</span> registered
