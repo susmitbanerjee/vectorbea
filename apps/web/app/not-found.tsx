@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { Route } from "next";
 import Link from "next/link";
 import { USE_CASES, getUseCasePath } from "@/lib/marketing/pages";
 
@@ -32,7 +33,7 @@ export default function NotFound() {
           <ul className="mx-auto grid max-w-[440px] grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
             {USE_CASES.map((p) => (
               <li key={p.slug}>
-                <Link href={getUseCasePath(p.slug)} className="text-[13.5px] text-[#007F4E] hover:underline">
+                <Link href={getUseCasePath(p.slug) as Route} className="text-[13.5px] text-[#007F4E] hover:underline">
                   {p.navLabel}
                 </Link>
               </li>
