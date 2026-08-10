@@ -1,0 +1,267 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   INK & IRIS — Colour tokens
+   Design direction §3.  This file and its siblings in this directory are the
+   ONLY place in apps/web where a hex value may appear (CLAUDE.md hard rule 1).
+
+   THE GOVERNING RULE
+     Brand colour and status colour are disjoint sets.
+     Iris never means "good". Green never means "Vectorbea".
+
+   Structure
+     1. dark variant registration
+     2. raw palette      — @theme, literal hex, never used directly in components
+     3. semantic layer   — @theme inline, resolves through --ink-* per theme
+     4. theme bindings   — :root (light) and .dark
+     5. border utilities — @utility, so the class reads `border-subtle`
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Dark variant ────────────────────────────────────────────────────────
+   next-themes writes `class="dark"` onto <html>. Declared explicitly rather than
+   relying on the frozen legacy config's darkMode setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── 2. Raw palette ─────────────────────────────────────────────────────────
+   Components must NOT use these directly — use the semantic layer below.
+   They exist so the semantic layer has something to point at, and for the rare
+   documented case (charts, illustration) that needs a specific step. */
+@theme {
+  /* Graphite — cool, blue-undertone neutrals. Deliberately not Tailwind slate/zinc. */
+  --color-graphite-1000: #07080c;
+  --color-graphite-950: #0a0c12;
+  --color-graphite-900: #0f1118;
+  --color-graphite-850: #141722;
+  --color-graphite-800: #1a1e2b;
+  --color-graphite-750: #212636;
+  --color-graphite-700: #2a3042;
+  --color-graphite-600: #39415a;
+  --color-graphite-500: #4e5773;
+  --color-graphite-400: #6c7593;
+  --color-graphite-300: #949cb6;
+  --color-graphite-200: #c3c9db;
+  --color-graphite-100: #e6e9f2;
+  --color-graphite-50: #f6f7fb;
+
+  /* Paper — light-theme neutrals */
+  --color-paper-0: #ffffff;
+  --color-paper-50: #fafbfd;
+  --color-paper-100: #f3f5f9;
+  --color-paper-200: #e9ecf3;
+  --color-paper-300: #d7dce7;
+  --color-paper-400: #b4bccd;
+  --color-paper-500: #7c8499;
+  --color-paper-700: #4a5266;
+  --color-paper-900: #1b2030;
+  --color-paper-1000: #0a0c12;
+
+  /* Iris — brand. Never a status, never a health indicator, never a risk level. */
+  --color-iris-50: #eff0fe;
+  --color-iris-100: #e0e2fd;
+  --color-iris-200: #c4c7fb;
+  --color-iris-300: #9fa3f7;
+  --color-iris-400: #7e82f2;
+  --color-iris-500: #5a5cf0;
+  --color-iris-600: #4644d6;
+  --color-iris-700: #3735ac;
+  --color-iris-800: #2b2a82;
+  --color-iris-900: #1f1e5c;
+  --color-iris-950: #111033;
+
+  /* Ember — the colour of human involvement */
+  --color-ember-200: #ffe3bc;
+  --color-ember-300: #ffcf87;
+  --color-ember-400: #f7b15c;
+  --color-ember-500: #e89234;
+  --color-ember-600: #c4711f;
+  --color-ember-700: #94520f;
+  --color-ember-950: #2e1a05;
+
+  /* Status hues — one job each */
+  --color-verdant-400: #5ad9a6;
+  --color-verdant-500: #2fcb8b;
+  --color-verdant-600: #0e9c66;
+  --color-verdant-950: #052b1d;
+
+  --color-signal-400: #ff8593;
+  --color-signal-500: #ff5c6e;
+  --color-signal-600: #d62842;
+  --color-signal-950: #3a0a12;
+
+  --color-pulse-400: #63d8f0;
+  --color-pulse-500: #31c6e8;
+  --color-pulse-600: #0c93b4;
+  --color-pulse-950: #06283a;
+}
+
+/* ── 3. Semantic layer ──────────────────────────────────────────────────────
+   `@theme inline` emits utilities that reference the --ink-* custom property at
+   runtime, so every one of these responds to the .dark class. This is what makes
+   `bg-surface-raised` correct in both themes without a single `dark:` variant. */
+@theme inline {
+  /* Surfaces */
+  --color-surface-void: var(--ink-surface-void);
+  --color-surface-app: var(--ink-surface-app);
+  --color-surface-base: var(--ink-surface-base);
+  --color-surface-raised: var(--ink-surface-raised);
+  --color-surface-overlay: var(--ink-surface-overlay);
+  --color-surface-hover: var(--ink-surface-hover);
+
+  /* Foreground */
+  --color-fg-max: var(--ink-fg-max);
+  --color-fg-high: var(--ink-fg-high);
+  --color-fg-primary: var(--ink-fg-primary);
+  --color-fg-secondary: var(--ink-fg-secondary);
+  --color-fg-muted: var(--ink-fg-muted);
+  --color-fg-disabled: var(--ink-fg-disabled);
+  --color-fg-on-brand: var(--ink-fg-on-brand);
+
+  /* Edges. Consumed through the `border-subtle` etc. utilities in §5. */
+  --color-edge-subtle: var(--ink-edge-subtle);
+  --color-edge-default: var(--ink-edge-default);
+  --color-edge-strong: var(--ink-edge-strong);
+
+  /* Brand */
+  --color-brand: var(--ink-brand);
+  --color-brand-hover: var(--ink-brand-hover);
+  --color-brand-pressed: var(--ink-brand-pressed);
+  --color-brand-tint: var(--ink-brand-tint);
+  --color-brand-border: var(--ink-brand-border);
+
+  /* Status — each has exactly one meaning. See design §3.5. */
+  --color-status-succeeded: var(--ink-status-succeeded);
+  --color-status-failed: var(--ink-status-failed);
+  --color-status-live: var(--ink-status-live);
+  --color-status-waiting: var(--ink-status-waiting);
+  --color-status-queued: var(--ink-status-queued);
+  --color-status-cancelled: var(--ink-status-cancelled);
+
+  /* Status tints — for badge fills and row washes */
+  --color-status-succeeded-tint: var(--ink-status-succeeded-tint);
+  --color-status-failed-tint: var(--ink-status-failed-tint);
+  --color-status-live-tint: var(--ink-status-live-tint);
+  --color-status-waiting-tint: var(--ink-status-waiting-tint);
+
+  /* Environment chrome — design §3.6 */
+  --color-env-production: var(--ink-env-production);
+  --color-env-staging: var(--ink-env-staging);
+  --color-env-development: var(--ink-env-development);
+}
+
+/* ── 4. Theme bindings ──────────────────────────────────────────────────────
+   Dark is the product default (design §3.2) and is authored first; light is
+   derived from it, never the reverse. */
+
+/* Light */
+:root {
+  --ink-surface-void: var(--color-paper-100);
+  --ink-surface-app: var(--color-paper-50);
+  --ink-surface-base: var(--color-paper-0);
+  --ink-surface-raised: var(--color-paper-0);
+  --ink-surface-overlay: var(--color-paper-0);
+  --ink-surface-hover: var(--color-paper-100);
+
+  --ink-fg-max: var(--color-paper-1000);
+  --ink-fg-high: var(--color-paper-900);
+  --ink-fg-primary: var(--color-paper-900);
+  --ink-fg-secondary: var(--color-paper-700);
+  --ink-fg-muted: var(--color-paper-500);
+  --ink-fg-disabled: var(--color-paper-400);
+  --ink-fg-on-brand: var(--color-paper-0);
+
+  --ink-edge-subtle: var(--color-paper-200);
+  --ink-edge-default: var(--color-paper-300);
+  --ink-edge-strong: var(--color-paper-400);
+
+  --ink-brand: var(--color-iris-600);
+  --ink-brand-hover: var(--color-iris-500);
+  --ink-brand-pressed: var(--color-iris-700);
+  --ink-brand-tint: var(--color-iris-50);
+  --ink-brand-border: var(--color-iris-200);
+
+  --ink-status-succeeded: var(--color-verdant-600);
+  --ink-status-failed: var(--color-signal-600);
+  --ink-status-live: var(--color-pulse-600);
+  --ink-status-waiting: var(--color-ember-600);
+  --ink-status-queued: var(--color-paper-500);
+  --ink-status-cancelled: var(--color-paper-400);
+
+  --ink-status-succeeded-tint: #e4f7ee;
+  --ink-status-failed-tint: #fdeaed;
+  --ink-status-live-tint: #e2f6fb;
+  --ink-status-waiting-tint: var(--color-ember-200);
+
+  --ink-env-production: var(--color-iris-600);
+  --ink-env-staging: var(--color-ember-600);
+  --ink-env-development: var(--color-pulse-600);
+
+  /* Elevation — tinted with the surface hue, never pure black. Design §3.7. */
+  --shadow-1: 0 1px 2px -1px rgb(27 32 48 / 0.1), 0 1px 1px rgb(27 32 48 / 0.06);
+  --shadow-2: 0 4px 12px -3px rgb(27 32 48 / 0.1), 0 2px 4px -2px rgb(27 32 48 / 0.06);
+  --shadow-3: 0 16px 36px -12px rgb(27 32 48 / 0.14), 0 4px 10px -4px rgb(27 32 48 / 0.08);
+  --shadow-focus: 0 0 0 2px var(--ink-surface-base), 0 0 0 4px var(--color-iris-600);
+  --glow-live: 0 0 0 1px rgb(12 147 180 / 0.28), 0 0 16px -4px rgb(12 147 180 / 0.34);
+}
+
+/* Dark — the product default */
+.dark {
+  --ink-surface-void: var(--color-graphite-1000);
+  --ink-surface-app: var(--color-graphite-950);
+  --ink-surface-base: var(--color-graphite-900);
+  --ink-surface-raised: var(--color-graphite-850);
+  --ink-surface-overlay: var(--color-graphite-800);
+  --ink-surface-hover: var(--color-graphite-750);
+
+  --ink-fg-max: var(--color-graphite-50);
+  --ink-fg-high: var(--color-graphite-100);
+  --ink-fg-primary: var(--color-graphite-200);
+  --ink-fg-secondary: var(--color-graphite-300);
+  --ink-fg-muted: var(--color-graphite-400);
+  --ink-fg-disabled: var(--color-graphite-500);
+  --ink-fg-on-brand: var(--color-graphite-50);
+
+  --ink-edge-subtle: var(--color-graphite-700);
+  --ink-edge-default: var(--color-graphite-600);
+  --ink-edge-strong: var(--color-graphite-500);
+
+  --ink-brand: var(--color-iris-400);
+  --ink-brand-hover: var(--color-iris-300);
+  --ink-brand-pressed: var(--color-iris-500);
+  --ink-brand-tint: var(--color-iris-950);
+  --ink-brand-border: var(--color-iris-800);
+
+  --ink-status-succeeded: var(--color-verdant-500);
+  --ink-status-failed: var(--color-signal-500);
+  --ink-status-live: var(--color-pulse-500);
+  --ink-status-waiting: var(--color-ember-400);
+  --ink-status-queued: var(--color-graphite-400);
+  --ink-status-cancelled: var(--color-graphite-500);
+
+  --ink-status-succeeded-tint: var(--color-verdant-950);
+  --ink-status-failed-tint: var(--color-signal-950);
+  --ink-status-live-tint: var(--color-pulse-950);
+  --ink-status-waiting-tint: var(--color-ember-950);
+
+  --ink-env-production: var(--color-iris-500);
+  --ink-env-staging: var(--color-ember-500);
+  --ink-env-development: var(--color-pulse-500);
+
+  --shadow-1: 0 1px 2px -1px rgb(11 13 20 / 0.4), 0 1px 1px rgb(11 13 20 / 0.24);
+  --shadow-2: 0 4px 12px -3px rgb(11 13 20 / 0.42), 0 2px 4px -2px rgb(11 13 20 / 0.28);
+  --shadow-3: 0 16px 36px -12px rgb(11 13 20 / 0.52), 0 4px 10px -4px rgb(11 13 20 / 0.32);
+  --shadow-focus: 0 0 0 2px var(--ink-surface-base), 0 0 0 4px var(--color-iris-500);
+  --glow-live: 0 0 0 1px rgb(49 198 232 / 0.28), 0 0 16px -4px rgb(49 198 232 / 0.34);
+}
+
+/* ── 5. Border utilities ────────────────────────────────────────────────────
+   CLAUDE.md names these `border-subtle` / `border-default` / `border-strong`.
+   A colour key literally named `border-subtle` would generate the class
+   `border-border-subtle`, so the ergonomic names are provided as explicit
+   utilities over the `edge` colour scale. */
+@utility border-subtle {
+  border-color: var(--ink-edge-subtle);
+}
+@utility border-default {
+  border-color: var(--ink-edge-default);
+}
+@utility border-strong {
+  border-color: var(--ink-edge-strong);
+}

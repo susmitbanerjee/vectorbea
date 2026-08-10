@@ -84,10 +84,19 @@ jobs:
         run: npm ci
 
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
-        run: npx next lint || true   # warn-only, not blocking
+        run: npm run lint
+
+      # Design constitution — /CLAUDE.md. Fails on raw hex/rgb/hsl, default
+      # Tailwind palette classes, Lucide imports or emoji anywhere in
+      # apps/web/src. Also prints the legacy migration baseline.
+      - name: Design token guardrails
+        run: npm run check:tokens
+
+      - name: Architecture boundaries
+        run: npm run check:boundaries
 
       - name: Build
         run: npm run build

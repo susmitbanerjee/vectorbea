@@ -1,0 +1,60 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   INK & IRIS — Layout tokens
+   Design direction §8.
+
+   Lattice is 4px. Radii come from a six-step scale and nothing else
+   (CLAUDE.md hard rules 5 and 6).
+══════════════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── Radii — the complete permitted set. Nothing else exists. ─────────── */
+  --radius-xs: 4px; /* chips, ribbon cells */
+  --radius-sm: 6px; /* inputs, buttons */
+  --radius-md: 8px; /* cards */
+  --radius-lg: 12px; /* panels */
+  --radius-xl: 16px; /* modals, marketing */
+  /* `rounded-full` is built in. */
+
+  /* ── Spacing — 4px base. Tailwind derives the whole scale from this. ──── */
+  --spacing: 4px;
+
+  /* ── Content max-widths — design §8 ───────────────────────────────────── */
+  --container-product: 1600px;
+  --container-marketing: 1200px;
+  --container-prose: 68ch;
+
+  /* ── Density modes — persisted per user, per table ────────────────────── */
+  --row-comfortable: 44px;
+  --row-default: 36px;
+  --row-compact: 28px;
+
+  /* ── Chrome ───────────────────────────────────────────────────────────── */
+  --sidebar-expanded: 248px;
+  --sidebar-collapsed: 56px;
+  --env-rail: 2px; /* environment rail along the viewport top, design §3.6 */
+}
+
+/* ── Elevation utilities ──────────────────────────────────────────────────────
+   Shadows are tinted with the surface hue, never pure black. The values live in
+   colour.css because they are theme-dependent; these expose them as utilities. */
+@utility elevation-1 {
+  box-shadow: var(--shadow-1);
+}
+@utility elevation-2 {
+  box-shadow: var(--shadow-2);
+}
+@utility elevation-3 {
+  box-shadow: var(--shadow-3);
+}
+
+/* The focus ring. Every interactive element must show this on :focus-visible
+   (CLAUDE.md "every component must define … focus-visible"). */
+@utility focus-ring {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* Live/executing emphasis — the only place a glow is permitted. */
+@utility glow-live {
+  box-shadow: var(--glow-live);
+}

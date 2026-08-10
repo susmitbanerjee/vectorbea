@@ -1,0 +1,55 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   INK & IRIS — Motion tokens
+   Design direction §7.
+
+   THE LAW
+     Motion explains state change. Motion that decorates is deleted.
+     Every animation must answer "what just changed, and where did it come from?"
+
+   Animate transform and opacity ONLY. Never width, height, top or left
+   (CLAUDE.md hard rule 9).
+══════════════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── Duration ─────────────────────────────────────────────────────────── */
+  --duration-instant: 90ms; /* state flips, toggles */
+  --duration-fast: 140ms; /* hover, press, tooltip */
+  --duration-base: 200ms; /* dropdowns, tabs, chips */
+  --duration-slow: 320ms; /* drawers, sheets, route change */
+  --duration-deliberate: 480ms; /* first-paint orchestration only */
+
+  /* ── Easing ───────────────────────────────────────────────────────────── */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ── Springs ──────────────────────────────────────────────────────────────────
+   Consumed by Motion (framer-motion) in TS, not by CSS. Mirrored as custom
+   properties so the values have exactly one source of truth. Read them from
+   src/lib/motion.ts — never retype the numbers into a component. */
+:root {
+  --spring-canvas-stiffness: 260;
+  --spring-canvas-damping: 30;
+  --spring-canvas-mass: 0.9;
+
+  --spring-cell-stiffness: 420;
+  --spring-cell-damping: 26;
+  --spring-cell-mass: 0.7;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────────
+   Design §7.1: collapses to opacity-only at 90ms. This is the global floor;
+   components must still honour the preference in their own JS-driven motion
+   (see prefersReducedMotion() in src/lib/motion.ts). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--duration-instant) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--duration-instant) !important;
+    transition-property: opacity !important;
+    scroll-behavior: auto !important;
+  }
+}

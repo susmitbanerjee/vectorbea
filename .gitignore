@@ -59,6 +59,12 @@ env/
 coverage/
 .nyc_output/
 test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# ── Storybook ────────────────────────────────────────────────────────────────
+storybook-static/
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 *.pem

@@ -1,8 +1,22 @@
+/*
+ * FROZEN LEGACY CONFIG — DO NOT ADD TO THIS FILE.
+ *
+ * Loaded by app/globals.css via `@config` purely so the pre-revamp application
+ * keeps rendering under Tailwind v4. It backs ~1,490 default-palette classes and
+ * every `vbgreen` / `surface` / `sidebar` class in apps/web/{app,components}.
+ *
+ * New design tokens belong in src/styles/tokens/*.css under `@theme`.
+ * This file is deleted at the end of the revamp — see
+ * /docs/audit/CURRENT-STATE.md §10, Stage 6.
+ */
 import type { Config } from "tailwindcss";
 import typography from "@tailwindcss/typography";
 
 const config: Config = {
-  darkMode: ["class"],
+  // `darkMode` is intentionally absent. Tailwind v4 types reject the v3
+  // `["class"]` form, and the dark variant is now declared in CSS instead:
+  //   @custom-variant dark (&:where(.dark, .dark *));
+  // in src/styles/tokens/colour.css.
   content: [
     "./app/**/*.{ts,tsx,mdx}",
     "./components/**/*.{ts,tsx}",
@@ -61,13 +75,10 @@ const config: Config = {
           hover:      "#F3F4F5",
         },
 
-        // Surface hierarchy
-        surface: {
-          1:     "#FFFFFF",
-          2:     "#FFFFFF",
-          3:     "#F3F4F5",
-          hover: "#F3F4F5",
-        },
+        // NOTE: the legacy `surface` scale was removed during the v4 migration.
+        // It had zero usages across apps/web (verified by grep) and its
+        // `surface-hover` key shadowed the new themed `bg-surface-hover` token
+        // in src/styles/tokens/colour.css. Surfaces now come from @theme only.
 
         // Brand green scale
         vbgreen: {
@@ -88,13 +99,22 @@ const config: Config = {
         },
       },
       borderRadius: {
+        // v3→v4 compat: v4 renames `rounded` → `rounded-sm`. Pinning DEFAULT keeps
+        // the 81 bare `rounded` utilities in legacy code rendering at 4px.
+        DEFAULT: "0.25rem",
         "2xl": "1rem",
         xl:    "0.75rem",
         lg:    "0.625rem", // 10px — primary card radius
         md:    "0.4375rem", // 7px — button/input radius
         sm:    "0.25rem",  // 4px — badge/tag radius
       },
+      blur: {
+        // v3→v4 compat: v4 renames `blur` → `blur-sm`. 6 bare uses in legacy code.
+        DEFAULT: "8px",
+      },
       boxShadow: {
+        // v3→v4 compat: v4 renames `shadow` → `shadow-sm`. 5 bare uses in legacy code.
+        DEFAULT: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
         xs:     "0 1px 2px rgba(0,0,0,0.04)",
         sm:     "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
         md:     "0 4px 8px -1px rgba(0,0,0,0.06), 0 2px 4px -1px rgba(0,0,0,0.04)",

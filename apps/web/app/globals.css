@@ -1,6 +1,23 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* ══════════════════════════════════════════════════════════════════════════════
+   Tailwind CSS v4 entry point.
+
+   Two token systems coexist by design during the "Ink & Iris" revamp:
+
+   1. NEW — src/styles/tokens/*.css declare the Ink & Iris design tokens with
+      `@theme`. All new work in src/** uses these, and only these.
+   2. LEGACY — tailwind.config.ts is loaded via `@config` so the pre-revamp app
+      in app/** and components/** keeps rendering. Frozen; deleted in Stage 6.
+
+   See /docs/audit/CURRENT-STATE.md §6 for the v3→v4 migration record.
+══════════════════════════════════════════════════════════════════════════════ */
+@import "tailwindcss";
+
+@import "../src/styles/tokens/colour.css";
+@import "../src/styles/tokens/typography.css";
+@import "../src/styles/tokens/motion.css";
+@import "../src/styles/tokens/layout.css";
+
+@config "../tailwind.config.ts";
 
 @layer base {
   /* ══════════════════════════════════════════════════════════════════════════
