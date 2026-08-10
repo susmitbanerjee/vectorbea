@@ -6,7 +6,7 @@ import { emailConfigured } from "@/lib/server/email";
 import { VerifyEmailScreen } from "@/components/auth/verify-email-screen";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Verify your email — Vectorbea" };
+export const metadata = { title: "Verify your email — Vectorbea", robots: { index: false, follow: false } };
 
 /**
  * /verify-email — shown to signed-in users whose address isn't confirmed yet.

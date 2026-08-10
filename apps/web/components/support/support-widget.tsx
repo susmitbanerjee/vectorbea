@@ -26,14 +26,12 @@ const SEVERITIES = [
 ];
 
 const STATUS_CHIP: Record<string, { bg: string; fg: string; bd: string; label: string }> = {
-  open:        { bg: "#FFFBEB", fg: "#92400E", bd: "#FDE68A", label: "Open" },
-  in_progress: { bg: "#F0FDFA", fg: "#0F766E", bd: "#99F6E4", label: "In progress" },
-  resolved:    { bg: "#E6F4EF", fg: "#006B45", bd: "#9CCFBB", label: "Resolved" },
-  closed:      { bg: "#F3F4F5", fg: "#6B7280", bd: "#E0E3E6", label: "Closed" },
+  OPEN:     { bg: "#FFFBEB", fg: "#92400E", bd: "#FDE68A", label: "Open" },
+  RESOLVED: { bg: "#E6F4EF", fg: "#006B45", bd: "#9CCFBB", label: "Resolved" },
 };
 
-interface IncidentView {
-  id: string; subject: string; status: string; severity: string;
+interface TicketView {
+  ticket_number: string; subject: string; status: string; priority: string;
   admin_note: string | null; created_at: string;
 }
 
@@ -47,13 +45,13 @@ export function SupportWidget() {
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [mine, setMine] = useState<IncidentView[] | null>(null);
+  const [mine, setMine] = useState<TicketView[] | null>(null);
 
   useEffect(() => {
     if (open && view === "mine" && mine === null) {
-      void fetch("/api/support/incidents")
+      void fetch("/api/support")
         .then((r) => r.json())
-        .then((d: { incidents?: IncidentView[] }) => setMine(d.incidents ?? []))
+        .then((d: { tickets?: TicketView[] }) => setMine(d.tickets ?? []))
         .catch(() => setMine([]));
     }
   }, [open, view, mine]);
@@ -69,10 +67,10 @@ export function SupportWidget() {
     if (description.trim().length < 10) { setError("Describe the issue in a bit more detail."); return; }
     setSending(true);
     try {
-      const res = await fetch("/api/support/incidents", {
+      const res = await fetch("/api/support", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category, severity, subject: subject.trim(), description: description.trim(), pagePath: pathname }),
+        body: JSON.stringify({ category, severity, subject: subject.trim(), message: description.trim(), pagePath: pathname }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) { setError(data.error ?? "Could not file the report. Try again."); return; }
@@ -176,7 +174,7 @@ export function SupportWidget() {
                     className={selectCls}
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
-                    maxLength={160}
+                    maxLength={200}
                     placeholder="Run stuck at approval gate"
                   />
                 </div>
@@ -185,7 +183,7 @@ export function SupportWidget() {
                   <textarea
                     className="w-full resize-none rounded-[8px] border border-[#E0E3E6] bg-white px-2.5 py-2 text-[12.5px] leading-[1.55] text-[#0B0D0F] focus:border-[#007F4E] focus:outline-none focus:ring-2 focus:ring-[#007F4E]/15"
                     rows={4}
-                    maxLength={5000}
+                    maxLength={10000}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="What did you do, what did you expect, what happened instead? Run/workflow IDs help a lot."
@@ -215,9 +213,9 @@ export function SupportWidget() {
               ) : (
                 <div className="space-y-2">
                   {mine.map((i) => {
-                    const chip = STATUS_CHIP[i.status] ?? STATUS_CHIP.open!;
+                    const chip = STATUS_CHIP[i.status] ?? STATUS_CHIP.OPEN!;
                     return (
-                      <div key={i.id} className="rounded-[10px] border border-[#ECEEEF] p-3">
+                      <div key={i.ticket_number} className="rounded-[10px] border border-[#ECEEEF] p-3">
                         <div className="flex items-center justify-between gap-2">
                           <p className="truncate text-[12.5px] font-semibold text-[#0B0D0F]">{i.subject}</p>
                           <span className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold" style={{ background: chip.bg, color: chip.fg, borderColor: chip.bd }}>
@@ -225,7 +223,7 @@ export function SupportWidget() {
                           </span>
                         </div>
                         <p className="mt-0.5 font-mono text-[10px] text-[#9CA3AF]">
-                          {i.severity} · {new Date(i.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          {i.ticket_number} · {new Date(i.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                         </p>
                         {i.admin_note && (
                           <p className="mt-1.5 rounded-[7px] bg-[#FAFBFB] px-2 py-1.5 text-[11.5px] leading-[1.5] text-[#4B5563]">

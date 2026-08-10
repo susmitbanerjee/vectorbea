@@ -16,6 +16,13 @@ import { WorkspaceProvider } from "@/lib/workspace-context";
 
 export const dynamic = "force-dynamic";
 
+// The entire authenticated application is private — keep every (app) route out
+// of search indexes. Access is still enforced by auth below; this is defense in
+// depth so nothing here can surface as a search result.
+export const metadata = {
+  robots: { index: false, follow: false },
+};
+
 // Auth is always required — JWT_SECRET controls it.
 // If JWT_SECRET is not set the app degrades gracefully (shows UI without data).
 const REQUIRE_AUTH = !!process.env.JWT_SECRET;

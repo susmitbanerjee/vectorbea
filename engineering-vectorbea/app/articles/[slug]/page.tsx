@@ -13,7 +13,7 @@ import { TableOfContents } from "@/components/TableOfContents";
 import { RelatedArticles } from "@/components/RelatedArticles";
 import { ReadingProgressBar } from "@/components/ReadingProgressBar";
 import { TagPill } from "@/components/TagPill";
-import { buildMetadata } from "@/lib/seo";
+import { buildMetadata, blogPostingJsonLd, breadcrumbJsonLd, serializeJsonLd } from "@/lib/seo";
 import { SITE, SERIES } from "@/lib/constants";
 
 export function generateStaticParams() {
@@ -44,8 +44,29 @@ export default async function ArticlePage({ params }: { params: { slug: string }
   const { prev, next } = getAdjacentInSeries(article);
   const seriesInfo = article.frontMatter.series === "building-vectorbea" ? SERIES["building-vectorbea"] : null;
 
+  const structuredData = [
+    blogPostingJsonLd({
+      title: article.frontMatter.title,
+      description: article.frontMatter.description,
+      path: `/articles/${article.slug}`,
+      datePublished: article.frontMatter.date,
+      authorName: article.frontMatter.author,
+      tags: article.frontMatter.tags,
+    }),
+    breadcrumbJsonLd([
+      { name: "Home", path: "/" },
+      { name: "Articles", path: "/articles" },
+      { name: article.frontMatter.title, path: `/articles/${article.slug}` },
+    ]),
+  ];
+
   return (
     <div className="mx-auto max-w-page px-6 py-12">
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(structuredData) }}
+      />
       <ReadingProgressBar />
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_240px] lg:gap-12">
         <article className="mx-auto w-full max-w-article">
