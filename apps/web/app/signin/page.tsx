@@ -8,6 +8,7 @@ import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/
 export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Sign in",
+  robots: { index: false, follow: false },
 };
 
 export default async function SigninPage({

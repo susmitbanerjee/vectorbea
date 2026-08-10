@@ -31,6 +31,7 @@ import { Logo } from "@/components/ui/Logo";
 import type { DashboardSummary } from "@/lib/api";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { cn } from "@/lib/utils";
+import { envBadgeLabel } from "@/lib/env";
 import { useRBAC, useWorkspace } from "@/lib/workspace-context";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -135,6 +136,9 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
   const { activeWorkspaceId } = useWorkspace();
 
   const [collapsed, setCollapsed] = useState(false);
+
+  // Non-prod deployments (staging/dev) surface a "Dev" badge; null in prod.
+  const envLabel = envBadgeLabel();
 
   useEffect(() => {
     const stored = localStorage.getItem(COLLAPSED_KEY);
@@ -329,12 +333,20 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
       {/* ── Logo / header ─────────────────────────────────────────────────── */}
       <div className="px-3.5 pb-2.5 pt-3">
         {collapsed ? (
-          <div className="flex items-center justify-center" style={{ height: 44 }}>
+          <div className="flex flex-col items-center justify-center gap-1" style={{ minHeight: 44 }}>
             <Link href="/dashboard" className="flex items-center justify-center">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#0B0D0F]">
                 <Logo className="h-3.5 w-3.5 text-white" />
               </div>
             </Link>
+            {envLabel && (
+              <span
+                title={`${envLabel} environment`}
+                className="rounded border border-[#FDE68A] bg-[#FFFBEB] px-1 font-mono text-[8px] font-bold uppercase leading-[1.5] tracking-[0.1em] text-[#92400E]"
+              >
+                {envLabel}
+              </span>
+            )}
           </div>
         ) : (
           <>
@@ -348,6 +360,14 @@ export function AppSidebar({ summary, user }: { summary: DashboardSummary | null
                   Vectorbea
                 </span>
               </Link>
+              {envLabel && (
+                <span
+                  title={`${envLabel} environment`}
+                  className="rounded border border-[#FDE68A] bg-[#FFFBEB] px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#92400E]"
+                >
+                  {envLabel}
+                </span>
+              )}
             </div>
             <WorkspaceSwitcher />
           </>

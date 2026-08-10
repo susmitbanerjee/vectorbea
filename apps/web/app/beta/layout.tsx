@@ -6,6 +6,11 @@ import { isEmailVerified } from "@/lib/auth/neon-auth";
 
 export const dynamic = "force-dynamic";
 
+// Private beta application — keep out of search indexes.
+export const metadata = {
+  robots: { index: false, follow: false },
+};
+
 /**
  * Gate for the beta application: must be signed in AND email-verified.
  * Unverified users go back to /verify-email; signed-out users to /signin.

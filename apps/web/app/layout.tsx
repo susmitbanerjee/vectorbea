@@ -5,6 +5,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { BootstrapProvider } from "@/components/BootstrapProvider";
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
+import { SITE } from "@/lib/seo";
 import "@/app/globals.css";
 
 const geist = Geist({
@@ -21,9 +22,27 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vectorbea",
-  description:
-    "Production control plane for scheduled and long-running AI agent jobs. Schedule, inspect, retry, and approve AI agent runs with complete execution traceability.",
+  metadataBase: new URL(SITE.url),
+  title: {
+    default: SITE.defaultTitle,
+    template: SITE.titleTemplate,
+  },
+  description: SITE.description,
+  applicationName: SITE.name,
+  openGraph: {
+    type: "website",
+    siteName: SITE.name,
+    url: SITE.url,
+    title: SITE.defaultTitle,
+    description: SITE.description,
+    images: [{ url: SITE.ogImagePath, width: 1200, height: 630, alt: SITE.defaultTitle }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE.defaultTitle,
+    description: SITE.description,
+    images: [SITE.ogImagePath],
+  },
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     shortcut: "/icon.svg",

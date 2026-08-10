@@ -5,15 +5,22 @@ import { isSupportAdmin } from "@/lib/server/support";
 import { SupportPortal } from "@/components/support/support-portal";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Support portal — Vectorbea" };
+export const metadata = { title: "Support portal — Vectorbea", robots: { index: false, follow: false } };
 
 /**
- * /support — admin incident portal (served on support.vectorbea.com via the
- * middleware host rewrite). Only the SUPPORT_EMAIL account may enter.
+ * /support — in-app admin support portal. Only support admins
+ * (SUPPORT_ADMIN_EMAILS) may enter. Notification emails deep-link here via
+ * /support?ticket=VB-XXXXXX, which the portal auto-opens.
  */
-export default async function SupportPortalPage() {
+export default async function SupportPortalPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ticket?: string }>;
+}) {
   const user = await getAuthenticatedUserFromCookies(await cookies());
   if (!user) redirect("/signin?next=/support");
+
+  const { ticket } = await searchParams;
 
   if (!isSupportAdmin(user.email)) {
     return (
@@ -30,5 +37,5 @@ export default async function SupportPortalPage() {
     );
   }
 
-  return <SupportPortal adminEmail={user.email} />;
+  return <SupportPortal adminEmail={user.email} initialTicket={ticket ?? null} />;
 }
