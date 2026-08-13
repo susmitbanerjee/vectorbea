@@ -96,6 +96,14 @@ const config = [
     files: ["src/styles/**"],
     rules: { "no-restricted-syntax": "off" },
   },
+
+  // Third-party brand colours are trademarks, not design tokens — they are fixed
+  // by other companies' guidelines and must not be themed. Quarantined to one
+  // file so the exception cannot spread. See the header in that file.
+  {
+    files: ["src/components/ui/provider-brand-colours.ts"],
+    rules: { "no-restricted-syntax": "off" },
+  },
 ];
 
 export default config;

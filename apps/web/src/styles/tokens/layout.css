@@ -1,60 +1,108 @@
 /* ══════════════════════════════════════════════════════════════════════════════
    INK & IRIS — Layout tokens
-   Design direction §8.
+   Design direction §8, plus the elevation set from §3.7.
 
    Lattice is 4px. Radii come from a six-step scale and nothing else
-   (CLAUDE.md hard rules 5 and 6).
+   (CLAUDE.md rules 5 and 6). Borders are always 1px — emphasis comes from the
+   colour step, never the width.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 @theme {
+  /* ── Spacing lattice (§8) ─────────────────────────────────────────────────
+     Tailwind derives the whole numeric scale from this base, so p-1 = 4px,
+     p-2 = 8px, p-3 = 12px, p-4 = 16px, p-5 = 20px, p-6 = 24px.
+     Component padding steps: 4 · 6 · 8 · 12 · 16 · 20 · 24
+     Section rhythm:          32 · 48 · 64 · 96 */
+  --spacing: 4px;
+
   /* ── Radii — the complete permitted set. Nothing else exists. ─────────── */
   --radius-xs: 4px; /* chips, ribbon cells */
   --radius-sm: 6px; /* inputs, buttons */
   --radius-md: 8px; /* cards */
   --radius-lg: 12px; /* panels */
   --radius-xl: 16px; /* modals, marketing */
-  /* `rounded-full` is built in. */
+  /* rounded-full is built in. */
 
-  /* ── Spacing — 4px base. Tailwind derives the whole scale from this. ──── */
-  --spacing: 4px;
-
-  /* ── Content max-widths — design §8 ───────────────────────────────────── */
+  /* ── Content max-widths (§8) ──────────────────────────────────────────── */
   --container-product: 1600px;
   --container-marketing: 1200px;
   --container-prose: 68ch;
 
-  /* ── Density modes — persisted per user, per table ────────────────────── */
+  /* ── Density modes (§8). Persisted per user, per table. ───────────────── */
   --row-comfortable: 44px;
   --row-default: 36px;
   --row-compact: 28px;
 
-  /* ── Chrome ───────────────────────────────────────────────────────────── */
+  /* ── Chrome (§8, §3.6) ────────────────────────────────────────────────── */
   --sidebar-expanded: 248px;
   --sidebar-collapsed: 56px;
-  --env-rail: 2px; /* environment rail along the viewport top, design §3.6 */
+  --env-rail: 2px; /* environment rail along the viewport top */
 }
 
-/* ── Elevation utilities ──────────────────────────────────────────────────────
-   Shadows are tinted with the surface hue, never pure black. The values live in
-   colour.css because they are theme-dependent; these expose them as utilities. */
-@utility elevation-1 {
-  box-shadow: var(--shadow-1);
-}
-@utility elevation-2 {
-  box-shadow: var(--shadow-2);
-}
-@utility elevation-3 {
-  box-shadow: var(--shadow-3);
+/* ── Z-index scale ────────────────────────────────────────────────────────────
+   A closed set. A component that needs a layer not on this list is a component
+   that has misunderstood which layer it belongs to. Declared as plain custom
+   properties AND as utilities so both CSS and className usage stay on-scale. */
+:root {
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-popover: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
 }
 
-/* The focus ring. Every interactive element must show this on :focus-visible
-   (CLAUDE.md "every component must define … focus-visible"). */
+@utility z-base {
+  z-index: var(--z-base);
+}
+@utility z-sticky {
+  z-index: var(--z-sticky);
+}
+@utility z-dropdown {
+  z-index: var(--z-dropdown);
+}
+@utility z-overlay {
+  z-index: var(--z-overlay);
+}
+@utility z-modal {
+  z-index: var(--z-modal);
+}
+@utility z-popover {
+  z-index: var(--z-popover);
+}
+@utility z-toast {
+  z-index: var(--z-toast);
+}
+@utility z-tooltip {
+  z-index: var(--z-tooltip);
+}
+
+/* ── Elevation (§3.7) ─────────────────────────────────────────────────────────
+   Shadows are tinted with the surface hue and never pure black. The values are
+   theme-dependent and live in colour.css as --elev-*; bridging them through
+   `@theme inline` here generates shadow-1 / shadow-2 / shadow-3 while keeping
+   them responsive to the theme class.
+
+   On dark, elevation is carried by border-lightening plus a very soft tint —
+   drop shadows look muddy on near-black, so shadow-3 is the only heavy step and
+   is reserved for modals. */
+@theme inline {
+  --shadow-1: var(--elev-1);
+  --shadow-2: var(--elev-2);
+  --shadow-3: var(--elev-3);
+}
+
+/* The focus ring. Every interactive element shows this on :focus-visible.
+   Two-stop ring: a surface-coloured spacer, then the brand colour — so it stays
+   legible against any surface, including a selected row. */
 @utility focus-ring {
   outline: none;
-  box-shadow: var(--shadow-focus);
+  box-shadow: var(--elev-focus);
 }
 
-/* Live/executing emphasis — the only place a glow is permitted. */
+/* Live/executing emphasis — the only place a glow is permitted (§3.7). */
 @utility glow-live {
-  box-shadow: var(--glow-live);
+  box-shadow: var(--elev-glow-live);
 }

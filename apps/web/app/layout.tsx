@@ -6,6 +6,7 @@ import { BootstrapProvider } from "@/components/BootstrapProvider";
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import { SITE } from "@/lib/seo";
+import { fontVariables } from "~/styles/fonts";
 import "@/app/globals.css";
 
 const geist = Geist({
@@ -54,7 +55,13 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${geist.variable} ${geistMono.variable}`}>
+    // geist.* still feed --font-sans / --font-mono for the legacy layer;
+    // fontVariables adds --ff-display / --ff-ui / --ff-code for Ink & Iris.
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${geist.variable} ${geistMono.variable} ${fontVariables}`}
+    >
       <body className="font-sans antialiased">
         <ThemeProvider>
           <BootstrapProvider />

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { HomeContent } from "@/components/marketing/home-content";
+// The legacy HomeContent stays in the repo per CLAUDE.md; the route now renders
+// the Ink & Iris landing page. Metadata and structured data are unchanged.
+import { Landing } from "~/components/marketing/landing";
 import { JsonLd } from "@/components/seo/json-ld";
 import {
   SITE, createMetadata, organizationSchema, websiteSchema, softwareApplicationSchema,
@@ -19,7 +21,7 @@ export default function HomePage() {
   return (
     <>
       <JsonLd data={[organizationSchema(), websiteSchema(), softwareApplicationSchema()]} />
-      <HomeContent />
+      <Landing />
     </>
   );
 }

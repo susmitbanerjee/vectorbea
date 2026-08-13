@@ -16,23 +16,29 @@
    of a Runs table.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-@theme {
-  /* ── Families ─────────────────────────────────────────────────────────────
-     Named `display` / `ui` / `code` rather than `sans` / `mono` on purpose:
-     next/font already owns --font-sans and --font-mono on <html> (app/layout.tsx)
-     and the frozen legacy config maps font-sans/font-mono onto them. Redefining
-     either here would collide at equal specificity and resolve by source order.
-     New components use font-display / font-ui / font-code. */
-  --font-display:
-    "Cabinet Grotesk", var(--font-sans), "Inter", system-ui, -apple-system,
-    "Segoe UI", sans-serif;
-  --font-ui:
-    "Switzer", var(--font-sans), "Inter", system-ui, -apple-system, "Segoe UI",
-    sans-serif;
-  --font-code:
-    "JetBrains Mono", var(--font-mono), ui-monospace, "Cascadia Code", Menlo,
-    Consolas, monospace;
+/* ── Families ───────────────────────────────────────────────────────────────
+   --ff-* are emitted by next/font/local in src/styles/fonts.ts, which is the
+   single file to edit when swapping the typeface stack. They already carry
+   their own metric-matched fallbacks, so nothing more is appended here.
 
+   `@theme inline` is required, not stylistic. A plain @theme would emit
+   `--font-ui: var(--ff-ui)` into :root and substitute it THERE — and next/font
+   defines --ff-ui on the element carrying its generated class, not on :root. The
+   variable would resolve to nothing and every descendant would inherit that
+   emptiness, landing on the browser's default serif. `inline` makes the
+   `font-ui` utility emit `font-family: var(--ff-ui)` directly, so it resolves at
+   the element, wherever the font class happens to sit.
+
+   Named `display` / `ui` / `code` rather than `sans` / `mono` on purpose:
+   next/font already owns --font-sans and --font-mono on <html> for the legacy
+   Geist stack, and the frozen config maps font-sans/font-mono onto them. */
+@theme inline {
+  --font-display: var(--ff-display);
+  --font-ui: var(--ff-ui);
+  --font-code: var(--ff-code);
+}
+
+@theme {
   /* ── Scale ────────────────────────────────────────────────────────────────
      Each step pairs a size with its line-height and tracking. Use the paired
      utilities (text-display-lg, text-body-sm …) — never a bare px value. */
@@ -103,18 +109,49 @@
 
 /* ── Numeric law — design §4.2 ────────────────────────────────────────────────
    tabular-nums on EVERY number in a table, metric, counter, duration, cost or
-   token count. Non-negotiable: it is why animated counters do not jitter. */
+   token count. Non-negotiable: it is why animated counters do not jitter.
+
+   Applied by default inside the table and metric primitives rather than left to
+   call sites, so forgetting it is not possible. */
 @utility tabular {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   letter-spacing: 0;
 }
 
-/* An ID: mono, tabular, non-breaking. Pair with middle-truncation and
-   click-to-copy in the component layer (CLAUDE.md hard rule 8). */
+/* Tables and metrics opt every descendant in. `th`/`td` and anything inside a
+   metric block gets tabular figures without the author asking. */
+table.tabular-auto :is(th, td),
+.metric-block,
+.metric-block * {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── Mono behaviour ───────────────────────────────────────────────────────────
+   JetBrains Mono ships a slashed zero as the `zero` stylistic feature, and
+   `ss01` disambiguates the 1/l/I cluster further. Both are switched on wherever
+   the code face is used — a zero that can be mistaken for an O is a real hazard
+   when the text is a run ID or a token count. Ligatures stay OFF: `!=` and `=>`
+   must render as the characters actually present in a log line. */
+.font-code,
+[class*="font-code"] {
+  font-feature-settings:
+    "zero" 1,
+    "ss01" 1,
+    "calt" 0,
+    "liga" 0;
+  font-variant-ligatures: none;
+}
+
+/* An ID: mono, tabular, slashed zero, non-breaking. Pair with middle-truncation
+   and click-to-copy — see <MonoId> (CLAUDE.md hard rule 8). */
 @utility identifier {
   font-family: var(--font-code);
   font-size: var(--text-mono-sm);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings:
+    "zero" 1,
+    "ss01" 1;
   white-space: nowrap;
 }

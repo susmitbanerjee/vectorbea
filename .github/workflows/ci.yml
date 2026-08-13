@@ -95,6 +95,11 @@ jobs:
       - name: Design token guardrails
         run: npm run check:tokens
 
+      # WCAG contrast for every semantic pairing in both themes, plus the
+      # brand/status disjointness rule. See src/styles/tokens/colour.css.
+      - name: Contrast and governing rule
+        run: npm run check:contrast
+
       - name: Architecture boundaries
         run: npm run check:boundaries
 

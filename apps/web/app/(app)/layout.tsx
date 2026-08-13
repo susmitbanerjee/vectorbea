@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { AppSidebar } from "@/components/layout/app-sidebar";
+// AppShell replaces the presentational chrome only. Every auth, verification
+// and beta gate below is untouched, as is the legacy AppSidebar component, which
+// stays in the repo until the last screen is migrated (CLAUDE.md).
+import { AppShell } from "~/components/app/shell/app-shell";
 import { TelemetryPageViews } from "@/components/layout/telemetry-page-views";
 import { SupportWidget } from "@/components/support/support-widget";
 import { OAuthTokenTransfer } from "@/components/layout/OAuthTokenTransfer";
@@ -104,13 +107,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
     return (
       <WorkspaceProvider organizations={organizations as never[]}>
-        <div className="flex h-screen overflow-hidden" style={{ background: "var(--bg-app)" }}>
-          <OAuthTokenTransfer />
-          <TelemetryPageViews />
-          <SupportWidget />
-          <AppSidebar summary={null} user={profile} />
-          <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "var(--bg-app)" }}>{children}</main>
-        </div>
+        <OAuthTokenTransfer />
+        <TelemetryPageViews />
+        <SupportWidget />
+        <AppShell
+          user={
+            profile
+              ? { name: profile.full_name ?? profile.email ?? "Account", email: profile.email ?? "" }
+              : null
+          }
+        >
+          {children}
+        </AppShell>
       </WorkspaceProvider>
     );
   }
@@ -118,10 +126,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // No JWT_SECRET — open/dev mode (all API calls will fail gracefully anyway)
   return (
     <WorkspaceProvider organizations={[] as never[]}>
-      <div className="flex h-screen overflow-hidden" style={{ background: "var(--bg-app)" }}>
-        <AppSidebar summary={null} user={null} />
-        <main className="min-w-0 h-full flex-1 overflow-y-auto" style={{ background: "var(--bg-app)" }}>{children}</main>
-      </div>
+      <AppShell user={null}>{children}</AppShell>
     </WorkspaceProvider>
   );
 }

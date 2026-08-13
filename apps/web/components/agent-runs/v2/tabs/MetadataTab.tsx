@@ -63,7 +63,7 @@ function KVTable({ rows }: { rows: { label: string; value: string; mono?: boolea
   return (
     <div
       className="overflow-hidden rounded-lg"
-      style={{ border: "1px solid var(--border-subtle)" }}
+      style={{ border: "1px solid var(--legacy-border-subtle)" }}
     >
       {rows.map((row, i) => (
         <div

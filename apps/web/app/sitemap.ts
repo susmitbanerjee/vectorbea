@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { absoluteUrl } from "@/lib/seo";
 import { USE_CASES, COMPARISONS, getUseCasePath, comparisonPath } from "@/lib/marketing/pages";
+import { DOCS_PAGES, docsPath } from "~/content/docs/registry";
 
 /**
  * /sitemap.xml — every valuable, indexable public URL on vectorbea.com.
@@ -16,13 +17,27 @@ import { USE_CASES, COMPARISONS, getUseCasePath, comparisonPath } from "@/lib/ma
 // Stable authored date for the hand-maintained top-level pages.
 const CORE_LAST_MODIFIED = "2026-08-10";
 
+// The docs were rebuilt wholesale in P09; every page is new as of this date.
+const DOCS_LAST_MODIFIED = "2026-08-12";
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const core: MetadataRoute.Sitemap = [
     { url: absoluteUrl("/"), lastModified: CORE_LAST_MODIFIED, changeFrequency: "weekly", priority: 1.0 },
     { url: absoluteUrl("/use-cases"), lastModified: CORE_LAST_MODIFIED, changeFrequency: "monthly", priority: 0.8 },
     { url: absoluteUrl("/compare"), lastModified: CORE_LAST_MODIFIED, changeFrequency: "monthly", priority: 0.6 },
-    { url: absoluteUrl("/docs"), lastModified: CORE_LAST_MODIFIED, changeFrequency: "weekly", priority: 0.7 },
   ];
+
+  /**
+   * Every docs page, driven off the registry so a new page is indexable the
+   * moment it is added rather than whenever someone remembers this file.
+   * /docs itself carries the higher priority as the section entry point.
+   */
+  const docs: MetadataRoute.Sitemap = DOCS_PAGES.map((p) => ({
+    url: absoluteUrl(docsPath(p.slug)),
+    lastModified: DOCS_LAST_MODIFIED,
+    changeFrequency: "weekly",
+    priority: p.slug === "introduction" ? 0.7 : 0.6,
+  }));
 
   const useCases: MetadataRoute.Sitemap = USE_CASES.map((p) => ({
     url: absoluteUrl(getUseCasePath(p.slug)),
@@ -38,5 +53,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.6,
   }));
 
-  return [...core, ...useCases, ...comparisons];
+  return [...core, ...useCases, ...comparisons, ...docs];
 }

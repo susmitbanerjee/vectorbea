@@ -194,7 +194,7 @@ function DetailsPanel({ event, onClose }: { event: RunTimelineEventUi; onClose: 
       {/* Header */}
       <div
         className="flex shrink-0 items-center gap-2 px-3 py-2.5"
-        style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-2)" }}
+        style={{ borderBottom: "1px solid var(--legacy-border-subtle)", background: "var(--surface-2)" }}
       >
         <span
           className="h-2 w-2 shrink-0 rounded-full"
@@ -219,7 +219,7 @@ function DetailsPanel({ event, onClose }: { event: RunTimelineEventUi; onClose: 
       {/* Tab bar */}
       <div
         className="flex shrink-0 items-center gap-0 overflow-x-auto"
-        style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-2)" }}
+        style={{ borderBottom: "1px solid var(--legacy-border-subtle)", background: "var(--surface-2)" }}
       >
         {tabs.map(t => (
           <button
@@ -367,7 +367,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
       {/* Toolbar */}
       <div
         className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg px-3 py-2"
-        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+        style={{ background: "var(--surface-2)", border: "1px solid var(--legacy-border-subtle)" }}
       >
         <div className="flex flex-1 flex-wrap gap-1">
           {FILTERS.map(f => (
@@ -396,7 +396,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
         </div>
 
         {/* View mode toggle */}
-        <div className="flex items-center rounded-md" style={{ border: "1px solid var(--border-subtle)" }}>
+        <div className="flex items-center rounded-md" style={{ border: "1px solid var(--legacy-border-subtle)" }}>
           <button
             type="button"
             title="Compact view"
@@ -427,7 +427,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
             className="h-7 rounded pl-6 pr-3 text-[11px] outline-none"
             style={{
               background: "var(--surface-3)",
-              border: "1px solid var(--border-subtle)",
+              border: "1px solid var(--legacy-border-subtle)",
               color: "var(--text-primary)",
               width: 160,
             }}
@@ -436,7 +436,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
       </div>
 
       {/* Main content: list + optional details panel */}
-      <div className="flex gap-0 overflow-hidden rounded-xl" style={{ border: "1px solid var(--border-subtle)", minHeight: 400 }}>
+      <div className="flex gap-0 overflow-hidden rounded-xl" style={{ border: "1px solid var(--legacy-border-subtle)", minHeight: 400 }}>
         {/* Event list */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Column header */}
@@ -580,7 +580,7 @@ export function EventHistoryTab({ events }: EventHistoryTabProps) {
 
         {/* Right-side details panel */}
         {selectedEvent && (
-          <div className="w-80 shrink-0 overflow-hidden" style={{ borderLeft: "1px solid var(--border-subtle)", maxHeight: 600 }}>
+          <div className="w-80 shrink-0 overflow-hidden" style={{ borderLeft: "1px solid var(--legacy-border-subtle)", maxHeight: 600 }}>
             <DetailsPanel event={selectedEvent} onClose={() => setSelectedEvent(null)} />
           </div>
         )}

@@ -55,7 +55,7 @@ const config: Config = {
         "secondary-foreground": "hsl(var(--secondary-foreground))",
         muted:              "hsl(var(--muted))",
         "muted-foreground": "hsl(var(--muted-foreground))",
-        accent:             "hsl(var(--accent))",
+        accent:             "hsl(var(--legacy-accent))",
         "accent-foreground": "hsl(var(--accent-foreground))",
         border:             "hsl(var(--border))",
         input:              "hsl(var(--input))",

@@ -1,0 +1,344 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import type { Route } from "next";
+import { cn } from "~/lib/cn";
+import { PageContainer } from "~/components/ui/page";
+import { Text } from "~/components/ui/text";
+import { Button } from "~/components/ui/button";
+import { ReplayProvider, useReplay } from "./replay";
+import { RunHeader } from "./run-header";
+import { RecoveryCard } from "./recovery-card";
+import { StepTimeline } from "./step-timeline";
+import { CanvasMirror } from "./canvas-mirror";
+import { Inspector } from "./inspector";
+import { LogStream } from "./log-stream";
+import { CompareView, EventHistory } from "./compare-and-events";
+import { diagnose, getRun } from "~/mocks/run-detail";
+import { SIGNATURE_RUN } from "~/mocks/fixtures";
+import { ApprovalGateIcon } from "~/components/icons/domain";
+import type { Run } from "~/mocks/domain";
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   RUN DETAIL — panes, not tabs.
+
+   The five tabs it replaces (Execution View, Logs, Recovery Engine, Tool Calls,
+   Event History) were the wrong shape for the moment this screen exists for.
+   During an incident you are correlating: this log line, at that step, on that
+   node. Tabs make correlation a memory exercise — you read the log, hold a
+   timestamp in your head, switch tab, and try to find the step it belongs to.
+
+   Panes make it a glance, and the scrubber makes it one gesture.
+
+   The panes are resizable and collapsible because "simultaneously" does not mean
+   "in fixed proportion" — reading a stack trace wants a wide inspector, watching
+   a live run wants a wide canvas.
+══════════════════════════════════════════════════════════════════════════════ */
+
+export interface RunDetailViewProps {
+  runId: string;
+  frozen?: boolean;
+}
+
+export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps) {
+  const params = useSearchParams();
+  const frozen = frozenProp ?? params.get("frozen") === "1";
+
+  /* `?demo=` swaps the run for a state, so every state has a real URL rather
+     than living only in Storybook. */
+  const demo = params.get("demo");
+  const run = React.useMemo(() => resolveRun(runId, demo), [runId, demo]);
+
+  if (!run) {
+    return (
+      <PageContainer>
+        <div className="border-subtle mx-auto mt-16 max-w-[32rem] rounded-lg border p-6 text-center">
+          <Text variant="heading-sm" tone="max" as="h1" className="block">Run not found</Text>
+          <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
+            No run with id <span className="font-code">{runId}</span>. It may have been outside the
+            retention window, or the link may be truncated.
+          </Text>
+          <Button asChild variant="secondary" size="sm" className="mt-4">
+            <Link href={"/runs" as Route}>Back to runs</Link>
+          </Button>
+        </div>
+      </PageContainer>
+    );
+  }
+
+  return (
+    <ReplayProvider run={run}>
+      <RunDetailBody run={run} frozen={frozen} />
+    </ReplayProvider>
+  );
+}
+
+function RunDetailBody({ run, frozen }: { run: Run; frozen: boolean }) {
+  const { select } = useReplay();
+  const diagnosis = React.useMemo(() => diagnose(run), [run]);
+
+  const [comparing, setComparing] = React.useState(false);
+  const [showEvents, setShowEvents] = React.useState(false);
+  const [logFullscreen, setLogFullscreen] = React.useState(false);
+  const [logHeight, setLogHeight] = React.useState(220);
+  const [leftWidth, setLeftWidth] = React.useState(272);
+  const [rightWidth, setRightWidth] = React.useState(300);
+  const [leftOpen, setLeftOpen] = React.useState(true);
+  const [rightOpen, setRightOpen] = React.useState(true);
+
+  const drag = (
+    axis: "x" | "y",
+    apply: (delta: number) => void,
+  ) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    const start = axis === "x" ? e.clientX : e.clientY;
+    const move = (ev: PointerEvent) => apply((axis === "x" ? ev.clientX : ev.clientY) - start);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = axis === "x" ? "col-resize" : "row-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const startLeft = React.useRef(leftWidth);
+  const startRight = React.useRef(rightWidth);
+  const startLog = React.useRef(logHeight);
+
+  return (
+    <PageContainer className="flex min-h-0 flex-col gap-3">
+      <RunHeader
+        run={run}
+        retryCostUsd={diagnosis?.retryCostUsd ?? null}
+        onCompare={() => setComparing((c) => !c)}
+        comparing={comparing}
+      />
+
+      {diagnosis ? (
+        <RecoveryCard diagnosis={diagnosis} onRetryStep={() => select(diagnosis.failedNode.index)} />
+      ) : null}
+
+      {run.status === "awaiting-approval" ? <GateBanner run={run} /> : null}
+
+      {comparing ? <CompareView run={run} onClose={() => setComparing(false)} /> : null}
+
+      {/* ── Panes ──────────────────────────────────────────────────────────── */}
+      {logFullscreen ? (
+        <div className="border-subtle relative h-[70vh] overflow-hidden rounded-lg border">
+          <LogStream fullscreen onToggleFullscreen={() => setLogFullscreen(false)} className="h-full" />
+        </div>
+      ) : (
+        <div className="border-subtle flex h-[62vh] min-h-[26rem] overflow-hidden rounded-lg border">
+          {leftOpen ? (
+            <>
+              <div style={{ width: leftWidth }} className="flex min-w-0 shrink-0 flex-col">
+                <StepTimeline className="h-full" />
+              </div>
+              <Divider
+                axis="x"
+                label="Resize step timeline"
+                onPointerDown={(e) => {
+                  startLeft.current = leftWidth;
+                  drag("x", (d) => setLeftWidth(Math.min(420, Math.max(180, startLeft.current + d))))(e);
+                }}
+                onCollapse={() => setLeftOpen(false)}
+              />
+            </>
+          ) : (
+            <CollapsedRail label="Steps" onExpand={() => setLeftOpen(true)} />
+          )}
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1">
+              <CanvasMirror className="h-full" />
+            </div>
+
+            <Divider
+              axis="y"
+              label="Resize log"
+              onPointerDown={(e) => {
+                startLog.current = logHeight;
+                drag("y", (d) => setLogHeight(Math.min(520, Math.max(96, startLog.current - d))))(e);
+              }}
+            />
+
+            <div style={{ height: logHeight }} className="relative shrink-0">
+              <LogStream
+                onToggleFullscreen={() => setLogFullscreen(true)}
+                padTo={frozen ? 0 : undefined}
+                className="h-full"
+              />
+            </div>
+          </div>
+
+          {rightOpen ? (
+            <>
+              <Divider
+                axis="x"
+                label="Resize inspector"
+                onPointerDown={(e) => {
+                  startRight.current = rightWidth;
+                  drag("x", (d) => setRightWidth(Math.min(460, Math.max(220, startRight.current - d))))(e);
+                }}
+                onCollapse={() => setRightOpen(false)}
+              />
+              <div style={{ width: rightWidth }} className="flex min-w-0 shrink-0 flex-col">
+                <Inspector className="h-full" />
+              </div>
+            </>
+          ) : (
+            <CollapsedRail label="Inspector" onExpand={() => setRightOpen(true)} />
+          )}
+        </div>
+      )}
+
+      {/* ── Event history ──────────────────────────────────────────────────── */}
+      {showEvents ? (
+        <EventHistory run={run} />
+      ) : (
+        <button
+          onClick={() => setShowEvents(true)}
+          className={cn(
+            "border-subtle bg-surface-raised hover:bg-surface-hover w-full rounded-lg border px-3 py-2 text-left",
+            "transition-colors duration-fast outline-none focus-visible:focus-ring",
+          )}
+        >
+          <Text variant="body-sm" tone="primary" className="font-medium">Event history</Text>
+          <Text variant="caption" tone="muted" className="ml-2">
+            the raw event-sourced log every view on this page is derived from
+          </Text>
+        </button>
+      )}
+    </PageContainer>
+  );
+}
+
+/* ── States ───────────────────────────────────────────────────────────────── */
+
+function GateBanner({ run }: { run: Run }) {
+  const gate = run.nodes.find((n) => n.state === "gated");
+  return (
+    <section className="border-status-waiting-border bg-status-waiting-subtle flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
+      <ApprovalGateIcon size={18} aria-hidden="true" className="text-status-waiting shrink-0" />
+      <div className="min-w-0 flex-1">
+        <Text variant="body-sm" tone="primary" className="block font-medium">
+          Suspended at {gate?.name ?? "an approval gate"}
+        </Text>
+        <Text variant="caption" tone="secondary" className="block">
+          No compute is consumed while the run waits. Everything before this step stays committed.
+        </Text>
+      </div>
+      <Button asChild size="sm" variant="primary">
+        <Link href={"/approvals" as Route}>Review approval</Link>
+      </Button>
+    </section>
+  );
+}
+
+/* ── Pane chrome ──────────────────────────────────────────────────────────── */
+
+function Divider({
+  axis, label, onPointerDown, onCollapse,
+}: {
+  axis: "x" | "y";
+  label: string;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onCollapse?: () => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation={axis === "x" ? "vertical" : "horizontal"}
+      aria-label={label}
+      onPointerDown={onPointerDown}
+      onDoubleClick={onCollapse}
+      title={onCollapse ? `${label} · double-click to collapse` : label}
+      className={cn(
+        "bg-surface-sunken group relative shrink-0",
+        "hover:bg-accent-subtle transition-colors duration-fast",
+        axis === "x" ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize",
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "bg-border-strong absolute opacity-0 transition-opacity duration-fast group-hover:opacity-100",
+          axis === "x" ? "left-0 top-1/2 h-6 w-full -translate-y-1/2" : "left-1/2 top-0 h-full w-8 -translate-x-1/2",
+        )}
+      />
+    </div>
+  );
+}
+
+function CollapsedRail({ label, onExpand }: { label: string; onExpand: () => void }) {
+  return (
+    <button
+      onClick={onExpand}
+      aria-label={`Expand ${label}`}
+      className={cn(
+        "bg-surface-sunken border-subtle hover:bg-surface-hover w-7 shrink-0 border-r",
+        "transition-colors duration-fast outline-none focus-visible:focus-ring",
+      )}
+    >
+      <span className="font-ui text-eyebrow text-fg-muted block whitespace-nowrap [writing-mode:vertical-rl]">
+        {label}
+      </span>
+    </button>
+  );
+}
+
+/* ── Demo states ──────────────────────────────────────────────────────────── */
+
+function resolveRun(runId: string, demo: string | null): Run | undefined {
+  const base = getRun(runId) ?? SIGNATURE_RUN;
+  if (!demo) return base;
+
+  const nodes = SIGNATURE_RUN.nodes;
+  const mid = Math.floor(nodes.length / 2);
+
+  switch (demo) {
+    case "running":
+      return {
+        ...base, status: "running", finishedAt: null,
+        nodes: nodes.map((n, i) => ({
+          ...n,
+          state: i < mid ? "committed" : i === mid ? "executing" : "pending",
+          error: undefined,
+        })),
+      };
+    case "queued":
+      return {
+        ...base, status: "queued", durationMs: null, finishedAt: null,
+        nodes: nodes.map((n) => ({ ...n, state: "pending", durationMs: null, at: null, error: undefined })),
+      };
+    case "gated":
+      return {
+        ...base, status: "awaiting-approval", finishedAt: null,
+        nodes: nodes.map((n, i) => ({
+          ...n,
+          state: i < mid ? "committed" : i === mid ? "gated" : "pending",
+          error: undefined,
+        })),
+      };
+    case "succeeded":
+      return {
+        ...base, status: "succeeded",
+        nodes: nodes.map((n, i) => ({ ...n, state: i === 4 ? "recovered" : "committed", error: undefined })),
+      };
+    case "cancelled":
+      return {
+        ...base, status: "cancelled",
+        nodes: nodes.map((n, i) => ({
+          ...n,
+          state: i < mid ? "committed" : "skipped",
+          error: undefined,
+        })),
+      };
+    default:
+      return base;
+  }
+}

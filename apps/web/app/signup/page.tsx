@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 
-import { AuthScreen } from "@/components/auth/auth-screen";
+import { AuthScreen } from "~/components/app/auth/auth-screen";
 import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";

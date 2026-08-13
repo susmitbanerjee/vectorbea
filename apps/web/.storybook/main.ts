@@ -20,10 +20,23 @@ const config: StorybookConfig = {
     name: "@storybook/nextjs",
     options: {},
   },
-  staticDirs: ["../public"],
+  staticDirs: [
+    "../public",
+    // @storybook/nextjs shims next/font/local by emitting the font's source
+    // path verbatim (/src/styles/fonts/…) rather than bundling it as an asset,
+    // so the directory has to be served at that exact URL or every face 404s and
+    // the stories silently fall back to the default serif. Next's own build
+    // fingerprints and bundles these properly; this mapping is Storybook-only.
+    { from: "../src/styles/fonts", to: "/src/styles/fonts" },
+  ],
   typescript: {
     check: false,
-    reactDocgen: "react-docgen-typescript",
+    // react-docgen-typescript attaches a __docgenInfo object to every export it
+    // believes is a component. Our icon modules export arrays whose members are
+    // components (DOMAIN_ICONS, NODE_MARKS), and the loader mis-attributes the
+    // docgen object into those arrays, which React then tries to render as a
+    // child. Prop tables are not worth that.
+    reactDocgen: false,
   },
 };
 

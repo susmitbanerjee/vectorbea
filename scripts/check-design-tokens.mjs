@@ -75,6 +75,19 @@ const RULES = [
     pattern: /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,
     hint: "No emoji anywhere in the UI (CLAUDE.md rule 4).",
   },
+  {
+    /**
+     * An invented `z-*` name compiles to NOTHING under Tailwind v4 — no class,
+     * no warning, no visual difference until something silently paints in the
+     * wrong order. `z-raised` shipped a broken sticky column on Control exactly
+     * this way. Only the named layers from layout.css and the numeric core
+     * utilities are valid.
+     */
+    id: "z-index",
+    label: "unknown z-index utility",
+    pattern: /\bz-(?!base\b|sticky\b|dropdown\b|overlay\b|modal\b|popover\b|toast\b|tooltip\b|auto\b|index\b|\d+\b|\[)[a-z][\w-]*/g,
+    hint: "Use a layer from src/styles/tokens/layout.css (z-sticky, z-modal…) or a numeric z-10.",
+  },
 ];
 
 // ─── Walk ─────────────────────────────────────────────────────────────────────
@@ -154,11 +167,19 @@ function scan(files, { skipRule } = {}) {
 
 // ─── Enforce: src/** ──────────────────────────────────────────────────────────
 
+/** Third-party brand colours — trademarks, not tokens. See the file's header. */
+const BRAND_COLOURS = join(SRC, "components", "ui", "provider-brand-colours.ts");
+
 const srcFiles = [...walk(SRC)];
 const { violations } = scan(srcFiles, {
-  // Token files are the one place colour may be authored.
-  skipRule: (rule, file) =>
-    file.startsWith(TOKENS) && (rule.id === "raw-hex" || rule.id === "colour-fn"),
+  skipRule: (rule, file) => {
+    const isColourRule = rule.id === "raw-hex" || rule.id === "colour-fn";
+    // Token files are the one place OUR colour may be authored.
+    if (file.startsWith(TOKENS) && isColourRule) return true;
+    // Vendor brand colours are quarantined to a single exempt file.
+    if (file === BRAND_COLOURS && isColourRule) return true;
+    return false;
+  },
 });
 
 // ─── Report: legacy baseline ──────────────────────────────────────────────────

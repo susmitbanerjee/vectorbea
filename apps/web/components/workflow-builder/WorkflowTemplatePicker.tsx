@@ -172,14 +172,14 @@ export function WorkflowTemplatePicker({ templates, workflowName, onSelect }: Wo
             className="group relative flex flex-col gap-3 rounded-xl p-4 text-left transition-all duration-150"
             style={{
               background: "var(--surface-2)",
-              border: "1px solid var(--border-subtle)",
+              border: "1px solid var(--legacy-border-subtle)",
             }}
             onMouseEnter={e => {
               (e.currentTarget as HTMLElement).style.borderColor = iconColor + "50";
               (e.currentTarget as HTMLElement).style.background = bgColor;
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--border-subtle)";
+              (e.currentTarget as HTMLElement).style.borderColor = "var(--legacy-border-subtle)";
               (e.currentTarget as HTMLElement).style.background = "var(--surface-2)";
             }}
           >
