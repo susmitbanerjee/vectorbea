@@ -133,7 +133,7 @@ export function WorkflowBulkBar({
             </Dialog.Title>
             <Dialog.Description asChild>
               <Text variant="body-sm" tone="secondary" className="mt-1 block">
-                Moving re-points the workflow's connections at the target environment. Schedules
+                Moving re-points the workflow&apos;s connections at the target environment. Schedules
                 keep their cron but start firing against the new data.
               </Text>
             </Dialog.Description>

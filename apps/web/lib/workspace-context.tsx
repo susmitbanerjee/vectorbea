@@ -123,7 +123,6 @@ export function WorkspaceProvider({
     setActiveWorkspaceIdState((prev) =>
       prev === queryWorkspaceId ? prev : queryWorkspaceId,
     );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   useEffect(() => {

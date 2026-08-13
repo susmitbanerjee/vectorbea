@@ -69,7 +69,7 @@ export function PublishFlow({ workflow }: { workflow: Workflow }) {
   const [published, setPublished] = React.useState(false);
   const [focusNode, setFocusNode] = React.useState<string | null>(null);
 
-  const nodes = candidate?.nodes ?? [];
+  const nodes = React.useMemo(() => candidate?.nodes ?? [], [candidate]);
   const findings = React.useMemo(() => validateVersion(nodes), [nodes]);
   const errors = findings.filter((f) => f.severity === "error");
   const warnings = findings.filter((f) => f.severity === "warning");
@@ -356,7 +356,10 @@ function ValidateStep({
 }) {
   const errors = findings.filter((f) => f.severity === "error");
   const warnings = findings.filter((f) => f.severity === "warning");
-  const offending = new Set(findings.filter((f) => f.severity === "error").map((f) => f.nodeId));
+  const offending = React.useMemo(
+    () => new Set(findings.filter((f) => f.severity === "error").map((f) => f.nodeId)),
+    [findings],
+  );
 
   const paint = React.useCallback(
     (node: VersionNode): NodePaint => (offending.has(node.id) ? "invalid" : "default"),
@@ -593,7 +596,7 @@ function SimulateStep({
           </table>
 
           <Text variant="caption" tone="muted" className="mt-2 block">
-            Estimates, not measurements. Tool latency is modelled from this workspace's history and a
+            Estimates, not measurements. Tool latency is modelled from this workspace&apos;s history and a
             real run will differ — the number worth trusting here is the shape of the path, not the
             fourth decimal place.
           </Text>

@@ -18,7 +18,7 @@ function node(id: string, nodeType = "tool", label = id) {
     type: nodeType,
     position: { x: 0, y: 0 },
     data: { label, nodeType, previewStatus: "idle" },
-  } as any; // eslint-disable-line
+  } as any;
 }
 
 function edge(source: string, target: string): Edge {
