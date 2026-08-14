@@ -211,6 +211,15 @@ export function ProviderLogo({
   className,
 }: ProviderLogoProps) {
   const mark = PROVIDER_MARKS[provider];
+
+  /* An unknown provider renders nothing rather than throwing.
+     Provider ids arrive from tool names (`contracts.getUpcomingRenewals` →
+     `contracts`), and the set of tool prefixes is open while the set of drawn
+     marks is not. Indexing without this guard took down the whole builder with
+     "Cannot read properties of undefined (reading 'label')" the first time a
+     tool from an unrepresented vendor was selected. */
+  if (!mark) return null;
+
   const label = connected ? `${mark.label}, connected` : mark.label;
 
   return (

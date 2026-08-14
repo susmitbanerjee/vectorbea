@@ -31,13 +31,15 @@
     "perf:runs": "node tests/perf/runs-10k.mjs",
     "capture:run-detail": "node tests/visual/capture-run-detail.mjs",
     "capture:governance": "node tests/visual/capture-governance.mjs",
-    "capture:workflows": "node tests/visual/capture-workflows.mjs"
+    "capture:workflows": "node tests/visual/capture-workflows.mjs",
+    "capture:inspector": "node tests/visual/capture-inspector.mjs"
   },
   "prisma": {
     "schema": "../../prisma/schema.prisma",
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} ../../prisma/seed.ts"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
     "@mdx-js/loader": "^3.1.1",
     "@mdx-js/react": "^3.1.1",
