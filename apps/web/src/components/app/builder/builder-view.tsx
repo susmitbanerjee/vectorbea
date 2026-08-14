@@ -1,0 +1,576 @@
+"use client";
+
+import * as React from "react";
+import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { cn } from "~/lib/cn";
+import { Text } from "~/components/ui/text";
+import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Kbd } from "~/components/ui/kbd";
+import { Canvas } from "./canvas";
+import { Palette, PALETTE, type QuickTemplate } from "./palette";
+import { Inspector } from "./inspector";
+import { NodeInspector, type NodeEdits } from "./inspector/node-inspector";
+import { TopBar, type SaveState } from "./top-bar";
+import { AlignToolbar } from "./align-toolbar";
+import { SimulatePanel } from "./simulate-panel";
+import { CommentLayer } from "./comments";
+import { useBuilderStore, type BuilderAction, type BuilderState } from "./store";
+import { validateGraph, summarise } from "./validation";
+import { autoLayout, snap } from "./layout";
+import { useKeyboardGraph } from "./keyboard-graph";
+import { seedGraph } from "~/mocks/builder";
+import type { Binding } from "~/mocks/io-schema";
+import { recentRuns, currentVersion, draftVersion } from "~/mocks/workflow-versions";
+import { NODE_MARKS } from "~/components/icons/nodes";
+import type { NodeKind, Workflow } from "~/mocks/domain";
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   THE BUILDER
+
+   Palette · canvas · inspector, with a top bar over all three. The canvas owns
+   the viewport; this owns the graph, the history and every action that changes
+   either.
+══════════════════════════════════════════════════════════════════════════════ */
+
+export function BuilderView({ workflow }: { workflow: Workflow }) {
+  return (
+    <ReactFlowProvider>
+      <BuilderInner workflow={workflow} />
+    </ReactFlowProvider>
+  );
+}
+
+function BuilderInner({ workflow }: { workflow: Workflow }) {
+  const flow = useReactFlow();
+  const seed = React.useMemo(() => seedGraph(workflow.id), [workflow.id]);
+  const [store, dispatch] = useBuilderStore(seed);
+  const { state } = store;
+
+  const [paletteCollapsed, setPaletteCollapsed] = React.useState(false);
+  const [presentation, setPresentation] = React.useState(false);
+  const [fullscreen, setFullscreen] = React.useState(false);
+  const [picker, setPicker] = React.useState<null | { at: { x: number; y: number }; connectFrom?: string }>(null);
+  const [simulating, setSimulating] = React.useState(false);
+  const [hoverIssueNode, setHoverIssueNode] = React.useState<string | null>(null);
+  const [saveState, setSaveState] = React.useState<SaveState>("saved");
+  const [lastSavedAt, setLastSavedAt] = React.useState<number | null>(null);
+  const shellRef = React.useRef<HTMLDivElement>(null);
+
+  const draft = draftVersion(workflow.id);
+  const version = draft ?? currentVersion(workflow.id);
+  const runs = React.useMemo(() => recentRuns(workflow.id, 30), [workflow.id]);
+
+  /* ── Validation, continuous ─────────────────────────────────────────────── */
+  const issues = React.useMemo(
+    () => validateGraph(state.nodes, state.edges, state.disabled),
+    [state.nodes, state.edges, state.disabled],
+  );
+  const summary = React.useMemo(() => summarise(issues), [issues]);
+
+  /* ── Autosave ───────────────────────────────────────────────────────────── */
+  React.useEffect(() => {
+    if (!state.dirty) return;
+    setSaveState("dirty");
+    // Debounced: saving on every keystroke of a drag would be a request per
+    // frame, and the indicator would strobe.
+    const id = window.setTimeout(() => {
+      setSaveState("saving");
+      window.setTimeout(() => {
+        setSaveState("saved");
+        setLastSavedAt(Date.now());
+        dispatch({ type: "markSaved" });
+      }, 420);
+    }, 1200);
+    return () => window.clearTimeout(id);
+  }, [state.dirty, dispatch]);
+
+  /* ── Viewport helpers ───────────────────────────────────────────────────── */
+  const reveal = React.useCallback((nodeId: string) => {
+    const node = state.nodes.find((n) => n.node.id === nodeId);
+    if (!node) return;
+    // Only recentre when the node is actually off-screen. Recentring on every
+    // Tab makes the canvas lurch under a reader who can already see the node.
+    const rendered = flow.getNode(nodeId);
+    if (!rendered) return;
+    flow.fitView({ nodes: [rendered], duration: 220, padding: 1.6, maxZoom: 1.2, minZoom: 0.5 });
+  }, [flow, state.nodes]);
+
+  const centreOfViewport = React.useCallback(() => {
+    const rect = shellRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    const at = flow.screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+    return { x: snap(at.x), y: snap(at.y) };
+  }, [flow]);
+
+  /* ── Actions ────────────────────────────────────────────────────────────── */
+  const addNode = React.useCallback((kind: NodeKind, label?: string, at?: { x: number; y: number }, connectFrom?: string) => {
+    const position = at ?? centreOfViewport();
+    dispatch({ type: "addNode", kind, x: position.x, y: position.y, connectFrom, name: label });
+  }, [dispatch, centreOfViewport]);
+
+  const onAddDownstream = React.useCallback((sourceId: string) => {
+    const source = state.nodes.find((n) => n.node.id === sourceId);
+    if (!source) return;
+    setPicker({ at: { x: source.x + 260, y: source.y }, connectFrom: sourceId });
+  }, [state.nodes]);
+
+  /* These three are passed INTO node data, so their identity becomes part of
+     every node object. As inline arrows they made the nodes array new on every
+     render; React Flow re-synced its store from it, that fired a change
+     callback, this re-rendered — "Maximum update depth exceeded", a dead
+     keyboard and a canvas with no edges. Stable identities are load-bearing
+     here, not a micro-optimisation. */
+  const handleOpenIssues = React.useCallback((nodeId: string) => {
+    dispatch({ type: "select", ids: [nodeId] });
+    reveal(nodeId);
+  }, [dispatch, reveal]);
+
+  const handleOpenNode = React.useCallback((nodeId: string) => {
+    dispatch({ type: "select", ids: [nodeId] });
+  }, [dispatch]);
+
+  const handleConnectEnd = React.useCallback((sourceId: string, at: { x: number; y: number }) => {
+    setPicker({ at, connectFrom: sourceId });
+  }, []);
+
+  const applyTemplate = React.useCallback((template: QuickTemplate) => {
+    const base = centreOfViewport();
+    let previous: string | undefined;
+    template.kinds.forEach((kind, i) => {
+      const id = `n-new-${kind}`;
+      dispatch({ type: "addNode", kind, x: base.x + i * 260, y: base.y, connectFrom: previous });
+      previous = id;
+    });
+  }, [dispatch, centreOfViewport]);
+
+  const runAutoLayout = React.useCallback(() => {
+    dispatch({ type: "replaceGraph", graph: autoLayout(state.nodes, state.edges), label: "Auto-layout" });
+    // The spring settle is the viewport's, not the nodes' — animating 200 node
+    // positions individually is 200 concurrent transitions and drops frames.
+    window.setTimeout(() => flow.fitView({ duration: 420, padding: 0.24 }), 20);
+  }, [dispatch, state.nodes, state.edges, flow]);
+
+  /* ── Clipboard ──────────────────────────────────────────────────────────── */
+  const clipboard = React.useRef<{ nodes: BuilderState["nodes"]; edges: BuilderState["edges"] } | null>(null);
+
+  React.useEffect(() => {
+    const onCopy = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+      const target = event.target as HTMLElement | null;
+      if (target && /input|textarea/i.test(target.tagName)) return;
+
+      if (event.key.toLowerCase() === "c" && !event.shiftKey && state.selection.length > 0) {
+        const picked = state.nodes.filter((n) => state.selection.includes(n.node.id));
+        const inner = state.edges.filter(
+          (e) => state.selection.includes(e.source) && state.selection.includes(e.target),
+        );
+        clipboard.current = { nodes: picked, edges: inner };
+      }
+
+      if (event.key.toLowerCase() === "v" && !event.shiftKey && clipboard.current) {
+        event.preventDefault();
+        dispatch({
+          type: "paste",
+          nodes: clipboard.current.nodes.map((n) => n.node),
+          edges: clipboard.current.edges,
+          at: centreOfViewport(),
+        });
+      }
+
+      if (event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        dispatch({ type: event.shiftKey ? "redo" : "undo" });
+      }
+
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPicker({ at: centreOfViewport() });
+      }
+    };
+
+    window.addEventListener("keydown", onCopy);
+    return () => window.removeEventListener("keydown", onCopy);
+  }, [state, dispatch, centreOfViewport]);
+
+  /* Escape leaves presentation mode. Presentation hides every exit except the
+     pill, so the key has to work even when nothing is focused. */
+  React.useEffect(() => {
+    if (!presentation) return;
+    const onEscape = (e: KeyboardEvent) => { if (e.key === "Escape") setPresentation(false); };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [presentation]);
+
+  useKeyboardGraph({
+    state,
+    dispatch,
+    reveal,
+    onOpenNode: handleOpenNode,
+    onAddDownstream,
+    enabled: !picker && !simulating,
+  });
+
+  const toggleFullscreen = React.useCallback(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      setFullscreen(false);
+    } else {
+      el.requestFullscreen?.().then(() => setFullscreen(true)).catch(() => {});
+    }
+  }, []);
+
+  const selectedNodeName = state.selection.length === 1
+    ? state.nodes.find((n) => n.node.id === state.selection[0])?.node.name ?? null
+    : null;
+
+  /* One node selected opens the node inspector; anything else keeps the graph
+     inspector. Two selected nodes have no single configuration, and showing one
+     of them arbitrarily is how people edit the wrong node. */
+  const selectedNode = state.selection.length === 1
+    ? state.nodes.find((n) => n.node.id === state.selection[0])?.node ?? null
+    : null;
+
+  /* Bindings live beside the graph rather than inside each node's config: they
+     are edges in the data flow, and the reverse index on the Output tab has to
+     read every node's bindings at once to answer "who consumes this field". */
+  const [bindingsByNode, setBindingsByNode] = React.useState<Record<string, Binding[]>>({});
+
+  /* Reads the graph through a ref so its identity never changes.
+     As a callback depending on `state.nodes`, every commit rebuilt it, which
+     re-fired the panel's autosave effect, which committed again. */
+  const graphRef = React.useRef(state);
+  graphRef.current = state;
+
+  const commitNodeEdits = React.useCallback((nodeId: string, edits: NodeEdits) => {
+    // Only write bindings that actually changed — an unconditional setState
+    // here produces a new object every commit and re-seeds the open panel.
+    setBindingsByNode((prev) => {
+      const before = prev[nodeId];
+      const same = before !== undefined
+        && before.length === edits.bindings.length
+        && before.every((b, i) =>
+          b.inputId === edits.bindings[i].inputId
+          && b.expression === edits.bindings[i].expression
+          && b.transform === edits.bindings[i].transform);
+      return same ? prev : { ...prev, [nodeId]: edits.bindings };
+    });
+
+    const current = graphRef.current;
+    const target = current.nodes.find((n) => n.node.id === nodeId);
+    if (!target) return;
+    const nextName = edits.name ?? target.node.name;
+    const nextConfig = edits.config ?? target.node.config;
+    if (nextName === target.node.name && nextConfig === target.node.config) return;
+
+    dispatch({
+      type: "replaceGraph",
+      graph: {
+        nodes: current.nodes.map((n) =>
+          n.node.id === nodeId ? { ...n, node: { ...n.node, name: nextName, config: nextConfig } } : n,
+        ),
+        edges: current.edges,
+      },
+      label: `Edit ${nextName}`,
+    });
+  }, [dispatch]);
+
+  return (
+    <div
+      ref={shellRef}
+      className="bg-surface-app flex h-[calc(100dvh-var(--shell-header,0px))] min-h-[40rem] flex-col overflow-hidden"
+    >
+      <TopBar
+        workflow={workflow}
+        versionNumber={version?.number ?? 1}
+        isDraft={Boolean(draft)}
+        summary={summary}
+        saveState={saveState}
+        lastSavedAt={lastSavedAt}
+        presentation={presentation}
+        onTogglePresentation={() => setPresentation((v) => !v)}
+        onToggleFullscreen={toggleFullscreen}
+        fullscreen={fullscreen}
+        onSave={() => { setSaveState("saving"); window.setTimeout(() => { setSaveState("saved"); setLastSavedAt(Date.now()); dispatch({ type: "markSaved" }); }, 300); }}
+        onTest={() => console.info("test", workflow.id)}
+        onSimulate={() => setSimulating(true)}
+        onRun={() => console.info("run", workflow.id)}
+        onDebugRun={() => console.info("debug run", workflow.id)}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        {!presentation ? (
+          <Palette
+            collapsed={paletteCollapsed}
+            onToggle={() => setPaletteCollapsed((v) => !v)}
+            onAdd={(kind, label) => addNode(kind, label)}
+            onApplyTemplate={applyTemplate}
+          />
+        ) : null}
+
+        <main
+          className="relative min-w-0 flex-1"
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+          onDrop={(e) => {
+            const kind = e.dataTransfer.getData("application/vectorbea-node") as NodeKind;
+            if (!kind) return;
+            e.preventDefault();
+            const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+            const item = PALETTE.flatMap((g) => g.items).find((i) => i.kind === kind);
+            addNode(kind, item?.label, { x: snap(at.x), y: snap(at.y) });
+          }}
+        >
+          <Canvas
+            state={state}
+            dispatch={dispatch}
+            issues={issues}
+            presentation={presentation}
+            onOpenIssues={handleOpenIssues}
+            onOpenNode={handleOpenNode}
+            onConnectEnd={handleConnectEnd}
+          />
+
+          <CommentLayer
+            comments={state.comments}
+            nodes={state.nodes}
+            onResolve={(id) => dispatch({ type: "resolveComment", id })}
+          />
+
+          {!presentation ? (
+            <AlignToolbar
+              state={state}
+              dispatch={dispatch}
+              onAutoLayout={runAutoLayout}
+              canUndo={store.canUndo}
+              canRedo={store.canRedo}
+              onUndo={() => dispatch({ type: "undo" })}
+              onRedo={() => dispatch({ type: "redo" })}
+              onComment={() => {
+                const anchor = state.selection[0] ?? null;
+                const node = anchor ? state.nodes.find((n) => n.node.id === anchor) : null;
+                const at = node ? { x: node.x + 210, y: node.y - 8 } : centreOfViewport();
+                dispatch({
+                  type: "addComment",
+                  comment: {
+                    id: `c-${Date.now().toString(36)}`,
+                    body: "",
+                    author: "you",
+                    at: new Date().toISOString(),
+                    nodeId: anchor,
+                    x: at.x,
+                    y: at.y,
+                    resolved: false,
+                  },
+                });
+              }}
+            />
+          ) : null}
+
+          {/* The hovered issue's node, lit through the canvas overlay. */}
+          {hoverIssueNode ? <IssueSpotlight nodeId={hoverIssueNode} /> : null}
+        </main>
+
+        {!presentation && selectedNode ? (
+          <NodeInspector
+            node={selectedNode}
+            nodes={state.nodes}
+            edges={state.edges}
+            bindingsByNode={bindingsByNode}
+            onCommit={commitNodeEdits}
+            onClose={() => dispatch({ type: "select", ids: [] })}
+            // The workspace run budget, for the timeout warning on Advanced.
+            workflowBudgetMs={10 * 60_000}
+          />
+        ) : !presentation ? (
+          <Inspector
+            nodeCount={state.nodes.length}
+            edgeCount={state.edges.length}
+            selection={state.selection}
+            selectedNodeName={selectedNodeName}
+            issues={issues}
+            summary={summary}
+            history={store.history}
+            cursor={store.cursor}
+            replayAvailable={runs.length > 0}
+            replayCount={runs.length}
+            onHoverIssue={setHoverIssueNode}
+            onSelectIssue={(nodeId) => {
+              if (!nodeId) return;
+              dispatch({ type: "select", ids: [nodeId] });
+              reveal(nodeId);
+            }}
+            onJumpHistory={(cursor) => dispatch({ type: "jumpTo", cursor })}
+            onOpenReplay={() => console.info("replay", workflow.id)}
+          />
+        ) : null}
+      </div>
+
+      {picker ? (
+        <NodePicker
+          connectFrom={picker.connectFrom}
+          onPick={(kind, label) => {
+            addNode(kind, label, picker.at, picker.connectFrom);
+            setPicker(null);
+          }}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
+
+      {simulating ? (
+        <SimulatePanel
+          nodes={state.nodes.map((n) => n.node)}
+          issues={issues}
+          onClose={() => setSimulating(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* ── Issue spotlight ──────────────────────────────────────────────────────── */
+
+/**
+ * A ring around the node an issue points at, while its row is hovered.
+ *
+ * Positioned from React Flow's own node record rather than from our state, so it
+ * lands on the rendered position mid-drag as well as at rest.
+ */
+function IssueSpotlight({ nodeId }: { nodeId: string }) {
+  const flow = useReactFlow();
+  const node = flow.getNode(nodeId);
+  const viewport = flow.getViewport();
+  if (!node) return null;
+
+  const x = node.position.x * viewport.zoom + viewport.x;
+  const y = node.position.y * viewport.zoom + viewport.y;
+  const w = (node.measured?.width ?? 200) * viewport.zoom;
+  const h = (node.measured?.height ?? 76) * viewport.zoom;
+
+  return (
+    <div
+      aria-hidden="true"
+      className="border-accent pointer-events-none absolute rounded-md border-2"
+      style={{ left: x - 6, top: y - 6, width: w + 12, height: h + 12 }}
+    />
+  );
+}
+
+/* ── Node picker ──────────────────────────────────────────────────────────── */
+
+/**
+ * ⌘K on the canvas, and the drop target for a connection dragged to nowhere.
+ *
+ * When it opens from a dangling connection it is FILTERED to what can legally
+ * follow the source — offering "Trigger" as the next step after a tool call is
+ * an option that produces a validation error the moment it is taken.
+ */
+function NodePicker({
+  connectFrom, onPick, onClose,
+}: {
+  connectFrom?: string;
+  onPick: (kind: NodeKind, label: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = React.useState("");
+  const [active, setActive] = React.useState(0);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const items = React.useMemo(() => {
+    const all = PALETTE.flatMap((g) => g.items.map((i) => ({ ...i, group: g.group })));
+    const legal = connectFrom ? all.filter((i) => i.kind !== "trigger") : all;
+    const needle = query.trim().toLowerCase();
+    if (!needle) return legal;
+    return legal.filter(
+      (i) => i.label.toLowerCase().includes(needle)
+        || i.description.toLowerCase().includes(needle)
+        || i.kind.includes(needle),
+    );
+  }, [query, connectFrom]);
+
+  React.useEffect(() => { setActive(0); }, [query]);
+
+  return (
+    <div className="z-modal fixed inset-0" role="dialog" aria-modal="true" aria-label="Add a node">
+      <div className="bg-surface-canvas/60 absolute inset-0 backdrop-blur-[2px]" onClick={onClose} />
+      <div
+        className={cn(
+          "motion-overlay bg-surface-overlay border-subtle shadow-3 absolute left-1/2 top-[18%]",
+          "w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border p-2",
+        )}
+      >
+        <Input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={connectFrom ? "What comes next?" : "Add a step by name"}
+          aria-label="Search steps"
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(items.length - 1, a + 1)); }
+            if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
+            if (e.key === "Enter" && items[active]) { e.preventDefault(); onPick(items[active].kind, items[active].label); }
+            if (e.key === "Escape") { e.preventDefault(); onClose(); }
+          }}
+        />
+
+        {connectFrom ? (
+          <Text variant="caption" tone="muted" className="mt-1.5 block px-1">
+            Connected downstream of the node you dragged from. Triggers are excluded — a run has
+            exactly one entry point.
+          </Text>
+        ) : null}
+
+        <ul role="listbox" aria-label="Steps" className="mt-2 max-h-72 overflow-y-auto">
+          {items.length === 0 ? (
+            <li className="px-2 py-3">
+              <Text variant="caption" tone="muted">No step matches “{query}”.</Text>
+            </li>
+          ) : items.map((item, i) => {
+            const entry = NODE_MARKS.find((m) => m.type === item.kind);
+            const Icon = entry?.Icon;
+            return (
+              <li key={item.kind} role="option" aria-selected={i === active}>
+                <button
+                  type="button"
+                  onMouseMove={() => setActive(i)}
+                  onClick={() => onPick(item.kind, item.label)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left",
+                    i === active && "bg-surface-hover",
+                  )}
+                >
+                  <span className="border-subtle bg-surface-hover text-fg-secondary grid size-6 shrink-0 place-items-center rounded-xs border">
+                    {Icon ? <Icon size={13} aria-hidden="true" /> : null}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="font-ui text-body-sm text-fg-primary block truncate">{item.label}</span>
+                    <span className="font-ui text-caption text-fg-muted block truncate">{item.description}</span>
+                  </span>
+                  <span className="font-ui text-[10px] text-fg-disabled shrink-0 uppercase">{item.group}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="border-subtle mt-2 flex items-center gap-3 border-t px-1 pt-2">
+          <Text variant="caption" tone="disabled" className="flex items-center gap-1">
+            <Kbd keys="↑ ↓" /> navigate
+          </Text>
+          <Text variant="caption" tone="disabled" className="flex items-center gap-1">
+            <Kbd keys="⏎" /> add
+          </Text>
+          <Text variant="caption" tone="disabled" className="ml-auto flex items-center gap-1">
+            <Kbd keys="Esc" /> close
+          </Text>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export type { BuilderAction };
