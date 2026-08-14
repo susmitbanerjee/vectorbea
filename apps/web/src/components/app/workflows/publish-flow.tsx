@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
@@ -53,6 +53,8 @@ const STEPS: { id: StepId; label: string; blurb: string }[] = [
 
 export function PublishFlow({ workflow }: { workflow: Workflow }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
 
   const live = liveVersion(workflow.id);
   const draft = draftVersion(workflow.id);
@@ -61,7 +63,6 @@ export function PublishFlow({ workflow }: { workflow: Workflow }) {
   // still runs, and its Publish step is honest that there is nothing to publish.
   const candidate = draft ?? currentVersion(workflow.id);
 
-  const [step, setStep] = React.useState<StepId>("draft");
   const [simulation, setSimulation] = React.useState<SimulationResult | null>(null);
   const [simulating, setSimulating] = React.useState(false);
   const [note, setNote] = React.useState("");
@@ -86,6 +87,30 @@ export function PublishFlow({ workflow }: { workflow: Workflow }) {
     simulate: errors.length === 0,
     publish: errors.length === 0 && simulation !== null,
   };
+
+  /* The step lives in the URL, like every other view state in this product.
+     A simulation result is exactly the thing somebody wants to link to — "here
+     is what it costs, look before I ship it" — and a step held only in local
+     state cannot be linked, bookmarked or reloaded.
+
+     The gates still hold: a URL naming a step you have not earned falls back to
+     the furthest one you have, so `?step=publish` on a workflow with structural
+     errors lands on Validate rather than smuggling you past it. */
+  const requested = (params.get("step") as StepId | null) ?? "draft";
+  const step: StepId = STEPS.some((s) => s.id === requested) && reached[requested]
+    ? requested
+    : [...STEPS].reverse().find((s) => reached[s.id])!.id;
+
+  const setStep = React.useCallback(
+    (next: StepId) => {
+      const search = new URLSearchParams(params.toString());
+      if (next === "draft") search.delete("step");
+      else search.set("step", next);
+      const query = search.toString();
+      router.replace(`${pathname}${query ? `?${query}` : ""}` as never, { scroll: false });
+    },
+    [params, pathname, router],
+  );
 
   const runSimulation = () => {
     setSimulating(true);
@@ -243,6 +268,11 @@ function StepRail({
             >
               <span className="flex items-center gap-2">
                 <StepGlyph index={i} done={done} active={active} open={open} />
+                {/* The glyph is aria-hidden, so without this the accessible name
+                    is just "Validate" and a screen reader loses the position in
+                    the sequence — which is the whole information a step rail
+                    carries. */}
+                <span className="sr-only">Step {i + 1}: </span>
                 <span className={cn("font-ui text-body-sm", active ? "text-fg-max" : "text-fg-secondary")}>
                   {step.label}
                 </span>
@@ -639,7 +669,7 @@ function PublishStep({
         </Text>
         <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
           The version record is immutable from this moment: its nodes, its author, its change
-          summary and the reliability it goes on to achieve are all attached to v{candidate.number}
+          summary and the reliability it goes on to achieve are all attached to v{candidate.number}{" "}
           and cannot be edited. Runs already in flight finish on the version they started on.
         </Text>
         <div className="mt-4 flex flex-wrap gap-2">

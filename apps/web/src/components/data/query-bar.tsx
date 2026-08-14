@@ -75,6 +75,10 @@ export function QueryBar({
       <div
         className={cn(
           "bg-surface-raised border-default flex items-center gap-2 rounded-md border px-2.5",
+          // The focus affordance belongs to the CONTAINER: the <input> inside it
+          // is transparent and spans only the middle strip between the glyph and
+          // the shortcut hint, so a ring drawn on the input alone is a floating
+          // rectangle inside an already-bordered box.
           "focus-within:border-focus transition-colors duration-fast",
           parsed.errors.length > 0 && "border-status-failed-border",
         )}
@@ -127,7 +131,14 @@ export function QueryBar({
               // The real text is transparent; the mirror behind paints it.
               // caret-color keeps the cursor visible.
               "text-transparent caret-fg-primary placeholder:text-fg-disabled",
-              "outline-none",
+              // `outline-none` alone was not enough: the unscoped
+              // `:focus-visible` in app/globals.css was painting the pre-revamp
+              // GREEN ring around this input (CURRENT-STATE §9.9) — success
+              // green indicating focus, on every page with a query bar.
+              // Suppressing the shadow explicitly is what stops it; this utility
+              // sits in the `utilities` layer and the legacy rule in `base`, so
+              // it wins. The container's border above remains the affordance.
+              "outline-none focus-visible:shadow-none",
             )}
           />
         </div>

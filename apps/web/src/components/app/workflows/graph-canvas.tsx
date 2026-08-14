@@ -84,6 +84,15 @@ export interface VersionGraphProps {
   paint?: (node: VersionNode, index: number) => NodePaint;
   /** Highlighted with the focus ring — the node a list selection points at. */
   selectedId?: string | null;
+  /**
+   * Scrolled into view on mount and whenever it changes.
+   *
+   * A diff pane is ~530px wide and a graph is 2,000px; without this a change at
+   * node 9 is off-screen, and the pane gives no hint that there is anything to
+   * scroll to. Landing on the first changed node is the only version where the
+   * diff shows you the diff.
+   */
+  scrollToId?: string | null;
   onSelect?: (node: VersionNode) => void;
   height?: number;
   /** Rendered above the graph as its accessible name. */
@@ -92,9 +101,26 @@ export interface VersionGraphProps {
 }
 
 export function VersionGraph({
-  nodes, paint, selectedId, onSelect, height = 260, label, className,
+  nodes, paint, selectedId, scrollToId, onSelect, height = 260, label, className,
 }: VersionGraphProps) {
   const graph = React.useMemo(() => layoutGraph(nodes), [nodes]);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  const targetX = React.useMemo(() => {
+    if (!scrollToId) return null;
+    const laid = graph.nodes.find((n) => n.node.id === scrollToId);
+    return laid ? laid.x : null;
+  }, [scrollToId, graph.nodes]);
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || targetX === null) return;
+    // Centre it, clamped to the scrollable range. `scrollTo` rather than
+    // `scrollIntoView`: the latter scrolls every ancestor, which yanks the whole
+    // page down to a graph the reader has not asked to look at yet.
+    const next = Math.max(0, targetX + NODE_W / 2 - el.clientWidth / 2);
+    el.scrollTo({ left: next, behavior: "auto" });
+  }, [targetX]);
 
   if (nodes.length === 0) {
     return (
@@ -107,11 +133,18 @@ export function VersionGraph({
     );
   }
 
+  /* The viewBox is computed from the NODES' real extents, not from
+     `graph.height` — that value pads for the run-detail canvas, and reusing it
+     here left roughly half the box empty above and below a single-lane graph.
+     A preview that is 50% dead space reads as a rendering bug. */
   const minY = Math.min(...graph.nodes.map((n) => n.y));
-  const viewBox = `-24 ${minY - NODE_H} ${graph.width + 48} ${graph.height + NODE_H}`;
+  const maxY = Math.max(...graph.nodes.map((n) => n.y)) + NODE_H;
+  const padY = 18;
+  const viewBox = `-24 ${minY - padY} ${graph.width + 48} ${maxY - minY + padY * 2}`;
 
   return (
     <div
+      ref={scrollRef}
       className={cn("bg-surface-sunken border-subtle overflow-x-auto rounded-md border", className)}
       style={{ height }}
     >
@@ -266,7 +299,12 @@ export function GraphLegend({ states, className }: { states: NodePaint[]; classN
               />
               {style.mark ? <DiffMark mark={style.mark} colour={style.text} x={3.2} y={1} /> : null}
             </svg>
-            <span className="font-ui text-caption text-fg-muted capitalize">{PAINT_LABEL[state]}</span>
+            {/* first-letter, not `capitalize` — that title-cases every word and
+                turned "on the execution path" into "On The Execution Path",
+                which is not sentence case. */}
+            <span className="font-ui text-caption text-fg-muted first-letter:uppercase">
+              {PAINT_LABEL[state]}
+            </span>
           </li>
         );
       })}

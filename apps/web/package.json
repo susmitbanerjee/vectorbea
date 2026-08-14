@@ -30,7 +30,8 @@
     "capture:runs": "node tests/visual/capture-runs.mjs",
     "perf:runs": "node tests/perf/runs-10k.mjs",
     "capture:run-detail": "node tests/visual/capture-run-detail.mjs",
-    "capture:governance": "node tests/visual/capture-governance.mjs"
+    "capture:governance": "node tests/visual/capture-governance.mjs",
+    "capture:workflows": "node tests/visual/capture-workflows.mjs"
   },
   "prisma": {
     "schema": "../../prisma/schema.prisma",

@@ -415,6 +415,19 @@ function GraphDiff({
     [base.nodes, head.nodes, diff],
   );
 
+  /* Each pane lands on the node the reader came here to see: whatever they have
+     selected, or else the first change in graph order — not the first id in the
+     added/removed/modified arrays, which is an artefact of how the diff was
+     computed rather than a position in the workflow. */
+  const firstChanged = React.useMemo(() => {
+    const changed = new Set([...diff.added, ...diff.removed, ...diff.modified]);
+    return head.nodes.find((n) => changed.has(n.id))?.id
+      ?? base.nodes.find((n) => changed.has(n.id))?.id
+      ?? null;
+  }, [diff, head.nodes, base.nodes]);
+
+  const scrollTo = selectedNode ?? firstChanged;
+
   return (
     <section className="bg-surface-raised border-subtle rounded-lg border">
       <header className="border-subtle flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
@@ -436,6 +449,7 @@ function GraphDiff({
                 nodes={base.nodes}
                 paint={paint}
                 selectedId={selectedNode}
+                scrollToId={scrollTo}
                 onSelect={(node) => onSelectNode(node.id)}
                 label={`Version ${base.number} graph`}
                 height={260}
@@ -449,6 +463,7 @@ function GraphDiff({
                 nodes={head.nodes}
                 paint={paint}
                 selectedId={selectedNode}
+                scrollToId={scrollTo}
                 onSelect={(node) => onSelectNode(node.id)}
                 label={`Version ${head.number} graph`}
                 height={260}
@@ -461,6 +476,7 @@ function GraphDiff({
               nodes={overlay.nodes.map((n) => n.node)}
               paint={paint}
               selectedId={selectedNode}
+              scrollToId={scrollTo}
               onSelect={(node) => onSelectNode(node.id)}
               label={`Versions ${base.number} and ${head.number} overlaid`}
               height={280}
