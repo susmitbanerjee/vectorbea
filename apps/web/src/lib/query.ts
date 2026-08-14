@@ -203,6 +203,57 @@ export const WORKFLOW_QUERY: QuerySchema = {
   fields: WORKFLOW_FIELDS,
 };
 
+/* ── Registries ───────────────────────────────────────────────────────────── */
+
+export const AGENT_FIELDS: FieldSpec[] = [
+  { key: "status", kind: "enum", description: "Lifecycle state", values: ["active", "paused", "draft"], phrase: (v) => v },
+  { key: "type", kind: "enum", description: "What the agent is for", values: ["task", "router", "reviewer", "researcher"], phrase: (v) => `of type ${v}` },
+  { key: "provider", kind: "text", description: "Model provider", phrase: (v) => `on ${v}` },
+  { key: "model", kind: "text", description: "Model id, substring match", phrase: (v) => `running ${v}` },
+  { key: "owner", kind: "text", description: "Owning team", phrase: (v) => `owned by ${v}` },
+  { key: "tool", kind: "text", description: "Granted tool, substring match", phrase: (v) => `granted ${v}` },
+  { key: "rate", kind: "number", description: "Success rate, e.g. <80", numeric: true, phrase: (v, w) => `success rate ${w} ${v}%` },
+  { key: "cost", kind: "number", description: "Average cost per run, e.g. >0.01", numeric: true, phrase: (v, w) => `cost per run ${w} $${v}` },
+  { key: "runs", kind: "number", description: "Runs in 30 days, e.g. >100", numeric: true, phrase: (v, w) => `runs ${w} ${v}` },
+  { key: "grants", kind: "number", description: "Number of tool grants", numeric: true, phrase: (v, w) => `tool grants ${w} ${v}` },
+  {
+    key: "governance", kind: "enum", description: "Holds a high-risk grant with no approval gate",
+    values: ["ok", "violation"],
+    phrase: (v) => (v === "violation" ? "holding an ungated high-risk grant" : "whose grants are all gated"),
+  },
+];
+
+export const AGENT_QUERY: QuerySchema = {
+  id: "agents",
+  subject: "Agents",
+  emptyExplanation: "All agents, most used first.",
+  placeholder: "status:active provider:anthropic rate:<80",
+  label: "Filter agents",
+  fields: AGENT_FIELDS,
+};
+
+export const TOOL_FIELDS: FieldSpec[] = [
+  { key: "status", kind: "enum", description: "Lifecycle state", values: ["active", "paused", "draft"], phrase: (v) => v },
+  { key: "type", kind: "enum", description: "How the tool is implemented", values: ["http", "db-read", "db-write", "builtin", "mcp"], phrase: (v) => `of type ${v}` },
+  { key: "risk", kind: "enum", description: "Risk tier", values: ["low", "medium", "high", "critical"], phrase: (v) => `at ${v} risk` },
+  { key: "connection", kind: "text", description: "Bound connection", phrase: (v) => `bound to ${v}` },
+  { key: "owner", kind: "text", description: "Owning team", phrase: (v) => `owned by ${v}` },
+  { key: "rate", kind: "number", description: "Success rate, e.g. <90", numeric: true, phrase: (v, w) => `success rate ${w} ${v}%` },
+  { key: "calls", kind: "number", description: "Calls in 30 days", numeric: true, phrase: (v, w) => `calls ${w} ${v}` },
+  { key: "latency", kind: "number", description: "p95 latency in ms, e.g. >1000", numeric: true, phrase: (v, w) => `p95 latency ${w} ${v}ms` },
+  { key: "failing", kind: "enum", description: "Has a recorded last error", values: ["true", "false"], phrase: (v) => (v === "true" ? "with a recorded error" : "with no recorded error") },
+  { key: "policy", kind: "enum", description: "Policy contradicts the risk tier", values: ["ok", "violation"], phrase: (v) => (v === "violation" ? "whose policy contradicts its risk tier" : "whose policy matches its tier") },
+];
+
+export const TOOL_QUERY: QuerySchema = {
+  id: "tools",
+  subject: "Tools",
+  emptyExplanation: "All tools, riskiest first.",
+  placeholder: "risk:high policy:violation",
+  label: "Filter tools",
+  fields: TOOL_FIELDS,
+};
+
 const SCHEMA_INDEX = new WeakMap<FieldSpec[], Map<string, FieldSpec>>();
 
 /** Memoised so a keystroke does not rebuild the index for every token. */
@@ -515,6 +566,57 @@ export function compileWorkflowPredicate(
   if (checks.length === 1) return checks[0];
   return (workflow) => {
     for (const check of checks) if (!check(workflow)) return false;
+    return true;
+  };
+}
+
+/* ── Registry predicates ──────────────────────────────────────────────────── */
+
+/**
+ * A generic compiler for the registries.
+ *
+ * Both take the same shape — enums, substring text, numeric comparisons — so
+ * they share one compiler driven by an accessor table rather than carrying two
+ * near-identical switch statements that drift the first time a field is added.
+ */
+export function compileRecordPredicate<T>(
+  parsed: ParsedQuery,
+  accessors: Record<string, (record: T) => string | number | string[]>,
+  searchText: (record: T) => string,
+): (record: T) => boolean {
+  const checks: ((record: T) => boolean)[] = [];
+
+  for (const term of parsed.terms) {
+    if (term.error || term.value === "") continue;
+    const needle = term.value.toLowerCase();
+
+    if (term.key === null) {
+      checks.push((r) => searchText(r).includes(needle));
+      continue;
+    }
+
+    const get = accessors[term.key];
+    if (!get) continue;
+
+    const numeric = Number(term.value);
+    checks.push((record) => {
+      const actual = get(record);
+      if (Array.isArray(actual)) return actual.some((v) => String(v).toLowerCase().includes(needle));
+      if (typeof actual === "number") {
+        return Number.isFinite(numeric) ? compare(actual, term.comparator, numeric) : false;
+      }
+      const text = String(actual).toLowerCase();
+      // Enums match exactly, free text matches as a substring: `type:http`
+      // should not also return `db-write`, but `owner:ops` should find
+      // `platform-ops`.
+      return term.comparator === ":" && text === needle ? true : text.includes(needle);
+    });
+  }
+
+  if (checks.length === 0) return () => true;
+  if (checks.length === 1) return checks[0];
+  return (record) => {
+    for (const check of checks) if (!check(record)) return false;
     return true;
   };
 }
