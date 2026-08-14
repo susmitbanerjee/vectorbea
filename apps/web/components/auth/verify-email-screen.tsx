@@ -53,7 +53,8 @@ export function VerifyEmailScreen({ email, error }: { email: string; error?: str
   }
 
   async function handleSignOut() {
-    try { await fetch("/api/auth/signout", { method: "POST" }); } catch { /* ignore */ }
+    try { await fetch("/api/auth/session", { method: "DELETE" }); } catch { /* ignore */ }
+    localStorage.removeItem("vectorbea-access-token");
     window.location.href = "/signin";
   }
 

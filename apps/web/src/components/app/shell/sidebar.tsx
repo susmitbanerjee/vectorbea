@@ -122,7 +122,9 @@ export interface SidebarProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   workspace: Workspace;
+  workspaces: Workspace[];
   onWorkspaceChange: (id: string) => void;
+  onCreateWorkspace?: () => void;
   counts: ShellCounts;
   user?: { name: string; email: string } | null;
   onOpenShortcuts: () => void;
@@ -131,7 +133,7 @@ export interface SidebarProps {
 }
 
 export function Sidebar({
-  collapsed, onToggleCollapsed, workspace, onWorkspaceChange, counts, user,
+  collapsed, onToggleCollapsed, workspace, workspaces, onWorkspaceChange, onCreateWorkspace, counts, user,
   onOpenShortcuts, onNavigate,
 }: SidebarProps) {
   return (
@@ -150,7 +152,13 @@ export function Sidebar({
       </div>
 
       <div className={cn("px-2 pb-2", collapsed && "px-1.5")}>
-        <WorkspaceSwitcher workspace={workspace} onWorkspaceChange={onWorkspaceChange} collapsed={collapsed} />
+        <WorkspaceSwitcher
+          workspace={workspace}
+          workspaces={workspaces}
+          onWorkspaceChange={onWorkspaceChange}
+          onCreateWorkspace={onCreateWorkspace}
+          collapsed={collapsed}
+        />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">

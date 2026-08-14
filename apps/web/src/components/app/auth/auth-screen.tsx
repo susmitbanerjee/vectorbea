@@ -6,6 +6,12 @@ import { AuthForm, type AuthMode } from "./auth-form";
 import { mapAuthError, NETWORK_ERROR, type AuthErrorState } from "./auth-errors";
 import type { SsoProvider } from "./auth-shell";
 
+const OAUTH_ROUTES: Record<SsoProvider, string> = {
+  github: "/api/auth/github",
+  google: "/api/auth/google",
+  microsoft: "/api/auth/microsoft",
+};
+
 /**
  * Container for sign-in and sign-up.
  *
@@ -74,8 +80,8 @@ export function AuthScreen({ mode, next }: { mode: AuthMode; next?: string }) {
   );
 
   const onSso = React.useCallback((provider: SsoProvider) => {
-    // Same OAuth entry point the legacy screen used.
-    window.location.assign(`/api/auth/oauth/${provider}${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`);
+    const endpoint = OAUTH_ROUTES[provider];
+    window.location.assign(`${endpoint}${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`);
   }, [safeNext]);
 
   const onErrorAction = React.useCallback(
