@@ -14,8 +14,6 @@ import { CommandPalette } from "./command-palette";
 import { ShortcutsSheet } from "./shortcuts-sheet";
 import { EnvironmentRail } from "./environment";
 import { WORKSPACES, INITIAL_COUNTS, type EnvironmentId, type ShellCounts } from "~/mocks/shell";
-import { useWorkspace } from "@/lib/workspace-context";
-import { apiFetch, withWorkspace } from "@/lib/api/client";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE APPLICATION SHELL
@@ -54,27 +52,10 @@ export function AppShell({ children, user }: AppShellProps) {
 function ShellInner({ children, user }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const {
-    workspaces: contextWorkspaces,
-    activeWorkspaceId,
-    seatUsage,
-    setActiveWorkspaceId,
-  } = useWorkspace();
-  const liveWorkspaces = React.useMemo(
-    () => contextWorkspaces.map((workspace) => ({
-      id: workspace.id,
-      name: workspace.name,
-      members: workspace.id === activeWorkspaceId ? seatUsage.used : 0,
-      environment: "production" as const,
-    })),
-    [activeWorkspaceId, contextWorkspaces, seatUsage.used],
-  );
-  const shellWorkspaces = liveWorkspaces.length > 0 ? liveWorkspaces : WORKSPACES;
-  const usingLiveWorkspaces = liveWorkspaces.length > 0;
 
   const [collapsed, setCollapsed] = React.useState(false);
   const [environment, setEnvironment] = React.useState<EnvironmentId>("production");
-  const [fallbackWorkspaceId, setFallbackWorkspaceId] = React.useState(WORKSPACES[0].id);
+  const [workspaceId, setWorkspaceId] = React.useState(WORKSPACES[0].id);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -90,11 +71,11 @@ function ShellInner({ children, user }: AppShellProps) {
       const e = window.localStorage.getItem(ENV_KEY);
       if (e === "production" || e === "staging" || e === "development") setEnvironment(e);
       const w = window.localStorage.getItem(WORKSPACE_KEY);
-      if (!usingLiveWorkspaces && w && WORKSPACES.some((x) => x.id === w)) setFallbackWorkspaceId(w);
+      if (w && WORKSPACES.some((x) => x.id === w)) setWorkspaceId(w);
     } catch {
       // Private mode or storage disabled — defaults are fine.
     }
-  }, [usingLiveWorkspaces]);
+  }, []);
 
   const persist = (key: string, value: string) => {
     try { window.localStorage.setItem(key, value); } catch { /* ignore */ }
@@ -110,13 +91,9 @@ function ShellInner({ children, user }: AppShellProps) {
   }, []);
 
   const changeWorkspace = React.useCallback((id: string) => {
-    if (usingLiveWorkspaces) {
-      setActiveWorkspaceId(id);
-    } else {
-      setFallbackWorkspaceId(id);
-      persist(WORKSPACE_KEY, id);
-    }
-  }, [setActiveWorkspaceId, usingLiveWorkspaces]);
+    setWorkspaceId(id);
+    persist(WORKSPACE_KEY, id);
+  }, []);
 
   /* ── Live badge counts ────────────────────────────────────────────────────
      Stand-in for the real subscription. The point of wiring it now is that the
@@ -130,43 +107,23 @@ function ShellInner({ children, user }: AppShellProps) {
      would. This still moves, so the roll is still exercised, but it always
      comes back to the truth. */
   React.useEffect(() => {
-    if (!activeWorkspaceId) return;
-    let cancelled = false;
-
-    type Summary = { pendingApprovals?: number };
-    type Incident = { resolutionStatus?: string };
-    type Connection = { status?: string };
-    type ConnectionResponse = Connection[] | { items?: Connection[] };
-
-    void Promise.allSettled([
-      apiFetch<Summary>(withWorkspace("/api/dashboard/summary", activeWorkspaceId)),
-      apiFetch<Incident[]>(withWorkspace("/api/failure-incidents", activeWorkspaceId)),
-      apiFetch<ConnectionResponse>(withWorkspace("/api/connections", activeWorkspaceId)),
-    ]).then(([summaryResult, incidentsResult, connectionsResult]) => {
-      if (cancelled) return;
-      const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
-      const incidents = incidentsResult.status === "fulfilled" ? incidentsResult.value : [];
-      const connectionResponse = connectionsResult.status === "fulfilled" ? connectionsResult.value : [];
-      const connections = Array.isArray(connectionResponse) ? connectionResponse : (connectionResponse.items ?? []);
-
+    let step = 0;
+    const DRIFT = [0, 1, 0, -1];
+    const timer = setInterval(() => {
+      step += 1;
       setCounts({
-        approvals: summary?.pendingApprovals ?? 0,
-        incidents: incidents.filter((incident) => incident.resolutionStatus?.toLowerCase() !== "resolved").length,
-        connections: connections.filter((connection) => {
-          const status = connection.status?.toLowerCase();
-          return status === "failed" || status === "failing" || status === "degraded";
-        }).length,
+        approvals: Math.max(0, INITIAL_COUNTS.approvals + DRIFT[step % DRIFT.length]),
+        incidents: INITIAL_COUNTS.incidents,
+        connections: INITIAL_COUNTS.connections,
       });
-    });
-
-    return () => { cancelled = true; };
-  }, [activeWorkspaceId, pathname]);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Close the mobile drawer whenever the route changes.
   React.useEffect(() => { setDrawerOpen(false); }, [pathname]);
 
-  const selectedWorkspaceId = usingLiveWorkspaces ? activeWorkspaceId : fallbackWorkspaceId;
-  const workspace = shellWorkspaces.find((w) => w.id === selectedWorkspaceId) ?? shellWorkspaces[0] ?? WORKSPACES[0];
+  const workspace = WORKSPACES.find((w) => w.id === workspaceId) ?? WORKSPACES[0];
 
   /* ── Shortcuts ────────────────────────────────────────────────────────── */
   useShortcut({
@@ -206,7 +163,6 @@ function ShellInner({ children, user }: AppShellProps) {
       collapsed={collapsed}
       onToggleCollapsed={toggleCollapsed}
       workspace={workspace}
-      workspaces={shellWorkspaces}
       onWorkspaceChange={changeWorkspace}
       counts={counts}
       user={user}
@@ -241,7 +197,6 @@ function ShellInner({ children, user }: AppShellProps) {
                 collapsed={false}
                 onToggleCollapsed={toggleCollapsed}
                 workspace={workspace}
-                workspaces={shellWorkspaces}
                 onWorkspaceChange={changeWorkspace}
                 counts={counts}
                 user={user}

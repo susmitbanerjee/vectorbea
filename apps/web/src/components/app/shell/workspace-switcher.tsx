@@ -5,7 +5,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "~/lib/cn";
 import { overlaySurface, overlayMotion } from "~/components/ui/select";
 import { fuzzyRank } from "~/lib/fuzzy";
-import { RECENT_WORKSPACE_IDS, type Workspace } from "~/mocks/shell";
+import { WORKSPACES, RECENT_WORKSPACE_IDS, type Workspace } from "~/mocks/shell";
 import { PatternedInitial } from "./workspace-mark";
 
 /**
@@ -21,19 +21,11 @@ import { PatternedInitial } from "./workspace-mark";
  */
 export interface WorkspaceSwitcherProps {
   workspace: Workspace;
-  workspaces: Workspace[];
   onWorkspaceChange: (id: string) => void;
-  onCreateWorkspace?: () => void;
   collapsed?: boolean;
 }
 
-export function WorkspaceSwitcher({
-  workspace,
-  workspaces,
-  onWorkspaceChange,
-  onCreateWorkspace,
-  collapsed = false,
-}: WorkspaceSwitcherProps) {
+export function WorkspaceSwitcher({ workspace, onWorkspaceChange, collapsed = false }: WorkspaceSwitcherProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState(0);
@@ -42,17 +34,17 @@ export function WorkspaceSwitcher({
   const results = React.useMemo(() => {
     if (!query.trim()) {
       const recents = RECENT_WORKSPACE_IDS
-        .map((id) => workspaces.find((w) => w.id === id))
+        .map((id) => WORKSPACES.find((w) => w.id === id))
         .filter((w): w is Workspace => Boolean(w) && w!.id !== workspace.id);
-      const rest = workspaces.filter((w) => w.id !== workspace.id && !RECENT_WORKSPACE_IDS.includes(w.id));
+      const rest = WORKSPACES.filter((w) => w.id !== workspace.id && !RECENT_WORKSPACE_IDS.includes(w.id));
       return [
         { label: "Recent", items: recents },
         { label: "All workspaces", items: rest },
       ].filter((g) => g.items.length > 0);
     }
-    const ranked = fuzzyRank(workspaces, query, (w) => w.name).map((r) => r.item);
+    const ranked = fuzzyRank(WORKSPACES, query, (w) => w.name).map((r) => r.item);
     return ranked.length ? [{ label: "Results", items: ranked }] : [];
-  }, [query, workspace.id, workspaces]);
+  }, [query, workspace.id]);
 
   const flat = React.useMemo(() => results.flatMap((g) => g.items), [results]);
 
@@ -164,13 +156,11 @@ export function WorkspaceSwitcher({
           <div className="border-subtle border-t p-1">
             <button
               type="button"
-              onClick={() => { setOpen(false); onCreateWorkspace?.(); }}
-              disabled={!onCreateWorkspace}
               className={cn(
                 "flex w-full items-center gap-2 rounded-xs px-2 py-1.5",
                 "font-ui text-body-sm text-fg-secondary",
                 "transition-colors duration-instant outline-none",
-                "hover:bg-surface-hover hover:text-fg-primary focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
+                "hover:bg-surface-hover hover:text-fg-primary focus-visible:focus-ring",
               )}
             >
               <svg viewBox="0 0 16 16" className="size-3.5" fill="none" aria-hidden="true">
