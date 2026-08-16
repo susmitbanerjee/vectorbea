@@ -88,7 +88,7 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Usage & limits", href: "/settings/usage" as Route, icon: TokenMeterIcon },
       { label: "Members", href: "/settings/members" as Route, icon: UsersThree as IconComponent },
-      { label: "Audit log", href: "/audit-log" as Route, icon: ByokKeyIcon, placeholder: true },
+      { label: "Audit log", href: "/audit-log" as Route, icon: ByokKeyIcon },
       { label: "Settings", href: "/settings" as Route, icon: GearSix as IconComponent },
     ],
   },

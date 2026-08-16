@@ -28,10 +28,10 @@ export default async function LoginPage({
         const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
         redirect(destination as Route);
       } catch {
-        redirect("/dashboard");
+        redirect("/control");
       }
     }
   }
 
-  return <AuthScreen mode="signup" next={next} />;
+  return <AuthScreen mode="signup" next={next} error={error} />;
 }

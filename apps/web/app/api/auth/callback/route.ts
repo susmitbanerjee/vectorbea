@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
   const ourToken = await signToken({ sub: jwtSub, email });
 
   // ── 4. Redirect with our JWT cookie ──────────────────────────────────────
-  const destination = explicitNext?.startsWith("/") ? explicitNext : "/dashboard";
+  const destination = explicitNext?.startsWith("/") ? explicitNext : "/control";
   const cookieOpts = {
     httpOnly: true, sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",

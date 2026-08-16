@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 
 const AUTH_PROTECTED_PREFIXES = [
-  "/onboarding", "/dashboard", "/prompts", "/audit-logs",
+  "/onboarding", "/control", "/dashboard", "/prompts", "/audit-logs",
   "/api-keys", "/settings", "/billing", "/workflows", "/runs",
   "/agents", "/tools", "/connections", "/approvals", "/schedules",
 ];

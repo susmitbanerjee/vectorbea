@@ -5,104 +5,53 @@ import {
   VerifyEmailScreen, VerifiedScreen, LinkExpiredScreen, LinkUsedScreen,
   ForgotPasswordScreen, ChoosePasswordScreen, AcceptInviteScreen, LockedOutScreen,
 } from "./status-screens";
-import { mapAuthError } from "./auth-errors";
+import { mapAuthError, mapOAuthError } from "./auth-errors";
 import { Onboarding } from "~/components/app/onboarding/onboarding";
 
 /**
  * Auth — every state, both themes.
  *
- * The error states are produced by the REAL mapper, driven with the API
- * responses that cause them, so what you see here is what a user gets rather
- * than a hand-written approximation.
+ * Sign-in is federated only: three OAuth providers and a SAML domain route.
+ * There is no password on this screen, so the failure states are the ones the
+ * provider round-trip can actually produce, driven through the REAL mappers
+ * with the codes our routes emit.
  */
 
 const meta = { title: "Flows/Auth", parameters: { layout: "fullscreen" } } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-const noop = () => {};
-
 export const SignIn: Story = {
-  render: () => <AuthForm mode="signin" onSubmit={noop} />,
+  render: () => <AuthForm mode="signin" />,
 };
 
-export const SignInLoading: Story = {
-  name: "Sign in — submitting",
-  render: () => <AuthForm mode="signin" loading onSubmit={noop} initialEmail="ada@acme.com" />,
+export const SignInHandingOff: Story = {
+  name: "Sign in — handing off to the provider",
+  render: () => <AuthForm mode="signin" loading />,
 };
 
-export const SignInWrongPassword: Story = {
-  name: "Sign in — wrong password",
-  render: () => (
-    <AuthForm
-      mode="signin"
-      onSubmit={noop}
-      initialEmail="ada@acme.com"
-      error={mapAuthError("Invalid credentials", 401, "ada@acme.com")}
-    />
-  ),
+export const SignInProviderUnreachable: Story = {
+  name: "Sign in — provider unreachable",
+  render: () => <AuthForm mode="signin" error={mapOAuthError("oauth")} />,
 };
 
-export const SignInNoAccount: Story = {
-  name: "Sign in — no account",
-  render: () => (
-    <AuthForm
-      mode="signin"
-      onSubmit={noop}
-      initialEmail="nobody@acme.com"
-      error={mapAuthError("No user found", 404, "nobody@acme.com")}
-    />
-  ),
+export const SignInCallbackFailed: Story = {
+  name: "Sign in — callback failed",
+  render: () => <AuthForm mode="signin" error={mapOAuthError("callback_failed")} />,
 };
 
-export const SignInLocked: Story = {
-  name: "Sign in — account locked",
-  render: () => (
-    <AuthForm
-      mode="signin"
-      onSubmit={noop}
-      initialEmail="ada@acme.com"
-      error={mapAuthError("Account locked", 423, "ada@acme.com")}
-    />
-  ),
-};
-
-export const SignInRateLimited: Story = {
-  name: "Sign in — rate limited",
-  render: () => (
-    <AuthForm
-      mode="signin"
-      onSubmit={noop}
-      initialEmail="ada@acme.com"
-      error={mapAuthError("Too many requests", 429, "ada@acme.com")}
-    />
-  ),
+export const SignInCancelledAtProvider: Story = {
+  name: "Sign in — cancelled at the provider",
+  render: () => <AuthForm mode="signin" error={mapOAuthError("access_denied")} />,
 };
 
 export const SignInUnverified: Story = {
   name: "Sign in — email not verified",
-  render: () => (
-    <AuthForm
-      mode="signin"
-      onSubmit={noop}
-      initialEmail="ada@acme.com"
-      error={mapAuthError("Email not confirmed", 403, "ada@acme.com")}
-    />
-  ),
-};
-
-export const SignInSamlDomain: Story = {
-  name: "Sign in — SAML domain routed",
-  render: () => <AuthForm mode="signin" onSubmit={noop} initialEmail="dana@acme-corp.com" />,
+  render: () => <AuthForm mode="signin" error={mapAuthError("Email not confirmed", 403, "")} />,
 };
 
 export const SignUp: Story = {
-  render: () => <AuthForm mode="signup" onSubmit={noop} />,
-};
-
-export const SignUpConsumerEmail: Story = {
-  name: "Sign up — consumer email",
-  render: () => <AuthForm mode="signup" onSubmit={noop} initialEmail="ada@gmail.com" />,
+  render: () => <AuthForm mode="signup" />,
 };
 
 export const VerifyEmail: Story = {

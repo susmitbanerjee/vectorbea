@@ -1,29 +1,17 @@
-import { RoutePlaceholder } from "~/components/app/shell/placeholder";
-import { QueueDepthIcon } from "~/components/icons/domain";
+import * as React from "react";
+import { TriggersView } from "~/components/app/connectivity/triggers-view";
+import { ControlSkeleton } from "~/components/app/control/skeletons";
 
 export const metadata = { title: "Triggers" };
 
 /**
- * Triggers — Schedules, unified (design §9).
- *
- * A schedule is one KIND of trigger. Webhooks are listed as a feature in Usage
- * and run detail already reports `trigger: manual`, so two of the three trigger
- * types had no home at all. The legacy /schedules route stays live until this
- * replaces it.
+ * Schedules, webhooks and manual starts unified (§10). Webhooks had nowhere to
+ * live before this despite being a shipped feature.
  */
 export default function TriggersPage() {
   return (
-    <RoutePlaceholder
-      eyebrow="Connect"
-      title="Triggers"
-      description="Schedules, webhooks and manual or API runs, in one place."
-      icon={QueueDepthIcon}
-      plannedIn="P19"
-      bullets={[
-        "Next fire time, timezone, jitter and overlap policy per trigger",
-        "Webhook endpoints with secret rotation and delivery history",
-        "Backfill: replay a schedule across a past window",
-      ]}
-    />
+    <React.Suspense fallback={<ControlSkeleton />}>
+      <TriggersView />
+    </React.Suspense>
   );
 }

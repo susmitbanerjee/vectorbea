@@ -34,6 +34,10 @@ const button = cva(
     "focus-visible:focus-ring",
     // Press: 1px down, and only when the control is live.
     "active:not-disabled:translate-y-px",
+    // Tailwind v4's preflight sets `cursor: default` on <button>, so without
+    // this a live control gives no pointer feedback at all on hover. The
+    // disabled and busy cursors below are later in the cascade and still win.
+    "cursor-pointer",
     "disabled:cursor-not-allowed disabled:opacity-50",
     // aria-busy is set while loading; pointer events stay off so a double
     // submit is impossible without the button changing size. (aria-busy is not

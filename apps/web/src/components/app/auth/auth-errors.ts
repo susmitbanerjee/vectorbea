@@ -130,6 +130,48 @@ export function mapAuthError(
   };
 }
 
+/**
+ * Map the `?error=` code an OAuth route redirects back with.
+ *
+ * The provider round-trip is the only way this screen can fail now, and the
+ * codes are ours — `/api/auth/callback` and the three initiators emit them — so
+ * unlike `mapAuthError` this is an exact lookup with an honest fallback.
+ */
+export function mapOAuthError(code: string): AuthErrorState {
+  if (code === "callback_failed") {
+    return {
+      kind: "unknown",
+      title: "Your provider signed you in, but we could not finish",
+      body: "The hand-back to Vectorbea failed or expired. Starting again almost always works — the sign-in window is short.",
+      action: { label: "Contact support", href: "/support" },
+    };
+  }
+
+  if (code === "oauth") {
+    return {
+      kind: "unknown",
+      title: "Could not reach that provider",
+      body: "We could not start the sign-in handshake. Try another provider, or try this one again in a moment.",
+    };
+  }
+
+  if (code === "access_denied") {
+    return {
+      kind: "unknown",
+      title: "You cancelled at your provider",
+      body: "Nothing was shared with us. Choose a provider below to try again.",
+    };
+  }
+
+  return {
+    kind: "unknown",
+    // Still no "Something went wrong": say what we know and what to do.
+    title: "Sign-in did not complete",
+    body: `Your provider returned "${code}" and we do not have a specific fix for it. Try again; if it keeps happening, send us the time it occurred.`,
+    action: { label: "Contact support", href: "/support" },
+  };
+}
+
 export const NETWORK_ERROR: AuthErrorState = {
   kind: "network",
   title: "Could not reach Vectorbea",

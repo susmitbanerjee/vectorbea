@@ -35,14 +35,16 @@ export async function getPostLoginRedirectForUser(
       if (!approved) return { redirectTo: "/beta", organizations: [] };
     }
   } catch {
-    // DB hiccup — fall through to the dashboard; the layout gates re-check there
+    // DB hiccup — fall through to the control plane; the layout gates re-check there
   }
 
   const workspaces = await getUserWorkspaces(userId);
   const first = workspaces[0];
+  // /control is the landing surface. The old /dashboard is no longer part of the
+  // navigation, so sending people there after sign-in stranded them off the map.
   const redirectTo = first
-    ? `/dashboard?org=${encodeURIComponent(first.id)}`
-    : "/dashboard";
+    ? `/control?org=${encodeURIComponent(first.id)}`
+    : "/control";
 
   // Map each Neon workspace into OrganizationView shape so the WorkspaceSwitcher
   // can list and switch between all workspaces the user belongs to.

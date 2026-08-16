@@ -13,6 +13,7 @@
     "check:boundaries": "node ../../scripts/check-forbidden-imports.mjs",
     "check:tokens": "node ../../scripts/check-design-tokens.mjs",
     "check:contrast": "node ../../scripts/check-contrast.mjs",
+    "check:consistency": "node ../../scripts/check-consistency.mjs",
     "storybook": "storybook dev -p 6006",
     "build:storybook": "storybook build",
     "test": "vitest run",
@@ -32,7 +33,8 @@
     "capture:run-detail": "node tests/visual/capture-run-detail.mjs",
     "capture:governance": "node tests/visual/capture-governance.mjs",
     "capture:workflows": "node tests/visual/capture-workflows.mjs",
-    "capture:inspector": "node tests/visual/capture-inspector.mjs"
+    "capture:inspector": "node tests/visual/capture-inspector.mjs",
+    "capture:architect": "node tests/visual/capture-architect.mjs"
   },
   "prisma": {
     "schema": "../../prisma/schema.prisma",

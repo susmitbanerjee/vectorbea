@@ -33,7 +33,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const { origin, searchParams } = request.nextUrl;
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = searchParams.get("next") ?? "/control";
 
   const cookieStore = await cookies();
 
