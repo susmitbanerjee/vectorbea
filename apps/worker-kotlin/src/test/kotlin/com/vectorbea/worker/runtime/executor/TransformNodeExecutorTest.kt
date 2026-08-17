@@ -1,5 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.mapping.InMemoryStepOutputView
 import com.vectorbea.worker.runtime.graph.*
 import org.junit.jupiter.api.Assertions.*
@@ -42,7 +44,7 @@ class TransformNodeExecutorTest {
     // ── Basic pass-through ────────────────────────────────────────────────────
 
     @Test
-    fun `empty transform returns resolved inputs unchanged`() {
+    fun `empty transform returns resolved inputs unchanged`(): Unit = runBlocking {
         val node = WorkflowNode(id = "t1", type = "transform")
         val c    = ctx(input = mapOf("x" to 1))
         val result = executor().execute(node, mapOf("x" to 1), c)
@@ -53,7 +55,7 @@ class TransformNodeExecutorTest {
     // ── Template input mapping ────────────────────────────────────────────────
 
     @Test
-    fun `template input mapping resolves workflow input`() {
+    fun `template input mapping resolves workflow input`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             inputMapping = mapOf("customerId" to "{{ workflow.input.custId }}")
@@ -64,7 +66,7 @@ class TransformNodeExecutorTest {
     }
 
     @Test
-    fun `template input mapping from previous step`() {
+    fun `template input mapping from previous step`(): Unit = runBlocking {
         val prevNode = WorkflowNode(id = "fetch", type = "transform")
         val graph    = WorkflowGraph(nodes = listOf(prevNode))
         val stepData = mapOf("score" to 0.92)
@@ -80,7 +82,7 @@ class TransformNodeExecutorTest {
     }
 
     @Test
-    fun `blocked secret reference returns Failed`() {
+    fun `blocked secret reference returns Failed`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             inputMapping = mapOf("key" to "{{ secret.apiKey }}")
@@ -93,7 +95,7 @@ class TransformNodeExecutorTest {
     }
 
     @Test
-    fun `future step reference returns Failed`() {
+    fun `future step reference returns Failed`(): Unit = runBlocking {
         val futureNode = WorkflowNode(id = "future", type = "transform")
         val graph      = WorkflowGraph(nodes = listOf(futureNode))
         val node       = WorkflowNode(
@@ -108,7 +110,7 @@ class TransformNodeExecutorTest {
     // ── Output mapping ────────────────────────────────────────────────────────
 
     @Test
-    fun `output mapping renames fields`() {
+    fun `output mapping renames fields`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             outputMapping = mapOf("userId" to "input.id")
@@ -119,7 +121,7 @@ class TransformNodeExecutorTest {
     }
 
     @Test
-    fun `output mapping with literal prefix`() {
+    fun `output mapping with literal prefix`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             outputMapping = mapOf("source" to "literal:manual")
@@ -132,7 +134,7 @@ class TransformNodeExecutorTest {
     // ── Output extraction ─────────────────────────────────────────────────────
 
     @Test
-    fun `json_path extraction in config`() {
+    fun `json_path extraction in config`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             config = mapOf(
@@ -155,7 +157,7 @@ class TransformNodeExecutorTest {
     // ── Schema validation ─────────────────────────────────────────────────────
 
     @Test
-    fun `valid output passes schema validation`() {
+    fun `valid output passes schema validation`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             outputSchema = mapOf(
@@ -172,7 +174,7 @@ class TransformNodeExecutorTest {
     }
 
     @Test
-    fun `schema validation warning on non-strict schema`() {
+    fun `schema validation warning on non-strict schema`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             outputSchema = mapOf(
@@ -189,7 +191,7 @@ class TransformNodeExecutorTest {
     }
 
     @Test
-    fun `strict schema fails run on validation error`() {
+    fun `strict schema fails run on validation error`(): Unit = runBlocking {
         val node = WorkflowNode(
             id = "t1", type = "transform",
             config = mapOf("strictSchema" to true),

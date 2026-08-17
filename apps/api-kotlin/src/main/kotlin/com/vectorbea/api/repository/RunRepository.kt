@@ -17,6 +17,13 @@ data class CreateRunRequest(
     val idempotencyKey: String? = null,
     /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
     val debugMode: Boolean = false,
+    /**
+     * Which worker pool and typed stream this run belongs to, decided at trigger
+     * from the workflow version's graph. Materialising it here is what lets the
+     * worker consume a stream it knows it can serve, instead of reading first
+     * and discovering afterwards. Defaults to "short" — the smallest claim.
+     */
+    val executionClass: String = "short",
 )
 
 data class AgentRun(
@@ -54,6 +61,23 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         created_at, updated_at, debug_mode
     """.trimIndent()
 
+    /**
+     * The run's stored execution class, for routing a RESUME_RUN / RETRY_NODE /
+     * REPLAY_RUN onto the right typed stream.
+     *
+     * Read rather than re-derived on purpose: the class was decided once, at
+     * trigger, from the version's graph. Re-deriving it on resume would risk a
+     * continuation landing on a different stream from the run it continues —
+     * and would reintroduce exactly the graph probe that typing the queue exists
+     * to delete.
+     *
+     * Null means the run does not exist. Callers treat that as "short".
+     */
+    open fun findExecutionClass(runId: UUID): String? = queryOne(
+        "SELECT execution_class FROM agent_runs WHERE id = ?",
+        { setUuid(1, runId) },
+    ) { rs -> rs.getString("execution_class") }
+
     open fun findById(id: UUID, workspaceId: UUID): AgentRun? = queryOne(
         "SELECT $cols FROM agent_runs WHERE id = ? AND workspace_id = ?",
         { setUuid(1, id); setUuid(2, workspaceId) },
@@ -68,8 +92,9 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         """
         INSERT INTO agent_runs
             (workspace_id, environment_id, workflow_id, workflow_version_id,
-             status, trigger_type, input_json, idempotency_key, debug_mode)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?)
+             status, trigger_type, input_json, idempotency_key, debug_mode,
+             execution_class)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -81,6 +106,7 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setString(6, req.inputJson)
             setString(7, req.idempotencyKey)
             setBoolean(8, req.debugMode)
+            setString(9, req.executionClass)
         },
         ::mapRow,
     )

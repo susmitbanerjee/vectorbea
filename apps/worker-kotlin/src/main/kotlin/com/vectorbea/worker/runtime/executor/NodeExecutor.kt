@@ -17,11 +17,21 @@ interface NodeExecutor {
     /**
      * Execute the node.
      *
+     * SUSPENDING BY CONTRACT. A node that waits — on an LLM, an HTTP tool, a
+     * tenant database — must release its thread while it waits, because an
+     * execution slot is now a semaphore permit rather than a thread. An
+     * implementation that blocks instead of suspending pins a dispatcher thread
+     * and silently serialises everything behind it; BlockHound fails the build
+     * when that happens (see BlockingCallAuditTest).
+     *
+     * Blocking work that genuinely cannot be converted — JDBC to a tenant
+     * database — belongs in `withContext(tenantDbDispatcher)`, never inline.
+     *
      * @param node           the node definition (config, policies, etc.)
      * @param resolvedInputs inputs resolved from the context's input mapping
      * @param ctx            read-only view of current execution context
      */
-    fun execute(
+    suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

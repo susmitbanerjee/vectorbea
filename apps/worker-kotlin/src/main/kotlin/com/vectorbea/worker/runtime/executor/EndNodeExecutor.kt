@@ -11,7 +11,7 @@ import com.vectorbea.worker.runtime.graph.WorkflowNode
  * are selected after an END node (enforced by [GraphScheduler]).
  */
 class EndNodeExecutor : NodeExecutor {
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

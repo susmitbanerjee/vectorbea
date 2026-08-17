@@ -48,7 +48,7 @@ class AgentNodeExecutor(
 
     private val llmExecutor by lazy { LlmNodeExecutor(connectionResolver, eventStore) }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
@@ -291,7 +291,7 @@ class AgentNodeExecutor(
 
     // ── Iterative agent execution via AgentBrainRunner ────────────────────────
 
-    private fun executeIterativeAgent(
+    private suspend fun executeIterativeAgent(
         agent: AgentRow,
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,

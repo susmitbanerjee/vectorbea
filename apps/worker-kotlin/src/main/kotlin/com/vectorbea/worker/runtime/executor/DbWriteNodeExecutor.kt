@@ -58,7 +58,7 @@ class DbWriteNodeExecutor(
         const val DEFAULT_TIMEOUT_SECS = 30
     }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         context: RuntimeContext,
@@ -141,7 +141,11 @@ class DbWriteNodeExecutor(
 
         val startMs = System.currentTimeMillis()
 
+        // See DbReadNodeExecutor: queryTimeout alone cannot unpark a thread whose
+        // socket read never returns. The effective bound is the driver-level
+        // socketTimeout forced by JdbcTimeouts in ClientDbPoolManager.
         val affectedRows = try {
+            com.vectorbea.worker.metrics.WorkerMetrics.timeBlocking {
             dataSource.connection.use { conn ->
                 conn.autoCommit = false
                 try {
@@ -159,8 +163,11 @@ class DbWriteNodeExecutor(
                     conn.autoCommit = true
                 }
             }
+            }
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startMs
+            com.vectorbea.worker.metrics.WorkerMetrics.tenantDbCallDurationSeconds
+                .observeMs(durationMs, "write", "error")
             log.warn("[dbwrite] statement failed [nodeId={}, durationMs={}]: {}",
                 node.id, durationMs, e.javaClass.simpleName)
             return NodeResult.Failed(
@@ -169,6 +176,8 @@ class DbWriteNodeExecutor(
         }
 
         val durationMs = System.currentTimeMillis() - startMs
+        com.vectorbea.worker.metrics.WorkerMetrics.tenantDbCallDurationSeconds
+            .observeMs(durationMs, "write", "ok")
 
         val output = mapOf(
             "affectedRows" to affectedRows,

@@ -22,6 +22,10 @@ import com.vectorbea.worker.runtime.executor.NodeExecutorRegistry
 import com.vectorbea.worker.runtime.executor.NodeResult
 import com.vectorbea.worker.runtime.executor.TransformNodeExecutor
 import com.vectorbea.worker.runtime.graph.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.MDC
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -89,6 +93,14 @@ class WorkflowRuntime(
      * as RESUME_RUN. Null = unbounded (historical behavior — used by unit tests).
      */
     private val executionBudget: ExecutionBudget? = null,
+    /**
+     * Isolated dispatcher for `db_read` / `db_write` nodes. Null means "run them
+     * on the shared node executor", which is the pre-isolation behaviour and is
+     * retained only for unit tests that construct a runtime directly.
+     */
+    private val tenantDbDispatcher: TenantDbDispatcher? = null,
+    /** Exactly-once guard, handed to the executors that perform side effects. */
+    private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -97,6 +109,7 @@ class WorkflowRuntime(
         dbPoolManager      = dbPoolManager ?: ClientDbPoolManager(),
         eventStore         = eventStore,
         dataSource         = dataSource,
+        sideEffects        = sideEffects,
     )
     private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
 
@@ -127,12 +140,41 @@ class WorkflowRuntime(
         ThreadPoolExecutor.CallerRunsPolicy(),
     )
 
-    // Pool used to enforce per-node execution timeouts. Thread count is naturally
-    // bounded by (worker concurrency × branch threads) since each caller blocks
-    // on its own future.
-    private val nodeTimeoutExecutor: ExecutorService = Executors.newCachedThreadPool { r ->
-        Thread(r).also { it.name = "wf-node-${it.id}"; it.isDaemon = true }
-    }
+    // Pool used to enforce per-node execution timeouts.
+    //
+    // THE THREAD-COUNT ASSUMPTION HERE WAS WRONG, AND IT MATTERED.
+    //
+    // The old comment claimed the count was "naturally bounded by (worker
+    // concurrency × branch threads) since each caller blocks on its own future".
+    // That holds only while every submitted task eventually finishes. It does
+    // not hold on timeout: `future.get(timeout)` returns and `future.cancel(true)`
+    // *interrupts* the worker thread — but a thread blocked in a classic
+    // java.net.Socket read (which is what the Postgres JDBC driver uses) does not
+    // respond to interrupts. The caller is released and its execution slot is
+    // correctly freed, while the node thread stays parked on the socket.
+    //
+    // With an unbounded cached pool that is a permanent thread leak: one leaked
+    // thread per hung tenant-DB query, never reclaimed, ending in
+    // OutOfMemoryError: unable to create native thread.
+    //
+    // Two things fix it, and both are needed:
+    //   1. Driver-level socketTimeout (see JdbcTimeouts) so the read actually
+    //      returns and the thread comes back. This is the real fix.
+    //   2. A ceiling here, so a burst cannot outrun (1). Bounded exactly like
+    //      [branchExecutor] above: CallerRunsPolicy degrades to inline execution
+    //      rather than growing without limit. Inline execution is safe now
+    //      precisely because (1) bounds it — before the socket timeouts existed,
+    //      it would not have been.
+    private val maxNodeThreads =
+        (System.getenv("WORKER_MAX_NODE_THREADS") ?: "64").toInt().coerceIn(4, 512)
+    private val nodeTimeoutExecutor: ExecutorService = ThreadPoolExecutor(
+        0, maxNodeThreads, 60L, TimeUnit.SECONDS,
+        SynchronousQueue(),
+        { r ->
+            Thread(r).also { it.name = "wf-node-${it.id}"; it.isDaemon = true }
+        },
+        ThreadPoolExecutor.CallerRunsPolicy(),
+    )
 
     sealed class ExecutionResult {
         data class Succeeded(val output: Map<String, Any>) : ExecutionResult()
@@ -158,7 +200,7 @@ class WorkflowRuntime(
      * @param inputJson   raw JSON input (treat as untrusted)
      * @param source      event source tag (e.g. "worker:abc123")
      */
-    fun execute(
+    suspend fun execute(
         runId: UUID,
         workspaceId: UUID,
         environmentId: UUID,
@@ -220,7 +262,7 @@ class WorkflowRuntime(
      * @param snapshot      the checkpoint to restore from
      * @param pendingNodeIds nodes to force back to PENDING (e.g. approval node, failed node)
      */
-    fun resume(
+    suspend fun resume(
         runId: UUID,
         workspaceId: UUID,
         environmentId: UUID,
@@ -288,7 +330,7 @@ class WorkflowRuntime(
 
     // ── DAG execution loop ────────────────────────────────────────────────────
 
-    private fun runDag(
+    private suspend fun runDag(
         graph: WorkflowGraph,
         scheduler: GraphScheduler,
         ctx: RuntimeContext,
@@ -385,7 +427,7 @@ class WorkflowRuntime(
 
     // ── Single-node execution ─────────────────────────────────────────────────
 
-    private fun executeSingleNode(
+    private suspend fun executeSingleNode(
         node: WorkflowNode,
         scheduler: GraphScheduler,
         ctx: RuntimeContext,
@@ -489,7 +531,7 @@ class WorkflowRuntime(
      *     (falling back to [defaultNodeTimeoutMs]) so a hung executor cannot
      *     occupy a worker thread forever.
      */
-    private fun executeGuardedWithRetry(
+    private suspend fun executeGuardedWithRetry(
         node: WorkflowNode,
         executor: NodeExecutor,
         resolvedInputs: Map<String, Any>,
@@ -561,43 +603,80 @@ class WorkflowRuntime(
         return result
     }
 
-    /** Run a single executor attempt under a wall-clock timeout. */
-    private fun executeWithTimeout(
+    /**
+     * Run a single executor attempt under a wall-clock timeout.
+     *
+     * THIS IS WHERE WAITING STOPPED COSTING A THREAD.
+     *
+     * Previously: submit a `Callable` to a thread pool, then `future.get(timeout)`
+     * on the caller. Two threads per node — one running it, one parked waiting —
+     * and the parked one was the execution slot. An agent node waiting 6 s on a
+     * provider held both for 6 s.
+     *
+     * Now: `withTimeoutOrNull` around a suspending call. While the node awaits
+     * I/O it holds a continuation on the heap and no thread at all, and the
+     * timeout is cooperative cancellation rather than an abandoned future.
+     *
+     * Tenant-database nodes are the exception, and deliberately so. JDBC is
+     * blocking and cannot be converted, so those run in `withContext` on the
+     * bounded tenant-DB dispatcher: the coroutine suspends, one dispatcher thread
+     * blocks, and a hanging tenant database exhausts that dispatcher and nothing
+     * else (§2.3).
+     */
+    private suspend fun executeWithTimeout(
         node: WorkflowNode,
         executor: NodeExecutor,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
     ): NodeResult {
         val timeoutMs = node.timeoutPolicy.timeoutMs.takeIf { it > 0 } ?: defaultTimeoutFor(node.nodeType)
-        if (timeoutMs <= 0) {
-            // Timeouts disabled — execute inline
-            return try { executor.execute(node, resolvedInputs, ctx) }
-            catch (e: Exception) { NodeResult.Failed(sanitizeError(e)) }
-        }
+        val isTenantDbNode = node.nodeType == NodeType.DB_QUERY || node.nodeType == NodeType.DB_WRITE
 
+        // MDC is thread-local, so it does not follow a coroutine across
+        // suspension points. Captured here and reinstated inside the block.
         val mdc = MDC.getCopyOfContextMap()
-        val future = nodeTimeoutExecutor.submit<NodeResult> {
+
+        suspend fun runIt(): NodeResult {
             val previous = MDC.getCopyOfContextMap()
             if (mdc != null) MDC.setContextMap(mdc)
-            try {
-                executor.execute(node, resolvedInputs, ctx)
+            return try {
+                if (isTenantDbNode && tenantDbDispatcher != null) {
+                    // Blocking JDBC, contained. The coroutine suspends; only a
+                    // dispatcher thread blocks.
+                    tenantDbDispatcher.withTenantDbContext(ctx.workspaceId) {
+                        executor.execute(node, resolvedInputs, ctx)
+                    }
+                } else {
+                    executor.execute(node, resolvedInputs, ctx)
+                }
             } finally {
                 if (previous != null) MDC.setContextMap(previous) else MDC.clear()
             }
         }
+
+        if (timeoutMs <= 0) {
+            return try { runIt() }
+            catch (e: TenantDbDispatcher.DispatcherFullException) {
+                NodeResult.Failed(e.message ?: "Tenant database capacity is exhausted")
+            }
+            catch (e: Exception) { NodeResult.Failed(sanitizeError(e)) }
+        }
+
         return try {
-            future.get(timeoutMs, TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
-            future.cancel(true)
-            log.error("[runtime] node timed out after {}ms [nodeId={}, runId={}]", timeoutMs, node.id, ctx.runId)
-            NodeResult.Failed("Node '${node.id}' timed out after ${timeoutMs}ms")
-        } catch (e: java.util.concurrent.ExecutionException) {
-            val cause = e.cause
-            NodeResult.Failed(sanitizeError(if (cause is Exception) cause else Exception(e.message)))
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            future.cancel(true)
-            NodeResult.Failed("Node '${node.id}' execution interrupted")
+            withTimeoutOrNull(timeoutMs) { runIt() }
+                ?: run {
+                    log.error("[runtime] node timed out after {}ms [nodeId={}, runId={}]",
+                        timeoutMs, node.id, ctx.runId)
+                    NodeResult.Failed("Node '${node.id}' timed out after ${timeoutMs}ms")
+                }
+        } catch (e: TenantDbDispatcher.DispatcherFullException) {
+            log.warn("[runtime] tenant-db capacity exhausted — failing node fast [nodeId={}, runId={}]",
+                node.id, ctx.runId)
+            NodeResult.Failed(e.message ?: "Tenant database capacity is exhausted")
+        } catch (e: CancellationException) {
+            throw e   // run cancellation must propagate, never become a node failure
+        } catch (e: Exception) {
+            NodeResult.Failed(sanitizeError(e))
         }
     }
 
@@ -780,7 +859,7 @@ class WorkflowRuntime(
         }
     }
 
-    private fun applyNodeResult(
+    private suspend fun applyNodeResult(
         node: WorkflowNode,
         result: NodeResult,
         scheduler: GraphScheduler,
@@ -889,7 +968,7 @@ class WorkflowRuntime(
 
     // ── Parallel node execution ───────────────────────────────────────────────
 
-    private fun executeParallelNode(
+    private suspend fun executeParallelNode(
         parallelNode: WorkflowNode,
         scheduler: GraphScheduler,
         ctx: RuntimeContext,
@@ -947,6 +1026,7 @@ class WorkflowRuntime(
             allOutEdges.joinToString { "${it.id}:${it.type}→${it.target}" })
 
         // Fork contexts and execute each branch concurrently
+        val branchResults = coroutineScope {
         val futures = branchEntryEdges.map { edge ->
             val entryNodeId = edge.target
             val branchCtx   = ctx.fork(branchNodeIds)
@@ -960,7 +1040,12 @@ class WorkflowRuntime(
                 title  = "Branch started: $entryNodeId",
                 stepId = entryNodeId)
 
-            CompletableFuture.supplyAsync({
+            // A branch is now a coroutine, not a pooled thread.
+            //
+            // Eight parallel HTTP branches used to mean eight threads parked on
+            // eight sockets. As `async` they are eight continuations sharing the
+            // execution dispatcher, so fan-out width stops being a thread budget.
+            async {
                 val branchView   = InMemoryStepOutputView()
                 // Copy parent step outputs into branch view so cross-step refs work
                 ctx.completedNodeIds().forEach { id ->
@@ -971,19 +1056,22 @@ class WorkflowRuntime(
                 val branchResult = runDag(ctx.graph, branchScheduler, branchCtx, source, branchView,
                     cancellationCheck, enforceBudget = false)
                 Triple(entryNodeId, branchCtx, branchResult)
-            }, branchExecutor)
+            }
         }
 
         // Wait for ALL branches — collect results even if some fail so we get full diagnostic info
-        val branchResults = futures.map { future ->
+        futures.map { deferred ->
             try {
-                future.get()
+                deferred.await()
+            } catch (e: CancellationException) {
+                throw e   // run cancellation propagates; it is not a branch failure
             } catch (e: Exception) {
                 // Branch threw unexpectedly — treat as failed result with a sanitized reason
                 val reason = sanitizeError(e)
-                log.warn("[runtime] branch future threw [parallelId={}]: {}", parallelNode.id, reason)
+                log.warn("[runtime] branch threw [parallelId={}]: {}", parallelNode.id, reason)
                 Triple("unknown", ctx, ExecutionResult.Failed(reason) as ExecutionResult)
             }
+        }
         }
 
         // Log per-branch outcome so failures are always visible

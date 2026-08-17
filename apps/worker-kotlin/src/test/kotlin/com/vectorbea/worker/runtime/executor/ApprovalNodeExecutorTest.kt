@@ -1,5 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.runtime.checkpoint.ApprovalRow
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
@@ -37,7 +39,7 @@ class ApprovalNodeExecutorTest {
     // ── No existing approval row → create new PENDING row ────────────────────
 
     @Test
-    fun `no existing approval creates new pending approval`() {
+    fun `no existing approval creates new pending approval`(): Unit = runBlocking {
         val store = object : ApprovalStore(noopDataSource()) {
             var createCalled = false
             override fun findApproval(runId: UUID, nodeId: String): ApprovalRow? = null
@@ -61,7 +63,7 @@ class ApprovalNodeExecutorTest {
     // ── Existing PENDING row → re-pause without creating duplicate ───────────
 
     @Test
-    fun `existing PENDING approval re-pauses without creating duplicate`() {
+    fun `existing PENDING approval re-pauses without creating duplicate`(): Unit = runBlocking {
         val existingId = UUID.randomUUID()
         val store = object : ApprovalStore(noopDataSource()) {
             var createCalled = false
@@ -87,7 +89,7 @@ class ApprovalNodeExecutorTest {
     // ── APPROVED row → Completed ──────────────────────────────────────────────
 
     @Test
-    fun `existing APPROVED row returns Completed`() {
+    fun `existing APPROVED row returns Completed`(): Unit = runBlocking {
         val existingId = UUID.randomUUID()
         val store = object : ApprovalStore(noopDataSource()) {
             override fun findApproval(runId: UUID, nodeId: String) = ApprovalRow(
@@ -111,7 +113,7 @@ class ApprovalNodeExecutorTest {
     // ── REJECTED row → Failed ─────────────────────────────────────────────────
 
     @Test
-    fun `existing REJECTED row returns Failed`() {
+    fun `existing REJECTED row returns Failed`(): Unit = runBlocking {
         val existingId = UUID.randomUUID()
         val store = object : ApprovalStore(noopDataSource()) {
             override fun findApproval(runId: UUID, nodeId: String) = ApprovalRow(
@@ -134,7 +136,7 @@ class ApprovalNodeExecutorTest {
     // ── Status case-insensitivity ──────────────────────────────────────────────
 
     @Test
-    fun `lowercase approved status is handled correctly`() {
+    fun `lowercase approved status is handled correctly`(): Unit = runBlocking {
         val store = object : ApprovalStore(noopDataSource()) {
             override fun findApproval(runId: UUID, nodeId: String) = ApprovalRow(
                 id = UUID.randomUUID(), runId = runId, nodeId = nodeId,

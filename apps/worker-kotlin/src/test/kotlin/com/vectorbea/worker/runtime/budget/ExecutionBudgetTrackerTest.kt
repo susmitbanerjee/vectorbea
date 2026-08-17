@@ -47,11 +47,23 @@ class ExecutionBudgetTrackerTest {
      */
     @Test
     fun `node count disabled but wall clock still yields`() {
-        val t = ExecutionBudgetTracker(budget(nodes = 0, wallMs = 1))
-        repeat(500) { t.recordNode() }
-        assertNull(t.exhaustedReason(), "nodes=0 must never trigger a node-count yield")
+        // Two trackers, because the two assertions want opposite wall budgets and
+        // sharing one made this test flaky: with wallMs = 1, the 500 recordNode()
+        // calls could themselves take longer than a millisecond on a loaded
+        // machine, so the "not yet exhausted" assertion raced the clock it was
+        // trying to hold still.
+
+        // 1. Node count disabled — never yields, no matter how many nodes run.
+        //    A generous wall budget keeps the clock out of this assertion.
+        val nodesDisabled = ExecutionBudgetTracker(budget(nodes = 0, wallMs = 60_000))
+        repeat(500) { nodesDisabled.recordNode() }
+        assertNull(nodesDisabled.exhaustedReason(), "nodes=0 must never trigger a node-count yield")
+
+        // 2. Wall clock still fires, independently of the node dimension.
+        val wallBounded = ExecutionBudgetTracker(budget(nodes = 0, wallMs = 1))
         Thread.sleep(5)
-        assertEquals("MAX_WALL_CLOCK_MS_EXCEEDED", t.exhaustedReason(), "wall-clock yield must still fire")
+        assertEquals("MAX_WALL_CLOCK_MS_EXCEEDED", wallBounded.exhaustedReason(),
+            "wall-clock yield must still fire")
     }
 
     @Test

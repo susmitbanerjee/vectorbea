@@ -36,7 +36,7 @@ class TransformNodeExecutor(
     private val stepOutputView: StepOutputView = InMemoryStepOutputView(),
 ) : NodeExecutor {
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

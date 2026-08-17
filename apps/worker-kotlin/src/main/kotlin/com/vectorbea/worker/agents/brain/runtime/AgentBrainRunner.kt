@@ -47,7 +47,7 @@ class AgentBrainRunner(
         val observations: List<AgentObservation>,
     )
 
-    fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
+    suspend fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
         val budget = AgentBudget(
             maxIterations  = config.maxIterations,
             maxToolCalls   = config.maxToolCalls,
@@ -205,7 +205,7 @@ class AgentBrainRunner(
 
     private data class LlmCallResult(val rawContent: String, val tokensUsed: Int, val estimatedCostCents: Double)
 
-    private fun callLlm(config: AgentBrainConfig, systemPrompt: String, userPrompt: String, state: AgentLoopState): LlmCallResult {
+    private suspend fun callLlm(config: AgentBrainConfig, systemPrompt: String, userPrompt: String, state: AgentLoopState): LlmCallResult {
         emitEvent(config, RunEventStore.EventType.LLM_CALL_STARTED, "running",
             "LLM call iter=${state.iteration} model=${config.modelName}")
 
@@ -228,21 +228,33 @@ class AgentBrainRunner(
                 ?: inferBaseUrl(resolved.record.provider)
             val url = "$baseUrl/chat/completions"
 
-            val http = java.net.http.HttpClient.newHttpClient()
+            // Shared client. Building one per call left a selector thread behind
+            // on every agent iteration (HttpClient is not AutoCloseable on JDK 17)
+            // and carried no connect timeout at all.
             val request = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(url))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer $apiKey")
                 .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
-                .timeout(java.time.Duration.ofMillis(config.timeoutMs))
-                .build()
 
-            val response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() !in 200..299)
-                throw RuntimeException("LLM API returned ${response.statusCode()}")
+            val budgetMs = com.vectorbea.worker.net.OutboundHttp.policy().clampTotalCallMs(config.timeoutMs)
+            val response = com.vectorbea.worker.metrics.WorkerMetrics.timeBlocking {
+                com.vectorbea.worker.net.OutboundHttp.send(
+                    request,
+                    totalCallMs = budgetMs,
+                    maxResponseBytes = 1_048_576L,
+                )
+            }
+            com.vectorbea.worker.metrics.WorkerMetrics.llmCallDurationSeconds.observeMs(
+                response.durationMs,
+                resolved.record.provider.lowercase(),
+                if (response.statusCode in 200..299) "ok" else "http_error",
+            )
+            if (response.statusCode !in 200..299)
+                throw RuntimeException("LLM API returned ${response.statusCode}")
 
             @Suppress("UNCHECKED_CAST")
-            val parsed  = mapper.readValue(response.body(), Map::class.java) as Map<String, Any?>
+            val parsed  = mapper.readValue(response.body, Map::class.java) as Map<String, Any?>
             val choices = parsed["choices"] as? List<*> ?: throw RuntimeException("No choices in LLM response")
             val msg     = ((choices[0] as Map<*, *>)["message"] as Map<*, *>)["content"] as? String ?: ""
 
@@ -304,7 +316,7 @@ class AgentBrainRunner(
 
     // ── Tool execution ────────────────────────────────────────────────────────
 
-    private fun executeTool(
+    private suspend fun executeTool(
         action: AgentAction,
         config: AgentBrainConfig,
         runtimeCtx: RuntimeContext,

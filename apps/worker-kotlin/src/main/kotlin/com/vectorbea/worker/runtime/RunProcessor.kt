@@ -52,8 +52,37 @@ class RunProcessor(
      * the orphaned 'yielded' run.
      */
     private val reEnqueue: (WorkflowRunJob) -> Unit = {},
+    /**
+     * Enforces per-tenant limits at lease-claim time. Null in tests that do not
+     * exercise fairness; production always supplies it.
+     */
+    private val tenantAdmission: com.vectorbea.worker.fairness.SharedTenantAdmission? = null,
+    /** Reads a run's stored execution class for the claim-time class check. */
+    private val runClassLookup: com.vectorbea.worker.queue.RunClassLookup? = null,
+    /** Poison-job protection. Null in tests that do not exercise it. */
+    private val deadLetters: com.vectorbea.worker.durable.DeadLetterStore? = null,
 ) {
+
+    /** The run's class, for per-class limit checks at claim time. */
+    private fun executionClassOf(workspaceId: java.util.UUID, runId: java.util.UUID) =
+        runClassLookup?.classOf(runId) ?: com.vectorbea.worker.queue.WorkerJobType.SHORT
     private val log = logger()
+
+    companion object {
+        /**
+         * Lease heartbeat interval. Fixed rather than derived from the TTL so the
+         * margin does not silently shrink if someone lowers
+         * WORKER_LEASE_TTL_SECONDS.
+         */
+        private val LEASE_HEARTBEAT_MS =
+            System.getenv("LEASE_HEARTBEAT_MS")?.toLongOrNull() ?: 10_000L
+    }
+
+    /**
+     * Cancellation handles for in-flight runs, so a lost lease can stop the work
+     * immediately instead of waiting for it to finish and be fenced at the write.
+     */
+    private val runCancellation = java.util.concurrent.ConcurrentHashMap<UUID, kotlinx.coroutines.Job>()
 
     /** Shared scheduler for periodic lease renewal — one tick per in-flight run. */
     private val leaseRenewer = Executors.newSingleThreadScheduledExecutor { r ->
@@ -64,7 +93,7 @@ class RunProcessor(
      * Entry point — called from the consumer thread pool for each job.
      * Must not throw; all exceptions are caught and turned into RUN_FAILED events.
      */
-    fun process(job: WorkflowRunJob) {
+    suspend fun process(job: WorkflowRunJob) {
         heartbeat.taskStarted()
         WorkerMetrics.activeTasks.inc()
         WorkerMetrics.runsQueued.inc()
@@ -98,12 +127,109 @@ class RunProcessor(
                 mdcClearAll()
                 return
             }
+            // ── The hard per-tenant gate ──────────────────────────────────
+            // Admission at poll time is advisory: it reads a short-TTL cache of
+            // shared state, so several replicas can admit against the same stale
+            // view. Measured, that was worth 2xN concurrency — the original
+            // multiply-by-replicas bug, intact.
+            //
+            // The lease row is where the shared state actually changes, so this
+            // is where the limit is enforced. We now hold a lease; if older
+            // leases for this workspace already fill its quota, we are the excess
+            // one, and we release rather than run. Ordering by (created_at,
+            // run_id) means the first N acquirers always win and no two replicas
+            // can both decide to yield.
+            val admitted = tenantAdmission?.admitAtClaim(
+                workspaceId = leaseRun.workspaceId,
+                runId = job.runId,
+                type = executionClassOf(leaseRun.workspaceId, job.runId),
+            ) ?: true
+            if (!admitted) {
+                leaseManager.release(job.runId, workerId)
+                // Re-enqueue rather than park.
+                //
+                // Leaving the message unacked would be correct but slow: with
+                // typed streams a worker only reads what it can start, so nothing
+                // re-reads a parked message until the XAUTOCLAIM idle threshold
+                // (60 s). Measured, that turned every refused claim into a
+                // minute-long stall and collapsed throughput as replicas were
+                // added — limits held, but the platform crawled.
+                //
+                // A fresh XADD puts the run at the tail of its own class stream,
+                // where it is retried in seconds. The run row stays 'queued' and
+                // the original message is acked by the caller, so exactly one
+                // copy remains outstanding.
+                runCatching { reEnqueue(job) }.onFailure {
+                    log.warn("[processor] re-enqueue after claim refusal failed [runId={}]: {}",
+                        job.runId, it.message)
+                }
+                log.debug("[processor] over per-tenant limit at claim — released lease, re-queued " +
+                    "[runId={}, ws={}]", job.runId, leaseRun.workspaceId)
+                WorkerMetrics.activeTasks.dec()
+                heartbeat.taskFinished()
+                mdcClearAll()
+                return
+            }
+
+            // ── Poison-job protection ─────────────────────────────────────────
+            //
+            // Counted at CLAIM, before execution, which is the whole point: a job
+            // that has already killed four workers must not be given a fifth. A
+            // job that crashes the process never reaches any post-execution
+            // bookkeeping, so counting afterwards would never fire.
+            val attempts = deadLetters?.recordDelivery(job.runId)
+            if (deadLetters != null && deadLetters.isExhausted(attempts)) {
+                deadLetters.deadLetter(
+                    job = job,
+                    attempts = attempts ?: deadLetters.maxAttempts + 1,
+                    reason = "max_delivery_attempts_exceeded",
+                    lastError = "Exceeded ${deadLetters.maxAttempts} delivery attempts — " +
+                        "likely a poison job that crashes its worker before completing.",
+                )
+                leaseManager.release(job.runId, workerId)
+                WorkerMetrics.activeTasks.dec()
+                heartbeat.taskFinished()
+                mdcClearAll()
+                return
+            }
+
             lease = acquired
-            val renewEveryMs = (leaseManager.leaseTtlSeconds * 1000L / 3).coerceAtLeast(5_000L)
+
+            // ── Lease heartbeat ───────────────────────────────────────────────
+            //
+            // Fixed 10s, not TTL/3. A step that outlives its lease gets stolen
+            // mid-flight, and the old TTL/3 schedule (20s at a 60s TTL) left only
+            // three beats of margin — one GC pause or one slow query and the
+            // lease is gone while the step is still running.
+            //
+            // The important half is what happens when extension FAILS. Zero rows
+            // updated means the lease was reassigned: another worker is now
+            // legitimately executing this run. Continuing would be two workers
+            // running the same run, so the coroutine is cancelled immediately
+            // rather than allowed to finish and write.
+            val heartbeatScope = job
             renewal = leaseRenewer.scheduleWithFixedDelay({
                 val ok = leaseManager.renew(job.runId, workerId, acquired.token)
-                if (!ok) log.warn("[processor] lease renewal failed [runId={}]", job.runId)
-            }, renewEveryMs, renewEveryMs, TimeUnit.MILLISECONDS)
+                if (!ok) {
+                    WorkerMetrics.leaseExpiryTotal.inc("renew_failed")
+                    WorkerMetrics.leaseStolenTotal.inc()
+                    log.warn("[processor] LEASE LOST mid-flight [runId={}] — another worker has taken " +
+                        "over. Cancelling this execution so the run is not executed twice.",
+                        heartbeatScope.runId)
+                    // Cancelling the job's scope unwinds the suspended execution
+                    // at its next suspension point. Any write it attempts after
+                    // this is fenced anyway (see Fence), so this is defence in
+                    // depth rather than the only guard.
+                    runCancellation[job.runId]?.cancel(
+                        java.util.concurrent.CancellationException("lease reassigned"))
+                }
+            }, LEASE_HEARTBEAT_MS, LEASE_HEARTBEAT_MS, TimeUnit.MILLISECONDS)
+        }
+
+        // Publish this coroutine's Job so the lease heartbeat can cancel it the
+        // moment the lease is reassigned.
+        kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let {
+            runCancellation[job.runId] = it
         }
 
         try {
@@ -123,6 +249,7 @@ class RunProcessor(
                 job.runId, durationMs, e)
             runCatching { markRunFailed(job, sanitizeError(e), start) }
         } finally {
+            runCancellation.remove(job.runId)
             renewal?.cancel(false)
             if (lease != null) leaseManager.release(job.runId, workerId)
             eventStore.forgetRun(job.runId)
@@ -132,9 +259,31 @@ class RunProcessor(
         }
     }
 
+    /**
+     * Record XADD → RUN_STARTED, the latency the user actually feels.
+     *
+     * No extra field is needed on the message: a Redis Stream ID is
+     * `<millisecondsSinceEpoch>-<sequence>`, assigned by Redis at XADD. Parsing
+     * the left half gives the enqueue instant exactly, for free, and for every
+     * message ever written to the stream — including ones enqueued before this
+     * metric existed.
+     *
+     * Synthesized jobs (crash recovery, timers) carry no stream ID and are
+     * skipped: their "wait" is a scheduling decision, not queue latency, and
+     * mixing them in would flatter the percentiles.
+     */
+    private fun recordWaitBeforeStart(job: WorkflowRunJob) {
+        val msgId = job.streamMessageId ?: return
+        val enqueuedMs = msgId.substringBefore('-').toLongOrNull() ?: return
+        val waitedMs = System.currentTimeMillis() - enqueuedMs
+        // Guard against clock skew between the Redis host and this worker.
+        if (waitedMs < 0 || waitedMs > TimeUnit.HOURS.toMillis(24)) return
+        WorkerMetrics.jobWaitBeforeStartSeconds.observeMs(waitedMs, job.jobType.name.lowercase())
+    }
+
     // ── Job type handlers ─────────────────────────────────────────────────────
 
-    private fun processStartRun(job: WorkflowRunJob, start: Instant) {
+    private suspend fun processStartRun(job: WorkflowRunJob, start: Instant) {
         // 1. Load the run to get workspace/environment context
         val run = loadRun(job.runId)
             ?: run {
@@ -199,6 +348,7 @@ class RunProcessor(
         }
 
         // 3. Emit RUN_STARTED
+        recordWaitBeforeStart(job)
         eventStore.appendEvent(RunEvent(
             runId = job.runId,
             workspaceId = run.workspaceId,
@@ -257,7 +407,7 @@ class RunProcessor(
      * The approval node is placed back in PENDING state so [ApprovalNodeExecutor]
      * re-runs and reads the decision from the DB (APPROVED → Completed, REJECTED → Failed).
      */
-    private fun processResumeRun(job: WorkflowRunJob, start: Instant) {
+    private suspend fun processResumeRun(job: WorkflowRunJob, start: Instant) {
         val run = loadRun(job.runId) ?: run {
             log.error("[processor] RESUME_RUN — run not found [runId={}]", job.runId)
             return
@@ -348,7 +498,7 @@ class RunProcessor(
      * Loads the latest checkpoint, resets the target node to PENDING, and
      * resumes the DAG. Other completed nodes are not re-executed.
      */
-    private fun processRetryNode(job: WorkflowRunJob, start: Instant) {
+    private suspend fun processRetryNode(job: WorkflowRunJob, start: Instant) {
         val run = loadRun(job.runId) ?: run {
             log.error("[processor] RETRY_NODE — run not found [runId={}]", job.runId)
             return
@@ -435,7 +585,7 @@ class RunProcessor(
      * No checkpoint is consulted — the run starts clean from the trigger node.
      * The existing run row is reused (status reset to running).
      */
-    private fun processReplayRun(job: WorkflowRunJob, start: Instant) {
+    private suspend fun processReplayRun(job: WorkflowRunJob, start: Instant) {
         val run = loadRun(job.runId) ?: run {
             log.error("[processor] REPLAY_RUN — run not found [runId={}]", job.runId)
             return

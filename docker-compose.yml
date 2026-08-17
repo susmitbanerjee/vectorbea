@@ -107,7 +107,20 @@ services:
       SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
       WORKER_QUEUE_STREAM: workflow-runs
       WORKER_QUEUE_GROUP: workflow-workers
+      # Fallback formula only — the per-pool knobs below take precedence.
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      # Stage 1: pool sizing decoupled from WORKER_CONCURRENCY, agent 2 -> 6.
+      # See docs/architecture/STAGE-1-CAPACITY.md for the measured ceiling.
+      WORKER_POOL_SHORT: ${WORKER_POOL_SHORT:-8}
+      WORKER_POOL_LONG: ${WORKER_POOL_LONG:-2}
+      WORKER_POOL_AGENT: ${WORKER_POOL_AGENT:-6}
+      WORKER_POOL_SYSTEM: ${WORKER_POOL_SYSTEM:-2}
+      # Tenant-database node execution, isolated from every pool above so a
+      # hanging tenant database exhausts only this.
+      WORKER_POOL_TENANT_DB: ${WORKER_POOL_TENANT_DB:-16}
+      # MUST equal the deployed replica count. Left at 1: replicas are NOT
+      # scaled. See docs/architecture/TECH-DEBT.md#D1 before changing.
+      REPLICA_COUNT: ${REPLICA_COUNT:-1}
       WORKER_POLL_BLOCK_MS: 5000
       REDIS_COMMAND_TIMEOUT_MS: 10000
       WORKER_HEARTBEAT_INTERVAL_MS: 15000

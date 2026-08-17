@@ -35,6 +35,20 @@ class RuntimeContext(
      * The step-idempotency guard is bypassed for these so a deliberate retry always runs.
      */
     val forceReexecuteNodeIds: Set<String> = emptySet(),
+    /**
+     * Which logical attempt-group this run belongs to.
+     *
+     * Increments only on user-initiated re-runs, never on automatic retries, and
+     * is the third component of every side-effect idempotency key. That is what
+     * makes a retry share a key with the operation it retries (so it dedupes)
+     * while a deliberate re-run gets a fresh one (so it genuinely runs again).
+     */
+    val attemptGroup: Int = 0,
+    /**
+     * The lease token this worker holds for the run, or null when unfenced.
+     * Recorded on side effects so an incident can be traced to a worker+lease.
+     */
+    val leaseToken: String? = null,
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()

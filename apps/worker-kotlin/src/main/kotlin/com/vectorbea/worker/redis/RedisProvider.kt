@@ -32,6 +32,26 @@ class RedisProvider private constructor(
     /** Pub/Sub connection for PUBLISH only. */
     val pubSubConnection: StatefulRedisPubSubConnection<String, String> = _pubSubConnection
 
+    /** Extra connections handed out by [dedicatedConnection], closed with the provider. */
+    private val dedicated = java.util.concurrent.CopyOnWriteArrayList<StatefulRedisConnection<String, String>>()
+
+    /**
+     * A connection of this consumer's own, for **blocking** commands.
+     *
+     * Lettuce multiplexes commands over one connection, but a blocking command
+     * (`XREADGROUP … BLOCK`) holds that connection for its whole block window.
+     * With one connection shared across four typed-stream consumers, each
+     * blocking for `pollBlockMs`, every other Redis call on the worker — XACK,
+     * XADD, heartbeat — would queue behind whichever consumer happened to be
+     * waiting. Each blocking consumer therefore gets its own.
+     */
+    fun dedicatedConnection(purpose: String): RedisCommands<String, String> {
+        val conn = client.connect()
+        dedicated += conn
+        log.info("[redis] dedicated connection opened for {}", purpose)
+        return conn.sync()
+    }
+
     /** Round-trip PING. Returns latency ms or throws. */
     fun ping(): Long {
         val start = System.currentTimeMillis()
@@ -41,6 +61,8 @@ class RedisProvider private constructor(
     }
 
     fun close() {
+        for (c in dedicated) { try { c.close() } catch (_: Exception) {} }
+        dedicated.clear()
         try { _pubSubConnection.close() } catch (_: Exception) {}
         try { connection.close() } catch (_: Exception) {}
         try { client.shutdown() } catch (_: Exception) {}

@@ -156,9 +156,18 @@ fun main() {
         NoOpCacheService()
     }
 
+    // Typed streams: runs.short / runs.long / runs.agent / runs.system, routed by
+    // the execution class materialised at trigger. REDIS_LEGACY_QUEUE_STREAM is
+    // the migration mirror — while set, every enqueue is ALSO written to the old
+    // single stream so a not-yet-upgraded worker still sees it. Unset it once
+    // every worker consumes typed streams; see TYPED-QUEUE-MIGRATION.md.
+    val legacyMirrorStream: String? = System.getenv("REDIS_LEGACY_QUEUE_STREAM")?.takeIf { it.isNotBlank() }
     val workflowQueue: WorkflowQueue? = if (redis != null) {
-        val q = RedisStreamsWorkflowQueue(redis, config.redis!!.queueStream, config.redis.queueGroup)
-        RedisStreamsWorkflowQueue.verifyStream(redis, config.redis.queueStream)
+        val q = com.vectorbea.api.queue.TypedStreamsWorkflowQueue(
+            redis = redis,
+            legacyStreamKey = legacyMirrorStream,
+        )
+        com.vectorbea.api.queue.TypedStreamsWorkflowQueue.verifyStreams(redis, legacyMirrorStream)
         q
     } else null
 
@@ -227,6 +236,14 @@ fun main() {
     val agentRepo = ds?.let { AgentRepository(it) }
     val toolRepo = ds?.let { ToolRepository(it) }
     val workflowRepo = ds?.let { WorkflowRepository(it) }
+
+    // Classification happens here, once per workflow version, and is memoised on
+    // the version row. Every enqueue path shares this instance so a version is
+    // parsed at most once per process — and, thanks to the row memo, usually
+    // never again after the first trigger anywhere in the fleet.
+    val executionClassResolver = workflowRepo?.let {
+        com.vectorbea.api.queue.ExecutionClassResolver(it)
+    }
     val runRepo = ds?.let { RunRepository(it) }
     val runEventRepo = ds?.let { RunEventRepository(it) }
     val approvalRepo = ds?.let { ApprovalRepository(it) }
@@ -278,6 +295,7 @@ fun main() {
     if (runRepo != null && runEventRepo != null) {
         val betaRepoForRuns = ds?.let { com.vectorbea.api.beta.BetaAccessRepository(it) }
         RunRoutes(
+            classResolver = executionClassResolver,
             runRepo = runRepo,
             eventRepo = runEventRepo,
             workflowRepo = workflowRepo,
@@ -295,6 +313,7 @@ fun main() {
             debugRepo = com.vectorbea.api.repository.DebugSnapshotRepository(ds!!),
             workflowRepo = workflowRepo,
             queue = workflowQueue,
+            classResolver = executionClassResolver,
         ).register(router)
     } else log.warn("RunRoutes disabled — no database")
 
@@ -309,6 +328,10 @@ fun main() {
 
     if (ds != null) {
         WorkerRoutes(ds).register(router)
+        // Fleet health for the Control page — liveness, load, headroom.
+        com.vectorbea.api.routes.FleetStatusRoutes(ds).register(router)
+        // Dead-lettered jobs — the most actionable failure the platform emits.
+        com.vectorbea.api.routes.DeadLetterRoutes(ds).register(router)
         BootstrapRoutes(ds).register(router)
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
 
@@ -338,6 +361,7 @@ fun main() {
             runRepo = runRepo,
             eventRepo = runEventRepo,
             queue = workflowQueue,
+            classResolver = executionClassResolver,
         ).also { it.start() }
     } else {
         log.warn("WorkflowScheduler disabled — requires database + queue")

@@ -1,5 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.connector.ConnectionRecord
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.ResolvedConnection
@@ -73,7 +75,7 @@ class LlmNodeExecutorTest {
     // ── Missing connectionId ──────────────────────────────────────────────────
 
     @Test
-    fun `returns Failed when connectionId missing`() {
+    fun `returns Failed when connectionId missing`(): Unit = runBlocking {
         val executor = LlmNodeExecutor(stubResolver("openai"), eventStore())
         val node     = WorkflowNode(id = "n1", type = "llm", config = emptyMap())
         val result   = executor.execute(node, emptyMap(), context())
@@ -84,7 +86,7 @@ class LlmNodeExecutorTest {
     // ── OpenAI-compatible response parsing ────────────────────────────────────
 
     @Test
-    fun `parses OpenAI response and returns content`() {
+    fun `parses OpenAI response and returns content`(): Unit = runBlocking {
         val openAiJson = """
             {
               "choices": [{"message": {"role": "assistant", "content": "Hello, world!"}, "finish_reason": "stop"}],
@@ -114,7 +116,7 @@ class LlmNodeExecutorTest {
     // ── Anthropic response parsing ────────────────────────────────────────────
 
     @Test
-    fun `parses Anthropic response and returns content`() {
+    fun `parses Anthropic response and returns content`(): Unit = runBlocking {
         val anthropicJson = """
             {
               "content": [{"type": "text", "text": "Bonjour!"}],
@@ -145,7 +147,7 @@ class LlmNodeExecutorTest {
     // ── Gemini response parsing ───────────────────────────────────────────────
 
     @Test
-    fun `parses Gemini response and returns content`() {
+    fun `parses Gemini response and returns content`(): Unit = runBlocking {
         val geminiJson = """
             {
               "candidates": [{"content": {"parts": [{"text": "Ciao!"}]}, "finishReason": "STOP"}],
@@ -174,7 +176,7 @@ class LlmNodeExecutorTest {
     // ── HTTP error ────────────────────────────────────────────────────────────
 
     @Test
-    fun `returns Failed on HTTP 401`() {
+    fun `returns Failed on HTTP 401`(): Unit = runBlocking {
         val executor = LlmNodeExecutor(
             connectionResolver = stubResolver("openai"),
             eventStore         = eventStore(),
@@ -196,7 +198,7 @@ class LlmNodeExecutorTest {
     // ── Resolved inputs used as prompt when no messages ──────────────────────
 
     @Test
-    fun `resolved inputs prompt field used when no messages configured`() {
+    fun `resolved inputs prompt field used when no messages configured`(): Unit = runBlocking {
         val openAiJson = """
             {"choices":[{"message":{"role":"assistant","content":"Got it"},"finish_reason":"stop"}],"usage":{"total_tokens":3}}
         """.trimIndent()
@@ -235,10 +237,16 @@ private fun stubHttpClient(statusCode: Int, responseBody: String): HttpClient {
         override fun authenticator(): java.util.Optional<java.net.Authenticator> = java.util.Optional.empty()
         override fun executor(): java.util.Optional<java.util.concurrent.Executor> = java.util.Optional.empty()
         override fun cookieHandler(): java.util.Optional<java.net.CookieHandler> = java.util.Optional.empty()
+        // OutboundHttp.send drives sendAsync so the total-call ceiling can cover
+        // body streaming. The stub returns an already-complete future; the body
+        // handler is bypassed because the stub supplies the decoded String.
+        @Suppress("UNCHECKED_CAST")
         override fun <T : Any?> sendAsync(
             request: HttpRequest,
             responseBodyHandler: HttpResponse.BodyHandler<T>,
-        ): java.util.concurrent.CompletableFuture<HttpResponse<T>> = throw UnsupportedOperationException()
+        ): java.util.concurrent.CompletableFuture<HttpResponse<T>> =
+            java.util.concurrent.CompletableFuture.completedFuture(
+                StubHttpResponse(statusCode, responseBody) as HttpResponse<T>)
         override fun <T : Any?> sendAsync(
             request: HttpRequest,
             responseBodyHandler: HttpResponse.BodyHandler<T>,

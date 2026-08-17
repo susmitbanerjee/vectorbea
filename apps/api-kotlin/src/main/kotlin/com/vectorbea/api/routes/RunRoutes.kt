@@ -114,7 +114,33 @@ class RunRoutes(
     private val betaRepo: com.vectorbea.api.beta.BetaAccessRepository? = null,
     private val appConfig: com.vectorbea.api.config.AppConfig? = null,
     private val telemetry: TelemetryClient? = null,
+    /**
+     * Decides which typed stream a run goes to, before the message exists.
+     * Null keeps every enqueue on the SHORT stream, which is the safe default
+     * for a deployment mid-migration and for tests that do not exercise routing.
+     */
+    private val classResolver: com.vectorbea.api.queue.ExecutionClassResolver? = null,
 ) {
+
+    /**
+     * Class for a fresh run: derived from the workflow version's graph, memoised
+     * per version. This is the one place a graph is inspected — everything
+     * downstream reads the stored answer.
+     */
+    private fun classifyVersion(versionId: UUID) =
+        classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
+
+    /**
+     * Class for a continuation: read from the run row, never re-derived.
+     *
+     * A RESUME_RUN must land on the same stream as the run it continues. Re-
+     * deriving would risk a continuation drifting to a different pool if the
+     * classifier ever changed, and would reintroduce the graph probe that typing
+     * the queue exists to remove.
+     */
+    private fun classifyExistingRun(runId: UUID) =
+        com.vectorbea.api.queue.ExecutionClass.fromWire(
+            runCatching { runRepo.findExecutionClass(runId) }.getOrNull())
     fun register(router: Router) {
         // Workflow-scoped trigger
         router.post("/api/workflows/:workflowId/run", ::triggerRun)
@@ -234,6 +260,13 @@ class RunRoutes(
             throw ApiError.ValidationError("Invalid input JSON: ${e.message}")
         }
 
+        // ── 4b. Classify BEFORE the run row exists ────────────────────────────
+        // The API already holds workflow_version_id here, and therefore
+        // graph_json, so the class costs one memoised lookup. Doing it now means
+        // the class is committed atomically with the run and the message can be
+        // routed without any worker-side probe.
+        val executionClass = classifyVersion(versionId)
+
         // ── 5. Create run row with status=queued ──────────────────────────────
         val run = runRepo.create(CreateRunRequest(
             workspaceId = ctx.workspaceId,
@@ -243,6 +276,7 @@ class RunRoutes(
             triggerType = body.triggerType,
             inputJson = inputJson,
             idempotencyKey = body.idempotencyKey,
+            executionClass = executionClass.wire,
         ))
 
         // ── 6. Append lifecycle events ────────────────────────────────────────
@@ -261,6 +295,7 @@ class RunRoutes(
             inputJson = inputJson,
             // Audit trail: identity derived from verified JWT, never from user-supplied headers
             requestedByUserId = req.principal?.appUserId?.toString(),
+            executionClass = executionClass,
         )
 
         val messageId = try {
@@ -548,6 +583,7 @@ class RunRoutes(
             workflowVersionId = run.workflowVersionId.toString(),
             jobType           = JobType.REPLAY_RUN,
             inputJson         = run.inputJson,
+            executionClass    = classifyExistingRun(runId),
         )
         try { q.enqueue(job) }
         catch (e: Exception) {
@@ -598,6 +634,7 @@ class RunRoutes(
             jobType           = JobType.RETRY_NODE,
             resumeFromNodeId  = body.nodeId,
             inputJson         = run.inputJson,
+            executionClass    = classifyExistingRun(runId),
         )
         try { q.enqueue(job) }
         catch (e: Exception) {
@@ -633,6 +670,11 @@ class RunRoutes(
             ?: throw ApiError.ValidationError("Original workflow no longer exists")
 
         // Create a fresh run row
+        // A replay is a NEW run of the same version, so it is classified from the
+        // version like any fresh trigger — not copied from the original run,
+        // whose class may predate a classifier change.
+        val replayClass = classifyVersion(original.workflowVersionId)
+
         val newRun = runRepo.create(com.vectorbea.api.repository.CreateRunRequest(
             workspaceId       = ctx.workspaceId,
             environmentId     = environmentId,
@@ -640,6 +682,7 @@ class RunRoutes(
             workflowVersionId = original.workflowVersionId,
             triggerType       = "replay",
             inputJson         = original.inputJson,
+            executionClass    = replayClass.wire,
         ))
 
         appendEvent(newRun, "REPLAY_CREATED", "queued", "api:replay",
@@ -654,6 +697,7 @@ class RunRoutes(
             workflowVersionId = original.workflowVersionId.toString(),
             jobType           = JobType.START_RUN,
             inputJson         = original.inputJson,
+            executionClass    = replayClass,
         )
         try { q.enqueue(job) }
         catch (e: Exception) {

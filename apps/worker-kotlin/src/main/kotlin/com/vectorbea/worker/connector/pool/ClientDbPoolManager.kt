@@ -1,7 +1,9 @@
 package com.vectorbea.worker.connector.pool
 
+import com.vectorbea.worker.config.OutboundTimeouts
 import com.vectorbea.worker.connector.ConnectionRecord
 import com.vectorbea.worker.connector.SecretValue
+import com.vectorbea.worker.db.JdbcTimeouts
 import com.vectorbea.worker.logging.logger
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -27,11 +29,25 @@ import javax.sql.DataSource
  *    only for HikariCP pool initialisation, then discarded.
  *  - Pool names never include credentials.
  *  - [close] must be called on shutdown to release all pools.
+ *
+ * AVAILABILITY — read this before changing anything below:
+ *  These are connections to **someone else's** database, over the public
+ *  internet, to a host the worker does not control. A tenant whose Postgres is
+ *  firewalled (SYN dropped) or hung (TCP established, no response) will park the
+ *  calling thread on a socket read. That thread is an execution slot; the agent
+ *  pool is two slots wide platform-wide. Two hung tenant databases are therefore
+ *  the entire platform's agent capacity, held indefinitely.
+ *
+ *  Every pool below MUST carry driver-level `connectTimeout`, `socketTimeout`
+ *  and `loginTimeout` — see [JdbcTimeouts]. A `withTimeout` in Kotlin, or a
+ *  `Statement.setQueryTimeout`, is not a substitute: neither can unpark a thread
+ *  blocked in a native socket read.
  */
 open class ClientDbPoolManager(
     private val maxConnectionsPerPool: Int = 3,
     private val connectionTimeoutMs: Long = 10_000L,
     private val idleTimeoutMs: Long = 300_000L,
+    private val timeouts: OutboundTimeouts = OutboundTimeouts.fromEnv(),
 ) : AutoCloseable {
 
     private val log = logger()
@@ -92,21 +108,21 @@ open class ClientDbPoolManager(
             secret.useOnce { raw ->
                 jdbcUrl = normaliseJdbcUrl(raw, record.provider)
             }
+            // Force driver-level timeouts even when the tenant supplied the whole
+            // URL — a connection string carrying `socketTimeout=0` would otherwise
+            // opt this tenant out of the only bound that protects the others.
+            val guardedUrl = JdbcTimeouts.applyTo(jdbcUrl, record.provider, timeouts)
             return try {
                 val hk = HikariConfig().apply {
-                    this.jdbcUrl = jdbcUrl
+                    this.jdbcUrl = guardedUrl
                     driverClassName = driverFor(record.provider)
                     poolName = "client-${record.id}"
                     maximumPoolSize = maxConnectionsPerPool
                     minimumIdle = 1
-                    connectionTimeout = connectionTimeoutMs
-                    idleTimeout = idleTimeoutMs
-                    maxLifetime = 1_800_000L
-                    connectionTestQuery = "SELECT 1"
-                    isRegisterMbeans = false
-                    leakDetectionThreshold = 60_000L
                     isReadOnly = readOnly
                 }
+                applyBounds(hk)
+                logEffective(record, "conn-string")
                 HikariDataSource(hk)
             } catch (e: Exception) {
                 val rootMsg = (e.cause?.message ?: e.message ?: e.javaClass.simpleName)
@@ -120,7 +136,7 @@ open class ClientDbPoolManager(
         }
 
         // ── Host/port mode ────────────────────────────────────────────────────
-        val jdbcUrl = buildJdbcUrl(record)
+        val jdbcUrl = JdbcTimeouts.applyTo(buildJdbcUrl(record), record.provider, timeouts)
         val username = cfg["username"] as? String ?: ""
 
         return try {
@@ -130,12 +146,6 @@ open class ClientDbPoolManager(
                 poolName = "client-${record.id}"
                 maximumPoolSize = maxConnectionsPerPool
                 minimumIdle = 1
-                connectionTimeout = connectionTimeoutMs
-                idleTimeout = idleTimeoutMs
-                maxLifetime = 1_800_000L
-                connectionTestQuery = "SELECT 1"
-                isRegisterMbeans = false
-                leakDetectionThreshold = 60_000L
 
                 if (username.isNotBlank()) {
                     this.username = username
@@ -147,6 +157,8 @@ open class ClientDbPoolManager(
 
                 isReadOnly = readOnly
             }
+            applyBounds(hk)
+            logEffective(record, "host-port")
             HikariDataSource(hk)
         } catch (e: Exception) {
             // Log the root cause message (safe — no JDBC URL, no credentials).
@@ -160,6 +172,43 @@ open class ClientDbPoolManager(
                 "Cannot create pool for connection '${record.name}' (${record.id}): $rootMsg"
             )
         }
+    }
+
+    /**
+     * Pool-level bounds, applied identically to both construction paths.
+     *
+     * Note the absence of `connectionTestQuery`. Setting it forces HikariCP to
+     * validate with `Statement.execute("SELECT 1")`, bounded only by
+     * `setQueryTimeout` — the pgjdbc cancel-request path, which itself hangs
+     * against an unreachable host. Without it HikariCP uses JDBC4
+     * `Connection.isValid(seconds)`, which pgjdbc bounds at the socket. That is
+     * the difference between "validation eventually gives up" and "validation
+     * parks a pool thread forever".
+     */
+    private fun applyBounds(hk: HikariConfig) {
+        JdbcTimeouts.applyPoolBounds(
+            cfg = hk,
+            t = timeouts,
+            connectionTimeoutMs = connectionTimeoutMs,
+            idleTimeoutMs = idleTimeoutMs,
+            maxLifetimeMs = timeouts.tenantPoolMaxLifetimeMs,
+            validationTimeoutMs = timeouts.tenantPoolValidationTimeoutMs,
+            leakDetectionMs = timeouts.tenantPoolLeakDetectionMs,
+        )
+    }
+
+    /** Log the effective bounds for this tenant pool — never the URL or credentials. */
+    private fun logEffective(record: ConnectionRecord, mode: String) {
+        val driverParams = JdbcTimeouts.paramsFor(record.provider, timeouts)
+            .entries.joinToString(" ") { (k, v) -> "$k=$v" }
+        log.info(
+            "[clientdb] pool bounds [connId={}, provider={}, mode={}] driver: {} | hikari: " +
+                "connectionTimeout={}ms validationTimeout={}ms maxLifetime={}ms idleTimeout={}ms leakDetection={}ms maxPoolSize={}",
+            record.id, record.provider, mode, driverParams,
+            connectionTimeoutMs, timeouts.tenantPoolValidationTimeoutMs,
+            timeouts.tenantPoolMaxLifetimeMs, idleTimeoutMs,
+            timeouts.tenantPoolLeakDetectionMs, maxConnectionsPerPool,
+        )
     }
 
     private fun buildJdbcUrl(record: ConnectionRecord): String {

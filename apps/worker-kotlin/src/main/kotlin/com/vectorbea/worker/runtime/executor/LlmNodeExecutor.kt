@@ -7,13 +7,12 @@ import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.metrics.WorkerMetrics
+import com.vectorbea.worker.net.OutboundHttp
 import com.vectorbea.worker.runtime.graph.RuntimeContext
 import com.vectorbea.worker.runtime.graph.WorkflowNode
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 import java.util.UUID
 
 /**
@@ -34,13 +33,19 @@ import java.util.UUID
  *  - API key values are never logged, only provider/model metadata.
  *  - Connection validation happens before any network I/O.
  *  - Response bodies are capped at [DEFAULT_MAX_RESPONSE_BYTES].
+ *
+ * AVAILABILITY:
+ *  An LLM call is the single longest blocking operation the worker performs, and
+ *  it happens on an agent-pool thread. All calls go through [OutboundHttp.send],
+ *  which bounds connect, headers, **total call including body streaming**, and
+ *  response size. `timeoutMs` from node config is honoured but clamped to the
+ *  process ceiling — a node cannot configure an unbounded call.
  */
 class LlmNodeExecutor(
     private val connectionResolver: ConnectionResolver,
     private val eventStore: RunEventStore,
-    private val httpClient: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build(),
+    /** Injectable for tests; production always uses the shared, bounded client. */
+    private val httpClient: java.net.http.HttpClient = OutboundHttp.client,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -51,7 +56,7 @@ class LlmNodeExecutor(
         const val DEFAULT_MAX_RESPONSE_BYTES = 1_048_576L // 1 MB
     }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         context: RuntimeContext,
@@ -85,7 +90,10 @@ class LlmNodeExecutor(
         val model       = cfg["model"] as? String
             ?: resolved.record.configJson["model"] as? String
             ?: defaultModelFor(provider)
-        val timeoutMs   = (cfg["timeoutMs"] as? Number)?.toLong() ?: DEFAULT_TIMEOUT_MS
+        // Clamp the node's timeout into the process ceiling — this is the
+        // total-call budget, not a headers-only budget.
+        val timeoutMs   = OutboundHttp.policy()
+            .clampTotalCallMs((cfg["timeoutMs"] as? Number)?.toLong() ?: DEFAULT_TIMEOUT_MS)
         val maxRespBytes = (cfg["maxResponseBytes"] as? Number)?.toLong() ?: DEFAULT_MAX_RESPONSE_BYTES
 
         @Suppress("UNCHECKED_CAST")
@@ -203,6 +211,7 @@ class LlmNodeExecutor(
             ),
             timeoutMs = timeoutMs,
             maxResponseBytes = maxResponseBytes,
+            provider = provider,
         )
 
         return parseOpenAiResponse(response)
@@ -242,6 +251,7 @@ class LlmNodeExecutor(
             ),
             timeoutMs = timeoutMs,
             maxResponseBytes = maxResponseBytes,
+            provider = "anthropic",
         )
 
         return parseAnthropicResponse(response)
@@ -285,6 +295,7 @@ class LlmNodeExecutor(
             ),
             timeoutMs = timeoutMs,
             maxResponseBytes = maxResponseBytes,
+            provider = "gemini",
         )
 
         return parseGeminiResponse(response)
@@ -298,35 +309,44 @@ class LlmNodeExecutor(
         headers: Map<String, String>,
         timeoutMs: Long,
         maxResponseBytes: Long,
+        provider: String,
     ): String {
         val bodyJson = mapper.writeValueAsString(body)
 
         val reqBuilder = HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .timeout(Duration.ofMillis(timeoutMs))
             .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
 
         headers.forEach { (k, v) -> reqBuilder.header(k, v) }
 
-        val httpResponse = try {
-            httpClient.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString())
+        val result = try {
+            WorkerMetrics.timeBlocking {
+                OutboundHttp.send(reqBuilder, totalCallMs = timeoutMs,
+                    maxResponseBytes = maxResponseBytes, httpClient = httpClient)
+            }
+        } catch (e: OutboundHttp.TotalCallTimeoutException) {
+            WorkerMetrics.llmCallDurationSeconds.observeMs(timeoutMs, provider, "timeout")
+            throw LlmCallException(
+                "LLM call exceeded its ${timeoutMs}ms budget and was aborted " +
+                    "(connect ${OutboundHttp.policy().httpConnectTimeoutMs}ms / total ${timeoutMs}ms). " +
+                    "Raise the node's timeoutMs, or check the provider's status."
+            )
+        } catch (e: OutboundHttp.ResponseTooLargeException) {
+            WorkerMetrics.llmCallDurationSeconds.observeMs(0, provider, "too_large")
+            throw LlmCallException("LLM response exceeded the ${e.limitBytes}-byte limit and was aborted")
         } catch (e: Exception) {
+            WorkerMetrics.llmCallDurationSeconds.observeMs(0, provider, "error")
             throw LlmCallException("HTTP request failed: ${e.javaClass.simpleName}: ${e.message?.take(200)}")
         }
 
-        val responseBody = httpResponse.body() ?: ""
-
-        if (responseBody.length > maxResponseBytes) {
-            throw LlmCallException("Response exceeded size limit (${responseBody.length} > $maxResponseBytes bytes)")
-        }
-
-        val status = httpResponse.statusCode()
-        if (status !in 200..299) {
+        if (result.statusCode !in 200..299) {
+            WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "http_error")
             // Never log the response body raw — it may echo the request including prompt content
-            throw LlmCallException("LLM API returned HTTP $status")
+            throw LlmCallException("LLM API returned HTTP ${result.statusCode}")
         }
 
-        return responseBody
+        WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "ok")
+        return result.body
     }
 
     // ── Response parsers ──────────────────────────────────────────────────────

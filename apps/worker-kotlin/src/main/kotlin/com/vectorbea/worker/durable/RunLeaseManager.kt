@@ -100,6 +100,35 @@ class RunLeaseManager(
     }
 
     /**
+     * Release every lease this worker still holds, on graceful shutdown.
+     *
+     * Without this, a rolling deploy leaves each replica's in-flight leases to
+     * expire on their own — up to `WORKER_LEASE_TTL_SECONDS` (60 s) during which
+     * those runs are invisible to crash recovery AND still counted against their
+     * workspace's concurrency limit. A three-replica rolling restart could
+     * therefore hold a tenant at its cap for a minute after the work stopped.
+     *
+     * Releasing explicitly makes a planned restart look like what it is —
+     * capacity freed immediately — and keeps expiry for what it is for: workers
+     * that died without the chance to say so.
+     *
+     * @return number of leases released.
+     */
+    fun releaseAllForWorker(workerId: String): Int = try {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("DELETE FROM run_leases WHERE worker_id = ?").use { stmt ->
+                stmt.setString(1, workerId)
+                stmt.executeUpdate()
+            }
+        }
+    } catch (e: Exception) {
+        // Non-fatal: expiry is the backstop, which is exactly the case this
+        // method exists to make rarer, not to replace.
+        log.warn("[lease] bulk release failed for worker {}: {}", workerId, e.message)
+        0
+    }
+
+    /**
      * Find runs that appear stale: status RUNNING and either
      *   - the lease exists but expired more than 30s ago (worker crashed mid-run), or
      *   - no lease exists AND the run has made no progress for 120s

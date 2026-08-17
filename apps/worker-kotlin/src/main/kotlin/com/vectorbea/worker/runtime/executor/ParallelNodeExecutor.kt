@@ -11,7 +11,7 @@ import com.vectorbea.worker.runtime.graph.WorkflowNode
  * Actual parallel branch execution is orchestrated by [WorkflowRuntime].
  */
 class ParallelNodeExecutor : NodeExecutor {
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

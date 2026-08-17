@@ -57,6 +57,8 @@ class CrashRecoveryLoop(
         try {
             val stale = leaseManager.findStaleRuns(limit = 10)
             if (stale.isEmpty()) return
+            com.vectorbea.worker.metrics.WorkerMetrics.leaseExpiryTotal
+                .inc("crash_recovery", delta = stale.size.toLong())
             log.warn("[recovery-loop] found {} stale runs", stale.size)
             stale.forEach { recover(it) }
         } catch (e: Exception) {

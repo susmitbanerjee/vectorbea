@@ -1,5 +1,7 @@
 package com.vectorbea.worker.runtime
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
@@ -53,7 +55,7 @@ class WorkflowRuntimeTest {
         ) { /* no-op */ }
     }
 
-    private fun runtime() = WorkflowRuntime(
+    private suspend fun runtime() = WorkflowRuntime(
         dataSource      = noopDataSource(),
         eventStore      = stubEventStore,
         checkpointStore = stubCheckpointStore,
@@ -64,15 +66,15 @@ class WorkflowRuntimeTest {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun node(id: String, type: NodeType, config: Map<String, Any> = emptyMap()) =
+    private suspend fun node(id: String, type: NodeType, config: Map<String, Any> = emptyMap()) =
         WorkflowNode(id = id, type = type.value, config = config)
 
-    private fun edge(id: String, from: String, to: String, type: EdgeType = EdgeType.DEFAULT, cond: String? = null) =
+    private suspend fun edge(id: String, from: String, to: String, type: EdgeType = EdgeType.DEFAULT, cond: String? = null) =
         WorkflowEdge(id = id, source = from, target = to, type = type.value, condition = cond)
 
-    private fun runIds() = Triple(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
+    private suspend fun runIds() = Triple(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
 
-    private fun execute(
+    private suspend fun execute(
         graph: WorkflowGraph,
         input: String = "{}",
         workflowVersionId: UUID = UUID.randomUUID(),
@@ -92,7 +94,7 @@ class WorkflowRuntimeTest {
     // ── Sequential workflow ───────────────────────────────────────────────────
 
     @Test
-    fun `sequential trigger → transform → end succeeds`() {
+    fun `sequential trigger → transform → end succeeds`(): Unit = runBlocking {
         val trigger   = node("t1", NodeType.TRIGGER)
         val transform = node("n1", NodeType.TRANSFORM)
         val end       = node("e1", NodeType.END)
@@ -114,7 +116,7 @@ class WorkflowRuntimeTest {
     }
 
     @Test
-    fun `invalid graph (no trigger) returns Failed`() {
+    fun `invalid graph (no trigger) returns Failed`(): Unit = runBlocking {
         val graph = WorkflowGraph(
             nodes = listOf(node("n1", NodeType.TRANSFORM)),
             edges = emptyList()
@@ -128,7 +130,7 @@ class WorkflowRuntimeTest {
     // ── Branch workflow ───────────────────────────────────────────────────────
 
     @Test
-    fun `branch selects correct edge based on input`() {
+    fun `branch selects correct edge based on input`(): Unit = runBlocking {
         val trigger = node("t1", NodeType.TRIGGER)
         val branch  = node("b1", NodeType.BRANCH)
         val left    = node("left", NodeType.TRANSFORM)
@@ -167,7 +169,7 @@ class WorkflowRuntimeTest {
     // ── Parallel / join workflow ──────────────────────────────────────────────
 
     @Test
-    fun `parallel branches both execute and join completes`() {
+    fun `parallel branches both execute and join completes`(): Unit = runBlocking {
         val trigger  = node("t1", NodeType.TRIGGER)
         val parallel = node("par", NodeType.PARALLEL)
         val branch1  = node("b1",  NodeType.TRANSFORM)
@@ -201,7 +203,7 @@ class WorkflowRuntimeTest {
     // ── Approval pause ────────────────────────────────────────────────────────
 
     @Test
-    fun `approval node pauses run without failing`() {
+    fun `approval node pauses run without failing`(): Unit = runBlocking {
         val trigger  = node("t1", NodeType.TRIGGER)
         val approval = node("ap1", NodeType.APPROVAL, config = mapOf("message" to "Please review"))
         val end      = node("end", NodeType.END)
@@ -225,7 +227,7 @@ class WorkflowRuntimeTest {
     // ── Unsupported node type ─────────────────────────────────────────────────
 
     @Test
-    fun `unsupported node (TOOL) emits NODE_TYPE_UNSUPPORTED and fails run by default`() {
+    fun `unsupported node (TOOL) emits NODE_TYPE_UNSUPPORTED and fails run by default`(): Unit = runBlocking {
         val trigger = node("t1", NodeType.TRIGGER)
         // TOOL gained a real executor — use UNKNOWN, which is genuinely unsupported
         val tool    = node("tool1", NodeType.UNKNOWN)
@@ -249,7 +251,7 @@ class WorkflowRuntimeTest {
     }
 
     @Test
-    fun `unsupported node with continue policy skips and continues`() {
+    fun `unsupported node with continue policy skips and continues`(): Unit = runBlocking {
         val trigger    = node("t1", NodeType.TRIGGER)
         val llmContinue = WorkflowNode(
             id = "tool1", type = "tool",   // TOOL is unsupported
@@ -274,7 +276,7 @@ class WorkflowRuntimeTest {
     // ── Checkpoints ───────────────────────────────────────────────────────────
 
     @Test
-    fun `checkpoint event is emitted after each completed node`() {
+    fun `checkpoint event is emitted after each completed node`(): Unit = runBlocking {
         val trigger   = node("t1", NodeType.TRIGGER)
         val transform = node("n1", NodeType.TRANSFORM)
         val end       = node("e1", NodeType.END)

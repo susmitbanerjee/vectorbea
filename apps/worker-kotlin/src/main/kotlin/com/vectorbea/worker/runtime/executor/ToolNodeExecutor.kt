@@ -52,7 +52,7 @@ class ToolNodeExecutor(
     private val dbWriteExecutor by lazy { DbWriteNodeExecutor(connectionResolver, dbPoolManager,
         ApprovalStore(dataSource), eventStore) }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,
@@ -928,26 +928,30 @@ class ToolNodeExecutor(
         log.info("[builtin-email] POST $emailUrl to=$toRaw subject='$subject'")
 
         return try {
-            val http    = java.net.http.HttpClient.newHttpClient()
+            // Shared client: bounded connect, headers, total call and body size.
+            // `HttpClient.newHttpClient()` here previously had no connect timeout
+            // at all and leaked a selector thread per email sent.
             val request = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(emailUrl))
                 .header("Content-Type", "application/json")
                 .header("X-Platform-Secret", platformSecret)
                 .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
-                .timeout(java.time.Duration.ofSeconds(30))
-                .build()
 
-            val response = http.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-            val body = response.body() ?: ""
+            val response = com.vectorbea.worker.net.OutboundHttp.send(
+                request,
+                totalCallMs = com.vectorbea.worker.net.OutboundHttp.policy().clampTotalCallMs(30_000L),
+                maxResponseBytes = 262_144L,
+            )
+            val body = response.body
 
-            if (response.statusCode() !in 200..299) {
+            if (response.statusCode !in 200..299) {
                 refundBuiltinEmailQuota(ctx.workspaceId)  // no email went out — don't consume quota
-                val friendly = if (response.statusCode() in 400..499)
+                val friendly = if (response.statusCode in 400..499)
                     "We couldn't send the email — please check the recipient address and content, then try again."
                 else
                     "The email service is temporarily unavailable. Please try again shortly."
                 // Same friendly message in the log, plus technical detail for ops.
-                log.warn("[builtin-email] $friendly | detail=HTTP ${response.statusCode()} body=${body.take(300)}")
+                log.warn("[builtin-email] $friendly | detail=HTTP ${response.statusCode} body=${body.take(300)}")
                 return NodeResult.Failed(friendly)
             }
 

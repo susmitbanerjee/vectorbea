@@ -1,7 +1,7 @@
 package com.vectorbea.worker.queue
 
 import com.vectorbea.worker.config.WorkerConfig
-import com.vectorbea.worker.fairness.TenantConcurrencyLimiter
+import com.vectorbea.worker.fairness.SharedTenantAdmission
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.metrics.WorkerMetrics
 import com.vectorbea.worker.runtime.RunProcessor
@@ -39,13 +39,19 @@ class WorkflowQueueConsumer(
     private val config: WorkerConfig,
     private val redis: RedisCommands<String, String>,
     private val processor: RunProcessor,
-    private val router: ExecutionPoolRouter,
+    private val router: ExecutionSlots,
     private val classifier: JobClassifier,
-    private val tenantLimiter: TenantConcurrencyLimiter,
+    private val tenantLimiter: SharedTenantAdmission,
 ) {
     private val log = logger()
 
     private val running = AtomicBoolean(false)
+
+    /**
+     * Adaptive read sizing — shrinks when messages get parked in the PEL, grows
+     * back when every read message finds a home. See [AdaptiveReadBatch].
+     */
+    private val readBatch = AdaptiveReadBatch(config.readBatchSize)
 
     /** Adaptive backoff for idle/saturated poll iterations — reduces wasted XREADGROUPs. */
     private val backoff = PollBackoff(
@@ -69,6 +75,21 @@ class WorkflowQueueConsumer(
     /** How often to run the reclaim scan (ms). */
     private val reclaimIntervalMs = (System.getenv("WORKER_RECLAIM_INTERVAL_MS") ?: "30000").toLong()
     private val lastReclaimAt = AtomicLong(0L)
+
+    /**
+     * Message IDs read from the consumer group and not yet XACKed — this worker's
+     * share of the Pending Entries List. Every one of these is a message no other
+     * worker can touch until [pendingIdleMs] elapses, so depth here is the direct
+     * measure of head-of-line blocking at the stream layer.
+     *
+     * A SET, not a counter. A parked message is re-read by [reclaimPendingMessages]
+     * on every XAUTOCLAIM sweep until it can finally be placed, so a counter
+     * incremented per delivery would count the same message once per sweep and
+     * drift upward without bound. Set membership is idempotent, which is exactly
+     * the semantics "messages this worker currently holds" requires.
+     */
+    private val unackedMessageIds: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     // ── Bounded per-pool prefetch buffers ──────────────────────────────────────
     // A message that was read but whose pool is momentarily full waits here
@@ -208,6 +229,10 @@ class WorkflowQueueConsumer(
                     }
                 }
 
+                // Feed the read controller: parking means we pulled work this
+                // worker could not start, which is the thing to stop doing.
+                if (parkedAny) readBatch.onParked() else readBatch.onAllPlaced()
+
                 // Progress was made → reset to the floor for snappy throughput.
                 if (submittedAny) {
                     backoff.reset()
@@ -240,9 +265,14 @@ class WorkflowQueueConsumer(
     }
 
     /**
-     * Total messages we can place right now = free pool slots + free buffer room,
-     * summed across all pools. Reading no more than this guarantees every message
-     * read has a home and the PEL stays bounded.
+     * Placements available right now = **free** pool slots (capacity minus
+     * outstanding, never total) plus **free** local buffer room (the per-pool
+     * cap minus what is already buffered), summed across the four pools.
+     *
+     * Necessary, but not sufficient on its own: the stream is untyped, so a
+     * message's class is only known after it is read. See [AdaptiveReadBatch]
+     * for the control that covers the gap, and §2.1 of
+     * 09-EXECUTION-ARCHITECTURE-REVISED.md for the real fix.
      */
     private fun totalAcceptCapacity(): Int = synchronized(bufferLock) {
         WorkerJobType.entries.sumOf { type ->
@@ -252,11 +282,17 @@ class WorkflowQueueConsumer(
     }
 
     private fun readMessages(capacity: Int): List<StreamMessage<String, String>>? {
-        val count = minOf(config.readBatchSize, capacity).coerceAtLeast(1).toLong()
+        val count = readBatch.next(capacity)
+        // Never request work with nowhere to put it. The previous
+        // `.coerceAtLeast(1)` meant a zero-capacity call still pulled one
+        // message straight into the PEL; the poll loop guarded against that at
+        // the call site, but the function was unsafe on its own terms.
+        if (count <= 0) return null
+        WorkerMetrics.readBatchSize.set(count.toDouble())
         WorkerMetrics.redisXreadgroup.inc()
         return redis.xreadgroup(
             consumer,
-            XReadArgs.Builder.count(count).block(config.pollBlockMs),
+            XReadArgs.Builder.count(count.toLong()).block(config.pollBlockMs),
             XReadArgs.StreamOffset.lastConsumed(config.queueStream),
         )
     }
@@ -269,6 +305,11 @@ class WorkflowQueueConsumer(
         val msgId = msg.id
         val fields = msg.body
 
+        // The message is ours from this point until XACK. Re-adding an ID we
+        // already hold (a reclaimed park) is a no-op, which is the point.
+        unackedMessageIds.add(msgId)
+        WorkerMetrics.pelDepth.set(unackedMessageIds.size.toDouble(), config.queueStream)
+
         val job = try {
             WorkflowRunJob.parse(msgId, fields)
         } catch (e: WorkflowRunJob.ParseException) {
@@ -278,7 +319,14 @@ class WorkflowQueueConsumer(
             return PlaceOutcome.SUBMITTED // handled = progress
         }
 
-        return tryPlace(job, classifier.classify(job), msgId)
+        // §6.1: the classifier probes Postgres on the hot path. Measure it, so the
+        // cost of removing it later can be stated rather than guessed.
+        val classifyStart = System.nanoTime()
+        val type = classifier.classify(job)
+        WorkerMetrics.jobClassifyDurationSeconds.observeSeconds(
+            (System.nanoTime() - classifyStart) / 1_000_000_000.0, type.name.lowercase())
+
+        return tryPlace(job, type, msgId)
     }
 
     /**
@@ -354,7 +402,7 @@ class WorkflowQueueConsumer(
      * throws (it converts failures to RUN_FAILED), so the catch is a last resort
      * that dead-letters before clearing the PEL.
      */
-    private fun processAndAck(job: WorkflowRunJob, msgId: String?) {
+    private suspend fun processAndAck(job: WorkflowRunJob, msgId: String?) {
         try {
             processor.process(job)
             if (msgId != null) {
@@ -400,6 +448,11 @@ class WorkflowQueueConsumer(
             log.debug("[queue] XACK [msgId={}]", messageId)
         } catch (e: Exception) {
             log.warn("[queue] XACK failed [msgId={}]: {}", messageId, e.message)
+        } finally {
+            // Whether or not the XACK reached Redis, this worker is no longer
+            // holding the message for the purpose of local capacity accounting.
+            unackedMessageIds.remove(messageId)
+            WorkerMetrics.pelDepth.set(unackedMessageIds.size.toDouble(), config.queueStream)
         }
     }
 
@@ -407,18 +460,33 @@ class WorkflowQueueConsumer(
      * Reclaim messages idle in the PEL longer than [pendingIdleMs] — recovers jobs
      * claimed by a crashed worker. Reclaimed messages go through the same
      * classify/submit path; idempotency guards prevent duplicate side effects.
+     *
+     * FIXED HERE (was TECH-DEBT.md#D4). On Lettuce 6.3.2 the sync API is:
+     *
+     *   ClaimedMessages<K, V> xautoclaim(K key, XAutoClaimArgs<K> args)
+     *
+     * not `List<StreamMessage<K, V>>`. This previously read
+     * `... as? List<StreamMessage<String, String>> ?: return`, which evaluated
+     * to null on every sweep and returned silently — no exception, no log line,
+     * no metric — so pending recovery had never once run. Messages a saturated
+     * pool parked here sat until the process restarted.
+     *
+     * Typed streams make parking rare (a message is only claimed when a slot
+     * exists), but this path still matters for the case it was written for:
+     * recovering work from a worker that died mid-flight.
      */
     private fun reclaimPendingMessages() {
         try {
-            @Suppress("UNCHECKED_CAST")
-            val messages = redis.xautoclaim(
+            val claimed = redis.xautoclaim(
                 config.queueStream,
                 XAutoClaimArgs.Builder
                     .xautoclaim(consumer, pendingIdleMs, "0-0")
                     .count(config.readBatchSize.toLong()),
-            ) as? List<StreamMessage<String, String>> ?: return
+            )
+            val messages = claimed?.messages ?: return
             if (messages.isNotEmpty()) {
                 WorkerMetrics.pelReclaimed.inc(delta = messages.size.toLong())
+                WorkerMetrics.xautoclaimReclaimTotal.inc(delta = messages.size.toLong())
                 log.info("[queue] reclaimed {} pending message(s) from idle workers", messages.size)
                 messages.forEach { handleIncoming(it) }
             }
@@ -435,10 +503,16 @@ class WorkflowQueueConsumer(
         router.utilization().forEach { (type, util) ->
             val (outstanding, capacity) = util
             val name = router.poolName(type)
+            // Short label ("agent") for the new metrics; the legacy metrics keep
+            // the fully-qualified pool name so existing dashboards do not break.
+            val shortName = type.name.lowercase()
             WorkerMetrics.activeRunsByPool.set(outstanding.toDouble(), name)
             WorkerMetrics.poolCapacityAvailable.set((capacity - outstanding).coerceAtLeast(0).toDouble(), name)
+            WorkerMetrics.poolSlotsTotal.set(capacity.toDouble(), shortName)
+            WorkerMetrics.poolSlotsActive.set(outstanding.toDouble(), shortName)
             val buffered = synchronized(bufferLock) { buffers.getValue(type).size }
             WorkerMetrics.localBufferSize.set(buffered.toDouble(), name)
         }
+        WorkerMetrics.pelDepth.set(unackedMessageIds.size.toDouble(), config.queueStream)
     }
 }

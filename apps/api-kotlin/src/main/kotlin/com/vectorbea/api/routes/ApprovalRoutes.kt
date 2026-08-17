@@ -179,6 +179,10 @@ class ApprovalRoutes(
                     jobType           = JobType.RESUME_RUN,
                     resumeFromNodeId  = approval.stepId,
                     reason            = "approval",
+                    // A continuation belongs on the same stream as the run it
+                    // continues — read, never re-derived.
+                    executionClass    = com.vectorbea.api.queue.ExecutionClass.fromWire(
+                        runCatching { runRepo?.findExecutionClass(approval.runId) }.getOrNull()),
                     // inputJson intentionally omitted — RESUME_RUN loads it from the DB.
                 ))
             }.onFailure { e ->

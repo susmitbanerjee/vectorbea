@@ -77,7 +77,11 @@ class DebugRoutes(
     private val debugRepo: DebugSnapshotRepository,
     private val workflowRepo: WorkflowRepository? = null,
     private val queue: WorkflowQueue? = null,
+    private val classResolver: com.vectorbea.api.queue.ExecutionClassResolver? = null,
 ) {
+    private fun classifyVersion(versionId: java.util.UUID) =
+        classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
+
     fun register(router: Router) {
         router.post("/api/workflows/:workflowId/runs/debug", ::startDebugRun)
         router.get("/api/workflow-runs/:runId/debug/nodes", ::listNodeSummaries)
@@ -111,6 +115,11 @@ class DebugRoutes(
             throw ApiError.ValidationError("Invalid input JSON: ${e.message}")
         }
 
+        // A debug run executes the same graph as a normal run, so it is
+        // classified identically and shares its pool. Debug is an observability
+        // mode, not an execution class.
+        val debugClass = classifyVersion(versionId)
+
         // Debug runs are scoped to a single run — never persisted as a workflow-level setting.
         val run = runRepo.create(CreateRunRequest(
             workspaceId = ctx.workspaceId,
@@ -120,6 +129,7 @@ class DebugRoutes(
             triggerType = "manual",
             inputJson = inputJson,
             debugMode = true,
+            executionClass = debugClass.wire,
         ))
 
         val job = WorkflowRunJob(
@@ -132,6 +142,7 @@ class DebugRoutes(
             inputJson = inputJson,
             requestedByUserId = req.principal?.appUserId?.toString(),
             debugMode = true,
+            executionClass = debugClass,
         )
 
         try {

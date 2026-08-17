@@ -11,7 +11,7 @@ import com.vectorbea.worker.runtime.graph.WorkflowNode
  * whether to fail the run or follow a failure edge.
  */
 class UnsupportedNodeExecutor : NodeExecutor {
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

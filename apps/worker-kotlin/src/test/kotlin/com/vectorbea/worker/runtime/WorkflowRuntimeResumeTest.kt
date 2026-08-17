@@ -1,5 +1,7 @@
 package com.vectorbea.worker.runtime
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
@@ -54,7 +56,7 @@ class WorkflowRuntimeResumeTest {
         override fun loadRaw(runId: UUID, nodeId: String): Map<String, Any>? = null
     }
 
-    private fun runtime() = WorkflowRuntime(
+    private suspend fun runtime() = WorkflowRuntime(
         dataSource      = noopDataSource(),
         eventStore      = stubEventStore,
         checkpointStore = stubCheckpointStore,
@@ -65,15 +67,15 @@ class WorkflowRuntimeResumeTest {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun node(id: String, type: NodeType, config: Map<String, Any> = emptyMap()) =
+    private suspend fun node(id: String, type: NodeType, config: Map<String, Any> = emptyMap()) =
         WorkflowNode(id = id, type = type.value, config = config)
 
-    private fun edge(id: String, from: String, to: String) =
+    private suspend fun edge(id: String, from: String, to: String) =
         WorkflowEdge(id = id, source = from, target = to, type = EdgeType.DEFAULT.value)
 
-    private fun runIds() = Triple(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
+    private suspend fun runIds() = Triple(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
 
-    private fun resume(
+    private suspend fun resume(
         graph: WorkflowGraph,
         snapshot: RuntimeSnapshot,
         pendingNodeIds: Set<String> = emptySet(),
@@ -94,7 +96,7 @@ class WorkflowRuntimeResumeTest {
         )
     }
 
-    private fun execute(
+    private suspend fun execute(
         graph: WorkflowGraph,
         cancellationCheck: () -> Boolean = { false },
     ): WorkflowRuntime.ExecutionResult {
@@ -114,7 +116,7 @@ class WorkflowRuntimeResumeTest {
     // ── Resume with all-completed snapshot skips to END ───────────────────────
 
     @Test
-    fun `resume with completed trigger and transform executes only END`() {
+    fun `resume with completed trigger and transform executes only END`(): Unit = runBlocking {
         val trigger   = node("t1", NodeType.TRIGGER)
         val transform = node("n1", NodeType.TRANSFORM)
         val end       = node("e1", NodeType.END)
@@ -164,7 +166,7 @@ class WorkflowRuntimeResumeTest {
     // ── Resume with pending override re-runs the specified node ──────────────
 
     @Test
-    fun `resume with pendingNodeIds forces node to re-run`() {
+    fun `resume with pendingNodeIds forces node to re-run`(): Unit = runBlocking {
         val trigger   = node("t1", NodeType.TRIGGER)
         val transform = node("n1", NodeType.TRANSFORM)
         val end       = node("e1", NodeType.END)
@@ -211,7 +213,7 @@ class WorkflowRuntimeResumeTest {
     // ── Cancellation check halts the run ─────────────────────────────────────
 
     @Test
-    fun `cancellation check causes run to return Cancelled`() {
+    fun `cancellation check causes run to return Cancelled`(): Unit = runBlocking {
         val trigger   = node("t1", NodeType.TRIGGER)
         val transform = node("n1", NodeType.TRANSFORM)
         val end       = node("e1", NodeType.END)
@@ -229,7 +231,7 @@ class WorkflowRuntimeResumeTest {
     // ── Cancellation check false → normal execution ───────────────────────────
 
     @Test
-    fun `cancellation check returning false does not cancel run`() {
+    fun `cancellation check returning false does not cancel run`(): Unit = runBlocking {
         val trigger = node("t1", NodeType.TRIGGER)
         val end     = node("e1", NodeType.END)
         val graph = WorkflowGraph(

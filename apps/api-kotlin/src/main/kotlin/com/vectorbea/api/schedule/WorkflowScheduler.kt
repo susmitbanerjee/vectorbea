@@ -35,6 +35,7 @@ class WorkflowScheduler(
     private val eventRepo: RunEventRepository,
     private val queue: WorkflowQueue,
     private val pollIntervalMs: Long = 30_000L,
+    private val classResolver: com.vectorbea.api.queue.ExecutionClassResolver? = null,
 ) {
     private val log = LoggerFactory.getLogger(WorkflowScheduler::class.java)
     private val running = AtomicBoolean(false)
@@ -101,6 +102,10 @@ class WorkflowScheduler(
             return
         }
 
+        // A scheduled run is a normal run with a cron trigger — same graph,
+        // same class, same pool.
+        val scheduledClass = classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
+
         val run = runRepo.create(CreateRunRequest(
             workspaceId = s.workspaceId,
             environmentId = s.environmentId,
@@ -108,6 +113,7 @@ class WorkflowScheduler(
             workflowVersionId = versionId,
             triggerType = "schedule",
             inputJson = "{}",
+            executionClass = scheduledClass.wire,
         ))
 
         runCatching {
@@ -127,6 +133,7 @@ class WorkflowScheduler(
                 jobType = JobType.START_RUN,
                 inputJson = "{}",
                 reason = "schedule",
+                executionClass = scheduledClass,
             ))
             log.info("[scheduler] fired schedule {} → run {} (workflow {})", s.id, run.id, s.workflowId)
         } catch (e: Exception) {

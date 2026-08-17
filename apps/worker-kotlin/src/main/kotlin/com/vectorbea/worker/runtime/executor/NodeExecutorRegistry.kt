@@ -20,6 +20,12 @@ class NodeExecutorRegistry(
     dbPoolManager: ClientDbPoolManager,
     eventStore: RunEventStore,
     dataSource: DataSource,
+    /**
+     * Exactly-once guard for outbound side effects. Null in tests; production
+     * always supplies it, because an at-least-once queue plus an unguarded POST
+     * is a duplicate email waiting to happen.
+     */
+    sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
 ) {
 
     private val executors: Map<NodeType, NodeExecutor> = mapOf(
@@ -33,7 +39,7 @@ class NodeExecutorRegistry(
         NodeType.END       to EndNodeExecutor(),
         // Connector executors (real I/O)
         NodeType.LLM       to LlmNodeExecutor(connectionResolver, eventStore),
-        NodeType.HTTP      to HttpNodeExecutor(connectionResolver, eventStore),
+        NodeType.HTTP      to HttpNodeExecutor(connectionResolver, eventStore, sideEffects = sideEffects),
         NodeType.DB_QUERY  to DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore),
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),
         // Reference executors — look up tool/agent definition from DB at runtime

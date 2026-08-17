@@ -234,6 +234,36 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
         ::mapVersionRow,
     )
 
+    // ── Execution class memo (V020) ───────────────────────────────────────────
+    //
+    // A version's graph is immutable, so its execution class is too. These two
+    // methods are the durable half of the classification memo: computed once by
+    // whichever API instance first triggers the version, then read by every
+    // other instance — including cold ones with an empty in-process cache.
+    // Deliberately narrow reads/writes of a single column rather than going
+    // through the full version row, since this sits on the trigger hot path.
+
+    /** Persisted class for [versionId], or null when it has never been classified. */
+    fun findVersionExecutionClass(versionId: UUID): String? = queryOne(
+        "SELECT execution_class FROM workflow_versions WHERE id = ?",
+        { setUuid(1, versionId) },
+    ) { rs -> rs.getString("execution_class") }
+
+    /**
+     * Memoise [executionClass] for [versionId].
+     *
+     * `IS NULL` in the predicate makes this write-once: two instances racing on
+     * the first trigger of a version both compute the same value (the classifier
+     * is pure), and the loser's UPDATE simply affects zero rows.
+     */
+    fun setVersionExecutionClass(versionId: UUID, executionClass: String): Boolean =
+        execute(
+            "UPDATE workflow_versions SET execution_class = ? WHERE id = ? AND execution_class IS NULL"
+        ) {
+            setString(1, executionClass)
+            setUuid(2, versionId)
+        } > 0
+
     fun listVersions(workflowId: UUID, params: PageParams = PageParams()): Page<WorkflowVersion> = queryPage(
         sql = "SELECT $vCols FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC",
         countSql = "SELECT COUNT(*) FROM workflow_versions WHERE workflow_id = ?",

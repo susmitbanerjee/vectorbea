@@ -44,6 +44,15 @@ data class WorkflowRunJob(
      * classification (e.g. approval/timer/recovery → SYSTEM pool).
      */
     val reason: String = "manual",
+    /**
+     * Which typed stream this job belongs on.
+     *
+     * Decided by the caller — from the workflow version's graph for a fresh
+     * START_RUN, or from `agent_runs.execution_class` for any continuation — and
+     * never re-derived by the queue. The whole point of typing the queue is that
+     * the decision happens once, before the message exists.
+     */
+    val executionClass: ExecutionClass = ExecutionClass.SHORT,
 )
 
 enum class JobType {

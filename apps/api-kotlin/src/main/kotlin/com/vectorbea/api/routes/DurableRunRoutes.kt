@@ -151,6 +151,9 @@ class DurableRunRoutes(
                 workflowVersionId = workflowVersionId.toString(),
                 jobType = JobType.START_RUN,
                 inputJson = stateJson,
+                // Same workflow version as the run being continued, so the class
+                // is identical by construction — inherit rather than re-derive.
+                executionClass = com.vectorbea.api.queue.ExecutionClass.fromWire(run.executionClass),
             ))
         }
 
@@ -218,6 +221,7 @@ class DurableRunRoutes(
                 workflowId = run.workflowId.toString(),
                 workflowVersionId = run.workflowVersionId.toString(),
                 jobType = JobType.RESUME_RUN,
+                executionClass = com.vectorbea.api.queue.ExecutionClass.fromWire(run.executionClass),
             ))
         }
 
@@ -230,13 +234,15 @@ class DurableRunRoutes(
         val id: UUID, val workspaceId: UUID, val environmentId: UUID,
         val workflowId: UUID, val workflowVersionId: UUID,
         val status: String, val continuedToRunId: UUID?, val continuationSequence: Int,
+        /** Stored routing class; null on rows written before V020. */
+        val executionClass: String? = null,
     )
 
     private fun loadRun(runId: UUID, workspaceId: UUID): RunRow? {
         ds.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT id, workspace_id, environment_id, workflow_id, workflow_version_id,
-                   status, continued_to_run_id, continuation_sequence
+                   status, continued_to_run_id, continuation_sequence, execution_class
                    FROM agent_runs WHERE id = ? AND workspace_id = ?"""
             ).use { stmt ->
                 stmt.setObject(1, runId); stmt.setObject(2, workspaceId)
@@ -251,6 +257,7 @@ class DurableRunRoutes(
                     status = rs.getString("status"),
                     continuedToRunId = rs.getString("continued_to_run_id")?.let { UUID.fromString(it) },
                     continuationSequence = rs.getInt("continuation_sequence"),
+                    executionClass = rs.getString("execution_class"),
                 )
             }
         }

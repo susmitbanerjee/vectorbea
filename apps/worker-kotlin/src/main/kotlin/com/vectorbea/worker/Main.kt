@@ -8,9 +8,10 @@ import com.vectorbea.worker.db.Database
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.heartbeat.WorkerHeartbeat
 import com.vectorbea.worker.logging.logger
-import com.vectorbea.worker.fairness.TenantConcurrencyLimiter
+import com.vectorbea.worker.fairness.SharedTenantAdmission
+import com.vectorbea.worker.fairness.WorkspaceLimits
+import com.vectorbea.worker.fairness.WorkspaceLimitsProvider
 import com.vectorbea.worker.metrics.WorkerMetrics
-import com.vectorbea.worker.queue.ExecutionPoolRouter
 import com.vectorbea.worker.queue.JobClassifier
 import com.vectorbea.worker.queue.WorkflowQueueConsumer
 import com.vectorbea.worker.redis.RedisProvider
@@ -59,9 +60,16 @@ fun main() {
         exitProcess(1)
     }
 
+    // ── 1b. Outbound timeout policy ───────────────────────────────────────────
+    // Installed BEFORE any pool or HTTP client is built: the JDBC URLs are
+    // rewritten from it and the shared HttpClient reads it once, at construction.
+    val timeouts = com.vectorbea.worker.config.OutboundTimeouts.fromEnv()
+    com.vectorbea.worker.net.OutboundHttp.configure(timeouts)
+    timeouts.logEffectiveValues()
+
     // ── 2. Database ───────────────────────────────────────────────────────────
     val database = try {
-        val db = Database.create(config)
+        val db = Database.create(config, timeouts)
         val latency = db.ping()
         log.info("[startup] DB connected (latency={}ms)", latency)
         db
@@ -117,8 +125,10 @@ fun main() {
         secretService = secretService,
     )
     val dbPoolManager      = ClientDbPoolManager(
-        maxConnectionsPerPool = 3,
-        connectionTimeoutMs   = 10_000L,
+        maxConnectionsPerPool = timeouts.tenantPoolMaxSize,
+        connectionTimeoutMs   = timeouts.tenantPoolConnectionTimeoutMs,
+        idleTimeoutMs         = timeouts.tenantPoolIdleTimeoutMs,
+        timeouts              = timeouts,
     )
     log.info("[startup] connector infrastructure ready")
 
@@ -134,6 +144,22 @@ fun main() {
     // worker thread before it checkpoints and re-enqueues a RESUME_RUN.
     val executionBudget = ExecutionBudget.fromEnv()
 
+    // Tenant-database node execution is isolated here, not on the class pools.
+    // Blast-radius containment: a hanging tenant database exhausts this and
+    // nothing else. Must be created before the runtime that uses it.
+    val tenantDbDispatcher = com.vectorbea.worker.runtime.TenantDbDispatcher(
+        maxThreads = config.tenantDbConcurrency,
+    )
+    tenantDbDispatcher.logConfiguration()
+
+    // Exactly-once guard: records the intent of every external side effect
+    // BEFORE it happens and the response after, keyed deterministically, so an
+    // at-least-once redelivery replays the stored answer instead of the call.
+    val sideEffectGuard = com.vectorbea.worker.durable.SideEffectGuard(
+        dataSource = database.dataSource,
+        workerId = config.workerId,
+    )
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -147,8 +173,40 @@ fun main() {
         stepGuard          = stepGuard,
         historyChecker     = historyChecker,
         executionBudget    = executionBudget,
+        tenantDbDispatcher = tenantDbDispatcher,
+        sideEffects        = sideEffectGuard,
     )
     val telemetry = TelemetryClient.fromEnv()
+
+    // Per-tenant admission now reads shared state (run_leases), so limits are
+    // enforced platform-wide and are independent of the replica count. The env
+    // constants below survive only as the fallback for a workspace with no
+    // usage-policy row.
+    val limitsProvider = WorkspaceLimitsProvider(
+        dataSource = database.dataSource,
+        defaults = WorkspaceLimits(
+            maxTotal = config.maxActiveRunsPerTenant,
+            maxAgent = config.maxActiveAgentRunsPerTenant,
+            maxLong  = config.maxActiveLongRunsPerTenant,
+            maxShort = config.maxActiveShortRunsPerTenant,
+        ),
+    )
+    val tenantLimiter = SharedTenantAdmission(
+        dataSource = database.dataSource,
+        limitsProvider = limitsProvider,
+    )
+    tenantLimiter.logConfiguration()
+
+    // Poison-job protection: a job that crashes its worker is redelivered and
+    // crashes the next one. Past max_attempts it lands in dead_letters instead.
+    val deadLetterStore = com.vectorbea.worker.durable.DeadLetterStore(
+        dataSource = database.dataSource,
+        workerId = config.workerId,
+    )
+
+    // Resolves a run's stored execution class for continuation routing.
+    val runClassLookup = com.vectorbea.worker.queue.RunClassLookup(database.dataSource)
+
     val processor = RunProcessor(
         dataSource      = database.dataSource,
         eventStore      = eventStore,
@@ -158,36 +216,75 @@ fun main() {
         checkpointStore = checkpointStore,
         telemetry       = telemetry,
         leaseManager    = leaseManager,
+        tenantAdmission = tenantLimiter,
+        runClassLookup  = runClassLookup,
+        deadLetters     = deadLetterStore,
         // Durably re-enqueue continuation jobs after a yield (survives crash).
+        // Routed to the run's OWN class stream, read from agent_runs — a
+        // continuation must resume in the pool its first half occupied.
         reEnqueue       = { job ->
-            redis.commands.xadd(config.queueStream, job.toStreamFields())
+            val cls = runClassLookup.classOf(job.runId)
+            val stream = com.vectorbea.worker.queue.TypedStreamConsumer.streamKeyFor(cls)
+            redis.commands.xadd(stream, job.toStreamFields())
             WorkerMetrics.redisXadd.inc()
+            log.debug("[queue] re-enqueued continuation runId={} class={} stream={}",
+                job.runId, cls, stream)
         },
     )
     log.info("[startup] run processor ready (lease + idempotency guards + cooperative yield active)")
 
     // ── 7. Execution pools, classifier, tenant fairness, queue consumer ───────
-    val poolRouter = ExecutionPoolRouter(
-        shortConcurrency  = config.shortConcurrency,
-        longConcurrency   = config.longConcurrency,
-        agentConcurrency  = config.agentConcurrency,
-        systemConcurrency = config.systemConcurrency,
+    // Slots are permits now, not threads. Waiting on I/O costs a continuation on
+    // the heap instead of a parked thread, so these numbers are an order of
+    // magnitude larger than the old pool sizes and are bounded by memory and
+    // provider rate limits rather than by the thread budget (§2.3).
+    val poolRouter = com.vectorbea.worker.queue.ExecutionSlots(
+        shortPermits  = config.shortConcurrency,
+        longPermits   = config.longConcurrency,
+        agentPermits  = config.agentConcurrency,
+        systemPermits = config.systemConcurrency,
     )
+    poolRouter.logConfiguration()
     val jobClassifier = JobClassifier(database.dataSource)
-    val tenantLimiter = TenantConcurrencyLimiter(
-        maxRunsPerTenant      = config.maxActiveRunsPerTenant,
-        maxAgentRunsPerTenant = config.maxActiveAgentRunsPerTenant,
-        maxLongRunsPerTenant  = config.maxActiveLongRunsPerTenant,
-        maxShortRunsPerTenant = config.maxActiveShortRunsPerTenant,
-    )
-    val consumer = WorkflowQueueConsumer(
-        config, redis.commands, processor,
-        router = poolRouter,
-        classifier = jobClassifier,
-        tenantLimiter = tenantLimiter,
-    )
+    // ── 7b. Typed stream consumers — one per class, one per pool ─────────────
+    //
+    // Each consumer reads ONLY its own stream and asks for at most as many
+    // messages as its pool has FREE slots, so a worker can never claim work it
+    // cannot start. That is what removes PEL hoarding: not a mitigation, an
+    // impossibility.
+    //
+    // Each gets a dedicated Redis connection because XREADGROUP BLOCK holds the
+    // connection for the whole block window — sharing one would serialise all
+    // four behind whichever happened to be waiting.
+    val typedConsumers = com.vectorbea.worker.queue.WorkerJobType.entries.map { type ->
+        com.vectorbea.worker.queue.TypedStreamConsumer(
+            config = config,
+            redis = redis.dedicatedConnection("stream-${type.name.lowercase()}"),
+            processor = processor,
+            router = poolRouter,
+            tenantLimiter = tenantLimiter,
+            jobType = type,
+        )
+    }
+
+    // ── 7c. Legacy consumer — migration only ─────────────────────────────────
+    //
+    // Dual-consume: while a not-yet-upgraded API may still be writing to the old
+    // untyped stream, keep serving it so no run is stranded. It classifies the
+    // old way (read, then probe). Disabled with WORKER_LEGACY_STREAM_ENABLED=false
+    // once the legacy stream is drained — see TYPED-QUEUE-MIGRATION.md.
+    val legacyConsumer = if (config.legacyStreamEnabled) {
+        WorkflowQueueConsumer(
+            config, redis.dedicatedConnection("legacy-stream"), processor,
+            router = poolRouter,
+            classifier = jobClassifier,
+            tenantLimiter = tenantLimiter,
+        )
+    } else null
+
     try {
-        consumer.ensureConsumerGroup()
+        typedConsumers.forEach { it.ensureConsumerGroup() }
+        legacyConsumer?.ensureConsumerGroup()
     } catch (e: Exception) {
         log.error("[startup] Failed to ensure consumer group — aborting: {}", e.message)
         heartbeat.stop()
@@ -195,13 +292,22 @@ fun main() {
         database.close()
         exitProcess(4)
     }
-    consumer.start()
+    typedConsumers.forEach { it.start() }
+    legacyConsumer?.start()
+
+    // SYSTEM work synthesized by this worker (timers, crash recovery) is placed
+    // straight onto the system pool — it is already durable in Postgres, so a
+    // round trip through Redis would only add a hop.
+    val systemConsumer = typedConsumers.first { it.streamKey.endsWith(".system") }
+
+    log.info("[startup] consumers ready — typed={} legacy={}",
+        typedConsumers.map { it.streamKey }, legacyConsumer?.let { config.queueStream } ?: "disabled")
 
     // ── Durable execution services ────────────────────────────────────────────
     // Timer scheduler — fires durable timers without blocking workers
     val timerScheduler = TimerScheduler(
         dataSource = database.dataSource,
-        enqueueJob = { job -> try { consumer.enqueueRecovery(job) } catch (e: Exception) { log.warn("[timers] enqueue failed: {}", e.message) } },
+        enqueueJob = { job -> try { systemConsumer.enqueueLocal(job) } catch (e: Exception) { log.warn("[timers] enqueue failed: {}", e.message) } },
         redisCommands = redis.commands,
     )
     timerScheduler.start()
@@ -211,7 +317,7 @@ fun main() {
         dataSource = database.dataSource,
         eventStore = eventStore,
         leaseManager = leaseManager,
-        enqueueJob = { job -> try { consumer.enqueueRecovery(job) } catch (e: Exception) { log.warn("[crash-recovery] enqueue failed: {}", e.message) } },
+        enqueueJob = { job -> try { systemConsumer.enqueueLocal(job) } catch (e: Exception) { log.warn("[crash-recovery] enqueue failed: {}", e.message) } },
     )
     crashRecovery.start()
 
@@ -229,12 +335,30 @@ fun main() {
         heartbeat.drain()
         timerScheduler.stop()
         crashRecovery.stop()
-        consumer.stop(drainTimeoutSeconds = 30L)
+        typedConsumers.forEach { it.stop(drainTimeoutMs = 30_000L) }
+        legacyConsumer?.stop(drainTimeoutSeconds = 30L)
+        poolRouter.shutdown(config.shutdownTimeoutMs)
+
+        // Release leases explicitly rather than letting them expire.
+        //
+        // Pools have drained, so anything still leased belongs to a run this
+        // worker will not finish. Leaving those rows to time out would keep the
+        // work invisible to crash recovery AND keep it counted against the
+        // tenant's concurrency limit for the full lease TTL — during a rolling
+        // deploy, that is a tenant held at its cap long after its work stopped.
+        val released = runCatching { leaseManager.releaseAllForWorker(config.workerId) }.getOrDefault(0)
+        if (released > 0) {
+            log.info("[shutdown] released {} run lease(s) — capacity freed immediately, not on expiry", released)
+        }
 
         // Final heartbeat as stopped
         heartbeat.stop()
 
-        // Close client DB pools (tenant connections)
+        // Close client DB pools (tenant connections). The dispatcher goes first:
+        // its threads are the ones that might be parked on a tenant socket, and
+        // they are daemons precisely so a wedged tenant cannot block the deploy.
+        tenantLimiter.close()
+        tenantDbDispatcher.close()
         dbPoolManager.close()
 
         // Close infrastructure
