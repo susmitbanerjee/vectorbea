@@ -26,6 +26,18 @@ class NodeExecutorRegistry(
      * is a duplicate email waiting to happen.
      */
     sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
+    /**
+     * Per-connection circuit breaker, shared across every executor that makes
+     * outbound calls so a provider that is down is discovered once rather than
+     * once per node type.
+     */
+    circuit: com.vectorbea.worker.net.ConnectionCircuit? = null,
+    /** Records every provider call completely enough to replay it. */
+    recorder: com.vectorbea.worker.replay.ModelCallRecorder? = null,
+    /** Non-null during a replay: calls are served from the recording. */
+    replay: com.vectorbea.worker.replay.ReplayContext? = null,
+    /** Supplies a node's output contract, so a declared schema enables Layer 0. */
+    contracts: com.vectorbea.worker.contract.ContractValidator? = null,
 ) {
 
     private val executors: Map<NodeType, NodeExecutor> = mapOf(
@@ -38,7 +50,9 @@ class NodeExecutorRegistry(
         NodeType.APPROVAL  to ApprovalNodeExecutor(approvalStore),
         NodeType.END       to EndNodeExecutor(),
         // Connector executors (real I/O)
-        NodeType.LLM       to LlmNodeExecutor(connectionResolver, eventStore),
+        NodeType.LLM       to LlmNodeExecutor(connectionResolver, eventStore,
+                                  circuit = circuit, recorder = recorder, replay = replay,
+                                  contracts = contracts),
         NodeType.HTTP      to HttpNodeExecutor(connectionResolver, eventStore, sideEffects = sideEffects),
         NodeType.DB_QUERY  to DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore),
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),

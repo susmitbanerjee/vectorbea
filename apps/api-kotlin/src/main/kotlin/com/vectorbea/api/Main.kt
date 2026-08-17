@@ -162,7 +162,11 @@ fun main() {
     // single stream so a not-yet-upgraded worker still sees it. Unset it once
     // every worker consumes typed streams; see TYPED-QUEUE-MIGRATION.md.
     val legacyMirrorStream: String? = System.getenv("REDIS_LEGACY_QUEUE_STREAM")?.takeIf { it.isNotBlank() }
-    val workflowQueue: WorkflowQueue? = if (redis != null) {
+    //
+    // QUEUE_MODE selects the transport. The default is unchanged, so this deploys
+    // as a no-op; see docs/architecture/POSTGRES-CLAIM.md for the ordered cutover.
+    val queueMode = com.vectorbea.api.queue.PostgresClaimQueue.mode()
+    val streamQueue: WorkflowQueue? = if (redis != null) {
         val q = com.vectorbea.api.queue.TypedStreamsWorkflowQueue(
             redis = redis,
             legacyStreamKey = legacyMirrorStream,
@@ -170,10 +174,24 @@ fun main() {
         com.vectorbea.api.queue.TypedStreamsWorkflowQueue.verifyStreams(redis, legacyMirrorStream)
         q
     } else null
+    val workflowQueue: WorkflowQueue? = when (queueMode) {
+        "postgres" -> com.vectorbea.api.queue.PostgresClaimQueue()
+        "dual"     -> com.vectorbea.api.queue.PostgresClaimQueue(mirror = streamQueue)
+        else       -> streamQueue
+    }
+    log.info("[startup] queue mode = {} ({})", queueMode, when (queueMode) {
+        "postgres" -> "Postgres claim only — no XADD"
+        "dual"     -> "Postgres claim + typed-stream mirror"
+        else       -> "typed Redis streams"
+    })
 
     val distributedLock = if (redis != null) RedisDistributedLock(redis, config.redis!!.lockPrefix) else null
     val eventBus = if (redis != null) RedisRunEventBus(redis, config.redis!!.eventChannelPrefix) else null
     val rateLimiter = if (redis != null) RedisRateLimiter(redis, config.redis!!.cachePrefix) else null
+    // Token buckets — continuous refill with a burst allowance, unlike the fixed
+    // window above. See TokenBucket for why the boundary burst matters under load.
+    val tokenBucket = if (redis != null)
+        com.vectorbea.api.rate.TokenBucket(redis, config.redis!!.cachePrefix) else null
     val workerHeartbeatRepository = if (redis != null)
         WorkerHeartbeatRepository(redis, config.redis!!.workerHeartbeatTtlSeconds) else null
 
@@ -207,6 +225,10 @@ fun main() {
 
     // 6. Repositories (require DB)
     val ds = database?.dataSource
+
+    // Append-only governance trail (P20). Constructed even without a database so
+    // call sites need no null dance; it no-ops when there is nowhere to write.
+    val auditLog = com.vectorbea.api.audit.AuditLog(ds)
 
     // 6a. Authentication — HS256 JWT verifier + user repository
     // JWT_SECRET is the shared secret used by Next.js to sign tokens.
@@ -257,7 +279,7 @@ fun main() {
     MetricsRoutes().register(router)
 
     if (connectionRepo != null) {
-        ConnectionRoutes(connectionRepo, cacheService, secretService, telemetry).register(router)
+        ConnectionRoutes(connectionRepo, cacheService, secretService, telemetry, auditLog).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
     } else log.warn("ConnectionRoutes disabled — no database")
@@ -296,6 +318,7 @@ fun main() {
         val betaRepoForRuns = ds?.let { com.vectorbea.api.beta.BetaAccessRepository(it) }
         RunRoutes(
             classResolver = executionClassResolver,
+            dataSource = ds,
             runRepo = runRepo,
             eventRepo = runEventRepo,
             workflowRepo = workflowRepo,
@@ -306,6 +329,8 @@ fun main() {
             betaRepo = betaRepoForRuns,
             appConfig = config,
             telemetry = telemetry,
+            admission = ds?.let { com.vectorbea.api.admission.AdmissionControl(it) },
+            runRateLimiter = tokenBucket,
         ).register(router)
 
         com.vectorbea.api.routes.DebugRoutes(
@@ -323,6 +348,7 @@ fun main() {
             runRepo   = runRepo,
             eventRepo = runEventRepo,
             queue     = workflowQueue,
+            audit     = auditLog,
         ).register(router)
     } else log.warn("ApprovalRoutes disabled — no database")
 
@@ -332,6 +358,17 @@ fun main() {
         com.vectorbea.api.routes.FleetStatusRoutes(ds).register(router)
         // Dead-lettered jobs — the most actionable failure the platform emits.
         com.vectorbea.api.routes.DeadLetterRoutes(ds).register(router)
+        // Queue position + wait reason — only answerable now the claim lives in
+        // Postgres. A visible position is patience; an unexplained 'queued' is a
+        // bug report.
+        com.vectorbea.api.routes.QueuePositionRoutes(ds).register(router)
+        // A continuation chain presented as one logical run. Without this the Runs
+        // page shows Temporal-style history truncation as two unrelated rows, and
+        // the feature reads as a bug.
+        com.vectorbea.api.routes.ContinuationRoutes(ds).register(router)
+        // Output contracts: CRUD, draft inference, live testing, and the publish
+        // gate that refuses a schema the provider cannot enforce.
+        com.vectorbea.api.contract.ContractRoutes(ds, auditLog).register(router)
         BootstrapRoutes(ds).register(router)
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
 
@@ -362,6 +399,7 @@ fun main() {
             eventRepo = runEventRepo,
             queue = workflowQueue,
             classResolver = executionClassResolver,
+            dataSource = ds,
         ).also { it.start() }
     } else {
         log.warn("WorkflowScheduler disabled — requires database + queue")
@@ -369,7 +407,7 @@ fun main() {
     }
 
     // 8. HTTP server
-    val server = HttpServer(config, router, authMiddleware)
+    val server = HttpServer(config, router, authMiddleware, requestRateLimiter = tokenBucket)
 
     // 9. Graceful shutdown
     Runtime.getRuntime().addShutdownHook(Thread {

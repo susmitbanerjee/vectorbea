@@ -8,7 +8,11 @@ import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.metrics.WorkerMetrics
+import com.vectorbea.worker.contract.ConstrainedDecoding
+import com.vectorbea.worker.net.ConnectionCircuit
+import com.vectorbea.worker.replay.ModelCallRecorder
 import com.vectorbea.worker.net.OutboundHttp
+import com.vectorbea.worker.net.ProviderThrottle
 import com.vectorbea.worker.runtime.graph.RuntimeContext
 import com.vectorbea.worker.runtime.graph.WorkflowNode
 import java.net.URI
@@ -46,6 +50,28 @@ class LlmNodeExecutor(
     private val eventStore: RunEventStore,
     /** Injectable for tests; production always uses the shared, bounded client. */
     private val httpClient: java.net.http.HttpClient = OutboundHttp.client,
+    /**
+     * Per-connection breaker. Null disables it — the behaviour before breakers
+     * existed, kept for the unit tests that construct this executor directly.
+     */
+    private val circuit: ConnectionCircuit? = null,
+    /**
+     * Records every call completely enough to replay it. Null disables recording —
+     * which also means the run cannot be replayed, so production always supplies
+     * it.
+     */
+    private val recorder: ModelCallRecorder? = null,
+    /**
+     * Non-null when this execution is a replay. Model calls are then served from
+     * the recording and any attempt to reach a provider is a hard error.
+     */
+    private val replay: com.vectorbea.worker.replay.ReplayContext? = null,
+    /**
+     * Supplies the node's output contract, so a declared schema turns on
+     * constrained decoding. Null means no contract lookup and therefore no
+     * Layer 0 - which is why production always supplies it.
+     */
+    private val contracts: com.vectorbea.worker.contract.ContractValidator? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -112,6 +138,112 @@ class LlmNodeExecutor(
             summary = "provider=$provider model=$model")
 
         val startMs = System.currentTimeMillis()
+        val capture = CallCapture()
+
+        // ---- Layer 0: the node's declared schema, if it has one ----------------
+        //
+        // Read from the contract rather than from node config so there is ONE
+        // definition of the node's output shape, versioned and content-hashed. A
+        // schema duplicated in the graph would drift from the contract that
+        // validates against it, and the two disagreeing is worse than either alone.
+        val outputSchema = contracts?.contractFor(context.workflowId, node.id)?.schema
+
+        // Record whatever happened, on every exit path.
+        //
+        // A local rather than a call at each return site: this method has five
+        // ways out (success, circuit open, throttle, call failure, secret
+        // missing) and an audit that covers only the happy one is not an audit.
+        // The failure paths are the ones a replay most needs to reproduce.
+        fun recordCall(
+            outcome: String,
+            response: LlmResponse? = null,
+            error: String? = null,
+        ) {
+            val rec = recorder ?: return
+            rec.record(ModelCallRecorder.ModelCall(
+                runId = context.runId,
+                workspaceId = context.workspaceId,
+                environmentId = context.environmentId,
+                nodeId = node.id,
+                provider = provider,
+                modelId = model,
+                modelVersion = response?.modelVersion,
+                temperature = temperature,
+                topP = (cfg["topP"] as? Number)?.toDouble(),
+                seed = (cfg["seed"] as? Number)?.toLong(),
+                maxTokens = maxTokens,
+                responseFormat = cfg["responseFormat"] as? String,
+                promptHash = ModelCallRecorder.promptHash(messages),
+                // Secrets stripped; the prompt is not. See ModelCallRecorder for
+                // why the prompt and response are never redacted.
+                requestJson = capture.requestJson,
+                responseJson = capture.responseJson,
+                logprobs = response?.logprobsJson,
+                finishReason = response?.finishReason,
+                tokensIn = response?.tokensIn,
+                tokensOut = response?.tokensOut,
+                latencyMs = System.currentTimeMillis() - startMs,
+                costUsd = response?.tokenCount?.let { estimateCostUsd(it, model) },
+                attemptNumber = context.attemptGroup,
+                callIndex = 0,
+                outcome = outcome,
+                errorSanitized = error,
+            ))
+        }
+
+        // ── Replay: answer from the recording, never from the provider ────────
+        //
+        // Placed before the secret is resolved, deliberately. A replay must work
+        // on a run whose connection has since been deleted or whose key has been
+        // rotated - the recording is the source of truth, and needing a live
+        // credential to read it would make replay fail exactly when it is most
+        // needed, during an incident.
+        val liveAfterBoundary = replay != null && replay.isLive(node.id)
+        capture.liveCallAllowed = liveAfterBoundary
+        if (replay != null && !liveAfterBoundary) {
+            val recorded = replay.nextModelCall(node.id, context.attemptGroup)
+
+            // A recorded failure replays as a failure. Skipping it would let the
+            // replayed run take a different branch from the original, which is the
+            // divergence this whole change exists to eliminate.
+            if (recorded.outcome != "ok") {
+                emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
+                    title = "LLM call failed (replayed)",
+                    summary = recorded.errorSanitized ?: "Recorded failure")
+                return NodeResult.Failed(
+                    "LLM call failed for node '${node.id}': ${recorded.errorSanitized ?: "recorded failure"}")
+            }
+
+            val replayed = parseFor(provider, recorded.responseBody)
+            emitEvent(context, node.id, EventType.LLM_CALL_COMPLETED, "success",
+                title = "LLM call replayed",
+                summary = "provider=$provider model=${recorded.modelId} " +
+                    "version=${recorded.modelVersion ?: "unknown"} REPLAYED - no provider call, no cost",
+                durationMs = 0,
+                modelName = recorded.modelId,
+                // Tokens and cost are reported as zero rather than as the original
+                // figures. They are the original run's cost and are already
+                // attributed to it; repeating them here would double-count a spend
+                // that never happened twice.
+                tokenCount = 0,
+                estimatedCost = 0.0)
+
+            return NodeResult.Completed(
+                output = mapOf(
+                    "content"      to (replayed.content ?: ""),
+                    "model"        to recorded.modelId,
+                    "provider"     to provider,
+                    "tokenCount"   to (replayed.tokenCount ?: 0),
+                    "finishReason" to (replayed.finishReason ?: ""),
+                ),
+                metadata = mapOf(
+                    "provider"   to provider,
+                    "model"      to recorded.modelId,
+                    "durationMs" to 0L,
+                    "replayed"   to true,
+                ),
+            )
+        }
 
         val result = try {
             resolved.secret.use { secret ->
@@ -126,11 +258,36 @@ class LlmNodeExecutor(
                     return NodeResult.Failed("No API key configured for LLM connection '${resolved.record.name}'")
                 }
 
+                // Fail fast if this connection is already known to be down. The
+                // alternative is burning the full timeout to rediscover it, once
+                // per run, while holding a permit each time.
+                circuit?.beforeCall(connectionId)
                 callProvider(provider, model, baseUrl, apiKey, messages,
-                    temperature, maxTokens, timeoutMs, maxRespBytes)
+                    temperature, maxTokens, timeoutMs, maxRespBytes, capture, outputSchema)
+                    .also { circuit?.onSuccess(connectionId) }
             }
+        } catch (e: ConnectionCircuit.CircuitOpenException) {
+            recordCall("error", error = "circuit open")
+            emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
+                title = "Connection paused", summary = e.message)
+            return NodeResult.Failed(e.message ?: "Connection temporarily unavailable")
+        } catch (e: ProviderThrottledException) {
+            // Hand the scheduling decision up. Suspending releases the permit;
+            // sleeping here would hold it for the provider's whole backoff.
+            recordCall("throttled", error = "provider rate limited")
+            val decision = ProviderThrottle.decide(e.retryAfter, attempt = 0)
+            WorkerMetrics.providerThrottleSuspendTotal.inc(provider)
+            emitEvent(context, node.id, EventType.NODE_FAILED, "throttled",
+                title = "Rate limited by $provider",
+                summary = decision.userMessage(provider))
+            log.info("[llm] {} rate limited [nodeId={}] — {} for {}ms",
+                provider, node.id, if (decision.suspend) "suspending" else "backing off",
+                decision.delayMs)
+            return NodeResult.Throttled(provider, decision.delayMs, decision.userMessage(provider))
         } catch (e: LlmCallException) {
             val durationMs = System.currentTimeMillis() - startMs
+            recordCall("error", error = e.message?.take(500))
+            circuit?.onFailure(connectionId, e.message ?: "LLM call failed")
             log.warn("[llm] call failed [nodeId={}, provider={}, durationMs={}]: {}",
                 node.id, provider, durationMs, e.message)
             return NodeResult.Failed("LLM call failed for node '${node.id}': ${e.message}")
@@ -138,6 +295,7 @@ class LlmNodeExecutor(
 
         val durationMs = System.currentTimeMillis() - startMs
         val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }
+        recordCall("ok", response = result)
         emitEvent(context, node.id, EventType.LLM_CALL_COMPLETED, "success",
             title = "LLM call completed",
             summary = "provider=$provider model=$model durationMs=$durationMs" +
@@ -148,8 +306,21 @@ class LlmNodeExecutor(
             tokenCount = result.tokenCount,
             estimatedCost = estimatedCostUsd)
 
+        // With a schema declared, the structured object IS the output.
+        //
+        // Without this the node's output would be {content: "{\"risk_score\":80}"} and
+        // every assertion would have to reach through a JSON string - which the
+        // expression language deliberately cannot do. Layer 0 and Layer 1 have to
+        // agree on what "the output" means, and this is where they are joined.
+        val structured: Map<String, Any>? =
+            if (outputSchema == null) null
+            else runCatching {
+                @Suppress("UNCHECKED_CAST")
+                mapper.readValue(result.content ?: "{}", Map::class.java) as Map<String, Any>
+            }.getOrNull()
+
         return NodeResult.Completed(
-            output = mapOf(
+            output = structured ?: mapOf(
                 "content"    to (result.content ?: ""),
                 "model"      to model,
                 "provider"   to provider,
@@ -164,6 +335,17 @@ class LlmNodeExecutor(
         )
     }
 
+    /**
+     * The provider asked us to slow down.
+     *
+     * Separate from [LlmCallException] because the handling is opposite: a failure
+     * ends the node, a throttle pauses the run and keeps its progress.
+     */
+    private class ProviderThrottledException(
+        val provider: String,
+        val retryAfter: String?,
+    ) : RuntimeException("$provider rate limited this request")
+
     // ── Provider dispatch ─────────────────────────────────────────────────────
 
     private fun callProvider(
@@ -176,10 +358,19 @@ class LlmNodeExecutor(
         maxTokens: Int?,
         timeoutMs: Long,
         maxResponseBytes: Long,
+        capture: CallCapture,
+        /**
+         * The node's declared output schema, when it has one.
+         *
+         * Non-null turns on constrained decoding for that provider - Layer 0. This
+         * is the parameter that converts "please return JSON" into a structural
+         * guarantee.
+         */
+        outputSchema: Map<String, Any?>?,
     ): LlmResponse = when (provider) {
-        "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes)
-        "gemini"    -> callGemini(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes)
-        else        -> callOpenAiCompatible(provider, model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes)
+        "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema)
+        "gemini"    -> callGemini(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema)
+        else        -> callOpenAiCompatible(provider, model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema)
     }
 
     // ── OpenAI-compatible ─────────────────────────────────────────────────────
@@ -194,6 +385,8 @@ class LlmNodeExecutor(
         maxTokens: Int?,
         timeoutMs: Long,
         maxResponseBytes: Long,
+        capture: CallCapture,
+        outputSchema: Map<String, Any?>?,
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.openai.com") + "/v1/chat/completions"
 
@@ -202,6 +395,9 @@ class LlmNodeExecutor(
             put("messages", messages)
             temperature?.let { put("temperature", it) }
             maxTokens?.let { put("max_tokens", it) }
+            // Layer 0. `strict: true` is the whole point - without it json_schema is
+            // advisory and the model may still return prose.
+            outputSchema?.let { put("response_format", ConstrainedDecoding.openAiResponseFormat(it)) }
         }
 
         val response = doHttpPost(url, body,
@@ -212,6 +408,7 @@ class LlmNodeExecutor(
             timeoutMs = timeoutMs,
             maxResponseBytes = maxResponseBytes,
             provider = provider,
+            capture = capture,
         )
 
         return parseOpenAiResponse(response)
@@ -228,6 +425,8 @@ class LlmNodeExecutor(
         maxTokens: Int?,
         timeoutMs: Long,
         maxResponseBytes: Long,
+        capture: CallCapture,
+        outputSchema: Map<String, Any?>?,
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.anthropic.com") + "/v1/messages"
 
@@ -241,6 +440,10 @@ class LlmNodeExecutor(
             put("max_tokens", maxTokens ?: 1024)
             systemMsg?.let { put("system", it) }
             temperature?.let { put("temperature", it) }
+            // Anthropic has no response_format; a FORCED tool call is the
+            // equivalent. tool_choice is what makes it forced - without it the model
+            // may answer in prose and never call the tool.
+            outputSchema?.let { putAll(ConstrainedDecoding.anthropicToolConfig(it)) }
         }
 
         val response = doHttpPost(url, body,
@@ -252,6 +455,7 @@ class LlmNodeExecutor(
             timeoutMs = timeoutMs,
             maxResponseBytes = maxResponseBytes,
             provider = "anthropic",
+            capture = capture,
         )
 
         return parseAnthropicResponse(response)
@@ -268,6 +472,8 @@ class LlmNodeExecutor(
         maxTokens: Int?,
         timeoutMs: Long,
         maxResponseBytes: Long,
+        capture: CallCapture,
+        outputSchema: Map<String, Any?>?,
     ): LlmResponse {
         // NOTE: Gemini uses Bearer auth — API key goes in Authorization header, NOT as ?key= param
         val url = (baseUrl?.trimEnd('/') ?: "https://generativelanguage.googleapis.com") +
@@ -284,6 +490,9 @@ class LlmNodeExecutor(
             val genConfig = buildMap<String, Any> {
                 temperature?.let { put("temperature", it) }
                 maxTokens?.let { put("maxOutputTokens", it) }
+                // Both keys or neither: responseSchema without responseMimeType is
+                // silently ignored and the call returns prose.
+                outputSchema?.let { putAll(ConstrainedDecoding.geminiGenerationConfig(it)) }
             }
             if (genConfig.isNotEmpty()) put("generationConfig", genConfig)
         }
@@ -296,9 +505,24 @@ class LlmNodeExecutor(
             timeoutMs = timeoutMs,
             maxResponseBytes = maxResponseBytes,
             provider = "gemini",
+            capture = capture,
         )
 
         return parseGeminiResponse(response)
+    }
+
+    /**
+     * Parse a recorded body with the same parser that read it live.
+     *
+     * Reusing the live parser is the point: if replay parsed differently from the
+     * original execution the outputs would diverge for a reason that has nothing
+     * to do with the model, and the byte-identical test would be checking the
+     * wrong thing.
+     */
+    private fun parseFor(provider: String, body: String): LlmResponse = when (provider) {
+        "anthropic" -> parseAnthropicResponse(body)
+        "gemini"    -> parseGeminiResponse(body)
+        else        -> parseOpenAiResponse(body)
     }
 
     // ── HTTP execution ────────────────────────────────────────────────────────
@@ -310,8 +534,23 @@ class LlmNodeExecutor(
         timeoutMs: Long,
         maxResponseBytes: Long,
         provider: String,
+        capture: CallCapture,
     ): String {
+        // The backstop. Every replayed node should have returned a recorded
+        // response before reaching here; if one did not, refusing is the only safe
+        // answer — a replay that reaches the network has already broken its
+        // promise.
+        //
+        // Skipped when the executor has explicitly authorised a live call, which
+        // happens only past a partial-replay boundary the user asked for.
+        if (replay != null && !capture.liveCallAllowed) {
+            replay.refuseExternalCall("(http)", "$provider HTTP")
+        }
+
         val bodyJson = mapper.writeValueAsString(body)
+        // Captured before the call, so a request that fails or times out is still
+        // recorded. A failed call the audit cannot see is a hole in the audit.
+        capture.requestJson = bodyJson
 
         val reqBuilder = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -339,6 +578,22 @@ class LlmNodeExecutor(
             throw LlmCallException("HTTP request failed: ${e.javaClass.simpleName}: ${e.message?.take(200)}")
         }
 
+        // 429 is not a failure, and treating it as one is how a rate limit becomes
+        // an incident: the node fails, the run retries, the retry is rate limited
+        // too, and the provider's polite "slow down" turns into a failed workflow.
+        if (result.statusCode == 429) {
+            WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "throttled")
+            throw ProviderThrottledException(
+                provider = provider,
+                // Header names are case-insensitive and providers disagree about
+                // the casing, so match on the lower-cased name rather than
+                // guessing which two spellings to try.
+                retryAfter = result.headers.entries
+                    .firstOrNull { it.key.lowercase() == "retry-after" }
+                    ?.value?.firstOrNull(),
+            )
+        }
+
         if (result.statusCode !in 200..299) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "http_error")
             // Never log the response body raw — it may echo the request including prompt content
@@ -346,6 +601,7 @@ class LlmNodeExecutor(
         }
 
         WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "ok")
+        capture.responseJson = result.body
         return result.body
     }
 
@@ -364,7 +620,16 @@ class LlmNodeExecutor(
             val usage      = root["usage"] as? Map<String, Any>
             val tokenCount = (usage?.get("total_tokens") as? Number)?.toInt()
 
-            LlmResponse(content = content, finishReason = finish, tokenCount = tokenCount)
+            LlmResponse(
+                content = content, finishReason = finish, tokenCount = tokenCount,
+                // The provider echoes the version it actually served. This is the
+                // field that distinguishes "gpt-4o" the alias from the specific
+                // model that made the decision under audit.
+                modelVersion = root["model"] as? String,
+                tokensIn = (usage?.get("prompt_tokens") as? Number)?.toInt(),
+                tokensOut = (usage?.get("completion_tokens") as? Number)?.toInt(),
+                logprobsJson = (first["logprobs"])?.let { mapper.writeValueAsString(it) },
+            )
         } catch (e: Exception) {
             throw LlmCallException("Failed to parse OpenAI response: ${e.javaClass.simpleName}")
         }
@@ -375,6 +640,27 @@ class LlmNodeExecutor(
         return try {
             val root    = mapper.readValue(json, Map::class.java) as Map<String, Any>
             val content = root["content"] as? List<Map<String, Any>> ?: emptyList()
+
+            // Under constrained decoding the answer arrives as a tool_use block's
+            // `input`, not as a text block. Checked first: with a schema declared
+            // there IS no text block, and reading one would return empty content
+            // from a call that succeeded.
+            val toolUse = content.firstOrNull { it["type"] == "tool_use" }
+            if (toolUse != null) {
+                val usage = root["usage"] as? Map<String, Any>
+                val inTok = (usage?.get("input_tokens") as? Number)?.toInt()
+                val outTok = (usage?.get("output_tokens") as? Number)?.toInt()
+                return LlmResponse(
+                    // Re-serialised so the caller sees JSON text whichever route the
+                    // provider took. Downstream parses it identically either way.
+                    content = mapper.writeValueAsString(toolUse["input"]),
+                    finishReason = root["stop_reason"] as? String,
+                    tokenCount = if (inTok != null && outTok != null) inTok + outTok else null,
+                    modelVersion = root["model"] as? String,
+                    tokensIn = inTok,
+                    tokensOut = outTok,
+                )
+            }
             val text    = content.firstOrNull { it["type"] == "text" }?.get("text") as? String
             val stop    = root["stop_reason"] as? String
 
@@ -495,11 +781,51 @@ class LlmNodeExecutor(
 
     // ── Internal types ────────────────────────────────────────────────────────
 
+    /**
+     * The parsed response, plus everything an audit needs that parsing used to
+     * throw away.
+     *
+     * `rawBody` matters most: it is the byte string the provider actually sent,
+     * and it is the only thing a replay can hand back that is guaranteed
+     * identical. Everything else here is derived from it and stored alongside so
+     * the common questions do not require re-parsing megabytes.
+     */
     private data class LlmResponse(
         val content: String?,
         val finishReason: String? = null,
         val tokenCount: Int? = null,
+        /** Resolved model version the provider served, not the alias we asked for. */
+        val modelVersion: String? = null,
+        val tokensIn: Int? = null,
+        val tokensOut: Int? = null,
+        val logprobsJson: String? = null,
     )
+
+    /**
+     * Carries the raw request and response out of the HTTP layer.
+     *
+     * Passed down the call chain rather than held in a field or a ThreadLocal:
+     * this executor instance is shared across nodes, and execution is now
+     * coroutine-based, so a ThreadLocal would attach the capture to whatever
+     * thread happened to resume the continuation. Explicit threading is four extra
+     * parameters and no chance of cross-talk.
+     */
+    private class CallCapture {
+        var requestJson: String? = null
+        var responseJson: String? = null
+
+        /**
+         * Set when this node is past a partial-replay boundary and a live call is
+         * therefore intended.
+         *
+         * The HTTP backstop refuses every outbound call during a replay, which is
+         * correct for a full replay and wrong for the live half of a partial one.
+         * The decision is made once, by the executor, where the node id is known —
+         * and carried here rather than re-derived in the HTTP layer, which has no
+         * idea which node it is serving.
+         */
+        var liveCallAllowed: Boolean = false
+    }
 }
 
 private class LlmCallException(message: String) : Exception(message)

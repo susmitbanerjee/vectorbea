@@ -101,6 +101,26 @@ class WorkflowRuntime(
     private val tenantDbDispatcher: TenantDbDispatcher? = null,
     /** Exactly-once guard, handed to the executors that perform side effects. */
     private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
+    /** Per-connection breaker, so a failing provider stops costing worker permits. */
+    private val circuit: com.vectorbea.worker.net.ConnectionCircuit? = null,
+    /** Records every provider call so the run can later be replayed. */
+    private val recorder: com.vectorbea.worker.replay.ModelCallRecorder? = null,
+    /**
+     * Non-null when this execution is a replay.
+     *
+     * Held on the runtime rather than passed per-execute because it must reach
+     * every executor, and a replay is a property of the whole execution rather
+     * than of one node.
+     */
+    private val replay: com.vectorbea.worker.replay.ReplayContext? = null,
+    /**
+     * Output contracts - Layers 0 and 1.
+     *
+     * Null disables contract validation entirely, which is the pre-contract
+     * behaviour and is retained for the unit tests that construct a runtime
+     * directly. Production always supplies it.
+     */
+    private val contracts: com.vectorbea.worker.contract.ContractValidator? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -110,6 +130,10 @@ class WorkflowRuntime(
         eventStore         = eventStore,
         dataSource         = dataSource,
         sideEffects        = sideEffects,
+        circuit            = circuit,
+        recorder           = recorder,
+        replay             = replay,
+        contracts          = contracts,
     )
     private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
 
@@ -187,6 +211,33 @@ class WorkflowRuntime(
          * is the label the yield checkpoint was saved under.
          */
         data class Yielded(val reason: String, val checkpointNodeId: String?) : ExecutionResult()
+
+        /**
+         * A per-run ceiling was reached — steps, cost, tokens, active duration, or
+         * node payload.
+         *
+         * Distinct from [Failed] because nothing went wrong. The run did exactly
+         * what it was asked to do, for longer or more expensively than it was
+         * allowed to, and the user needs to be told which limit and what to do
+         * about it — not "your run failed".
+         */
+        /**
+         * A provider rate-limited the run. Progress is checkpointed and a durable
+         * timer is scheduled; the worker permit is released in between.
+         *
+         * Distinct from [Yielded] because the resume is time-gated rather than
+         * immediate — re-enqueueing straight away would hit the same rate limit.
+         */
+        data class Throttled(
+            val provider: String,
+            val retryAfterMs: Long,
+            val nodeId: String,
+            val message: String,
+        ) : ExecutionResult()
+
+        data class CeilingExceeded(
+            val breach: com.vectorbea.worker.runtime.budget.RunCeilings.Breach,
+        ) : ExecutionResult()
     }
 
     /**
@@ -301,7 +352,7 @@ class WorkflowRuntime(
             when (statusName) {
                 "COMPLETED" -> ctx.markCompleted(nodeId)
                 "FAILED"    -> ctx.markFailed(nodeId)
-                "SKIPPED"   -> ctx.markSkipped(nodeId)
+                "SKIPPED"   -> { ctx.markSkipped(nodeId); recordRibbon(ctx, nodeId, RibbonWriter.State.SKIPPED) }
                 // RUNNING or PENDING → leave as PENDING so the node re-runs
             }
         }
@@ -351,6 +402,21 @@ class WorkflowRuntime(
         // Per-tick cooperative-yield budget (null = unbounded / historical behavior).
         val tracker = if (enforceBudget) executionBudget?.let { ExecutionBudgetTracker(it) } else null
 
+        // Per-RUN ceilings. Different thing from the tracker above and checked in
+        // the same places: the tracker decides when to yield, this decides when to
+        // stop. An agent looping forever satisfies the tracker on every tick and
+        // only this ever ends it.
+        //
+        // Top-level only, like the yield budget. A parallel branch shares the run's
+        // ceiling — counting a branch's steps against a private tracker would let a
+        // fan-out multiply the limit by its width.
+        val ceilings = if (enforceBudget && dataSource != null) {
+            val limits = com.vectorbea.worker.runtime.budget.RunCeilings
+                .forWorkspace(dataSource, ctx.workspaceId)
+            com.vectorbea.worker.runtime.budget.RunCeilingTracker
+                .forRun(dataSource, ctx.runId, limits)
+        } else null
+
         for (iteration in 0..maxIterations) {
             // Hard wall-clock budget — a hung node or pathological graph must
             // not occupy a worker thread indefinitely.
@@ -369,13 +435,26 @@ class WorkflowRuntime(
             // Cooperative yield (wall-clock dimension) — checked before doing more
             // work so a single slow-but-not-timed-out node still yields promptly.
             if (tracker != null && !tracker.canContinue()) {
+                ceilings?.persist(dataSource!!)
                 return yieldRun(ctx, source, tracker)
+            }
+
+            // Run ceilings — checked every iteration, which is what "continuously"
+            // has to mean. Checking only at start would let a run that was inside
+            // its limits when it began exceed them by any margin before finishing.
+            ceilings?.check(dataSource)?.let { breach ->
+                ceilings.persist(dataSource!!)
+                return ExecutionResult.CeilingExceeded(breach)
             }
 
             // Check for completion
             if (scheduler.isRunComplete(ctx)) {
                 val endNode  = graph.nodes.firstOrNull { it.nodeType == NodeType.END && ctx.isCompleted(it.id) }
                 val output   = endNode?.let { ctx.getOutput(it.id) } ?: buildFinalOutput(ctx, graph)
+                // Flush on success too: the totals are what the run detail page
+                // shows as "47 steps, $0.31", and a successful run that reports
+                // zero of everything is worse than no figure at all.
+                ceilings?.persist(dataSource!!)
                 return ExecutionResult.Succeeded(output)
             }
 
@@ -407,7 +486,15 @@ class WorkflowRuntime(
                 val result = executeParallelNode(parallelNode, scheduler, ctx, source, stepOutputView, cancellationCheck)
                 if (result != null) return result
                 tracker?.recordNode()
-                if (tracker != null && !tracker.canContinue()) return yieldRun(ctx, source, tracker)
+                ceilings?.recordStep()
+                ceilings?.check(dataSource)?.let { breach ->
+                    ceilings.persist(dataSource!!)
+                    return ExecutionResult.CeilingExceeded(breach)
+                }
+                if (tracker != null && !tracker.canContinue()) {
+                    ceilings?.persist(dataSource!!)
+                    return yieldRun(ctx, source, tracker)
+                }
             }
 
             // Execute sequential nodes one by one
@@ -418,7 +505,22 @@ class WorkflowRuntime(
                 // Count this node against the per-tick budget; yield (checkpoint +
                 // RESUME_RUN) when exhausted so we never pin the worker thread.
                 tracker?.recordNode()
-                if (tracker != null && !tracker.canContinue()) return yieldRun(ctx, source, tracker)
+
+                // …and against the run's own ceilings, which persist across ticks.
+                ceilings?.recordStep()
+                ceilings?.let { c ->
+                    // Payload is per node, so it is checked here rather than at the
+                    // top of the loop where the node's identity is no longer known.
+                    val bytes = ctx.getOutput(node.id)?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0
+                    (c.checkPayload(node.id, bytes) ?: c.check(dataSource))?.let { breach ->
+                        c.persist(dataSource!!)
+                        return ExecutionResult.CeilingExceeded(breach)
+                    }
+                }
+                if (tracker != null && !tracker.canContinue()) {
+                    ceilings?.persist(dataSource!!)
+                    return yieldRun(ctx, source, tracker)
+                }
             }
         }
 
@@ -463,6 +565,7 @@ class WorkflowRuntime(
                 // Return ExecutionResult.Failed so the branch properly fails instead of
                 // silently completing as Succeeded with a failed node inside.
                 ctx.markFailed(node.id)
+            recordRibbon(ctx, node.id, RibbonWriter.State.FAILED)
                 emitEvent(ctx, EventType.INPUT_MAPPING_FAILED, "running", source,
                     title  = "Input mapping failed: ${nodeLabel(node)}",
                     stepId = node.id)
@@ -578,7 +681,11 @@ class WorkflowRuntime(
                     if (guarded) stepGuard.markCompleted(ctx.runId, node.id, attempt)
                     return result
                 }
-                is NodeResult.ApprovalPaused, is NodeResult.Unsupported -> return result
+                // Throttled goes straight up without consuming a node retry. The
+                // provider told us when to come back; burning attempts against
+                // that clock just fails the node faster.
+                is NodeResult.ApprovalPaused, is NodeResult.Unsupported,
+                is NodeResult.Throttled -> return result
                 is NodeResult.Failed -> {
                     if (guarded) stepGuard.markFailed(ctx.runId, node.id, attempt,
                         """{"reason":${jsonStr(result.reason.take(300))}}""")
@@ -691,6 +798,9 @@ class WorkflowRuntime(
     ) {
         if (!ctx.debugMode || debugWriter == null) return
         when (result) {
+            // No snapshot: the node did not execute. A debug entry showing an
+            // empty output would read as "the provider returned nothing".
+            is NodeResult.Throttled -> Unit
             is NodeResult.Completed -> captureDebugSnapshot(
                 node = node, ctx = ctx, status = "success",
                 resolvedInput = resolvedInputs, output = result.output,
@@ -866,10 +976,64 @@ class WorkflowRuntime(
         ctx: RuntimeContext,
         source: String,
         stepOutputView: InMemoryStepOutputView,
-    ): ExecutionResult? = when (result) {
+    ): ExecutionResult? = run { when (result) {
+        is NodeResult.Throttled -> {
+            // The node stays PENDING, so the resume re-executes it. Safe because
+            // a 429 means the provider did no work — there is nothing to
+            // duplicate by trying again.
+            emitEvent(ctx, EventType.RUN_YIELDED, "throttled", source,
+                title = "Paused — ${result.provider} rate limit",
+                summary = result.message, stepId = node.id)
+            ExecutionResult.Throttled(
+                provider = result.provider,
+                retryAfterMs = result.retryAfterMs,
+                nodeId = node.id,
+                message = result.message,
+            )
+        }
         is NodeResult.Completed -> {
+            // ---- THE CHECKPOINT BOUNDARY ------------------------------------
+            //
+            // Everything below this line makes the output durable: ctx.setOutput
+            // puts it in scope for downstream nodes, stepOutputView persists it, and
+            // the checkpoint captures it. So validation happens HERE, before any of
+            // it.
+            //
+            // Failure mode #6 in the reliability taxonomy is context poisoning - a
+            // bad upstream output compounding downstream - and its defence is not a
+            // cleverer check, it is this ordering:
+            //
+            //   "Validate before commit, and a bad output never becomes durable.
+            //    Validate after, and you've made it permanent."
+            //
+            // Moving these lines below the writes would compile, pass every unit
+            // test, and silently break the guarantee. Hence the volume of comment on
+            // three lines of code.
+            val verdict = validateContract(node, ctx, result)
+            if (verdict != null && !verdict.committable) {
+                recordRibbon(ctx, node.id, RibbonWriter.State.FAILED)
+                // Re-dispatched as a node FAILURE so the ordinary failure policy
+                // applies — but carrying the contract's specific message rather than
+                // a generic "validation error". Recursion into this same function
+                // rather than duplicating the failure path, so the two can never
+                // diverge.
+                //
+                // Note what has NOT happened at this point: setOutput, the step
+                // output view, persistStepOutput, the checkpoint. The bad value does
+                // not exist anywhere durable.
+                return@run applyNodeResult(
+                    node, NodeResult.Failed(verdict.failureMessage()),
+                    scheduler, ctx, source, stepOutputView)
+            }
+
             ctx.setOutput(node.id, result.output)
             ctx.markCompleted(node.id)
+            recordRibbon(ctx, node.id,
+                // A gated node is not plainly committed: the Ribbon shows it as
+                // gated so a reader can see the run is waiting on a human.
+                if (verdict?.outcome == com.vectorbea.worker.contract.ContractValidator.Outcome.GATE)
+                    RibbonWriter.State.GATED else RibbonWriter.State.COMMITTED,
+                (result.metadata["durationMs"] as? Number)?.toLong())
 
             // Persist step outputs (raw = validated = output for now; transform populates tiers separately)
             stepOutputView.putRaw(node.id, result.output)
@@ -915,6 +1079,7 @@ class WorkflowRuntime(
 
         is NodeResult.Failed -> {
             ctx.markFailed(node.id)
+            recordRibbon(ctx, node.id, RibbonWriter.State.FAILED)
             val failEdges = scheduler.selectEdgesAfterFailure(node, ctx)
 
             emitEvent(ctx, EventType.STEP_FAILED, "running", source,
@@ -937,6 +1102,7 @@ class WorkflowRuntime(
 
         is NodeResult.Unsupported -> {
             ctx.markFailed(node.id)
+            recordRibbon(ctx, node.id, RibbonWriter.State.FAILED)
             val failEdges = scheduler.selectEdgesAfterFailure(node, ctx)
 
             emitEvent(ctx, EventType.NODE_TYPE_UNSUPPORTED, "running", source,
@@ -964,7 +1130,7 @@ class WorkflowRuntime(
 
             ExecutionResult.WaitingForApproval(result.approvalId, node.id)
         }
-    }
+    } }
 
     // ── Parallel node execution ───────────────────────────────────────────────
 
@@ -1082,6 +1248,12 @@ class WorkflowRuntime(
                 is ExecutionResult.WaitingForApproval -> "waiting_for_approval"
                 is ExecutionResult.Cancelled          -> "cancelled"
                 is ExecutionResult.Yielded            -> "yielded" // branches run unbounded; defensive
+                // Also defensive: ceilings are enforced at the top level only, so
+                // a branch cannot produce this. Named rather than swallowed by an
+                // `else` so that if branches ever do enforce ceilings, this stops
+                // compiling instead of silently logging the wrong thing.
+                is ExecutionResult.CeilingExceeded    -> "ceiling: ${result.breach.dimension}"
+                is ExecutionResult.Throttled          -> "throttled by ${result.provider}"
             }
             log.info("[runtime] branch {} → {} [parallelId={}]", entryNodeId, status, parallelNode.id)
         }
@@ -1295,6 +1467,139 @@ class WorkflowRuntime(
 
     private fun nodeLabel(node: WorkflowNode): String =
         node.label.ifBlank { node.type + ":" + node.id.take(8) }
+
+    /**
+     * Run the node's output contract, before anything is committed.
+     *
+     * Returns null when the node has no contract - which is the common case today
+     * and must stay working. A node without a contract behaves exactly as it did
+     * before contracts existed; it is merely flagged in the publish readiness check.
+     *
+     * Never throws. A validator that itself fails must not fail the run: that would
+     * make enabling a contract riskier than not having one, which is the opposite of
+     * the intent. A validation that cannot run is logged and treated as absent
+     * (recorded as D26).
+     */
+    private fun validateContract(
+        node: com.vectorbea.worker.runtime.graph.WorkflowNode,
+        ctx: RuntimeContext,
+        result: NodeResult.Completed,
+    ): com.vectorbea.worker.contract.ContractValidator.Verdict? {
+        val validator = contracts ?: return null
+        return try {
+            val contract = validator.contractFor(ctx.workflowId, node.id) ?: return null
+
+            val verdict = validator.validate(
+                contract = contract,
+                input = ctx.workflowInput,
+                output = result.output,
+                // Historical stats, so `stats.p50` and `stats.stddev` resolve.
+                stats = validator.statsFor(ctx.workflowId, node.id),
+                context = mapOf(
+                    "runId" to ctx.runId.toString(),
+                    "nodeId" to node.id,
+                    "attempt" to ctx.attemptGroup,
+                ),
+            )
+
+            validator.recordValidation(ctx.runId, ctx.workspaceId, node.id, verdict)
+
+            when (verdict.outcome) {
+                com.vectorbea.worker.contract.ContractValidator.Outcome.FAIL -> {
+                    log.warn("[contract] node {} FAILED its contract v{}: {}",
+                        node.id, contract.version, verdict.failureMessage())
+                    emitEvent(ctx, EventType.NODE_FAILED, "failed", "worker:$workerId",
+                        title = "Contract violation",
+                        summary = verdict.failureMessage(), stepId = node.id)
+                }
+                com.vectorbea.worker.contract.ContractValidator.Outcome.WARN -> {
+                    // Commits, but the run is flagged and surfaces on Control.
+                    val notes = verdict.results.filter { !it.passed }.map { it.message }
+                    validator.markLowConfidence(ctx.runId, notes)
+                    log.info("[contract] node {} committed with warnings: {}", node.id, notes)
+                    emitEvent(ctx, EventType.NODE_SUCCEEDED, "warning", "worker:$workerId",
+                        title = "Committed with warnings",
+                        summary = notes.joinToString(" "), stepId = node.id)
+                }
+                com.vectorbea.worker.contract.ContractValidator.Outcome.GATE -> {
+                    // Commits, and forces a human approval before any downstream side
+                    // effect. The gate is created here rather than at the next
+                    // side-effecting node because the decision the human is making is
+                    // about THIS output, and it is this output they need to see.
+                    val reasons = verdict.results.filter { !it.passed }.map { it.message }
+                    createContractGate(ctx, node.id, reasons)
+                    log.info("[contract] node {} gated for approval: {}", node.id, reasons)
+                }
+                com.vectorbea.worker.contract.ContractValidator.Outcome.PASS -> Unit
+            }
+            verdict
+        } catch (e: Exception) {
+            log.error("[contract] validation failed for node {} - treating as absent: {}",
+                node.id, e.message)
+            null
+        }
+    }
+
+    /**
+     * Create the approval gate a `gate` assertion demands.
+     *
+     * Written straight to `run_approvals` rather than through the approval node
+     * executor: this gate was not authored in the graph, it was demanded by a
+     * contract, and it must exist even though no approval node is present.
+     *
+     * `decision_context_json` carries the assertion messages and the output, because
+     * an approver asked to sign off on "the contract flagged this" needs to see what
+     * was flagged and why.
+     */
+    private fun createContractGate(ctx: RuntimeContext, nodeId: String, reasons: List<String>) {
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """INSERT INTO run_approvals
+                        (run_id, workspace_id, environment_id, node_id, status, message,
+                         metadata_json, title, risk_level, requested_by,
+                         decision_context_json)
+                       VALUES (?, ?, ?, ?, 'PENDING', ?, ?::jsonb, ?, 'high', 'contract',
+                               ?::jsonb)"""
+                ).use { stmt ->
+                    stmt.setObject(1, ctx.runId)
+                    stmt.setObject(2, ctx.workspaceId)
+                    stmt.setObject(3, ctx.environmentId)
+                    stmt.setString(4, nodeId)
+                    stmt.setString(5, reasons.joinToString(" "))
+                    stmt.setString(6, """{"source":"contract_gate"}""")
+                    stmt.setString(7, "Contract gate on '\$nodeId'")
+                    stmt.setString(8, """{"reasons":[${reasons.joinToString(",") { jsonStr(it) }}]}""")
+                    stmt.executeUpdate()
+                }
+            }
+        }.onFailure {
+            // A gate that could not be created is a side effect that will now proceed
+            // unapproved. Loud, because the whole point of `gate` was to stop that.
+            log.error("[contract] COULD NOT CREATE the approval gate for node {} - " +
+                "downstream side effects are NOT gated: {}", nodeId, it.message)
+        }
+    }
+
+    /**
+     * Write one ribbon transition.
+     *
+     * Shares the run's connection so the ribbon lands with the transition it
+     * describes rather than after it — see RibbonWriter for why that is the whole
+     * design. Never throws onward: the ribbon is a render optimisation, and a run
+     * that executed correctly must not be failed because its summary could not be
+     * written. The rethrow inside RibbonWriter still aborts the enclosing
+     * transaction when there is one, which is where it matters.
+     */
+    private fun recordRibbon(
+        ctx: RuntimeContext,
+        nodeId: String,
+        state: RibbonWriter.State,
+        durationMs: Long? = null,
+    ) {
+        runCatching { RibbonWriter.recordTransition(dataSource, ctx.runId, nodeId, state, durationMs) }
+            .onFailure { log.warn("[ribbon] {} for node {} not recorded: {}", state.wire, nodeId, it.message) }
+    }
 
     private fun sanitizeError(e: Exception): String =
         (e.message ?: e.javaClass.simpleName)

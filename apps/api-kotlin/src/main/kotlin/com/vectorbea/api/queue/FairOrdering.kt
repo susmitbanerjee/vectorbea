@@ -1,0 +1,131 @@
+package com.vectorbea.api.queue
+
+import org.slf4j.LoggerFactory
+import java.util.UUID
+import javax.sql.DataSource
+
+/**
+ * Weighted fair queueing, in one column.
+ *
+ * THE PROBLEM WITH FIFO
+ * ---------------------
+ * A tenant who submits 500 runs ahead of a tenant who submits one gets all 500
+ * served first. That is what a stream gives you, and it is why S01 test 4 showed
+ * a quiet tenant completing nothing while a flooder completed fifty.
+ *
+ * THE MECHANISM
+ * -------------
+ * Each workspace has a virtual clock. Every enqueue stamps the run with a
+ * virtual finish time and pushes the clock forward by the run's cost:
+ *
+ *     fair_vtime = GREATEST(vclock, now_epoch) + (est_cost / plan_weight)
+ *     vclock     = fair_vtime
+ *
+ * Ordering by `fair_vtime` then interleaves tenants automatically. The flooder's
+ * 500th run carries a vtime 500 cost-units in the future; the quiet tenant's
+ * single run carries one near `now` and is served next. No round-robin
+ * bookkeeping, no per-tenant queues — one indexed column.
+ *
+ * `GREATEST(vclock, now_epoch)` is the part that matters most and is easiest to
+ * miss. Without it, a tenant who flooded an hour ago and went quiet would still
+ * carry a clock far in the future and be starved long after their burst ended.
+ * Clamping to `now` means an idle tenant always re-enters at the front, which is
+ * exactly the behaviour a fair scheduler should have.
+ *
+ * `plan_weight` divides the increment: a weight-2.0 tenant advances their clock
+ * half as fast and is therefore served about twice as often under contention.
+ */
+object FairOrdering {
+
+    private val log = LoggerFactory.getLogger(FairOrdering::class.java)
+
+    /**
+     * The boundary between ordinary traffic and the priority lane.
+     *
+     * Mirrors `PostgresClaim.PRIORITY_LANE_FLOOR` in the worker. Duplicated
+     * rather than shared because the two modules have no common artifact, and a
+     * shared-constants module for one integer would be worse than two lines that
+     * name each other. If one moves, the claim silently stops preempting — so the
+     * lane test in scripts/load/priority-lane.mjs is what holds them together.
+     */
+    const val PRIORITY_LANE_FLOOR = 50
+
+    /** Priority stamped on a run from a `priority_lane` workspace. */
+    const val PRIORITY_LANE_VALUE: Short = 100
+
+    /**
+     * Relative cost by execution class.
+     *
+     * Deliberately coarse. The point is to stop an agent run counting the same as
+     * a transform against a tenant's clock — a precise estimate is neither
+     * available at trigger nor necessary, since only the ratios matter.
+     */
+    fun estimatedCost(executionClass: ExecutionClass): Double = when (executionClass) {
+        ExecutionClass.AGENT -> 10.0   // seconds of LLM latency, typically
+        ExecutionClass.LONG -> 5.0
+        ExecutionClass.SHORT -> 1.0
+        ExecutionClass.SYSTEM -> 0.0   // operational work never charges a tenant
+    }
+
+    data class Placement(val fairVtime: Double, val priority: Short)
+
+    /**
+     * Compute the run's place in the fair queue and advance the workspace clock,
+     * atomically.
+     *
+     * One statement, so two concurrent triggers for the same workspace cannot both
+     * read the same clock and receive the same vtime — which would put them in an
+     * arbitrary order and let a burst of parallel submissions bypass the weighting
+     * entirely. The `UPDATE … RETURNING` takes a row lock for the duration.
+     *
+     * Never throws: a scheduling hint must not be able to fail a trigger. On error
+     * the caller falls back to `now`, which degrades to FIFO for that one run.
+     */
+    fun placeAndAdvance(
+        dataSource: DataSource,
+        workspaceId: UUID,
+        executionClass: ExecutionClass,
+    ): Placement {
+        val cost = estimatedCost(executionClass)
+        return try {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """
+                    WITH policy AS (
+                        SELECT COALESCE(MAX(plan_weight), 1.0)   AS weight,
+                               COALESCE(bool_or(priority_lane), false) AS priority_lane
+                          FROM workspace_usage_policies
+                         WHERE workspace_id = ?
+                    )
+                    UPDATE workspaces w
+                       SET vclock = GREATEST(w.vclock, EXTRACT(EPOCH FROM now()))
+                                    + (? / GREATEST((SELECT weight FROM policy), 0.01))
+                     WHERE w.id = ?
+                    RETURNING w.vclock, (SELECT priority_lane FROM policy) AS priority_lane
+                    """.trimIndent()
+                ).use { stmt ->
+                    stmt.setObject(1, workspaceId)
+                    stmt.setDouble(2, cost)
+                    stmt.setObject(3, workspaceId)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            val vtime = rs.getDouble("vclock")
+                            // The demo lane: runtime-configurable, no deploy.
+                            val priority: Short = if (rs.getBoolean("priority_lane")) PRIORITY_LANE_VALUE else 0
+                            Placement(vtime, priority)
+                        } else {
+                            log.warn("[fair] workspace {} not found — falling back to now", workspaceId)
+                            Placement(nowEpoch(), 0)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[fair] could not place run for workspace {} — falling back to FIFO: {}",
+                workspaceId, e.message)
+            Placement(nowEpoch(), 0)
+        }
+    }
+
+    private fun nowEpoch(): Double = System.currentTimeMillis() / 1000.0
+}

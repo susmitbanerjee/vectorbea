@@ -45,6 +45,14 @@ data class WorkerConfig(
      * docs/architecture/TYPED-QUEUE-MIGRATION.md.
      */
     val legacyStreamEnabled: Boolean,
+    /**
+     * Where the claim decision is made: "redis" | "postgres" | "dual".
+     *
+     * Defaults to "redis" so deploying this code changes nothing. "dual" runs
+     * both while the streams drain — see TYPED-QUEUE-MIGRATION.md and
+     * POSTGRES-CLAIM.md for the ordered cutover.
+     */
+    val claimMode: String,
     /** Legacy single-pool sizing — retained as the fallback for pool derivation. */
     val concurrency: Int,
 
@@ -179,6 +187,7 @@ data class WorkerConfig(
                 // Default true: a worker deployed before the API still needs to
                 // see legacy messages. Flipping to false is the last migration step.
                 legacyStreamEnabled = env("WORKER_LEGACY_STREAM_ENABLED")?.lowercase() != "false",
+                claimMode = (env("WORKER_CLAIM_MODE") ?: "redis").lowercase(),
                 concurrency = concurrency,
                 shortConcurrency  = shortConcurrency.coerceIn(1, 64),
                 longConcurrency   = longConcurrency.coerceIn(1, 32),
@@ -241,6 +250,7 @@ data class WorkerConfig(
         log.info("  database    : ${if (dbUrl.isNotBlank()) "configured (pool=$dbMaxPoolSize)" else "NOT SET"}")
         log.info("  redis       : ${if (redisUrl.isNotBlank()) "configured (tls=$redisTlsEnabled)" else "NOT SET"}")
         log.info("  secret key  : ${if (secretEncryptionKey != null) "present" else "NOT SET"}")
+        log.info("  claim mode  : $claimMode${if (claimMode == "dual") " — Postgres claim + Redis streams draining" else ""}")
         log.info("  streams     : runs.short / runs.long / runs.agent / runs.system (typed)")
         log.info("  legacy      : ${if (legacyStreamEnabled) "$queueStream / group=$queueGroup (DUAL-CONSUME ACTIVE)" else "disabled"}")
         log.info("  concurrency : $concurrency (fallback formula only)")

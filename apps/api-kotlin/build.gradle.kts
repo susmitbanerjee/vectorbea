@@ -50,6 +50,30 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.11.0")
 }
 
+/**
+ * The contract expression language is shared with the worker.
+ *
+ * The API needs it for publish-time linting and the inspector's live testing; the
+ * worker needs it to enforce contracts at runtime. Those two must agree EXACTLY —
+ * an expression that lints clean in the editor and then fails to parse in the
+ * worker is the worst possible outcome, because the author has already shipped.
+ *
+ * So the source is shared rather than duplicated. The alternative, a common module,
+ * is more build machinery than two files justify; the alternative to that, copying
+ * the files, guarantees they drift.
+ */
+sourceSets {
+    main {
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract")
+        // Only the pure language files travel. ContractValidator is bound to the
+        // worker's DataSource and its runtime concerns; the API has no business
+        // compiling it, and pulling it in drags worker-only dependencies with it.
+        // The pattern is relative to each source root, and the root added above IS
+        // .../worker/contract - so the path is the bare filename.
+        kotlin.exclude("ContractValidator.kt")
+    }
+}
+
 kotlin {
     jvmToolchain(17)
 }

@@ -24,6 +24,24 @@ data class CreateRunRequest(
      * and discovering afterwards. Defaults to "short" — the smallest claim.
      */
     val executionClass: String = "short",
+    /**
+     * Virtual finish time from weighted fair queueing — the run's place in the
+     * claim order. 0.0 means "not placed", which the claim treats as the front of
+     * the queue, so callers that skip placement must pass a real value.
+     */
+    val fairVtime: Double = 0.0,
+    /** 0 = ordinary traffic, 100 = priority/demo lane. */
+    val priority: Short = 0,
+    /**
+     * Which of the three operations produced this run: live | replay | retry |
+     * rerun. The worker reads this from the row to decide whether to serve model
+     * calls from a recording or make them for real.
+     */
+    val executionModeKind: String = "live",
+    /** The run being replayed or re-run from. Null for a fresh trigger. */
+    val sourceRunId: UUID? = null,
+    /** Partial replay: replayed up to and including this node, live after it. */
+    val replayUntilNode: String? = null,
 )
 
 data class AgentRun(
@@ -93,8 +111,9 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         INSERT INTO agent_runs
             (workspace_id, environment_id, workflow_id, workflow_version_id,
              status, trigger_type, input_json, idempotency_key, debug_mode,
-             execution_class)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?, ?)
+             execution_class, fair_vtime, priority,
+             execution_mode_kind, source_run_id, replay_until_node)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -107,6 +126,11 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setString(7, req.idempotencyKey)
             setBoolean(8, req.debugMode)
             setString(9, req.executionClass)
+            setDouble(10, req.fairVtime)
+            setShort(11, req.priority)
+            setString(12, req.executionModeKind)
+            setUuidOrNull(13, req.sourceRunId)
+            setString(14, req.replayUntilNode)
         },
         ::mapRow,
     )

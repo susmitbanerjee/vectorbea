@@ -36,6 +36,8 @@ class WorkflowScheduler(
     private val queue: WorkflowQueue,
     private val pollIntervalMs: Long = 30_000L,
     private val classResolver: com.vectorbea.api.queue.ExecutionClassResolver? = null,
+    /** For weighted fair placement. Null degrades scheduled runs to FIFO. */
+    private val dataSource: javax.sql.DataSource? = null,
 ) {
     private val log = LoggerFactory.getLogger(WorkflowScheduler::class.java)
     private val running = AtomicBoolean(false)
@@ -72,8 +74,29 @@ class WorkflowScheduler(
                     log.warn("[scheduler] schedule {} has an invalid/never cron '{}' — parking it",
                         s.id, s.cronExpression)
                 }
+                // ── Overlap policy ────────────────────────────────────────
+                // Checked BEFORE the claim, so a skipped occurrence still advances
+                // next_fire_at. Skipping without advancing would leave the schedule
+                // permanently due and re-evaluated on every tick.
+                //
+                //   skip             the previous run is still going; do not start
+                //                    another. The default, and the right one for a
+                //                    sync job where two concurrent copies corrupt
+                //                    each other.
+                //   queue            fire anyway; admission and the per-tenant cap
+                //                    decide when it actually runs.
+                //   allow_concurrent fire, no check.
+                val skipping = s.overlapPolicy == "skip" &&
+                    runCatching { schedules.previousRunActive(s.id) }.getOrDefault(false)
+
                 // Atomically claim: only the winner advances next_fire_at and fires.
                 if (!schedules.claimAndAdvance(s.id, threshold = now, firedAt = now, nextFireAt = nextFire)) continue
+
+                if (skipping) {
+                    log.info("[scheduler] schedule {} skipped — previous run still in flight " +
+                        "(overlap_policy=skip)", s.id)
+                    continue
+                }
                 try {
                     fire(s)
                 } catch (e: Exception) {
@@ -106,6 +129,14 @@ class WorkflowScheduler(
         // same class, same pool.
         val scheduledClass = classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
 
+        // Scheduled runs go through the same weighted fair placement as manual
+        // ones. Without this they carry fair_vtime = 0, which the claim reads as
+        // the front of the queue — so a workspace with fifty schedules would
+        // preempt every interactive run on the platform at 09:00.
+        val placement = dataSource?.let {
+            com.vectorbea.api.queue.FairOrdering.placeAndAdvance(it, s.workspaceId, scheduledClass)
+        } ?: com.vectorbea.api.queue.FairOrdering.Placement(System.currentTimeMillis() / 1000.0, 0)
+
         val run = runRepo.create(CreateRunRequest(
             workspaceId = s.workspaceId,
             environmentId = s.environmentId,
@@ -114,7 +145,12 @@ class WorkflowScheduler(
             triggerType = "schedule",
             inputJson = "{}",
             executionClass = scheduledClass.wire,
+            fairVtime = placement.fairVtime,
+            priority = placement.priority,
         ))
+
+        // Record it so the next occurrence's overlap check has something to look at.
+        runCatching { schedules.setActiveRun(s.id, run.id) }
 
         runCatching {
             eventRepo.append(AppendEventRequest(run.id, s.workspaceId, s.environmentId,

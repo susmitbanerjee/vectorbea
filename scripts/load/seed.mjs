@@ -209,14 +209,56 @@ export async function enqueueRun(pool, redis, tenant, workflow, input = {}) {
   // tests the worker's typed consumption rather than re-deriving a guess.
   const executionClass = (workflow.expectedClass ?? 'SHORT').toLowerCase();
 
+  // Weighted fair placement, mirroring FairOrdering.placeAndAdvance in the API.
+  //
+  // LOAD_FAIR_ORDERING=false stamps `now` for every run instead, which degrades
+  // the claim's ORDER BY to plain arrival order. That is how the FIFO-vs-fair
+  // comparison in POSTGRES-CLAIM.md is produced: one variable, everything else
+  // identical — the same binary, the same scenario, the same seed.
+  const fifo = process.env.LOAD_FAIR_ORDERING === 'false';
+  const cost = { agent: 10, long: 5, short: 1, system: 0 }[executionClass] ?? 1;
+
+  let fairVtime;
+  let priority = 0;
+  if (fifo) {
+    const { rows } = await pool.query('SELECT EXTRACT(EPOCH FROM now()) AS t');
+    fairVtime = Number(rows[0].t);
+  } else {
+    const { rows } = await pool.query(
+      `WITH policy AS (
+           SELECT COALESCE(MAX(plan_weight), 1.0) AS weight,
+                  COALESCE(bool_or(priority_lane), false) AS priority_lane
+             FROM workspace_usage_policies WHERE workspace_id = $1
+       )
+       UPDATE workspaces w
+          SET vclock = GREATEST(w.vclock, EXTRACT(EPOCH FROM now()))
+                       + ($2::float / GREATEST((SELECT weight FROM policy), 0.01))
+        WHERE w.id = $1
+       RETURNING w.vclock, (SELECT priority_lane FROM policy) AS priority_lane`,
+      [tenant.workspaceId, cost],
+    );
+    fairVtime = Number(rows[0].vclock);
+    priority = rows[0].priority_lane ? 100 : 0;
+  }
+
   await pool.query(
     `INSERT INTO agent_runs
        (id, workspace_id, environment_id, workflow_id, workflow_version_id,
-        status, trigger_type, input_json, execution_class)
-     VALUES ($1,$2,$3,$4,$5,'queued','manual',$6,$7)`,
+        status, trigger_type, input_json, execution_class, fair_vtime, priority)
+     VALUES ($1,$2,$3,$4,$5,'queued','manual',$6,$7,$8,$9)`,
     [runId, tenant.workspaceId, tenant.environmentId,
-      workflow.workflowId, workflow.versionId, JSON.stringify(input), executionClass],
+      workflow.workflowId, workflow.versionId, JSON.stringify(input), executionClass,
+      fairVtime, priority],
   );
+
+  // In claim mode the row IS the queue entry and the V023 trigger has already
+  // fired pg_notify on that commit. Nothing further to write.
+  if (process.env.LOAD_QUEUE_MODE === 'postgres') {
+    return {
+      runId, streamId: null, executionClass, priority, fairVtime,
+      enqueuedAtMs: Date.now(), tenantSlug: tenant.slug, shape: workflow.shape,
+    };
+  }
 
   // Postgres first, XADD second — the durability contract is unchanged by
   // typing the queue.
@@ -245,6 +287,8 @@ export async function enqueueRun(pool, redis, tenant, workflow, input = {}) {
     runId,
     streamId,
     executionClass,
+    priority,
+    fairVtime,
     enqueuedAtMs: Number(String(streamId).split('-')[0]),
     tenantSlug: tenant.slug,
     shape: workflow.shape,

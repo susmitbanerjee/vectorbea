@@ -22,5 +22,18 @@ enum class WorkerJobType {
     AGENT,
 
     /** Internal/operational commands that must always have capacity. */
-    SYSTEM,
+    SYSTEM;
+
+    /** Lower-case wire form — the `execution_class` column and NOTIFY payload. */
+    val label: String get() = name.lowercase()
+
+    companion object {
+        /**
+         * Parse the stored/notified class. Unknown values fall back to [SHORT]
+         * rather than throwing: a NOTIFY payload arrives from outside this
+         * process, and an unparseable one must not kill the listener.
+         */
+        fun fromLabel(label: String?): WorkerJobType =
+            entries.firstOrNull { it.label == label?.trim()?.lowercase() } ?: SHORT
+    }
 }

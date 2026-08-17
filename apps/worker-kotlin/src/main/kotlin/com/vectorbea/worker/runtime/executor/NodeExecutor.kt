@@ -73,4 +73,21 @@ sealed class NodeResult {
      * The run will follow failure policy for the node.
      */
     data class Unsupported(val nodeType: String) : NodeResult()
+
+    /**
+     * A provider rate-limited this call and the run should stand down.
+     *
+     * Not [Failed]: nothing is wrong and the work is not lost. Not a sleep
+     * either — the run gives its worker permit back and resumes when the timer
+     * fires, because holding a slot through a 60-second provider backoff is how
+     * one throttled integration stalls a whole pool.
+     *
+     * The node is re-executed from the start on resume, which is safe because a
+     * 429 means the provider did not perform the work.
+     */
+    data class Throttled(
+        val provider: String,
+        val retryAfterMs: Long,
+        val message: String,
+    ) : NodeResult()
 }

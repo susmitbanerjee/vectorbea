@@ -56,6 +56,12 @@ class ApprovalRoutes(
     private val runRepo: RunRepository? = null,
     private val eventRepo: RunEventRepository? = null,
     private val queue: WorkflowQueue? = null,
+    /**
+     * Governance trail. An approval decision is the single most audit-relevant
+     * action in the product: a human took responsibility for something an agent
+     * proposed, and "who approved this" is the first question after any incident.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
 
     fun register(router: Router) {
@@ -143,6 +149,24 @@ class ApprovalRoutes(
 
         log.info("[approval] {} id={} runId={} stepId={} by={}",
             decision, id, approval.runId, approval.stepId, body.decidedBy)
+
+        // Recorded with both sides: the status it was in, and the decision made.
+        // The reason is included because "approved" without "why" answers half the
+        // question an auditor is asking.
+        //
+        // Note this is the searchable index over the decision, not its
+        // authoritative record — that is `run_approvals.resolved_by`, written
+        // transactionally above. The audit log is best-effort by design so a
+        // logging failure cannot block a decision a human is waiting on.
+        audit?.recordUserAction(
+            req, ctx.workspaceId,
+            com.vectorbea.api.audit.AuditLog.Action.APPROVAL_DECIDE,
+            targetType = "approval", targetId = id,
+            before = mapOf("status" to approval.status, "runId" to approval.runId.toString(),
+                           "nodeId" to approval.stepId),
+            after = mapOf("status" to decision, "decidedBy" to body.decidedBy,
+                          "reason" to body.reason),
+        )
 
         // Load the run to get environmentId (needed for event and job)
         val run = runRepo?.findById(approval.runId, ctx.workspaceId)

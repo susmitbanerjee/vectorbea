@@ -12,6 +12,21 @@ sealed class ApiError(
     val httpStatus: Int,
     val code: String,
     override val message: String,
+    /**
+     * Machine-readable facts behind the message, for a UI that has to render
+     * something better than the sentence.
+     *
+     * "Workspace concurrency limit reached" is a toast. `{limit: 8, active: 8,
+     * queued: 12}` is a progress bar, a queue position, and an upgrade prompt
+     * that names the right number. The message stays authoritative — details
+     * never contradict it — but a client that understands the code can do more
+     * than print it.
+     *
+     * Values must be JSON primitives or maps of them. Never anything derived
+     * from a secret, a connection string, or an internal identifier the caller
+     * does not already own.
+     */
+    val details: Map<String, Any?> = emptyMap(),
 ) : Exception(message) {
 
     /** 400 — request body / parameter is invalid */
@@ -41,8 +56,42 @@ sealed class ApiError(
         ApiError(422, "UNPROCESSABLE_ENTITY", message)
 
     /** 429 — too many requests */
-    class TooManyRequests(message: String = "Rate limit exceeded") :
-        ApiError(429, "TOO_MANY_REQUESTS", message)
+    class TooManyRequests(
+        message: String = "Rate limit exceeded",
+        details: Map<String, Any?> = emptyMap(),
+    ) : ApiError(429, "TOO_MANY_REQUESTS", message, details)
+
+    /**
+     * 429 — the workspace is at its own concurrency ceiling.
+     *
+     * Distinct from [TooManyRequests] on purpose. Rate limiting is "you asked too
+     * fast"; this is "you have too much running", and the fix is different: wait
+     * for your own runs to finish, or raise the plan. Giving them the same code
+     * would make the UI unable to tell a customer which.
+     */
+    class WorkspaceConcurrencyLimit(
+        limit: Int, active: Int, queued: Int,
+    ) : ApiError(
+        429, "WORKSPACE_CONCURRENCY_LIMIT",
+        "Workspace concurrency limit reached ($limit concurrent runs). $queued runs queued.",
+        mapOf("limit" to limit, "active" to active, "queued" to queued, "retryable" to true),
+    )
+
+    /**
+     * 503 — the platform is shedding load, and this request is not in the
+     * priority lane.
+     *
+     * A 503 rather than a 429: nothing about *this* caller is wrong, and a 429
+     * would tell them to slow down when slowing down is not the remedy.
+     */
+    class QueueSaturated(
+        globalDepth: Int, threshold: Int,
+    ) : ApiError(
+        503, "QUEUE_SATURATED",
+        "The platform is at capacity ($globalDepth runs queued). Your run was not accepted — " +
+            "please retry shortly.",
+        mapOf("globalDepth" to globalDepth, "threshold" to threshold, "retryable" to true),
+    )
 
     /** 500 — unexpected server error (message is generic in production) */
     class InternalError(message: String = "An internal error occurred") :

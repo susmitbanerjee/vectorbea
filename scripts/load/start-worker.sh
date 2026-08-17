@@ -60,6 +60,14 @@ export DB_LOGIN_TIMEOUT_SECONDS="${DB_LOGIN_TIMEOUT_SECONDS:-5}"
 export HTTP_CONNECT_TIMEOUT_MS="${HTTP_CONNECT_TIMEOUT_MS:-5000}"
 export HTTP_TOTAL_CALL_CEILING_MS="${HTTP_TOTAL_CALL_CEILING_MS:-120000}"
 
+# Postgres claim scheduler. redis | dual | postgres — see POSTGRES-CLAIM.md.
+export WORKER_CLAIM_MODE="${WORKER_CLAIM_MODE:-redis}"
+# LISTEN must not go through a transaction pooler. Locally this is the same
+# endpoint; ClaimWakeup logs at ERROR if it ever looks pooled.
+export DATABASE_DIRECT_URL="$DATABASE_URL"
+export CLAIM_RESERVED_PRIORITY_SLOTS="${CLAIM_RESERVED_PRIORITY_SLOTS:-1}"
+export WORKER_LEGACY_STREAM_ENABLED="${WORKER_LEGACY_STREAM_ENABLED:-true}"
+
 export TELEMETRY_ENABLED=false
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 

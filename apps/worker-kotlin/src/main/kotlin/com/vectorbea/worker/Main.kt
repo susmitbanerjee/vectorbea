@@ -160,6 +160,24 @@ fun main() {
         workerId = config.workerId,
     )
 
+    // Per-connection circuit breaker. Shared by every executor that makes outbound
+    // calls, and published to `connections` so the Connections page can show which
+    // integration is unhealthy rather than leaving the customer to guess.
+    val connectionCircuit = com.vectorbea.worker.net.ConnectionCircuit(database.dataSource)
+
+    // Set once the timer scheduler exists — see RunProcessor.timerScheduler for
+    // why this is deferred rather than injected.
+    var timerSchedulerRef: TimerScheduler? = null
+
+    // Records every provider call completely enough to replay it later. Without
+    // this a run is not replayable, so it is wired unconditionally.
+    val modelCallRecorder = com.vectorbea.worker.replay.ModelCallRecorder(database.dataSource)
+
+    // Output contracts - Layers 0 and 1 of the reliability defence. Wired
+    // unconditionally: a node without a contract behaves exactly as before, and one
+    // with a contract gets constrained decoding and validation before commit.
+    val contractValidator = com.vectorbea.worker.contract.ContractValidator(database.dataSource)
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -175,7 +193,47 @@ fun main() {
         executionBudget    = executionBudget,
         tenantDbDispatcher = tenantDbDispatcher,
         sideEffects        = sideEffectGuard,
+        circuit            = connectionCircuit,
+        recorder           = modelCallRecorder,
+        contracts          = contractValidator,
     )
+
+    /**
+     * A runtime wired for replay against one specific recording.
+     *
+     * Built per replay rather than once, because the context holds that run's
+     * cursors. Note what is NOT passed: no side-effect guard, because a replay
+     * must not perform side effects at all — omitting it means an executor that
+     * tried would have nothing to record against, on top of the ReplayContext
+     * refusing the call.
+     */
+    val replayRuntimeFactory: (com.vectorbea.worker.replay.ReplayContext) -> WorkflowRuntime = { ctx ->
+        WorkflowRuntime(
+            dataSource         = database.dataSource,
+            eventStore         = eventStore,
+            checkpointStore    = checkpointStore,
+            approvalStore      = approvalStore,
+            stepOutputStore    = stepOutputStore,
+            workerId           = config.workerId,
+            connectionResolver = connectionResolver,
+            dbPoolManager      = dbPoolManager,
+            debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
+            stepGuard          = stepGuard,
+            historyChecker     = historyChecker,
+            executionBudget    = executionBudget,
+            tenantDbDispatcher = tenantDbDispatcher,
+            sideEffects        = null,
+            circuit            = connectionCircuit,
+            recorder           = null,
+            replay             = ctx,
+            // The same contracts apply on replay. Without this a replayed run would
+            // skip validation and could appear to succeed where the original failed,
+            // which would make replay useless for debugging a contract violation -
+            // the most likely reason to open one.
+            contracts          = contractValidator,
+        )
+    }
+
     val telemetry = TelemetryClient.fromEnv()
 
     // Per-tenant admission now reads shared state (run_leases), so limits are
@@ -219,6 +277,8 @@ fun main() {
         tenantAdmission = tenantLimiter,
         runClassLookup  = runClassLookup,
         deadLetters     = deadLetterStore,
+        timerScheduler  = { timerSchedulerRef },
+        replayRuntimeFactory = replayRuntimeFactory,
         // Durably re-enqueue continuation jobs after a yield (survives crash).
         // Routed to the run's OWN class stream, read from agent_runs — a
         // continuation must resume in the pool its first half occupied.
@@ -256,7 +316,12 @@ fun main() {
     // Each gets a dedicated Redis connection because XREADGROUP BLOCK holds the
     // connection for the whole block window — sharing one would serialise all
     // four behind whichever happened to be waiting.
-    val typedConsumers = com.vectorbea.worker.queue.WorkerJobType.entries.map { type ->
+    //
+    // Skipped entirely in claim mode "postgres": the streams are then dead and a
+    // consumer on them would sit blocked on XREADGROUP forever.
+    val redisConsumeEnabled = config.claimMode != "postgres"
+    val typedConsumers = if (!redisConsumeEnabled) emptyList() else
+      com.vectorbea.worker.queue.WorkerJobType.entries.map { type ->
         com.vectorbea.worker.queue.TypedStreamConsumer(
             config = config,
             redis = redis.dedicatedConnection("stream-${type.name.lowercase()}"),
@@ -273,7 +338,7 @@ fun main() {
     // untyped stream, keep serving it so no run is stranded. It classifies the
     // old way (read, then probe). Disabled with WORKER_LEGACY_STREAM_ENABLED=false
     // once the legacy stream is drained — see TYPED-QUEUE-MIGRATION.md.
-    val legacyConsumer = if (config.legacyStreamEnabled) {
+    val legacyConsumer = if (config.legacyStreamEnabled && redisConsumeEnabled) {
         WorkflowQueueConsumer(
             config, redis.dedicatedConnection("legacy-stream"), processor,
             router = poolRouter,
@@ -281,6 +346,44 @@ fun main() {
             tenantLimiter = tenantLimiter,
         )
     } else null
+
+    // ── 7d. Postgres claim ───────────────────────────────────────────
+    //
+    // WORKER_CLAIM_MODE:
+    //   redis    — streams only. The default, so deploying this changes nothing.
+    //   dual     — both. Runs enqueued before the cutover drain from the streams
+    //              while new ones are claimed from Postgres. Safe because a run
+    //              can only be claimed once: the stream path takes the lease and
+    //              the claim path takes the row, and each is an atomic
+    //              compare-and-set on the same run.
+    //   postgres — claim only. Streams are dead; Redis keeps its real jobs.
+    val claimEnabled = config.claimMode == "postgres" || config.claimMode == "dual"
+    val postgresClaim = if (claimEnabled)
+        com.vectorbea.worker.queue.PostgresClaim(database.dataSource, config.workerId) else null
+
+    val claimConsumers: Map<com.vectorbea.worker.queue.WorkerJobType, com.vectorbea.worker.queue.ClaimConsumer> =
+        if (postgresClaim == null) emptyMap() else
+            com.vectorbea.worker.queue.WorkerJobType.entries.associateWith { type ->
+                com.vectorbea.worker.queue.ClaimConsumer(
+                    config = config,
+                    claim = postgresClaim,
+                    processor = processor,
+                    slots = poolRouter,
+                    jobType = type,
+                )
+            }
+
+    // The listener needs a direct, non-pooled connection: PgBouncer in transaction
+    // mode silently drops LISTEN registrations. ClaimWakeup logs at ERROR if the URL
+    // it is handed looks pooled, because the failure mode is a queue that only
+    // drains on the 2 s safety poll — slower, but never visibly broken.
+    val claimWakeup = if (postgresClaim == null) null else com.vectorbea.worker.queue.ClaimWakeup(
+        directUrl = com.vectorbea.worker.queue.ClaimWakeup.resolveDirectUrl() ?: config.dbUrl,
+        onWakeup = { cls ->
+            if (cls == null) claimConsumers.values.forEach { it.wakeup() }
+            else claimConsumers[com.vectorbea.worker.queue.WorkerJobType.fromLabel(cls)]?.wakeup()
+        },
+    )
 
     try {
         typedConsumers.forEach { it.ensureConsumerGroup() }
@@ -294,11 +397,37 @@ fun main() {
     }
     typedConsumers.forEach { it.start() }
     legacyConsumer?.start()
+    claimConsumers.values.forEach { it.start() }
+    claimWakeup?.start()
+
+    // Reclaim rows a dead worker left in `claimed`. Cheap, and the only recovery
+    // path the claim model needs — there is no PEL to sweep.
+    val claimReclaimer = if (postgresClaim == null) null else
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "claim-reclaimer").also { it.isDaemon = true }
+        }.also { sched ->
+            sched.scheduleWithFixedDelay({
+                runCatching {
+                    val n = postgresClaim.reclaimStale()
+                    if (n > 0) log.warn("[claim] reclaimed {} stale claims", n)
+                }.onFailure { log.warn("[claim] reclaim sweep failed: {}", it.message) }
+            }, 0L, 30L, java.util.concurrent.TimeUnit.SECONDS)
+        }
 
     // SYSTEM work synthesized by this worker (timers, crash recovery) is placed
     // straight onto the system pool — it is already durable in Postgres, so a
     // round trip through Redis would only add a hop.
-    val systemConsumer = typedConsumers.first { it.streamKey.endsWith(".system") }
+    val systemConsumer = typedConsumers.firstOrNull { it.streamKey.endsWith(".system") }
+
+    // Timers and crash recovery synthesise SYSTEM work locally. In Redis mode that
+    // goes straight onto the system pool; in Postgres mode the run row is already
+    // `queued` in the database, so the claim loop picks it up on the next NOTIFY
+    // and this is a no-op. Either way it never round-trips through the queue.
+    val enqueueSystemJob: (com.vectorbea.worker.queue.WorkflowRunJob) -> Unit = { job ->
+        val consumer = systemConsumer
+        if (consumer != null) consumer.enqueueLocal(job)
+        else claimConsumers[com.vectorbea.worker.queue.WorkerJobType.SYSTEM]?.wakeup()
+    }
 
     log.info("[startup] consumers ready — typed={} legacy={}",
         typedConsumers.map { it.streamKey }, legacyConsumer?.let { config.queueStream } ?: "disabled")
@@ -307,9 +436,10 @@ fun main() {
     // Timer scheduler — fires durable timers without blocking workers
     val timerScheduler = TimerScheduler(
         dataSource = database.dataSource,
-        enqueueJob = { job -> try { systemConsumer.enqueueLocal(job) } catch (e: Exception) { log.warn("[timers] enqueue failed: {}", e.message) } },
+        enqueueJob = { job -> try { enqueueSystemJob(job) } catch (e: Exception) { log.warn("[timers] enqueue failed: {}", e.message) } },
         redisCommands = redis.commands,
     )
+    timerSchedulerRef = timerScheduler
     timerScheduler.start()
 
     // Crash recovery loop — detects stale leases and re-enqueues runs
@@ -317,7 +447,7 @@ fun main() {
         dataSource = database.dataSource,
         eventStore = eventStore,
         leaseManager = leaseManager,
-        enqueueJob = { job -> try { systemConsumer.enqueueLocal(job) } catch (e: Exception) { log.warn("[crash-recovery] enqueue failed: {}", e.message) } },
+        enqueueJob = { job -> try { enqueueSystemJob(job) } catch (e: Exception) { log.warn("[crash-recovery] enqueue failed: {}", e.message) } },
     )
     crashRecovery.start()
 
@@ -337,6 +467,9 @@ fun main() {
         crashRecovery.stop()
         typedConsumers.forEach { it.stop(drainTimeoutMs = 30_000L) }
         legacyConsumer?.stop(drainTimeoutSeconds = 30L)
+        claimWakeup?.close()
+        claimReclaimer?.shutdownNow()
+        claimConsumers.values.forEach { it.stop(drainTimeoutMs = 30_000L) }
         poolRouter.shutdown(config.shutdownTimeoutMs)
 
         // Release leases explicitly rather than letting them expire.

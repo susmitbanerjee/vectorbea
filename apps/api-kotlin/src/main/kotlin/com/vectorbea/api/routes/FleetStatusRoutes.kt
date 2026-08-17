@@ -43,6 +43,18 @@ class FleetStatusRoutes(private val dataSource: DataSource) {
 
         /** Beyond this, treat the worker as gone rather than merely late. */
         private const val STALE_SECONDS = 120L
+
+        /**
+         * Queue depth at which the platform tells users it is busy.
+         *
+         * Mirrors AdmissionControl's thresholds so the Control page and the
+         * trigger endpoint agree. A status page reporting "healthy" while runs
+         * are being told they are #200 in queue is worse than no status page.
+         */
+        private val DEGRADED_DEPTH =
+            System.getenv("ADMISSION_IMMEDIATE_BELOW")?.toIntOrNull() ?: 100
+        private val SHEDDING_DEPTH =
+            System.getenv("ADMISSION_GLOBAL_REJECT")?.toIntOrNull() ?: 2_000
     }
 
     fun register(router: Router) {
@@ -66,10 +78,19 @@ class FleetStatusRoutes(private val dataSource: DataSource) {
         val active = live.sumOf { it.activeTasks }
         val headroom = (capacity - active).coerceAtLeast(0)
 
+        // Queue depth is the half of "system health" the workers cannot report.
+        // A fleet at 20% utilisation with 4,000 runs queued is not healthy — it is
+        // being throttled by per-tenant caps — and a status derived from worker
+        // heartbeats alone would call it healthy and be wrong in the direction
+        // that matters.
+        val queue = runCatching { queryQueue() }.getOrDefault(QueueDepth())
+
         val fleetStatus = when {
-            live.isEmpty() -> "down"          // nothing is executing anything
-            stale.isNotEmpty() -> "degraded"  // we have lost at least one worker
+            live.isEmpty() -> "down"                      // nothing is executing anything
+            queue.total > SHEDDING_DEPTH -> "shedding"    // non-priority work is being rejected
+            stale.isNotEmpty() -> "degraded"              // we have lost at least one worker
             capacity > 0 && active >= capacity -> "saturated"
+            queue.total >= DEGRADED_DEPTH -> "busy"       // accepting, but with a visible wait
             degraded.isNotEmpty() -> "degraded"
             else -> "healthy"
         }
@@ -107,9 +128,44 @@ class FleetStatusRoutes(private val dataSource: DataSource) {
                     "region" to w.region,
                 )
             },
+            "queue" to mapOf(
+                "depth" to queue.total,
+                "inFlight" to queue.inFlight,
+                "byClass" to queue.byClass,
+                "oldestQueuedSeconds" to queue.oldestSeconds,
+                "throughputPerMinute" to queue.completedLastMinute,
+            ),
+            // What a user is currently being told, so the Control page can show the
+            // same sentence the trigger endpoint is returning rather than inventing
+            // its own wording for the same state.
+            "degradation" to mapOf(
+                "state" to fleetStatus,
+                // Whether a trigger will succeed — NOT whether it will execute.
+                // With no workers, runs are still accepted and queued; they simply
+                // do not run. Conflating the two would have the Control page tell
+                // users the API is rejecting them when it is not, and the fix for
+                // "nothing is executing" is not the fix for "my request was
+                // refused".
+                "acceptingRuns" to (queue.total <= SHEDDING_DEPTH),
+                "sheddingNonPriority" to (queue.total > SHEDDING_DEPTH),
+                "message" to when (fleetStatus) {
+                    "down" -> "No workers are running. Runs are being queued but nothing is executing them."
+                    "shedding" -> "The platform is at capacity. New runs outside the priority lane are " +
+                        "being rejected; queued runs are unaffected."
+                    "saturated" -> "Every worker slot is busy. New runs are accepted and will start as " +
+                        "slots free up."
+                    "busy" -> "The queue is deeper than usual. New runs are accepted and return a " +
+                        "position and an estimate."
+                    "degraded" -> "At least one worker is unhealthy. Capacity is reduced but runs are " +
+                        "still executing."
+                    else -> "All workers are healthy and the queue is clear."
+                },
+            ),
             "thresholds" to mapOf(
                 "healthySeconds" to HEALTHY_SECONDS,
                 "staleSeconds" to STALE_SECONDS,
+                "degradedQueueDepth" to DEGRADED_DEPTH,
+                "sheddingQueueDepth" to SHEDDING_DEPTH,
             ),
         ))
     } catch (e: Exception) {
@@ -141,6 +197,57 @@ class FleetStatusRoutes(private val dataSource: DataSource) {
      * on this endpoint — filtering to healthy workers would hide exactly the
      * event an operator opened the page to find.
      */
+    /** Queue state, from the run table the claim reads. */
+    private data class QueueDepth(
+        val total: Int = 0,
+        val inFlight: Int = 0,
+        val byClass: Map<String, Int> = emptyMap(),
+        val oldestSeconds: Long? = null,
+        val completedLastMinute: Int = 0,
+    )
+
+    /**
+     * One statement.
+     *
+     * `oldestQueuedSeconds` is the number to alert on: depth alone cannot tell a
+     * healthy backlog moving fast from a stuck queue, and a run that has been
+     * waiting eleven minutes is a support ticket regardless of how many are
+     * behind it.
+     */
+    private fun queryQueue(): QueueDepth = dataSource.connection.use { conn ->
+        val byClass = mutableMapOf<String, Int>()
+        var total = 0
+        conn.prepareStatement(
+            """SELECT execution_class, count(*)::int AS n
+                 FROM agent_runs WHERE status IN ('queued','yielded')
+                GROUP BY execution_class"""
+        ).use { stmt ->
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val n = rs.getInt("n")
+                    byClass[rs.getString("execution_class") ?: "short"] = n
+                    total += n
+                }
+            }
+        }
+        conn.prepareStatement(
+            """SELECT (SELECT count(*)::int FROM agent_runs
+                        WHERE status IN ('claimed','running'))            AS in_flight,
+                      (SELECT EXTRACT(EPOCH FROM (now() - MIN(created_at)))::bigint
+                         FROM agent_runs WHERE status IN ('queued','yielded')) AS oldest,
+                      (SELECT count(*)::int FROM agent_runs
+                        WHERE completed_at > now() - interval '1 minute')  AS done"""
+        ).use { stmt ->
+            stmt.executeQuery().use { rs ->
+                if (rs.next()) {
+                    val oldest = rs.getLong("oldest").takeIf { !rs.wasNull() }
+                    return QueueDepth(total, rs.getInt("in_flight"), byClass, oldest, rs.getInt("done"))
+                }
+            }
+        }
+        QueueDepth(total, 0, byClass)
+    }
+
     private fun queryWorkers(): List<WorkerRow> {
         val cutoff = Instant.now().minus(1, ChronoUnit.HOURS)
         dataSource.connection.use { conn ->

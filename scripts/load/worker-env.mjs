@@ -42,6 +42,17 @@ export function workerEnv() {
     // Replicas are NOT scaled — see docs/architecture/TECH-DEBT.md#D1.
     REPLICA_COUNT: process.env.REPLICA_COUNT ?? '1',
 
+    // Postgres claim scheduler. 'redis' keeps the streams; 'dual' runs both while
+    // they drain; 'postgres' is claim-only. The listener needs a direct
+    // (non-pooled) URL — locally that is the same endpoint, and ClaimWakeup logs
+    // loudly if it ever is not.
+    WORKER_CLAIM_MODE: process.env.WORKER_CLAIM_MODE ?? 'redis',
+    DATABASE_DIRECT_URL:
+      `jdbc:postgresql://${CONFIG.pgHost}:${CONFIG.pgPort}/${CONFIG.pgDatabase}` +
+      `?user=${CONFIG.pgUser}&password=${CONFIG.pgPassword}`,
+    CLAIM_RESERVED_PRIORITY_SLOTS: process.env.CLAIM_RESERVED_PRIORITY_SLOTS ?? '1',
+    WORKER_LEGACY_STREAM_ENABLED: process.env.WORKER_LEGACY_STREAM_ENABLED ?? 'true',
+
     METRICS_PORT: String(CONFIG.metricsPort),
 
     // Mock upstreams live on loopback; see README "The SSRF exemption".

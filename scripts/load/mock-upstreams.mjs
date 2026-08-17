@@ -150,7 +150,7 @@ const server = http.createServer(async (req, res) => {
         model,
         choices: [{
           index: 0,
-          message: { role: 'assistant', content: mockAgentReply(body) },
+          message: { role: 'assistant', content: contractReply(body) },
           finish_reason: 'stop',
         }],
         usage: { prompt_tokens: 120, completion_tokens: 40, total_tokens: 160 },
@@ -200,6 +200,44 @@ const server = http.createServer(async (req, res) => {
  * agent loop's — the agent brain parses JSON actions out of the content, and a
  * FINAL action keeps each mock agent turn deterministic and terminating.
  */
+/**
+ * Response body for the contract tests.
+ *
+ * `?contract=violate` returns a payload that is well-formed JSON and violates the
+ * declared contract — `risk_score: 340` where the schema says 0-100. That is failure
+ * mode #3 from the reliability taxonomy, and the one constrained decoding cannot
+ * catch, because 340 IS an integer.
+ *
+ * `?contract=valid` returns a conforming payload, so the test can show the same
+ * node committing when the contract holds. A test that only proves rejection cannot
+ * distinguish "the guard works" from "nothing ever commits".
+ */
+function contractReply(body) {
+  // Keyed on the MODEL, not a query parameter. LlmNodeExecutor appends
+  // `/v1/chat/completions` to the configured baseUrl, so a query string on the base
+  // ends up in the middle of the path and the request 404s. The model name is in
+  // the body, which the mock already parses.
+  let mode = null;
+  try { mode = (JSON.parse(body || '{}').model ?? '').split('-').pop(); } catch { /* ignore */ }
+  if (mode === 'violate') {
+    return JSON.stringify({
+      risk_score: 340,
+      account_id: 'acc_hallucinated',
+      recommendation: 'no_action',
+      reasoning: 'This reasoning is deliberately long enough to satisfy the minLength constraint on the field.',
+    });
+  }
+  if (mode === 'valid') {
+    return JSON.stringify({
+      risk_score: 42,
+      account_id: 'acc_abc123def456',
+      recommendation: 'renew',
+      reasoning: 'This reasoning is deliberately long enough to satisfy the minLength constraint on the field.',
+    });
+  }
+  return mockAgentReply(body);
+}
+
 function mockAgentReply(requestBody) {
   return JSON.stringify({
     type: 'FINAL',

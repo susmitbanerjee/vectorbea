@@ -61,7 +61,51 @@ class RunProcessor(
     private val runClassLookup: com.vectorbea.worker.queue.RunClassLookup? = null,
     /** Poison-job protection. Null in tests that do not exercise it. */
     private val deadLetters: com.vectorbea.worker.durable.DeadLetterStore? = null,
+    /**
+     * Durable timers, for suspending a run across a provider's rate-limit backoff.
+     *
+     * A supplier rather than the instance: the scheduler needs a way to enqueue
+     * system jobs, which needs the consumers, which need this processor. Deferring
+     * the lookup to call time breaks that cycle without anyone holding a
+     * half-built object.
+     *
+     * Returning null falls back to leaving the run `yielded` for crash recovery to
+     * pick up — correct but slower, so production always supplies it.
+     */
+    private val timerScheduler: () -> com.vectorbea.worker.durable.TimerScheduler? = { null },
+    /**
+     * Builds a runtime wired for replay against a given recording.
+     *
+     * A factory rather than a second injected runtime: the replay context is per
+     * run — it holds that run's cursors — so a shared instance would let two
+     * concurrent replays consume each other's recorded responses. Null disables
+     * replay, and a run marked `replay` then fails closed rather than executing
+     * live, which is the safe direction.
+     */
+    private val replayRuntimeFactory: ((com.vectorbea.worker.replay.ReplayContext) -> WorkflowRuntime)? = null,
 ) {
+
+    /**
+     * The runtime to execute this run with.
+     *
+     * A run whose row says `replay` must never reach a provider. If the factory is
+     * absent we refuse rather than silently falling back to the live runtime —
+     * executing live under a replay label is the original bug, and it must not be
+     * reachable by misconfiguration either.
+     */
+    private fun runtimeFor(run: RunRow): WorkflowRuntime {
+        if (run.executionModeKind != "replay") return runtime
+        val source = run.sourceRunId
+            ?: error("Run ${run.id} is marked replay but has no source_run_id")
+        val factory = replayRuntimeFactory
+            ?: error("Run ${run.id} is a replay but no replay runtime is configured — " +
+                "refusing to execute live under a replay label")
+        return factory(com.vectorbea.worker.replay.ReplayContext(
+            dataSource = dataSource,
+            sourceRunId = source,
+            replayUntilNode = run.replayUntilNode,
+        ))
+    }
 
     /** The run's class, for per-class limit checks at claim time. */
     private fun executionClassOf(workspaceId: java.util.UUID, runId: java.util.UUID) =
@@ -69,6 +113,15 @@ class RunProcessor(
     private val log = logger()
 
     companion object {
+        /**
+         * `triggeredBy` on a job the Postgres claim produced.
+         *
+         * The one place downstream code needs to know which transport delivered a
+         * run — admission is folded into the claim, so re-checking it is both
+         * redundant and, in claim mode, unrunnable.
+         */
+        const val PG_CLAIM_SOURCE = "pg-claim"
+
         /**
          * Lease heartbeat interval. Fixed rather than derived from the TTL so the
          * margin does not silently shrink if someone lowers
@@ -139,11 +192,20 @@ class RunProcessor(
             // one, and we release rather than run. Ordering by (created_at,
             // run_id) means the first N acquirers always win and no two replicas
             // can both decide to yield.
-            val admitted = tenantAdmission?.admitAtClaim(
-                workspaceId = leaseRun.workspaceId,
-                runId = job.runId,
-                type = executionClassOf(leaseRun.workspaceId, job.runId),
-            ) ?: true
+            //
+            // Skipped entirely for jobs that arrived via the Postgres claim. The
+            // claim's `tenant_load` CTE applies the identical limits inside the
+            // same `FOR UPDATE SKIP LOCKED` statement that takes the row, so a
+            // claimed run has already passed this check — atomically, rather than
+            // against a cache. Re-running it here would be a second round trip to
+            // reach the same answer, and its refusal path re-enqueues onto a Redis
+            // stream that claim mode does not have.
+            val admitted = if (job.triggeredBy == PG_CLAIM_SOURCE) true else
+                tenantAdmission?.admitAtClaim(
+                    workspaceId = leaseRun.workspaceId,
+                    runId = job.runId,
+                    type = executionClassOf(leaseRun.workspaceId, job.runId),
+                ) ?: true
             if (!admitted) {
                 leaseManager.release(job.runId, workerId)
                 // Re-enqueue rather than park.
@@ -331,19 +393,28 @@ class RunProcessor(
             return
         }
 
-        // 2. Transition: queued → running. The CAS is authoritative: if it fails,
-        // the run was already claimed (duplicate/redelivered message) or reached a
-        // terminal state. Executing anyway would double-run side effects — bail out.
+        // 2. Transition: queued|claimed → running. The CAS is authoritative: if it
+        // fails, the run was already taken (duplicate/redelivered message) or
+        // reached a terminal state. Executing anyway would double-run side
+        // effects — bail out.
+        //
+        // `claimed` is accepted because that is the state the Postgres claim left
+        // the row in, milliseconds earlier and in the same `FOR UPDATE SKIP
+        // LOCKED` statement that made it ours. It is not a weaker check: only one
+        // worker can move a row `queued → claimed`, so `claimed` here means "this
+        // worker holds it", and the CAS still rejects every terminal state and
+        // every run another worker has already started.
         val updated = updateRunStatus(
             runId      = job.runId,
             status     = "running",
             startedAt  = start,
             workerId   = workerId,
-            fromStatus = "queued",
+            fromStatuses = listOf("queued", "claimed"),
         )
         if (!updated) {
-            log.warn("[processor] START_RUN skipped — run not in 'queued' state (current={}) [runId={}]. " +
-                "Likely a duplicate or redelivered message.", loadRun(job.runId)?.status, job.runId)
+            log.warn("[processor] START_RUN skipped — run not in 'queued' or 'claimed' state " +
+                "(current={}) [runId={}]. Likely a duplicate or redelivered message.",
+                loadRun(job.runId)?.status, job.runId)
             return
         }
 
@@ -381,8 +452,18 @@ class RunProcessor(
         log.info("[processor] executing workflow graph [runId={}, nodes={}, edges={}]",
             job.runId, graph.nodes.size, graph.edges.size)
 
+        // The Ribbon's denominator, set once the graph is known. Without it the
+        // Runs page shows "3 of 3 committed" for a run that failed at node 3 of 12
+        // — technically true of what it observed, and the opposite of what the
+        // reader needs to know.
+        runCatching {
+            dataSource.connection.use {
+                RibbonWriter.setNodeTotal(it, job.runId, graph.nodes.size)
+            }
+        }
+
         // ── Execute via WorkflowRuntime ────────────────────────────────────
-        val execResult = runtime.execute(
+        val execResult = runtimeFor(run).execute(
             runId             = job.runId,
             workspaceId       = run.workspaceId,
             environmentId     = run.environmentId,
@@ -472,7 +553,7 @@ class RunProcessor(
         // so its executor re-reads the approval decision from DB.
         val pendingOverrides = if (job.nodeId != null) setOf(job.nodeId) else emptySet()
 
-        val execResult = runtime.resume(
+        val execResult = runtimeFor(run).resume(
             runId             = job.runId,
             workspaceId       = run.workspaceId,
             environmentId     = run.environmentId,
@@ -558,7 +639,7 @@ class RunProcessor(
             return
         }
 
-        val execResult = runtime.resume(
+        val execResult = runtimeFor(run).resume(
             runId             = job.runId,
             workspaceId       = run.workspaceId,
             environmentId     = run.environmentId,
@@ -630,7 +711,7 @@ class RunProcessor(
             return
         }
 
-        val execResult = runtime.execute(
+        val execResult = runtimeFor(run).execute(
             runId             = job.runId,
             workspaceId       = run.workspaceId,
             environmentId     = run.environmentId,
@@ -800,6 +881,94 @@ class RunProcessor(
                 markRunFailed(job, execResult.reason, start)
             }
 
+            is WorkflowRuntime.ExecutionResult.Throttled -> {
+                // The permit is released the moment this returns, and the run is
+                // parked on a durable timer instead. That is the whole guard:
+                // twenty runs throttled by one provider release twenty permits
+                // rather than holding them through the provider's backoff.
+                //
+                // Status is `yielded`, the same state a cooperative yield uses, so
+                // crash recovery already understands it — a worker that dies
+                // between the status change and the timer write leaves a `yielded`
+                // run the recovery sweep re-enqueues. The timer is the fast path,
+                // not the only path.
+                val moved = updateRunStatus(
+                    runId = job.runId, status = "yielded",
+                    startedAt = start, workerId = workerId, fromStatus = "running",
+                )
+                if (!moved) {
+                    log.warn("[processor] throttle skipped status transition — run no longer 'running' [runId={}]",
+                        job.runId)
+                }
+                val fireAt = Instant.now().plusMillis(execResult.retryAfterMs)
+                val scheduled = runCatching {
+                    timerScheduler()?.scheduleTimer(
+                        runId = job.runId,
+                        workspaceId = run.workspaceId,
+                        environmentId = run.environmentId,
+                        workflowId = job.workflowId,
+                        nodeId = execResult.nodeId,
+                        fireAt = fireAt,
+                        payloadJson = """{"reason":"provider_throttle","provider":"${execResult.provider}"}""",
+                    )
+                }.onFailure {
+                    log.warn("[processor] could not schedule throttle timer [runId={}]: {} — " +
+                        "crash recovery will re-enqueue the yielded run", job.runId, it.message)
+                }.getOrNull()
+
+                eventStore.appendEvent(RunEvent(
+                    runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
+                    type = EventType.RUN_YIELDED, status = "yielded",
+                    source = "worker:$workerId",
+                    title = "Paused by ${execResult.provider} rate limit",
+                    summary = execResult.message,
+                    stepId = execResult.nodeId,
+                ))
+                WorkerMetrics.runYields.inc("provider_throttle")
+                log.info("[processor] run suspended by {} rate limit [runId={}, resumeAt={}, timer={}]",
+                    execResult.provider, job.runId, fireAt, scheduled ?: "none")
+            }
+
+            is WorkflowRuntime.ExecutionResult.CeilingExceeded -> {
+                // A ceiling is a terminal state of its own, not a failure.
+                //
+                // `status` names the dimension (`cost_limit_exceeded`,
+                // `step_limit_exceeded`, …) so the Runs list can group them, filter
+                // them, and offer the right next action — raise the plan, fix the
+                // loop, split the workflow. Folding all five into `failed` would
+                // make every one of those a support ticket.
+                //
+                // Not retryable, and the error json says so: retrying a run that
+                // hit its cost ceiling spends the money again to reach the same
+                // place.
+                val breach = execResult.breach
+                updateRunCompleted(
+                    runId = job.runId, status = breach.status,
+                    completedAt = Instant.now(), durationMs = durationMs, outputJson = null,
+                    errorJson = breach.toErrorJson(),
+                )
+                eventStore.appendEvent(RunEvent(
+                    runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
+                    type = EventType.RUN_FAILED, status = breach.status,
+                    source = "worker:$workerId",
+                    title = "Run stopped at its ${breach.dimension} limit",
+                    summary = breach.message,
+                    durationMs = durationMs,
+                ))
+                WorkerMetrics.runDuration.observe(durationMs, job.jobType.name)
+                log.warn("[processor] run stopped by {} ceiling [runId={}, used={}, limit={}]",
+                    breach.dimension, job.runId, breach.used, breach.limit)
+                telemetry?.track("workflow_run_ceiling", "run",
+                    workspaceId = run.workspaceId.toString(),
+                    runId = job.runId.toString(),
+                    workflowId = job.workflowId.toString(),
+                    properties = mapOf(
+                        "dimension" to breach.dimension,
+                        "used" to breach.used,
+                        "limit" to breach.limit,
+                    ))
+            }
+
             is WorkflowRuntime.ExecutionResult.Cancelled -> {
                 updateRunCompleted(
                     runId = job.runId, status = "cancelled",
@@ -857,13 +1026,27 @@ class RunProcessor(
         val status: String,
         /** Authoritative run input — the DB is the source of truth, not the Redis message. */
         val inputJson: String?,
+        /**
+         * Which operation produced this run: live | replay | retry | rerun.
+         *
+         * Read from the row rather than from the job payload so it survives a
+         * redelivery and cannot be forged by a stale message. A replay that
+         * executed live because its message lost a flag would be the exact bug
+         * this change exists to fix.
+         */
+        val executionModeKind: String = "live",
+        /** The run being replayed from. Null unless this is a replay. */
+        val sourceRunId: UUID? = null,
+        /** Partial-replay boundary: replayed up to and including this node. */
+        val replayUntilNode: String? = null,
     )
 
     private fun loadRun(runId: UUID): RunRow? =
         dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT id, workspace_id, environment_id, workflow_id,
-                   workflow_version_id, status, input_json::text AS input_json
+                   workflow_version_id, status, input_json::text AS input_json,
+                   execution_mode_kind, source_run_id, replay_until_node
                    FROM agent_runs WHERE id = ?"""
             ).use { stmt ->
                 stmt.setObject(1, runId)
@@ -877,6 +1060,9 @@ class RunProcessor(
                         workflowVersionId = UUID.fromString(rs.getString("workflow_version_id")),
                         status = rs.getString("status"),
                         inputJson = rs.getString("input_json"),
+                        executionModeKind = rs.getString("execution_mode_kind") ?: "live",
+                        sourceRunId = rs.getString("source_run_id")?.let { UUID.fromString(it) },
+                        replayUntilNode = rs.getString("replay_until_node"),
                     )
                 }
             }

@@ -32,6 +32,19 @@ class HttpServer(
     private val router: Router,
     /** Null = auth disabled (no SUPABASE_URL configured, dev/local mode). */
     private val authMiddleware: AuthMiddleware? = null,
+    /**
+     * Per-caller request rate.
+     *
+     * Keyed on the authenticated principal. The spec calls this "per API key";
+     * this codebase authenticates with Supabase JWTs and has no API-key concept
+     * yet, so the app user is the closest true identity — and when API keys do
+     * arrive, the key becomes the identity and nothing else here changes.
+     *
+     * Unauthenticated requests are not bucketed here: they have no stable
+     * identity, and bucketing them by IP would rate-limit an entire office behind
+     * one NAT. Auth failure is already the cheap rejection for those.
+     */
+    private val requestRateLimiter: com.vectorbea.api.rate.TokenBucket? = null,
 ) {
     private val log = LoggerFactory.getLogger(HttpServer::class.java)
     private lateinit var server: JdkHttpServer
@@ -89,6 +102,11 @@ class HttpServer(
                 // Apply authentication before routing for all non-OPTIONS requests.
                 val request = authMiddleware?.authenticate(rawRequest) ?: rawRequest
 
+                // Rate limit after authentication, before routing. After, because
+                // the bucket is keyed on identity; before, because the whole point
+                // is to reject without doing the work.
+                enforceRequestRate(request)
+
                 // Check for SSE route before normal dispatch
                 val sseMatch = router.findSseRoute(request.method, request.path)
                 if (sseMatch != null) {
@@ -102,7 +120,9 @@ class HttpServer(
             }
         } catch (e: ApiError) {
             val requestIdFallback = response?.headers?.get("X-Request-Id") ?: requestId
-            response = Response.fromApiError(e, requestIdFallback).withHeaders(corsHeaders(exchange))
+            response = Response.fromApiError(e, requestIdFallback)
+                .withHeaders(corsHeaders(exchange))
+                .withHeaders(retryAfterHeader(e))
         } catch (e: Exception) {
             log.error("Unhandled exception [requestId=$requestId]", e)
             val msg = if (config.isProduction) null else e.message
@@ -250,6 +270,61 @@ class HttpServer(
     }
 
     // ── CORS ─────────────────────────────────────────────────────────────────
+
+    private companion object {
+        /**
+         * Per-caller API request rate.
+         *
+         * Deliberately far above the run-creation rate: reading runs, polling a
+         * status, and streaming events are cheap and a busy dashboard legitimately
+         * makes many of them. This exists to stop a runaway client, not to shape
+         * normal usage.
+         */
+        val REQUESTS_PER_MINUTE = System.getenv("API_REQUESTS_PER_MINUTE")?.toIntOrNull() ?: 600
+        val REQUESTS_BURST = System.getenv("API_REQUESTS_BURST")?.toIntOrNull() ?: 1_200
+    }
+
+    /**
+     * Per-caller request rate, enforced before any routing work happens.
+     *
+     * Throws [ApiError.TooManyRequests] so the existing error path renders it —
+     * structured body, request id, and (via [retryAfterHeader]) a `Retry-After`
+     * a well-behaved client will honour without being told.
+     */
+    private fun enforceRequestRate(request: Request) {
+        val bucket = requestRateLimiter ?: return
+        val caller = request.principal?.appUserId?.toString() ?: return
+        val verdict = bucket.tryConsume(
+            key = "req:$caller",
+            refillPerMinute = REQUESTS_PER_MINUTE,
+            burst = REQUESTS_BURST,
+        )
+        if (!verdict.allowed) {
+            throw ApiError.TooManyRequests(
+                "Too many requests. The limit is $REQUESTS_PER_MINUTE per minute; " +
+                    "retry in ${verdict.retryAfterSeconds}s.",
+                mapOf(
+                    "limitPerMinute" to REQUESTS_PER_MINUTE,
+                    "burst" to REQUESTS_BURST,
+                    "retryAfterSeconds" to verdict.retryAfterSeconds,
+                    "retryable" to true,
+                ),
+            )
+        }
+    }
+
+    /**
+     * `Retry-After` for any error that carries a retry hint.
+     *
+     * A 429 without one tells a client to back off and leaves it to guess how
+     * long — and clients guess badly, usually by retrying immediately. Reading it
+     * off `details` means every error that knows its own retry interval gets the
+     * header for free, without each throw site remembering to set it.
+     */
+    private fun retryAfterHeader(e: ApiError): Map<String, String> =
+        (e.details["retryAfterSeconds"] as? Int)
+            ?.let { mapOf("Retry-After" to it.toString()) }
+            ?: emptyMap()
 
     private fun corsHeaders(exchange: HttpExchange): Map<String, String> {
         val origin = exchange.requestHeaders.getFirst("Origin") ?: return emptyMap()

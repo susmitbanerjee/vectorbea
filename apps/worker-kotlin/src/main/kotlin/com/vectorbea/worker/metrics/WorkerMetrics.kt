@@ -391,6 +391,77 @@ object WorkerMetrics {
     /** Messages recovered from another consumer's PEL via XAUTOCLAIM. */
     internal val xautoclaimReclaimTotal = WCounter("xautoclaim_reclaim", "Messages reclaimed via XAUTOCLAIM", emptyList())
 
+    // ── Postgres-claim scheduler ──────────────────────────────────────────────
+
+    /**
+     * Claim round-trip latency. The number the brief asks to keep under 100ms p95.
+     *
+     * This is the cost of the transport swap: every claim is now a Postgres query
+     * rather than an XREADGROUP. If it degrades, the index is not being used —
+     * check that the plan still walks `agent_runs_claim_idx` rather than sorting.
+     */
+    internal val claimDurationSeconds = WSecondsHistogram(
+        "claim_duration_seconds", "SKIP LOCKED claim round-trip", listOf("class"))
+
+    /**
+     * Run-level ceilings hit, by dimension.
+     *
+     * `steps` climbing is the signal that matters most: it usually means agent
+     * loops in the wild are not reaching their exit conditions, which is a product
+     * problem the ceiling is only containing. `cost` climbing means the default is
+     * too low for real workloads, or too high to protect anyone.
+     */
+    internal val ceilingBreachTotal = WCounter(
+        "run_ceiling_breach", "Runs ended by a per-run ceiling", listOf("dimension"))
+
+    /**
+     * Circuit breaker activity.
+     *
+     * `opened` climbing is a provider incident, not a platform one — the label
+     * that matters is which connection. `rejected` is the win being measured:
+     * every increment is a call that failed in microseconds instead of burning a
+     * 30s socket timeout and a worker permit with it.
+     */
+    internal val circuitOpenedTotal = WCounter("circuit_opened", "Connection circuits opened", emptyList())
+    internal val circuitClosedTotal = WCounter("circuit_closed", "Connection circuits recovered", emptyList())
+    // No connection label: connection ids are unbounded, and one Prometheus series
+    // per connection is how a metrics backend falls over. Which connection is open
+    // is already in `connections.circuit_state`, queryable and shown in the UI.
+    internal val circuitRejectedTotal = WCounter(
+        "circuit_rejected", "Calls rejected fast by an open circuit", emptyList())
+
+    /** Provider 429s that suspended a run instead of holding its permit. */
+    internal val providerThrottleSuspendTotal = WCounter(
+        "provider_throttle_suspend", "Runs suspended after a provider 429", listOf("provider"))
+
+    /** Runs claimed, by class. */
+    internal val claimedTotal = WCounter("claimed", "Runs claimed from Postgres", listOf("class"))
+
+    /**
+     * Runs claimed while only the reserved priority permits were free.
+     *
+     * Every increment is a run that would have queued behind ordinary traffic
+     * without the reserve. Flat at zero means the reserve is never being used and
+     * could be released back to general capacity; climbing steadily means the pool
+     * is undersized, and the demo lane is masking it.
+     */
+    internal val claimReservedLaneTotal = WCounter(
+        "claim_reserved_lane", "Runs claimed from the reserved priority slots", listOf("class"))
+
+    /** Runs recovered from a stale `claimed` state — a worker died before leasing. */
+    internal val claimReclaimedTotal = WCounter(
+        "claim_reclaimed", "Runs returned to the queue after a stale claim", emptyList())
+
+    /**
+     * Wakeups, by source.
+     *
+     * `notify` near zero while `safety_poll` climbs is the pooler trap: LISTEN
+     * was silently dropped and the system is running on the fallback poll while
+     * looking event-driven. See ClaimWakeup.
+     */
+    internal val claimWakeupTotal = WCounter(
+        "claim_wakeup", "Claim-loop wakeups by source", listOf("source"))
+
     // ── Isolated tenant-database dispatcher ───────────────────────────────────
     //
     // Watched separately from the execution pools on purpose: the whole point of
@@ -520,6 +591,10 @@ object WorkerMetrics {
             tenantActiveRuns, tenantThrottledTotal, tenantAdmissionOvershoot, tenantClaimRejected, tenantLoadQuerySeconds,
             llmCallDurationSeconds, toolCallDurationSeconds, tenantDbCallDurationSeconds,
             threadBlockedSeconds, leaseExpiryTotal, xautoclaimReclaimTotal,
+            claimDurationSeconds, claimedTotal, claimReclaimedTotal, claimWakeupTotal,
+            claimReservedLaneTotal, ceilingBreachTotal,
+            circuitOpenedTotal, circuitClosedTotal, circuitRejectedTotal,
+            providerThrottleSuspendTotal,
             fencedWriteTotal, sideEffectDedupeTotal, sideEffectUndeterminedTotal,
             deadLetterTotal, leaseStolenTotal,
             tenantDbSlotsTotal, tenantDbSlotsActive, tenantDbQueueDepth, tenantDbRejectedTotal,
