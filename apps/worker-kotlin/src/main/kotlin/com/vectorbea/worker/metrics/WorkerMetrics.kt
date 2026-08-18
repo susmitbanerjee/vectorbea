@@ -191,7 +191,15 @@ object WorkerMetrics {
     private val log = LoggerFactory.getLogger(WorkerMetrics::class.java)
 
     // Gauge: currently-active (in-flight) tasks
-    internal val activeTasks = WGauge("worker_active_tasks", "Number of workflow run tasks currently executing", emptyList())
+    /**
+     * §5.4: `worker_in_flight{worker_id}`.
+     *
+     * Renamed from `worker_active_tasks` and given the worker_id label it was missing.
+     * Without the label a three-replica fleet summed to one number, which answers "is
+     * the fleet busy" and not "is THIS worker stuck" - and the second question is the
+     * one you ask when a run is not progressing.
+     */
+    internal val activeTasks = WGauge("worker_in_flight", "Runs currently executing on this worker", listOf("worker_id"))
 
     // Gauge: seconds since the last heartbeat was written (updated by heartbeat component)
     internal val heartbeatAgeSeconds = WGauge("worker_heartbeat_age_seconds", "Seconds since the last worker heartbeat was written", emptyList())
@@ -401,7 +409,10 @@ object WorkerMetrics {
      * check that the plan still walks `agent_runs_claim_idx` rather than sorting.
      */
     internal val claimDurationSeconds = WSecondsHistogram(
-        "claim_duration_seconds", "SKIP LOCKED claim round-trip", listOf("class"))
+        // §5.4 names this `job_claim_latency_seconds`. Renamed from
+        // `claim_duration_seconds` so the dashboards, the alert and the doc all say the
+        // same word; the metric is unchanged.
+        "job_claim_latency_seconds", "SKIP LOCKED claim round-trip", listOf("class"))
 
     /**
      * Run-level ceilings hit, by dimension.
@@ -432,7 +443,9 @@ object WorkerMetrics {
 
     /** Provider 429s that suspended a run instead of holding its permit. */
     internal val providerThrottleSuspendTotal = WCounter(
-        "provider_throttle_suspend", "Runs suspended after a provider 429", listOf("provider"))
+        // §5.4: `provider_429_total{provider}`. The `_total` suffix is appended by the
+        // counter renderer, so the name here stops at `provider_429`.
+        "provider_429", "Runs suspended after a provider 429", listOf("provider"))
 
     /** Runs claimed, by class. */
     internal val claimedTotal = WCounter("claimed", "Runs claimed from Postgres", listOf("class"))
@@ -499,6 +512,76 @@ object WorkerMetrics {
     internal val jvmHeapMaxBytes = WGauge("jvm_heap_max_bytes", "Maximum heap", emptyList())
     internal val jvmCpuSeconds = WGauge("jvm_process_cpu_seconds", "Process CPU time consumed", emptyList())
     internal val jvmCpuLoad = WGauge("jvm_process_cpu_load", "Process CPU load, 0..1 across all cores", emptyList())
+
+    // ── §5.4 metrics that did not exist before ────────────────────────────────
+
+    /**
+     * Free execution slots across every pool on this worker.
+     *
+     * §5.4 lists `worker_slots_available` unlabelled, and that is deliberate: it is the
+     * number an operator glances at to answer "can this worker take more work". The
+     * per-pool breakdown is still there as `worker_pool_capacity_available{pool}` for
+     * when the answer is "yes overall, no for agents".
+     */
+    internal val workerSlotsAvailable = WGauge(
+        "worker_slots_available", "Free execution slots across all pools on this worker", emptyList())
+
+    /**
+     * Runs waiting in Postgres, by workspace and priority.
+     *
+     * Sampled rather than incremented: queue depth is a property of a table that many
+     * processes write, so counting locally would drift the moment anything else claimed
+     * or enqueued. [sampleQueueDepth] runs on scrape.
+     */
+    internal val jobQueueDepth = WGauge(
+        "job_queue_depth", "Runs queued and not yet claimed", listOf("workspace", "priority"))
+
+    /**
+     * How long a node took, by kind.
+     *
+     * `worker_run_duration_ms` measures whole runs, which conflates "the model was slow"
+     * with "the workflow has forty nodes". §5.4 asks for the per-node view by node_kind,
+     * which is the one that identifies WHICH step is slow.
+     */
+    internal val jobExecutionDurationSeconds = WSecondsHistogram(
+        "job_execution_duration_seconds", "Node execution duration", listOf("node_kind", "outcome"))
+
+    /**
+     * Time spent waiting for a connection from the pool.
+     *
+     * §5.4: "rising means the DB pool is the bottleneck". This is the metric that
+     * distinguishes a slow query from no connection to run it on - two problems with
+     * identical symptoms at the request layer and opposite fixes.
+     */
+    internal val dbPoolWaitSeconds = WSecondsHistogram(
+        "db_pool_wait_seconds", "Time waiting to acquire a pooled connection", listOf("pool"))
+
+    /**
+     * Runs that suspended rather than holding a slot.
+     *
+     * §5.4: "should be free; confirm it isn't holding slots". The confirmation is the
+     * pairing - this counter climbing while `worker_in_flight` does not is suspension
+     * working. Both climbing together means a suspend path is still occupying a permit.
+     */
+    internal val runSuspendedTotal = WCounter(
+        "run_suspended", "Runs suspended without holding an execution slot", listOf("reason"))
+
+    /**
+     * Where the queue-depth sample comes from.
+     *
+     * Set by Main once the DataSource exists. Null in tests and before startup, in which
+     * case the gauge simply reports nothing rather than the process failing to scrape.
+     */
+    @Volatile var queueDepthSource: (() -> List<Triple<String, String, Long>>)? = null
+
+    private fun sampleQueueDepth() {
+        val source = queueDepthSource ?: return
+        try {
+            for ((workspace, priority, depth) in source()) {
+                jobQueueDepth.set(depth.toDouble(), workspace, priority)
+            }
+        } catch (_: Exception) { /* a scrape must not fail because Postgres is busy */ }
+    }
 
     /** Refresh the JVM gauges. Called on each scrape. */
     private fun sampleJvm() {
@@ -574,6 +657,7 @@ object WorkerMetrics {
 
     fun scrape(): String = buildString {
         sampleJvm()
+        sampleQueueDepth()
         listOf(
             activeTasks, heartbeatAgeSeconds,
             runsQueued, runsSucceeded, runsFailed, runsCancelled,
@@ -598,6 +682,8 @@ object WorkerMetrics {
             fencedWriteTotal, sideEffectDedupeTotal, sideEffectUndeterminedTotal,
             deadLetterTotal, leaseStolenTotal,
             tenantDbSlotsTotal, tenantDbSlotsActive, tenantDbQueueDepth, tenantDbRejectedTotal,
+            workerSlotsAvailable, jobQueueDepth, jobExecutionDurationSeconds,
+            dbPoolWaitSeconds, runSuspendedTotal,
             jvmThreads, jvmThreadsPeak, jvmHeapUsedBytes, jvmHeapMaxBytes, jvmCpuSeconds, jvmCpuLoad,
         ).forEach { m ->
             try {

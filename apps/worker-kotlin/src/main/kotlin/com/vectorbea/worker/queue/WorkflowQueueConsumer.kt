@@ -500,6 +500,7 @@ class WorkflowQueueConsumer(
     }
 
     private fun publishPoolGauges() {
+        var freeAcrossPools = 0L
         router.utilization().forEach { (type, util) ->
             val (outstanding, capacity) = util
             val name = router.poolName(type)
@@ -507,12 +508,16 @@ class WorkflowQueueConsumer(
             // the fully-qualified pool name so existing dashboards do not break.
             val shortName = type.name.lowercase()
             WorkerMetrics.activeRunsByPool.set(outstanding.toDouble(), name)
-            WorkerMetrics.poolCapacityAvailable.set((capacity - outstanding).coerceAtLeast(0).toDouble(), name)
+            val free = (capacity - outstanding).coerceAtLeast(0)
+            freeAcrossPools += free
+            WorkerMetrics.poolCapacityAvailable.set(free.toDouble(), name)
             WorkerMetrics.poolSlotsTotal.set(capacity.toDouble(), shortName)
             WorkerMetrics.poolSlotsActive.set(outstanding.toDouble(), shortName)
             val buffered = synchronized(bufferLock) { buffers.getValue(type).size }
             WorkerMetrics.localBufferSize.set(buffered.toDouble(), name)
         }
+        // The §5.4 headline number: free slots on this worker, all pools together.
+        WorkerMetrics.workerSlotsAvailable.set(freeAcrossPools.toDouble())
         WorkerMetrics.pelDepth.set(unackedMessageIds.size.toDouble(), config.queueStream)
     }
 }

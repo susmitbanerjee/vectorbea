@@ -58,6 +58,13 @@ export async function resetLoadData(pool) {
   await pool.query(`DELETE FROM run_events WHERE run_id IN (
       SELECT ar.id FROM agent_runs ar JOIN workspaces w ON w.id = ar.workspace_id
       WHERE w.slug LIKE $1)`, [`${LOAD_TAG}-%`]);
+  // Confidence gating writes three more children hanging off runs, and
+  // run_approvals carries an FK to confidence_scores, so those two have their own
+  // order. Missing them makes every reset after a gated run fail on a constraint.
+  for (const t of ['eval_cases', 'run_approvals', 'confidence_scores', 'step_outputs']) {
+    await pool.query(`DELETE FROM ${t} WHERE workspace_id IN (
+        SELECT id FROM workspaces WHERE slug LIKE $1)`, [`${LOAD_TAG}-%`]);
+  }
   await pool.query(`DELETE FROM agent_runs WHERE workspace_id IN (
       SELECT id FROM workspaces WHERE slug LIKE $1)`, [`${LOAD_TAG}-%`]);
   await pool.query(`DELETE FROM workflow_versions WHERE workflow_id IN (

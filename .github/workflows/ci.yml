@@ -2,7 +2,7 @@ name: CI
 
 # CI runs CHECKS only — deployments are owned by the platform git integrations:
 #   PR / push to dev    → Vercel deploys apps/web to dev.vectorbea.com (staging)
-#                         + Railway `staging` env (api/worker/telemetry, branch=dev)
+#                         + Railway `staging` env (api/worker, branch=dev)
 #   merge dev → master  → Vercel production (vectorbea.com, blog, support domain)
 #                         + Railway `production` env
 # Per-path filters below keep a PR from building services it didn't touch.
@@ -22,7 +22,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       api: ${{ steps.filter.outputs.api }}
       worker: ${{ steps.filter.outputs.worker }}
-      telemetry: ${{ steps.filter.outputs.telemetry }}
+      observability: ${{ steps.filter.outputs.observability }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -34,10 +34,14 @@ jobs:
               - 'prisma/**'
             api:
               - 'apps/api-kotlin/**'
+              # observability-kotlin compiles INTO the api via includeBuild, so a change
+              # there can break this build without touching a file under apps/api-kotlin.
+              - 'packages/observability-kotlin/**'
             worker:
               - 'apps/worker-kotlin/**'
-            telemetry:
-              - 'apps/telemetry/**'
+              - 'packages/observability-kotlin/**'
+            observability:
+              - 'packages/observability-kotlin/**'
 
   # ── Closed-source boundary guards (cheap, always run) ───────────────────────
   guards:
@@ -161,15 +165,18 @@ jobs:
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
-  # ── Telemetry service (Kotlin) ───────────────────────────────────────────────
-  telemetry:
-    name: Telemetry (build + test)
+  # ── Observability library (Kotlin) ──────────────────────────────────────────
+  # Was the `telemetry` service job. The service is gone; the library it became is
+  # built and tested on its own so a break is attributed here rather than surfacing
+  # as a confusing failure inside the api or worker build.
+  observability:
+    name: Observability library (build + test)
     needs: changes
-    if: needs.changes.outputs.telemetry == 'true'
+    if: needs.changes.outputs.observability == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/telemetry
+        working-directory: packages/observability-kotlin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -187,4 +194,3 @@ jobs:
         run: gradle test --no-daemon --console=plain
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
-        continue-on-error: true

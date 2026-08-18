@@ -17,6 +17,10 @@ repositories {
 }
 
 dependencies {
+    // Metrics, structured logging, tracing and product analytics - formerly the
+    // separate `apps/telemetry` service. See docs/architecture/OBSERVABILITY.md.
+    implementation("com.vectorbea:observability-kotlin:0.1.0")
+
     // JSON — Jackson with Kotlin + JSR-310 (java.time) support
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")

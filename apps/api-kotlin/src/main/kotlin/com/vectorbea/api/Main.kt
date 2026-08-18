@@ -79,7 +79,10 @@ fun main() {
 
     // 1. Config
     val config = AppConfig.fromEnv()
-    val telemetry = TelemetryClient.fromEnv()
+    // Analytics is constructed after the database below and `telemetry` is rebound to
+    // the in-process client then. `fromEnv()` is the fallback for a deployment that
+    // still points at a remote collector.
+    var telemetry = TelemetryClient.fromEnv()
 
     // Production startup validation — fail closed if critical config is missing
     config.validateForProduction()
@@ -226,6 +229,25 @@ fun main() {
     // 6. Repositories (require DB)
     val ds = database?.dataSource
 
+    // ── Analytics, formerly apps/telemetry ────────────────────────────────────
+    // Same DataSource as everything else: one pool per process, so analytics writes
+    // are visibly charged against the connection budget rather than hidden in a second
+    // pool that only shows up when Postgres starts refusing connections.
+    val analyticsConfig = com.vectorbea.observability.analytics.AnalyticsConfig.fromEnv()
+    val analyticsRepo = ds?.let { com.vectorbea.observability.analytics.AnalyticsRepository(it) }
+    val analyticsIngestion = analyticsRepo?.let {
+        com.vectorbea.observability.analytics.AnalyticsIngestionService(it, analyticsConfig)
+    }
+    val analyticsQuery = analyticsRepo?.let {
+        com.vectorbea.observability.analytics.AnalyticsQueryService(it)
+    }
+    val engineeringTelemetry = ds?.let {
+        com.vectorbea.observability.engineering.EngineeringTelemetryService(it)
+    }
+    if (analyticsIngestion != null) {
+        telemetry = TelemetryClient.local(analyticsIngestion, analyticsConfig.vectorbeaEnv)
+    }
+
     // Append-only governance trail (P20). Constructed even without a database so
     // call sites need no null dance; it no-ops when there is nowhere to write.
     val auditLog = com.vectorbea.api.audit.AuditLog(ds)
@@ -277,6 +299,9 @@ fun main() {
     VersionRoutes(config).register(router)
     NetworkRoutes().register(router)
     MetricsRoutes().register(router)
+    com.vectorbea.api.telemetry.TelemetryRoutes(
+        analyticsIngestion, analyticsQuery, engineeringTelemetry, config).register(router)
+    com.vectorbea.api.telemetry.AdminConsoleRoutes().register(router)
 
     if (connectionRepo != null) {
         ConnectionRoutes(connectionRepo, cacheService, secretService, telemetry, auditLog).register(router)
@@ -369,6 +394,8 @@ fun main() {
         // Output contracts: CRUD, draft inference, live testing, and the publish
         // gate that refuses a schema the provider cannot enforce.
         com.vectorbea.api.contract.ContractRoutes(ds, auditLog).register(router)
+        // Confidence: the gate payload, the four reviewer actions, and calibration.
+        com.vectorbea.api.confidence.ConfidenceRoutes(ds, auditLog).register(router)
         BootstrapRoutes(ds).register(router)
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
 

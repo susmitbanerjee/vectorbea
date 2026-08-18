@@ -39,6 +39,15 @@ data class AppConfig(
     val publicSignupEnabled: Boolean = true,
     /** Comma-separated admin email addresses */
     val adminEmails: Set<String> = emptySet(),
+    /**
+     * Shared secret for `/internal/telemetry/events`.
+     *
+     * Was the telemetry service's own; now the API's, because the API is the process
+     * that owns that endpoint. Null disables internal ingestion rather than defaulting
+     * to something guessable - an analytics store anyone can write to is a store you
+     * cannot trust, which is worse than not having one.
+     */
+    val telemetryInternalToken: String? = null,
     val defaultExecutionMode: String = "simulation_only",
     val realExecutionRequiresAdminApproval: Boolean = true,
     val byokRequiredForRealExecution: Boolean = true,
@@ -190,6 +199,7 @@ data class AppConfig(
                 privateBetaMode  = privateBetaMode,
                 publicSignupEnabled = publicSignupEnabled,
                 adminEmails      = adminEmails,
+                telemetryInternalToken = env("TELEMETRY_INTERNAL_TOKEN"),
                 defaultExecutionMode = defaultExecMode,
                 realExecutionRequiresAdminApproval = realExecApproval,
                 byokRequiredForRealExecution = byokRequired,

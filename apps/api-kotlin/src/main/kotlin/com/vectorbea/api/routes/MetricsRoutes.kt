@@ -20,7 +20,12 @@ class MetricsRoutes {
     }
 
     private fun scrape(@Suppress("UNUSED_PARAMETER") req: com.vectorbea.api.http.Request): Response {
-        val body = MetricsRegistry.scrape()
+        // Two registries: the API's own, which predates observability-kotlin, and the
+        // shared one that new metrics register in. Rendered together because Prometheus
+        // scrapes one endpoint per target and does not care that the process has two
+        // internal collections. The local one is being migrated (D35), not kept.
+        val body = MetricsRegistry.scrape() +
+            com.vectorbea.observability.metrics.MetricsRegistry.scrape()
         return Response(
             status = 200,
             body = body,

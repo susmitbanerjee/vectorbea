@@ -16,6 +16,10 @@ repositories {
 }
 
 dependencies {
+    // Metrics, structured logging and tracing - shared with api-kotlin, formerly the
+    // separate `apps/telemetry` service. See docs/architecture/OBSERVABILITY.md.
+    implementation("com.vectorbea:observability-kotlin:0.1.0")
+
     // JSON — Jackson with Kotlin module
     // Note: recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")

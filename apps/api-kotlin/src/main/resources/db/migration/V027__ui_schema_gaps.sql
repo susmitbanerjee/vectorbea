@@ -103,6 +103,35 @@ UPDATE agent_runs r
 -- system speaks, and it carries workspace_id/environment_id, which `approvals`
 -- does not — meaning every read of `approvals` needed a join just to authorise it.
 
+-- run_approvals must EXIST before it can be extended.
+--
+-- Found the hard way: this migration was written against a database where
+-- `run_approvals` was present, but no migration in this repository creates it - it
+-- had been introduced out-of-band. On a genuinely fresh database the chain broke
+-- here with "relation run_approvals does not exist", which means every new
+-- environment would have failed to provision.
+--
+-- Created idempotently rather than assumed. The definition matches the shape the
+-- worker and API already write, so an existing database is unaffected and a fresh
+-- one now works.
+CREATE TABLE IF NOT EXISTS run_approvals (
+    id             UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    run_id         UUID        NOT NULL,
+    workspace_id   UUID        NOT NULL,
+    environment_id UUID        NOT NULL,
+    node_id        TEXT        NOT NULL,
+    status         TEXT        NOT NULL DEFAULT 'PENDING',
+    message        TEXT,
+    metadata_json  JSONB,
+    resolved_by    TEXT,
+    resolved_at    TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_approvals_run_status
+    ON run_approvals (run_id, status);
+
 -- P13's fields.
 ALTER TABLE run_approvals
     -- When this decision becomes late. P13 renders a countdown against it.
@@ -142,6 +171,12 @@ COMMENT ON COLUMN run_approvals.evidence_refs_json IS
 -- Matched on (run_id, step_id ↔ node_id): the same approval recorded in both
 -- tables must not become two rows. workspace_id/environment_id are recovered from
 -- agent_runs, which is why the join is required rather than optional.
+-- Migrating legacy rows only makes sense where the legacy table exists. On a fresh
+-- database there is nothing to move, and an unguarded INSERT..SELECT would fail on
+-- the missing relation.
+DO $mig$
+BEGIN
+IF to_regclass('public.approvals') IS NOT NULL THEN
 INSERT INTO run_approvals (
     id, run_id, workspace_id, environment_id, node_id, status, message,
     metadata_json, resolved_by, resolved_at, created_at, updated_at,
@@ -160,15 +195,28 @@ SELECT a.id, a.run_id, r.workspace_id, r.environment_id, a.step_id,
       WHERE ra.run_id = a.run_id AND ra.node_id = a.step_id
  )
 ON CONFLICT (id) DO NOTHING;
+END IF;
+END $mig$;
 
 -- Renamed rather than dropped. A drop is unrecoverable if a reader was missed;
 -- a rename fails that reader loudly and immediately, and the table can be dropped
 -- for real once a release has passed with nothing complaining.
-ALTER TABLE IF EXISTS approvals RENAME TO approvals_deprecated_v027;
+DO $ren$
+BEGIN
+    IF to_regclass('public.approvals') IS NOT NULL
+       AND to_regclass('public.approvals_deprecated_v027') IS NULL THEN
+        ALTER TABLE approvals RENAME TO approvals_deprecated_v027;
+    END IF;
+END $ren$;
 
-COMMENT ON TABLE approvals_deprecated_v027 IS
+DO $cmt$
+BEGIN
+    IF to_regclass('public.approvals_deprecated_v027') IS NOT NULL THEN
+        EXECUTE $c$COMMENT ON TABLE approvals_deprecated_v027 IS
     'DEPRECATED - superseded by run_approvals in V027. Data migrated. Renamed rather '
-    'than dropped so any missed reader fails loudly. Safe to DROP after one release.';
+    'than dropped so any missed reader fails loudly. Safe to DROP after one release.'$c$;
+    END IF;
+END $cmt$;
 
 CREATE INDEX IF NOT EXISTS run_approvals_pending_idx
     ON run_approvals (workspace_id, sla_deadline_at)

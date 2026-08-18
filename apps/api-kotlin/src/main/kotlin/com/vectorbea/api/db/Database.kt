@@ -18,7 +18,20 @@ import javax.sql.DataSource
  *
  * The URL is taken from [DbConfig.url] and is NEVER logged.
  */
-class Database private constructor(val dataSource: HikariDataSource) {
+class Database private constructor(
+    /** The Hikari pool. Only `close()` needs it; callers take [dataSource]. */
+    private val pool: HikariDataSource,
+) {
+    /**
+     * The DataSource every caller uses, wrapped so `db_pool_wait_seconds` sees every
+     * connection acquisition — including Flyway's and the analytics library's, neither
+     * of which would ever be instrumented by hand.
+     */
+    val dataSource: javax.sql.DataSource = com.vectorbea.observability.db.TimedDataSource(
+        pool, "platform") { s, p ->
+        com.vectorbea.api.metrics.AppMetrics.dbPoolWaitSeconds.observeSeconds(s, p)
+    }
+
 
     private val log = LoggerFactory.getLogger(Database::class.java)
 
@@ -48,7 +61,7 @@ class Database private constructor(val dataSource: HikariDataSource) {
     }
 
     fun close() {
-        dataSource.close()
+        pool.close()
         log.info("[db] connection pool closed")
     }
 

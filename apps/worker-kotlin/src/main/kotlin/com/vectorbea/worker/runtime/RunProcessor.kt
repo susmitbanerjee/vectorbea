@@ -148,7 +148,7 @@ class RunProcessor(
      */
     suspend fun process(job: WorkflowRunJob) {
         heartbeat.taskStarted()
-        WorkerMetrics.activeTasks.inc()
+        WorkerMetrics.activeTasks.inc(workerId)
         WorkerMetrics.runsQueued.inc()
         val start = Instant.now()
 
@@ -175,7 +175,7 @@ class RunProcessor(
             if (acquired == null) {
                 log.warn("[processor] lease held by another worker — skipping job [runId={}, type={}]",
                     job.runId, job.jobType)
-                WorkerMetrics.activeTasks.dec()
+                WorkerMetrics.activeTasks.dec(workerId)
                 heartbeat.taskFinished()
                 mdcClearAll()
                 return
@@ -227,7 +227,7 @@ class RunProcessor(
                 }
                 log.debug("[processor] over per-tenant limit at claim — released lease, re-queued " +
                     "[runId={}, ws={}]", job.runId, leaseRun.workspaceId)
-                WorkerMetrics.activeTasks.dec()
+                WorkerMetrics.activeTasks.dec(workerId)
                 heartbeat.taskFinished()
                 mdcClearAll()
                 return
@@ -249,7 +249,7 @@ class RunProcessor(
                         "likely a poison job that crashes its worker before completing.",
                 )
                 leaseManager.release(job.runId, workerId)
-                WorkerMetrics.activeTasks.dec()
+                WorkerMetrics.activeTasks.dec(workerId)
                 heartbeat.taskFinished()
                 mdcClearAll()
                 return
@@ -315,7 +315,7 @@ class RunProcessor(
             renewal?.cancel(false)
             if (lease != null) leaseManager.release(job.runId, workerId)
             eventStore.forgetRun(job.runId)
-            WorkerMetrics.activeTasks.dec()
+            WorkerMetrics.activeTasks.dec(workerId)
             heartbeat.taskFinished()
             mdcClearAll()
         }
@@ -836,11 +836,16 @@ class RunProcessor(
                     runId = job.runId, status = "waiting_for_approval",
                     startedAt = start, workerId = workerId, fromStatus = "running",
                 )
+                // §5.4: `run_suspended_total` "should be free; confirm it isn't holding
+                // slots". The confirmation is reading this against `worker_in_flight` -
+                // this climbing while in-flight does not is suspension working.
+                WorkerMetrics.runSuspendedTotal.inc("approval")
                 log.info("[processor] run paused for approval [runId={}, approvalId={}]",
                     job.runId, execResult.approvalId)
             }
 
             is WorkflowRuntime.ExecutionResult.Yielded -> {
+                WorkerMetrics.runSuspendedTotal.inc("budget")
                 // The run consumed its per-tick budget. Progress is already
                 // checkpointed by the runtime. Move running → yielded and durably
                 // re-enqueue a RESUME_RUN so another (bounded) tick continues.
@@ -882,6 +887,7 @@ class RunProcessor(
             }
 
             is WorkflowRuntime.ExecutionResult.Throttled -> {
+                WorkerMetrics.runSuspendedTotal.inc("provider_429")
                 // The permit is released the moment this returns, and the run is
                 // parked on a durable timer instead. That is the whole guard:
                 // twenty runs throttled by one provider release twenty permits

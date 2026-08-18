@@ -19,7 +19,20 @@ import javax.sql.DataSource
  *   db.dataSource     // raw DataSource for all DB operations
  *   db.close()        // called in shutdown hook
  */
-class Database private constructor(val dataSource: HikariDataSource) {
+class Database private constructor(
+    /**
+     * The Hikari pool itself. Only `close()` needs it; everything else takes
+     * [dataSource], which is the metered wrapper.
+     */
+    private val pool: HikariDataSource,
+) {
+    /**
+     * The DataSource every caller uses, wrapped so `db_pool_wait_seconds` sees every
+     * connection acquisition rather than the subset someone remembered to instrument.
+     */
+    val dataSource: javax.sql.DataSource = com.vectorbea.observability.db.TimedDataSource(
+        pool, "platform") { s, p -> com.vectorbea.worker.metrics.WorkerMetrics.dbPoolWaitSeconds.observeSeconds(s, p) }
+
 
     private val log = logger()
 
@@ -36,7 +49,7 @@ class Database private constructor(val dataSource: HikariDataSource) {
     }
 
     fun close() {
-        dataSource.close()
+        pool.close()
         log.info("[db] connection pool closed")
     }
 

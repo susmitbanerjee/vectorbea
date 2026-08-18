@@ -41,6 +41,19 @@ object AppMetrics {
         "operation",
     )
 
+    /**
+     * §5.4: `db_pool_wait_seconds`. Registered in the SHARED registry, not this one.
+     *
+     * The API's local Counter/Gauge/Histogram predate observability-kotlin and are still
+     * what the rest of this file uses. New metrics go to the shared registry so the API
+     * and the worker render them identically - in particular in seconds, where the local
+     * histogram is in milliseconds. Both registries are rendered by MetricsRoutes.
+     *
+     * The remaining local metrics are a migration, not a design; see D35.
+     */
+    val dbPoolWaitSeconds = com.vectorbea.observability.metrics.secondsHistogram(
+        "db_pool_wait_seconds", "Time waiting to acquire a pooled connection", "pool")
+
     // ── Redis metrics ─────────────────────────────────────────────────────────
 
     /** Redis command duration in milliseconds. Labels: command */

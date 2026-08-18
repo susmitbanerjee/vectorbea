@@ -178,6 +178,11 @@ fun main() {
     // with a contract gets constrained decoding and validation before commit.
     val contractValidator = com.vectorbea.worker.contract.ContractValidator(database.dataSource)
 
+    // Layer 3 - confidence routing. Also unconditional, and also inert on a node with
+    // no contract and no citations: with nothing to score it returns "commit" without
+    // touching the database.
+    val confidenceGating = com.vectorbea.worker.confidence.ConfidenceGating(database.dataSource)
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -196,6 +201,7 @@ fun main() {
         circuit            = connectionCircuit,
         recorder           = modelCallRecorder,
         contracts          = contractValidator,
+        confidence         = confidenceGating,
     )
 
     /**
@@ -231,6 +237,11 @@ fun main() {
             // which would make replay useless for debugging a contract violation -
             // the most likely reason to open one.
             contracts          = contractValidator,
+            // Deliberately absent. A replay reproduces what happened; it must not open
+            // a NEW approval gate against a run that was already decided, and a person
+            // being asked to review a replay of an output they already approved is a
+            // confusing thing to do to them.
+            confidence         = null,
         )
     }
 
@@ -452,6 +463,39 @@ fun main() {
     crashRecovery.start()
 
     // ── Metrics server ────────────────────────────────────────────────────────
+    // §5.4: `job_queue_depth{workspace, priority}`. Sampled on scrape rather than
+    // counted in-process, because the queue is a Postgres table that every replica and
+    // the API also write - a local counter would be wrong within seconds.
+    //
+    // One indexed aggregate per scrape, capped at the busiest 200 workspaces so a
+    // pathological tenant count cannot turn the metrics endpoint into a table scan or
+    // the exposition into a cardinality bomb.
+    WorkerMetrics.queueDepthSource = {
+        database.dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                // `priority` is a SMALLINT (0 ordinary, 100 demo lane). Bucketed into a
+                // label here rather than exposed raw: a numeric label value would make
+                // the dashboard legend read "0" and "100", and would grow a new series
+                // the day someone introduces priority 50.
+                """SELECT workspace_id::text,
+                          CASE WHEN priority >= 100 THEN 'priority' ELSE 'normal' END AS priority,
+                          COUNT(*) AS depth
+                     FROM agent_runs
+                    WHERE status = 'queued'
+                    GROUP BY 1, 2
+                    ORDER BY depth DESC
+                    LIMIT 200"""
+            ).use { stmt ->
+                stmt.queryTimeout = 2
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) add(Triple(rs.getString(1), rs.getString(2), rs.getLong(3)))
+                    }
+                }
+            }
+        }
+    }
+
     val metricsPort = System.getenv("METRICS_PORT")?.toIntOrNull() ?: 9090
     WorkerMetrics.startServer(metricsPort)
 

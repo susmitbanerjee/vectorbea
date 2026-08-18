@@ -4,7 +4,11 @@
         <!-- Structured JSON lines — one JSON object per log event (NDJSON).
              All MDC fields (runId, workerId, nodeId, jobType, etc.) are merged
              into the root JSON object automatically by JsonLayout. -->
-        <layout class="com.vectorbea.worker.observability.JsonLayout"/>
+        <!-- One JSON object per line with a fixed envelope. The encoder lives in
+         observability-kotlin so both services emit the same shape; each service
+         previously had its own copy of this class and they had already diverged
+         in field naming. -->
+    <encoder class="com.vectorbea.observability.logging.JsonLogEncoder"/>
     </appender>
 
     <!-- Never log Hikari URL, Redis URL, or secret key values -->

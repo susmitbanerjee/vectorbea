@@ -11,7 +11,14 @@ package com.vectorbea.worker.runtime.graph
  * Thread-safety: all methods are thread-safe (read-only access to immutable
  * graph structure; context reads are synchronised inside [RuntimeContext]).
  */
-class GraphScheduler(private val graph: WorkflowGraph) {
+class GraphScheduler(
+    /**
+     * Readable, not writable. The gate payload needs to name the node a reviewer's
+     * approval would actually trigger, which means looking one hop ahead - a read the
+     * scheduler is the right owner of and the runtime should not reconstruct.
+     */
+    val graph: WorkflowGraph,
+) {
 
     // ── Entry-point discovery ─────────────────────────────────────────────────
 

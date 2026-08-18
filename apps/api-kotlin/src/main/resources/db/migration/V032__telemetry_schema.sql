@@ -1,3 +1,20 @@
+-- V032 — the telemetry schema, folded in from apps/telemetry (was V100 there).
+--
+-- WHY IT MOVES RATHER THAN STAYING WHERE IT WAS
+-- ---------------------------------------------
+-- Two Flyway histories against one database is a trap that springs quietly: each keeps
+-- its own `flyway_schema_history` view of "what has been applied", so provisioning a
+-- fresh environment depends on running two migrators in an order nothing records, and
+-- a table one chain creates is invisible to the other. D32 in TECH-DEBT.md is the same
+-- class of bug and it cost real time.
+--
+-- Renumbered from V100 to V032 to sit in this chain's sequence. Every statement is
+-- already IF NOT EXISTS, so applying it to a database where the telemetry service
+-- previously ran is a no-op rather than an error - which is what makes the cutover a
+-- deploy rather than a migration window.
+--
+-- The old file is deleted with the service. This is now the only copy.
+
 -- Telemetry schema — analytics, engineering snapshots, revenue (future)
 -- All tables include environment column for dev/stage/prod filtering.
 

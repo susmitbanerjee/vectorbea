@@ -30,6 +30,28 @@ val mapper: ObjectMapper = jacksonObjectMapper().apply {
 /** Serialize any value to a JSON string. */
 fun toJson(value: Any): String = mapper.writeValueAsString(value)
 
+/**
+ * A mapper that KEEPS nulls, for stored data payloads.
+ *
+ * [mapper] omits nulls, which is right for API responses - a DTO with fifteen absent
+ * optional fields should not ship fifteen `null`s to the browser.
+ *
+ * It is wrong for anything we persist as data, because in this product `null` is an
+ * answer. When a reviewer corrects a hallucinated field to null they are saying "this
+ * value is not in the source", which is a different statement from saying nothing about
+ * the field at all. Dropping the key turns an explicit finding into a silent omission:
+ * downstream nodes see a missing key rather than a deliberate null, and the eval case
+ * captured from the correction records no expectation for the field it was capturing.
+ *
+ * Found by running the confidence demo, which corrects an invented contact to null and
+ * then asserts the null survived the round trip. It did not.
+ */
+val dataMapper: ObjectMapper = mapper.copy()
+    .setSerializationInclusion(JsonInclude.Include.ALWAYS)
+
+/** Serialize a stored data payload, preserving explicit nulls. See [dataMapper]. */
+fun toDataJson(value: Any): String = dataMapper.writeValueAsString(value)
+
 /** Deserialize a JSON string to the reified type T. */
 inline fun <reified T> fromJson(json: String): T = mapper.readValue(json)
 

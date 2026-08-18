@@ -9,6 +9,7 @@ import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.metrics.WorkerMetrics
 import com.vectorbea.worker.contract.ConstrainedDecoding
+import com.vectorbea.worker.contract.Groundedness
 import com.vectorbea.worker.net.ConnectionCircuit
 import com.vectorbea.worker.replay.ModelCallRecorder
 import com.vectorbea.worker.net.OutboundHttp
@@ -122,9 +123,30 @@ class LlmNodeExecutor(
             .clampTotalCallMs((cfg["timeoutMs"] as? Number)?.toLong() ?: DEFAULT_TIMEOUT_MS)
         val maxRespBytes = (cfg["maxResponseBytes"] as? Number)?.toLong() ?: DEFAULT_MAX_RESPONSE_BYTES
 
+        val nodeContract = contracts?.contractFor(context.workflowId, node.id)
+
+        // ---- Layer 2: groundedness --------------------------------------------
+        //
+        // When the contract asks for citations, the schema sent to the provider is
+        // the WRAPPED one - every field becomes {value, found, source_span} - and the
+        // response is unwrapped again below. The author declared the simple shape and
+        // never sees the envelope, which is what keeps turning groundedness on from
+        // being a breaking edit to every downstream mapping.
+        val grounded = Groundedness.enabled(nodeContract?.groundedness)
+        val outputSchema = nodeContract?.schema?.let {
+            if (grounded) Groundedness.wrapSchema(it) else it
+        }
+
         @Suppress("UNCHECKED_CAST")
         val messages = buildMessages(
-            systemPrompt = cfg["systemPrompt"] as? String,
+            // The addendum is not decoration: explicit permission to answer "not
+            // present" is the half of Layer 2 that prevents fabrication in the first
+            // place. A model asked to fill a schema with no sanctioned way to decline
+            // invents a plausible value, because that is what the request implies.
+            systemPrompt = (cfg["systemPrompt"] as? String).let { base ->
+                if (!grounded) base
+                else listOfNotNull(base, Groundedness.systemPromptAddendum()).joinToString("\n\n")
+            },
             messages     = cfg["messages"] as? List<Map<String, Any>> ?: emptyList(),
             resolvedInputs = resolvedInputs,
         )
@@ -146,7 +168,6 @@ class LlmNodeExecutor(
         // definition of the node's output shape, versioned and content-hashed. A
         // schema duplicated in the graph would drift from the contract that
         // validates against it, and the two disagreeing is worse than either alone.
-        val outputSchema = contracts?.contractFor(context.workflowId, node.id)?.schema
 
         // Record whatever happened, on every exit path.
         //
@@ -295,6 +316,64 @@ class LlmNodeExecutor(
 
         val durationMs = System.currentTimeMillis() - startMs
         val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }
+        // ---- Verify the citations before anything is returned -----------------
+        //
+        // Before the output leaves this executor, not after: a fabricated citation
+        // means a fabricated value, and the value must not reach the checkpoint
+        // boundary as if it were real.
+        var groundednessFailure: String? = null
+        var groundingCounts: Map<String, Int> = emptyMap()
+        // Kept alongside the counts because the confidence gate has to show a reviewer
+        // WHICH field was doubtful and what it cited, not just how many failed. Counts
+        // score the node; this is what the human reads.
+        var groundingEvidence: Map<String, Any?> = emptyMap()
+        var unverifiedCitation: String? = null
+        val groundedOutput: Map<String, Any?>? = if (!grounded) null else {
+            val parsedWrapped = runCatching {
+                @Suppress("UNCHECKED_CAST")
+                mapper.readValue(result.content ?: "{}", Map::class.java) as Map<String, Any?>
+            }.getOrNull()
+
+            val verdict = Groundedness.verify(parsedWrapped, Groundedness.sourceText(resolvedInputs))
+            groundingCounts = mapOf(
+                "verified" to verdict.verifiedCount,
+                "fuzzy" to verdict.fuzzyCount,
+                "unverified" to verdict.unverifiedCount,
+                "absent" to verdict.absentCount,
+                "claims" to verdict.claimsMade,
+            )
+
+            // `required` fails on a fabricated citation; `optional` verifies and
+            // records but does not block - which is what makes it usable on a node
+            // where some fields are extracted and some are generated.
+            groundingEvidence = verdict.fields.associate { f ->
+                f.field to mapOf(
+                    "found" to f.found,
+                    "span" to f.span,
+                    "verified" to (f.verification?.verified ?: !f.found),
+                    "level" to (f.verification?.level?.name ?: if (f.found) "NOT_FOUND" else "ABSENT"),
+                    "offset" to f.verification?.offset,
+                    "length" to f.span?.length,
+                    "similarity" to f.verification?.similarity,
+                )
+            }
+            unverifiedCitation = verdict.fabricated.firstOrNull()?.field
+
+            if (verdict.fabricated.isNotEmpty() &&
+                Groundedness.required(nodeContract?.groundedness)) {
+                groundednessFailure = verdict.failureMessage()
+            }
+            verdict.unwrapped
+        }
+
+        if (groundednessFailure != null) {
+            emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
+                title = "Citation could not be verified",
+                summary = groundednessFailure)
+            log.warn("[llm] groundedness failed [nodeId={}]: {}", node.id, groundednessFailure)
+            return NodeResult.Failed(groundednessFailure)
+        }
+
         recordCall("ok", response = result)
         emitEvent(context, node.id, EventType.LLM_CALL_COMPLETED, "success",
             title = "LLM call completed",
@@ -304,7 +383,11 @@ class LlmNodeExecutor(
             durationMs = durationMs,
             modelName = model,
             tokenCount = result.tokenCount,
-            estimatedCost = estimatedCostUsd)
+            estimatedCost = estimatedCostUsd,
+            // Verified / fuzzy / unverified per node - the citation half of the
+            // confidence score.
+            meta = if (groundingCounts.isEmpty()) null
+                   else runCatching { mapper.writeValueAsString(groundingCounts) }.getOrNull())
 
         // With a schema declared, the structured object IS the output.
         //
@@ -312,8 +395,10 @@ class LlmNodeExecutor(
         // every assertion would have to reach through a JSON string - which the
         // expression language deliberately cannot do. Layer 0 and Layer 1 have to
         // agree on what "the output" means, and this is where they are joined.
+        @Suppress("UNCHECKED_CAST")
         val structured: Map<String, Any>? =
-            if (outputSchema == null) null
+            if (groundedOutput != null) groundedOutput as Map<String, Any>
+            else if (outputSchema == null) null
             else runCatching {
                 @Suppress("UNCHECKED_CAST")
                 mapper.readValue(result.content ?: "{}", Map::class.java) as Map<String, Any>
@@ -332,6 +417,15 @@ class LlmNodeExecutor(
                 "model"      to model,
                 "durationMs" to durationMs,
             )
+                // The citation evidence has to survive the return, or confidence
+                // scoring in the runtime has nothing to score. It was previously
+                // written only to an event, where the runtime cannot reach it.
+                + (if (groundingCounts.isEmpty()) emptyMap()
+                   else mapOf(
+                       "groundingCounts" to groundingCounts,
+                       "groundingEvidence" to groundingEvidence,
+                   ))
+                + (unverifiedCitation?.let { mapOf("unverifiedCitation" to it) } ?: emptyMap())
         )
     }
 
@@ -762,6 +856,12 @@ class LlmNodeExecutor(
         modelName: String? = null,
         tokenCount: Int? = null,
         estimatedCost: Double? = null,
+        /**
+         * Sanitised metadata JSON. Carries the groundedness counts - verified,
+         * fuzzy, unverified, absent - which are the citation half of the confidence
+         * score and are otherwise lost the moment the node returns.
+         */
+        meta: String? = null,
     ) = try {
         eventStore.appendEvent(RunEvent(
             runId          = ctx.runId,
@@ -772,6 +872,7 @@ class LlmNodeExecutor(
             stepId         = nodeId,
             title          = title,
             summary        = summary,
+            metadataJsonSanitized = meta,
             durationMs     = durationMs,
             modelName      = modelName,
             tokenCount     = tokenCount,

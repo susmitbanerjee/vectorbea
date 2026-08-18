@@ -91,6 +91,8 @@ class ContractValidator(
         val hash: String,
         val schema: Map<String, Any?>?,
         val assertions: List<AssertionEngine.Assertion>,
+        /** required | optional | none - drives Layer 2 for this node. */
+        val groundedness: String = "none",
     )
 
     /**
@@ -104,7 +106,8 @@ class ContractValidator(
     fun contractFor(workflowId: UUID, nodeId: String): Contract? = runCatching {
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                """SELECT id, version, content_hash, schema_json::text, assertions_json::text
+                """SELECT id, version, content_hash, schema_json::text, assertions_json::text,
+                          groundedness
                      FROM node_contracts
                     WHERE workflow_id = ? AND node_id = ? AND status = 'active'"""
             ).use { stmt ->
@@ -117,6 +120,7 @@ class ContractValidator(
                         hash = rs.getString("content_hash"),
                         schema = rs.getString(4)?.let { parseObject(it) },
                         assertions = parseAssertions(rs.getString(5)),
+                        groundedness = rs.getString("groundedness") ?: "none",
                     )
                 }
             }

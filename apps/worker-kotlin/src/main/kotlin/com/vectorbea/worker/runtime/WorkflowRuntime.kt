@@ -121,6 +121,13 @@ class WorkflowRuntime(
      * directly. Production always supplies it.
      */
     private val contracts: com.vectorbea.worker.contract.ContractValidator? = null,
+    /**
+     * Layer 3 - confidence routing.
+     *
+     * Null disables scoring and every output commits on its contract verdict alone,
+     * which is the pre-Layer-3 behaviour the unit tests rely on. Production supplies it.
+     */
+    private val confidence: com.vectorbea.worker.confidence.ConfidenceGating? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -140,6 +147,17 @@ class WorkflowRuntime(
     companion object {
         /** Safety cap on configured per-node retries. */
         private const val MAX_NODE_RETRIES = 5
+
+        /**
+         * Node types that reach outside Vectorbea and cannot be undone.
+         *
+         * Used only to word the gate warning. TOOL and AGENT are included because both
+         * resolve at runtime to something that may well send or write, and a warning
+         * that over-includes costs a reviewer a moment's caution, while one that
+         * under-includes costs them the thing they were trying to prevent.
+         */
+        private val SIDE_EFFECTING = setOf(
+            NodeType.HTTP, NodeType.DB_WRITE, NodeType.TOOL, NodeType.AGENT)
         /** Cap on a single backoff sleep between node retries. */
         private const val MAX_BACKOFF_MS = 30_000L
 
@@ -746,6 +764,14 @@ class WorkflowRuntime(
         suspend fun runIt(): NodeResult {
             val previous = MDC.getCopyOfContextMap()
             if (mdc != null) MDC.setContextMap(mdc)
+            // node_id and workflow_id are set HERE rather than at each executor,
+            // because the requirement is that every line emitted during this node
+            // carries them - including lines from the HTTP client, the JDBC driver and
+            // anything else the executor reaches that has never heard of a node. A
+            // parameter threaded through our own code reaches only our own code, which
+            // is the part that was already easy to attribute.
+            MDC.put(com.vectorbea.worker.observability.MdcKeys.NODE_ID, node.id)
+            MDC.put(com.vectorbea.worker.observability.MdcKeys.WORKFLOW_ID, ctx.workflowId.toString())
             return try {
                 if (isTenantDbNode && tenantDbDispatcher != null) {
                     // Blocking JDBC, contained. The coroutine suspends; only a
@@ -761,8 +787,33 @@ class WorkflowRuntime(
             }
         }
 
+        // §5.4: per-node duration by kind. Wraps the timeout paths below rather than
+        // sitting inside runIt(), so a node killed by its timeout is still measured -
+        // the slow ones are the point of the metric and they are exactly the ones that
+        // do not return normally.
+        suspend fun timedRunIt(): NodeResult {
+            val startedAt = System.nanoTime()
+            var outcome = "ok"
+            try {
+                val r = runIt()
+                if (r is NodeResult.Failed) outcome = "failed"
+                return r
+            } catch (e: Throwable) {
+                // `withTimeoutOrNull` below cancels rather than throwing a timeout, so
+                // a timed-out node arrives here as a CancellationException. Classifying
+                // it as "error" would hide the slowest nodes in the bucket you look at
+                // last.
+                outcome = if (e is CancellationException) "timeout" else "error"
+                throw e
+            } finally {
+                com.vectorbea.worker.metrics.WorkerMetrics.jobExecutionDurationSeconds
+                    .observeSeconds((System.nanoTime() - startedAt) / 1_000_000_000.0,
+                        node.nodeType.value, outcome)
+            }
+        }
+
         if (timeoutMs <= 0) {
-            return try { runIt() }
+            return try { timedRunIt() }
             catch (e: TenantDbDispatcher.DispatcherFullException) {
                 NodeResult.Failed(e.message ?: "Tenant database capacity is exhausted")
             }
@@ -770,7 +821,7 @@ class WorkflowRuntime(
         }
 
         return try {
-            withTimeoutOrNull(timeoutMs) { runIt() }
+            withTimeoutOrNull(timeoutMs) { timedRunIt() }
                 ?: run {
                     log.error("[runtime] node timed out after {}ms [nodeId={}, runId={}]",
                         timeoutMs, node.id, ctx.runId)
@@ -1024,6 +1075,70 @@ class WorkflowRuntime(
                 return@run applyNodeResult(
                     node, NodeResult.Failed(verdict.failureMessage()),
                     scheduler, ctx, source, stepOutputView)
+            }
+
+            // ---- Layer 3: confidence routing ---------------------------------
+            //
+            // Same position and the same reason as the contract check above: before
+            // setOutput, before persistStepOutput, before the checkpoint. A gated
+            // output must not be durable-then-retracted.
+            //
+            // The distinction between this and the contract check is what each is
+            // able to say. A contract says "this is wrong" and fails. Confidence says
+            // "I cannot show that this is right", which is not grounds to throw the
+            // work away - it is grounds to ask. So GATE suspends rather than fails,
+            // and the output travels with the gate so a person can see it.
+            val gating = confidence?.evaluate(
+                runId = ctx.runId,
+                workspaceId = ctx.workspaceId,
+                workflowId = ctx.workflowId,
+                nodeId = node.id,
+                environmentId = ctx.environmentId,
+                verdict = verdict,
+                metadata = result.metadata,
+                output = result.output,
+                downstreamSideEffect = firstDownstreamSideEffect(node, scheduler, ctx),
+            )
+
+            if (gating is com.vectorbea.worker.confidence.ConfidenceGating.Decision.Fail) {
+                recordRibbon(ctx, node.id, RibbonWriter.State.FAILED)
+                return@run applyNodeResult(
+                    node, NodeResult.Failed(gating.message),
+                    scheduler, ctx, source, stepOutputView)
+            }
+
+            if (gating is com.vectorbea.worker.confidence.ConfidenceGating.Decision.Gate) {
+                // The output IS committed to the in-memory context and to step
+                // outputs, because the reviewer is being asked about this value and
+                // the run resumes from here. What does not happen is the rest of the
+                // graph: WaitingForApproval stops the run, so no downstream node -
+                // and therefore no side effect - runs on an unreviewed value.
+                ctx.setOutput(node.id, result.output)
+                ctx.markCompleted(node.id)
+                recordRibbon(ctx, node.id, RibbonWriter.State.GATED,
+                    (result.metadata["durationMs"] as? Number)?.toLong())
+                stepOutputView.putRaw(node.id, result.output)
+                stepOutputView.putExtracted(node.id, result.output)
+                stepOutputView.putValidated(node.id, result.output)
+                persistStepOutput(node, result, ctx)
+
+                emitEvent(ctx, EventType.APPROVAL_REQUESTED, "waiting_for_approval", source,
+                    title   = "Review needed: ${nodeLabel(node)}",
+                    summary = gating.message,
+                    stepId  = node.id,
+                    meta    = """{"approvalId":${jsonStr(gating.approvalId.toString())},""" +
+                              """"nodeId":"${node.id}","reason":"low_confidence"}""")
+
+                // The checkpoint matters more here than anywhere: the run is about to
+                // stop for an unbounded time, and it must resume from exactly this
+                // point however long the reviewer takes.
+                writeCheckpoint(node.id, ctx, source)
+
+                return@run ExecutionResult.WaitingForApproval(gating.approvalId.toString(), node.id)
+            }
+
+            if (gating is com.vectorbea.worker.confidence.ConfidenceGating.Decision.Flag) {
+                contracts?.markLowConfidence(ctx.runId, listOf(gating.message))
             }
 
             ctx.setOutput(node.id, result.output)
@@ -1539,6 +1654,26 @@ class WorkflowRuntime(
             null
         }
     }
+
+    /**
+     * The first downstream node that would do something irreversible.
+     *
+     * The gate payload uses this to tell a reviewer what approving actually causes -
+     * "this will send an email" rather than "the run will continue". Best-effort and
+     * one hop only: a reviewer needs the immediate consequence, and walking the whole
+     * transitive graph would produce a list nobody reads.
+     */
+    private fun firstDownstreamSideEffect(
+        node: com.vectorbea.worker.runtime.graph.WorkflowNode,
+        scheduler: GraphScheduler,
+        ctx: RuntimeContext,
+    ): String? = runCatching {
+        scheduler.graph.edges
+            .filter { it.source == node.id }
+            .mapNotNull { e -> scheduler.graph.nodes.firstOrNull { it.id == e.target } }
+            .firstOrNull { it.nodeType in SIDE_EFFECTING }
+            ?.let { nodeLabel(it) }
+    }.getOrNull()
 
     /**
      * Create the approval gate a `gate` assertion demands.

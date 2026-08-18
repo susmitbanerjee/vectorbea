@@ -23,9 +23,22 @@ import java.util.concurrent.Executors
  *  VECTORBEA_ENV=dev|stage|prod
  */
 class TelemetryClient private constructor(
-    private val endpoint: String,
-    private val internalToken: String,
+    private val endpoint: String?,
+    private val internalToken: String?,
     private val environment: String,
+    /**
+     * In-process ingestion, set when analytics runs inside this JVM.
+     *
+     * When present the HTTP path is not used at all. The API posting events to its own
+     * `/internal/telemetry/events` would be a loopback request that serialises, opens a
+     * socket, re-authenticates against a token it configured itself, and re-parses -
+     * for a write it could do directly. It would also make the API's analytics depend
+     * on the API's own HTTP server being healthy, which is precisely the moment you
+     * most want the event recorded.
+     *
+     * The HTTP path is kept for the worker, which is a different process.
+     */
+    private val local: com.vectorbea.observability.analytics.AnalyticsIngestionService? = null,
 ) {
     private val log = LoggerFactory.getLogger(TelemetryClient::class.java)
     private val executor = Executors.newCachedThreadPool()
@@ -52,6 +65,14 @@ class TelemetryClient private constructor(
     ) {
         executor.execute {
             try {
+                if (local != null) {
+                    trackLocally(
+                        eventName, eventCategory, workspaceId, environmentId, appUserId,
+                        runId, workflowId, connectionId, architectSessionId, agentId,
+                        toolId, properties,
+                    )
+                    return@execute
+                }
                 val body = mapper.writeValueAsString(mapOf(
                     "events" to listOf(mapOf(
                         "eventName" to eventName,
@@ -93,9 +114,58 @@ class TelemetryClient private constructor(
         }
     }
 
+    private fun trackLocally(
+        eventName: String, eventCategory: String, workspaceId: String?, environmentId: String?,
+        appUserId: String?, runId: String?, workflowId: String?, connectionId: String?,
+        architectSessionId: String?, agentId: String?, toolId: String?,
+        properties: Map<String, Any?>,
+    ) {
+        val result = local!!.ingestBatch(
+            com.vectorbea.observability.analytics.IngestBatchRequest(
+                events = listOf(com.vectorbea.observability.analytics.IngestEventRequest(
+                    eventName = eventName,
+                    eventCategory = eventCategory,
+                    occurredAt = Instant.now().toString(),
+                    environment = environment,
+                    workspaceId = workspaceId,
+                    environmentId = environmentId,
+                    appUserId = appUserId,
+                    runId = runId,
+                    workflowId = workflowId,
+                    connectionId = connectionId,
+                    architectSessionId = architectSessionId,
+                    agentId = agentId,
+                    toolId = toolId,
+                    properties = properties,
+                ))
+            ),
+            sourceService = "vectorbea-api",
+        )
+        if (result.rejected > 0) {
+            log.warn("[telemetry] event {} rejected: {}", eventName, result.errors.take(2))
+        }
+    }
+
     companion object {
         private val log = LoggerFactory.getLogger(TelemetryClient::class.java)
         val NOOP: TelemetryClient? = null
+
+        /**
+         * In-process client — the arrangement after the fold.
+         *
+         * Note there is no `TELEMETRY_ENABLED` gate here. That flag existed because the
+         * remote service might not be deployed; a library that is on the classpath is
+         * always deployed. Analytics now follows the database: if there is one, events
+         * are recorded.
+         */
+        fun local(
+            ingestion: com.vectorbea.observability.analytics.AnalyticsIngestionService,
+            environment: String,
+        ): TelemetryClient {
+            log.info("[telemetry] in-process — no network hop, env={}", environment)
+            return TelemetryClient(endpoint = null, internalToken = null,
+                environment = environment, local = ingestion)
+        }
 
         fun fromEnv(): TelemetryClient? {
             val enabled = System.getenv("TELEMETRY_ENABLED")?.lowercase() == "true"
@@ -113,7 +183,7 @@ class TelemetryClient private constructor(
                 return null
             }
 
-            log.info("[telemetry] enabled — endpoint={} env={}", endpoint, env)
+            log.info("[telemetry] enabled over HTTP — endpoint={} env={}", endpoint, env)
             return TelemetryClient(endpoint = endpoint, internalToken = token, environment = env)
         }
     }
