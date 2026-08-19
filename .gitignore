@@ -71,3 +71,9 @@ storybook-static/
 *.key
 *.p12
 secrets/
+
+# Generated visual artifacts — Playwright/Storybook captures and print exports.
+# These were untracked noise in `git status` (264 files) and 110MB on disk.
+# Regenerate with `npm run test:visual` / `npm run capture:storybook`.
+screenshots/
+*.stackdump

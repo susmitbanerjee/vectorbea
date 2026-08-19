@@ -87,6 +87,30 @@ class HttpServer(
         exchange.requestHeaders.getFirst("X-Environment-Id")?.takeIf { it.isNotBlank() }
             ?.let { MDC.put(MdcKeys.ENVIRONMENT_ID, it) }
 
+        // The root span for the whole path. Everything downstream — the enqueue, the
+        // claim in another process, each node, each tool call — hangs off this one, so
+        // a single trace answers "what happened when the user pressed Run".
+        //
+        // Started here rather than after routing so a request rejected by auth or the
+        // rate limiter still produces a span. The rejected ones are the interesting
+        // ones during an incident, and instrumenting only the happy path is how you end
+        // up with a trace view that looks healthy while users cannot log in.
+        //
+        // The span's own trace id replaces the locally-generated one in MDC when
+        // tracing is live, so a log line and a trace agree on the identifier. With
+        // tracing off, the locally-generated id stays — it is still useful for
+        // correlating one request's log lines with each other.
+        val span = com.vectorbea.observability.tracing.Tracing.tracer()
+            .spanBuilder("${exchange.requestMethod} ${exchange.requestURI.path}")
+            .setSpanKind(io.opentelemetry.api.trace.SpanKind.SERVER)
+            .setAttribute("http.request.method", exchange.requestMethod)
+            .setAttribute("url.path", exchange.requestURI.path)
+            .startSpan()
+        span.spanContext.takeIf { it.isValid }?.let {
+            MDC.put(MdcKeys.TRACE_ID, it.traceId)
+            MDC.put(MdcKeys.SPAN_ID, it.spanId)
+        }
+
         var response: Response? = null
         try {
             // Parse request (may throw ApiError.ValidationError for body-too-large)
@@ -133,6 +157,21 @@ class HttpServer(
                     "Content-Type" to "application/json; charset=utf-8",
                 ) + corsHeaders(exchange),
             )
+        } finally {
+            // The SSE branch above `return`s from inside the try, so the span MUST be
+            // ended here rather than after `send`. Ending it only on the normal path
+            // would leak one span per SSE connection — unbounded, and invisible until
+            // the exporter's queue starts dropping.
+            //
+            // A streaming response has no single status code at this point, so the
+            // attribute is simply absent rather than guessed.
+            response?.let {
+                span.setAttribute("http.response.status_code", it.status.toLong())
+                if (it.status >= 500) {
+                    span.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR)
+                }
+            }
+            span.end()
         }
 
         send(exchange, response, requestId)

@@ -29,16 +29,47 @@ export type AssertResult =
   | { error: NextResponse; user?: never }
   | { error: null; user: { id: string; email?: string | null; role: WorkspaceRole } };
 
-export type WorkspaceRole = "viewer" | "editor" | "admin";
+/**
+ * The workspace roles, matching the database.
+ *
+ * These are exactly the values permitted by the CHECK constraint in
+ * `V006__auth_schema_complete.sql`:
+ *
+ *     CHECK (role IN ('owner', 'admin', 'developer', 'viewer'))
+ *
+ * This union previously read `"viewer" | "editor" | "admin"`, which agreed with
+ * the database on only two of four values, and the disagreement was silent:
+ *
+ *   - `owner` and `developer` are real, stored roles that were not in the union,
+ *     so `normalizeRole` fell through and returned `"viewer"`. Every OAuth
+ *     sign-up is inserted as `owner` (see `lib/auth/oauth-upsert.ts`), so
+ *     **every owner was treated as a viewer** by `hasWorkspaceRole` — not a
+ *     display bug, an authorization one. It is what made the Settings page say
+ *     "Your role: Viewer" beside a row saying Owner.
+ *   - `editor` was in the union but is NOT a permitted database value, so
+ *     writing it violates the constraint. It is accepted here as a legacy alias
+ *     for `developer` rather than dropped, because invitation rows created
+ *     before this fix carry it.
+ */
+export type WorkspaceRole = "viewer" | "developer" | "admin" | "owner";
 
 const ROLE_LEVEL: Record<WorkspaceRole, number> = {
   viewer: 0,
-  editor: 1,
+  developer: 1,
   admin: 2,
+  owner: 3,
 };
 
 function normalizeRole(role: unknown): WorkspaceRole {
-  return role === "admin" || role === "editor" || role === "viewer" ? role : "viewer";
+  if (role === "owner" || role === "admin" || role === "developer" || role === "viewer") {
+    return role;
+  }
+  // Legacy alias. `editor` was never a valid database value; treat it as the
+  // role it was meant to be rather than silently demoting the member.
+  if (role === "editor") return "developer";
+  // Unknown roles still fall back to the least privilege. That default was the
+  // right instinct — it was the incomplete union above it that was wrong.
+  return "viewer";
 }
 
 export function hasWorkspaceRole(role: WorkspaceRole, required: WorkspaceRole) {

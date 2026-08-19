@@ -163,6 +163,31 @@ export function mapOAuthError(code: string): AuthErrorState {
     };
   }
 
+  if (code === "provider_error") {
+    return {
+      kind: "unknown",
+      title: "Your provider refused the request",
+      body: "The provider rejected the sign-in before it reached us, which usually means its app configuration changed. Try another provider while we look into it.",
+      action: { label: "Contact support", href: "/support" },
+    };
+  }
+
+  if (code === "code_expired") {
+    return {
+      kind: "unknown",
+      title: "That sign-in link expired",
+      body: "The hand-back from your provider is only valid for a few minutes. Choose a provider below to start again.",
+    };
+  }
+
+  if (code === "code_used") {
+    return {
+      kind: "unknown",
+      title: "That sign-in link was already used",
+      body: "Each hand-back works once, so reloading the callback page will not work. Choose a provider below to start again.",
+    };
+  }
+
   return {
     kind: "unknown",
     // Still no "Something went wrong": say what we know and what to do.

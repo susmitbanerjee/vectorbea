@@ -34,7 +34,8 @@
     "capture:governance": "node tests/visual/capture-governance.mjs",
     "capture:workflows": "node tests/visual/capture-workflows.mjs",
     "capture:inspector": "node tests/visual/capture-inspector.mjs",
-    "capture:architect": "node tests/visual/capture-architect.mjs"
+    "capture:architect": "node tests/visual/capture-architect.mjs",
+    "check:fixtures": "node ../../scripts/check-fixtures.mjs"
   },
   "prisma": {
     "schema": "../../prisma/schema.prisma",
@@ -72,6 +73,8 @@
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.49.8",
     "@tailwindcss/typography": "^0.5.19",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-query-devtools": "^5.101.4",
     "@tanstack/react-table": "^9.1.2",
     "@tanstack/react-virtual": "^3.14.9",
     "@types/canvas-confetti": "^1.9.0",
@@ -100,7 +103,8 @@
     "sonner": "^2.0.7",
     "stripe": "^18.4.0",
     "tailwind-merge": "^2.6.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@vectorbea/shared": "*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

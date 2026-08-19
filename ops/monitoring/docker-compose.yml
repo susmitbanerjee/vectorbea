@@ -1,0 +1,161 @@
+# The monitoring stack for the Hetzner box. All free, all self-hosted.
+#
+#   cd ops/monitoring && docker compose up -d
+#
+# WHY SELF-HOSTED
+# ---------------
+# §4.2 of the backend architecture is that the whole platform runs on a €6/month
+# budget. A hosted APM would cost several times the entire infrastructure bill, and
+# the per-host or per-series pricing models all punish exactly the thing this system
+# does: many short spans and a metric labelled by workspace.
+#
+# The trade is real and worth stating: this stack is one box with no replication. If
+# the box dies, the monitoring dies with it — including the monitoring that would have
+# told you the box died. Uptime alerting therefore has to come from outside; a free
+# external ping on the API's /health closes that gap and is NOT part of this file.
+#
+# SIZING
+# ------
+# Memory limits are set on every service because they share a box with nothing to
+# spare, and an unbounded Prometheus will happily use everything. The limits below fit
+# 4GB with room for the application; raise them together with the box, not one at a
+# time.
+
+name: vectorbea-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # 15d, as specified. At the current series count this is well under a gigabyte;
+      # the limit exists so a cardinality mistake fills a bounded volume instead of
+      # the root filesystem, which would take the application down with it.
+      - '--storage.tsdb.retention.time=15d'
+      - '--storage.tsdb.retention.size=4GB'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      # Bound to localhost. Prometheus has no authentication of its own and its
+      # query API can read every metric, including per-workspace series. Reach it
+      # through Grafana, or over an SSH tunnel.
+      - "127.0.0.1:9091:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  loki:
+    image: grafana/loki:3.1.1
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Ships the JSON log lines the services write to stdout.
+  #
+  # Promtail reads Docker's container logs rather than requiring the services to push,
+  # so a service that crashes on startup still has its logs collected — which is when
+  # you most want them.
+  promtail:
+    image: grafana/promtail:3.1.1
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yml"]
+    volumes:
+      - ./otel/config.yml:/etc/otel/config.yml:ro
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC — what the services export to
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      # No anonymous access. The dashboards show per-workspace cost and volume, which
+      # is customer data even though it is aggregate.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Dashboards and datasources are provisioned from this repo, not clicked
+      # together in the UI. A dashboard that exists only in Grafana's database is one
+      # box failure away from being gone, and is not reviewable.
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

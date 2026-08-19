@@ -104,6 +104,134 @@ const config = [
     files: ["src/components/ui/provider-brand-colours.ts"],
     rules: { "no-restricted-syntax": "off" },
   },
+
+  // ── Fixtures must not reach production ──────────────────────────────────
+  //
+  // `src/mocks/**` is design-review data. It is imported by 87 component files
+  // (the redesign was built against fixtures before the API existed), and it
+  // reaches three production chunks including `layout-*.js` — so fabricated
+  // domain data is downloaded on every page load.
+  //
+  // This rule is a RATCHET, not a big-bang ban. Deleting the directory would
+  // break 87 files at once; leaving the rule off lets the number grow. So the
+  // existing importers are enumerated below and every other file is an error.
+  // A file leaves the list when its screen is wired to the API, and the list is
+  // the migration backlog — `npm run check:fixtures` prints what is left.
+  //
+  // The list only ever shrinks. Adding to it should be treated as a mistake.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      // Mock mode itself: the transport swap, and the ONE place fixtures are
+      // legitimately read — behind NEXT_PUBLIC_DATA_MODE.
+      "src/lib/api/mock-transport.ts",
+      "src/mocks/**",
+      // Stories are design-review surfaces and never ship.
+      "src/**/*.stories.tsx",
+      // ── Migration baseline. Shrinks as screens are wired. ────────────────
+      "src/components/app/admin/audit-view.tsx",
+      "src/components/app/admin/members-view.tsx",
+      "src/components/app/admin/settings-view.tsx",
+      "src/components/app/admin/usage-view.tsx",
+      "src/components/app/approvals/approvals-view.tsx",
+      "src/components/app/approvals/gate-card.tsx",
+      "src/components/app/approvals/sla-ring.tsx",
+      "src/components/app/architect/architect-view.tsx",
+      "src/components/app/architect/blueprint-stream.tsx",
+      "src/components/app/auth/ambient-run.tsx",
+      "src/components/app/builder/builder-view.tsx",
+      "src/components/app/builder/canvas.tsx",
+      "src/components/app/builder/comments.tsx",
+      "src/components/app/builder/inspector/advanced-tab.tsx",
+      "src/components/app/builder/inspector/configure-tab.tsx",
+      "src/components/app/builder/inspector/inputs-tab.tsx",
+      "src/components/app/builder/inspector/node-inspector.tsx",
+      "src/components/app/builder/inspector/output-test-tabs.tsx",
+      "src/components/app/builder/keyboard-graph.ts",
+      "src/components/app/builder/layout.ts",
+      "src/components/app/builder/palette.tsx",
+      "src/components/app/builder/simulate-panel.tsx",
+      "src/components/app/builder/store.ts",
+      "src/components/app/builder/top-bar.tsx",
+      "src/components/app/builder/validation.ts",
+      "src/components/app/builder/workflow-edge.tsx",
+      "src/components/app/builder/workflow-node.tsx",
+      "src/components/app/connectivity/connections-view.tsx",
+      "src/components/app/connectivity/integrations-view.tsx",
+      "src/components/app/connectivity/triggers-view.tsx",
+      "src/components/app/control/activity-stream.tsx",
+      "src/components/app/control/attention-feed.tsx",
+      "src/components/app/control/control-view.tsx",
+      "src/components/app/control/detail-band.tsx",
+      "src/components/app/control/empty-workspace.tsx",
+      "src/components/app/control/fleet-heatstrip.tsx",
+      "src/components/app/control/health-strip.tsx",
+      "src/components/app/control/time-range.tsx",
+      "src/components/app/incidents/incident-detail.tsx",
+      "src/components/app/incidents/incidents-view.tsx",
+      "src/components/app/registry/agent-detail.tsx",
+      "src/components/app/registry/agents-view.tsx",
+      "src/components/app/registry/atoms.tsx",
+      "src/components/app/registry/tool-detail.tsx",
+      "src/components/app/registry/tools-view.tsx",
+      "src/components/app/ribbon/checkpoint-ribbon.tsx",
+      "src/components/app/ribbon/geometry.ts",
+      "src/components/app/run-detail/canvas-mirror.tsx",
+      "src/components/app/run-detail/compare-and-events.tsx",
+      "src/components/app/run-detail/inspector.tsx",
+      "src/components/app/run-detail/log-stream.tsx",
+      "src/components/app/run-detail/recovery-card.tsx",
+      "src/components/app/run-detail/replay.tsx",
+      "src/components/app/run-detail/run-detail-view.tsx",
+      "src/components/app/run-detail/run-header.tsx",
+      "src/components/app/run-detail/step-timeline.tsx",
+      "src/components/app/runs/bulk-bar.tsx",
+      "src/components/app/runs/failure-clusters.tsx",
+      "src/components/app/runs/quick-peek.tsx",
+      "src/components/app/runs/runs-view.tsx",
+      "src/components/app/shell/app-shell.tsx",
+      "src/components/app/shell/command-palette.tsx",
+      "src/components/app/shell/environment.tsx",
+      "src/components/app/shell/notification-inbox.tsx",
+      "src/components/app/shell/sidebar.tsx",
+      "src/components/app/shell/topbar.tsx",
+      "src/components/app/shell/workspace-switcher.tsx",
+      "src/components/app/templates/templates-view.tsx",
+      "src/components/app/workflows/atoms.tsx",
+      "src/components/app/workflows/bulk-bar.tsx",
+      "src/components/app/workflows/config-diff.tsx",
+      "src/components/app/workflows/graph-canvas.tsx",
+      "src/components/app/workflows/overview.tsx",
+      "src/components/app/workflows/publish-flow.tsx",
+      "src/components/app/workflows/row-actions.tsx",
+      "src/components/app/workflows/version-history.tsx",
+      "src/components/app/workflows/workflow-cards.tsx",
+      "src/components/app/workflows/workflows-view.tsx",
+      "src/components/charts/burndown.tsx",
+      "src/components/charts/cost-trend.tsx",
+      "src/components/charts/heatstrip.tsx",
+      "src/components/charts/latency-distribution.tsx",
+      "src/components/marketing/landing.tsx",
+      "src/components/marketing/recovery-loop.tsx",
+      "src/content/docs/bodies.tsx",
+      "src/lib/api/client.ts",
+      "src/lib/query.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["~/mocks", "~/mocks/*"],
+              message:
+                "Fixtures must not be imported outside mock mode. This data is fabricated and currently ships to production. Read from the API via ~/lib/api, and render <NotAvailableYet> where the endpoint does not exist yet. See docs/integration/API-GAPS.md.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export default config;

@@ -137,6 +137,19 @@ class RedisStreamsWorkflowQueue(
             if (job.debugMode) put("debugMode", "true")
             // Audit: who triggered this run (app_users.id, verified server-side from JWT)
             if (job.requestedByUserId != null) put("requestedByUserId", job.requestedByUserId)
+
+            // The trace context travels with the job.
+            //
+            // This is the field that keeps a trace whole across the queue. Without it
+            // the API's span ends at enqueue and the worker starts an unrelated root,
+            // so the one interval nobody can otherwise account for — how long the run
+            // waited before a worker picked it up — belongs to no trace at all.
+            //
+            // `inject` is a no-op when tracing is disabled, so the message is
+            // byte-identical to one written before this existed. That matters: these
+            // fields feed idempotency reasoning, and a key that appears and disappears
+            // with a feature flag is a key you cannot reason about.
+            com.vectorbea.observability.tracing.Tracing.inject(this as MutableMap<String, String>)
         }
 
         /**

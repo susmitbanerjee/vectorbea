@@ -41,6 +41,15 @@ dependencies {
     implementation("io.opentelemetry:opentelemetry-exporter-otlp:1.40.0")
     implementation("io.opentelemetry:opentelemetry-sdk-extension-autoconfigure:1.40.0")
     implementation("io.opentelemetry:opentelemetry-context:1.40.0")
+    // Carries the span context across coroutine suspension points.
+    //
+    // `Span.makeCurrent()` returns a thread-local Scope that must be closed on the
+    // thread that opened it. A coroutine can resume on a different thread, so the
+    // thread-local approach silently attributes work to the wrong span — or to none.
+    // `asContextElement()` puts the context in the coroutine context instead, where it
+    // travels with the coroutine rather than with the thread.
+    api("io.opentelemetry:opentelemetry-extension-kotlin:1.40.0")
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")

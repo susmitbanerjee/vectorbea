@@ -1,0 +1,66 @@
+# Where the three alerts go.
+#
+# §6 says "route to a channel you actually read". For a solo developer that is email
+# and a phone-capable channel, not a #alerts Slack room that fills with noise and gets
+# muted in week two.
+#
+# CONFIGURE ONE OF THESE AND DELETE THE OTHERS. A receiver list with three half-filled
+# entries is a config that silently drops alerts.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: primary
+  # Group all three together: if the box is in trouble, more than one will fire, and
+  # three separate notifications about one incident is how you learn to ignore them.
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  # Re-notify every 4 hours while still firing. Long, deliberately — these three alerts
+  # all describe conditions that persist until someone acts, and a 30-minute repeat
+  # would turn an unfixed problem into a reason to silence the alert.
+  repeat_interval: 4h
+
+receivers:
+  - name: primary
+    # ── Option A: email ───────────────────────────────────────────────────
+    # Works with any SMTP provider. Resend and Postmark both have free tiers that
+    # cover three alerts.
+    email_configs:
+      - to: '${ALERT_EMAIL:-}'
+        from: 'alerts@vectorbea.com'
+        smarthost: '${SMTP_HOST:-smtp.resend.com}:587'
+        auth_username: '${SMTP_USER:-resend}'
+        auth_password: '${SMTP_PASSWORD:-}'
+        send_resolved: true
+        headers:
+          Subject: '[vectorbea] {{ .CommonAnnotations.summary }}'
+        # The action is in the body, not just the subject. The subject tells you
+        # something is wrong; the body has to tell you what to do about it.
+        text: |
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+
+          {{ .Annotations.description }}
+
+          WHAT TO DO:
+          {{ .Annotations.action }}
+
+          Started: {{ .StartsAt }}
+          {{ end }}
+
+    # ── Option B: a webhook you own ───────────────────────────────────────
+    # Uncomment to POST to a Telegram bot, ntfy topic, or anything else that reaches
+    # a phone. Delete the email_configs block above if you use this instead.
+    #
+    # webhook_configs:
+    #   - url: '${ALERT_WEBHOOK_URL}'
+    #     send_resolved: true
+
+inhibit_rules:
+  # A dying fleet makes everything slow, so the saturation alert is redundant while
+  # the lease-expiry alert is firing. Suppressing it keeps one incident to one page.
+  - source_matchers: [alertname = "WorkersDyingOrOverloaded"]
+    target_matchers: [alertname = "SystemSaturated"]
+    equal: ['environment']

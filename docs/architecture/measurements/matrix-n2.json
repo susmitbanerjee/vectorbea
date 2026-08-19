@@ -1,0 +1,289 @@
+{
+  "tag": "n2",
+  "at": "2026-08-19T03:30:01.876Z",
+  "results": [
+    {
+      "scenario": "b",
+      "name": "Agent saturation — 20 tenants × 1 agent workflow",
+      "tag": "n2",
+      "at": "2026-08-19T03:17:31.887Z",
+      "enqueued": 20,
+      "completed": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 0,
+      "wallClockSeconds": 28.79,
+      "enqueueSeconds": 1.659,
+      "throughputPerSec": 0.6946856547412296,
+      "wait": {
+        "n": 20,
+        "p50": 0.171021,
+        "p95": 16.749475,
+        "p99": 16.977203,
+        "max": 16.977203
+      },
+      "split": null,
+      "fairness": 1,
+      "completedByTenant": {
+        "loadtest-t01": 1,
+        "loadtest-t02": 1,
+        "loadtest-t03": 1,
+        "loadtest-t04": 1,
+        "loadtest-t05": 1,
+        "loadtest-t06": 1,
+        "loadtest-t07": 1,
+        "loadtest-t08": 1,
+        "loadtest-t09": 1,
+        "loadtest-t10": 1,
+        "loadtest-t11": 1,
+        "loadtest-t12": 1,
+        "loadtest-t13": 1,
+        "loadtest-t14": 1,
+        "loadtest-t15": 1,
+        "loadtest-t16": 1,
+        "loadtest-t17": 1,
+        "loadtest-t18": 1,
+        "loadtest-t19": 1,
+        "loadtest-t20": 1
+      },
+      "peakQueueDepth": 10,
+      "peakSlotsActive": {
+        "unknown": 0
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 1,
+      "peakTenantClassConcurrency": 1,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 46.816816,
+        "peakMB": 61.678728,
+        "endMB": 58.65488,
+        "slopeMBPerHour": null
+      },
+      "threads": {
+        "start": 56,
+        "peak": 154,
+        "end": 153
+      },
+      "dbConnections": {
+        "start": 32,
+        "peak": 33,
+        "end": 32,
+        "slopePerHour": null
+      },
+      "guards": {
+        "throttled": 0,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": 0.025,
+      "samples": 29,
+      "scrapeFailures": 0,
+      "note": null,
+      "steps": null
+    },
+    {
+      "scenario": "d",
+      "name": "Abusive tenant — 1 floods 500 runs + 10 tenants × 2 runs",
+      "tag": "n2",
+      "at": "2026-08-19T03:26:11.793Z",
+      "enqueued": 520,
+      "completed": 520,
+      "succeeded": 520,
+      "failed": 0,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 0,
+      "wallClockSeconds": 517.759,
+      "enqueueSeconds": 14.367,
+      "throughputPerSec": 1.004328268557379,
+      "wait": {
+        "n": 520,
+        "p50": 248.119246,
+        "p95": 478.918256,
+        "p99": 498.583904,
+        "max": 504.462645
+      },
+      "split": {
+        "abusive": {
+          "n": 500,
+          "completed": 500,
+          "succeeded": 500,
+          "waitP50": 257.796133,
+          "waitP95": 478.936175,
+          "waitP99": 498.583904,
+          "waitMax": 504.462645
+        },
+        "normal": {
+          "n": 20,
+          "completed": 20,
+          "succeeded": 20,
+          "waitP50": 0.068296,
+          "waitP95": 5.114531,
+          "waitP99": 5.314865,
+          "waitMax": 5.314865
+        }
+      },
+      "fairness": 250,
+      "completedByTenant": {
+        "loadtest-t01": 500,
+        "loadtest-t02": 2,
+        "loadtest-t03": 2,
+        "loadtest-t04": 2,
+        "loadtest-t05": 2,
+        "loadtest-t06": 2,
+        "loadtest-t07": 2,
+        "loadtest-t08": 2,
+        "loadtest-t09": 2,
+        "loadtest-t10": 2,
+        "loadtest-t11": 2
+      },
+      "peakQueueDepth": 494,
+      "peakSlotsActive": {
+        "unknown": 0
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 2,
+      "peakTenantClassConcurrency": 2,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 61.800608,
+        "peakMB": 67.82988,
+        "endMB": 47.86088,
+        "slopeMBPerHour": 6.697337402126034
+      },
+      "threads": {
+        "start": 151,
+        "peak": 165,
+        "end": 155
+      },
+      "dbConnections": {
+        "start": 32,
+        "peak": 33,
+        "end": 31,
+        "slopePerHour": -3.8786529940318886
+      },
+      "guards": {
+        "throttled": 0,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": 0.05,
+      "samples": 514,
+      "scrapeFailures": 0,
+      "note": null,
+      "steps": null
+    },
+    {
+      "scenario": "e",
+      "name": "Sustained — 200 concurrent for 3 minutes",
+      "tag": "n2",
+      "at": "2026-08-19T03:30:01.871Z",
+      "enqueued": 1427,
+      "completed": 1427,
+      "succeeded": 1427,
+      "failed": 0,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 0,
+      "wallClockSeconds": 227.565,
+      "enqueueSeconds": 185.693,
+      "throughputPerSec": 6.270735833717839,
+      "wait": {
+        "n": 1427,
+        "p50": 25.572172,
+        "p95": 32.145632,
+        "p99": 36.076685,
+        "max": 40.075432
+      },
+      "split": null,
+      "fairness": 1.0140845070422535,
+      "completedByTenant": {
+        "loadtest-t01": 72,
+        "loadtest-t02": 72,
+        "loadtest-t03": 72,
+        "loadtest-t04": 72,
+        "loadtest-t05": 72,
+        "loadtest-t06": 72,
+        "loadtest-t07": 72,
+        "loadtest-t08": 71,
+        "loadtest-t09": 71,
+        "loadtest-t10": 71,
+        "loadtest-t11": 71,
+        "loadtest-t12": 71,
+        "loadtest-t13": 71,
+        "loadtest-t14": 71,
+        "loadtest-t15": 71,
+        "loadtest-t16": 71,
+        "loadtest-t17": 71,
+        "loadtest-t18": 71,
+        "loadtest-t19": 71,
+        "loadtest-t20": 71
+      },
+      "peakQueueDepth": 193,
+      "peakSlotsActive": {
+        "unknown": 0
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 2,
+      "peakTenantClassConcurrency": 2,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 52.055184,
+        "peakMB": 70.11856,
+        "endMB": 60.88896,
+        "slopeMBPerHour": null
+      },
+      "threads": {
+        "start": 155,
+        "peak": 157,
+        "end": 156
+      },
+      "dbConnections": {
+        "start": 32,
+        "peak": 39,
+        "end": 31,
+        "slopePerHour": null
+      },
+      "guards": {
+        "throttled": 0,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": 0.05,
+      "samples": 226,
+      "scrapeFailures": 0,
+      "note": "held ~200 in flight for 3min; 1427 runs total (1227 topped up)",
+      "steps": null
+    }
+  ]
+}

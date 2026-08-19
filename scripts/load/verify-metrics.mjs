@@ -69,6 +69,16 @@ function findMetric(body, name) {
   return { kind, samples };
 }
 
+/**
+ * Real labels only.
+ *
+ * `le` is the histogram's own bucket boundary, not a dimension anyone chose. Counting it
+ * made an empty histogram look like a labelled one with the wrong labels — reported as
+ * a hard failure when the truth was "no node has executed yet on a freshly started
+ * worker", which is not a defect.
+ */
+const STRUCTURAL_LABELS = new Set(['le', 'quantile']);
+
 function labelsOn(samples) {
   const found = new Set();
   for (const line of samples) {
@@ -76,7 +86,7 @@ function labelsOn(samples) {
     if (!m) continue;
     for (const pair of m[1].split(',')) {
       const k = pair.split('=')[0]?.trim();
-      if (k) found.add(k);
+      if (k && !STRUCTURAL_LABELS.has(k)) found.add(k);
     }
   }
   return found;

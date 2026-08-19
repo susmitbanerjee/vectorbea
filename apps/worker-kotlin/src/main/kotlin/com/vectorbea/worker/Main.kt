@@ -173,6 +173,16 @@ fun main() {
     // this a run is not replayable, so it is wired unconditionally.
     val modelCallRecorder = com.vectorbea.worker.replay.ModelCallRecorder(database.dataSource)
 
+    // Tracing, and the process identity every log line carries. Inert unless
+    // OTEL_ENABLED=true; never throws.
+    com.vectorbea.observability.logging.LogContext.identify("worker", config.workerId)
+    com.vectorbea.observability.tracing.Tracing.init(
+        serviceName = System.getenv("OTEL_SERVICE_NAME") ?: "vectorbea-worker",
+        endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        enabledFlag = System.getenv("OTEL_ENABLED")?.lowercase() == "true",
+        resourceAttributes = System.getenv("OTEL_RESOURCE_ATTRIBUTES"),
+    )
+
     // Output contracts - Layers 0 and 1 of the reliability defence. Wired
     // unconditionally: a node without a contract behaves exactly as before, and one
     // with a contract gets constrained decoding and validation before commit.

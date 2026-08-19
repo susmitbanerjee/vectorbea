@@ -375,6 +375,29 @@ class LlmNodeExecutor(
         }
 
         recordCall("ok", response = result)
+
+        // Cost, attributed. The event above already carries these numbers, but an event
+        // is a row in Postgres — you cannot graph a rate from it, and "what is this
+        // costing me right now" is a rate question.
+        //
+        // Micros because the counter is an integer: a call costing $0.0004 would
+        // truncate to zero dollars and the meter would read 0.00 while money was
+        // leaving the account.
+        run {
+            val ws = context.workspaceId.toString()
+            val wf = context.workflowId.toString()
+            WorkerMetrics.llmCallsTotal.inc(ws, model, "ok")
+            result.tokenCount?.let {
+                // The provider reports a single total here; split reporting arrives
+                // per-provider and is not yet normalised, so `direction="total"` is
+                // honest rather than a guess at the input/output ratio.
+                WorkerMetrics.llmTokensTotal.inc(ws, wf, model, "total", delta = it.toLong())
+            }
+            estimatedCostUsd?.let {
+                WorkerMetrics.llmCostMicros.inc(ws, wf, model, delta = Math.round(it * 1_000_000))
+            }
+        }
+
         emitEvent(context, node.id, EventType.LLM_CALL_COMPLETED, "success",
             title = "LLM call completed",
             summary = "provider=$provider model=$model durationMs=$durationMs" +

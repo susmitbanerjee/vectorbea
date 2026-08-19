@@ -8,6 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.context.Context
+import io.opentelemetry.extension.kotlin.asContextElement
 import io.opentelemetry.context.propagation.TextMapGetter
 import io.opentelemetry.context.propagation.TextMapSetter
 import com.vectorbea.observability.logging.LogContext
@@ -119,6 +120,54 @@ object Tracing {
 
         return try {
             span.makeCurrent().use { block(span) }
+        } catch (e: Throwable) {
+            span.recordException(e)
+            span.setStatus(StatusCode.ERROR, e.message ?: e::class.java.simpleName)
+            throw e
+        } finally {
+            span.end()
+            LogContext.put(LogContext.TRACE_ID, previousTrace)
+            LogContext.put(LogContext.SPAN_ID, previousSpan)
+        }
+    }
+
+    /**
+     * The suspending form, for work that crosses coroutine suspension points.
+     *
+     * NOT just [span] with a suspend lambda. `Span.makeCurrent()` returns a
+     * thread-local Scope that must be closed on the thread that opened it; a coroutine
+     * can resume anywhere, so using the thread-local form around a suspending block
+     * attributes the work after the first suspension to whatever span happens to be
+     * current on the resuming thread — usually none, occasionally another run's.
+     *
+     * That failure is invisible: the span exists, has a duration, and is simply missing
+     * its children. `asContextElement()` puts the context in the COROUTINE context, so
+     * it travels with the coroutine.
+     */
+    suspend fun <T> spanSuspending(
+        name: String,
+        kind: SpanKind = SpanKind.INTERNAL,
+        attributes: Map<String, String> = emptyMap(),
+        parent: Context? = null,
+        block: suspend (Span) -> T,
+    ): T {
+        val builder = tracer.spanBuilder(name).setSpanKind(kind)
+        parent?.let { builder.setParent(it) }
+        attributes.forEach { (k, v) -> builder.setAttribute(k, v) }
+        val span = builder.startSpan()
+
+        val previousTrace = LogContext.get(LogContext.TRACE_ID)
+        val previousSpan = LogContext.get(LogContext.SPAN_ID)
+        val ctx = span.spanContext
+        if (ctx.isValid) {
+            LogContext.put(LogContext.TRACE_ID, ctx.traceId)
+            LogContext.put(LogContext.SPAN_ID, ctx.spanId)
+        }
+
+        return try {
+            kotlinx.coroutines.withContext(
+                Context.current().with(span).asContextElement()
+            ) { block(span) }
         } catch (e: Throwable) {
             span.recordException(e)
             span.setStatus(StatusCode.ERROR, e.message ?: e::class.java.simpleName)

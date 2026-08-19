@@ -8,17 +8,22 @@ import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { AuthShell, AuthError, SsoButtons, Divider, type SsoProvider } from "./auth-shell";
 import type { AuthErrorState } from "./auth-errors";
+import { PasswordStrength, passwordMeetsRules } from "./password-strength";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    SIGN IN / SIGN UP
 
-   Identity providers only. There is no password on this screen because there is
-   no password to type: every account is federated through GitHub, Google,
-   Microsoft, or the workspace's own SAML identity provider.
+   Three ways in, in the order most people use them: a federated provider, an
+   email and password, or the workspace's own SAML identity provider.
 
-   The SAML route asks for a DOMAIN rather than an email address. It is the one
-   piece of text this screen collects, and it exists to route the browser to the
-   right identity provider — not to identify the person, which the IdP does.
+   Credentials sit BELOW the providers rather than above. Most accounts here are
+   federated, and leading with a password field asks the majority to read past
+   the thing they do not need. They are still a plain form, not a disclosure —
+   the people who do use a password use it every day.
+
+   The SAML route asks for a DOMAIN rather than an email address. It exists to
+   route the browser to the right identity provider — not to identify the person,
+   which the IdP does.
 
    Presentational. Every side effect arrives as a prop, so the container keeps
    the existing redirects untouched and this file can be exercised in every state
@@ -34,6 +39,8 @@ export interface AuthFormProps {
   onSso?: (provider: SsoProvider) => void;
   onSamlSso?: (domain: string) => void;
   onErrorAction?: (intent: NonNullable<AuthErrorState["action"]>["intent"]) => void;
+  /** Email/password submit. Omit to hide the credentials form entirely. */
+  onCredentials?: (email: string, password: string, fullName?: string) => void;
 }
 
 /** Labels, not validation: a domain that does not exist fails at the IdP, not here. */
@@ -49,9 +56,14 @@ function toDomain(value: string): string | null {
 }
 
 export function AuthForm({
-  mode, loading = false, error = null, onSso, onSamlSso, onErrorAction,
+  mode, loading = false, error = null, onSso, onSamlSso, onErrorAction, onCredentials,
 }: AuthFormProps) {
   const isSignup = mode === "signup";
+
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [fullName, setFullName] = React.useState("");
+  const [credentialsTouched, setCredentialsTouched] = React.useState(false);
 
   const [samlOpen, setSamlOpen] = React.useState(false);
   const [domainInput, setDomainInput] = React.useState("");
@@ -65,6 +77,18 @@ export function AuthForm({
   React.useEffect(() => {
     if (samlOpen) domainRef.current?.focus();
   }, [samlOpen]);
+
+  // Validation is intentionally shallow. A syntactically fine address can still
+  // be the wrong one, and the server is the only thing that knows — so this
+  // catches typos, then gets out of the way.
+  const emailLooksValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+  const passwordOk = isSignup ? passwordMeetsRules(password) : password.length > 0;
+  const credentialsValid = emailLooksValid && passwordOk;
+
+  const emailError =
+    !credentialsTouched || emailLooksValid || email.trim().length === 0
+      ? undefined
+      : "That does not look like an email address.";
 
   const domain = toDomain(domainInput);
   const domainError =
@@ -102,6 +126,86 @@ export function AuthForm({
       <SsoButtons onSelect={onSso} disabled={loading} verb={isSignup ? "Sign up" : "Continue"} />
 
       <Divider>or</Divider>
+
+      {onCredentials ? (
+        <form
+          noValidate
+          className="mb-4 grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setCredentialsTouched(true);
+            if (!credentialsValid || loading) return;
+            onCredentials(email.trim(), password, isSignup ? fullName.trim() || undefined : undefined);
+          }}
+        >
+          {isSignup ? (
+            <Field label="Full name" description="Shown to your teammates on runs and approvals.">
+              <Input
+                type="text"
+                autoComplete="name"
+                placeholder="Ada Lovelace"
+                value={fullName}
+                disabled={loading}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+            </Field>
+          ) : null}
+
+          <Field label="Email" required error={emailError}>
+            <Input
+              type="email"
+              inputMode="email"
+              autoComplete={isSignup ? "email" : "username"}
+              spellCheck={false}
+              placeholder="you@company.com"
+              value={email}
+              disabled={loading}
+              onChange={(e) => setEmail(e.target.value)}
+              onBlur={() => setCredentialsTouched(true)}
+            />
+          </Field>
+
+          <Field
+            label="Password"
+            required
+            description={
+              isSignup ? undefined : (
+                <Link
+                  href={"/forgot-password" as never}
+                  className="text-fg-link underline-offset-2 hover:underline"
+                >
+                  Forgot your password?
+                </Link>
+              )
+            }
+          >
+            <Input
+              type="password"
+              autoComplete={isSignup ? "new-password" : "current-password"}
+              value={password}
+              disabled={loading}
+              onChange={(e) => setPassword(e.target.value)}
+              onBlur={() => setCredentialsTouched(true)}
+            />
+          </Field>
+
+          {/* Only on sign-up. Grading a password someone chose months ago tells
+              them nothing they can act on at the moment they are typing it. */}
+          {isSignup ? <PasswordStrength value={password} /> : null}
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={loading}
+            loadingLabel={isSignup ? "Creating your account" : "Signing you in"}
+            disabled={!credentialsValid}
+          >
+            {isSignup ? "Create account" : "Sign in"}
+          </Button>
+        </form>
+      ) : null}
 
       {/* SAML. Collapsed by default: most people use one of the three above, and
           an always-open domain field reads as a sign-in form that it is not. */}

@@ -1,0 +1,81 @@
+{
+  "tag": "diag",
+  "at": "2026-08-19T02:05:59.222Z",
+  "results": [
+    {
+      "scenario": "c",
+      "name": "Fan-out — 1 workflow, 16 parallel branches",
+      "tag": "diag",
+      "at": "2026-08-19T02:05:59.217Z",
+      "enqueued": 2,
+      "completed": 2,
+      "succeeded": 0,
+      "failed": 2,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 100,
+      "wallClockSeconds": 2.095,
+      "enqueueSeconds": 0.05,
+      "throughputPerSec": 0.954653937947494,
+      "wait": {
+        "n": 2,
+        "p50": 0.308876,
+        "p95": 1.424609,
+        "p99": 1.424609,
+        "max": 1.424609
+      },
+      "split": null,
+      "fairness": 1,
+      "completedByTenant": {
+        "loadtest-t01": 2
+      },
+      "peakQueueDepth": 2,
+      "peakSlotsActive": {
+        "system": 0,
+        "agent": 0,
+        "long": 1,
+        "short": 0
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 0,
+      "peakTenantClassConcurrency": 0,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 32.0512,
+        "peakMB": 36.245504,
+        "endMB": 36.245504,
+        "slopeMBPerHour": null
+      },
+      "threads": {
+        "start": 49,
+        "peak": 50,
+        "end": 50
+      },
+      "dbConnections": {
+        "start": 16,
+        "peak": 16,
+        "end": 16,
+        "slopePerHour": null
+      },
+      "guards": {
+        "throttled": 4,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": null,
+      "samples": 3,
+      "scrapeFailures": 0,
+      "note": "2 runs × 8 branches = 16 concurrent branches from one tenant",
+      "steps": null
+    }
+  ]
+}

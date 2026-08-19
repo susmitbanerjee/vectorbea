@@ -31,7 +31,12 @@ let worstP95 = 0;
 for (const cls of ['short', 'long', 'agent', 'system']) {
   const n = value(samples, 'claim_duration_seconds_count', { class: cls });
   if (!n) continue;
-  const p = (q) => histogramQuantile(samples, 'claim_duration_seconds', { class: cls }, q);
+  // Renamed from `claim_duration_seconds` when the §5.4 metric set was aligned —
+  // the doc calls this `job_claim_latency_seconds` and the dashboards and the
+  // SystemSaturated alert both query that name. This script measured nothing between
+  // the rename and this fix, which is exactly the failure `verify-metrics.mjs` exists
+  // to catch and did not, because it checks the endpoint rather than the consumers.
+  const p = (q) => histogramQuantile(samples, 'job_claim_latency_seconds', { class: cls }, q);
   const p95 = p(0.95);
   if (p95 != null) worstP95 = Math.max(worstP95, p95);
   console.log(`| ${cls} | ${n} | ${ms(p(0.5))} | ${ms(p95)} | ${ms(p(0.99))} | ${p95 != null && p95 < 0.1 ? 'PASS' : 'FAIL'} |`);

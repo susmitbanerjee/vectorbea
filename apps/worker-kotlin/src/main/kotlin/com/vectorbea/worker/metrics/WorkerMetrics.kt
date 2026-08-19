@@ -26,9 +26,21 @@ internal class WCounter(val name: String, val help: String, val labelNames: List
         cells.getOrPut(LabelGuard.guard(name, lv.toList())) { AtomicLong(0) }.addAndGet(delta)
     }
     fun exposition() = buildString {
-        append("# HELP $name $help\n# TYPE $name counter\n")
-        if (cells.isEmpty()) append("${name}_total 0.0\n")
-        else cells.forEach { (lbs, c) -> append("${name}_total${ls(lbs)} ${c.get().toDouble()}\n") }
+        // The HELP/TYPE header must name the SAME family as the samples.
+        //
+        // This emitted `# TYPE lease_expiry counter` while the samples were named
+        // `lease_expiry_total` — so the declared family had no samples and the samples
+        // belonged to no declared family. Prometheus ingests it either way, which is why
+        // nobody noticed: the series exists but is UNTYPED, so nothing validates that
+        // `rate()` is being applied to a counter, and a type-aware consumer sees nothing
+        // at all.
+        //
+        // Found by scripts/load/verify-metrics.mjs, which looked for each §5.4 metric by
+        // its documented name and could not find five of them.
+        val family = "${name}_total"
+        append("# HELP $family $help\n# TYPE $family counter\n")
+        if (cells.isEmpty()) append("$family 0.0\n")
+        else cells.forEach { (lbs, c) -> append("$family${ls(lbs)} ${c.get().toDouble()}\n") }
     }
     private fun ls(v: List<String>): String {
         if (labelNames.isEmpty() || v.isEmpty()) return ""
@@ -583,6 +595,48 @@ object WorkerMetrics {
         } catch (_: Exception) { /* a scrape must not fail because Postgres is busy */ }
     }
 
+    // ── Cost ──────────────────────────────────────────────────────────────────
+    //
+    // ON THE CARDINALITY OF THESE THREE
+    // ---------------------------------
+    // `workspace` and `workflow` are both unbounded in principle — one series per
+    // (workspace, workflow, model) combination, retained for the full 15 days. That is
+    // the highest-cardinality thing in this process by a wide margin.
+    //
+    // It is accepted rather than avoided, for a specific reason: "which customer is
+    // costing me money" is the question this system's economics depend on, and it
+    // cannot be answered by an aggregate. LabelGuard caps each metric at 1,000 distinct
+    // label sets and collapses the rest into `overflow`, so the failure mode is a
+    // dashboard that stops distinguishing the long tail — not a worker that runs out of
+    // memory.
+    //
+    // If that cap is ever reached, the right move is to drop `workflow` from the labels
+    // and read per-workflow cost from `agent_runs.estimated_cost_usd` in Postgres,
+    // where it already lives and where cardinality is free. Prometheus is the wrong
+    // store for high-cardinality attribution; it is used here only because the
+    // cardinality is currently small and the convenience is real.
+
+    /** Tokens consumed, split by direction so input/output pricing can be applied. */
+    internal val llmTokensTotal = WCounter(
+        "llm_tokens", "Tokens consumed by model calls",
+        listOf("workspace", "workflow", "model", "direction"))
+
+    /**
+     * Estimated spend in USD micros.
+     *
+     * Micros rather than dollars because this is an integer counter and a fractional
+     * cent per call would truncate to zero — the metric would read 0.0 forever while
+     * real money was being spent, which is the worst possible failure for a cost meter.
+     * The dashboard divides by 1e6.
+     */
+    internal val llmCostMicros = WCounter(
+        "llm_cost_usd_micros", "Estimated model spend in USD micros",
+        listOf("workspace", "workflow", "model"))
+
+    /** Model calls, so cost per call and call volume are both available. */
+    internal val llmCallsTotal = WCounter(
+        "llm_calls", "Model calls made", listOf("workspace", "model", "outcome"))
+
     /** Refresh the JVM gauges. Called on each scrape. */
     private fun sampleJvm() {
         try {
@@ -684,6 +738,7 @@ object WorkerMetrics {
             tenantDbSlotsTotal, tenantDbSlotsActive, tenantDbQueueDepth, tenantDbRejectedTotal,
             workerSlotsAvailable, jobQueueDepth, jobExecutionDurationSeconds,
             dbPoolWaitSeconds, runSuspendedTotal,
+            llmTokensTotal, llmCostMicros, llmCallsTotal,
             jvmThreads, jvmThreadsPeak, jvmHeapUsedBytes, jvmHeapMaxBytes, jvmCpuSeconds, jvmCpuLoad,
         ).forEach { m ->
             try {

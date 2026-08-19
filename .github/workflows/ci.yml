@@ -32,6 +32,10 @@ jobs:
             web:
               - 'apps/web/**'
               - 'prisma/**'
+              # The API contracts live here and the web app typechecks against
+              # them, so a schema change can break the build without touching a
+              # file under apps/web.
+              - 'packages/shared/**'
             api:
               - 'apps/api-kotlin/**'
               # observability-kotlin compiles INTO the api via includeBuild, so a change
@@ -82,10 +86,23 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: package-lock.json
 
+      # Installed from the REPO ROOT, not apps/web. The web app depends on the
+      # workspace package @vectorbea/shared, which only resolves through the
+      # root workspaces config — `npm ci` inside apps/web cannot see it and
+      # would try (and fail) to fetch it from the registry.
       - name: Install dependencies
+        working-directory: .
         run: npm ci
+
+      # @vectorbea/shared publishes from dist/, so it must be compiled before
+      # anything typechecks against it. This is also the contract gate: if the
+      # Zod schemas in packages/shared stop compiling, the web build stops here
+      # rather than failing later with a confusing module-resolution error.
+      - name: Build shared contracts
+        working-directory: packages/shared
+        run: npm run build
 
       - name: TypeScript check
         run: npm run typecheck

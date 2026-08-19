@@ -1,0 +1,55 @@
+# Loki, single-binary, filesystem storage.
+#
+# No object store, no ring, no replication — one box, one process. Losing this loses
+# the logs, and that is an accepted trade at this size: the durable record of what a
+# run did lives in `run_events` in Postgres, which is backed up. Loki holds the
+# operational detail around it.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Matches Prometheus's 15d so a log line and a metric point are never available
+  # for different windows — following a spike from a graph into its logs and finding
+  # the logs already expired is a specific, avoidable frustration.
+  retention_period: 360h
+  # The services emit JSON with a fixed envelope; these bound what one misbehaving
+  # run can do to the disk.
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_line_size: 256kb
+  # Reject logs claiming to be from the future or the distant past, which is how a
+  # clock-skewed container corrupts a time range.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
+  retention_enabled: true

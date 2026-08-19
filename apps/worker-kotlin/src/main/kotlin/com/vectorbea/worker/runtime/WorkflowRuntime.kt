@@ -795,7 +795,23 @@ class WorkflowRuntime(
             val startedAt = System.nanoTime()
             var outcome = "ok"
             try {
-                val r = runIt()
+                // One span per node, a child of the run span the processor opened,
+                // which is itself a child of the API request that enqueued the job.
+                // That is the full path §5.4 asks for: request → enqueue → claim →
+                // node → tool call → completion, in one trace.
+                //
+                // The span wraps runIt() rather than the executor directly so a tool
+                // call made inside the executor becomes a grandchild automatically —
+                // OpenTelemetry's context is ambient within the coroutine, so nothing
+                // downstream has to be passed anything.
+                val r = com.vectorbea.observability.tracing.Tracing.spanSuspending(
+                    name = "node.${node.nodeType.value}",
+                    attributes = mapOf(
+                        "vectorbea.node_id" to node.id,
+                        "vectorbea.node_type" to node.nodeType.value,
+                        "vectorbea.run_id" to ctx.runId.toString(),
+                    ),
+                ) { runIt() }
                 if (r is NodeResult.Failed) outcome = "failed"
                 return r
             } catch (e: Throwable) {

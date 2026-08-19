@@ -42,9 +42,13 @@ class Counter(val name: String, val help: String, val labelNames: List<String> =
     fun total(): Long = cells.values.sumOf { it.get() }
 
     fun exposition(): String = buildString {
-        append("# HELP $name $help\n# TYPE $name counter\n")
-        if (cells.isEmpty()) append("${name}_total 0.0\n")
-        else cells.forEach { (labels, c) -> append("${name}_total${labelSet(labelNames, labels)} ${c.get().toDouble()}\n") }
+        // Header and samples must name the same family. Declaring `foo` while emitting
+        // `foo_total` leaves the samples untyped — see the note on the worker's
+        // equivalent, which is where this was found.
+        val family = "${name}_total"
+        append("# HELP $family $help\n# TYPE $family counter\n")
+        if (cells.isEmpty()) append("$family 0.0\n")
+        else cells.forEach { (labels, c) -> append("$family${labelSet(labelNames, labels)} ${c.get().toDouble()}\n") }
     }
 }
 

@@ -1,9 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
+import type { Route } from "next";
+
 import { AuthForm, type AuthMode } from "./auth-form";
-import { mapOAuthError, type AuthErrorState } from "./auth-errors";
+import { mapAuthError, mapOAuthError, NETWORK_ERROR, type AuthErrorState } from "./auth-errors";
 import type { SsoProvider } from "./auth-shell";
+import { CredentialError, signInWithPassword, signUpWithPassword } from "~/lib/auth/session";
+import { getAccessToken } from "~/lib/auth/token";
 
 const OAUTH_ROUTES: Record<SsoProvider, string> = {
   github: "/api/auth/github",
@@ -14,25 +19,32 @@ const OAUTH_ROUTES: Record<SsoProvider, string> = {
 /**
  * Container for sign-in and sign-up.
  *
- * THE NETWORK BEHAVIOUR IS UNCHANGED from the screen this replaces: the same
- * OAuth initiators, the same SAML route, and the same open-redirect guard on
- * `next`. What changed is that credentials are no longer an option — the
- * email/password POST to /api/auth/{signin,signup} is gone from the UI, though
- * the endpoints themselves are untouched.
+ * The OAuth initiators are unchanged: they are server route handlers, and they
+ * are server-side specifically because starting PKCE from the browser races the
+ * `code_verifier` cookie write against the navigation to the provider — the bug
+ * that made the first click fail and the second succeed.
  *
- * That leaves the provider round-trip as the only way to fail, so the `?error=`
- * code those routes redirect back with is now rendered rather than discarded.
+ * Credentials post to the same-origin `/api/auth/{signin,signup}` handlers,
+ * which set the same httpOnly session cookie the OAuth callback sets. Both
+ * routes therefore land on ONE session model, and the token layer cannot tell
+ * which one was used.
  */
 export function AuthScreen({ mode, next, error }: { mode: AuthMode; next?: string; error?: string }) {
+  const router = useRouter();
+
   // Only ever honour same-site paths — never absolute URLs (open-redirect guard).
   const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
 
   const [loading, setLoading] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState<AuthErrorState | null>(null);
 
   const urlError = React.useMemo<AuthErrorState | null>(
     () => (error ? mapOAuthError(error) : null),
     [error],
   );
+
+  // A fresh submission supersedes whatever the redirect complained about.
+  const shownError = submitError ?? urlError;
 
   const onSso = React.useCallback((provider: SsoProvider) => {
     setLoading(true);
@@ -44,6 +56,34 @@ export function AuthScreen({ mode, next, error }: { mode: AuthMode; next?: strin
     setLoading(true);
     window.location.assign(`/api/auth/saml?domain=${encodeURIComponent(domain)}`);
   }, []);
+
+  const onCredentials = React.useCallback(
+    async (email: string, password: string, fullName?: string) => {
+      setLoading(true);
+      setSubmitError(null);
+      try {
+        if (mode === "signup") await signUpWithPassword(email, password, fullName);
+        else await signInWithPassword(email, password);
+
+        // Pull the token that goes with the cookie the handler just set, so the
+        // destination page starts with a warm session instead of resolving one.
+        await getAccessToken({ forceRefresh: true });
+
+        router.replace((safeNext ?? "/control") as Route);
+        router.refresh();
+      } catch (cause) {
+        setLoading(false);
+        if (cause instanceof CredentialError) {
+          setSubmitError(
+            cause.status === 0 ? NETWORK_ERROR : mapAuthError(cause.message, cause.status, email),
+          );
+          return;
+        }
+        setSubmitError(mapAuthError(undefined, 500, email));
+      }
+    },
+    [mode, router, safeNext],
+  );
 
   const onErrorAction = React.useCallback(
     (intent: NonNullable<AuthErrorState["action"]>["intent"]) => {
@@ -59,9 +99,10 @@ export function AuthScreen({ mode, next, error }: { mode: AuthMode; next?: strin
     <AuthForm
       mode={mode}
       loading={loading}
-      error={urlError}
+      error={shownError}
       onSso={onSso}
       onSamlSso={onSamlSso}
+      onCredentials={(email, password, fullName) => void onCredentials(email, password, fullName)}
       onErrorAction={onErrorAction}
     />
   );

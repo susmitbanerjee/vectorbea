@@ -147,6 +147,31 @@ class RunProcessor(
      * Must not throw; all exceptions are caught and turned into RUN_FAILED events.
      */
     suspend fun process(job: WorkflowRunJob) {
+        // Rejoin the trace the API started.
+        //
+        // The parent context comes out of the job payload rather than from anything
+        // ambient, because the enqueuing request finished long ago in a different
+        // process. Parent-child rather than a span link: the claim genuinely IS caused
+        // by the enqueue and belongs in the same trace. Links are for fan-in.
+        //
+        // When the job carries no traceparent — tracing off, or a job enqueued before
+        // the field existed — `extractContext` returns null and this becomes a new root
+        // span rather than a failure.
+        val parent = com.vectorbea.observability.tracing.Tracing.extractContext(job.traceCarrier())
+        com.vectorbea.observability.tracing.Tracing.spanSuspending(
+            name = "run.${job.jobType.name.lowercase()}",
+            kind = io.opentelemetry.api.trace.SpanKind.CONSUMER,
+            attributes = mapOf(
+                "vectorbea.run_id" to job.runId.toString(),
+                "vectorbea.workflow_id" to job.workflowId.toString(),
+                "vectorbea.job_type" to job.jobType.name,
+                "vectorbea.worker_id" to workerId,
+            ),
+            parent = parent,
+        ) { processInSpan(job) }
+    }
+
+    private suspend fun processInSpan(job: WorkflowRunJob) {
         heartbeat.taskStarted()
         WorkerMetrics.activeTasks.inc(workerId)
         WorkerMetrics.runsQueued.inc()

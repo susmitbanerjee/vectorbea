@@ -54,7 +54,29 @@ data class WorkflowRunJob(
      * Defaults true so legacy messages and direct constructions are unaffected.
      */
     val inputProvided: Boolean = true,
+    /**
+     * W3C traceparent from the process that enqueued this job.
+     *
+     * This is what makes a trace survive the queue. In-process tracing is easy — the
+     * context is ambient and every child span finds its parent. The moment work crosses
+     * a queue the parent is in a different process that has already returned, and the
+     * trace breaks exactly where it becomes interesting: "the user pressed Run at 09:41
+     * and the node started at 09:46, where were those five minutes?" is a question that
+     * only spans the boundary.
+     *
+     * Carried as data, the same way the run id is. Null on jobs enqueued before this
+     * existed and on any deploy with tracing off, in which case the worker starts a new
+     * root span rather than refusing the job.
+     */
+    val traceparent: String? = null,
+    val tracestate: String? = null,
 ) {
+    /** The carrier shape [com.vectorbea.observability.tracing.Tracing] extracts from. */
+    fun traceCarrier(): Map<String, String> = buildMap {
+        traceparent?.let { put("traceparent", it) }
+        tracestate?.let { put("tracestate", it) }
+    }
+
     enum class JobType {
         START_RUN,
         RESUME_RUN,
@@ -98,6 +120,8 @@ data class WorkflowRunJob(
                     ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
                 requestedByUserId = fields["requestedByUserId"] ?: fields["requested_by_user_id"],
                 debugMode = (fields["debugMode"] ?: fields["debug_mode"])?.equals("true", ignoreCase = true) ?: false,
+                traceparent = fields["traceparent"],
+                tracestate = fields["tracestate"],
             )
         }
 

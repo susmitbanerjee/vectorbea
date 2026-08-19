@@ -84,6 +84,20 @@ fun main() {
     // still points at a remote collector.
     var telemetry = TelemetryClient.fromEnv()
 
+    // Tracing, and the process identity every log line carries.
+    //
+    // Both are set before anything else runs so that a failure during startup is
+    // already attributable. Tracing is inert unless OTEL_ENABLED=true and never throws
+    // — an observability layer that prevents the service from starting has inverted its
+    // own purpose.
+    com.vectorbea.observability.logging.LogContext.identify("api")
+    com.vectorbea.observability.tracing.Tracing.init(
+        serviceName = System.getenv("OTEL_SERVICE_NAME") ?: "vectorbea-api",
+        endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        enabledFlag = System.getenv("OTEL_ENABLED")?.lowercase() == "true",
+        resourceAttributes = System.getenv("OTEL_RESOURCE_ATTRIBUTES"),
+    )
+
     // Production startup validation — fail closed if critical config is missing
     config.validateForProduction()
     if (config.isProduction && !config.secretEncryptionKeyPresent) {
@@ -381,6 +395,9 @@ fun main() {
         WorkerRoutes(ds).register(router)
         // Fleet health for the Control page — liveness, load, headroom.
         com.vectorbea.api.routes.FleetStatusRoutes(ds).register(router)
+        // The Control page reads the same definitions the dashboards do — see the
+        // class doc for why this queries Postgres rather than proxying Prometheus.
+        com.vectorbea.api.routes.ControlMetricsRoutes(ds).register(router)
         // Dead-lettered jobs — the most actionable failure the platform emits.
         com.vectorbea.api.routes.DeadLetterRoutes(ds).register(router)
         // Queue position + wait reason — only answerable now the claim lives in
