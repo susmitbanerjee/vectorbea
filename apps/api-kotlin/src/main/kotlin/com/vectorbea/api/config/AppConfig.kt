@@ -35,7 +35,6 @@ data class AppConfig(
     val maxRequestBodyBytes: Int,
 
     // ── Private beta / production controls ─────────────────────────────────
-    val privateBetaMode: Boolean = false,
     val publicSignupEnabled: Boolean = true,
     /** Comma-separated admin email addresses */
     val adminEmails: Set<String> = emptySet(),
@@ -164,12 +163,9 @@ data class AppConfig(
             val architectApiKey  = env("AI_ARCHITECT_API_KEY") ?: env("OPENAI_API_KEY")
             val architectModel   = env("AI_ARCHITECT_MODEL") ?: "gpt-4o-mini"
 
-            // ── Private beta / production controls ───────────────────────────
-            // Safe production defaults: beta gate ON, signup CLOSED unless explicitly opened.
-            // In production (APP_ENV=production) these default to the restrictive direction.
+            // ── Production controls ─────────────────────────────────────────
+            // Signup remains closed by default in production.
             val isProductionEnv = appEnv == "production"
-            val privateBetaMode    = env("PRIVATE_BETA_MODE")?.lowercase()?.let { it == "true" }
-                ?: isProductionEnv   // production defaults to beta mode ON
             val publicSignupEnabled = env("PUBLIC_SIGNUP_ENABLED")?.lowercase()?.let { it != "false" }
                 ?: !isProductionEnv  // production defaults to signup CLOSED
             val adminEmails        = (env("ADMIN_EMAILS") ?: "")
@@ -196,7 +192,6 @@ data class AppConfig(
                 architectEnabled = architectEnabled,
                 architectApiKey  = architectApiKey,
                 architectModel   = architectModel,
-                privateBetaMode  = privateBetaMode,
                 publicSignupEnabled = publicSignupEnabled,
                 adminEmails      = adminEmails,
                 telemetryInternalToken = env("TELEMETRY_INTERNAL_TOKEN"),

@@ -20,10 +20,12 @@ import { QuickPeek } from "./quick-peek";
 import { TimeRangeControl } from "~/components/app/control/time-range";
 import { parseQuery, compileRunPredicate } from "~/lib/query";
 import { formatCost, formatDuration, formatTokens, EMPTY } from "~/lib/format";
-import { resolveRange, DEFAULT_RANGE, type TimeRangeId } from "~/mocks/control";
-import { RUNS } from "~/mocks/fixtures";
-import { makeRunsAtScale, clusterFailures, countByStatus } from "~/mocks/runs-scale";
-import type { Run, RunStatus } from "~/mocks/domain";
+import { resolveRange, DEFAULT_RANGE } from "~/lib/control/range";
+import type { TimeRangeId } from "~/lib/control/model";
+import { clusterFailures, countByStatus } from "~/lib/runs/derive";
+import type { Run, RunStatus } from "~/lib/runs/model";
+import { useApi } from "~/lib/api/api-provider";
+import { useRunsData } from "./use-runs-data";
 import {
   DurableRunIcon, IncidentIcon, ApprovalGateIcon, QueueDepthIcon, WorkerIcon,
 } from "~/components/icons/domain";
@@ -40,7 +42,7 @@ import type { IconComponent } from "~/components/icons/types";
    broken dependency rather than forty broken runs.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-const NOW = new Date("2026-08-11T14:20:00Z").getTime();
+const FROZEN_NOW = new Date("2026-08-11T14:20:00Z").getTime();
 
 const STATUS_META: Record<RunStatus, { label: string; icon: IconComponent; className: string }> = {
   succeeded: { label: "Succeeded", icon: DurableRunIcon, className: "text-status-success border-status-success-border bg-status-success-subtle" },
@@ -69,15 +71,17 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const api = useApi();
 
   const frozen = frozenProp ?? params.get("frozen") === "1";
-  const scale = Number(params.get("scale") ?? "0");
+  const now = frozen ? FROZEN_NOW : Date.now();
 
   /* ── URL-synced view state ──────────────────────────────────────────────── */
   const urlQuery = params.get("q") ?? "";
   const rangeId = (params.get("range") ?? DEFAULT_RANGE) as TimeRangeId;
   const stateParam = params.get("state") as TableStatus | null;
   const sortParam = params.get("sort") ?? "started:desc";
+  const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
 
   const sort = React.useMemo(
     () =>
@@ -111,10 +115,14 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
   const { views, save, remove, update } = useSavedViews();
 
   /* ── Data ───────────────────────────────────────────────────────────────── */
-  const allRuns = React.useMemo(
-    () => (scale > 0 ? makeRunsAtScale(scale) : RUNS),
-    [scale],
-  );
+  const data = useRunsData(page);
+  const allRuns = data.rows;
+
+  React.useEffect(() => {
+    if (data.loading || data.total === 0 || allRuns.length > 0) return;
+    const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
+    if (page > lastPage) setParams({ page: String(lastPage) });
+  }, [allRuns.length, data.loading, data.pageSize, data.total, page, setParams]);
 
   const range = resolveRange(rangeId);
 
@@ -136,15 +144,15 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
 
   const filtered = React.useMemo(() => {
     const parsed = parseQuery(deferredQuery);
-    const predicate = compileRunPredicate(parsed, NOW);
-    const floor = range.durationMs === null ? 0 : NOW - range.durationMs;
+    const predicate = compileRunPredicate(parsed, now);
+    const floor = range.durationMs === null ? 0 : now - range.durationMs;
     const out: Run[] = [];
     for (const run of allRuns) {
       if (Date.parse(run.startedAt) < floor) continue;
       if (predicate(run)) out.push(run);
     }
     return out;
-  }, [allRuns, deferredQuery, range.durationMs]);
+  }, [allRuns, deferredQuery, range.durationMs, now]);
 
   const sorted = React.useMemo(() => {
     if (sort.length === 0) return filtered;
@@ -186,9 +194,9 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
      clicked, because the table is range-scoped and the chip was not. Two
      numbers describing one filter must not disagree. */
   const inRange = React.useMemo(() => {
-    const floor = range.durationMs === null ? 0 : NOW - range.durationMs;
+    const floor = range.durationMs === null ? 0 : now - range.durationMs;
     return allRuns.filter((r) => Date.parse(r.startedAt) >= floor);
-  }, [allRuns, range.durationMs]);
+  }, [allRuns, range.durationMs, now]);
 
   const statusCounts = React.useMemo(() => countByStatus(inRange), [inRange]);
   const clusters = React.useMemo(() => clusterFailures(inRange), [inRange]);
@@ -197,20 +205,43 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
   const [peek, setPeek] = React.useState<{ run: Run; el: HTMLElement } | null>(null);
 
   /* ── State resolution ───────────────────────────────────────────────────── */
-  const [booted, setBooted] = React.useState(frozen);
-  React.useEffect(() => {
-    if (frozen) return;
-    const id = window.setTimeout(() => setBooted(true), 260);
-    return () => window.clearTimeout(id);
-  }, [frozen]);
-
   const status: TableStatus =
     forceState ??
     stateParam ??
-    (!booted ? "loading"
+    (data.loading ? "loading"
+      : data.error ? "error"
       : allRuns.length === 0 ? "empty"
       : sorted.length === 0 ? "no-results"
       : "ready");
+
+  const [operationError, setOperationError] = React.useState<string | null>(null);
+
+  const retryRuns = React.useCallback(async (runs: Run[]) => {
+    setOperationError(null);
+    try {
+      await Promise.all(runs.map((run) => {
+        const failedNode = run.nodes.find((node) => node.state === "failed");
+        return failedNode
+          ? api.runs.retryNode(run.id, failedNode.id, data.scope)
+          : api.runs.retry(run.id, data.scope);
+      }));
+      selection.clear();
+      await data.refetch();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "The retry request failed.");
+    }
+  }, [api, data, selection]);
+
+  const cancelRuns = React.useCallback(async (runs: Run[]) => {
+    setOperationError(null);
+    try {
+      await Promise.all(runs.map((run) => api.runs.cancel(run.id, data.scope)));
+      selection.clear();
+      await data.refetch();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "The cancellation request failed.");
+    }
+  }, [api, data, selection]);
 
   /* ── Columns ────────────────────────────────────────────────────────────── */
   const columns = React.useMemo<DataColumn<Run>[]>(() => [
@@ -252,15 +283,15 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       // The point of the page.
       id: "ribbon", header: "Checkpoints", width: 168, minWidth: 96,
       skeletonWidth: 130,
-      cell: (run) => (
-        <CheckpointRibbon
-          nodes={run.nodes}
-          size="xs"
-          runId={run.id}
-          maxCells={40}
-          className="w-full"
-        />
-      ),
+      cell: (run) => run.nodes.length > 0 ? (
+          <CheckpointRibbon
+            nodes={run.nodes}
+            size="xs"
+            runId={run.id}
+            maxCells={40}
+            className="w-full"
+          />
+        ) : <Text variant="caption" tone="muted">{EMPTY}</Text>,
     },
     {
       id: "trigger", header: "Trigger", width: 104, minWidth: 80,
@@ -290,6 +321,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       skeletonWidth: 34,
       cell: (run) => {
         const committed = run.nodes.filter((n) => n.state === "committed" || n.state === "recovered").length;
+        if (run.nodes.length === 0) return <Text variant="caption" tone="muted">{EMPTY}</Text>;
         const partial = committed > 0 && committed < run.nodes.length;
         return (
           <Text
@@ -325,7 +357,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       id: "started", header: "Started", width: 104, minWidth: 84,
       sortValue: (r) => Date.parse(r.startedAt),
       skeletonWidth: 56,
-      cell: (run) => <StartedCell startedAt={run.startedAt} />,
+      cell: (run) => <StartedCell startedAt={run.startedAt} now={now} />,
     },
     {
       id: "actions", header: "", width: 40, locked: true, skeletonWidth: 14,
@@ -347,7 +379,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
         </span>
       ),
     },
-  ], [selection]);
+  ], [selection, now]);
 
   /* ── Quick filters ──────────────────────────────────────────────────────── */
   const quickFilters: QuickFilter[] = [
@@ -361,7 +393,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
 
   const applyQuery = (query: string) => {
     setQueryInput(query);
-    setParams({ q: query });
+    setParams({ q: query, page: null });
     selection.clear();
   };
 
@@ -393,6 +425,13 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       />
 
       <div className="grid gap-3">
+        {operationError ? (
+          <div role="alert" className="border-status-failed-border bg-status-failed-subtle rounded-md border px-3 py-2">
+            <Text variant="body-sm" tone="inherit" className="text-status-failed">
+              {operationError}
+            </Text>
+          </div>
+        ) : null}
         <QueryBar
           value={queryInput}
           onChange={setQueryInput}
@@ -432,7 +471,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
           onToggleSelect={selection.toggle}
           onToggleSelectAll={selection.toggleAll}
           onOpenRow={openRun}
-          onRetryRow={(run) => retry([run])}
+          onRetryRow={(run) => void retryRuns([run])}
           onRowHover={(run, el) => setPeek(run && el ? { run, el } : null)}
           height={640}
         />
@@ -453,31 +492,50 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
             </button>
           </Text>
         ) : null}
+        {status === "ready" && data.total > allRuns.length ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Text variant="caption" tone="muted">
+              Page <span className="tabular">{page.toLocaleString("en-GB")}</span> ·{" "}
+              <span className="tabular">{data.total.toLocaleString("en-GB")}</span> total runs
+            </Text>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setParams({ page: String(page - 1) })}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={page * data.pageSize >= data.total}
+                onClick={() => setParams({ page: String(page + 1) })}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <QuickPeek
         run={peek?.run ?? null}
         anchor={peek?.el ?? null}
-        onRetry={(run) => retry([run])}
+        onRetry={(run) => void retryRuns([run])}
       />
 
       <BulkBar
         selected={selectedRuns}
         onClear={selection.clear}
-        onRetry={retry}
-        onCancel={(runs) => console.info("cancel", runs.length)}
+        onRetry={(runs) => void retryRuns(runs)}
+        onCancel={(runs) => void cancelRuns(runs)}
         onCompare={(runs) => router.push(`/runs/compare?a=${runs[0].id}&b=${runs[1].id}` as Route)}
         onExport={(runs) => exportCsv(runs)}
       />
     </PageContainer>
   );
-}
-
-/* P12 wires these to the API. Until then they are honest no-ops rather than
-   fake success toasts — a toast that says "retried" when nothing was retried is
-   worse than no affordance. */
-function retry(runs: Run[]) {
-  console.info("retry from checkpoint", runs.map((r) => r.id));
 }
 
 function exportCsv(runs: Run[]) {
@@ -525,10 +583,10 @@ function StatusBadge({ status }: { status: RunStatus }) {
  * "3h ago" is what you want while scanning; the exact UTC timestamp is what you
  * need the moment you are correlating with someone else's logs.
  */
-function StartedCell({ startedAt }: { startedAt: string }) {
+function StartedCell({ startedAt, now }: { startedAt: string; now: number }) {
   const at = Date.parse(startedAt);
   const absolute = new Date(at).toISOString().replace("T", " ").slice(0, 19) + "Z";
-  const delta = NOW - at;
+  const delta = Math.max(0, now - at);
   const relative =
     delta < 60_000 ? `${Math.round(delta / 1000)}s ago`
     : delta < 3_600_000 ? `${Math.round(delta / 60_000)}m ago`
@@ -595,8 +653,8 @@ function TableState({
         Could not load runs
       </Text>
       <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
-        The request to the runs API timed out after 30 seconds. Your runs are unaffected — this is a
-        read failure, and everything already committed is still committed.
+        The runs API could not be read. Your runs are unaffected — this is a read failure, and
+        everything already committed is still committed.
       </Text>
       <div className="mt-4">
         <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>

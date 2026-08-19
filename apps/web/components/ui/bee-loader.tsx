@@ -1,31 +1,38 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { BeeLogo } from "@/components/brand/bee-logo";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 const PHASES = [
-  "Preparing workspace…",
-  "Loading evaluation data…",
-  "Building report…",
-  "Almost ready…",
+  "Restoring durable state…",
+  "Reading checkpoints…",
+  "Connecting the control plane…",
+  "Ready to continue…",
 ];
+
+const CHECKPOINTS = Array.from({ length: 7 }, (_, index) => index);
 
 export function BeeLoader({ compact = false, phase }: { compact?: boolean; phase?: string }) {
   const [phaseIndex, setPhaseIndex] = useState(0);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     if (compact || phase) return;
-    const t = setInterval(() => {
-      setPhaseIndex((i) => (i + 1) % PHASES.length);
+    const timer = setInterval(() => {
+      setPhaseIndex((index) => (index + 1) % PHASES.length);
     }, 2200);
-    return () => clearInterval(t);
+    return () => clearInterval(timer);
   }, [compact, phase]);
 
   if (compact) {
     return (
       <div className="flex items-center gap-2" role="status" aria-label="Loading">
-        <BeeLogo className="h-4 w-4 animate-[pulse_1.8s_ease-in-out_infinite]" />
+        <motion.div
+          animate={reduceMotion ? undefined : { y: [0, -2, 0] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <RibbonMark className="h-4 w-4" />
+        </motion.div>
         <span className="text-xs text-muted-foreground">Loading…</span>
       </div>
     );
@@ -33,49 +40,93 @@ export function BeeLoader({ compact = false, phase }: { compact?: boolean; phase
 
   return (
     <div
-      className="flex min-h-[60vh] flex-col items-center justify-center gap-6"
+      className="relative flex min-h-[70vh] flex-col items-center justify-center overflow-hidden px-6"
       role="status"
       aria-live="polite"
       aria-label="Loading"
     >
-      {/* Logo with soft pulse ring */}
-      <div className="relative">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute h-64 w-64 rounded-full bg-[rgba(98,91,246,0.08)] blur-3xl"
+      />
+
+      <div className="relative mb-7">
         <motion.div
-          className="absolute inset-0 rounded-full bg-primary/10"
-          animate={{ scale: [1, 1.6, 1], opacity: [0.5, 0, 0.5] }}
-          transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+          aria-hidden="true"
+          className="absolute -inset-5 rounded-full border border-[#625BF6]/20"
+          animate={reduceMotion ? undefined : { scale: [0.82, 1.35], opacity: [0.6, 0] }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
         />
         <motion.div
-          className="relative flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-card shadow-md"
-          animate={{ scale: [1, 1.03, 1] }}
-          transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+          animate={reduceMotion ? undefined : { y: [0, -5, 0], rotate: [0, -2, 0] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          className="relative drop-shadow-[0_14px_22px_rgba(98,91,246,0.28)]"
         >
-          <BeeLogo className="h-7 w-7 drop-shadow-sm" />
+          <RibbonMark className="h-16 w-16" />
         </motion.div>
       </div>
 
-      {/* Progress bar */}
-      <div className="w-40 overflow-hidden rounded-full bg-border/40 h-[2px]">
-        <motion.div
-          className="h-full bg-primary/70 rounded-full"
-          animate={{ x: ["-100%", "200%"] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-        />
+      <div className="flex items-center gap-1.5" aria-hidden="true">
+        {CHECKPOINTS.map((index) => (
+          <motion.span
+            key={index}
+            className="block h-4 w-6 border border-[#625BF6]/25 bg-[#625BF6]/5"
+            style={{ clipPath: "polygon(25% 0, 100% 0, 100% 70%, 80% 100%, 0 100%, 0 25%)" }}
+            animate={
+              reduceMotion
+                ? { backgroundColor: "rgba(98,91,246,0.45)" }
+                : {
+                    backgroundColor: [
+                      "rgba(98,91,246,0.05)",
+                      "rgba(98,91,246,0.92)",
+                      "rgba(98,91,246,0.18)",
+                    ],
+                    borderColor: [
+                      "rgba(98,91,246,0.25)",
+                      "rgba(98,91,246,0.9)",
+                      "rgba(98,91,246,0.25)",
+                    ],
+                    y: [0, -2, 0],
+                  }
+            }
+            transition={{
+              duration: 1.8,
+              repeat: Infinity,
+              delay: index * 0.13,
+              times: [0, 0.28, 1],
+              ease: "easeInOut",
+            }}
+          />
+        ))}
       </div>
 
-      {/* Phase label */}
       <AnimatePresence mode="wait">
         <motion.p
           key={phase ?? PHASES[phaseIndex]}
-          className="text-[12px] font-medium tracking-wide text-muted-foreground"
-          initial={{ opacity: 0, y: 4 }}
+          className="mt-5 text-[12px] font-medium tracking-wide text-muted-foreground"
+          initial={reduceMotion ? false : { opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
+          exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
         >
           {phase ?? PHASES[phaseIndex]}
         </motion.p>
       </AnimatePresence>
     </div>
+  );
+}
+
+function RibbonMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true" focusable="false">
+      <path d="M22 10h32v32L42 54H10V22Z" fill="#625BF6" />
+      <path
+        d="M32 10v44"
+        fill="none"
+        stroke="white"
+        strokeWidth="4"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }

@@ -80,6 +80,12 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "updatedAt" to updatedAt.toString(),
     "hasOutput" to (outputJson != null),
     "hasError" to (errorJson != null),
+    "workflowName" to workflowName,
+    "environment" to environmentName,
+    "nodeTotal" to nodeTotal,
+    "nodeCommitted" to nodeCommitted,
+    "ribbonJson" to ribbonJson,
+    "incidentId" to incidentId?.toString(),
 )
 
 private fun AgentRun.toDetailResponse(): Map<String, Any?> = toResponse() + mapOf(

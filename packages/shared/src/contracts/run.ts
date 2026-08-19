@@ -33,10 +33,18 @@ import { isoDateTime, jsonObject, money, page, uuid } from "./primitives";
 export const runStatus = z.enum([
   "queued",
   "running",
+  "succeeded",
   "completed",
   "failed",
   "cancelled",
   "awaiting_approval",
+  "waiting_for_approval",
+  "waiting_for_timer",
+  "recovering",
+  "yielded",
+  "cancellation_requested",
+  "enqueue_failed",
+  "continued_as_new",
   "paused",
   "timed_out",
 ]);
@@ -48,13 +56,10 @@ export type TriggerType = z.infer<typeof triggerType>;
 /**
  * A run as the LIST endpoint returns it.
  *
- * Note what is absent and what the UI expects:
- *   - no `workflowName`  — only `workflowId`; the Runs table shows a name
- *   - no `environment`   — only `environmentId` (a UUID); the UI filters by name
- *   - no `nodes[]`       — the run graph is detail-only
- *   - no ribbon fields   — `ribbon_json` exists in the DB (V027) but is not selected
- *
- * All four are catalogued in API-GAPS.md rather than papered over here.
+ * The list response includes the denormalized checkpoint ribbon and joined
+ * workflow/environment labels needed by the Runs table. It intentionally does
+ * not include full node payloads; `ribbonJson` is the compact [{n,s,ms}] shape
+ * maintained transactionally by the worker.
  */
 export const runSummary = z.object({
   id: uuid,
@@ -76,6 +81,13 @@ export const runSummary = z.object({
   updatedAt: isoDateTime,
   hasOutput: z.boolean(),
   hasError: z.boolean(),
+  workflowName: z.string().nullish(),
+  environment: z.string().nullish(),
+  nodeTotal: z.number().int().nonnegative().nullish(),
+  nodeCommitted: z.number().int().nonnegative(),
+  /** Compact worker-maintained JSON: [{n,s,ms}]. */
+  ribbonJson: z.string(),
+  incidentId: uuid.nullish(),
 });
 export type RunSummary = z.infer<typeof runSummary>;
 
@@ -164,13 +176,22 @@ export type UiRunStatus =
 export function toUiRunStatus(status: RunStatus): UiRunStatus {
   switch (status) {
     case "completed":
+    case "succeeded":
       return "succeeded";
     case "awaiting_approval":
+    case "waiting_for_approval":
       return "awaiting-approval";
     case "timed_out":
+    case "enqueue_failed":
       return "failed";
     case "paused":
+    case "waiting_for_timer":
+    case "recovering":
+    case "yielded":
       return "queued";
+    case "cancellation_requested":
+    case "continued_as_new":
+      return "cancelled";
     default:
       return status;
   }

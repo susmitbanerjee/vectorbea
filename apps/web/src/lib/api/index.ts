@@ -15,7 +15,6 @@ export { getApiBaseUrl, getDataMode, isMockMode, type DataMode } from "./config"
 
 export {
   VectorbeaApiError,
-  isBetaGated,
   isUnauthenticated,
   isVectorbeaApiError,
   isWorkspaceMembershipDenied,

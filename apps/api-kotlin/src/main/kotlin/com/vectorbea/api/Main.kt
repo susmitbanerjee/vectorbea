@@ -103,10 +103,6 @@ fun main() {
     if (config.isProduction && !config.secretEncryptionKeyPresent) {
         throw IllegalStateException("SECRET_ENCRYPTION_KEY is required in production")
     }
-    if (config.privateBetaMode) {
-        log.info("[startup] PRIVATE BETA MODE enabled — unapproved users are blocked from product APIs")
-    }
-
     // 2. Database
     val database: Database? = if (config.db != null) {
         log.info("Initialising database connection pool (maxPoolSize={})", config.db.maxPoolSize)
@@ -426,7 +422,7 @@ fun main() {
     if (ds != null && appUserRepo != null) {
         val betaRepo = BetaAccessRepository(ds)
         BetaRoutes(betaRepo, appUserRepo, config, telemetry).register(router)
-        log.info("BetaRoutes registered (privateBetaMode={})", config.privateBetaMode)
+        log.info("BetaRoutes registered")
     }
 
     if (ds != null) {

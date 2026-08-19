@@ -44,14 +44,22 @@ type ControlMetrics = contracts.ControlMetrics;
  * as waiting.
  */
 const STATUS_MAP: Record<contracts.RunStatus, RunStatus> = {
+  succeeded: "succeeded",
   completed: "succeeded",
   failed: "failed",
   running: "running",
   queued: "queued",
   awaiting_approval: "awaiting-approval",
+  waiting_for_approval: "awaiting-approval",
   cancelled: "cancelled",
   timed_out: "failed",
   paused: "awaiting-approval",
+  waiting_for_timer: "queued",
+  recovering: "running",
+  yielded: "queued",
+  cancellation_requested: "cancelled",
+  enqueue_failed: "failed",
+  continued_as_new: "cancelled",
 };
 
 export function toUiStatus(status: contracts.RunStatus): RunStatus {

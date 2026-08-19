@@ -274,10 +274,3 @@ export function isWorkspaceMembershipDenied(error: unknown): boolean {
     message.includes("no workspace memberships")
   );
 }
-
-/** The private-beta gate, which is a 403 but means "apply for access". */
-export function isBetaGated(error: unknown): boolean {
-  return (
-    isVectorbeaApiError(error) && error.message.includes("PRIVATE_BETA_ACCESS_REQUIRED")
-  );
-}

@@ -10,7 +10,7 @@ import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { ribbonSummary } from "~/components/app/ribbon/geometry";
 import { formatCost, formatDuration, formatTokens } from "~/lib/format";
-import type { Run } from "~/mocks/domain";
+import type { Run } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    QUICK PEEK
@@ -78,10 +78,16 @@ export function QuickPeek({ run, anchor, onRetry }: QuickPeekProps) {
       </div>
 
       <div className="mt-2.5">
-        <CheckpointRibbon nodes={r.nodes} size="sm" runId={`peek-${r.id}`} />
-        <Text variant="caption" tone="muted" className="mt-1.5 block">
-          {ribbonSummary(r.nodes)}
-        </Text>
+        {r.nodes.length > 0 ? (
+          <>
+            <CheckpointRibbon nodes={r.nodes} size="sm" runId={`peek-${r.id}`} />
+            <Text variant="caption" tone="muted" className="mt-1.5 block">
+              {ribbonSummary(r.nodes)}
+            </Text>
+          </>
+        ) : (
+          <Text variant="caption" tone="muted">Checkpoint data is not available for this run.</Text>
+        )}
       </div>
 
       {failedNode ? (

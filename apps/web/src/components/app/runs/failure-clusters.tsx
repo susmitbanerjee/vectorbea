@@ -7,8 +7,8 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { RootCauseIcon } from "~/components/icons/domain";
-import { formatSpan } from "~/mocks/control";
-import type { FailureCluster } from "~/mocks/runs-scale";
+import { formatSpan } from "~/lib/control/model";
+import type { FailureCluster } from "~/lib/runs/derive";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    FAILURE CLUSTERING

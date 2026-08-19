@@ -2,7 +2,7 @@ import "server-only";
 import type { ReadonlyRequestCookies } from "next/dist/server/web/spec-extension/adapters/request-cookies";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 import { verifyToken } from "@/lib/auth/jwt";
-import { getUserById, getUserWorkspaces, getUserBetaStatus } from "@/lib/auth/neon-auth";
+import { getUserById, getUserWorkspaces } from "@/lib/auth/neon-auth";
 
 export function getAccessTokenFromCookies(
   cookieStore: Pick<ReadonlyRequestCookies, "get">,
@@ -23,19 +23,6 @@ export async function getAuthenticatedUserFromCookies(
 export async function getPostLoginRedirectForUser(
   userId: string,
 ): Promise<{ redirectTo: string; organizations: import("@/lib/api").OrganizationView[] }> {
-  // Gate ordering mirrors the (app) layout: beta approval → app. The
-  // verify-email step is gone with password sign-in; every provider address
-  // arrives verified.
-  try {
-    if (process.env.NEXT_PUBLIC_PRIVATE_BETA_MODE !== "false") {
-      const bs = await getUserBetaStatus(userId);
-      const approved = bs?.betaStatus === "approved" || bs?.isPlatformAdmin === true;
-      if (!approved) return { redirectTo: "/beta", organizations: [] };
-    }
-  } catch {
-    // DB hiccup — fall through to the control plane; the layout gates re-check there
-  }
-
   const workspaces = await getUserWorkspaces(userId);
   const first = workspaces[0];
   // /control is the landing surface. The old /dashboard is no longer part of the

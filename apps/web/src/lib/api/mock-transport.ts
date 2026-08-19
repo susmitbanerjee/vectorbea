@@ -98,6 +98,16 @@ function toApiRun(run: UiRun) {
     updatedAt: run.finishedAt ?? run.startedAt,
     hasOutput: run.status === "succeeded",
     hasError: run.status === "failed",
+    workflowName: run.workflowName,
+    environment: run.environment,
+    nodeTotal: run.nodes.length,
+    nodeCommitted: run.nodes.filter((node) => node.state === "committed" || node.state === "recovered").length,
+    ribbonJson: JSON.stringify(run.nodes.map((node) => ({
+      n: node.id,
+      s: node.state,
+      ...(node.durationMs == null ? {} : { ms: node.durationMs }),
+    }))),
+    incidentId: run.incidentId ? uuidFrom(run.incidentId) : null,
   };
 }
 

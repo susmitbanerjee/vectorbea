@@ -94,6 +94,7 @@ export interface VectorbeaClient {
     queuePosition(id: string, scope?: Scope, options?: RequestOptions): Promise<QueuePosition>;
     cancel(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     retry(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    retryNode(id: string, nodeId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
   };
 
   workflows: {
@@ -236,6 +237,12 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
       retry: (id, scope, options) =>
         call<unknown>(`/api/runs/${id}/retry`, {
           method: "POST",
+          ...req(scope, undefined, options),
+        }),
+      retryNode: (id, nodeId, scope, options) =>
+        call<unknown>(`/api/runs/${id}/retry-node`, {
+          method: "POST",
+          body: { nodeId },
           ...req(scope, undefined, options),
         }),
     },

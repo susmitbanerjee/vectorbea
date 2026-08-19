@@ -6,8 +6,8 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { formatCost } from "~/lib/format";
-import { estimateRetryCost } from "~/mocks/runs-scale";
-import type { Run } from "~/mocks/domain";
+import { estimateRetryCost } from "~/lib/runs/derive";
+import type { Run } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BULK ACTION BAR
@@ -41,7 +41,9 @@ export function BulkBar({ selected, onClear, onRetry, onCancel, onCompare, onExp
   const count = selected.length;
   const estimate = React.useMemo(() => estimateRetryCost(selected), [selected]);
   const retryable = selected.filter((r) => r.status === "failed" || r.status === "cancelled");
-  const cancellable = selected.filter((r) => r.status === "running" || r.status === "queued");
+  const cancellable = selected.filter(
+    (r) => r.status === "running" || r.status === "queued" || r.status === "awaiting-approval",
+  );
 
   if (count === 0) return null;
 

@@ -66,6 +66,13 @@ data class AgentRun(
     val createdAt: Instant,
     val updatedAt: Instant,
     val debugMode: Boolean = false,
+    val nodeTotal: Int? = null,
+    val nodeCommitted: Int = 0,
+    val ribbonJson: String = "[]",
+    /** Populated by list(); null for point reads and newly-created rows. */
+    val workflowName: String? = null,
+    val environmentName: String? = null,
+    val incidentId: UUID? = null,
 )
 
 open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
@@ -76,7 +83,8 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         status, trigger_type, input_json, output_json, error_json,
         current_step_id, current_agent_id, idempotency_key,
         started_at, completed_at, duration_ms, token_count, estimated_cost,
-        created_at, updated_at, debug_mode
+        created_at, updated_at, debug_mode,
+        node_total, node_committed, ribbon_json
     """.trimIndent()
 
     /**
@@ -165,10 +173,10 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         params: PageParams = PageParams(),
     ): Page<AgentRun> {
         val filters = buildList {
-            add("workspace_id = ?")
-            if (environmentId != null) add("environment_id = ?")
-            if (workflowId != null) add("workflow_id = ?")
-            if (status != null) add("status = ?")
+            add("r.workspace_id = ?")
+            if (environmentId != null) add("r.environment_id = ?")
+            if (workflowId != null) add("r.workflow_id = ?")
+            if (status != null) add("r.status = ?")
         }
         val where = "WHERE ${filters.joinToString(" AND ")}"
         val bindBase: (java.sql.PreparedStatement) -> Unit = {
@@ -179,13 +187,37 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (status != null) it.setString(i++, status)
         }
         return queryPage(
-            sql = "SELECT $cols FROM agent_runs $where ORDER BY created_at DESC",
-            countSql = "SELECT COUNT(*) FROM agent_runs $where",
+            sql = """
+                SELECT r.*, w.name AS workflow_name,
+                       COALESCE(e.slug, e.type) AS environment_name,
+                       fi.id AS incident_id
+                  FROM agent_runs r
+                  JOIN workflows w
+                    ON w.id = r.workflow_id AND w.workspace_id = r.workspace_id
+                  LEFT JOIN environments e
+                    ON e.id = r.environment_id AND e.workspace_id = r.workspace_id
+                  LEFT JOIN LATERAL (
+                      SELECT id
+                        FROM failure_incidents
+                       WHERE workspace_id = r.workspace_id AND run_id = r.id
+                       ORDER BY detected_at DESC
+                       LIMIT 1
+                  ) fi ON true
+                  $where
+                 ORDER BY r.created_at DESC
+            """.trimIndent(),
+            countSql = "SELECT COUNT(*) FROM agent_runs r $where",
             params = params,
             bind = { bindBase(this) },
-            mapRow = ::mapRow,
+            mapRow = ::mapListRow,
         )
     }
+
+    private fun mapListRow(rs: java.sql.ResultSet): AgentRun = mapRow(rs).copy(
+        workflowName = rs.getString("workflow_name"),
+        environmentName = rs.getString("environment_name"),
+        incidentId = rs.uuidOrNull("incident_id"),
+    )
 
     private fun mapRow(rs: java.sql.ResultSet) = AgentRun(
         id = rs.uuid("id"),
@@ -209,5 +241,8 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
         debugMode = rs.getBoolean("debug_mode"),
+        nodeTotal = (rs.getObject("node_total") as? Number)?.toInt(),
+        nodeCommitted = rs.getInt("node_committed"),
+        ribbonJson = rs.getJsonbString("ribbon_json"),
     )
 }
