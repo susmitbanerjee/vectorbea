@@ -138,6 +138,23 @@ export const controlMetrics = z.object({
 });
 export type ControlMetrics = z.infer<typeof controlMetrics>;
 
+/** `GET /api/control/activity` — newest durable run events for a workspace. */
+export const controlActivityEvent = z.object({
+  id: uuid,
+  runId: uuid,
+  type: z.string(),
+  status: z.string().nullish(),
+  source: z.string().nullish(),
+  timestamp: isoDateTime,
+  durationMs: z.number().nullish(),
+  stepId: z.string().nullish(),
+  title: z.string().nullish(),
+  summary: z.string().nullish(),
+  workflowName: z.string(),
+});
+export type ControlActivityEvent = z.infer<typeof controlActivityEvent>;
+export const controlActivityList = z.array(controlActivityEvent);
+
 /* ── Node debug snapshots ─────────────────────────────────────────────────── */
 
 /**

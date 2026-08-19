@@ -398,6 +398,8 @@ fun main() {
         // The Control page reads the same definitions the dashboards do — see the
         // class doc for why this queries Postgres rather than proxying Prometheus.
         com.vectorbea.api.routes.ControlMetricsRoutes(ds).register(router)
+        // One workspace-wide event tail for Control; avoids polling every run.
+        com.vectorbea.api.routes.ControlActivityRoutes(ds).register(router)
         // Dead-lettered jobs — the most actionable failure the platform emits.
         com.vectorbea.api.routes.DeadLetterRoutes(ds).register(router)
         // Queue position + wait reason — only answerable now the claim lives in

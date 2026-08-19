@@ -14,6 +14,7 @@ import { formatCost, formatTokens } from "~/lib/format";
 import { formatAxisDuration } from "~/components/charts/scale";
 import type { CostTrend, LatencyDistribution, TimeRange } from "~/mocks/control";
 import { AgentBrainIcon } from "~/components/icons/domain";
+import type { contracts } from "@vectorbea/shared";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BAND 4 · DETAIL
@@ -31,12 +32,13 @@ export interface DetailBandProps {
   latency: LatencyDistribution;
   cost: CostTrend;
   range: TimeRange;
+  activity: contracts.ControlActivityEvent[];
   /** Frozen for screenshots. */
   streamPaused?: boolean;
   className?: string;
 }
 
-export function DetailBand({ latency, cost, range, streamPaused, className }: DetailBandProps) {
+export function DetailBand({ latency, cost, range, activity, streamPaused, className }: DetailBandProps) {
   const router = useRouter();
 
   return (
@@ -82,7 +84,7 @@ export function DetailBand({ latency, cost, range, streamPaused, className }: De
         </Panel>
 
         <div className="xl:col-span-2">
-          <ActivityStream paused={streamPaused} />
+          <ActivityStream events={activity} paused={streamPaused} />
         </div>
 
         <div className="xl:col-span-2">

@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
-import { buildActivity, type ActivityEvent, type ActivityKind } from "~/mocks/control";
+import type { contracts } from "@vectorbea/shared";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BAND 4 · LIVE ACTIVITY STREAM
@@ -23,6 +23,8 @@ import { buildActivity, type ActivityEvent, type ActivityKind } from "~/mocks/co
    content updating is information, the slide is decoration.
 ══════════════════════════════════════════════════════════════════════════════ */
 
+type ActivityKind = "run.started" | "node.committed" | "gate.opened" | "run.failed" | "run.succeeded" | "run.resumed";
+
 const KIND_STYLE: Record<ActivityKind, { label: string; dot: string; text: string }> = {
   "run.started": { label: "started", dot: "bg-fg-muted", text: "text-fg-muted" },
   "node.committed": { label: "commit", dot: "bg-status-success", text: "text-status-success" },
@@ -32,29 +34,26 @@ const KIND_STYLE: Record<ActivityKind, { label: string; dot: string; text: strin
   "run.resumed": { label: "resume", dot: "bg-status-live", text: "text-status-live" },
 };
 
-const VISIBLE = 9;
-const TICK_MS = 2_600;
-
 export interface ActivityStreamProps {
+  events: contracts.ControlActivityEvent[];
   /** Frozen for screenshots and for the loading state. */
   paused?: boolean;
   className?: string;
 }
 
-export function ActivityStream({ paused = false, className }: ActivityStreamProps) {
-  const [offset, setOffset] = React.useState(0);
+export function ActivityStream({ events, paused = false, className }: ActivityStreamProps) {
   const [hovered, setHovered] = React.useState(false);
   const [focusWithin, setFocusWithin] = React.useState(false);
+  const [visibleEvents, setVisibleEvents] = React.useState(events);
 
+  const reading = hovered || focusWithin;
   const frozen = paused || hovered || focusWithin;
 
+  // Hold the rendered snapshot while somebody is reading it. Query refreshes
+  // can still complete and populate the cache; they become visible on resume.
   React.useEffect(() => {
-    if (frozen) return;
-    const id = window.setInterval(() => setOffset((o) => o + 1), TICK_MS);
-    return () => window.clearInterval(id);
-  }, [frozen]);
-
-  const events = React.useMemo(() => buildActivity(VISIBLE, offset), [offset]);
+    if (!reading) setVisibleEvents(events);
+  }, [events, reading]);
 
   return (
     <div
@@ -81,11 +80,15 @@ export function ActivityStream({ paused = false, className }: ActivityStreamProp
         </Text>
       </div>
 
-      {/* aria-live is deliberately off. A stream announcing nine lines every
-          2.6 seconds makes a screen reader unusable; the list is reachable and
+      {/* aria-live is deliberately off. Re-announcing the list after every
+          refresh makes a screen reader unusable; it remains reachable and
           readable on demand instead. */}
       <ul className="grid" aria-label="Recent activity">
-        {events.map((event, i) => (
+        {visibleEvents.length === 0 ? (
+          <li className="px-3 py-6 text-center">
+            <Text variant="body-sm" tone="muted">No run activity yet.</Text>
+          </li>
+        ) : visibleEvents.slice(0, 9).map((event, i) => (
           <ActivityRow key={event.id} event={event} index={i} animate={!frozen} />
         ))}
       </ul>
@@ -93,8 +96,9 @@ export function ActivityStream({ paused = false, className }: ActivityStreamProp
   );
 }
 
-function ActivityRow({ event, index, animate }: { event: ActivityEvent; index: number; animate: boolean }) {
-  const style = KIND_STYLE[event.kind];
+function ActivityRow({ event, index, animate }: { event: contracts.ControlActivityEvent; index: number; animate: boolean }) {
+  const kind = activityKind(event.type, event.status);
+  const style = KIND_STYLE[kind];
   return (
     <li
       // Only the newest row animates in; re-animating the whole list on every
@@ -105,7 +109,7 @@ function ActivityRow({ event, index, animate }: { event: ActivityEvent; index: n
       )}
     >
       <Link
-        href={event.href as Route}
+        href={`/runs/${event.runId}` as Route}
         className={cn(
           "flex items-center gap-2.5 px-3 py-1.5",
           "hover:bg-surface-hover transition-colors duration-fast",
@@ -115,17 +119,27 @@ function ActivityRow({ event, index, animate }: { event: ActivityEvent; index: n
         <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", style.dot)} />
         <span className={cn("font-code text-mono-sm w-14 shrink-0", style.text)}>{style.label}</span>
         <span className="font-ui text-body-sm text-fg-primary min-w-0 flex-1 truncate">
-          {event.subject}
+          {event.workflowName}
         </span>
         <span className="font-ui text-caption text-fg-muted hidden min-w-0 truncate sm:block">
-          {event.detail}
+          {event.summary ?? event.title ?? event.stepId ?? event.source ?? event.type}
         </span>
         <span className="font-code text-mono-sm text-fg-disabled tabular shrink-0">
-          {new Date(event.at).toLocaleTimeString("en-GB", {
+          {new Date(event.timestamp).toLocaleTimeString("en-GB", {
             hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
           })}
         </span>
       </Link>
     </li>
   );
+}
+
+function activityKind(type: string, status?: string | null): ActivityKind {
+  const value = type.toUpperCase();
+  if (value.includes("FAIL") || value.includes("REJECT") || status === "failed") return "run.failed";
+  if (value.includes("APPROVAL") || value.includes("GATE") || status === "waiting_for_approval") return "gate.opened";
+  if (value.includes("RESUM") || value.includes("RECOVER") || value.includes("RETRY")) return "run.resumed";
+  if (value.includes("SUCCEED") || value.includes("COMPLETED") || status === "completed") return value.includes("STEP") || value.includes("NODE") ? "node.committed" : "run.succeeded";
+  if (value.includes("STEP") || value.includes("NODE") || value.includes("COMMIT")) return "node.committed";
+  return "run.started";
 }

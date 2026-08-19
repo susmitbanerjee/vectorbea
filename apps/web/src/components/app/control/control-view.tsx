@@ -109,7 +109,7 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
 
   /* ── Data — live, from the API ──────────────────────────────────────────── */
   const data = useControlData(range, sort, tick);
-  const { health, attention, fleet, latency, cost } = data;
+  const { health, attention, fleet, latency, cost, activity } = data;
   // Only the shape of the attention list is needed here — the items themselves
   // are rendered by the inbox.
   const attentionWorst = React.useMemo(
@@ -181,7 +181,13 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
             sort={sort}
             onSortChange={(next) => setParam({ sort: next })}
           />
-          <DetailBand latency={latency} cost={cost} range={range} streamPaused={frozen} />
+          <DetailBand
+            latency={latency}
+            cost={cost}
+            range={range}
+            activity={activity}
+            streamPaused={frozen}
+          />
         </div>
       )}
     </PageContainer>

@@ -324,6 +324,23 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       freshness: { workspace: "live", fleet: "up to 15s (worker heartbeat interval)" },
     }),
   ],
+  [
+    "GET",
+    "/api/control/activity",
+    (_params, init) => RUNS.slice(0, Number(init.query?.limit ?? 20)).map((run, index) => ({
+      id: uuidFrom(`activity:${run.id}:${index}`),
+      runId: uuidFrom(run.id),
+      type: run.status === "failed" ? "RUN_FAILED" : run.status === "succeeded" ? "RUN_SUCCEEDED" : "RUN_STARTED",
+      status: toApiStatus(run.status),
+      source: run.trigger,
+      timestamp: run.finishedAt ?? run.startedAt,
+      durationMs: run.durationMs,
+      stepId: null,
+      title: null,
+      summary: null,
+      workflowName: run.workflowName,
+    })),
+  ],
 ];
 
 export function createMockTransport(): Transport {

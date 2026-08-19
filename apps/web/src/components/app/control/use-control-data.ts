@@ -40,6 +40,7 @@ export interface ControlData {
   fleet: FleetRow[];
   latency: LatencyDistribution;
   cost: CostTrend;
+  activity: import("@vectorbea/shared").contracts.ControlActivityEvent[];
   /** False when the run page did not cover the whole selected range. */
   complete: boolean;
   /** True until the first successful load of every query. */
@@ -94,6 +95,13 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
     enabled,
   });
 
+  const activity = useApiQuery({
+    queryKey: [...queryKeys.env(workspaceId, null), "control-activity", tick],
+    queryFn: () => api.controlActivity({ ...scope, limit: 20 }),
+    enabled,
+    freshness: "live",
+  });
+
   const now = Date.now();
 
   return React.useMemo(() => {
@@ -112,6 +120,7 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
       metrics.isError && "control metrics",
       incidents.isError && "incidents",
       connections.isError && "connections",
+      activity.isError && "activity",
     ].filter((x): x is string => typeof x === "string");
 
     return {
@@ -120,6 +129,7 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
       fleet: deriveFleet(allRuns, workflowList, sort),
       latency: deriveLatency(inRange),
       cost: deriveCostTrend(inRange, range, now),
+      activity: activity.data ?? [],
       complete: runsAreComplete(allRuns, range, now, runs.data?.total ?? allRuns.length),
       loading: runs.isPending || workflows.isPending,
       error: runs.error ?? workflows.error ?? null,
@@ -135,5 +145,5 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
     // `now` is recomputed each render by design; the tick in every query key is
     // what actually drives a refetch, so it is not a dependency here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runs, workflows, metrics, incidents, connections, range, sort]);
+  }, [runs, workflows, metrics, incidents, connections, activity, range, sort]);
 }

@@ -34,6 +34,7 @@ type Approval = contracts.Approval;
 type FailureIncident = contracts.FailureIncident;
 type Worker = contracts.Worker;
 type ControlMetrics = contracts.ControlMetrics;
+type ControlActivityEvent = contracts.ControlActivityEvent;
 type QueuePosition = contracts.QueuePosition;
 type NodeDebugSummary = contracts.NodeDebugSummary;
 type NodeDebugDetail = contracts.NodeDebugDetail;
@@ -81,6 +82,10 @@ export interface VectorbeaClient {
   me(options?: RequestOptions): Promise<CurrentUser>;
   workspaces(options?: RequestOptions): Promise<Workspace[]>;
   controlMetrics(scope?: Scope, options?: RequestOptions): Promise<ControlMetrics>;
+  controlActivity(
+    params?: Scope & { limit?: number },
+    options?: RequestOptions,
+  ): Promise<ControlActivityEvent[]>;
   workers(scope?: Scope, options?: RequestOptions): Promise<Worker[]>;
 
   runs: {
@@ -196,6 +201,12 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
 
     controlMetrics: (scope, options) =>
       call<ControlMetrics>("/api/control/metrics", req(scope, contracts.controlMetrics, options)),
+
+    controlActivity: ({ workspaceId, environmentId, limit } = {}, options) =>
+      call<ControlActivityEvent[]>(
+        "/api/control/activity",
+        req({ workspaceId, environmentId }, contracts.controlActivityList, options, { limit }),
+      ),
 
     workers: (scope, options) =>
       call<Worker[]>("/api/workers", req(scope, contracts.workerList, options)),
