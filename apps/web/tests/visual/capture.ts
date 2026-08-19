@@ -8,7 +8,7 @@ export type Theme = "dark" | "light";
  *
  * Writes the next-themes storage key before navigation so the blocking script
  * next-themes injects picks it up on first paint — no flash, no post-hoc class
- * swap that would race the screenshot.
+ * swap that would race the screenshot. check
  */
 export async function setTheme(page: Page, theme: Theme): Promise<void> {
   await page.addInitScript((value) => {

@@ -89,7 +89,7 @@ fun main() {
     // Both are set before anything else runs so that a failure during startup is
     // already attributable. Tracing is inert unless OTEL_ENABLED=true and never throws
     // — an observability layer that prevents the service from starting has inverted its
-    // own purpose.
+    // own purpose. check
     com.vectorbea.observability.logging.LogContext.identify("api")
     com.vectorbea.observability.tracing.Tracing.init(
         serviceName = System.getenv("OTEL_SERVICE_NAME") ?: "vectorbea-api",

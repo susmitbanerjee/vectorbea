@@ -72,6 +72,7 @@ fun main() {
         val db = Database.create(config, timeouts)
         val latency = db.ping()
         log.info("[startup] DB connected (latency={}ms)", latency)
+        //check
         db
     } catch (e: Exception) {
         log.error("[startup] Failed to connect to database — aborting: {}", e.message)
