@@ -14,6 +14,22 @@ import { isoDateTime, jsonObject, money, page, uuid } from "./primitives";
  * reconciled, so no screen has to know.
  */
 
+/*
+ * A NOTE ON `.nullish()` BELOW
+ * ----------------------------
+ * Several fields are `.nullish()` rather than `.nullable()`. That is not
+ * defensive padding — it is what the API actually does.
+ *
+ * Every response is assembled as a Kotlin `mapOf(...)`, and Jackson's default
+ * inclusion drops null entries rather than emitting `"field": null`. So an
+ * absent value arrives as a MISSING KEY, and `z.string().nullable()` rejects a
+ * missing key with "Required" — the whole response fails validation and the
+ * transport raises `contract_mismatch`.
+ *
+ * That is why live data reached no screen: five of the eight endpoints the
+ * Control page needs were failing validation before a component ever saw them.
+ */
+
 export const runStatus = z.enum([
   "queued",
   "running",
@@ -48,14 +64,14 @@ export const runSummary = z.object({
   workflowVersionId: uuid,
   status: runStatus,
   triggerType,
-  currentStepId: z.string().nullable(),
-  currentAgentId: uuid.nullable(),
-  idempotencyKey: z.string().nullable(),
-  startedAt: isoDateTime.nullable(),
-  completedAt: isoDateTime.nullable(),
-  durationMs: z.number().nullable(),
-  totalTokens: z.number().nullable(),
-  estimatedCostUsd: money.nullable(),
+  currentStepId: z.string().nullish(),
+  currentAgentId: uuid.nullish(),
+  idempotencyKey: z.string().nullish(),
+  startedAt: isoDateTime.nullish(),
+  completedAt: isoDateTime.nullish(),
+  durationMs: z.number().nullish(),
+  totalTokens: z.number().nullish(),
+  estimatedCostUsd: money.nullish(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
   hasOutput: z.boolean(),
@@ -82,7 +98,7 @@ export const runEvent = z.object({
   status: z.string().nullable(),
   source: z.string().nullable(),
   timestamp: isoDateTime,
-  durationMs: z.number().nullable(),
+  durationMs: z.number().nullish(),
 });
 export type RunEvent = z.infer<typeof runEvent>;
 

@@ -8,7 +8,7 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Heatstrip, HEATSTRIP_STATUS_LABEL } from "~/components/charts/heatstrip";
 import { formatCost, formatPercent } from "~/lib/format";
-import { formatSpan, type FleetRow, type FleetSort } from "~/mocks/control";
+import { formatSpan, plural, type FleetRow, type FleetSort } from "~/mocks/control";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BAND 3 · FLEET HEATSTRIP
@@ -47,7 +47,7 @@ export function FleetHeatstrip({ rows, sort, onSortChange, className }: FleetHea
           Fleet
         </Text>
         <Text variant="caption" tone="muted">
-          {rows.length} workflows · last 30 runs each, oldest left
+          {plural(rows.length, "workflow")} · last 30 runs each, oldest left
         </Text>
 
         <div role="group" aria-label="Sort fleet by" className="ml-auto flex items-center gap-0.5">

@@ -14,11 +14,9 @@ import { worstSeverity } from "~/components/app/shell/inbox-signal";
 import {
   HealthStripSkeleton, AttentionSummarySkeleton, FleetSkeleton, DetailSkeleton,
 } from "./skeletons";
-import {
-  buildHealth, buildAttention, buildFleet, buildLatency, buildCostTrend,
-  resolveRange, DEFAULT_RANGE,
-  type FleetSort, type TimeRangeId,
-} from "~/mocks/control";
+import { useControlData } from "./use-control-data";
+import { resolveRange, DEFAULT_RANGE } from "~/lib/control/range";
+import type { FleetSort, TimeRangeId } from "~/lib/control/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    CONTROL
@@ -89,14 +87,11 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
 
   const refresh = React.useCallback(() => {
     setRefreshing(true);
-    // The real fetch lands in P12. The delay is here so the loading affordance
-    // is a real state that has been designed and tested, not a branch that only
-    // ever runs against a slow network.
-    window.setTimeout(() => {
-      setTick((t) => t + 1);
-      setFetchedAt(Date.now());
-      setRefreshing(false);
-    }, 420);
+    // Bumping the tick changes every query key, so this is a real refetch
+    // against the API rather than the timer that used to stand in for one.
+    setTick((t) => t + 1);
+    setFetchedAt(Date.now());
+    window.setTimeout(() => setRefreshing(false), 300);
   }, []);
 
   React.useEffect(() => {
@@ -112,20 +107,15 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
     return () => window.clearInterval(id);
   }, [frozen]);
 
-  /* ── Data ───────────────────────────────────────────────────────────────── */
-  const health = React.useMemo(() => buildHealth(range, tick), [range, tick]);
+  /* ── Data — live, from the API ──────────────────────────────────────────── */
+  const data = useControlData(range, sort, tick);
+  const { health, attention, fleet, latency, cost } = data;
   // Only the shape of the attention list is needed here — the items themselves
-  // are rendered by the inbox. Counting them in both places is deliberate: this
-  // is one number, and threading the inbox's state across the shell to save it
-  // would be more machinery than the number is worth.
-  const attention = React.useMemo(() => buildAttention(), []);
+  // are rendered by the inbox.
   const attentionWorst = React.useMemo(
     () => worstSeverity(attention.map((a) => a.severity)),
     [attention],
   );
-  const fleet = React.useMemo(() => buildFleet(sort), [sort]);
-  const latency = React.useMemo(() => buildLatency(range), [range]);
-  const cost = React.useMemo(() => buildCostTrend(range), [range]);
 
   /* ── First-paint loading ────────────────────────────────────────────────── */
   const [booted, setBooted] = React.useState(frozen);
@@ -136,7 +126,7 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
   }, [frozen]);
 
   const state: ControlState =
-    forceState ?? stateParam ?? (booted ? "ready" : "loading");
+    forceState ?? stateParam ?? (booted && !data.loading ? "ready" : "loading");
 
   return (
     <PageContainer>
@@ -181,6 +171,9 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
         </div>
       ) : (
         <div className="grid gap-6">
+          {data.unavailable.length > 0 ? (
+            <UnavailableNotice endpoints={data.unavailable} />
+          ) : null}
           <HealthStrip health={health} />
           <AttentionSummary count={attention.length} worst={attentionWorst} />
           <FleetHeatstrip
@@ -192,6 +185,27 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
         </div>
       )}
     </PageContainer>
+  );
+}
+
+/**
+ * Says which endpoints did not answer.
+ *
+ * A band fed by a failed request renders as "nothing is happening", which is
+ * indistinguishable from a genuinely quiet workspace and far more dangerous.
+ * Naming the endpoint is the difference between "all clear" and "we cannot see".
+ */
+function UnavailableNotice({ endpoints }: { endpoints: string[] }) {
+  return (
+    <div
+      role="status"
+      className="border-status-waiting-border bg-status-waiting-subtle rounded-md border px-3 py-2"
+    >
+      <Text variant="body-sm" tone="primary">
+        Some of this page could not load: {endpoints.join(", ")}. The bands below show only what
+        the API returned.
+      </Text>
+    </div>
   );
 }
 

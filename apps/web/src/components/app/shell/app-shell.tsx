@@ -13,7 +13,8 @@ import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsSheet } from "./shortcuts-sheet";
 import { EnvironmentRail } from "./environment";
-import { WORKSPACES, INITIAL_COUNTS, type EnvironmentId, type ShellCounts } from "~/mocks/shell";
+import { INITIAL_COUNTS, type EnvironmentId, type ShellCounts, type Workspace } from "~/mocks/shell";
+import { useWorkspace } from "~/lib/workspace/workspace-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE APPLICATION SHELL
@@ -55,7 +56,6 @@ function ShellInner({ children, user }: AppShellProps) {
 
   const [collapsed, setCollapsed] = React.useState(false);
   const [environment, setEnvironment] = React.useState<EnvironmentId>("production");
-  const [workspaceId, setWorkspaceId] = React.useState(WORKSPACES[0].id);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -70,8 +70,6 @@ function ShellInner({ children, user }: AppShellProps) {
       if (c !== null) setCollapsed(c === "true");
       const e = window.localStorage.getItem(ENV_KEY);
       if (e === "production" || e === "staging" || e === "development") setEnvironment(e);
-      const w = window.localStorage.getItem(WORKSPACE_KEY);
-      if (w && WORKSPACES.some((x) => x.id === w)) setWorkspaceId(w);
     } catch {
       // Private mode or storage disabled — defaults are fine.
     }
@@ -123,7 +121,24 @@ function ShellInner({ children, user }: AppShellProps) {
   // Close the mobile drawer whenever the route changes.
   React.useEffect(() => { setDrawerOpen(false); }, [pathname]);
 
-  const workspace = WORKSPACES.find((w) => w.id === workspaceId) ?? WORKSPACES[0];
+  /**
+   * The real workspace, from the provider that resolved it against the API.
+   *
+   * The placeholder exists for the window before resolution completes and for
+   * the case where /api/bootstrap could not identify one. It is deliberately
+   * unnamed rather than a plausible-looking company: a made-up name here is
+   * indistinguishable from a real one, which is the whole problem.
+   */
+  const { workspaces: realWorkspaces, workspaceId, setWorkspace } = useWorkspace();
+  const workspaceList: Workspace[] = realWorkspaces.map((w) => ({
+    id: w.id,
+    name: w.name,
+    members: w.members ?? 0,
+    environment: environment,
+  }));
+  const workspace: Workspace =
+    workspaceList.find((w) => w.id === workspaceId) ??
+    workspaceList[0] ?? { id: "", name: "No workspace", members: 0, environment };
 
   /* ── Shortcuts ────────────────────────────────────────────────────────── */
   useShortcut({

@@ -20,36 +20,36 @@ import type { Run, RunStatus, Workflow } from "./domain";
 /** Pinned so fixtures, charts and screenshots all agree on "now". */
 export const NOW = new Date("2026-08-11T14:20:00Z").getTime();
 
-const HOUR = 3_600_000;
-const DAY = 86_400_000;
 
 /* ── Time range ───────────────────────────────────────────────────────────── */
 
-export type TimeRangeId = "1h" | "24h" | "7d" | "30d" | "custom";
 
-export interface TimeRange {
-  id: TimeRangeId;
-  label: string;
-  /** Window length in ms. Null for a custom range, which carries explicit ends. */
-  durationMs: number | null;
-  /** Bucket width for the trend charts. */
-  bucketMs: number;
-  /** Axis tick format. */
-  tickFormat: "time" | "day";
-}
+import {
+  DAY, HOUR,
+  type ApprovalAging, type AttentionItem, type AttentionSeverity, type BlastFact,
+  type BudgetPoint, type CostPoint, type CostTrend, type FailureBudget, type FleetRow,
+  type FleetSort, type HealthSnapshot, type InFlight, type LatencyDistribution,
+  type SpendToday, type TimeRange, type TimeRangeId,
+  formatSpan, formatSpanPrecise, plural,
+} from "~/lib/control/model";
 
-export const TIME_RANGES: TimeRange[] = [
-  { id: "1h", label: "1h", durationMs: HOUR, bucketMs: 5 * 60_000, tickFormat: "time" },
-  { id: "24h", label: "24h", durationMs: DAY, bucketMs: HOUR, tickFormat: "time" },
-  { id: "7d", label: "7d", durationMs: 7 * DAY, bucketMs: 6 * HOUR, tickFormat: "day" },
-  { id: "30d", label: "30d", durationMs: 30 * DAY, bucketMs: DAY, tickFormat: "day" },
-];
+/**
+ * The view models live in `~/lib/control/model` and are re-exported here.
+ *
+ * They were defined in this file, which meant real-data code had to import from
+ * the FIXTURE module just to name a type. The shapes are not fixtures — the
+ * fixtures are one producer of them and `~/lib/control/derive` is the other.
+ */
+export type {
+  ApprovalAging, AttentionItem, AttentionSeverity, BlastFact, BudgetPoint, CostPoint,
+  CostTrend, FailureBudget, FleetRow, FleetSort, HealthSnapshot, InFlight,
+  LatencyDistribution, SpendToday, TimeRange, TimeRangeId,
+};
+export { formatSpan, formatSpanPrecise, plural };
 
-export const DEFAULT_RANGE: TimeRangeId = "24h";
-
-export function resolveRange(id: string | null | undefined): TimeRange {
-  return TIME_RANGES.find((r) => r.id === id) ?? TIME_RANGES[1];
-}
+// Ranges live in ~/lib/control/range now — re-exported so existing importers
+// (time-range.tsx, control-view) keep working.
+export { TIME_RANGES, DEFAULT_RANGE, resolveRange } from "~/lib/control/range";
 
 /** Runs that started inside the window. */
 export function runsInRange(range: TimeRange, from?: number, to?: number): Run[] {
@@ -84,61 +84,6 @@ export const POLICY: WorkspacePolicy = {
 };
 
 /* ── Band 1 · Health ──────────────────────────────────────────────────────── */
-
-export interface InFlight {
-  running: number;
-  queued: number;
-  /** The value before the last refresh, so the counter rolls from truth. */
-  previousRunning: number;
-  oldestQueuedMs: number;
-}
-
-export interface BudgetPoint {
-  /** ms since the start of the window. */
-  t: number;
-  /** Budget remaining as a fraction of the day's allowance. Negative = overspent. */
-  remaining: number;
-  /** Ideal linear burn, for the reference line. */
-  ideal: number;
-}
-
-export interface FailureBudget {
-  target: number;
-  /** Allowed failures in the window, from the target and the run volume. */
-  allowed: number;
-  spent: number;
-  /** spent / allowed. Over 1 means the budget is blown. */
-  burnRatio: number;
-  series: BudgetPoint[];
-  /** The single largest contributor, so the number resolves to a cause. */
-  topCause: { label: string; share: number; href: string } | null;
-}
-
-export interface ApprovalAging {
-  count: number;
-  oldestWaitedMs: number;
-  oldestSlaMs: number;
-  /** True when any gate has consumed more than half its SLA. */
-  pressured: boolean;
-  breached: number;
-}
-
-export interface SpendToday {
-  spentUsd: number;
-  budgetUsd: number;
-  /** Straight-line projection to midnight from the current burn rate. */
-  projectedUsd: number;
-  /** Fraction of the day elapsed, for the projection marker. */
-  dayElapsed: number;
-  series: { t: number; usd: number }[];
-}
-
-export interface HealthSnapshot {
-  inFlight: InFlight;
-  failureBudget: FailureBudget;
-  approvals: ApprovalAging;
-  spend: SpendToday;
-}
 
 export function bucket(runs: Run[], range: TimeRange, end: number): { t: number; runs: Run[] }[] {
   const span = range.durationMs ?? DAY;
@@ -265,29 +210,6 @@ export function buildHealth(range: TimeRange, tick = 0): HealthSnapshot {
 }
 
 /* ── Band 2 · Needs attention ─────────────────────────────────────────────── */
-
-export type AttentionSeverity = "critical" | "high" | "medium";
-
-export interface AttentionItem {
-  id: string;
-  severity: AttentionSeverity;
-  /** What is wrong, in one sentence, active voice. */
-  problem: string;
-  /** Who or what is affected. Rendered as discrete facts, not prose. */
-  blastRadius: BlastFact[];
-  /** Age of the condition, for the sort and the label. */
-  since: number;
-  action: { label: string; href: string };
-  kind: "connection" | "approval" | "workflow" | "quota" | "incident";
-}
-
-export interface BlastFact {
-  label: string;
-  value: string;
-  href?: string;
-  /** Render through <MonoId> — mono, middle-truncated, click-to-copy (rule 8). */
-  id?: boolean;
-}
 
 const SEVERITY_RANK: Record<AttentionSeverity, number> = { critical: 0, high: 1, medium: 2 };
 
@@ -431,41 +353,7 @@ function consecutiveFailures(w: Workflow): number {
  * which is true and says nothing — the whole point of that sentence is the gap
  * between the two numbers.
  */
-export function formatSpan(ms: number): string {
-  const abs = Math.abs(ms);
-  if (abs < 60_000) return `${Math.round(abs / 1000)}s`;
-  if (abs < HOUR) return `${Math.round(abs / 60_000)}m`;
-  if (abs < 2 * DAY) return `${Math.round(abs / HOUR)}h`;
-  return `${Math.round(abs / DAY)}d`;
-}
-
-/** `23h 48m` — for the one place where the remainder is the news. */
-export function formatSpanPrecise(ms: number): string {
-  const abs = Math.abs(ms);
-  if (abs < HOUR) return `${Math.round(abs / 60_000)}m`;
-  const hours = Math.floor(abs / HOUR);
-  const minutes = Math.round((abs % HOUR) / 60_000);
-  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
-}
-
-/** `1 workflow` · `3 workflows`. */
-export function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
-  return `${n} ${n === 1 ? singular : pluralForm}`;
-}
-
 /* ── Band 3 · Fleet ───────────────────────────────────────────────────────── */
-
-export interface FleetRow {
-  workflow: Workflow;
-  /** Newest last, so the strip reads left-to-right as time. */
-  last30: RunStatus[];
-  failureRate: number;
-  lastRunAt: number;
-  spendUsd: number;
-  runIds: (string | null)[];
-}
-
-export type FleetSort = "failure" | "recency" | "spend";
 
 export function buildFleet(sort: FleetSort = "failure"): FleetRow[] {
   const rows: FleetRow[] = WORKFLOWS.map((w, wi) => {
@@ -492,15 +380,6 @@ export function buildFleet(sort: FleetSort = "failure"): FleetRow[] {
 }
 
 /* ── Band 4 · Detail ──────────────────────────────────────────────────────── */
-
-export interface LatencyDistribution {
-  /** Bucket upper bounds in ms, and the count in each. */
-  buckets: { upperMs: number; count: number }[];
-  p50: number;
-  p95: number;
-  p99: number;
-  sampleCount: number;
-}
 
 export function buildLatency(range: TimeRange): LatencyDistribution {
   const durations = runsInRange(range)
@@ -538,20 +417,6 @@ export function buildLatency(range: TimeRange): LatencyDistribution {
     p99: quantile(0.99),
     sampleCount: durations.length,
   };
-}
-
-export interface CostPoint {
-  t: number;
-  costUsd: number;
-  tokens: number;
-}
-
-export interface CostTrend {
-  points: CostPoint[];
-  /** Budget allocated per bucket, for the overlay line. */
-  budgetPerBucketUsd: number;
-  totalUsd: number;
-  totalTokens: number;
 }
 
 export function buildCostTrend(range: TimeRange): CostTrend {

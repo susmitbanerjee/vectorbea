@@ -57,21 +57,29 @@ export const failureIncident = z.object({
   id: uuid,
   runId: uuid,
   workflowId: uuid,
-  failedNodeId: z.string().nullable(),
-  failedStepId: z.string().nullable(),
-  failedAgentId: uuid.nullable(),
-  failedToolId: uuid.nullable(),
-  failedConnectionId: uuid.nullable(),
+  failedNodeId: z.string().nullish(),
+  failedStepId: z.string().nullish(),
+  failedAgentId: uuid.nullish(),
+  failedToolId: uuid.nullish(),
+  failedConnectionId: uuid.nullish(),
   category: z.string(),
   code: z.string(),
   severity: z.string(),
   summary: z.string(),
-  technicalSummary: z.string().nullable(),
-  recommendedAction: z.string().nullable(),
+  technicalSummary: z.string().nullish(),
+  recommendedAction: z.string().nullish(),
   retryable: z.boolean(),
   autoReplaySafe: z.boolean(),
   requiresHumanApproval: z.boolean(),
-  remediationJson: jsonObject.nullable(),
+  /**
+   * A JSON-encoded STRING, not an object.
+   *
+   * `FailureIncidentRoutes` puts the already-serialised `remediation_json`
+   * column straight into the response map, so it arrives double-encoded. The
+   * union accepts both so this keeps working if the route is ever fixed to send
+   * a real object; callers must handle the string case today.
+   */
+  remediationJson: z.union([jsonObject, z.string()]).nullish(),
   detectedAt: isoDateTime,
   resolutionStatus: z.string(),
 });
@@ -92,12 +100,12 @@ export const failureIncidentList = z.array(failureIncident);
 export const worker = z.object({
   id: z.string(),
   status: z.string(),
-  queue: z.string().nullable(),
+  queue: z.string().nullish(),
   activeTasks: z.number(),
   maxCapacity: z.number(),
-  heartbeat: z.string().nullable(),
-  version: z.string().nullable(),
-  region: z.string().nullable(),
+  heartbeat: z.string().nullish(),
+  version: z.string().nullish(),
+  region: z.string().nullish(),
 });
 export type Worker = z.infer<typeof worker>;
 

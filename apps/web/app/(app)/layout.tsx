@@ -16,6 +16,8 @@ import {
 } from "@/lib/auth/server";
 import { getUserBetaStatus } from "@/lib/auth/neon-auth";
 import { WorkspaceProvider } from "@/lib/workspace-context";
+import { AppProviders } from "~/components/app/providers";
+import { resolveWorkspacesForServer } from "~/lib/workspace/resolve-server";
 
 export const dynamic = "force-dynamic";
 
@@ -100,11 +102,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       // DB call failed — degrade gracefully
     }
 
+    const scope = await resolveWorkspacesForServer();
+
     return (
       <WorkspaceProvider organizations={organizations as never[]}>
         <OAuthTokenTransfer />
         <TelemetryPageViews />
         <SupportWidget />
+        <AppProviders
+          workspaces={scope.workspaces}
+          defaultWorkspaceId={scope.defaultWorkspaceId}
+        >
         <AppShell
           user={
             profile
@@ -114,14 +122,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         >
           {children}
         </AppShell>
+        </AppProviders>
       </WorkspaceProvider>
     );
   }
 
-  // No JWT_SECRET — open/dev mode (all API calls will fail gracefully anyway)
+  // No JWT_SECRET — open/dev mode. The API's own AuthMiddleware is disabled in
+  // the same situation, so scoped calls still succeed on the workspace header.
+  const scope = await resolveWorkspacesForServer();
+
   return (
     <WorkspaceProvider organizations={[] as never[]}>
-      <AppShell user={null}>{children}</AppShell>
+      <AppProviders workspaces={scope.workspaces} defaultWorkspaceId={scope.defaultWorkspaceId}>
+        <AppShell user={null}>{children}</AppShell>
+      </AppProviders>
     </WorkspaceProvider>
   );
 }

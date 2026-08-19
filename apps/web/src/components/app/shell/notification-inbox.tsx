@@ -11,14 +11,11 @@ import { MonoId } from "~/components/ui/mono-id";
 import { CountRoll } from "./count-roll";
 import { DismissDialog } from "./dismiss-dialog";
 import { badgeTone, onOpenInbox, worstSeverity, type InboxSeverity } from "./inbox-signal";
+import { useAttention } from "~/lib/control/use-attention";
+import { formatSpan, type AttentionItem } from "~/lib/control/model";
 import {
-  NOTIFICATIONS, NOTIFICATION_GROUP_LABEL,
-  type ShellNotification, type NotificationKind,
-} from "~/mocks/shell";
-import { buildAttention, formatSpan, type AttentionItem } from "~/mocks/control";
-import {
-  IncidentIcon, ApprovalGateIcon, DurableRunIcon, LeaseIcon, TokenMeterIcon,
-  BlastRadiusIcon, QueueDepthIcon, RecoveryEngineIcon, CheckpointIcon,
+  IncidentIcon, ApprovalGateIcon, BlastRadiusIcon, QueueDepthIcon,
+  RecoveryEngineIcon, CheckpointIcon,
 } from "~/components/icons/domain";
 import type { IconComponent } from "~/components/icons/types";
 
@@ -29,11 +26,19 @@ import type { IconComponent } from "~/components/icons/types";
    RESOLVED problems, and a bell that REPORTED events. Two surfaces competing to
    be the place you look when something is wrong.
 
-   They are one surface now, and it is the bell. The important half is the
-   triage half, so the merge keeps its properties rather than the notification
-   list's: every actionable item still states what is wrong, what it is taking
-   down with it, and the one action that fixes it. Informational notices sit
-   below them and cannot colour the badge.
+   They are one surface now, and it is the bell. Every item states what is
+   wrong, what it is taking down with it, and the one action that fixes it.
+
+   THE ITEMS ARE LIVE. They come from `useAttention`, which derives them from
+   /api/runs, /api/workflows, /api/connections and /api/failure-incidents — the
+   same query the Control summary reads, so the bell and the page cannot
+   disagree about how much needs doing.
+
+   The informational notification list that used to sit below them is GONE, not
+   hidden. It was fixture data, and there is no notifications endpoint to
+   replace it with; inventing notices to fill the panel is exactly the failure
+   this migration exists to end. When an endpoint exists, they come back as a
+   second severity tier.
 
    GROUPED BY TYPE, NOT BY TIME. A reverse-chronological feed is the wrong shape
    here. During an incident forty notices arrive in a minute and a flat list
@@ -43,14 +48,14 @@ import type { IconComponent } from "~/components/icons/types";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 /** Every group the inbox can show, in triage order. */
-const GROUP_ORDER = [
-  "incident", "connection", "approval", "workflow", "quota", "run", "system",
-] as const;
+const GROUP_ORDER = ["incident", "connection", "approval", "workflow", "quota"] as const;
 
 type InboxGroup = (typeof GROUP_ORDER)[number];
 
 const GROUP_LABEL: Record<InboxGroup, string> = {
-  ...NOTIFICATION_GROUP_LABEL,
+  incident: "Incidents",
+  connection: "Connections",
+  approval: "Approvals",
   workflow: "Workflows",
   quota: "Quota",
 };
@@ -61,8 +66,6 @@ const GROUP_ICON: Record<InboxGroup, IconComponent> = {
   approval: ApprovalGateIcon,
   workflow: RecoveryEngineIcon,
   quota: QueueDepthIcon,
-  run: DurableRunIcon,
-  system: TokenMeterIcon,
 };
 
 const SEVERITY_RAIL: Record<InboxSeverity, string> = {
@@ -118,29 +121,6 @@ function fromAttention(item: AttentionItem): InboxEntry {
   };
 }
 
-function relativeAge(minutes: number): string {
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-function fromNotification(n: ShellNotification): InboxEntry {
-  return {
-    id: n.id,
-    group: n.kind,
-    severity: "info",
-    title: n.title,
-    body: n.body,
-    age: relativeAge(n.age),
-    ageValue: n.age * 60_000,
-    read: n.read,
-    href: n.href,
-    dismissible: false,
-  };
-}
-
 /* ── Inbox ────────────────────────────────────────────────────────────────── */
 
 export function NotificationInbox() {
@@ -153,15 +133,16 @@ export function NotificationInbox() {
   // Control's severity summary opens this popover.
   React.useEffect(() => onOpenInbox(() => setOpen(true)), []);
 
-  const entries = React.useMemo(() => {
-    const merged = [
-      ...buildAttention().map(fromAttention),
-      ...NOTIFICATIONS.map(fromNotification),
-    ];
-    return merged
-      .filter((e) => !dismissed[e.id])
-      .map((e) => (readIds.has(e.id) ? { ...e, read: true } : e));
-  }, [dismissed, readIds]);
+  const { items } = useAttention();
+
+  const entries = React.useMemo(
+    () =>
+      items
+        .map(fromAttention)
+        .filter((e) => !dismissed[e.id])
+        .map((e) => (readIds.has(e.id) ? { ...e, read: true } : e)),
+    [items, dismissed, readIds],
+  );
 
   const grouped = React.useMemo(
     () =>

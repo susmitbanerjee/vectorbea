@@ -5,7 +5,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "~/lib/cn";
 import { overlaySurface, overlayMotion } from "~/components/ui/select";
 import { fuzzyRank } from "~/lib/fuzzy";
-import { WORKSPACES, RECENT_WORKSPACE_IDS, type Workspace } from "~/mocks/shell";
+import type { Workspace } from "~/mocks/shell";
 import { PatternedInitial } from "./workspace-mark";
 
 /**
@@ -21,30 +21,37 @@ import { PatternedInitial } from "./workspace-mark";
  */
 export interface WorkspaceSwitcherProps {
   workspace: Workspace;
+  /**
+   * Every workspace the user can reach, from the API.
+   *
+   * Passed in rather than imported. The switcher used to read the fixture list
+   * directly, which is how "Acme Platform" appeared above real data on a real
+   * workspace — the one place in the shell guaranteed to be seen on every
+   * screen.
+   */
+  workspaces: Workspace[];
   onWorkspaceChange: (id: string) => void;
   collapsed?: boolean;
 }
 
-export function WorkspaceSwitcher({ workspace, onWorkspaceChange, collapsed = false }: WorkspaceSwitcherProps) {
+export function WorkspaceSwitcher({
+  workspace, workspaces, onWorkspaceChange, collapsed = false,
+}: WorkspaceSwitcherProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   const results = React.useMemo(() => {
+    // No "Recent" group any more: recency was a fixture constant, and there is
+    // no endpoint that records which workspaces this user visited last.
+    const others = workspaces.filter((w) => w.id !== workspace.id);
     if (!query.trim()) {
-      const recents = RECENT_WORKSPACE_IDS
-        .map((id) => WORKSPACES.find((w) => w.id === id))
-        .filter((w): w is Workspace => Boolean(w) && w!.id !== workspace.id);
-      const rest = WORKSPACES.filter((w) => w.id !== workspace.id && !RECENT_WORKSPACE_IDS.includes(w.id));
-      return [
-        { label: "Recent", items: recents },
-        { label: "All workspaces", items: rest },
-      ].filter((g) => g.items.length > 0);
+      return others.length ? [{ label: "All workspaces", items: others }] : [];
     }
-    const ranked = fuzzyRank(WORKSPACES, query, (w) => w.name).map((r) => r.item);
+    const ranked = fuzzyRank(others, query, (w) => w.name).map((r) => r.item);
     return ranked.length ? [{ label: "Results", items: ranked }] : [];
-  }, [query, workspace.id]);
+  }, [query, workspace.id, workspaces]);
 
   const flat = React.useMemo(() => results.flatMap((g) => g.items), [results]);
 
