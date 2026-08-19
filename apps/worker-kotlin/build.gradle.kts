@@ -76,6 +76,10 @@ tasks.test {
 tasks.register<Jar>("fatJar") {
     group = "build"
     description = "Assembles an executable fat jar with all runtime dependencies"
+    // Gradle's composite dependency substitution puts the observability JAR on
+    // runtimeClasspath, but a custom Jar task does not infer that it must first
+    // execute the included build's jar task before expanding that file.
+    dependsOn(gradle.includedBuild("observability-kotlin").task(":jar"))
     archiveClassifier = "all"
     manifest {
         attributes["Main-Class"] = "com.vectorbea.worker.MainKt"
