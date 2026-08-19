@@ -28,6 +28,7 @@ vectorbea-ui/out/
 # ── Gradle / JVM ─────────────────────────────────────────────────────────────
 vectorbea-proxy/build/
 vectorbea-proxy/.gradle/
+.gradle/
 *.class
 *.war
 *.ear
@@ -47,6 +48,8 @@ build/
 .venv/
 venv/
 env/
+!packages/observability-kotlin/src/main/kotlin/com/vectorbea/observability/env/
+!packages/observability-kotlin/src/main/kotlin/com/vectorbea/observability/env/EnvironmentFilter.kt
 .env
 .env.local
 .env.*.local
