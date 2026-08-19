@@ -11,8 +11,7 @@ import { Switch } from "~/components/ui/choice";
 import { formatDuration } from "~/lib/format";
 import { DetailSheet, Section, Facts } from "./detail-sheet";
 import { RiskBadge, RegistryStatusBadge, HealthDot, EnvironmentScope, Sparkline, DistributionBar } from "./atoms";
-import { policyFindings, policyForRisk, TOOL_TYPE_LABEL, type ToolRecord, type SchemaParameter } from "~/mocks/registry";
-import { CONNECTIONS } from "~/mocks/fixtures";
+import { policyFindings, policyForRisk, TOOL_TYPE_LABEL, type ToolRecord, type SchemaParameter } from "~/lib/registry/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    TOOL DETAIL
@@ -51,7 +50,10 @@ export function ToolDetail({
   if (!tool) return null;
 
   const findings = policyFindings(tool);
-  const connection = CONNECTIONS.find((c) => c.name === tool.connection);
+  const connection = tool.connection ? {
+    status: tool.connectionStatus ?? "unknown",
+    latencyMs: tool.connectionLatencyMs ?? null,
+  } : undefined;
 
   return (
     <DetailSheet
@@ -109,7 +111,7 @@ export function ToolDetail({
 
 /* ── Overview ─────────────────────────────────────────────────────────────── */
 
-function Overview({ tool, connection }: { tool: ToolRecord; connection?: { status: string; latencyMs: number | null; blastRadius: { workflows: number; tools: number } } }) {
+function Overview({ tool, connection }: { tool: ToolRecord; connection?: { status: string; latencyMs: number | null; blastRadius?: { workflows: number; tools: number } } }) {
   return (
     <>
       <Section title="What it does" help="">
@@ -139,7 +141,7 @@ function Overview({ tool, connection }: { tool: ToolRecord; connection?: { statu
               {connection?.latencyMs ? `${connection.latencyMs}ms` : connection?.status ?? "not registered"}
             </Text>
           </span>
-          {connection ? (
+          {connection?.blastRadius ? (
             <Text variant="caption" tone="muted" className="mt-1.5 block">
               {connection.blastRadius.workflows} workflows and {connection.blastRadius.tools} tools
               share this connection — if it fails, they all fail together.

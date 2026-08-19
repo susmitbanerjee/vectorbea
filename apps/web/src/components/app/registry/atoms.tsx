@@ -4,8 +4,8 @@ import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { EMPTY } from "~/lib/format";
-import type { Environment, RiskLevel } from "~/mocks/domain";
-import type { RegistryStatus } from "~/mocks/registry";
+import type { Environment } from "~/lib/workflows/model";
+import type { RegistryStatus, RiskLevel } from "~/lib/registry/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    REGISTRY CELL VOCABULARY
@@ -114,12 +114,14 @@ const ENV_SHORT: Record<Environment, string> = {
   production: "prod",
   staging: "stg",
   development: "dev",
+  unknown: "unknown",
 };
 
 const ENV_CLASS: Record<Environment, string> = {
   production: "text-env-production border-env-production/40",
   staging: "text-env-staging border-env-staging/40",
   development: "text-env-development border-env-development/40",
+  unknown: "text-fg-muted border-subtle",
 };
 
 /**

@@ -12,7 +12,7 @@ import {
   EnvironmentChip, StepsCell,
 } from "./atoms";
 import { WorkflowRowActions, type WorkflowActionHandlers } from "./row-actions";
-import type { Workflow } from "~/mocks/domain";
+import type { Workflow } from "~/lib/workflows/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    CARD VIEW
@@ -112,9 +112,11 @@ const WorkflowCard = React.memo(function WorkflowCard({
       <div>
         <div className="mb-1 flex items-baseline justify-between gap-2">
           <Text variant="eyebrow" tone="muted">Last 30 runs</Text>
-          <SuccessRateCell rate={workflow.successRate30d} />
+          {workflow.hasRunData
+            ? <SuccessRateCell rate={workflow.successRate30d} />
+            : <Text variant="caption" tone="disabled">{EMPTY}</Text>}
         </div>
-        <Heatstrip
+        {workflow.hasRunData ? <Heatstrip
           statuses={workflow.last30}
           runIds={workflow.last30RunIds}
           label={workflow.name}
@@ -122,7 +124,7 @@ const WorkflowCard = React.memo(function WorkflowCard({
           cellHeight={18}
           gap={2}
           onSelect={(_, runId) => { if (runId) onOpenRun(runId); }}
-        />
+        /> : <Text variant="caption" tone="disabled">No runs yet</Text>}
       </div>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
@@ -144,7 +146,7 @@ const WorkflowCard = React.memo(function WorkflowCard({
         <Fact label="Version">
           <span className="flex items-center gap-1">
             <Text variant="caption" tone={workflow.version === 0 ? "disabled" : "secondary"} tabular>
-              {workflow.version === 0 ? EMPTY : `v${workflow.version}`}
+              {workflow.versionKnown === false && workflow.draftVersion === null ? "Published" : workflow.version === 0 ? EMPTY : `v${workflow.version}`}
             </Text>
             {workflow.draftVersion ? (
               <Text variant="caption" tone="inherit" className="text-status-waiting text-[10px]">

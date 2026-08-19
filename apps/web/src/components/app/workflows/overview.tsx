@@ -59,7 +59,6 @@ export function WorkflowOverview({ workflow }: { workflow: Workflow }) {
 
   const handlers = React.useMemo<WorkflowActionHandlers>(() => ({
     onRunNow: (w) => console.info("run now", w.id),
-    onDuplicate: (w) => console.info("duplicate", w.id),
     onExport: (w) => console.info("export", w.id),
     onDelete: (w) => console.info("delete", w.id),
     onSetStatus: (w, s) => console.info("set status", w.id, s),

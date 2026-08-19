@@ -15,11 +15,13 @@ import { QueryBar } from "~/components/data/query-bar";
 import { QuickFilters, type QuickFilter } from "~/components/data/saved-views";
 import { parseQuery, compileRecordPredicate, AGENT_QUERY } from "~/lib/query";
 import { formatCost, formatDuration, formatTokens } from "~/lib/format";
-import { AGENT_RECORDS, grantFindings, type AgentRecord } from "~/mocks/registry";
+import { grantFindings, type AgentRecord } from "~/lib/registry/model";
 import { RegistryStatusBadge, RateCell, RiskBadge } from "./atoms";
 import { RelativeTime } from "~/components/app/workflows/atoms";
 import { AgentDetail } from "./agent-detail";
 import { RegistryBulkBar } from "./bulk-bar";
+import { useAgentsData } from "./use-registry-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AGENTS — a registry, not a card grid (§1, diagnosis #2).
@@ -31,9 +33,12 @@ import { RegistryBulkBar } from "./bulk-bar";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function AgentsView({ forceState }: { forceState?: TableStatus }) {
+  const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const data = useAgentsData();
+  const agents = data.rows;
 
   const frozen = params.get("frozen") === "1";
   const urlQuery = params.get("q") ?? "";
@@ -90,8 +95,8 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
       grants: (a) => a.grants.length,
       governance: (a) => (grantFindings(a).length > 0 ? "violation" : "ok"),
     }, searchText);
-    return AGENT_RECORDS.filter(predicate);
-  }, [deferred, searchText]);
+    return agents.filter(predicate);
+  }, [agents, deferred, searchText]);
 
   const sorted = React.useMemo(() => {
     if (sort.length === 0) return filtered;
@@ -137,9 +142,9 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
   }, [frozen]);
 
   const status: TableStatus = forceState ?? stateParam
-    ?? (!booted ? "loading" : AGENT_RECORDS.length === 0 ? "empty" : sorted.length === 0 ? "no-results" : "ready");
+    ?? (data.loading || !booted ? "loading" : data.error ? "error" : agents.length === 0 ? "empty" : sorted.length === 0 ? "no-results" : "ready");
 
-  const openAgent = React.useMemo(() => AGENT_RECORDS.find((a) => a.id === openId) ?? null, [openId]);
+  const openAgent = React.useMemo(() => agents.find((a) => a.id === openId) ?? null, [agents, openId]);
 
   /* ── Columns ────────────────────────────────────────────────────────────── */
   const columns = React.useMemo<DataColumn<AgentRecord>[]>(() => [
@@ -209,27 +214,29 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
     {
       id: "runs", header: "Runs 30d", width: 88, minWidth: 72, numeric: true,
       sortValue: (a) => a.runs30d, skeletonWidth: 40,
-      cell: (agent) => <Text variant="caption" tone="secondary" tabular>{agent.runs30d.toLocaleString("en-GB")}</Text>,
+      cell: (agent) => agent.hasUsageData
+        ? <Text variant="caption" tone="secondary" tabular>{agent.runs30d.toLocaleString("en-GB")}</Text>
+        : <Text variant="caption" tone="disabled">—</Text>,
     },
     {
       id: "rate", header: "Success", width: 84, minWidth: 70, numeric: true,
       sortValue: (a) => a.successRate, skeletonWidth: 34,
-      cell: (agent) => <RateCell rate={agent.successRate} />,
+      cell: (agent) => agent.hasUsageData ? <RateCell rate={agent.successRate} /> : <Text variant="caption" tone="disabled">—</Text>,
     },
     {
       id: "tokens", header: "Avg tokens", width: 92, minWidth: 76, numeric: true,
       sortValue: (a) => a.avgTokens, skeletonWidth: 42,
-      cell: (agent) => <Text variant="caption" tone="secondary" tabular>{formatTokens(agent.avgTokens)}</Text>,
+      cell: (agent) => agent.hasUsageData ? <Text variant="caption" tone="secondary" tabular>{formatTokens(agent.avgTokens)}</Text> : <Text variant="caption" tone="disabled">—</Text>,
     },
     {
       id: "cost", header: "Avg cost", width: 88, minWidth: 72, numeric: true,
       sortValue: (a) => a.avgCostUsd, skeletonWidth: 44,
-      cell: (agent) => <Text variant="caption" tone="secondary" tabular>{formatCost(agent.avgCostUsd)}</Text>,
+      cell: (agent) => agent.hasUsageData ? <Text variant="caption" tone="secondary" tabular>{formatCost(agent.avgCostUsd)}</Text> : <Text variant="caption" tone="disabled">—</Text>,
     },
     {
       id: "p95", header: "p95", width: 80, minWidth: 66, numeric: true,
       sortValue: (a) => a.p95DurationMs, skeletonWidth: 40,
-      cell: (agent) => <Text variant="caption" tone="secondary" tabular>{formatDuration(agent.p95DurationMs)}</Text>,
+      cell: (agent) => agent.hasUsageData ? <Text variant="caption" tone="secondary" tabular>{formatDuration(agent.p95DurationMs)}</Text> : <Text variant="caption" tone="disabled">—</Text>,
     },
     {
       id: "lastUsed", header: "Last used", width: 92, minWidth: 78,
@@ -250,10 +257,10 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
   ], [selection]);
 
   const counts = React.useMemo(() => ({
-    ungated: AGENT_RECORDS.filter((a) => grantFindings(a).length > 0).length,
-    paused: AGENT_RECORDS.filter((a) => a.status === "paused").length,
-    failing: AGENT_RECORDS.filter((a) => a.successRate < 70).length,
-  }), []);
+    ungated: agents.filter((a) => grantFindings(a).length > 0).length,
+    paused: agents.filter((a) => a.status === "paused").length,
+    failing: agents.filter((a) => a.hasUsageData && a.successRate < 70).length,
+  }), [agents]);
 
   const quickFilters: QuickFilter[] = [
     { id: "ungated", label: "Ungated high risk", query: "governance:violation", count: counts.ungated, tone: "failed" },
@@ -275,7 +282,7 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
         eyebrow="Build"
         title="Agents"
         description="Every registered agent, with what it costs, how often it works, and exactly what it is permitted to do."
-        actions={<Button variant="primary" size="sm">New agent</Button>}
+        actions={<Button asChild variant="primary" size="sm"><Link href={"/agents/new" as Route}>New agent</Link></Button>}
       />
 
       <div className="grid gap-3">
@@ -320,9 +327,14 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
         count={selected.length}
         noun="agent"
         onClear={selection.clear}
-        onActivate={() => console.info("activate", selected.length)}
-        onDeactivate={() => console.info("deactivate", selected.length)}
-        onTag={() => console.info("tag", selected.length)}
+        onActivate={() => {
+          void Promise.all(selected.map((agent) => api.agents.update(agent.id, { status: "active" }, data.scope)))
+            .then(data.refetch);
+        }}
+        onDeactivate={() => {
+          void Promise.all(selected.map((agent) => api.agents.update(agent.id, { status: "paused" }, data.scope)))
+            .then(data.refetch);
+        }}
         onExport={() => exportAgents(selected)}
       />
     </PageContainer>
@@ -359,7 +371,7 @@ function AgentsState({
           and also the risk this page exists to make visible.
         </Text>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button variant="primary" size="sm">Register an agent</Button>
+          <Button asChild variant="primary" size="sm"><Link href={"/agents/new" as Route}>Register an agent</Link></Button>
           <Button asChild variant="secondary" size="sm">
             <Link href={"/docs/first-workflow" as Route}>Read the tutorial</Link>
           </Button>

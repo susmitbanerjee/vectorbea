@@ -19,9 +19,6 @@ import {
   parseQuery, compileWorkflowPredicate, healthBand, WORKFLOW_QUERY,
 } from "~/lib/query";
 import { formatCost, formatDuration, EMPTY } from "~/lib/format";
-import { WORKFLOWS } from "~/mocks/fixtures";
-import { currentVersion, liveVersion, draftVersion } from "~/mocks/workflow-versions";
-import { flattenConfig } from "~/mocks/workflow-nodes";
 import {
   WorkflowStatusBadge, TriggerCell, SuccessRateCell, LastRunCell, TagList,
   EnvironmentChip, StepsCell,
@@ -29,7 +26,9 @@ import {
 import { WorkflowRowActions, type WorkflowActionHandlers } from "./row-actions";
 import { WorkflowBulkBar } from "./bulk-bar";
 import { WorkflowCardGrid } from "./workflow-cards";
-import type { Environment, Workflow } from "~/mocks/domain";
+import type { Workflow } from "~/lib/workflows/model";
+import { useWorkflowsData } from "./use-workflows-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WORKFLOWS
@@ -88,23 +87,12 @@ function buildSearchIndex(workflows: Workflow[]): Map<string, string> {
   const index = new Map<string, string>();
 
   for (const workflow of workflows) {
-    // `currentVersion`, not `liveVersion`: a draft-only workflow is still
-    // findable by what it contains, and a search that cannot reach an
-    // unpublished graph is a search you have to remember not to trust.
-    const nodes = currentVersion(workflow.id)?.nodes ?? [];
     const parts: string[] = [
       workflow.name, workflow.description, workflow.owner,
       workflow.environment, workflow.status, workflow.trigger,
       ...workflow.tags,
       ...workflow.triggers.map((t) => `${t.summary} ${t.detail}`),
     ];
-
-    for (const node of nodes) {
-      parts.push(node.name, node.kind);
-      for (const value of Object.values(flattenConfig(node.config))) {
-        if (typeof value === "string" || typeof value === "number") parts.push(String(value));
-      }
-    }
 
     index.set(workflow.id, parts.join(" ").toLowerCase());
   }
@@ -119,9 +107,12 @@ export interface WorkflowsViewProps {
 }
 
 export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
+  const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const data = useWorkflowsData();
+  const workflows = data.rows;
 
   const frozen = params.get("frozen") === "1";
   const urlQuery = params.get("q") ?? "";
@@ -161,7 +152,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const [preferences, setPreferences] = useTablePreferences("workflows");
 
   /* ── Data ───────────────────────────────────────────────────────────────── */
-  const searchIndex = React.useMemo(() => buildSearchIndex(WORKFLOWS), []);
+  const searchIndex = React.useMemo(() => buildSearchIndex(workflows), [workflows]);
   const searchText = React.useCallback(
     (workflow: Workflow) => searchIndex.get(workflow.id) ?? "",
     [searchIndex],
@@ -172,8 +163,8 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const filtered = React.useMemo(() => {
     const parsed = parseQuery(deferredQuery, WORKFLOW_QUERY.fields);
     const predicate = compileWorkflowPredicate(parsed, searchText);
-    return WORKFLOWS.filter(predicate);
-  }, [deferredQuery, searchText]);
+    return workflows.filter(predicate);
+  }, [deferredQuery, searchText, workflows]);
 
   const sorted = React.useMemo(() => {
     if (sort.length === 0) return filtered;
@@ -224,8 +215,9 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const status: TableStatus =
     forceState ??
     stateParam ??
-    (!booted ? "loading"
-      : WORKFLOWS.length === 0 ? "empty"
+    (data.loading || !booted ? "loading"
+      : data.error ? "error"
+      : workflows.length === 0 ? "empty"
         : sorted.length === 0 ? "no-results"
           : "ready");
 
@@ -246,12 +238,11 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   );
 
   const handlers = React.useMemo<WorkflowActionHandlers>(() => ({
-    onRunNow: (w) => console.info("run now", w.id),
-    onDuplicate: (w) => console.info("duplicate", w.id),
+    onRunNow: (w) => { void api.workflows.run(w.id, {}, data.scope); },
     onExport: (w) => exportJson([w]),
-    onDelete: (w) => console.info("delete", w.id),
-    onSetStatus: (w, s) => console.info("set status", w.id, s),
-  }), []);
+    onDelete: (w) => { void api.workflows.delete(w.id, data.scope).then(data.refetch); },
+    onSetStatus: (w, s) => { void api.workflows.update(w.id, { status: s }, data.scope).then(data.refetch); },
+  }), [api, data]);
 
   /* ── Columns ────────────────────────────────────────────────────────────── */
   const columns = React.useMemo<DataColumn<Workflow>[]>(() => [
@@ -295,6 +286,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
       sortValue: (w) => w.successRate30d, skeletonWidth: 150,
       cell: (workflow) => (
         <span data-row-stop className="flex">
+          {!workflow.hasRunData ? <Text variant="caption" tone="disabled">{EMPTY}</Text> :
           <Heatstrip
             statuses={workflow.last30}
             runIds={workflow.last30RunIds}
@@ -303,7 +295,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
             cellHeight={16}
             gap={1}
             onSelect={(_, runId) => { if (runId) router.push(`/runs/${runId}` as Route); }}
-          />
+          />}
         </span>
       ),
     },
@@ -329,7 +321,9 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
     {
       id: "rate", header: "Success 30d", width: 96, numeric: true, minWidth: 78,
       sortValue: (w) => w.successRate30d, skeletonWidth: 36,
-      cell: (workflow) => <SuccessRateCell rate={workflow.successRate30d} />,
+      cell: (workflow) => workflow.hasRunData
+        ? <SuccessRateCell rate={workflow.successRate30d} />
+        : <Text variant="caption" tone="disabled">{EMPTY}</Text>,
     },
     {
       id: "duration", header: "Avg duration", width: 100, numeric: true, minWidth: 80,
@@ -348,7 +342,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
     {
       id: "version", header: "Version", width: 92, minWidth: 72,
       sortValue: (w) => w.version, skeletonWidth: 34,
-      cell: (workflow) => <VersionCell version={workflow.version} draft={workflow.draftVersion} />,
+      cell: (workflow) => <VersionCell version={workflow.version} draft={workflow.draftVersion} known={workflow.versionKnown !== false} published={Boolean(workflow.versionKnown === false && workflow.draftVersion === null)} />,
     },
     {
       id: "owner", header: "Owner", width: 120, minWidth: 88,
@@ -376,13 +370,13 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
 
   /* ── Quick filters ──────────────────────────────────────────────────────── */
   const counts = React.useMemo(() => ({
-    failing: WORKFLOWS.filter((w) => healthBand(w.successRate30d) === "failing").length,
-    active: WORKFLOWS.filter((w) => w.status === "active").length,
-    paused: WORKFLOWS.filter((w) => w.status === "paused").length,
-    draft: WORKFLOWS.filter((w) => w.status === "draft").length,
-    drafts: WORKFLOWS.filter((w) => w.draftVersion !== null).length,
-    scheduled: WORKFLOWS.filter((w) => w.trigger === "schedule").length,
-  }), []);
+    failing: workflows.filter((w) => w.hasRunData && healthBand(w.successRate30d) === "failing").length,
+    active: workflows.filter((w) => w.status === "active").length,
+    paused: workflows.filter((w) => w.status === "paused").length,
+    draft: workflows.filter((w) => w.status === "draft").length,
+    drafts: workflows.filter((w) => w.draftVersion !== null).length,
+    scheduled: workflows.filter((w) => w.trigger === "schedule").length,
+  }), [workflows]);
 
   const quickFilters: QuickFilter[] = [
     { id: "failing", label: "Failing", query: "health:failing", count: counts.failing, tone: "failed" },
@@ -482,10 +476,11 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
       <WorkflowBulkBar
         selected={selected}
         onClear={selection.clear}
-        onSetStatus={(workflows, next) => console.info("bulk status", next, workflows.length)}
+        onSetStatus={(items, next) => {
+          void Promise.all(items.map((workflow) => api.workflows.update(workflow.id, { status: next }, data.scope)))
+            .then(data.refetch);
+        }}
         onExport={exportJson}
-        onMoveEnvironment={(workflows, environment: Environment) =>
-          console.info("bulk move", environment, workflows.length)}
       />
     </PageContainer>
   );
@@ -506,8 +501,6 @@ function exportJson(workflows: Workflow[]) {
     version: w.version,
     draftVersion: w.draftVersion,
     triggers: w.triggers,
-    nodes: liveVersion(w.id)?.nodes ?? [],
-    draftNodes: draftVersion(w.id)?.nodes ?? null,
   }));
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -529,7 +522,10 @@ function exportJson(workflows: Workflow[]) {
  * that. A draft sitting past the live version is news: what is running is not
  * what the last person edited.
  */
-function VersionCell({ version, draft }: { version: number; draft: number | null }) {
+function VersionCell({ version, draft, known = true, published = false }: { version: number; draft: number | null; known?: boolean; published?: boolean }) {
+  if (!known && published) {
+    return <Text variant="caption" tone="secondary">Published</Text>;
+  }
   if (version === 0) {
     return (
       <span className="flex min-w-0 items-baseline gap-1">

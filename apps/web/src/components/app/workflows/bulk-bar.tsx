@@ -1,13 +1,10 @@
 "use client";
 
 import * as React from "react";
-import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
-import { Select } from "~/components/ui/select";
-import { plural } from "~/mocks/control";
-import type { Environment, Workflow } from "~/mocks/domain";
+import type { Workflow } from "~/lib/workflows/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BULK ACTIONS — activate · pause · archive · export · move to environment.
@@ -27,33 +24,21 @@ export interface WorkflowBulkBarProps {
   onClear: () => void;
   onSetStatus: (workflows: Workflow[], status: Workflow["status"]) => void;
   onExport: (workflows: Workflow[]) => void;
-  onMoveEnvironment: (workflows: Workflow[], environment: Environment) => void;
 }
 
-const ENVIRONMENTS = [
-  { value: "production", label: "Production" },
-  { value: "staging", label: "Staging" },
-  { value: "development", label: "Development" },
-];
-
 export function WorkflowBulkBar({
-  selected, onClear, onSetStatus, onExport, onMoveEnvironment,
+  selected, onClear, onSetStatus, onExport,
 }: WorkflowBulkBarProps) {
-  const [moving, setMoving] = React.useState(false);
-  const [target, setTarget] = React.useState<Environment>("staging");
-
   const count = selected.length;
   // A draft has never been published, so there is nothing to activate or pause.
   const activatable = selected.filter((w) => w.status === "paused" || w.status === "archived");
   const pausable = selected.filter((w) => w.status === "active");
   const archivable = selected.filter((w) => w.status !== "archived");
-  const moving_ = selected.filter((w) => w.environment !== target);
 
   if (count === 0) return null;
 
   return (
-    <>
-      <div
+    <div
         role="region"
         aria-label={`${count} workflows selected`}
         className="pointer-events-none fixed inset-x-0 bottom-0 z-sticky flex justify-center p-3 print:hidden"
@@ -93,9 +78,6 @@ export function WorkflowBulkBar({
               reason="These are already archived."
               onClick={() => onSetStatus(archivable, "archived")}
             />
-            <Button size="sm" variant="secondary" onClick={() => setMoving(true)}>
-              Move…
-            </Button>
             <Button size="sm" variant="secondary" onClick={() => onExport(selected)}>
               Export
             </Button>
@@ -113,62 +95,7 @@ export function WorkflowBulkBar({
             </button>
           </div>
         </div>
-      </div>
-
-      <Dialog.Root open={moving} onOpenChange={setMoving}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="motion-fade z-overlay bg-surface-canvas/70 fixed inset-0 backdrop-blur-[2px]" />
-          <Dialog.Content
-            className={cn(
-              "motion-overlay z-modal fixed",
-              "bg-surface-overlay border-subtle shadow-3 border",
-              "inset-x-0 bottom-0 rounded-t-lg",
-              "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2",
-              "sm:w-[min(30rem,calc(100vw-2rem))] sm:rounded-lg",
-              "p-4",
-            )}
-          >
-            <Dialog.Title asChild>
-              <Text variant="heading-sm" tone="max" as="h2">Move to another environment</Text>
-            </Dialog.Title>
-            <Dialog.Description asChild>
-              <Text variant="body-sm" tone="secondary" className="mt-1 block">
-                Moving re-points the workflow&apos;s connections at the target environment. Schedules
-                keep their cron but start firing against the new data.
-              </Text>
-            </Dialog.Description>
-
-            <div className="mt-3 grid gap-2">
-              <Select
-                options={ENVIRONMENTS}
-                value={target}
-                onValueChange={(v) => setTarget(v as Environment)}
-                aria-label="Target environment"
-              />
-              <Text variant="caption" tone="muted">
-                {moving_.length === 0
-                  ? `All ${plural(count, "workflow")} already sit in ${target}.`
-                  : `${plural(moving_.length, "workflow")} will move. ${count - moving_.length} already there.`}
-              </Text>
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <Dialog.Close asChild>
-                <Button variant="secondary" size="sm">Cancel</Button>
-              </Dialog.Close>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={moving_.length === 0}
-                onClick={() => { onMoveEnvironment(moving_, target); setMoving(false); }}
-              >
-                Move {moving_.length} to {target}
-              </Button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-    </>
+    </div>
   );
 }
 

@@ -13,11 +13,12 @@ import { QueryBar } from "~/components/data/query-bar";
 import { QuickFilters, type QuickFilter } from "~/components/data/saved-views";
 import { parseQuery, compileRecordPredicate, TOOL_QUERY } from "~/lib/query";
 import { formatDuration, EMPTY } from "~/lib/format";
-import { TOOL_RECORDS, policyFindings, TOOL_TYPE_LABEL, type ToolRecord } from "~/mocks/registry";
-import { CONNECTIONS } from "~/mocks/fixtures";
+import { policyFindings, TOOL_TYPE_LABEL, type ToolRecord } from "~/lib/registry/model";
 import { RiskBadge, RegistryStatusBadge, RateCell, HealthDot } from "./atoms";
 import { ToolDetail } from "./tool-detail";
 import { RegistryBulkBar } from "./bulk-bar";
+import { useToolsData } from "./use-registry-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    TOOLS — a registry, sorted riskiest first by default.
@@ -30,9 +31,12 @@ import { RegistryBulkBar } from "./bulk-bar";
 const RISK_ORDER = { critical: 0, high: 1, medium: 2, low: 3 } as const;
 
 export function ToolsView({ forceState }: { forceState?: TableStatus }) {
+  const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const data = useToolsData();
+  const tools = data.rows;
 
   const frozen = params.get("frozen") === "1";
   const urlQuery = params.get("q") ?? "";
@@ -88,8 +92,8 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       failing: (t) => (t.lastError ? "true" : "false"),
       policy: (t) => (policyFindings(t).length > 0 ? "violation" : "ok"),
     }, searchText);
-    return TOOL_RECORDS.filter(predicate);
-  }, [deferred, searchText]);
+    return tools.filter(predicate);
+  }, [deferred, searchText, tools]);
 
   const sorted = React.useMemo(() => {
     if (sort.length === 0) return filtered;
@@ -131,9 +135,9 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
   }, [frozen]);
 
   const status: TableStatus = forceState ?? stateParam
-    ?? (!booted ? "loading" : TOOL_RECORDS.length === 0 ? "empty" : sorted.length === 0 ? "no-results" : "ready");
+    ?? (data.loading || !booted ? "loading" : data.error ? "error" : tools.length === 0 ? "empty" : sorted.length === 0 ? "no-results" : "ready");
 
-  const openTool = React.useMemo(() => TOOL_RECORDS.find((t) => t.id === openId) ?? null, [openId]);
+  const openTool = React.useMemo(() => tools.find((t) => t.id === openId) ?? null, [openId, tools]);
 
   const columns = React.useMemo<DataColumn<ToolRecord>[]>(() => [
     {
@@ -188,11 +192,10 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       id: "connection", header: "Connection", width: 156, minWidth: 110,
       sortValue: (t) => t.connection ?? "", skeletonWidth: 100,
       cell: (tool) => {
-        const connection = CONNECTIONS.find((c) => c.name === tool.connection);
         if (!tool.connection) return <Text variant="caption" tone="disabled">{EMPTY}</Text>;
         return (
           <span className="flex min-w-0 items-center gap-1.5">
-            <HealthDot status={(connection?.status as "healthy") ?? "unknown"} />
+            <HealthDot status={(tool.connectionStatus as "healthy") ?? "unknown"} />
             <Text variant="caption" tone="secondary" className="truncate">{tool.connection}</Text>
           </span>
         );
@@ -201,17 +204,17 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
     {
       id: "calls", header: "Calls 30d", width: 92, minWidth: 76, numeric: true,
       sortValue: (t) => t.calls30d, skeletonWidth: 44,
-      cell: (tool) => <Text variant="caption" tone="secondary" tabular>{tool.calls30d.toLocaleString("en-GB")}</Text>,
+      cell: (tool) => tool.hasUsageData ? <Text variant="caption" tone="secondary" tabular>{tool.calls30d.toLocaleString("en-GB")}</Text> : <Text variant="caption" tone="disabled">{EMPTY}</Text>,
     },
     {
       id: "rate", header: "Success", width: 84, minWidth: 70, numeric: true,
       sortValue: (t) => t.successRate, skeletonWidth: 34,
-      cell: (tool) => <RateCell rate={tool.successRate} />,
+      cell: (tool) => tool.hasUsageData ? <RateCell rate={tool.successRate} /> : <Text variant="caption" tone="disabled">{EMPTY}</Text>,
     },
     {
       id: "latency", header: "p95", width: 80, minWidth: 66, numeric: true,
       sortValue: (t) => t.p95LatencyMs, skeletonWidth: 40,
-      cell: (tool) => <Text variant="caption" tone="secondary" tabular>{formatDuration(tool.p95LatencyMs)}</Text>,
+      cell: (tool) => tool.hasUsageData ? <Text variant="caption" tone="secondary" tabular>{formatDuration(tool.p95LatencyMs)}</Text> : <Text variant="caption" tone="disabled">{EMPTY}</Text>,
     },
     {
       id: "timeout", header: "Timeout", width: 84, minWidth: 70, numeric: true,
@@ -258,10 +261,10 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
   ], [selection]);
 
   const counts = React.useMemo(() => ({
-    violations: TOOL_RECORDS.filter((t) => policyFindings(t).length > 0).length,
-    failing: TOOL_RECORDS.filter((t) => t.lastError !== null).length,
-    critical: TOOL_RECORDS.filter((t) => t.risk === "critical" || t.risk === "high").length,
-  }), []);
+    violations: tools.filter((t) => policyFindings(t).length > 0).length,
+    failing: tools.filter((t) => t.lastError !== null).length,
+    critical: tools.filter((t) => t.risk === "critical" || t.risk === "high").length,
+  }), [tools]);
 
   const quickFilters: QuickFilter[] = [
     { id: "violations", label: "Policy violations", query: "policy:violation", count: counts.violations, tone: "failed" },
@@ -283,7 +286,7 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         eyebrow="Build"
         title="Tools"
         description="Every registered tool, riskiest first — what it can do, what it is allowed to do, and how often it works."
-        actions={<Button variant="primary" size="sm">New tool</Button>}
+        actions={<Button asChild variant="primary" size="sm"><Link href={"/tools/new" as Route}>New tool</Link></Button>}
       />
 
       <div className="grid gap-3">
@@ -344,9 +347,14 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         count={selected.length}
         noun="tool"
         onClear={selection.clear}
-        onActivate={() => console.info("activate", selected.length)}
-        onDeactivate={() => console.info("deactivate", selected.length)}
-        onTag={() => console.info("tag", selected.length)}
+        onActivate={() => {
+          void Promise.all(selected.map((tool) => api.tools.update(tool.id, { status: "active" }, data.scope)))
+            .then(data.refetch);
+        }}
+        onDeactivate={() => {
+          void Promise.all(selected.map((tool) => api.tools.update(tool.id, { status: "paused" }, data.scope)))
+            .then(data.refetch);
+        }}
         onExport={() => {
           const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
           const url = URL.createObjectURL(blob);
@@ -381,7 +389,7 @@ function ToolsState({
           needs a human first.
         </Text>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button variant="primary" size="sm">Register a tool</Button>
+          <Button asChild variant="primary" size="sm"><Link href={"/tools/new" as Route}>Register a tool</Link></Button>
           <Button variant="secondary" size="sm">Import from OpenAPI</Button>
           <Button asChild variant="secondary" size="sm">
             <Link href={"/integrations" as Route}>Browse integrations</Link>

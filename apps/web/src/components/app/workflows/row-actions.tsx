@@ -11,9 +11,7 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Field } from "~/components/ui/field";
 import { overlaySurface, overlayMotion, menuItem } from "~/components/ui/select";
-import { deleteImpact } from "~/mocks/workflow-versions";
-import { RelativeTime } from "./atoms";
-import type { Workflow } from "~/mocks/domain";
+import type { Workflow } from "~/lib/workflows/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    ROW ACTIONS
@@ -33,7 +31,6 @@ import type { Workflow } from "~/mocks/domain";
 
 export interface WorkflowActionHandlers {
   onRunNow: (workflow: Workflow) => void;
-  onDuplicate: (workflow: Workflow) => void;
   onExport: (workflow: Workflow) => void;
   onDelete: (workflow: Workflow) => void;
   onSetStatus: (workflow: Workflow, status: Workflow["status"]) => void;
@@ -104,9 +101,6 @@ export function WorkflowRowActions({
                 {paused || archived ? "Activate" : "Pause"}
               </DropdownMenu.Item>
             ) : null}
-            <DropdownMenu.Item className={menuItem} onSelect={() => handlers.onDuplicate(workflow)}>
-              Duplicate
-            </DropdownMenu.Item>
             <DropdownMenu.Item className={menuItem} onSelect={() => handlers.onExport(workflow)}>
               Export JSON
             </DropdownMenu.Item>
@@ -150,7 +144,6 @@ export function DeleteWorkflowDialog({
   const [typed, setTyped] = React.useState("");
   React.useEffect(() => { setTyped(""); }, [workflow?.id]);
 
-  const impact = React.useMemo(() => (workflow ? deleteImpact(workflow) : null), [workflow]);
   const confirmed = workflow !== null && typed.trim() === workflow.name;
 
   return (
@@ -179,51 +172,6 @@ export function DeleteWorkflowDialog({
               proves what it did. Archiving keeps all of that and stops it firing.
             </Text>
           </Dialog.Description>
-
-          {impact ? (
-            <div className="border-status-failed-border bg-status-failed-subtle mt-3 rounded-md border p-3">
-              <Text variant="label" tone="inherit" className="text-status-failed block">
-                What this breaks
-              </Text>
-              <ul className="mt-2 grid gap-1.5">
-                {impact.schedules.map((s) => (
-                  <ImpactRow
-                    key={s.detail}
-                    label="Schedule stops firing"
-                    value={s.summary}
-                    detail={s.nextFireAt ? <>next run was <RelativeTime iso={s.nextFireAt} /></> : null}
-                  />
-                ))}
-                {impact.endpoints.map((e) => (
-                  <ImpactRow
-                    key={e.detail}
-                    label="Endpoint starts returning 404"
-                    value={e.summary}
-                    detail={<span className="font-code">{e.detail}</span>}
-                  />
-                ))}
-                {impact.liveRuns > 0 ? (
-                  <ImpactRow
-                    label="Runs in flight are cancelled"
-                    value={`${impact.liveRuns} running or queued`}
-                    detail="Committed steps stay committed, but they cannot resume."
-                  />
-                ) : null}
-                <ImpactRow
-                  label="History is destroyed"
-                  value={`${impact.runs} runs, ${impact.versions} versions`}
-                  detail="Including the audit trail of every approval on them."
-                />
-                {impact.schedules.length === 0 && impact.endpoints.length === 0 ? (
-                  <ImpactRow
-                    label="No live entry points"
-                    value="Nothing external calls this workflow"
-                    detail="It only ever ran by hand."
-                  />
-                ) : null}
-              </ul>
-            </div>
-          ) : null}
 
           <div className="mt-4">
             <Field
@@ -256,21 +204,5 @@ export function DeleteWorkflowDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
-  );
-}
-
-function ImpactRow({
-  label, value, detail,
-}: {
-  label: string;
-  value: string;
-  detail?: React.ReactNode;
-}) {
-  return (
-    <li className="grid gap-0.5">
-      <Text variant="caption" tone="inherit" className="text-status-failed">{label}</Text>
-      <Text variant="body-sm" tone="primary" className="break-words">{value}</Text>
-      {detail ? <Text variant="caption" tone="muted" className="break-words">{detail}</Text> : null}
-    </li>
   );
 }

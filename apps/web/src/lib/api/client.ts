@@ -102,16 +102,22 @@ export interface VectorbeaClient {
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
     versions(id: string, scope?: Scope, options?: RequestOptions): Promise<WorkflowVersion[]>;
     run(id: string, input?: unknown, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
+    delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
 
   agents: {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Agent>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Agent>;
+    update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Agent>;
+    delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
 
   tools: {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Tool>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Tool>;
+    update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
+    delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
 
   connections: {
@@ -266,6 +272,14 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           body: input ?? {},
           ...req(scope, undefined, options),
         }),
+      update: (id, patch, scope, options) =>
+        call<Workflow>(`/api/workflows/${id}`, {
+          method: "PATCH",
+          body: patch,
+          ...req(scope, contracts.workflow, options),
+        }),
+      delete: (id, scope, options) =>
+        call<void>(`/api/workflows/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
     },
 
     agents: {
@@ -276,6 +290,10 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<Agent>(`/api/agents/${id}`, req(scope, contracts.agent, options)),
+      update: (id, patch, scope, options) =>
+        call<Agent>(`/api/agents/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.agent, options) }),
+      delete: (id, scope, options) =>
+        call<void>(`/api/agents/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
     },
 
     tools: {
@@ -286,6 +304,10 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<Tool>(`/api/tools/${id}`, req(scope, contracts.tool, options)),
+      update: (id, patch, scope, options) =>
+        call<Tool>(`/api/tools/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.tool, options) }),
+      delete: (id, scope, options) =>
+        call<void>(`/api/tools/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
     },
 
     connections: {

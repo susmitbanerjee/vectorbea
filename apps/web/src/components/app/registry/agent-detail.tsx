@@ -13,8 +13,7 @@ import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
 import { formatCost, formatDuration, formatTokens } from "~/lib/format";
 import { DetailSheet, Section, Facts } from "./detail-sheet";
 import { RiskBadge, RegistryStatusBadge, HealthDot, EnvironmentScope, Sparkline, DistributionBar } from "./atoms";
-import { grantFindings, type AgentRecord, type ToolGrant } from "~/mocks/registry";
-import { CONNECTIONS } from "~/mocks/fixtures";
+import { grantFindings, type AgentRecord, type ToolGrant } from "~/lib/registry/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AGENT DETAIL
@@ -52,7 +51,10 @@ export function AgentDetail({
   if (!agent) return null;
 
   const findings = grantFindings(agent);
-  const connection = CONNECTIONS.find((c) => c.name === agent.byokConnection);
+  const connection = agent.byokConnection ? {
+    status: agent.connectionStatus ?? "unknown",
+    latencyMs: agent.connectionLatencyMs ?? null,
+  } : undefined;
 
   return (
     <DetailSheet

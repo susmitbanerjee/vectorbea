@@ -1,5 +1,5 @@
 import type { Run, RunStatus } from "~/lib/runs/model";
-import type { Workflow, WorkflowStatus } from "~/mocks/domain";
+import type { Workflow, WorkflowStatus } from "~/lib/workflows/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    QUERY LANGUAGE — P06 Part C.

@@ -14,14 +14,13 @@ import { Button } from "~/components/ui/button";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function RegistryBulkBar({
-  count, noun, onClear, onActivate, onDeactivate, onTag, onExport,
+  count, noun, onClear, onActivate, onDeactivate, onExport,
 }: {
   count: number;
   noun: string;
   onClear: () => void;
   onActivate: () => void;
   onDeactivate: () => void;
-  onTag: () => void;
   onExport: () => void;
 }) {
   if (count === 0) return null;
@@ -48,7 +47,6 @@ export function RegistryBulkBar({
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <Button size="sm" variant="secondary" onClick={onActivate}>Activate</Button>
           <Button size="sm" variant="secondary" onClick={onDeactivate}>Deactivate</Button>
-          <Button size="sm" variant="secondary" onClick={onTag}>Tag</Button>
           <Button size="sm" variant="secondary" onClick={onExport}>Export</Button>
           <button
             onClick={onClear}

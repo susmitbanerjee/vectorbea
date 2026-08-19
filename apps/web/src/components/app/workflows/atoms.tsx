@@ -165,7 +165,7 @@ export function EnvironmentChip({ environment }: { environment: string }) {
         ENV_CLASS[environment] ?? "text-fg-muted border-subtle",
       )}
     >
-      {environment === "production" ? "prod" : environment === "staging" ? "stg" : "dev"}
+      {environment === "production" ? "prod" : environment === "staging" ? "stg" : environment === "development" ? "dev" : "unknown"}
     </span>
   );
 }
