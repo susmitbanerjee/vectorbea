@@ -2,14 +2,18 @@
 # vectorbea-worker — Kotlin workflow worker
 # Multi-stage build: Gradle fat-jar → JRE runtime
 #
-# Build context: apps/worker-kotlin/  (Railway Root Directory = apps/worker-kotlin)
-# recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
+# Build context: REPO ROOT  (Railway Root Directory = / , Dockerfile Path =
+#                            apps/worker-kotlin/Dockerfile)
+#
+# The worker uses packages/observability-kotlin as a Gradle composite build,
+# so both directories must be available inside the Docker build context.
+# recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/.
 # =============================================================================
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jdk-alpine AS builder
 
-WORKDIR /build
+WORKDIR /workspace/apps/worker-kotlin
 
 # Install Gradle (pinned version for reproducible builds)
 ARG GRADLE_VERSION=8.10
@@ -25,15 +29,18 @@ ENV PATH="/opt/gradle/bin:${PATH}"
 ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false"
 
 # Copy build scripts first — maximises Docker layer cache.
-COPY settings.gradle.kts build.gradle.kts ./
+COPY apps/worker-kotlin/settings.gradle.kts apps/worker-kotlin/build.gradle.kts ./
+COPY packages/observability-kotlin/settings.gradle.kts packages/observability-kotlin/build.gradle.kts /workspace/packages/observability-kotlin/
 
 # Pre-resolve dependencies (separate cached layer)
 RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
 
-# Copy source and build fat jar
-# cache-bust: v3
-COPY src ./src
-RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info 2>&1
+# Copy source and build fat jar. The included build must be present at the
+# exact path declared in settings.gradle.kts before Gradle evaluates it.
+# cache-bust: v4
+COPY apps/worker-kotlin/src ./src
+COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
+RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info --stacktrace 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime
@@ -48,7 +55,7 @@ RUN addgroup -S worker && adduser -S worker -G worker
 WORKDIR /app
 
 # Copy only the fat jar — no source, no JDK, no Gradle in the final image
-COPY --from=builder /build/build/libs/*-all.jar app.jar
+COPY --from=builder /workspace/apps/worker-kotlin/build/libs/*-all.jar app.jar
 
 RUN chown worker:worker /app/app.jar
 USER worker

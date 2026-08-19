@@ -62,8 +62,8 @@ services:
   # ── Kotlin API ──────────────────────────────────────────────────────────────
   api:
     build:
-      context: ./apps/api-kotlin
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api-kotlin/Dockerfile
     restart: unless-stopped
     ports:
       - "${API_PORT:-8080}:8080"
@@ -94,8 +94,8 @@ services:
   # ── Kotlin Worker ───────────────────────────────────────────────────────────
   worker:
     build:
-      context: ./apps/worker-kotlin
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/worker-kotlin/Dockerfile
     restart: unless-stopped
     ports:
       - "${WORKER_METRICS_PORT:-9090}:9090"
