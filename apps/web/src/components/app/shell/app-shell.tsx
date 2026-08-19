@@ -60,6 +60,7 @@ function ShellInner({ children, user }: AppShellProps) {
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [counts, setCounts] = React.useState<ShellCounts>(INITIAL_COUNTS);
+  const { workspaces: realWorkspaces, workspaceId, setWorkspace } = useWorkspace();
 
   /* ── Persisted preferences ────────────────────────────────────────────────
      Read after mount so the server and first client render agree; writing on
@@ -91,7 +92,7 @@ function ShellInner({ children, user }: AppShellProps) {
   const changeWorkspace = React.useCallback((id: string) => {
     setWorkspace(id);
     persist(WORKSPACE_KEY, id);
-  }, []);
+  }, [setWorkspace]);
 
   /* ── Live badge counts ────────────────────────────────────────────────────
      Stand-in for the real subscription. The point of wiring it now is that the
@@ -129,7 +130,6 @@ function ShellInner({ children, user }: AppShellProps) {
    * unnamed rather than a plausible-looking company: a made-up name here is
    * indistinguishable from a real one, which is the whole problem.
    */
-  const { workspaces: realWorkspaces, workspaceId, setWorkspace } = useWorkspace();
   const workspaceList: Workspace[] = realWorkspaces.map((w) => ({
     id: w.id,
     name: w.name,
@@ -178,6 +178,7 @@ function ShellInner({ children, user }: AppShellProps) {
       collapsed={collapsed}
       onToggleCollapsed={toggleCollapsed}
       workspace={workspace}
+      workspaces={workspaceList}
       onWorkspaceChange={changeWorkspace}
       counts={counts}
       user={user}
@@ -212,6 +213,7 @@ function ShellInner({ children, user }: AppShellProps) {
                 collapsed={false}
                 onToggleCollapsed={toggleCollapsed}
                 workspace={workspace}
+                workspaces={workspaceList}
                 onWorkspaceChange={changeWorkspace}
                 counts={counts}
                 user={user}
