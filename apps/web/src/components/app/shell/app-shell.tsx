@@ -89,7 +89,7 @@ function ShellInner({ children, user }: AppShellProps) {
   }, []);
 
   const changeWorkspace = React.useCallback((id: string) => {
-    setWorkspaceId(id);
+    setWorkspace(id);
     persist(WORKSPACE_KEY, id);
   }, []);
 
