@@ -10,8 +10,10 @@ import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/input";
 import { Radio, RadioGroup } from "~/components/ui/choice";
 import { GateCard } from "./gate-card";
-import { GATES, REJECT_REASONS, bulkApprovable, type GateView } from "~/mocks/governance";
+import { REJECT_REASONS, bulkApprovable, type GateView } from "~/lib/approvals/model";
 import { GateApprovedIcon } from "~/components/icons/domain";
+import { useApprovalsData } from "./use-approvals-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    APPROVALS
@@ -32,10 +34,13 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export function ApprovalsView({ frozen: frozenProp }: { frozen?: boolean } = {}) {
+  const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const frozen = frozenProp ?? params.get("frozen") === "1";
+  const data = useApprovalsData();
+  const gates = data.rows;
 
   const tab = (params.get("tab") ?? "pending") as TabId;
   const setTab = (next: TabId) => {
@@ -44,7 +49,6 @@ export function ApprovalsView({ frozen: frozenProp }: { frozen?: boolean } = {})
     router.replace(`${pathname}?${p.toString()}` as never, { scroll: false });
   };
 
-  const [gates, setGates] = React.useState<GateView[]>(GATES);
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
   const [cursor, setCursor] = React.useState(0);
@@ -72,36 +76,14 @@ export function ApprovalsView({ frozen: frozenProp }: { frozen?: boolean } = {})
   const guard = bulkApprovable(selectedGates);
 
   const decide = React.useCallback(
-    (id: string, status: GateView["status"], reason?: string) => {
-      setGates((current) =>
-        current.map((g) =>
-          g.id === id
-            ? {
-                ...g,
-                status,
-                decidedBy: "you",
-                decidedAt: Date.now(),
-                decisionReason: reason,
-                audit: [
-                  ...g.audit,
-                  {
-                    at: Date.now(),
-                    actor: "you",
-                    action: status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Changes requested",
-                    reason,
-                    // The context is snapshotted at decision time, so the audit
-                    // records what was actually on screen rather than what the
-                    // values happen to be when someone reads it later.
-                    contextSnapshot: g.context,
-                  },
-                ],
-              }
-            : g,
-        ),
-      );
+    (id: string, status: "approved" | "rejected", reason?: string) => {
+      const request = status === "approved"
+        ? api.approvals.approve(id, data.scope)
+        : api.approvals.reject(id, reason ?? "Rejected", data.scope);
+      void request.then(data.refetch);
       setSelected((s) => { const n = new Set(s); n.delete(id); return n; });
     },
-    [],
+    [api, data],
   );
 
   /* ── Keyboard: j/k move, a approve, r reject, Enter expand ──────────────── */
@@ -178,7 +160,11 @@ export function ApprovalsView({ frozen: frozenProp }: { frozen?: boolean } = {})
         </div>
       ) : null}
 
-      {visible.length === 0 ? (
+      {data.loading ? (
+        <div className="border-subtle rounded-lg border p-8 text-center"><Text variant="body-sm" tone="muted">Loading approvals…</Text></div>
+      ) : data.error ? (
+        <div className="border-status-failed-border rounded-lg border p-8 text-center"><Text variant="body-sm" tone="inherit" className="text-status-failed">Could not load approvals.</Text></div>
+      ) : visible.length === 0 ? (
         <EmptyState tab={tab} />
       ) : (
         <div className="grid gap-3">
@@ -197,9 +183,6 @@ export function ApprovalsView({ frozen: frozenProp }: { frozen?: boolean } = {})
               }
               onApprove={() => decide(gate.id, "approved")}
               onReject={() => setRejecting(gate)}
-              onRequestChanges={() => decide(gate.id, "changes-requested", "Returned to the workflow for more context.")}
-              onReassign={() => undefined}
-              onExtendSla={() => undefined}
             />
           ))}
         </div>
@@ -220,7 +203,7 @@ export function ApprovalsView({ frozen: frozenProp }: { frozen?: boolean } = {})
         guard={guard}
         onClose={() => setBulkOpen(false)}
         onConfirm={() => {
-          for (const g of selectedGates) decide(g.id, "approved", "Bulk approved — identical criteria.");
+          for (const g of selectedGates) decide(g.id, "approved");
           setBulkOpen(false);
         }}
       />

@@ -7,17 +7,15 @@ import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
-import { Textarea } from "~/components/ui/input";
 import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { formatCost, formatDuration } from "~/lib/format";
-import { formatSpan } from "~/mocks/control";
-import {
-  getIncident, incidentRuns, incidentWorkflows, autoResolveProgress,
-  type IncidentActivity, type IncidentStatus, type IncidentView,
-} from "~/mocks/governance";
+import { formatSpan } from "~/lib/control/model";
+import type { IncidentActivity, IncidentStatus } from "~/lib/incidents/model";
 import { SEVERITY_STYLE, STATUS_STYLE, Sparkline, titleFor } from "./incidents-view";
 import { RootCauseIcon, BlastRadiusIcon, RecoveryEngineIcon } from "~/components/icons/domain";
+import { useIncidentsData } from "./use-incidents-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    INCIDENT DETAIL
@@ -29,16 +27,15 @@ import { RootCauseIcon, BlastRadiusIcon, RecoveryEngineIcon } from "~/components
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function IncidentDetail({ incidentId }: { incidentId: string }) {
-  const base = getIncident(incidentId);
-  const [incident, setIncident] = React.useState<IncidentView | undefined>(base);
-  const [resolveOpen, setResolveOpen] = React.useState(false);
-  const [note, setNote] = React.useState("");
+  const api = useApi();
+  const data = useIncidentsData();
+  const incident = data.rows.find((item) => item.sourceIds.includes(incidentId));
 
   if (!incident) {
     return (
       <PageContainer>
         <div className="border-subtle mx-auto mt-16 max-w-[32rem] rounded-lg border p-6 text-center">
-          <Text variant="heading-sm" tone="max" as="h1" className="block">Incident not found</Text>
+          <Text variant="heading-sm" tone="max" as="h1" className="block">{data.loading ? "Loading incident…" : data.error ? "Could not load incident" : "Incident not found"}</Text>
           <Button asChild variant="secondary" size="sm" className="mt-4">
             <Link href={"/incidents" as Route}>Back to incidents</Link>
           </Button>
@@ -47,20 +44,15 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     );
   }
 
-  const runs = incidentRuns(incident);
-  const workflows = incidentWorkflows(incident);
-  const quiet = autoResolveProgress(incident);
-
-  const act = (action: string, next?: Partial<IncidentView>, noteText?: string) => {
-    setIncident((current) =>
-      current
-        ? {
-            ...current,
-            ...next,
-            activity: [...current.activity, { at: Date.now(), actor: "you", action, note: noteText }],
-          }
-        : current,
-    );
+  const runs = incident.runRecords;
+  const workflows = incident.workflowRecords;
+  const quietMs = Math.max(0, Date.now() - Date.parse(incident.lastSeen));
+  const quiet = {
+    quietMs,
+    fraction: incident.autoResolveAfterMs > 0 ? Math.min(1, quietMs / incident.autoResolveAfterMs) : 0,
+  };
+  const resolve = () => {
+    void Promise.all(incident.sourceIds.map((id) => api.incidents.resolve(id, data.scope))).then(data.refetch);
   };
 
   return (
@@ -88,47 +80,12 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         }
         actions={
           <>
-            {incident.status === "open" ? (
-              <Button size="sm" variant="secondary" onClick={() => act("Acknowledged", { status: "acknowledged", assignee: "you" })}>
-                Acknowledge
-              </Button>
-            ) : null}
             {incident.status !== "resolved" ? (
-              <>
-                <Button size="sm" variant="secondary" onClick={() => act("Assigned to platform-ops", { assignee: "platform-ops" })}>
-                  Assign
-                </Button>
-                <Button size="sm" variant="secondary" onClick={() => act("Muted for 4 hours", { status: "muted", mutedUntil: Date.now() + 4 * 3_600_000 })}>
-                  Mute
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => setResolveOpen((o) => !o)}>Resolve</Button>
-              </>
+              <Button size="sm" variant="primary" onClick={resolve}>Resolve</Button>
             ) : null}
-            <Button size="sm" variant="ghost">Link tracker</Button>
           </>
         }
       />
-
-      {resolveOpen ? (
-        <div className="border-subtle bg-surface-raised mb-3 rounded-lg border p-3">
-          <Text variant="label" tone="primary" className="mb-1.5 block">Resolution note (required)</Text>
-          <Textarea
-            minRows={2} maxRows={4} value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="What fixed it, and what would stop it recurring"
-            aria-label="Resolution note"
-          />
-          <div className="mt-2 flex gap-2">
-            <Button
-              size="sm" variant="primary" disabled={!note.trim()}
-              onClick={() => { act("Resolved", { status: "resolved" }, note.trim()); setResolveOpen(false); setNote(""); }}
-            >
-              Resolve incident
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setResolveOpen(false)}>Cancel</Button>
-          </div>
-        </div>
-      ) : null}
 
       <div className="grid gap-3 xl:grid-cols-[1fr_20rem]">
         <div className="grid min-w-0 gap-3">
@@ -172,18 +129,18 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
           <section className="border-subtle bg-surface-raised rounded-lg border p-3">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <Text variant="eyebrow" tone="muted">Occurrence timeline</Text>
-              <Text variant="caption" tone="muted">
+              {incident.autoResolveAvailable ? <Text variant="caption" tone="muted">
                 quiet for <span className="tabular">{formatSpan(quiet.quietMs)}</span> of the{" "}
                 <span className="tabular">{formatSpan(incident.autoResolveAfterMs)}</span> auto-resolve window
-              </Text>
+              </Text> : null}
             </div>
             <Sparkline values={incident.sparkline} width={640} height={64} className="w-full" />
-            <div className="bg-surface-sunken mt-2 h-1 overflow-hidden rounded-full">
+            {incident.autoResolveAvailable ? <div className="bg-surface-sunken mt-2 h-1 overflow-hidden rounded-full">
               <div
                 className={cn("h-full rounded-full", quiet.fraction >= 1 ? "bg-status-success" : "bg-accent")}
                 style={{ width: `${quiet.fraction * 100}%` }}
               />
-            </div>
+            </div> : null}
           </section>
 
           {/* ── Affected runs ──────────────────────────────────────────────── */}

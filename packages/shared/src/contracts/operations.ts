@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDateTime, jsonObject, uuid } from "./primitives";
+import { isoDateTime, jsonObject, page, uuid } from "./primitives";
 
 /**
  * Approvals, failure incidents, workers, control metrics, debug snapshots.
@@ -25,23 +25,41 @@ export const approval = z.object({
   id: uuid,
   runId: uuid,
   workflowId: uuid,
-  stepId: z.string().nullable(),
-  nodeId: z.string().nullable(),
-  agentId: uuid.nullable(),
+  stepId: z.string().nullish(),
+  nodeId: z.string().nullish(),
+  agentId: uuid.nullish(),
   status: z.enum(["PENDING", "APPROVED", "REJECTED"]),
-  title: z.string().nullable(),
-  message: z.string().nullable(),
-  riskLevel: z.string().nullable(),
-  requestedBy: z.string().nullable(),
-  decidedBy: z.string().nullable(),
+  title: z.string().nullish(),
+  message: z.string().nullish(),
+  riskLevel: z.string().nullish(),
+  requestedBy: z.string().nullish(),
+  decidedBy: z.string().nullish(),
   requestedAt: isoDateTime,
-  decidedAt: isoDateTime.nullable(),
-  decisionReason: z.string().nullable(),
-  payloadJsonSanitized: jsonObject.nullable(),
+  decidedAt: isoDateTime.nullish(),
+  decisionReason: z.string().nullish(),
+  payloadJsonSanitized: jsonObject.nullish(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
 export type Approval = z.infer<typeof approval>;
+export const approvalPage = page(approval);
+
+/* ── Schedules ───────────────────────────────────────────────────────────── */
+
+/** `GET /api/schedules`, emitted by `ScheduleRoutes.kt`. */
+export const schedule = z.object({
+  id: uuid,
+  jobName: z.string(),
+  cron: z.string(),
+  humanReadable: z.string(),
+  timezone: z.string(),
+  nextRun: isoDateTime.nullish(),
+  lastRun: isoDateTime.nullish(),
+  status: z.enum(["ACTIVE", "PAUSED"]),
+  jobId: uuid,
+});
+export type Schedule = z.infer<typeof schedule>;
+export const scheduleList = z.array(schedule);
 
 /* ── Failure incidents ────────────────────────────────────────────────────── */
 

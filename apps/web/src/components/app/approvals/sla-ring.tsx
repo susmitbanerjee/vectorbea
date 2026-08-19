@@ -3,7 +3,7 @@
 import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
-import { formatSpan, formatSpanPrecise } from "~/mocks/control";
+import { formatSpan, formatSpanPrecise } from "~/lib/control/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    SLA COUNTDOWN RING

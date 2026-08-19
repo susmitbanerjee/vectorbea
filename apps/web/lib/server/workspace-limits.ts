@@ -79,6 +79,17 @@ export async function getWorkspacePromptCount(workspaceId: string) {
   return count ?? 0;
 }
 
+export async function getWorkspaceMemberCount(workspaceId: string) {
+  const supabase = createVectorBeaAdminClient();
+  const { count, error } = await supabase
+    .from("workspace_members")
+    .select("user_id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .eq("status", "active");
+  if (error) throw new Error(`Failed to count workspace members: ${error.message}`);
+  return count ?? 0;
+}
+
 export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {
   const supabase = createVectorBeaAdminClient();
 

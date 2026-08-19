@@ -17,9 +17,10 @@ import { Sparkline, HealthDot } from "~/components/app/registry/atoms";
 import { RelativeTime } from "~/components/app/workflows/atoms";
 import { formatDuration, EMPTY } from "~/lib/format";
 import {
-  CONNECTION_RECORDS, connectionById, blastRadius, healthSummary, expiringSoon,
-  AUTH_LABEL, type ConnectionRecord,
-} from "~/mocks/connectivity";
+  blastRadius, healthSummary, AUTH_LABEL, type ConnectionRecord,
+} from "~/lib/connectivity/model";
+import { useConnectionsData } from "./use-connections-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    CONNECTIONS — the operational view.
@@ -40,6 +41,8 @@ const DETAIL_TABS = [
 ];
 
 export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
+  const api = useApi();
+  const data = useConnectionsData();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -61,12 +64,12 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
   }, [params, pathname, router]);
 
   const [preferences, setPreferences] = useTablePreferences("connections");
-  const summary = React.useMemo(() => healthSummary(), []);
-  const expiring = React.useMemo(() => expiringSoon(), []);
+  const summary = React.useMemo(() => healthSummary(data.rows), [data.rows]);
+  const expiring = React.useMemo(() => data.rows.filter((c) => c.expiresAt && Date.parse(c.expiresAt) <= Date.now() + 14 * 86_400_000), [data.rows]);
 
   const rows = React.useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return CONNECTION_RECORDS.filter((c) => {
+    return data.rows.filter((c) => {
       if (filter === "failing" && c.status !== "failing") return false;
       if (filter === "degraded" && c.status !== "degraded") return false;
       if (filter === "healthy" && c.status !== "healthy") return false;
@@ -78,7 +81,7 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
       const rank = { failing: 0, degraded: 1, healthy: 2 } as const;
       return rank[a.status] - rank[b.status] || a.name.localeCompare(b.name);
     });
-  }, [search, filter, expiring]);
+  }, [data.rows, search, filter, expiring]);
 
   const orderedIds = React.useMemo(() => rows.map((c) => c.id), [rows]);
   const selection = useSelection(orderedIds);
@@ -91,9 +94,9 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
   }, [frozen]);
 
   const status: TableStatus = forceState ?? stateParam
-    ?? (!booted ? "loading" : CONNECTION_RECORDS.length === 0 ? "empty" : rows.length === 0 ? "no-results" : "ready");
+    ?? (data.loading || !booted ? "loading" : data.rows.length === 0 ? "empty" : rows.length === 0 ? "no-results" : "ready");
 
-  const open = openId ? connectionById(openId) ?? null : null;
+  const open = openId ? data.rows.find((row) => row.id === openId) ?? null : null;
 
   const columns = React.useMemo<DataColumn<ConnectionRecord>[]>(() => [
     {
@@ -244,7 +247,8 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
           <HealthTile label="Expiring soon" value={summary.expiring} tone="waiting" active={filter === "expiring"} onClick={() => setParams({ filter: filter === "expiring" ? null : "expiring" })} />
         </div>
 
-        {summary.failing > 0 && filter === "" ? <FailingBanner onShow={() => setParams({ filter: "failing" })} /> : null}
+        {data.error ? <Text variant="body-sm" tone="inherit" className="text-status-failed">Could not load connections. Try refreshing the page.</Text> : null}
+        {summary.failing > 0 && filter === "" ? <FailingBanner failing={data.rows.filter((c) => c.status === "failing")} onShow={() => setParams({ filter: "failing" })} /> : null}
 
         <Input
           value={search}
@@ -276,6 +280,7 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
 
       <ConnectionDetail
         connection={open}
+        onTest={async (id) => { await api.connections.test(id, data.scope); await data.refetch(); }}
         onClose={() => setParams({ connection: null, tab: null })}
         tab={detailTab}
         onTabChange={(id) => setParams({ tab: id })}
@@ -326,8 +331,7 @@ function HealthTile({
   );
 }
 
-function FailingBanner({ onShow }: { onShow: () => void }) {
-  const failing = CONNECTION_RECORDS.filter((c) => c.status === "failing");
+function FailingBanner({ failing, onShow }: { failing: ConnectionRecord[]; onShow: () => void }) {
 
   /* Deduplicated across connections. Summing each radius counted a workflow
      once per broken connection it binds, which produced "13 workflows" in a
@@ -363,12 +367,13 @@ function FailingBanner({ onShow }: { onShow: () => void }) {
 /* ── Detail ───────────────────────────────────────────────────────────────── */
 
 function ConnectionDetail({
-  connection, onClose, tab, onTabChange,
+  connection, onClose, tab, onTabChange, onTest,
 }: {
   connection: ConnectionRecord | null;
   onClose: () => void;
   tab: string;
   onTabChange: (id: string) => void;
+  onTest: (id: string) => Promise<void>;
 }) {
   const [tested, setTested] = React.useState<"idle" | "testing" | "ok" | "failed">("idle");
   React.useEffect(() => { setTested("idle"); }, [connection?.id]);
@@ -408,7 +413,7 @@ function ConnectionDetail({
           loading={tested === "testing"}
           onClick={() => {
             setTested("testing");
-            window.setTimeout(() => setTested(connection.status === "healthy" ? "ok" : "failed"), 800);
+            void onTest(connection.id).then(() => setTested("ok"), () => setTested("failed"));
           }}
         >
           Test

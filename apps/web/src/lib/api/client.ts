@@ -32,6 +32,7 @@ type Tool = contracts.Tool;
 type Connection = contracts.Connection;
 type Approval = contracts.Approval;
 type FailureIncident = contracts.FailureIncident;
+type Schedule = contracts.Schedule;
 type Worker = contracts.Worker;
 type ControlMetrics = contracts.ControlMetrics;
 type ControlActivityEvent = contracts.ControlActivityEvent;
@@ -125,9 +126,13 @@ export interface VectorbeaClient {
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Connection>;
     test(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
   };
+  schedules: {
+    list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
+    setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
 
   approvals: {
-    list(scope?: Scope, options?: RequestOptions): Promise<Paged<Approval>>;
+    list(params?: Scope & PageParams & { status?: string }, options?: RequestOptions): Promise<Paged<Approval>>;
     approve(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     reject(id: string, reason: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
   };
@@ -145,6 +150,8 @@ export interface VectorbeaClient {
       params?: Scope & { status?: string; category?: string; limit?: number },
       options?: RequestOptions,
     ): Promise<FailureIncident[]>;
+    get(id: string, scope?: Scope, options?: RequestOptions): Promise<FailureIncident>;
+    resolve(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
   };
 
   debug: {
@@ -329,17 +336,18 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
     },
 
     approvals: {
-      list: (scope, options) =>
-        call<Paged<Approval>>("/api/approvals", req(scope, undefined, options)),
+      list: ({ workspaceId, environmentId, page, pageSize, status } = {}, options) =>
+        call<Paged<Approval>>("/api/approvals", req({ workspaceId, environmentId }, contracts.approvalPage, options, { page, pageSize, status })),
       approve: (id, scope, options) =>
         call<unknown>(`/api/approvals/${id}/approve`, {
           method: "POST",
+          body: { decidedBy: "ui" },
           ...req(scope, undefined, options),
         }),
       reject: (id, reason, scope, options) =>
         call<unknown>(`/api/approvals/${id}/reject`, {
           method: "POST",
-          body: { reason },
+          body: { decidedBy: "ui", reason },
           ...req(scope, undefined, options),
         }),
     },
@@ -355,6 +363,21 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
             query as RequestOptions["query"],
           ),
         ),
+      get: (id, scope, options) =>
+        call<FailureIncident>(`/api/failure-incidents/${id}`, req(scope, contracts.failureIncident, options)),
+      resolve: (id, scope, options) =>
+        call<unknown>(`/api/failure-incidents/${id}/mark-resolved`, { method: "POST", ...req(scope, undefined, options) }),
+    },
+
+    schedules: {
+      list: (scope, options) =>
+        call<Schedule[]>("/api/schedules", req(scope, contracts.scheduleList, options)),
+      setEnabled: (id, enabled, scope, options) =>
+        call<unknown>(`/api/schedules/${id}`, {
+          method: "PATCH",
+          body: { enabled },
+          ...req(scope, undefined, options),
+        }),
     },
 
     debug: {

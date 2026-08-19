@@ -51,7 +51,7 @@ export function useRunsData(page = 1) {
   };
 }
 
-function toUiRun(run: contracts.RunSummary, incident?: contracts.FailureIncident): Run {
+export function toUiRun(run: contracts.RunSummary, incident?: contracts.FailureIncident): Run {
   const nodes = parseRibbon(run.ribbonJson, run.nodeTotal ?? 0, incident);
   return {
     id: run.id,

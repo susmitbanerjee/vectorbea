@@ -9,8 +9,8 @@ import { Button } from "~/components/ui/button";
 import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { formatDuration } from "~/lib/format";
-import { formatSpan } from "~/mocks/control";
-import { slaState, type GateView } from "~/mocks/governance";
+import { formatSpan } from "~/lib/control/model";
+import { slaState, type GateView } from "~/lib/approvals/model";
 import { SlaRing } from "./sla-ring";
 import { EscalationIcon, ApprovalGateIcon } from "~/components/icons/domain";
 
@@ -48,15 +48,12 @@ export interface GateCardProps {
   onToggleExpand: () => void;
   onApprove: () => void;
   onReject: () => void;
-  onRequestChanges: () => void;
-  onReassign: () => void;
-  onExtendSla: () => void;
 }
 
 export function GateCard({
   gate, selected, cursored, expanded,
   onToggleSelect, onToggleExpand,
-  onApprove, onReject, onRequestChanges, onReassign, onExtendSla,
+  onApprove, onReject,
 }: GateCardProps) {
   const sla = slaState(gate);
   const pending = gate.status === "pending";
@@ -86,7 +83,7 @@ export function GateCard({
           />
         ) : null}
 
-        <SlaRing fraction={sla.fraction} remainingMs={sla.remainingMs} tone={sla.tone} />
+        {gate.slaAvailable ? <SlaRing fraction={sla.fraction} remainingMs={sla.remainingMs} tone={sla.tone} /> : null}
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -129,7 +126,7 @@ export function GateCard({
           </div>
 
           {/* Escalation path — visible before the breach, not after. */}
-          <div className="mt-1 flex items-center gap-1.5">
+          {gate.slaAvailable ? <div className="mt-1 flex items-center gap-1.5">
             <EscalationIcon size={12} aria-hidden="true" className={cn("shrink-0", sla.tone === "ok" ? "text-fg-disabled" : "text-status-waiting")} />
             <Text variant="caption" tone="muted">
               {sla.tone === "breached" ? (
@@ -140,14 +137,14 @@ export function GateCard({
                 <>{gate.approverGroup} → escalates to {gate.escalatesTo} at deadline</>
               )}
             </Text>
-          </div>
+          </div> : null}
         </div>
       </div>
 
       {/* ── Decision context, RESOLVED ─────────────────────────────────────── */}
       <div className="border-subtle border-t px-3 py-2.5">
         <Text variant="eyebrow" tone="muted" className="mb-2 block">Decision context</Text>
-        <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+        {gate.context.length === 0 ? <Text variant="caption" tone="muted">No sanitized decision context was provided.</Text> : <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
           {gate.context.map((entry) => (
             <div key={entry.label} className="min-w-0">
               <dt><Text variant="caption" tone="muted">{entry.label}</Text></dt>
@@ -161,7 +158,7 @@ export function GateCard({
               </dd>
             </div>
           ))}
-        </dl>
+        </dl>}
       </div>
 
       {/* ── Consequence ────────────────────────────────────────────────────── */}
@@ -258,9 +255,6 @@ export function GateCard({
         <div className="border-subtle bg-surface-sunken flex flex-wrap items-center gap-1.5 border-t px-3 py-2">
           <Button size="sm" variant="primary" onClick={onApprove}>Approve</Button>
           <Button size="sm" variant="danger" onClick={onReject}>Reject</Button>
-          <Button size="sm" variant="secondary" onClick={onRequestChanges}>Request changes</Button>
-          <Button size="sm" variant="ghost" onClick={onReassign}>Reassign</Button>
-          <Button size="sm" variant="ghost" onClick={onExtendSla}>Extend SLA</Button>
           <Text variant="caption" tone="disabled" className="ml-auto hidden lg:block">
             a approve · r reject · Enter evidence
           </Text>

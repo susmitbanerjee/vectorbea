@@ -9,9 +9,10 @@ import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { formatCost } from "~/lib/format";
-import { formatSpan } from "~/mocks/control";
-import { INCIDENT_VIEWS, type IncidentSeverity, type IncidentStatus, type IncidentView } from "~/mocks/governance";
+import { formatSpan } from "~/lib/control/model";
+import type { IncidentSeverity, IncidentStatus, IncidentView } from "~/lib/incidents/model";
 import { IncidentIcon } from "~/components/icons/domain";
+import { useIncidentsData } from "./use-incidents-data";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    INCIDENTS — grouped by failure signature.
@@ -41,6 +42,8 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
   const pathname = usePathname();
   const params = useSearchParams();
   void (frozenProp ?? params.get("frozen") === "1");
+  const data = useIncidentsData();
+  const incidents = data.rows;
 
   const status = params.get("status") ?? "";
   const severity = params.get("severity") ?? "";
@@ -54,25 +57,25 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
   };
 
   const workflows = React.useMemo(
-    () => [...new Set(INCIDENT_VIEWS.flatMap((i) => i.affectedWorkflows))].sort(),
-    [],
+    () => [...new Set(incidents.flatMap((i) => i.affectedWorkflows))].sort(),
+    [incidents],
   );
 
-  const visible = INCIDENT_VIEWS.filter((incident) => {
+  const visible = incidents.filter((incident) => {
     if (status && incident.status !== status) return false;
     if (severity && incident.severity !== severity) return false;
     if (workflow && !incident.affectedWorkflows.includes(workflow)) return false;
     return true;
   });
 
-  const totalRuns = INCIDENT_VIEWS.reduce((sum, i) => sum + i.affectedRuns, 0);
+  const totalRuns = incidents.reduce((sum, i) => sum + i.affectedRuns, 0);
 
   return (
     <PageContainer>
       <PageHeader
         eyebrow="Observe"
         title="Incidents"
-        description={`${totalRuns} failed runs across ${INCIDENT_VIEWS.length} signatures. The signature is the problem; the runs are symptoms.`}
+        description={`${totalRuns} failed runs across ${incidents.length} signatures. The signature is the problem; the runs are symptoms.`}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -88,11 +91,15 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
         ) : null}
       </div>
 
-      {visible.length === 0 ? (
+      {data.loading ? (
+        <div className="border-subtle rounded-lg border p-8 text-center"><Text variant="body-sm" tone="muted">Loading incidents…</Text></div>
+      ) : data.error ? (
+        <div className="border-status-failed-border rounded-lg border p-8 text-center"><Text variant="body-sm" tone="inherit" className="text-status-failed">Could not load incidents.</Text></div>
+      ) : visible.length === 0 ? (
         <div className="border-status-success-border bg-status-success-subtle rounded-lg border p-8 text-center">
           <Text variant="heading-sm" tone="max" as="p" className="block">No incidents match</Text>
           <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
-            {INCIDENT_VIEWS.length === 0
+            {incidents.length === 0
               ? "Nothing is failing repeatedly. Individual failures still appear in Runs."
               : "Try clearing a filter — there are incidents, just none in this slice."}
           </Text>

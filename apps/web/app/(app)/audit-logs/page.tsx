@@ -1,6 +1,6 @@
-// Redirect: /audit-logs → /settings
+// Legacy plural route.
 import { redirect } from "next/navigation";
 
 export default function AuditLogsRedirect() {
-  redirect("/settings");
+  redirect("/audit-log");
 }
