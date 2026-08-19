@@ -51,24 +51,22 @@ export function HealthStripSkeleton() {
   );
 }
 
-export function AttentionFeedSkeleton() {
-  // Three rows: the median number of things actually wrong at once. Ten would
-  // reserve space that then collapses, which is the reflow we are avoiding.
+/**
+ * The attention line, not the old feed.
+ *
+ * One row rather than three: the triage feed moved to the notification inbox
+ * and what remains on Control is a single severity summary. A three-row
+ * skeleton would reserve height the loaded page never uses, which is exactly
+ * the reflow a skeleton exists to prevent.
+ */
+export function AttentionSummarySkeleton() {
   return (
-    <div aria-hidden="true" className="grid gap-2">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="border-subtle bg-surface-raised relative overflow-hidden rounded-md border">
-          <span className="bg-surface-active absolute inset-y-0 left-0 w-[3px]" />
-          <div className="flex items-start gap-3 py-3 pl-5 pr-3">
-            <Shimmer className="mt-0.5 size-4 shrink-0 rounded-sm" />
-            <div className="min-w-0 flex-1">
-              <Shimmer className="h-3 w-full max-w-[28rem]" />
-              <Shimmer className="mt-2 h-2.5 w-full max-w-[18rem]" />
-            </div>
-            <Shimmer className="h-7 w-24 shrink-0 rounded-sm" />
-          </div>
-        </div>
-      ))}
+    <div aria-hidden="true" className="border-subtle bg-surface-raised rounded-md border px-3 py-2">
+      <div className="flex items-center gap-2.5">
+        <Shimmer className="size-4 shrink-0 rounded-sm" />
+        <Shimmer className="h-3 w-48" />
+        <Shimmer className="h-2.5 w-28" />
+      </div>
     </div>
   );
 }
@@ -133,7 +131,7 @@ export function ControlSkeleton() {
     <div className="grid gap-6">
       <p role="status" className="sr-only">Loading workspace health.</p>
       <HealthStripSkeleton />
-      <AttentionFeedSkeleton />
+      <AttentionSummarySkeleton />
       <FleetSkeleton />
       <DetailSkeleton />
     </div>

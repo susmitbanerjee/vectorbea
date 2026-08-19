@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
-import { isEmailVerified } from "@/lib/auth/neon-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,20 +11,15 @@ export const metadata = {
 };
 
 /**
- * Gate for the beta application: must be signed in AND email-verified.
- * Unverified users go back to /verify-email; signed-out users to /signin.
+ * Gate for the beta application: must be signed in.
+ *
+ * The email-verification half is gone with password sign-in — federated
+ * providers only hand us addresses they have already verified.
  */
 export default async function BetaLayout({ children }: { children: ReactNode }) {
   if (process.env.JWT_SECRET) {
     const user = await getAuthenticatedUserFromCookies(await cookies());
     if (!user) redirect("/signin?next=/beta");
-
-    try {
-      if (!(await isEmailVerified(user.id))) redirect("/verify-email");
-    } catch (err) {
-      if (err && typeof err === "object" && "digest" in err) throw err;
-      // DB hiccup — let the page render rather than hard-failing
-    }
   }
   return <>{children}</>;
 }

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 
@@ -44,11 +44,40 @@ export const metadata: Metadata = {
     description: SITE.description,
     images: [SITE.ogImagePath],
   },
+  manifest: "/manifest.json",
+  /**
+   * Order matters. A browser takes the LAST icon it understands, so the SVG is
+   * listed after the .ico: modern browsers get the scalable mark, and anything
+   * that only knows `image/x-icon` — including the crawlers and chat unfurlers
+   * that still request /favicon.ico by convention — falls back cleanly.
+   *
+   * The 48px entry inside favicon.ico is what Windows uses for a pinned
+   * shortcut, which is why the .ico carries three sizes rather than just 16.
+   */
   icons: {
-    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
-    shortcut: "/icon.svg",
-    apple: "/icon.svg",
+    icon: [
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48", type: "image/x-icon" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/apple-touch-icon-180.png", sizes: "180x180", type: "image/png" }],
   },
+};
+
+/**
+ * Brand colour for the browser's own chrome — iris, never a status hue.
+ *
+ * The two entries are the accent token resolved in each theme: `--iris-400` is
+ * `--accent` on dark, `--iris-600` on light. They are literals because a meta
+ * tag cannot read a CSS custom property; if the accent tokens move in
+ * `src/styles/tokens/colour.css`, these move with them.
+ */
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#7E82F2" },
+    { media: "(prefers-color-scheme: light)", color: "#4644D6" },
+  ],
 };
 
 export default function RootLayout({

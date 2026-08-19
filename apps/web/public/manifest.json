@@ -1,0 +1,16 @@
+{
+  "name": "Vectorbea",
+  "short_name": "Vectorbea",
+  "description": "Durable execution for agentic workflows.",
+  "start_url": "/control",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0B0D0F",
+  "theme_color": "#4644D6",
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "/maskable-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}

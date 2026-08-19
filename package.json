@@ -40,6 +40,9 @@
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:reset": "prisma migrate reset --schema prisma/schema.prisma --force",
 
+    "verify:screen": "node scripts/verify/verify-screen.ts",
+    "check:fixtures": "node scripts/check-fixtures.mjs",
+
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",

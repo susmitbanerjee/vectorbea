@@ -12,10 +12,15 @@ import type { AuthErrorState } from "./auth-errors";
 /**
  * <AuthShell> — the split layout shared by every auth screen.
  *
- * The left panel is dark and the right is the page theme, so the form sits on
+ * The left panel is dark and the right is the page theme, so the choices sit on
  * the calmer surface. Below lg the panel is dropped entirely rather than stacked
- * above the form: on a phone, a visitor who opened a sign-in link wants the
- * fields, not a demonstration they have to scroll past.
+ * above: on a phone, a visitor who opened a sign-in link wants the buttons, not
+ * a demonstration they have to scroll past.
+ *
+ * The right column is deliberately narrower than it was. It used to hold an
+ * email and password form; it now holds four buttons, and a column sized for
+ * the form would frame them in empty space. Giving the width back to the left
+ * panel keeps the page balanced rather than merely shorter.
  */
 export function AuthShell({
   children, footer,
@@ -25,7 +30,7 @@ export function AuthShell({
 }) {
   return (
     <div className="bg-surface-app text-fg-primary font-ui min-h-dvh">
-      <div className="grid min-h-dvh lg:grid-cols-[1.05fr_minmax(26rem,32rem)]">
+      <div className="grid min-h-dvh lg:grid-cols-[1.35fr_minmax(23rem,27rem)]">
         <section className="dark bg-surface-app border-subtle relative hidden overflow-hidden border-r p-10 xl:p-14 lg:flex lg:flex-col">
           <Link href="/" className="w-fit rounded-sm outline-none focus-visible:focus-ring">
             <Wordmark />
@@ -44,12 +49,12 @@ export function AuthShell({
             </Link>
           </div>
 
-          <div className="mx-auto flex w-full max-w-[26rem] flex-1 flex-col justify-center px-5 py-10 sm:px-8">
+          <div className="mx-auto flex w-full max-w-[23rem] flex-1 flex-col justify-center px-5 py-10 sm:px-8">
             {children}
           </div>
 
           {footer ? (
-            <div className="border-subtle mx-auto w-full max-w-[26rem] border-t px-5 py-4 sm:px-8">
+            <div className="border-subtle mx-auto w-full max-w-[23rem] border-t px-5 py-4 sm:px-8">
               {footer}
             </div>
           ) : null}

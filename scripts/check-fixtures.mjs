@@ -120,4 +120,126 @@ if (!existsSync(chunkDir)) {
   }
 }
 
+/* ── 3. Deployed-bundle guard ─────────────────────────────────────────────── */
+
+/**
+ * Section 2 proves the bundle on THIS machine is clean. That is not the same
+ * claim as "production is clean" — the deployed build came off CI, possibly
+ * from a different commit, with different env. So this fetches the real
+ * deployed page and every JS chunk it links, and greps those for the same four
+ * markers.
+ *
+ * Usage:  node scripts/check-fixtures.mjs --url https://app.vectorbea.com/runs
+ *         DEPLOY_URL=https://… node scripts/check-fixtures.mjs
+ *
+ * Unauthenticated, so a private route will usually answer with the login page.
+ * That still proves something real — the login shell and the chunks it pulls
+ * are exactly where a fixture import would leak first — but it does not cover
+ * authenticated screens, so the final URL is printed rather than assumed.
+ */
+
+function parseUrlArg(argv) {
+  const i = argv.indexOf("--url");
+  if (i !== -1) {
+    if (!argv[i + 1]) {
+      console.error("--url requires a value");
+      process.exit(1);
+    }
+    return argv[i + 1];
+  }
+  return process.env.DEPLOY_URL ?? null;
+}
+
+const deployUrl = parseUrlArg(process.argv.slice(2));
+
+if (!deployUrl) {
+  console.log("\nNo --url given — skipping the deployed-bundle check.");
+  console.log("Run `node scripts/check-fixtures.mjs --url https://your-deployment/` to verify production.");
+} else {
+  console.log(`\n── Deployed bundle: ${deployUrl} ──`);
+
+  const fetchText = async (url) => {
+    const res = await fetch(url, {
+      redirect: "follow",
+      headers: { "user-agent": "vectorbea-check-fixtures" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { text: await res.text(), finalUrl: res.url };
+  };
+
+  let html;
+  let finalUrl;
+  try {
+    ({ text: html, finalUrl } = await fetchText(deployUrl));
+  } catch (err) {
+    console.error(`  ✗ Could not fetch ${deployUrl} — ${err.message}`);
+    console.error("    Production cannot be proven clean without a successful fetch.");
+    process.exit(1);
+  }
+
+  if (finalUrl !== deployUrl) console.log(`  (redirected to ${finalUrl})`);
+
+  // src="…" on <script>, plus preloaded/modulepreloaded chunks — Next.js links
+  // its chunks both ways, and a chunk only referenced by a preload tag is still
+  // shipped to the browser.
+  const urls = new Set();
+  for (const re of [
+    /<script[^>]+src=["']([^"']+)["']/gi,
+    /<link[^>]+(?:rel=["'](?:preload|modulepreload)["'][^>]*href|href)=["']([^"']+\.js)["']/gi,
+  ]) {
+    for (const m of html.matchAll(re)) {
+      const raw = m[1];
+      if (!raw || raw.startsWith("data:")) continue;
+      try {
+        urls.add(new URL(raw, finalUrl).href);
+      } catch {
+        /* unparseable src — nothing to fetch */
+      }
+    }
+  }
+
+  const contaminatedRemote = new Map();
+  const unreachable = [];
+
+  const htmlHits = FIXTURE_MARKERS.filter((marker) => html.includes(marker));
+  if (htmlHits.length > 0) contaminatedRemote.set(finalUrl + " (HTML)", htmlHits);
+
+  // Bounded concurrency — a big Next build links a lot of chunks, and firing
+  // them all at once gets the request rate-limited, which reads as a false pass.
+  const queue = [...urls];
+  const CONCURRENCY = 8;
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const url = queue.shift();
+        try {
+          const { text } = await fetchText(url);
+          const hits = FIXTURE_MARKERS.filter((marker) => text.includes(marker));
+          if (hits.length > 0) contaminatedRemote.set(url, hits);
+        } catch (err) {
+          unreachable.push(`${url} — ${err.message}`);
+        }
+      }
+    }),
+  );
+
+  console.log(`  Scanned 1 HTML document and ${urls.size} linked JS chunk(s).`);
+
+  if (unreachable.length > 0) {
+    console.error(`\n  ✗ ${unreachable.length} chunk(s) could not be fetched:`);
+    for (const u of unreachable.slice(0, 10)) console.error(`      ${u}`);
+    console.error("\n  An unscanned chunk is an unproven chunk.");
+    failed = true;
+  }
+
+  if (contaminatedRemote.size === 0) {
+    console.log("  ✓ No fixture data found in the deployed HTML or its JS chunks.");
+  } else {
+    console.error(`\n  ✗ Fixture data found in ${contaminatedRemote.size} deployed asset(s):`);
+    for (const [url, hits] of contaminatedRemote) console.error(`      ${url}  →  ${hits.join(", ")}`);
+    console.error("\n  Fabricated domain data is live in production.");
+    failed = true;
+  }
+}
+
 process.exit(failed ? 1 : 0);

@@ -11,9 +11,7 @@ import {
   type AccessToken,
 } from "./token";
 import {
-  signInWithPassword,
   signOutRequest,
-  signUpWithPassword,
   type Session,
   type SessionUser,
 } from "./session";
@@ -23,8 +21,6 @@ export interface SessionState {
   session: Session | null;
   loading: boolean;
   error: Error | null;
-  signIn(email: string, password: string): Promise<void>;
-  signUp(email: string, password: string, fullName?: string): Promise<void>;
   signOut(): Promise<void>;
   /** Force a token fetch. Returns null when there is no session. */
   refresh(): Promise<Session | null>;
@@ -126,37 +122,16 @@ export function SessionProvider({ children, initialSession = null }: SessionProv
     };
   }, [router, teardown]);
 
-  const signIn = React.useCallback(
-    async (email: string, password: string) => {
-      await signInWithPassword(email, password);
-      // The cookie is set; pull the token that goes with it.
-      await load(true);
-      router.refresh();
-    },
-    [load, router],
-  );
-
-  const signUp = React.useCallback(
-    async (email: string, password: string, fullName?: string) => {
-      await signUpWithPassword(email, password, fullName);
-      await load(true);
-      router.refresh();
-    },
-    [load, router],
-  );
-
   const value = React.useMemo<SessionState>(
     () => ({
       user: session?.user ?? null,
       session,
       loading,
       error,
-      signIn,
-      signUp,
       signOut,
       refresh: () => load(true),
     }),
-    [session, loading, error, signIn, signUp, signOut, load],
+    [session, loading, error, signOut, load],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

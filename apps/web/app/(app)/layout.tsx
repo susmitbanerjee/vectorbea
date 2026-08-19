@@ -53,17 +53,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       redirect("/signin");
     }
 
-    // ── Email verification gate (before the beta gate) ─────────────────────
-    // Password signups must confirm their address before applying for access.
-    try {
-      const { isEmailVerified } = await import("@/lib/auth/neon-auth");
-      if (!(await isEmailVerified(user.id))) {
-        redirect("/verify-email");
-      }
-    } catch (err) {
-      // redirect() throws internally — re-throw; swallow only DB failures
-      if (err && typeof err === "object" && "digest" in err) throw err;
-    }
+    // No email-verification gate. Sign-in is federated and every provider
+    // hands us an address it has already verified, so there is nothing left to
+    // confirm. Keeping the gate would strand every account created before
+    // passwords were removed: `email_verified` is FALSE on those rows, and the
+    // /verify-email route now redirects to /signin, which redirects a signed-in
+    // user straight back here — an infinite loop.
 
     // ── Private beta gate ──────────────────────────────────────────────────
     if (PRIVATE_BETA) {

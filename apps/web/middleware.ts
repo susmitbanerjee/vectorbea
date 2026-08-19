@@ -15,13 +15,16 @@ const AUTH_PROTECTED_PREFIXES = [
 // (Vercel/Cloudflare) — application code cannot and should not handle that.
 const RATE_BUCKETS = new Map<string, { count: number; windowStart: number }>();
 const WINDOW_MS = 60_000;
-// Stricter caps for credential endpoints; generous for normal API chatter.
-const AUTH_LIMIT = 10;     // signin/signup/resend per IP per minute
+// Stricter caps for the session-establishing endpoints; generous for normal
+// API chatter. The credential endpoints they used to guard are deleted — what
+// remains worth limiting is the OAuth round-trip's landing points, which is
+// where a token gets exchanged for a cookie.
+const AUTH_LIMIT = 10;     // session-establishing calls per IP per minute
 const API_LIMIT = 240;     // all other /api/* per IP per minute
 
 const AUTH_RATE_PATHS = [
-  "/api/auth/signin", "/api/auth/signup", "/api/auth/resend-verification",
-  "/api/auth/set-session", "/api/book-demo",
+  "/api/auth/callback", "/api/auth/set-session", "/api/auth/token",
+  "/api/book-demo",
 ];
 
 function clientIp(request: NextRequest): string {

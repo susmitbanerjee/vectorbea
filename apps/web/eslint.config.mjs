@@ -160,7 +160,6 @@ const config = [
       "src/components/app/connectivity/integrations-view.tsx",
       "src/components/app/connectivity/triggers-view.tsx",
       "src/components/app/control/activity-stream.tsx",
-      "src/components/app/control/attention-feed.tsx",
       "src/components/app/control/control-view.tsx",
       "src/components/app/control/detail-band.tsx",
       "src/components/app/control/empty-workspace.tsx",

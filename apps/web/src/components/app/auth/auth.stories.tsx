@@ -2,19 +2,21 @@ import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/nextjs";
 import { AuthForm } from "./auth-form";
 import {
-  VerifyEmailScreen, VerifiedScreen, LinkExpiredScreen, LinkUsedScreen,
-  ForgotPasswordScreen, ChoosePasswordScreen, AcceptInviteScreen, LockedOutScreen,
+  VerifiedScreen, LinkExpiredScreen, LinkUsedScreen, AcceptInviteScreen, LockedOutScreen,
 } from "./status-screens";
-import { mapAuthError, mapOAuthError } from "./auth-errors";
+import { mapOAuthError } from "./auth-errors";
 import { Onboarding } from "~/components/app/onboarding/onboarding";
 
 /**
  * Auth — every state, both themes.
  *
- * Sign-in is federated only: three OAuth providers and a SAML domain route.
- * There is no password on this screen, so the failure states are the ones the
- * provider round-trip can actually produce, driven through the REAL mappers
- * with the codes our routes emit.
+ * Sign-in is federated only: three OAuth providers, plus a contact route for
+ * enterprise SAML. There is no password anywhere in this flow, so the failure
+ * states are exactly the ones the provider round-trip can produce, driven
+ * through the REAL mapper with the codes our routes emit.
+ *
+ * The password stories that used to live here — verify email, forgot password,
+ * choose password — are gone with the screens themselves.
  */
 
 const meta = { title: "Flows/Auth", parameters: { layout: "fullscreen" } } satisfies Meta;
@@ -45,40 +47,27 @@ export const SignInCancelledAtProvider: Story = {
   render: () => <AuthForm mode="signin" error={mapOAuthError("access_denied")} />,
 };
 
-export const SignInUnverified: Story = {
-  name: "Sign in — email not verified",
-  render: () => <AuthForm mode="signin" error={mapAuthError("Email not confirmed", 403, "")} />,
-};
-
 export const SignUp: Story = {
   render: () => <AuthForm mode="signup" />,
 };
 
-export const VerifyEmail: Story = {
-  render: () => <VerifyEmailScreen email="ada@acme.com" />,
+export const InviteAccepted: Story = { render: () => <VerifiedScreen /> };
+
+export const InviteExpired: Story = {
+  render: () => <LinkExpiredScreen email="ada@northwind.example" />,
 };
 
-export const Verified: Story = { render: () => <VerifiedScreen /> };
-
-export const LinkExpired: Story = {
-  render: () => <LinkExpiredScreen kind="verification" email="ada@acme.com" />,
+export const InviteAlreadyUsed: Story = {
+  render: () => <LinkUsedScreen />,
 };
-
-export const LinkAlreadyUsed: Story = {
-  render: () => <LinkUsedScreen kind="reset" />,
-};
-
-export const ForgotPassword: Story = { render: () => <ForgotPasswordScreen /> };
-
-export const ChoosePassword: Story = { render: () => <ChoosePasswordScreen /> };
 
 export const AcceptInvite: Story = {
   render: () => (
     <AcceptInviteScreen
-      workspace="Acme Platform"
+      workspace="Northwind Logistics"
       inviter="Grace Hopper"
       role="operator"
-      email="ada@acme.com"
+      email="ada@northwind.example"
     />
   ),
 };

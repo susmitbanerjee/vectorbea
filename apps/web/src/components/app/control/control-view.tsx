@@ -5,13 +5,14 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { HealthStrip } from "./health-strip";
-import { AttentionFeed } from "./attention-feed";
+import { AttentionSummary } from "./attention-summary";
 import { FleetHeatstrip } from "./fleet-heatstrip";
 import { DetailBand } from "./detail-band";
 import { TimeRangeControl, RefreshControl } from "./time-range";
 import { EmptyWorkspace } from "./empty-workspace";
+import { worstSeverity } from "~/components/app/shell/inbox-signal";
 import {
-  HealthStripSkeleton, AttentionFeedSkeleton, FleetSkeleton, DetailSkeleton,
+  HealthStripSkeleton, AttentionSummarySkeleton, FleetSkeleton, DetailSkeleton,
 } from "./skeletons";
 import {
   buildHealth, buildAttention, buildFleet, buildLatency, buildCostTrend,
@@ -22,11 +23,17 @@ import {
 /* ══════════════════════════════════════════════════════════════════════════════
    CONTROL
 
-   Four bands in priority order. The order is the argument: an operator arriving
-   because something is wrong reads top to bottom and stops as soon as they know
-   what to do. Health tells them whether it is bad, Needs attention tells them
-   what to fix, Fleet tells them how far it has spread, and Detail is there for
-   the diagnosis afterwards.
+   The order is the argument: an operator arriving because something is wrong
+   reads top to bottom and stops as soon as they know what to do. Health tells
+   them whether it is bad, the attention line tells them how much needs doing
+   and how badly, Fleet tells them how far it has spread, and Detail is there
+   for the diagnosis afterwards.
+
+   The triage feed itself has moved to the notification inbox, which makes it
+   reachable from every screen rather than only this one. What stayed is a
+   single severity-weighted line that opens it — see attention-summary.tsx for
+   why burying it entirely would have cost more than it saved. Fleet is promoted
+   into the space that freed up.
 
    Every number is a link. That is the single rule this rebuild exists to
    enforce — the old Overview reported "41% success rate" and "1 failed" and
@@ -107,7 +114,15 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
 
   /* ── Data ───────────────────────────────────────────────────────────────── */
   const health = React.useMemo(() => buildHealth(range, tick), [range, tick]);
+  // Only the shape of the attention list is needed here — the items themselves
+  // are rendered by the inbox. Counting them in both places is deliberate: this
+  // is one number, and threading the inbox's state across the shell to save it
+  // would be more machinery than the number is worth.
   const attention = React.useMemo(() => buildAttention(), []);
+  const attentionWorst = React.useMemo(
+    () => worstSeverity(attention.map((a) => a.severity)),
+    [attention],
+  );
   const fleet = React.useMemo(() => buildFleet(sort), [sort]);
   const latency = React.useMemo(() => buildLatency(range), [range]);
   const cost = React.useMemo(() => buildCostTrend(range), [range]);
@@ -158,8 +173,7 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
         <div className="grid gap-6">
           <p role="status" className="sr-only">Loading workspace health.</p>
           <HealthStripSkeleton />
-          <BandHeading>Needs attention</BandHeading>
-          <AttentionFeedSkeleton />
+          <AttentionSummarySkeleton />
           <BandHeading>Fleet</BandHeading>
           <FleetSkeleton />
           <BandHeading>Detail</BandHeading>
@@ -168,7 +182,7 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
       ) : (
         <div className="grid gap-6">
           <HealthStrip health={health} />
-          <AttentionFeed items={attention} />
+          <AttentionSummary count={attention.length} worst={attentionWorst} />
           <FleetHeatstrip
             rows={fleet}
             sort={sort}
