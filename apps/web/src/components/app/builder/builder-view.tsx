@@ -67,11 +67,27 @@ export function BuilderView({ workflowId }: { workflowId: string }) {
 
   return (
     <ReactFlowProvider>
-      {/* Keyed on the version: opening a different version is a different
-          document, and carrying the previous one's history into it would let
-          undo walk backwards into a graph that was never on this canvas. */}
+      {/* THE BLINK AND THE REVERTED EDITS.
+          This used to be keyed on `data.version?.id`. Every autosave writes a
+          NEW version (there is no PATCH — see use-workflow-graph.ts) and then
+          invalidates the workflow queries, so the "current version" this page
+          sees changes as a direct result of the user's own edit. Keying on it
+          meant every autosave remounted `BuilderInner` from scratch: a fresh
+          ReactFlowProvider, a fresh `useBuilderStore(graph)` seeded from
+          whatever the refetch had landed — the canvas blinking empty and back,
+          and a race where an edit made while an earlier save's refetch was
+          still in flight got overwritten by that stale graph, reverting the
+          node/edge the user had just changed.
+
+          This route never opens a specific historical version — no `?version=`
+          exists, `page.tsx` passes only `workflowId` — so the "different
+          document" the original comment was guarding against is only ever a
+          genuinely different WORKFLOW, which already gets a fresh `BuilderView`
+          from the route change. Keying on the workflow id preserves that
+          guarantee (undo never crosses workflows) without remounting on the
+          app's own writes. */}
       <BuilderInner
-        key={data.version?.id ?? "empty"}
+        key={workflow.id}
         workflow={workflow}
         graph={data.graph ?? { nodes: [], edges: [] }}
         data={data}
