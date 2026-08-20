@@ -44,7 +44,8 @@ export interface WorkflowGraphData {
   error: VectorbeaApiError | null;
   /** True when the graph had no stored positions and was laid out on open. */
   wasLaidOut: boolean;
-  save: (graph: BuilderGraph) => Promise<void>;
+  /** Resolves true only when the new workflow version was persisted. */
+  save: (graph: BuilderGraph) => Promise<boolean>;
   /** Mirror a store edit into the save indicator. */
   markDirty: () => void;
   saveState: SaveState;
@@ -130,7 +131,7 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
           ? "The only environment this deployment can name belongs to a different workspace, so this version cannot be written here. Your changes are still on the canvas."
           : "No environment resolved, so the version cannot be written. Your changes are still on the canvas — reload once the API is reachable.",
       );
-      return;
+      return false;
     }
 
     setSaveState("saving");
@@ -155,6 +156,7 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
       // The new version is now current: the version list, the workflow row and
       // the list's step counts are all stale.
       await queryClient.invalidateQueries({ queryKey: queryKeys.workflows.all(keyScope) });
+      return true;
     } catch (error) {
       setSaveState("error");
       setSaveError(
@@ -162,6 +164,7 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
           ? error.message
           : "The version could not be written. Your changes are still on the canvas.",
       );
+      return false;
     }
     // `keyScope` is rebuilt each render; its contents are what matter.
     // eslint-disable-next-line react-hooks/exhaustive-deps

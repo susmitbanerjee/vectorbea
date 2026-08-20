@@ -129,8 +129,10 @@ function Port({
         "!rounded-none",
         position === Position.Right ? "!-right-4" : position === Position.Left ? "!-left-4" : "",
       )}
-      style={position === Position.Bottom ? { bottom: -16, top: "auto", left: "50%" } : undefined}
-      aria-label={`${id === "error" ? "Error" : position === Position.Left ? "Left" : "Right"} connector of ${kind} node`}
+      style={position === Position.Bottom
+        ? { bottom: -16, top: "auto", left: id === "error" ? "70%" : "50%" }
+        : position === Position.Top ? { top: -16, bottom: "auto", left: "50%" } : undefined}
+      aria-label={`${id === "error" ? "Error" : `${position}`} connector of ${kind} node`}
     >
       <svg viewBox="0 0 12 12" className="pointer-events-none absolute inset-0 m-auto size-3" aria-hidden="true">
         <path
@@ -139,6 +141,7 @@ function Port({
           stroke={isError ? "var(--status-failed)" : "var(--border-default)"}
           strokeWidth={1.4}
         />
+        <circle cx={6} cy={6} r={1.5} fill={isError ? "var(--status-failed)" : "var(--border-default)"} />
       </svg>
     </Handle>
   );
@@ -287,6 +290,8 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
           the drag starts remains the directed source. */}
       <Port type="source" position={Position.Left} id="left" kind={node.kind} />
       <Port type="source" position={Position.Right} id="right" kind={node.kind} />
+      <Port type="source" position={Position.Top} id="top" kind={node.kind} />
+      <Port type="source" position={Position.Bottom} id="bottom" kind={node.kind} />
       {/* Tool calls get a second, error-typed output so a failure path is
           drawn from a different port than the success path. */}
       {node.kind === "tool" && !compact ? (

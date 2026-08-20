@@ -117,6 +117,7 @@ function BuilderInner({
 
   const saveState: SaveState = data.saveState;
   const lastSavedAt = data.lastSavedAt;
+  const markDirty = data.markDirty;
 
   /* ── Validation, continuous ─────────────────────────────────────────────── */
   const issues = React.useMemo(
@@ -125,36 +126,13 @@ function BuilderInner({
   );
   const summary = React.useMemo(() => summarise(issues), [issues]);
 
-  /* ── Autosave ─────────────────────────────────────────────────────────────
-     Every save is a NEW VERSION (`POST /api/workflows/:id/versions`), so the
-     debounce is not cosmetic: a request per drag frame would be a version per
-     drag frame. Only a COMMITTED edit sets `dirty` — the intermediate frames of
-     a drag do not — so this fires once when the node is dropped.
-
-     `markSaved` is dispatched only after the request resolves. Clearing the flag
-     optimistically, which the previous `setTimeout` version did, meant a failed
-     save left a canvas that believed it was persisted. */
-  const pendingGraphRef = React.useRef<BuilderGraph>({ nodes: state.nodes, edges: state.edges });
-  pendingGraphRef.current = { nodes: state.nodes, edges: state.edges };
-
-  const saveRef = React.useRef(data.save);
-  saveRef.current = data.save;
-
+  /* Saving creates a new workflow version, so edits remain explicitly dirty
+     until the user presses Save. This also keeps multiple quick graph edits in
+     one version instead of autosaving a partial interaction. */
   React.useEffect(() => {
     if (!state.dirty) return;
-    data.markDirty();
-
-    const id = window.setTimeout(() => {
-      void saveRef.current(pendingGraphRef.current).then(() => {
-        dispatch({ type: "markSaved" });
-      });
-    }, 1200);
-
-    return () => window.clearTimeout(id);
-    // `data.save` is held in a ref so a re-render mid-debounce cannot restart
-    // the timer and postpone the write indefinitely.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.dirty, dispatch]);
+    markDirty();
+  }, [state.dirty, markDirty]);
 
   /* ── Viewport helpers ───────────────────────────────────────────────────── */
   const reveal = React.useCallback((nodeId: string) => {
@@ -366,8 +344,8 @@ function BuilderInner({
         onToggleFullscreen={toggleFullscreen}
         fullscreen={fullscreen}
         onSave={() => {
-          void data.save({ nodes: state.nodes, edges: state.edges }).then(() => {
-            dispatch({ type: "markSaved" });
+          void data.save({ nodes: state.nodes, edges: state.edges }).then((saved) => {
+            if (saved) dispatch({ type: "markSaved" });
           });
         }}
         onTest={() => console.info("test", workflow.id)}

@@ -18,7 +18,7 @@ import * as React from "react";
 import { useTheme } from "next-themes";
 import {
   ReactFlow, MiniMap, useReactFlow, useStore, ConnectionMode, MarkerType,
-  type Node, type Edge, type NodeChange, type Connection,
+  type Node, type Edge, type NodeChange, type Connection, type OnNodeDrag,
 } from "@xyflow/react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
@@ -46,6 +46,23 @@ import type { Issue } from "./validation";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 const COMPACT_BELOW = 0.6;
+
+function nearestHandles(
+  source: { x: number; y: number } | undefined,
+  target: { x: number; y: number } | undefined,
+) {
+  if (!source || !target) return { sourceHandle: "right", targetHandle: "left" };
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { sourceHandle: "right", targetHandle: "left" }
+      : { sourceHandle: "left", targetHandle: "right" };
+  }
+  return dy >= 0
+    ? { sourceHandle: "bottom", targetHandle: "top" }
+    : { sourceHandle: "top", targetHandle: "bottom" };
+}
 
 /**
  * Returns the PREVIOUS array whenever the new one holds the same elements.
@@ -217,16 +234,16 @@ export function Canvas({
     return state.edges.map((e) => {
       const source = positions.get(e.source);
       const target = positions.get(e.target);
-      const runsLeftToRight = !source || !target || source.x <= target.x;
+      const route = nearestHandles(source, target);
       return {
       id: e.id,
       type: "workflow",
       source: e.source,
       target: e.target,
-      /* Loose mode supports source-to-source connectors. Route through the
-         nearest sides so repositioning nodes never leaves backwards loops. */
-      sourceHandle: e.kind === "error" ? "error" : runsLeftToRight ? "right" : "left",
-      targetHandle: runsLeftToRight ? "left" : "right",
+      /* Route through the nearest cardinal sides. Vertically stacked steps
+         use bottom-to-top ports instead of making a large reverse loop. */
+      sourceHandle: e.kind === "error" ? "error" : route.sourceHandle,
+      targetHandle: route.targetHandle,
       selected: state.selectedEdgeId === e.id,
       reconnectable: !presentation,
       interactionWidth: 28,
@@ -253,37 +270,36 @@ export function Canvas({
 
   const onNodesChange = React.useCallback((changes: NodeChange[]) => {
     const positions: Record<string, { x: number; y: number }> = {};
-    let dragging = false;
-    let ended = false;
 
     for (const change of changes) {
       if (change.type !== "position" || !change.position) continue;
       // Snapped as it moves, so the node and the lattice never disagree.
       positions[change.id] = { x: snap(change.position.x), y: snap(change.position.y) };
-      if (change.dragging) dragging = true;
-      else ended = true;
     }
 
     if (Object.keys(positions).length === 0) return;
-
-    if (dragging) {
-      dragRef.current = positions;
-      const movingId = Object.keys(positions)[0];
-      const moving = state.nodes.find((n) => n.node.id === movingId);
-      if (moving) {
-        setGuides(guidesFor({ ...moving, ...positions[movingId] }, state.nodes));
-      }
-      dispatch({ type: "move", positions, commit: false });
-      return;
+    dragRef.current = { ...dragRef.current, ...positions };
+    const movingId = Object.keys(positions)[0];
+    const moving = state.nodes.find((n) => n.node.id === movingId);
+    if (moving) {
+      setGuides(guidesFor({ ...moving, ...positions[movingId] }, state.nodes));
     }
-
-    if (ended) {
-      setGuides([]);
-      // The commit uses the last dragged positions: the final change event
-      // carries no position, so committing from it would write undefined.
-      dispatch({ type: "move", positions: { ...dragRef.current, ...positions }, commit: true });
-    }
+    dispatch({ type: "move", positions, commit: false });
   }, [dispatch, state.nodes]);
+
+  const onNodeDragStart = React.useCallback<OnNodeDrag>(() => {
+    dragRef.current = {};
+  }, []);
+
+  const onNodeDragStop = React.useCallback<OnNodeDrag>((_, node, draggedNodes) => {
+    const positions = { ...dragRef.current };
+    for (const dragged of draggedNodes.length > 0 ? draggedNodes : [node]) {
+      positions[dragged.id] = { x: snap(dragged.position.x), y: snap(dragged.position.y) };
+    }
+    dragRef.current = {};
+    setGuides([]);
+    dispatch({ type: "move", positions, commit: true });
+  }, [dispatch]);
 
   /* ── Selection flows ONE WAY: this store → React Flow, never back ──────────
      This is what the canvas always claimed to do, and did not.
@@ -357,6 +373,8 @@ export function Canvas({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         onSelectionEnd={onSelectionEnd}
         onConnect={onConnect}
         onReconnect={onReconnect}
@@ -368,15 +386,9 @@ export function Canvas({
            Without it every node reconciles on every pan frame whether or not it
            is anywhere near the viewport. */
         onlyRenderVisibleElements
-        /* Every node has exactly one target handle (left) and one source
-           handle (right) — see workflow-node.tsx. The default "strict"
-           connection mode only lets a drag START from a source handle and
-           END on a target handle, so connecting two nodes that aren't
-           already arranged left-to-right means dragging the full width of
-           the canvas in the one direction that works. "loose" lets a drag
-           start from either handle type and infers direction from which one
-           you grabbed, so a connection can be drawn from whichever side is
-           actually closest to the cursor. */
+        /* Each cardinal side is a direction-neutral connector. Loose mode
+           makes the node where the drag starts the directed source, while the
+           nearest-side router keeps horizontal and vertical flows tidy. */
         connectionMode={ConnectionMode.Loose}
         connectionRadius={28}
         reconnectRadius={28}

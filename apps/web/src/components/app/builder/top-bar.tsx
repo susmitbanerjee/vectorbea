@@ -147,8 +147,8 @@ export function TopBar({
           <Link href={`/workflows/${workflow.id}/versions` as Route}>History</Link>
         </Button>
 
-        <Button size="sm" variant="secondary" onClick={onSave} disabled={saveState === "saved"}>
-          Save
+        <Button size="sm" variant="secondary" onClick={onSave} disabled={saveState === "saved" || saveState === "saving"}>
+          {saveState === "saving" ? "Saving…" : "Save"}
         </Button>
         <Button size="sm" variant="secondary" onClick={onTest}>Test</Button>
         <Button size="sm" variant="secondary" onClick={onSimulate}>Simulate</Button>

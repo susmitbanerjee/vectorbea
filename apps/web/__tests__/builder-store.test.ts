@@ -17,6 +17,22 @@ function seededStore() {
 }
 
 describe("builder edge editing", () => {
+  it("marks the graph dirty only when a node drag is committed", () => {
+    const duringDrag = builderReducer(seededStore(), {
+      type: "move",
+      positions: { a: { x: 32, y: 48 } },
+      commit: false,
+    });
+    expect(duringDrag.state.dirty).toBe(false);
+
+    const afterDrop = builderReducer(duringDrag, {
+      type: "move",
+      positions: { a: { x: 32, y: 48 } },
+      commit: true,
+    });
+    expect(afterDrop.state.dirty).toBe(true);
+  });
+
   it("creates an edge in the direction the user dragged", () => {
     const next = builderReducer(seededStore(), {
       type: "connect",
