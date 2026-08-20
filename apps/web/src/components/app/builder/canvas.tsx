@@ -17,7 +17,7 @@ import "@xyflow/react/dist/base.css";
 import * as React from "react";
 import { useTheme } from "next-themes";
 import {
-  ReactFlow, MiniMap, useReactFlow, useStore,
+  ReactFlow, MiniMap, useReactFlow, useStore, ConnectionMode,
   type Node, type Edge, type NodeChange, type Connection,
 } from "@xyflow/react";
 import { cn } from "~/lib/cn";
@@ -367,6 +367,16 @@ export function Canvas({
            Without it every node reconciles on every pan frame whether or not it
            is anywhere near the viewport. */
         onlyRenderVisibleElements
+        /* Every node has exactly one target handle (left) and one source
+           handle (right) — see workflow-node.tsx. The default "strict"
+           connection mode only lets a drag START from a source handle and
+           END on a target handle, so connecting two nodes that aren't
+           already arranged left-to-right means dragging the full width of
+           the canvas in the one direction that works. "loose" lets a drag
+           start from either handle type and infers direction from which one
+           you grabbed, so a connection can be drawn from whichever side is
+           actually closest to the cursor. */
+        connectionMode={ConnectionMode.Loose}
         minZoom={0.2}
         maxZoom={2.5}
         snapToGrid
