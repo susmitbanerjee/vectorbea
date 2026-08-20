@@ -71,6 +71,7 @@ export type BuilderAction =
   | { type: "duplicateSelection" }
   | { type: "paste"; nodes: VersionNode[]; edges: BuilderEdge[]; at: { x: number; y: number } }
   | { type: "connect"; source: string; target: string; kind?: EdgeKind }
+  | { type: "reconnectEdge"; id: string; source: string; target: string; kind?: EdgeKind }
   | { type: "deleteEdge"; id: string }
   | { type: "setDisabled"; ids: string[]; disabled: boolean }
   | { type: "replaceGraph"; graph: BuilderGraph; label: string }
@@ -337,6 +338,40 @@ function reduceState(state: BuilderState, action: BuilderAction): { next: Builde
           dirty: true,
         },
         label: "Connect",
+      };
+    }
+
+    case "reconnectEdge": {
+      if (action.source === action.target) return null;
+      const edge = state.edges.find((e) => e.id === action.id);
+      if (!edge) return null;
+      const duplicate = state.edges.some(
+        (e) => e.id !== action.id && e.source === action.source && e.target === action.target,
+      );
+      if (duplicate) return null;
+
+      const source = state.nodes.find((n) => n.node.id === action.source);
+      const kind: EdgeKind = action.kind
+        ?? (edge.kind === "error" ? "standard"
+          : source?.node.kind === "branch" ? "conditional"
+            : source?.node.kind === "parallel" ? "parallel" : edge.kind);
+
+      return {
+        next: {
+          ...state,
+          edges: state.edges.map((e) => e.id === action.id ? {
+            ...e,
+            source: action.source,
+            target: action.target,
+            kind,
+            label: kind === "conditional"
+              ? String(source?.node.config.condition ?? "true")
+              : kind === "error" ? e.label : undefined,
+          } : e),
+          selectedEdgeId: action.id,
+          dirty: true,
+        },
+        label: "Reconnect edge",
       };
     }
 

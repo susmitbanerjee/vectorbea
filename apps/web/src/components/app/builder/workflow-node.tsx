@@ -106,9 +106,8 @@ const STATE: Record<NodeRunState, StateStyle> = {
 /**
  * A port, drawn as a small hive cell rather than the library's circle.
  *
- * Larger hit area than visual size: the visible cell is 10px, the grab target is
- * 20px. A 10px drag target is a miss most of the time, and the miss lands on the
- * canvas and starts a marquee instead — which reads as the app ignoring you.
+ * Larger hit area than visual size: the visible cell is 12px, the grab target is
+ * 32px. The connector sits half inside the node so it remains easy to acquire.
  */
 function Port({
   type, position, id, kind,
@@ -126,16 +125,16 @@ function Port({
       id={id}
       // The library's own class is left off entirely; these are our styles.
       className={cn(
-        "!size-5 !border-0 !bg-transparent",
+        "!size-8 !border-0 !bg-transparent",
         "!rounded-none",
-        type === "source" ? "!-right-2.5" : "!-left-2.5",
+        position === Position.Right ? "!-right-4" : position === Position.Left ? "!-left-4" : "",
       )}
-      style={position === Position.Bottom ? { bottom: -10, top: "auto", left: "50%" } : undefined}
-      aria-label={`${type === "source" ? "Output" : "Input"} of ${kind} node`}
+      style={position === Position.Bottom ? { bottom: -16, top: "auto", left: "50%" } : undefined}
+      aria-label={`${id === "error" ? "Error" : position === Position.Left ? "Left" : "Right"} connector of ${kind} node`}
     >
-      <svg viewBox="0 0 10 10" className="pointer-events-none absolute inset-0 m-auto size-2.5" aria-hidden="true">
+      <svg viewBox="0 0 12 12" className="pointer-events-none absolute inset-0 m-auto size-3" aria-hidden="true">
         <path
-          d={cellPath(10, 10)}
+          d={cellPath(12, 12)}
           fill={isError ? "var(--status-failed-subtle)" : "var(--bg-base)"}
           stroke={isError ? "var(--status-failed)" : "var(--border-default)"}
           strokeWidth={1.4}
@@ -284,10 +283,10 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
         ) : null}
       </div>
 
-      {/* Ports. A trigger has no input; an end has no output — drawing ports
-          that cannot be connected teaches people to try. */}
-      {node.kind !== "trigger" ? <Port type="target" position={Position.Left} kind={node.kind} /> : null}
-      {node.kind !== "end" ? <Port type="source" position={Position.Right} kind={node.kind} /> : null}
+      {/* Loose mode makes these direction-neutral connectors. The node where
+          the drag starts remains the directed source. */}
+      <Port type="source" position={Position.Left} id="left" kind={node.kind} />
+      <Port type="source" position={Position.Right} id="right" kind={node.kind} />
       {/* Tool calls get a second, error-typed output so a failure path is
           drawn from a different port than the success path. */}
       {node.kind === "tool" && !compact ? (

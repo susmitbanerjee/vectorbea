@@ -32,6 +32,7 @@ export interface WorkflowEdgeData extends Record<string, unknown> {
   dimmed: boolean;
   emphasised: boolean;
   onInsert?: (edgeId: string) => void;
+  onDelete?: (edgeId: string) => void;
 }
 
 interface KindStyle {
@@ -64,7 +65,7 @@ function curvatureFor(sourceY: number, targetY: number, sourceX: number, targetX
 
 function WorkflowEdgeImpl({
   id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
-  data, selected,
+  data, selected, markerEnd,
 }: EdgeProps) {
   const d = (data ?? {}) as WorkflowEdgeData;
   const kind = d.kind ?? "standard";
@@ -80,22 +81,13 @@ function WorkflowEdgeImpl({
 
   return (
     <>
-      {/* A wide, invisible stroke under the visible one. A 1.5px line is a 1.5px
-          click target, and an edge you cannot reliably click is an edge you
-          cannot delete or insert into. */}
-      <path
-        d={path}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={18}
-        className="cursor-pointer"
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      />
-
       <BaseEdge
         id={id}
         path={path}
+        markerEnd={markerEnd}
+        interactionWidth={28}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
           stroke: active ? "var(--accent)" : style.stroke,
           strokeWidth: active ? style.width + 0.8 : style.width,
@@ -163,6 +155,23 @@ function WorkflowEdgeImpl({
               >
                 <svg viewBox="0 0 10 10" className="size-2" aria-hidden="true">
                   <path d="M5 1.4v7.2M1.4 5h7.2" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+                </svg>
+              </button>
+            ) : null}
+
+            {active && d.onDelete ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); d.onDelete?.(id); }}
+                aria-label="Delete this edge"
+                className={cn(
+                  "border-default bg-surface-raised text-fg-secondary grid size-4 place-items-center rounded-full border",
+                  "hover:border-status-failed hover:text-status-failed transition-colors duration-fast",
+                  "outline-none focus-visible:focus-ring",
+                )}
+              >
+                <svg viewBox="0 0 10 10" className="size-2" aria-hidden="true">
+                  <path d="M2.2 3h5.6M4 3V2h2v1M3.1 3.2l.4 4.5h3l.4-4.5" fill="none" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             ) : null}

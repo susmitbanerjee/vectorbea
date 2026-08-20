@@ -17,7 +17,7 @@ import "@xyflow/react/dist/base.css";
 import * as React from "react";
 import { useTheme } from "next-themes";
 import {
-  ReactFlow, MiniMap, useReactFlow, useStore, ConnectionMode,
+  ReactFlow, MiniMap, useReactFlow, useStore, ConnectionMode, MarkerType,
   type Node, type Edge, type NodeChange, type Connection,
 } from "@xyflow/react";
 import { cn } from "~/lib/cn";
@@ -27,7 +27,7 @@ import { LatticeBackground, AlignmentGuides } from "./lattice";
 import { WorkflowNode, type WorkflowNodeData, type NodeRunState } from "./workflow-node";
 import { WorkflowEdge, type WorkflowEdgeData } from "./workflow-edge";
 import { snap, guidesFor, type Guide } from "./layout";
-import { NODE_SIZE, pathThrough, type BuilderAction, type BuilderState } from "./store";
+import { NODE_SIZE, type BuilderAction, type BuilderState } from "./store";
 import { boundResource, nodeChrome, type BuilderNode } from "~/mocks/builder";
 import type { Issue } from "./validation";
 
@@ -113,31 +113,11 @@ export function Canvas({
   const colorMode = resolvedTheme === "light" ? "light" : "dark";
 
   const [guides, setGuides] = React.useState<Guide[]>([]);
-  const [hoverPath, setHoverPath] = React.useState<Set<string> | null>(null);
   const dragRef = React.useRef<Record<string, { x: number; y: number }>>({});
 
-  /* THE HOVER BLINK.
-     `pathThrough(node.id, ...)` builds a brand-new Set every call, even when
-     the pointer is still over the same node — React Flow's pane keeps firing
-     mouseenter for a node whose underlying DOM element gets recreated by a
-     nodes-array reference change, and that new Set is a new `hoverPath`,
-     which rebuilds the `nodes`/`edges` memos below, which changes the
-     nodes-array reference, which can trigger mouseenter again. Same shape as
-     the drag blink and the old onSelectionChange loop: state kept getting
-     reset to an equal-but-not-identical value every frame. Tracking the
-     hovered id separately and only calling setHoverPath when it actually
-     changes breaks the cycle. */
-  const hoveredNodeIdRef = React.useRef<string | null>(null);
-  const onNodeHoverStart = React.useCallback((nodeId: string, edges: BuilderState["edges"]) => {
-    if (hoveredNodeIdRef.current === nodeId) return;
-    hoveredNodeIdRef.current = nodeId;
-    setHoverPath(pathThrough(nodeId, edges));
-  }, []);
-  const onNodeHoverEnd = React.useCallback(() => {
-    if (hoveredNodeIdRef.current === null) return;
-    hoveredNodeIdRef.current = null;
-    setHoverPath(null);
-  }, []);
+  /* Hover stays local to each rendered node/edge. Canvas-level hover state
+     replaced every React Flow element under the pointer and created an
+     enter/leave feedback loop that made the entire graph blink. */
 
   /* ── Derived per-node facts ─────────────────────────────────────────────── */
 
@@ -215,8 +195,8 @@ export function Canvas({
           chrome: decor?.chrome ?? nodeChrome(n.node, state.edges, versionNodes),
           issueCount: nodeIssues.length,
           compact,
-          dimmed: hoverPath !== null && !hoverPath.has(n.node.id),
-          emphasised: hoverPath?.has(n.node.id) ?? false,
+          dimmed: false,
+          emphasised: false,
           onOpenIssues,
         },
         /* Dimensions are MEASURED, not declared.
@@ -229,34 +209,45 @@ export function Canvas({
     });
   }, [
     state.nodes, state.edges, state.selection, state.disabled,
-    issuesByNode, runStates, compact, hoverPath, onOpenIssues, versionNodes, decoration,
+    issuesByNode, runStates, compact, onOpenIssues, versionNodes, decoration,
   ]);
 
-  const edges = React.useMemo<Edge<WorkflowEdgeData>[]>(() =>
-    state.edges.map((e) => ({
+  const edges = React.useMemo<Edge<WorkflowEdgeData>[]>(() => {
+    const positions = new Map(state.nodes.map((n) => [n.node.id, n]));
+    return state.edges.map((e) => {
+      const source = positions.get(e.source);
+      const target = positions.get(e.target);
+      const runsLeftToRight = !source || !target || source.x <= target.x;
+      return {
       id: e.id,
       type: "workflow",
       source: e.source,
       target: e.target,
-      /* `null`, not `undefined`, for the default handle.
-         React Flow resolves an edge by looking up the handle its id names. Our
-         default ports render without an id, which the library stores as `null`;
-         an edge asking for `undefined` matches nothing, and an edge whose
-         handle cannot be resolved is dropped SILENTLY — eleven edges in the
-         store, none on the canvas, and no warning to say why. */
-      sourceHandle: e.kind === "error" ? "error" : null,
-      targetHandle: null,
+      /* Loose mode supports source-to-source connectors. Route through the
+         nearest sides so repositioning nodes never leaves backwards loops. */
+      sourceHandle: e.kind === "error" ? "error" : runsLeftToRight ? "right" : "left",
+      targetHandle: runsLeftToRight ? "left" : "right",
       selected: state.selectedEdgeId === e.id,
+      reconnectable: !presentation,
+      interactionWidth: 28,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 14,
+        height: 14,
+        color: e.kind === "error" ? "var(--status-failed)" : "var(--border-default)",
+      },
       data: {
         kind: e.kind,
         label: e.label,
         flowing: flowingEdges?.has(e.id) ?? false,
-        dimmed: hoverPath !== null && !(hoverPath.has(e.source) && hoverPath.has(e.target)),
-        emphasised: hoverPath !== null && hoverPath.has(e.source) && hoverPath.has(e.target),
+        dimmed: false,
+        emphasised: false,
         onInsert: (edgeId: string) => dispatch({ type: "selectEdge", id: edgeId }),
+        onDelete: (edgeId: string) => dispatch({ type: "deleteEdge", id: edgeId }),
       },
-    })),
-  [state.edges, state.selectedEdgeId, flowingEdges, hoverPath, dispatch]);
+    };
+    });
+  }, [state.edges, state.nodes, state.selectedEdgeId, flowingEdges, presentation, dispatch]);
 
   /* ── Interaction ────────────────────────────────────────────────────────── */
 
@@ -334,6 +325,17 @@ export function Canvas({
     });
   }, [dispatch]);
 
+  const onReconnect = React.useCallback((edge: Edge, connection: Connection) => {
+    if (!connection.source || !connection.target) return;
+    dispatch({
+      type: "reconnectEdge",
+      id: edge.id,
+      source: connection.source,
+      target: connection.target,
+      kind: connection.sourceHandle === "error" ? "error" : undefined,
+    });
+  }, [dispatch]);
+
   /* Dragging a connection into empty canvas opens the node picker, filtered to
      what can legally follow the source. Dropping a connection on nothing and
      having nothing happen is the single most common dead end in n8n. */
@@ -357,9 +359,8 @@ export function Canvas({
         onNodesChange={onNodesChange}
         onSelectionEnd={onSelectionEnd}
         onConnect={onConnect}
+        onReconnect={onReconnect}
         onConnectEnd={handleConnectEnd}
-        onNodeMouseEnter={(_, node) => onNodeHoverStart(node.id, state.edges)}
-        onNodeMouseLeave={onNodeHoverEnd}
         onNodeDoubleClick={(_, node) => onOpenNode(node.id)}
         onEdgeClick={(_, edge) => dispatch({ type: "selectEdge", id: edge.id })}
         onPaneClick={() => { dispatch({ type: "select", ids: [] }); }}
@@ -377,6 +378,9 @@ export function Canvas({
            you grabbed, so a connection can be drawn from whichever side is
            actually closest to the cursor. */
         connectionMode={ConnectionMode.Loose}
+        connectionRadius={28}
+        reconnectRadius={28}
+        edgesReconnectable={!presentation}
         minZoom={0.2}
         maxZoom={2.5}
         snapToGrid
