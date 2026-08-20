@@ -173,4 +173,33 @@ function WorkflowEdgeImpl({
   );
 }
 
-export const WorkflowEdge = React.memo(WorkflowEdgeImpl);
+/**
+ * Same fix as `WorkflowNode` (see canvas.tsx), applied here: React Flow
+ * rebuilds every edge's `data` object whenever ANYTHING in the graph
+ * changes — including a node-only hover, which touches `dimmed`/
+ * `emphasised` on every edge's memo dependency even for edges nowhere near
+ * the hovered node. The default `React.memo` shallow-compares `data` by
+ * reference, so a brand-new (but often value-identical) object fails that
+ * check and re-renders every edge on every hover. Comparing the fields that
+ * actually affect rendering keeps a hover to only the edges whose drawn
+ * state really changed.
+ */
+export const WorkflowEdge = React.memo(WorkflowEdgeImpl, (a, b) => {
+  const x = (a.data ?? {}) as WorkflowEdgeData;
+  const y = (b.data ?? {}) as WorkflowEdgeData;
+  return (
+    a.selected === b.selected
+    && a.sourceX === b.sourceX && a.sourceY === b.sourceY
+    && a.targetX === b.targetX && a.targetY === b.targetY
+    && a.sourcePosition === b.sourcePosition && a.targetPosition === b.targetPosition
+    && x.kind === y.kind
+    && x.label === y.label
+    && x.flowing === y.flowing
+    && x.dimmed === y.dimmed
+    && x.emphasised === y.emphasised
+    // onInsert is a fresh closure every time the edges memo in canvas.tsx
+    // reruns (it wraps the stable `dispatch`, not memoized itself) — comparing
+    // it by reference would defeat this comparator on every recompute even
+    // when nothing the edge actually draws has changed.
+  );
+});
