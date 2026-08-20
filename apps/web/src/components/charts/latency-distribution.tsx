@@ -59,11 +59,38 @@ export function LatencyDistributionChart({
 
   // The x scale is log, matching the buckets.
   const x = linearScale([Math.log(lowerMs), Math.log(upperMs)], [padL, width - padR]);
+  const positionForMs = (value: number) => data.buckets.length === 1
+    ? (padL + width - padR) / 2
+    : x(Math.log(value));
   const y = linearScale([0, maxCount], [height - padB, padT]);
-  const barWidth = Math.max(2, (width - padL - padR) / data.buckets.length - 2);
+  // Sparse distributions should still look like histograms, not solid panels.
+  const barWidth = Math.min(48, Math.max(2, (width - padL - padR) / data.buckets.length - 2));
+  const countTicks = maxCount <= 1 ? [maxCount] : [maxCount / 2, maxCount];
+  const axisIndexes = Array.from(new Set([
+    0,
+    Math.floor(data.buckets.length / 2),
+    data.buckets.length - 1,
+  ])).filter((index) => index >= 0);
 
   return (
-    <div className={cn("w-full overflow-x-auto", className)}>
+    <div className={cn("w-full min-w-0", className)}>
+      <div
+        className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1"
+        aria-hidden="true"
+      >
+        {MARKERS.map((marker) => (
+          <span key={marker.key} className="inline-flex items-center gap-1.5 whitespace-nowrap font-ui text-[11px]">
+            <span
+              className="h-2.5 border-l border-dashed"
+              style={{ borderColor: marker.colour }}
+            />
+            <span style={{ color: marker.colour }}>
+              {marker.label} {formatAxisDuration(data[marker.key])}
+            </span>
+          </span>
+        ))}
+      </div>
+      <div className="w-full overflow-x-auto">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="block h-auto w-full min-w-[26rem]"
@@ -71,7 +98,7 @@ export function LatencyDistributionChart({
         aria-label={`Execution latency distribution over ${data.sampleCount} runs. Median ${formatAxisDuration(data.p50)}, p95 ${formatAxisDuration(data.p95)}, p99 ${formatAxisDuration(data.p99)}.`}
       >
         {/* Count gridlines. Two is enough to read magnitude. */}
-        {[maxCount / 2, maxCount].map((v) => (
+        {countTicks.map((v) => (
           <g key={v}>
             <line x1={padL} x2={width - padR} y1={y(v)} y2={y(v)} stroke="var(--border-subtle)" strokeWidth={1} />
             <text
@@ -85,7 +112,7 @@ export function LatencyDistributionChart({
         ))}
 
         {data.buckets.map((b, i) => {
-          const cx = x(Math.log(b.upperMs));
+          const cx = positionForMs(b.upperMs);
           const active = hover === i;
           const lower = i === 0 ? 0 : data.buckets[i - 1].upperMs;
           return (
@@ -107,29 +134,26 @@ export function LatencyDistributionChart({
           );
         })}
 
-        {/* Percentile markers, drawn over the bars. */}
+        {/* Labels live in the legend above so coincident percentiles never overlap. */}
         {MARKERS.map((m) => {
           const value = data[m.key];
-          const cx = x(Math.log(Math.max(lowerMs, value)));
+          const cx = positionForMs(Math.max(lowerMs, value));
           return (
             <g key={m.key}>
-              <line x1={cx} x2={cx} y1={padT - 8} y2={height - padB} stroke={m.colour} strokeWidth={1} strokeDasharray="3 2" />
-              <text x={cx} y={padT - 11} textAnchor="middle" className="font-ui" fontSize={9} fill={m.colour}>
-                {m.label} {formatAxisDuration(value)}
-              </text>
+              <line x1={cx} x2={cx} y1={padT} y2={height - padB} stroke={m.colour} strokeWidth={1} strokeDasharray="3 2" />
             </g>
           );
         })}
 
         {/* Axis: first, middle and last bucket only. */}
         <line x1={padL} x2={width - padR} y1={height - padB} y2={height - padB} stroke="var(--border-default)" strokeWidth={1} />
-        {[0, Math.floor(data.buckets.length / 2), data.buckets.length - 1].map((i) => {
+        {axisIndexes.map((i) => {
           const b = data.buckets[i];
           if (!b) return null;
           return (
             <text
               key={i}
-              x={x(Math.log(b.upperMs))}
+              x={positionForMs(b.upperMs)}
               y={height - padB + 13}
               textAnchor={i === 0 ? "start" : i === data.buckets.length - 1 ? "end" : "middle"}
               className="font-code tabular"
@@ -141,6 +165,7 @@ export function LatencyDistributionChart({
           );
         })}
       </svg>
+      </div>
     </div>
   );
 }
