@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
+import { getUserById } from "@/lib/auth/neon-auth";
 import { neon } from "@neondatabase/serverless";
 
 export const dynamic = "force-dynamic";
@@ -24,12 +25,18 @@ export async function GET(
     try { user = await getAuthenticatedUserFromCookies(cookieStore); } catch {}
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    // The JWT `sub` is app_users.id for password accounts but supabase_user_id
+    // for OAuth accounts — resolve to the canonical app_users.id before
+    // comparing against workspace_members.user_id, which is always app_users.id.
+    const resolvedUser = await getUserById(user.id);
+    if (!resolvedUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
     const sql = db();
 
     // Verify membership
     const membership = await sql`
       SELECT role FROM workspace_members
-      WHERE workspace_id = ${workspaceId} AND user_id = ${user.id} AND status = 'active'
+      WHERE workspace_id = ${workspaceId} AND user_id = ${resolvedUser.id} AND status = 'active'
       LIMIT 1
     ` as { role: string }[];
     if (!membership[0]) return NextResponse.json({ error: "Not a member" }, { status: 403 });

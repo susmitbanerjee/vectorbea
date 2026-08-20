@@ -153,7 +153,8 @@ export interface FleetRow {
   /** Newest last, so the strip reads left-to-right as time. */
   last30: RunStatus[];
   failureRate: number;
-  lastRunAt: number;
+  /** null when the workflow has no runs in scope — never render an age for it. */
+  lastRunAt: number | null;
   spendUsd: number;
   runIds: (string | null)[];
 }

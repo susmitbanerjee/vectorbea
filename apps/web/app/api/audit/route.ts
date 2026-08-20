@@ -4,6 +4,7 @@ import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
 import { resolveAuditLlmLatencyMs, resolveAuditProxyLatencyMs } from "@/lib/server/audit-latency";
 import { normalizeTraceMetadataV1 } from "@/lib/trace-metadata";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
 import type { AuditLogView } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -53,9 +54,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(logs);
   } catch (error) {
-    return NextResponse.json(
-      { error: "Failed to load audit logs" },
-      { status: 500 },
-    );
+    const safe = toSafeApiError(error, "Failed to load audit logs");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

@@ -298,19 +298,22 @@ export function deriveFleet(
       workflow: { id: w.id, name: w.name },
       last30: last30.map((r) => toUiStatus(r.status)),
       failureRate: terminal.length > 0 ? failed / terminal.length : 0,
-      lastRunAt: list.length > 0 ? runTime(list[list.length - 1]!) : 0,
+      lastRunAt: list.length > 0 ? runTime(list[list.length - 1]!) : null,
       spendUsd: list.reduce((sum, r) => sum + (r.estimatedCostUsd ?? 0), 0),
       runIds: last30.map((r) => r.id),
     };
   });
 
+  // Workflows with no runs in scope sort as oldest, never as "most recent".
+  const recencyKey = (r: FleetRow) => r.lastRunAt ?? -Infinity;
+
   switch (sort) {
     case "recency":
-      return rows.sort((a, b) => b.lastRunAt - a.lastRunAt);
+      return rows.sort((a, b) => recencyKey(b) - recencyKey(a));
     case "spend":
       return rows.sort((a, b) => b.spendUsd - a.spendUsd);
     default:
-      return rows.sort((a, b) => b.failureRate - a.failureRate || b.lastRunAt - a.lastRunAt);
+      return rows.sort((a, b) => b.failureRate - a.failureRate || recencyKey(b) - recencyKey(a));
   }
 }
 

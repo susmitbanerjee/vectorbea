@@ -81,7 +81,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <AppShell
           user={
             profile
-              ? { name: profile.full_name ?? profile.email ?? "Account", email: profile.email ?? "" }
+              ? {
+                  name: profile.full_name ?? profile.email ?? "Account",
+                  email: profile.email ?? "",
+                  avatarUrl: profile.avatar_url,
+                }
               : null
           }
         >

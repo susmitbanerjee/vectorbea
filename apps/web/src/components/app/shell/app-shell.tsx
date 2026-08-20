@@ -14,8 +14,11 @@ import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsSheet } from "./shortcuts-sheet";
 import { EnvironmentRail } from "./environment";
-import { INITIAL_COUNTS, type EnvironmentId, type ShellCounts, type Workspace } from "~/mocks/shell";
+import { type EnvironmentId, type ShellCounts, type Workspace } from "~/mocks/shell";
 import { useWorkspace } from "~/lib/workspace/workspace-provider";
+import { useApi } from "~/lib/api/api-provider";
+import { useApiQuery } from "~/lib/api/hooks";
+import { queryKeys } from "~/lib/api/keys";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE APPLICATION SHELL
@@ -38,7 +41,7 @@ const WORKSPACE_KEY = "vectorbea.shell.workspace";
 
 export interface AppShellProps {
   children: React.ReactNode;
-  user?: { name: string; email: string } | null;
+  user?: { name: string; email: string; avatarUrl?: string | null } | null;
 }
 
 export function AppShell({ children, user }: AppShellProps) {
@@ -60,8 +63,8 @@ function ShellInner({ children, user }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
-  const [counts, setCounts] = React.useState<ShellCounts>(INITIAL_COUNTS);
   const { workspaces: realWorkspaces, workspaceId, setWorkspace } = useWorkspace();
+  const api = useApi();
 
   /* ── Persisted preferences ────────────────────────────────────────────────
      Read after mount so the server and first client render agree; writing on
@@ -96,29 +99,37 @@ function ShellInner({ children, user }: AppShellProps) {
   }, [setWorkspace]);
 
   /* ── Live badge counts ────────────────────────────────────────────────────
-     Stand-in for the real subscription. The point of wiring it now is that the
-     roll animation is exercised against CHANGING data — a counter that only
-     ever renders its initial value hides every bug in the interpolation.
-
-     The drift is a fixed ±1 cycle anchored to INITIAL_COUNTS, not a random
-     walk. The walk wandered: the sidebar reached 7 approvals while Control,
-     deriving from the same fixtures, showed 2. Two numbers describing one
-     workspace disagreeing on screen costs more trust than a static badge ever
-     would. This still moves, so the roll is still exercised, but it always
-     comes back to the truth. */
-  React.useEffect(() => {
-    let step = 0;
-    const DRIFT = [0, 1, 0, -1];
-    const timer = setInterval(() => {
-      step += 1;
-      setCounts({
-        approvals: Math.max(0, INITIAL_COUNTS.approvals + DRIFT[step % DRIFT.length]),
-        incidents: INITIAL_COUNTS.incidents,
-        connections: INITIAL_COUNTS.connections,
-      });
-    }, 8000);
-    return () => clearInterval(timer);
-  }, []);
+     These used to drift on a fixed fake cycle anchored to fixture data — the
+     sidebar could say 7 approvals while Control, deriving from the real API,
+     said 2. Two numbers describing one workspace disagreeing on screen costs
+     more trust than a static badge ever would, so counts now come from the
+     same workspace-scoped queries Control uses: pending approvals, unresolved
+     incidents, and connections currently failing their health check. */
+  const scope = React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
+  const countsEnabled = Boolean(workspaceId);
+  const approvalsQuery = useApiQuery({
+    queryKey: queryKeys.approvals.list(scope, { status: "PENDING" }),
+    queryFn: () => api.approvals.list({ ...scope, status: "PENDING" }),
+    enabled: countsEnabled,
+  });
+  const incidentsQuery = useApiQuery({
+    queryKey: [...queryKeys.env(workspaceId, null), "incidents"],
+    queryFn: () => api.incidents.list({ ...scope, limit: 100 }),
+    enabled: countsEnabled,
+  });
+  const connectionsQuery = useApiQuery({
+    queryKey: queryKeys.connections.list(scope),
+    queryFn: () => api.connections.list({ ...scope, pageSize: 100 }),
+    enabled: countsEnabled,
+  });
+  const counts: ShellCounts = React.useMemo(
+    () => ({
+      approvals: approvalsQuery.data?.items.length ?? 0,
+      incidents: (incidentsQuery.data ?? []).filter((i) => i.resolutionStatus !== "resolved").length,
+      connections: (connectionsQuery.data?.items ?? []).filter((c) => c.lastTestStatus === "failed").length,
+    }),
+    [approvalsQuery.data, incidentsQuery.data, connectionsQuery.data],
+  );
 
   // Close the mobile drawer whenever the route changes.
   React.useEffect(() => { setDrawerOpen(false); }, [pathname]);

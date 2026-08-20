@@ -125,7 +125,7 @@ export interface SidebarProps {
   workspaces: Workspace[];
   onWorkspaceChange: (id: string) => void;
   counts: ShellCounts;
-  user?: { name: string; email: string } | null;
+  user?: { name: string; email: string; avatarUrl?: string | null } | null;
   onOpenShortcuts: () => void;
   /** Called after any nav click — closes the mobile drawer. */
   onNavigate?: () => void;
@@ -278,12 +278,13 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
 function UserMenu({
   user, collapsed, onOpenShortcuts,
 }: {
-  user?: { name: string; email: string } | null;
+  user?: { name: string; email: string; avatarUrl?: string | null } | null;
   collapsed: boolean;
   onOpenShortcuts: () => void;
 }) {
   const name = user?.name ?? "Signed out";
   const email = user?.email ?? "";
+  const avatarUrl = user?.avatarUrl;
 
   return (
     <DropdownMenu.Root>
@@ -297,9 +298,14 @@ function UserMenu({
         )}
         aria-label={`Account: ${name}`}
       >
-        <span className="bg-surface-active text-fg-primary font-ui text-caption grid size-5 shrink-0 place-items-center rounded-full">
-          {name.charAt(0).toUpperCase()}
-        </span>
+        {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- external provider avatar, not a local asset
+          <img
+            src={avatarUrl}
+            alt=""
+            className="size-5 shrink-0 rounded-full object-cover"
+          />
+        ) : null}
         {collapsed ? null : <span className="truncate">{name}</span>}
       </DropdownMenu.Trigger>
 

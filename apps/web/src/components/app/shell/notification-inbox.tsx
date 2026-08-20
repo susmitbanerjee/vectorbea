@@ -123,12 +123,42 @@ function fromAttention(item: AttentionItem): InboxEntry {
 
 /* ── Inbox ────────────────────────────────────────────────────────────────── */
 
+const DISMISSED_KEY = "vectorbea.inbox.dismissed";
+const READ_KEY = "vectorbea.inbox.read";
+
+function readStoredJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function NotificationInbox() {
   const [open, setOpen] = React.useState(false);
   const [readIds, setReadIds] = React.useState<Set<string>>(new Set());
   const [dismissed, setDismissed] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState<InboxEntry | null>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
+
+  /* Dismissed/read state is a triage decision, not a UI toggle — losing it on
+     reload made every dismissal feel like it hadn't taken. There is still no
+     backend for it, so it's scoped to this browser via localStorage rather
+     than lost outright. */
+  React.useEffect(() => {
+    setDismissed(readStoredJson(DISMISSED_KEY, {} as Record<string, string>));
+    setReadIds(new Set(readStoredJson<string[]>(READ_KEY, [])));
+  }, []);
+
+  const persistDismissed = (next: Record<string, string>) => {
+    setDismissed(next);
+    try { window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  const persistReadIds = (next: Set<string>) => {
+    setReadIds(next);
+    try { window.localStorage.setItem(READ_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+  };
 
   // Control's severity summary opens this popover.
   React.useEffect(() => onOpenInbox(() => setOpen(true)), []);
@@ -178,8 +208,8 @@ export function NotificationInbox() {
   const worst = worstSeverity(actionable.map((e) => e.severity));
   const tone = badgeTone(count === 0 ? null : worst);
 
-  const markRead = (id: string) => setReadIds((prev) => new Set(prev).add(id));
-  const markAllRead = () => setReadIds(new Set(entries.map((e) => e.id)));
+  const markRead = (id: string) => persistReadIds(new Set(readIds).add(id));
+  const markAllRead = () => persistReadIds(new Set(entries.map((e) => e.id)));
 
   /* Roving focus. Radix gives Tab and Escape; arrow keys are what people
      actually reach for in a list this shape, and without them a keyboard user
@@ -286,7 +316,7 @@ export function NotificationInbox() {
               <div className="border-subtle border-t px-3 py-2">
                 <button
                   type="button"
-                  onClick={() => setDismissed({})}
+                  onClick={() => persistDismissed({})}
                   className={cn(
                     "font-ui text-caption text-fg-muted rounded-xs",
                     "transition-colors duration-instant outline-none",
@@ -305,7 +335,7 @@ export function NotificationInbox() {
         problem={pending?.title ?? null}
         onClose={() => setPending(null)}
         onConfirm={(reason) => {
-          if (pending) setDismissed((d) => ({ ...d, [pending.id]: reason }));
+          if (pending) persistDismissed({ ...dismissed, [pending.id]: reason });
           setPending(null);
         }}
       />

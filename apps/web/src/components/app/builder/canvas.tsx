@@ -348,11 +348,16 @@ export function Canvas({
         maxZoom={2.5}
         snapToGrid
         snapGrid={[16, 16]}
-        selectionOnDrag
-        panOnDrag={[1, 2]}
+        /* Plain left-drag on empty canvas pans — panOnDrag={[1, 2]} (middle/
+           right-click only) plus selectionOnDrag left users unable to move
+           around their own workflow with the mouse button everyone reaches
+           for first. Box-selection moves to Shift+drag, alongside the
+           existing Shift multi-select-by-click. */
+        panOnDrag
+        selectionOnDrag={false}
         multiSelectionKeyCode="Shift"
         deleteKeyCode={null}
-        selectionKeyCode={null}
+        selectionKeyCode="Shift"
         nodesDraggable={!presentation}
         nodesConnectable={!presentation}
         elementsSelectable

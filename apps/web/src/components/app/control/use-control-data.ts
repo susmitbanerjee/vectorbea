@@ -52,7 +52,14 @@ export interface ControlData {
   refetch: () => void;
 }
 
-export function useControlData(range: TimeRange, sort: FleetSort, tick: number): ControlData {
+export function useControlData(
+  range: TimeRange,
+  sort: FleetSort,
+  tick: number,
+  /** Drives only the runs/activity refetch — see control-view.tsx. Defaults
+   *  to `tick` so callers that don't split the two still refresh everything. */
+  liveTick: number = tick,
+): ControlData {
   const api = useApi();
   const { workspaceId } = useScope();
   // Environment is intentionally not part of the scope — see the note above.
@@ -64,7 +71,7 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
   const enabled = Boolean(workspaceId);
 
   const runs = useApiQuery({
-    queryKey: [...queryKeys.runs.list(keyScope, { pageSize: RUN_PAGE_SIZE }), tick],
+    queryKey: [...queryKeys.runs.list(keyScope, { pageSize: RUN_PAGE_SIZE }), liveTick],
     queryFn: () => api.runs.list({ ...scope, pageSize: RUN_PAGE_SIZE }),
     enabled,
     freshness: "list",
@@ -96,7 +103,7 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
   });
 
   const activity = useApiQuery({
-    queryKey: [...queryKeys.env(workspaceId, null), "control-activity", tick],
+    queryKey: [...queryKeys.env(workspaceId, null), "control-activity", liveTick],
     queryFn: () => api.controlActivity({ ...scope, limit: 20 }),
     enabled,
     freshness: "live",
@@ -126,7 +133,7 @@ export function useControlData(range: TimeRange, sort: FleetSort, tick: number):
     return {
       health: deriveHealth(inRange, allRuns, metrics.data, incidentList, now),
       attention: deriveAttention(inRange, workflowList, connectionList, incidentList, now),
-      fleet: deriveFleet(allRuns, workflowList, sort),
+      fleet: deriveFleet(inRange, workflowList, sort),
       latency: deriveLatency(inRange),
       cost: deriveCostTrend(inRange, range, now),
       activity: activity.data ?? [],

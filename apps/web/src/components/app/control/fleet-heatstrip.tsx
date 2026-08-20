@@ -113,10 +113,12 @@ export function FleetHeatstrip({ rows, sort, onSortChange, className }: FleetHea
                           {HEATSTRIP_STATUS_LABEL[row.last30[peeked]]} ·{" "}
                           {row.last30.length - peeked} run{row.last30.length - peeked === 1 ? "" : "s"} ago
                         </>
-                      ) : (
+                      ) : row.lastRunAt !== null ? (
                         <>
                           {row.workflow.environment} · {formatSpan(NOW_OFFSET(row.lastRunAt))} ago
                         </>
+                      ) : (
+                        <>{row.workflow.environment} · no runs in range</>
                       )}
                     </Text>
                   </div>
@@ -158,8 +160,6 @@ export function FleetHeatstrip({ rows, sort, onSortChange, className }: FleetHea
   );
 }
 
-/* The fixtures pin "now"; this keeps the relative label honest against it
-   without every row importing the constant. */
 function NOW_OFFSET(at: number): number {
-  return new Date("2026-08-11T14:20:00Z").getTime() - at;
+  return Date.now() - at;
 }

@@ -79,7 +79,15 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
   );
 
   /* ── Refresh ────────────────────────────────────────────────────────────── */
+  // Two ticks, not one: the 30s auto-refresh only needs to re-poll the runs
+  // and activity queries — those are what actually change minute to minute.
+  // Bumping a single shared tick used to invalidate workflows/metrics/
+  // incidents/connections too, forcing a re-derive (and re-render) of the
+  // entire page every 30s. `tick` still covers everything for the manual
+  // "Refresh" button, which is a deliberate full reload; `liveTick` is the
+  // narrower one the auto-refresh timer drives.
   const [tick, setTick] = React.useState(0);
+  const [liveTick, setLiveTick] = React.useState(0);
   const [fetchedAt, setFetchedAt] = React.useState(() => Date.now());
   const [now, setNow] = React.useState(() => Date.now());
   const [refreshing, setRefreshing] = React.useState(false);
@@ -94,11 +102,16 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
     window.setTimeout(() => setRefreshing(false), 300);
   }, []);
 
+  const refreshLive = React.useCallback(() => {
+    setLiveTick((t) => t + 1);
+    setFetchedAt(Date.now());
+  }, []);
+
   React.useEffect(() => {
     if (frozen || !autoRefresh) return;
-    const id = window.setInterval(refresh, 30_000);
+    const id = window.setInterval(refreshLive, 30_000);
     return () => window.clearInterval(id);
-  }, [autoRefresh, refresh, frozen]);
+  }, [autoRefresh, refreshLive, frozen]);
 
   // Drives the "updated Xs ago" label without re-deriving the page data.
   React.useEffect(() => {
@@ -108,7 +121,7 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
   }, [frozen]);
 
   /* ── Data — live, from the API ──────────────────────────────────────────── */
-  const data = useControlData(range, sort, tick);
+  const data = useControlData(range, sort, tick, liveTick);
   const { health, attention, fleet, latency, cost, activity } = data;
   // Only the shape of the attention list is needed here — the items themselves
   // are rendered by the inbox.

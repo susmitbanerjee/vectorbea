@@ -373,7 +373,7 @@ export function buildFleet(sort: FleetSort = "failure"): FleetRow[] {
 
   const by: Record<FleetSort, (a: FleetRow, b: FleetRow) => number> = {
     failure: (a, b) => b.failureRate - a.failureRate,
-    recency: (a, b) => b.lastRunAt - a.lastRunAt,
+    recency: (a, b) => (b.lastRunAt ?? -Infinity) - (a.lastRunAt ?? -Infinity),
     spend: (a, b) => b.spendUsd - a.spendUsd,
   };
   return [...rows].sort(by[sort]);
