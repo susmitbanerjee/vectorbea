@@ -3,6 +3,7 @@ import { currentVersion } from "./workflow-versions";
 import { flattenConfig, type VersionNode } from "./workflow-nodes";
 import { CONNECTIONS, TOOLS, AGENTS } from "./fixtures";
 import type { NodeKind } from "./domain";
+import type { BuilderEdge, BuilderGraph } from "~/lib/workflows/builder-graph";
 import type { ProviderId } from "~/components/ui/provider-logo";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -21,27 +22,14 @@ import type { ProviderId } from "~/components/ui/provider-logo";
    connects to node n+1".
 ══════════════════════════════════════════════════════════════════════════════ */
 
-export type EdgeKind = "standard" | "conditional" | "error" | "parallel";
-
-export interface BuilderEdge {
-  id: string;
-  source: string;
-  target: string;
-  kind: EdgeKind;
-  /** Rendered on the edge. Set for conditional and error edges. */
-  label?: string;
-}
-
-export interface BuilderNode {
-  node: VersionNode;
-  x: number;
-  y: number;
-}
-
-export interface BuilderGraph {
-  nodes: BuilderNode[];
-  edges: BuilderEdge[];
-}
+/**
+ * The graph shapes moved to `~/lib/workflows/builder-graph` when the builder
+ * started loading real versions — live code cannot import this file. Re-exported
+ * so the seeded fixture graph and the live one stay one shape.
+ */
+export type {
+  BuilderEdge, BuilderGraph, BuilderNode, EdgeKind,
+} from "~/lib/workflows/builder-graph";
 
 /* ── Seeding ──────────────────────────────────────────────────────────────── */
 

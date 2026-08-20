@@ -9,6 +9,7 @@ import { cn } from "~/lib/cn";
 import { TooltipProvider } from "~/components/ui/tooltip";
 import { KeyboardProvider, useShortcut } from "~/lib/keyboard";
 import { Sidebar } from "./sidebar";
+import { WorkspaceGate } from "./workspace-gate";
 import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsSheet } from "./shortcuts-sheet";
@@ -233,7 +234,12 @@ function ShellInner({ children, user }: AppShellProps) {
           onOpenSidebar={() => setDrawerOpen(true)}
         />
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <StaggerContent key={pathname}>{children}</StaggerContent>
+          <StaggerContent key={pathname}>
+            {/* One answer to "is there a workspace?", above every route — see
+                WorkspaceGate. Without it each screen renders its own skeleton
+                forever, because a scoped query with no workspace never runs. */}
+            <WorkspaceGate>{children}</WorkspaceGate>
+          </StaggerContent>
         </main>
       </div>
 

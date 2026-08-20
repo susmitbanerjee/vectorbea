@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
+import { useScope } from "./workspace-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE ENVIRONMENT UUID
@@ -16,13 +17,26 @@ import { useApiQuery } from "~/lib/api/hooks";
 
      400  X-Environment-Id header is required
 
-   and no amount of retrying fixes it.
+   IT MUST BE THIS WORKSPACE'S ENVIRONMENT, AND THAT IS THE HARD PART.
 
-   `GET /api/bootstrap` is the one endpoint that returns the UUID, and it is in
-   the API's public path set precisely so a cold client can identify itself. The
-   legacy `BootstrapProvider` in the root layout already calls it and writes the
-   result to localStorage under the key below, so on a warm tab this hook costs
-   nothing — the fetch is the cold-start path, not the normal one.
+   `GET /api/bootstrap` is the only endpoint that returns an environment id, and
+   it is not scoped to anybody: it takes the OLDEST workspace in the database and
+   returns that workspace's first environment. For whoever owns that workspace
+   the answer is right by luck. For every other account it is another tenant's
+   environment id — and `WorkflowRoutes.create` does NOT check that the
+   environment belongs to the workspace, so sending it would write rows into a
+   workspace with a foreign `environment_id`, which reads back as an empty
+   screen and is a cross-tenant scope bug rather than a UI one.
+
+   So the id is accepted ONLY when bootstrap's own `workspaceId` matches the
+   workspace we are actually in. When it does not, this reports unresolved and
+   the write surfaces say so, which is the honest outcome: refusing to write is
+   recoverable, writing into the wrong environment is not.
+
+   THE REAL FIX IS AN ENDPOINT. There is no per-workspace environment route in
+   `api-kotlin` — `GET /api/environments` does not exist. Until it does, any
+   account that does not own the database's oldest workspace can read everything
+   and create nothing. See docs/integration/API-GAPS.md.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 /** Written by `hooks/useBootstrap.ts`. Shared, so do not rename either side. */
@@ -41,16 +55,24 @@ function readStored(key: string): string | null {
 }
 
 export interface EnvironmentUuid {
-  /** The real environment UUID, or null while it is still unknown. */
+  /** The environment UUID for the CURRENT workspace, or null when unknown. */
   environmentId: string | null;
-  /** True while the bootstrap call is in flight. */
+  /** True while the lookup is in flight. */
   loading: boolean;
   /**
-   * Set when the environment could not be resolved at all. A caller that needs
-   * to WRITE should surface this rather than sending the request and letting it
-   * come back as a 400 the user cannot act on.
+   * Set when no environment could be resolved for this workspace.
+   *
+   * A caller that needs to WRITE should surface this rather than sending the
+   * request: without the header the API answers 400, and with the wrong one it
+   * silently writes into another workspace's environment.
    */
   unresolved: boolean;
+  /**
+   * True when an environment exists but belongs to a DIFFERENT workspace, so it
+   * was deliberately not used. Distinguished from "could not reach the API"
+   * because the two need different sentences.
+   */
+  foreign: boolean;
 }
 
 /**
@@ -62,50 +84,51 @@ export interface EnvironmentUuid {
  */
 export function useEnvironmentUuid(): EnvironmentUuid {
   const api = useApi();
-
-  // Read after mount, never in the initialiser — a localStorage read during
-  // render makes the server and first client render disagree.
-  const [stored, setStored] = React.useState<string | null>(null);
-  const [checked, setChecked] = React.useState(false);
-
-  React.useEffect(() => {
-    setStored(readStored(STORAGE_KEY));
-    setChecked(true);
-  }, []);
+  const { workspaceId } = useScope();
 
   const query = useApiQuery({
     queryKey: ["session", "bootstrap"],
     queryFn: () => api.bootstrap(),
-    // Only after the localStorage check has actually run, and only when it
-    // found nothing. Firing alongside it would double every cold start.
-    enabled: checked && stored === null,
     staleTime: Infinity,
     retry: 1,
   });
 
-  React.useEffect(() => {
-    const fetched = query.data?.environmentId;
-    if (!fetched || !UUID_RE.test(fetched)) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, fetched);
-      const workspace = query.data?.workspaceId;
-      // The legacy client reads the workspace from the same pair of keys, so
-      // writing only one of them leaves the two layers disagreeing about scope.
-      if (workspace && UUID_RE.test(workspace) && !readStored(WORKSPACE_STORAGE_KEY)) {
-        window.localStorage.setItem(WORKSPACE_STORAGE_KEY, workspace);
-      }
-    } catch {}
-    setStored(fetched);
-  }, [query.data]);
+  const bootstrapWorkspace = query.data?.workspaceId ?? null;
+  const bootstrapEnvironment = query.data?.environmentId ?? null;
 
-  const candidate = stored ?? query.data?.environmentId ?? null;
-  const environmentId = candidate && UUID_RE.test(candidate) ? candidate : null;
+  /**
+   * Does bootstrap's answer belong to the workspace we are in?
+   *
+   * `workspaceId` may be a slug in fixture-backed setups, so the comparison is
+   * only meaningful when both sides are UUIDs. When they are not comparable we
+   * fall back to trusting it — that is the single-workspace local-dev case,
+   * where bootstrap's workspace is by definition the one we are in.
+   */
+  const comparable = Boolean(workspaceId) && UUID_RE.test(workspaceId ?? "") && bootstrapWorkspace !== null;
+  const matchesWorkspace = comparable ? bootstrapWorkspace === workspaceId : true;
 
-  // `isPending` stays true for a DISABLED query in TanStack v5 — it means "no
-  // data", not "in flight" — so reading it directly would leave this hook
-  // reporting `loading` forever on the warm path where localStorage already
-  // had the id. `isFetching` is the one that answers the question asked here.
-  const loading = !checked || (environmentId === null && query.isFetching);
+  const resolved = React.useMemo(() => {
+    if (bootstrapEnvironment && UUID_RE.test(bootstrapEnvironment) && matchesWorkspace) {
+      return bootstrapEnvironment;
+    }
+    // The cached value is written by the legacy bootstrap provider from the
+    // same unscoped endpoint, so it is only trustworthy under the same test.
+    const cached = typeof window === "undefined" ? null : readStored(STORAGE_KEY);
+    const cachedWorkspace = typeof window === "undefined" ? null : readStored(WORKSPACE_STORAGE_KEY);
+    if (!cached) return null;
+    if (comparable && cachedWorkspace !== null && cachedWorkspace !== workspaceId) return null;
+    return cached;
+  }, [bootstrapEnvironment, matchesWorkspace, comparable, workspaceId]);
 
-  return { environmentId, loading, unresolved: !loading && environmentId === null };
+  // `isPending` stays true for a query with no data even when nothing is in
+  // flight, so `isFetching` is the one that answers "are we still waiting".
+  const loading = resolved === null && query.isFetching;
+  const foreign = !loading && resolved === null && comparable && !matchesWorkspace;
+
+  return {
+    environmentId: resolved,
+    loading,
+    unresolved: !loading && resolved === null,
+    foreign,
+  };
 }

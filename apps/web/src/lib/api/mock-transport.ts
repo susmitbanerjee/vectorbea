@@ -4,6 +4,7 @@ import {
   requirementToApi, updateMockRequirement,
 } from "~/mocks/architect-api";
 import { WORKSPACES } from "~/mocks/shell";
+import { currentVersion } from "~/mocks/workflow-versions";
 import type { Run as UiRun, Workflow as UiWorkflow } from "~/mocks/domain";
 import { VectorbeaApiError } from "./errors";
 import type { RequestOptions, Transport } from "./transport";
@@ -69,6 +70,17 @@ function uuidFrom(seed: string): string {
     raw.slice(20, 32),
   ].join("-");
 }
+
+/**
+ * Versions written during this session, by workflow id.
+ *
+ * Mock mode has to be able to answer "did the save land?" — a transport that
+ * accepts a POST and then serves the ORIGINAL graph back on the next GET looks
+ * exactly like the bug this whole change set exists to fix, and would have
+ * hidden it during review. Module-level, so it survives client-side navigation
+ * and resets on reload, which is the right lifetime for a fixture.
+ */
+const SAVED_VERSIONS = new Map<string, unknown[]>();
 
 const WORKSPACE_ID = uuidFrom("ws_acme");
 const ENVIRONMENT_ID = uuidFrom("env_production");
@@ -173,18 +185,39 @@ function match(pattern: string, path: string): Record<string, string> | null {
 type Handler = (params: Record<string, string>, init: RequestOptions) => unknown;
 
 const ROUTES: [method: string, pattern: string, handler: Handler][] = [
-  ["GET", "/api/workspaces", () => ({ workspaces: WORKSPACES })],
+  /* Workspace ids are hashed to UUIDs like every other fixture id, because the
+     contract types them as UUIDs and because `useEnvironmentUuid` compares the
+     active workspace against bootstrap's to refuse another tenant's environment
+     — a comparison that is meaningless if one side is a slug. */
+  [
+    "GET",
+    "/api/workspaces",
+    () => ({
+      workspaces: WORKSPACES.map((w) => ({ id: uuidFrom(w.id), name: w.name, members: w.members })),
+    }),
+  ],
 
   [
     "GET",
     "/api/me",
+    /* Shaped as `MeRoutes.me()` actually returns it: a user object, MEMBERSHIPS
+       with names and roles, and a default. The previous mock returned a flat
+       `{ id, email, workspaces: string[] }` that matched neither the route nor
+       `contracts.me`, so it failed validation the moment anything relied on it
+       — which is now everything, since scope resolution reads this endpoint. */
     () => ({
-      id: uuidFrom("usr_mock"),
-      email: "operator@vectorbea.dev",
-      fullName: "Mock Operator",
-      betaStatus: "approved",
-      isPlatformAdmin: false,
-      workspaces: WORKSPACES.map((w) => w.id),
+      user: {
+        id: uuidFrom("usr_mock"),
+        supabaseUserId: uuidFrom("sub_mock"),
+        email: "operator@vectorbea.dev",
+      },
+      workspaces: WORKSPACES.map((w, index) => ({
+        id: uuidFrom(w.id),
+        name: w.name,
+        slug: w.id,
+        role: index === 0 ? "owner" : "member",
+      })),
+      defaultWorkspaceId: uuidFrom(WORKSPACES[0]?.id ?? "ws_acme"),
     }),
   ],
 
@@ -221,6 +254,45 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         (w) => uuidFrom(w.id) === params.id || w.id === params.id,
       );
       return workflow ? toApiWorkflow(workflow) : notFound(`/api/workflows/${params.id}`);
+    },
+  ],
+
+  [
+    "GET",
+    "/api/workflows/:id/versions",
+    (params, init) => {
+      const saved = SAVED_VERSIONS.get(params.id);
+      if (saved) return paged(saved, init);
+
+      const workflow = WORKFLOWS.find(
+        (w) => uuidFrom(w.id) === params.id || w.id === params.id,
+      );
+      const nodes = workflow ? currentVersion(workflow.id)?.nodes ?? [] : [];
+      const now = new Date(0).toISOString();
+
+      /* Seeded WITHOUT positions on purpose: a graph that has never been placed
+         is the state the builder has to lay out on open, and it is the state
+         every workflow in this database is actually in. */
+      return paged([{
+        id: uuidFrom(`wfv_seed_${params.id}`),
+        workflowId: params.id,
+        version: 1,
+        graph: {
+          nodes: nodes.map((n) => ({
+            id: n.id, type: n.kind, label: n.name, config: n.config,
+            data: { label: n.name, nodeType: n.kind, config: n.config },
+          })),
+          edges: nodes.slice(0, -1).map((n, i) => ({
+            id: `e-${n.id}-${nodes[i + 1].id}`,
+            source: n.id, target: nodes[i + 1].id,
+            type: "default", data: { edgeType: "standard" },
+          })),
+        },
+        inputSchema: {}, outputSchema: {}, triggerConfig: {},
+        retryPolicy: {}, timeoutPolicy: {}, budgetPolicy: {},
+        replaySupport: "full",
+        createdAt: now, updatedAt: now,
+      }], init);
     },
   ],
 
@@ -356,10 +428,11 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     (params, init) => {
       const body = (init.body ?? {}) as Record<string, unknown>;
       const now = new Date().toISOString();
-      return {
+      const previous = SAVED_VERSIONS.get(params.id) ?? [];
+      const version = {
         id: uuidFrom(`wfv_${params.id}_${now}`),
         workflowId: params.id,
-        version: 1,
+        version: previous.length + 1,
         graph: body.graph ?? {},
         inputSchema: body.inputSchema ?? {},
         outputSchema: body.outputSchema ?? {},
@@ -371,6 +444,9 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         createdAt: now,
         updatedAt: now,
       };
+      // Newest first, matching the real route's `ORDER BY version DESC`.
+      SAVED_VERSIONS.set(params.id, [version, ...previous]);
+      return version;
     },
   ],
 

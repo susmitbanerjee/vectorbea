@@ -8,7 +8,6 @@ import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { Kbd } from "~/components/ui/kbd";
 import type { ValiditySummary } from "./validation";
-import type { Workflow } from "~/mocks/domain";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    TOP BAR
@@ -28,7 +27,8 @@ import type { Workflow } from "~/mocks/domain";
 export type SaveState = "saved" | "saving" | "dirty" | "error";
 
 export interface TopBarProps {
-  workflow: Workflow;
+  /** Only identity and name are drawn here — not the whole row. */
+  workflow: { id: string; name: string };
   versionNumber: number;
   isDraft: boolean;
   summary: ValiditySummary;

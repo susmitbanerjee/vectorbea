@@ -18,7 +18,7 @@ import * as React from "react";
 import { useTheme } from "next-themes";
 import {
   ReactFlow, MiniMap, useReactFlow, useStore,
-  type Node, type Edge, type NodeChange, type OnSelectionChangeParams, type Connection,
+  type Node, type Edge, type NodeChange, type Connection,
 } from "@xyflow/react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
@@ -46,6 +46,24 @@ import type { Issue } from "./validation";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 const COMPACT_BELOW = 0.6;
+
+/**
+ * Returns the PREVIOUS array whenever the new one holds the same elements.
+ *
+ * Derived arrays are rebuilt on every render by definition, which makes them
+ * useless as a memo dependency for anything expensive. Comparing element
+ * identity — not deep equality, which would cost more than it saves — turns
+ * "the node list was rebuilt" back into "the node list changed", which is the
+ * question every downstream memo is actually asking.
+ */
+function useStable<T>(next: T[]): T[] {
+  const held = React.useRef(next);
+  const same =
+    held.current.length === next.length
+    && held.current.every((item, i) => item === next[i]);
+  if (!same) held.current = next;
+  return held.current;
+}
 
 const nodeTypes = { workflow: WorkflowNode };
 const edgeTypes = { workflow: WorkflowEdge };
@@ -111,7 +129,35 @@ export function Canvas({
     return map;
   }, [issues]);
 
-  const versionNodes = React.useMemo(() => state.nodes.map((n) => n.node), [state.nodes]);
+  /**
+   * THE DRAG BLINK LIVED HERE.
+   *
+   * `WorkflowNode` is memoised on the IDENTITY of `resource` and `chrome`
+   * (see its comparator), and both were rebuilt by `boundResource(...)` /
+   * `nodeChrome(...)` inside the nodes memo below. That memo depends on
+   * `state.nodes`, and a drag replaces `state.nodes` on every pointer frame —
+   * so every node on the canvas got new `resource` and `chrome` objects sixty
+   * times a second, every comparator returned false, and all of them
+   * re-rendered while one was moving. With `onlyRenderVisibleElements` culling
+   * against dimensions that are re-measured on each of those passes, the result
+   * reads as the whole canvas flickering under the cursor.
+   *
+   * Neither value depends on position. Holding the node list stable across
+   * position-only changes lets both be computed once per real edit, so a drag
+   * re-renders the node being dragged and nothing else.
+   */
+  const versionNodes = useStable(React.useMemo(() => state.nodes.map((n) => n.node), [state.nodes]));
+
+  const decoration = React.useMemo(() => {
+    const map = new Map<string, { resource: ReturnType<typeof boundResource>; chrome: ReturnType<typeof nodeChrome> }>();
+    for (const node of versionNodes) {
+      map.set(node.id, {
+        resource: boundResource(node),
+        chrome: nodeChrome(node, state.edges, versionNodes),
+      });
+    }
+    return map;
+  }, [versionNodes, state.edges]);
 
   const nodes = React.useMemo<Node<WorkflowNodeData>[]>(() => {
     const disabled = new Set(state.disabled);
@@ -132,6 +178,8 @@ export function Canvas({
             : nodeIssues.length > 0 ? "has-warning"
               : isConfigured(n) ? "configured" : "ready");
 
+      const decor = decoration.get(n.node.id);
+
       return {
         id: n.node.id,
         type: "workflow",
@@ -140,8 +188,8 @@ export function Canvas({
         data: {
           node: n.node,
           state: nodeState,
-          resource: boundResource(n.node),
-          chrome: nodeChrome(n.node, state.edges, versionNodes),
+          resource: decor?.resource ?? null,
+          chrome: decor?.chrome ?? nodeChrome(n.node, state.edges, versionNodes),
           issueCount: nodeIssues.length,
           compact,
           dimmed: hoverPath !== null && !hoverPath.has(n.node.id),
@@ -158,7 +206,7 @@ export function Canvas({
     });
   }, [
     state.nodes, state.edges, state.selection, state.disabled,
-    issuesByNode, runStates, compact, hoverPath, onOpenIssues, versionNodes,
+    issuesByNode, runStates, compact, hoverPath, onOpenIssues, versionNodes, decoration,
   ]);
 
   const edges = React.useMemo<Edge<WorkflowEdgeData>[]>(() =>
@@ -223,24 +271,35 @@ export function Canvas({
     }
   }, [dispatch, state.nodes]);
 
-  /* Selection flows ONE WAY: this store → React Flow, never back.
-     Subscribing to React Flow's own selection and mirroring it into the reducer
-     closed a loop — our `selected` flags rebuilt the nodes array, React Flow
-     re-synced from it and fired the change callback again, and React aborted
-     the tree with "Maximum update depth exceeded". Every selection gesture the
-     canvas offers (click, marquee, shift-click) is handled explicitly below and
-     dispatched here, so nothing is lost by not listening. */
+  /* ── Selection flows ONE WAY: this store → React Flow, never back ──────────
+     This is what the canvas always claimed to do, and did not.
+     `onSelectionChange` was subscribed to React Flow's CONTINUOUS selection
+     signal and mirrored it straight back into the reducer, guarded only by an
+     "is it the same set" check. That guard cannot break a genuine disagreement,
+     and there is one every time a node is added: React Flow reports `[]` for a
+     frame before it has adopted the new node's `selected` flag, we take that
+     as truth and clear the selection, React Flow then reports the node back
+     from the flag we set a render earlier, and the two sides alternate.
+
+     Instrumented on the real canvas, adding ONE node produced 53 selection
+     dispatches across 104 renders before React unmounted the tree with
+     "Maximum update depth exceeded". At pointer rate during a drag the same
+     loop does not crash — it re-renders every node continuously, which is the
+     flicker this canvas was reported for.
+
+     `onSelectionEnd` fires ONCE, when a marquee gesture finishes, so React
+     Flow's selection is read exactly when the user has expressed one and never
+     in response to our own writes. Click and shift-click are dispatched
+     explicitly elsewhere, so no gesture is lost. */
   const selectionRef = React.useRef(state.selection);
   selectionRef.current = state.selection;
 
-  const onSelectionChange = React.useCallback(({ nodes: picked }: OnSelectionChangeParams) => {
-    const ids = picked.map((n) => n.id);
+  const onSelectionEnd = React.useCallback(() => {
+    const ids = flow.getNodes().filter((n) => n.selected).map((n) => n.id);
     const current = selectionRef.current;
     const same = ids.length === current.length && ids.every((id) => current.includes(id));
-    // Only a marquee or shift-click reaches here with something new; a repeat of
-    // what we already hold is React Flow echoing our own state back.
     if (!same) dispatch({ type: "select", ids });
-  }, [dispatch]);
+  }, [dispatch, flow]);
 
   const onConnect = React.useCallback((connection: Connection) => {
     if (!connection.source || !connection.target) return;
@@ -273,7 +332,7 @@ export function Canvas({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
-        onSelectionChange={onSelectionChange}
+        onSelectionEnd={onSelectionEnd}
         onConnect={onConnect}
         onConnectEnd={handleConnectEnd}
         onNodeMouseEnter={(_, node) => setHoverPath(pathThrough(node.id, state.edges))}

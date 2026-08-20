@@ -109,15 +109,44 @@ export function initialStore(graph: BuilderGraph): BuilderStore {
 
 function reduceState(state: BuilderState, action: BuilderAction): { next: BuilderState; label: string } | null {
   switch (action.type) {
+    /**
+     * SELECTING WHAT IS ALREADY SELECTED IS NOT A STATE CHANGE.
+     *
+     * This returned a fresh state unconditionally, so a redundant select — of
+     * which there are many — produced a new `state.selection` array, which
+     * invalidated the canvas's `nodes` memo, which handed React Flow a new
+     * `nodes` prop, whose `StoreUpdater` layout effect called `setNodes`, which
+     * re-rendered us. React Flow answered by firing `onSelectionChange` with
+     * what it had, we dispatched it back, and the two sides ping-ponged:
+     * measured at 53 selection dispatches across 104 renders before React gave
+     * up with "Maximum update depth exceeded" and unmounted the canvas.
+     *
+     * That is the blink. During a drag the same loop runs at pointer rate and
+     * the graph flickers instead of dying, which is why it read as a rendering
+     * glitch rather than as the crash it is one node away from being.
+     *
+     * The reducer already has a "nothing changed" contract — `null`, which
+     * `builderReducer` turns into the identical store object. Using it here is
+     * the whole fix.
+     */
     case "select": {
       const ids = action.additive
         ? [...new Set([...state.selection, ...action.ids])]
         : action.ids;
+
+      const unchanged =
+        ids.length === state.selection.length
+        && ids.every((id, i) => id === state.selection[i])
+        && state.selectedEdgeId === null;
+      if (unchanged) return null;
+
       return { next: { ...state, selection: ids, selectedEdgeId: null }, label: "Select" };
     }
 
-    case "selectEdge":
+    case "selectEdge": {
+      if (action.id === state.selectedEdgeId && state.selection.length === 0) return null;
       return { next: { ...state, selectedEdgeId: action.id, selection: [] }, label: "Select edge" };
+    }
 
     case "move": {
       const nodes = state.nodes.map((n) => {

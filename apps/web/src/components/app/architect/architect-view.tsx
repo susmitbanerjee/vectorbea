@@ -225,9 +225,13 @@ function Describe({ session }: { session: ArchitectSessionApi }) {
       <QuotaBanner session={session} exhausted={exhausted} />
 
       {!session.environmentReady && !session.environmentLoading ? (
-        <Notice tone="failed" title="No environment resolved">
-          The Architect creates real resources, which needs the workspace&rsquo;s environment id — and the
-          API could not be reached to resolve it. Reload once the API is up; nothing has been lost.
+        <Notice
+          tone="failed"
+          title={session.environmentForeign ? "No environment for this workspace" : "No environment resolved"}
+        >
+          {session.environmentForeign
+            ? "The only environment this deployment can name belongs to a different workspace, so it cannot be used here without writing your data into another workspace. The API has no per-workspace environment endpoint yet — see docs/integration/API-GAPS.md."
+            : "The Architect creates real resources, which needs this workspace’s environment id — and the API could not be reached to resolve it. Reload once the API is up; nothing has been lost."}
         </Notice>
       ) : null}
 

@@ -338,9 +338,13 @@ export function NewWorkflowView() {
               ) : null}
 
               {blocked ? (
-                <Notice tone="failed" title="No environment resolved">
-                  Creating a workflow needs the workspace&rsquo;s environment id, and the API could not be
-                  reached to resolve it. Reload the page once the API is up — nothing has been lost.
+                <Notice
+                  tone="failed"
+                  title={environment.foreign ? "No environment for this workspace" : "No environment resolved"}
+                >
+                  {environment.foreign
+                    ? "The only environment this deployment can name belongs to a different workspace, so it cannot be used here without writing your data into another workspace. The API has no per-workspace environment endpoint yet — see docs/integration/API-GAPS.md."
+                    : "Creating a workflow needs this workspace’s environment id, and the API could not be reached to resolve it. Reload once the API is up — nothing has been lost."}
                 </Notice>
               ) : null}
 

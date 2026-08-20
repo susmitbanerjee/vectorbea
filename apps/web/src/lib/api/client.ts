@@ -157,7 +157,18 @@ export interface VectorbeaClient {
   workflows: {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Workflow>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
-    versions(id: string, scope?: Scope, options?: RequestOptions): Promise<WorkflowVersion[]>;
+    /**
+     * `GET /api/workflows/:id/versions` — a PAGE, not a bare array.
+     *
+     * It was typed `WorkflowVersion[]` and returns `Page<WorkflowVersion>`, so
+     * every caller that mapped over the result was mapping over an object. The
+     * route is `Response.ok(page.mapItems { … })`; the envelope is not optional.
+     */
+    versions(
+      id: string,
+      params?: Scope & PageParams,
+      options?: RequestOptions,
+    ): Promise<Paged<WorkflowVersion>>;
     /**
      * `POST /api/workflows`. The environment is NOT optional here the way it is
      * on a read: `WorkflowRoutes.create` calls `requireEnvironmentId()`, so a
@@ -441,10 +452,10 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<Workflow>(`/api/workflows/${id}`, req(scope, contracts.workflow, options)),
-      versions: (id, scope, options) =>
-        call<WorkflowVersion[]>(
+      versions: (id, { workspaceId, environmentId, page, pageSize } = {}, options) =>
+        call<Paged<WorkflowVersion>>(
           `/api/workflows/${id}/versions`,
-          req(scope, undefined, options),
+          req({ workspaceId, environmentId }, contracts.workflowVersionPage, options, { page, pageSize }),
         ),
       run: (id, input, scope, options) =>
         call<unknown>(`/api/workflows/${id}/run`, {

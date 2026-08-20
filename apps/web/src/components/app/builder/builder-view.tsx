@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import type { Route } from "next";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
@@ -19,11 +21,19 @@ import { useBuilderStore, type BuilderAction, type BuilderState } from "./store"
 import { validateGraph, summarise } from "./validation";
 import { autoLayout, snap } from "./layout";
 import { useKeyboardGraph } from "./keyboard-graph";
-import { seedGraph } from "~/mocks/builder";
+import { useWorkflowGraph, type WorkflowGraphData } from "./use-workflow-graph";
+import type { BuilderGraph } from "~/lib/workflows/builder-graph";
 import type { Binding } from "~/mocks/io-schema";
-import { recentRuns, currentVersion, draftVersion } from "~/mocks/workflow-versions";
 import { NODE_MARKS } from "~/components/icons/nodes";
-import type { NodeKind, Workflow } from "~/mocks/domain";
+import { PageContainer } from "~/components/ui/page";
+import { ControlSkeleton } from "~/components/app/control/skeletons";
+import type { NodeKind } from "~/lib/architect/blueprint";
+
+/** All the builder needs to identify what it is editing. */
+export interface BuilderWorkflow {
+  id: string;
+  name: string;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE BUILDER
@@ -33,18 +43,52 @@ import type { NodeKind, Workflow } from "~/mocks/domain";
    either.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-export function BuilderView({ workflow }: { workflow: Workflow }) {
+/**
+ * The builder, on a REAL workflow.
+ *
+ * The graph is loaded before the store is created rather than seeded and
+ * patched afterwards. `useBuilderStore` takes its initial graph once — feeding
+ * it a placeholder and dispatching `replaceGraph` on arrival would put the
+ * empty canvas into the undo history as the first entry, so the user's first
+ * undo would wipe the workflow.
+ */
+export function BuilderView({ workflowId }: { workflowId: string }) {
+  const data = useWorkflowGraph(workflowId);
+
+  if (data.loading) {
+    return <PageContainer><ControlSkeleton /></PageContainer>;
+  }
+
+  if (data.error || !data.workflow) {
+    return <BuilderLoadFailure workflowId={workflowId} message={data.error?.message} />;
+  }
+
+  const workflow: BuilderWorkflow = { id: data.workflow.id, name: data.workflow.name };
+
   return (
     <ReactFlowProvider>
-      <BuilderInner workflow={workflow} />
+      {/* Keyed on the version: opening a different version is a different
+          document, and carrying the previous one's history into it would let
+          undo walk backwards into a graph that was never on this canvas. */}
+      <BuilderInner
+        key={data.version?.id ?? "empty"}
+        workflow={workflow}
+        graph={data.graph ?? { nodes: [], edges: [] }}
+        data={data}
+      />
     </ReactFlowProvider>
   );
 }
 
-function BuilderInner({ workflow }: { workflow: Workflow }) {
+function BuilderInner({
+  workflow, graph, data,
+}: {
+  workflow: BuilderWorkflow;
+  graph: BuilderGraph;
+  data: WorkflowGraphData;
+}) {
   const flow = useReactFlow();
-  const seed = React.useMemo(() => seedGraph(workflow.id), [workflow.id]);
-  const [store, dispatch] = useBuilderStore(seed);
+  const [store, dispatch] = useBuilderStore(graph);
   const { state } = store;
 
   const [paletteCollapsed, setPaletteCollapsed] = React.useState(false);
@@ -53,13 +97,10 @@ function BuilderInner({ workflow }: { workflow: Workflow }) {
   const [picker, setPicker] = React.useState<null | { at: { x: number; y: number }; connectFrom?: string }>(null);
   const [simulating, setSimulating] = React.useState(false);
   const [hoverIssueNode, setHoverIssueNode] = React.useState<string | null>(null);
-  const [saveState, setSaveState] = React.useState<SaveState>("saved");
-  const [lastSavedAt, setLastSavedAt] = React.useState<number | null>(null);
   const shellRef = React.useRef<HTMLDivElement>(null);
 
-  const draft = draftVersion(workflow.id);
-  const version = draft ?? currentVersion(workflow.id);
-  const runs = React.useMemo(() => recentRuns(workflow.id, 30), [workflow.id]);
+  const saveState: SaveState = data.saveState;
+  const lastSavedAt = data.lastSavedAt;
 
   /* ── Validation, continuous ─────────────────────────────────────────────── */
   const issues = React.useMemo(
@@ -68,21 +109,35 @@ function BuilderInner({ workflow }: { workflow: Workflow }) {
   );
   const summary = React.useMemo(() => summarise(issues), [issues]);
 
-  /* ── Autosave ───────────────────────────────────────────────────────────── */
+  /* ── Autosave ─────────────────────────────────────────────────────────────
+     Every save is a NEW VERSION (`POST /api/workflows/:id/versions`), so the
+     debounce is not cosmetic: a request per drag frame would be a version per
+     drag frame. Only a COMMITTED edit sets `dirty` — the intermediate frames of
+     a drag do not — so this fires once when the node is dropped.
+
+     `markSaved` is dispatched only after the request resolves. Clearing the flag
+     optimistically, which the previous `setTimeout` version did, meant a failed
+     save left a canvas that believed it was persisted. */
+  const pendingGraphRef = React.useRef<BuilderGraph>({ nodes: state.nodes, edges: state.edges });
+  pendingGraphRef.current = { nodes: state.nodes, edges: state.edges };
+
+  const saveRef = React.useRef(data.save);
+  saveRef.current = data.save;
+
   React.useEffect(() => {
     if (!state.dirty) return;
-    setSaveState("dirty");
-    // Debounced: saving on every keystroke of a drag would be a request per
-    // frame, and the indicator would strobe.
+    data.markDirty();
+
     const id = window.setTimeout(() => {
-      setSaveState("saving");
-      window.setTimeout(() => {
-        setSaveState("saved");
-        setLastSavedAt(Date.now());
+      void saveRef.current(pendingGraphRef.current).then(() => {
         dispatch({ type: "markSaved" });
-      }, 420);
+      });
     }, 1200);
+
     return () => window.clearTimeout(id);
+    // `data.save` is held in a ref so a re-render mid-debounce cannot restart
+    // the timer and postpone the write indefinitely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.dirty, dispatch]);
 
   /* ── Viewport helpers ───────────────────────────────────────────────────── */
@@ -285,8 +340,8 @@ function BuilderInner({ workflow }: { workflow: Workflow }) {
     >
       <TopBar
         workflow={workflow}
-        versionNumber={version?.number ?? 1}
-        isDraft={Boolean(draft)}
+        versionNumber={data.version?.version ?? 1}
+        isDraft={!data.workflow?.currentVersionId}
         summary={summary}
         saveState={saveState}
         lastSavedAt={lastSavedAt}
@@ -294,7 +349,11 @@ function BuilderInner({ workflow }: { workflow: Workflow }) {
         onTogglePresentation={() => setPresentation((v) => !v)}
         onToggleFullscreen={toggleFullscreen}
         fullscreen={fullscreen}
-        onSave={() => { setSaveState("saving"); window.setTimeout(() => { setSaveState("saved"); setLastSavedAt(Date.now()); dispatch({ type: "markSaved" }); }, 300); }}
+        onSave={() => {
+          void data.save({ nodes: state.nodes, edges: state.edges }).then(() => {
+            dispatch({ type: "markSaved" });
+          });
+        }}
         onTest={() => console.info("test", workflow.id)}
         onSimulate={() => setSimulating(true)}
         onRun={() => console.info("run", workflow.id)}
@@ -394,8 +453,11 @@ function BuilderInner({ workflow }: { workflow: Workflow }) {
             summary={summary}
             history={store.history}
             cursor={store.cursor}
-            replayAvailable={runs.length > 0}
-            replayCount={runs.length}
+            /* Replay needs real run history, which this screen does not load.
+               Saying "0 runs to replay" is wrong in a way a reader cannot
+               detect; offering nothing is at least honest. */
+            replayAvailable={false}
+            replayCount={0}
             onHoverIssue={setHoverIssueNode}
             onSelectIssue={(nodeId) => {
               if (!nodeId) return;
@@ -574,3 +636,44 @@ function NodePicker({
 }
 
 export type { BuilderAction };
+
+/* ── Load failure ─────────────────────────────────────────────────────────── */
+
+/**
+ * The builder could not open.
+ *
+ * Distinguishes the two causes that need different actions: a workflow that is
+ * not there (wrong id, deleted, other workspace) is not the same as a workflow
+ * that could not be READ, and telling somebody to retry a 404 wastes their time.
+ */
+function BuilderLoadFailure({ workflowId, message }: { workflowId: string; message?: string }) {
+  const missing = message?.toLowerCase().includes("not found") ?? false;
+
+  return (
+    <PageContainer>
+      <div className="border-subtle bg-surface-raised grid place-items-center rounded-lg border px-4 py-16">
+        <div className="max-w-[36rem] text-center">
+          <Text variant="heading-sm" tone="max" as="p" className="block">
+            {missing ? "This workflow no longer exists" : "The builder could not load this workflow"}
+          </Text>
+          <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
+            {missing
+              ? "It was deleted, or the link points at a workflow in another workspace. Nothing was changed."
+              : message ?? "The workflow and its versions could not be read. Nothing has been changed."}
+          </Text>
+          <Text variant="caption" tone="disabled" className="font-code mt-2 block">{workflowId}</Text>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Button asChild variant="primary" size="sm">
+              <Link href={"/workflows" as Route}>Back to workflows</Link>
+            </Button>
+            {!missing ? (
+              <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
+                Try again
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </PageContainer>
+  );
+}

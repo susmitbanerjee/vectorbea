@@ -1,10 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 
+import { useApi } from "~/lib/api/api-provider";
+import { isUnauthenticated } from "~/lib/api/errors";
 import { queryKeys } from "~/lib/api/keys";
 import type { Environment, Workspace } from "./types";
 
@@ -37,6 +39,22 @@ function writeStored(key: string, value: string | null): void {
   }
 }
 
+/**
+ * Why the app has no workspace to work in.
+ *
+ * `null` means there is one. Everything else is a state a screen has to be able
+ * to render, because a perpetual skeleton in any of them is a lie.
+ */
+export type WorkspaceProblem =
+  /** Signed out, or the session expired mid-session. */
+  | "unauthenticated"
+  /** Authenticated, but a member of nothing. A real account state, not an error. */
+  | "no-memberships"
+  /** The browser reports no network, so the request was never sent. */
+  | "offline"
+  /** The membership list could not be read at all. */
+  | "unreachable";
+
 export interface WorkspaceState {
   workspaces: Workspace[];
   workspaceId: string | null;
@@ -44,6 +62,10 @@ export interface WorkspaceState {
   environmentId: Environment;
   /** True until the first resolution completes. */
   resolving: boolean;
+  /** Set when there is no usable workspace, and why. See [WorkspaceProblem]. */
+  problem: WorkspaceProblem | null;
+  /** Re-read the membership list — the retry behind a "Try again" button. */
+  retry(): void;
 
   setWorkspace(id: string): void;
   /**
@@ -93,6 +115,66 @@ export function WorkspaceProvider({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const api = useApi();
+
+  /* ── The user's OWN memberships ───────────────────────────────────────────
+     THE BUG THIS FIXES: scope came from `GET /api/bootstrap`, which runs
+
+         SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1
+
+     with no user filter, and sits in the API's PUBLIC path set. Every account
+     was therefore handed the oldest workspace in the database. Whoever owned it
+     worked; everyone else sent `X-Workspace-Id` for a workspace they are not in,
+     and `RequestContext` answered every scoped request with
+
+         403  You are not a member of workspace <id>
+
+     `/api/me` is the endpoint for this — its own route comment says it "must be
+     called after every login to discover authorized workspaces" — and nothing
+     was calling it to resolve scope.
+
+     Plain `useQuery`, not `useApiQuery`: that helper calls `useWorkspace()` to
+     route 403s back here, so using it inside this provider is a cycle. `/api/me`
+     is not workspace-scoped, so it cannot 403 on scope anyway. */
+  const meQuery = useQuery({
+    queryKey: queryKeys.me(),
+    queryFn: () => api.me(),
+    staleTime: 5 * 60_000,
+    /**
+     * `networkMode: "always"` — DO NOT REMOVE without reading this.
+     *
+     * TanStack's default mode pauses a query when `navigator.onLine` is false,
+     * and a paused query never settles: `isPending` stays true and
+     * `fetchStatus` sits on "paused" indefinitely. Every other query in the app
+     * can afford that — the screen shows its own error state and recovers on
+     * reconnect. This one cannot: it gates the whole shell, so pausing it
+     * replaces every screen with a spinner that will never resolve. Observed
+     * doing exactly that against an unreachable API.
+     *
+     * Reachability of OUR API is also not the same question as whether the
+     * browser has a network. "always" lets the request be attempted and fail
+     * honestly, which is the outcome the gate can actually render.
+     *
+     * No `retry` override: the client sets `retry: false` globally because the
+     * transport already retries the failures worth retrying, and stacking the
+     * two multiplies them.
+     */
+    networkMode: "always",
+  });
+
+  /**
+   * Memberships win over the server-rendered seed the moment they arrive.
+   *
+   * The seed comes from `/api/bootstrap` and is not user-specific, so it is only
+   * ever a first-paint placeholder and a dev-mode fallback.
+   */
+  const authoritative = meQuery.data?.workspaces;
+  const resolvedWorkspaces = React.useMemo<Workspace[]>(() => {
+    if (!authoritative) return workspaces;
+    return authoritative.map((m) => ({ id: m.id, name: m.name }));
+  }, [authoritative, workspaces]);
+
+  const resolvedDefault = meQuery.data?.defaultWorkspaceId ?? defaultWorkspaceId;
 
   const urlWorkspace = searchParams.get("ws");
   const urlEnvironment = searchParams.get("env");
@@ -111,9 +193,9 @@ export function WorkspaceProvider({
   const [pendingEnvironment, setPendingEnvironment] = React.useState<Environment | null>(null);
 
   const resolve = React.useCallback(() => {
-    const allowed = workspaces.filter((w) => !forbidden.current.has(w.id));
+    const allowed = resolvedWorkspaces.filter((w) => !forbidden.current.has(w.id));
 
-    const candidates = [urlWorkspace, readStored(WORKSPACE_STORAGE_KEY), defaultWorkspaceId];
+    const candidates = [urlWorkspace, readStored(WORKSPACE_STORAGE_KEY), resolvedDefault];
     const chosen =
       candidates.find(
         (id): id is string => typeof id === "string" && allowed.some((w) => w.id === id),
@@ -125,8 +207,15 @@ export function WorkspaceProvider({
     const chosenEnv = envCandidates.find(isEnvironment) ?? "development";
     setEnvironmentId(chosenEnv);
 
-    setResolving(false);
-  }, [workspaces, urlWorkspace, urlEnvironment, defaultWorkspaceId]);
+    /* Still waiting on the authoritative list: a workspace chosen from the seed
+       is a guess, and committing to it is how the wrong one got sent.
+
+       Keyed on "fetching" specifically, NOT on "not yet settled". A query can
+       also sit in "paused", which never settles on its own — treating that as
+       resolving is a spinner with no end, which is the exact failure this gate
+       exists to remove. */
+    setResolving(meQuery.fetchStatus === "fetching" && meQuery.data === undefined);
+  }, [resolvedWorkspaces, urlWorkspace, urlEnvironment, resolvedDefault, meQuery.fetchStatus, meQuery.data]);
 
   React.useEffect(() => {
     resolve();
@@ -217,19 +306,49 @@ export function WorkspaceProvider({
         writeStored(WORKSPACE_STORAGE_KEY, null);
       }
 
-      const fallback = workspaces.find((w) => !forbidden.current.has(w.id))?.id ?? null;
+      const fallback = resolvedWorkspaces.find((w) => !forbidden.current.has(w.id))?.id ?? null;
       void applyScope(fallback, environmentId);
+
+      // The rejection may be the seed's fault rather than the user's. Re-reading
+      // memberships is what turns "403 forever" into "opens in a workspace you
+      // are actually in".
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me() });
     },
-    [applyScope, environmentId, queryClient, workspaces],
+    [applyScope, environmentId, queryClient, resolvedWorkspaces],
   );
+
+  const retry = React.useCallback(() => {
+    forbidden.current.clear();
+    void meQuery.refetch();
+  }, [meQuery]);
+
+  /**
+   * No workspace, and why.
+   *
+   * Reported rather than left as "resolving", because the three causes need
+   * three different screens: sign in, ask for an invitation, or try again.
+   */
+  const problem = React.useMemo<WorkspaceProblem | null>(() => {
+    if (workspaceId !== null || resolving) return null;
+    // Authenticated with a real answer: zero memberships is the answer.
+    if (meQuery.data) return meQuery.data.workspaces.length === 0 ? "no-memberships" : null;
+    if (isUnauthenticated(meQuery.error)) return "unauthenticated";
+    // Parked because the browser reports no network. Distinct from unreachable:
+    // the request was never sent, so "the API did not answer" would be a lie.
+    if (meQuery.fetchStatus === "paused") return "offline";
+    if (meQuery.fetchStatus === "fetching") return null;
+    return resolvedWorkspaces.length === 0 ? "unreachable" : null;
+  }, [workspaceId, resolving, meQuery.fetchStatus, meQuery.error, meQuery.data, resolvedWorkspaces]);
 
   const value = React.useMemo<WorkspaceState>(
     () => ({
-      workspaces,
+      workspaces: resolvedWorkspaces,
       workspaceId,
-      workspace: workspaces.find((w) => w.id === workspaceId) ?? null,
+      workspace: resolvedWorkspaces.find((w) => w.id === workspaceId) ?? null,
       environmentId,
       resolving,
+      problem,
+      retry,
       setWorkspace,
       requestEnvironment,
       pendingEnvironment,
@@ -239,10 +358,12 @@ export function WorkspaceProvider({
       reportForbidden,
     }),
     [
-      workspaces,
+      resolvedWorkspaces,
       workspaceId,
       environmentId,
       resolving,
+      problem,
+      retry,
       setWorkspace,
       requestEnvironment,
       pendingEnvironment,

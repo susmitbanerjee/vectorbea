@@ -112,6 +112,7 @@ export const workflowVersion = z.object({
   updatedAt: isoDateTime,
 });
 export type WorkflowVersion = z.infer<typeof workflowVersion>;
+export const workflowVersionPage = page(workflowVersion);
 
 /* ── Connections ──────────────────────────────────────────────────────────── */
 

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isMockMode } from "~/lib/api/config";
+import { createMockTransport } from "~/lib/api/mock-transport";
 import type { Workspace } from "./types";
 
 /**
@@ -20,6 +22,32 @@ export async function resolveWorkspacesForServer(): Promise<{
   workspaces: Workspace[];
   defaultWorkspaceId: string | null;
 }> {
+  /**
+   * MOCK MODE RESOLVES THROUGH THE MOCK TRANSPORT, not through the network.
+   *
+   * This function runs on the SERVER with a raw `fetch`, so it was the one read
+   * in the app that bypassed the transport swap — mock mode still needed a live
+   * API just to learn which workspace it was in. It never got one, so
+   * `workspaceId` stayed null, and every scoped query is
+   * `enabled: Boolean(workspaceId)`. The entire product sat on "Loading…" in
+   * the one mode that exists to run it without a backend.
+   *
+   * Going through the transport rather than reading `~/mocks/shell` directly
+   * keeps fixtures behind their single sanctioned door, and means this resolves
+   * from the same `/api/workspaces` payload the client would have received.
+   */
+  if (isMockMode()) {
+    try {
+      const payload = await createMockTransport().request<{ workspaces?: Workspace[] }>(
+        "/api/workspaces",
+      );
+      const workspaces = payload?.workspaces ?? [];
+      return { workspaces, defaultWorkspaceId: workspaces[0]?.id ?? null };
+    } catch {
+      return { workspaces: [], defaultWorkspaceId: null };
+    }
+  }
+
   const base = (
     process.env.NEXT_PUBLIC_VECTORBEA_API_URL ??
     process.env.NEXT_PUBLIC_API_URL ??

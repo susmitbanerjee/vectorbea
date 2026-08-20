@@ -1,20 +1,15 @@
-import { notFound } from "next/navigation";
 import { BuilderView } from "~/components/app/builder/builder-view";
-import { getWorkflow } from "~/mocks/workflow-versions";
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const workflow = getWorkflow(id);
-  return { title: workflow ? `${workflow.name} — builder` : "Builder" };
-}
+export const metadata = { title: "Builder" };
 
 /**
  * The builder (design §6.2, §7, §8).
  *
- * No Suspense boundary: BuilderView holds its state in a reducer rather than in
- * the URL, so it never reads useSearchParams and never opts the route into
- * client rendering on that account. It is a client component because a canvas
- * is, not because of a search param.
+ * The id is passed through rather than resolved here. This used to call
+ * `getWorkflow(id)` against the fixtures and `notFound()` on a miss, which meant
+ * every real workflow — including one created thirty seconds earlier — opened as
+ * a 404. The name is not known server-side any more, so the title is static and
+ * the workflow's own name is drawn by the top bar once it loads.
  */
 export default async function BuilderPage({
   params,
@@ -22,8 +17,5 @@ export default async function BuilderPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const workflow = getWorkflow(id);
-  if (!workflow) notFound();
-
-  return <BuilderView workflow={workflow} />;
+  return <BuilderView workflowId={id} />;
 }

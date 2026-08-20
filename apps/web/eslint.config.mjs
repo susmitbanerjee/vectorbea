@@ -151,7 +151,7 @@ const config = [
       "src/components/app/builder/palette.tsx",
       "src/components/app/builder/simulate-panel.tsx",
       "src/components/app/builder/store.ts",
-      "src/components/app/builder/top-bar.tsx",
+      
       "src/components/app/builder/validation.ts",
       "src/components/app/builder/workflow-edge.tsx",
       "src/components/app/builder/workflow-node.tsx",
@@ -199,7 +199,7 @@ const config = [
       "src/components/app/workflows/bulk-bar.tsx",
       "src/components/app/workflows/config-diff.tsx",
       "src/components/app/workflows/graph-canvas.tsx",
-      "src/components/app/workflows/overview.tsx",
+      
       "src/components/app/workflows/publish-flow.tsx",
       "src/components/app/workflows/row-actions.tsx",
       "src/components/app/workflows/version-history.tsx",
