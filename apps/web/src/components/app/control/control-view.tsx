@@ -8,7 +8,7 @@ import { HealthStrip } from "./health-strip";
 import { AttentionSummary } from "./attention-summary";
 import { FleetHeatstrip } from "./fleet-heatstrip";
 import { DetailBand } from "./detail-band";
-import { TimeRangeControl, RefreshControl } from "./time-range";
+import { TimeRangeControl } from "./time-range";
 import { EmptyWorkspace } from "./empty-workspace";
 import { worstSeverity } from "~/components/app/shell/inbox-signal";
 import {
@@ -78,51 +78,9 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
     [params, pathname, router],
   );
 
-  /* ── Refresh ────────────────────────────────────────────────────────────── */
-  // Two ticks, not one: the 30s auto-refresh only needs to re-poll the runs
-  // and activity queries — those are what actually change minute to minute.
-  // Bumping a single shared tick used to invalidate workflows/metrics/
-  // incidents/connections too, forcing a re-derive (and re-render) of the
-  // entire page every 30s. `tick` still covers everything for the manual
-  // "Refresh" button, which is a deliberate full reload; `liveTick` is the
-  // narrower one the auto-refresh timer drives.
-  const [tick, setTick] = React.useState(0);
-  const [liveTick, setLiveTick] = React.useState(0);
-  const [fetchedAt, setFetchedAt] = React.useState(() => Date.now());
-  const [now, setNow] = React.useState(() => Date.now());
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [autoRefresh, setAutoRefresh] = React.useState(true);
-
-  const refresh = React.useCallback(() => {
-    setRefreshing(true);
-    // Bumping the tick changes every query key, so this is a real refetch
-    // against the API rather than the timer that used to stand in for one.
-    setTick((t) => t + 1);
-    setFetchedAt(Date.now());
-    window.setTimeout(() => setRefreshing(false), 300);
-  }, []);
-
-  const refreshLive = React.useCallback(() => {
-    setLiveTick((t) => t + 1);
-    setFetchedAt(Date.now());
-  }, []);
-
-  React.useEffect(() => {
-    if (frozen || !autoRefresh) return;
-    const id = window.setInterval(refreshLive, 30_000);
-    return () => window.clearInterval(id);
-  }, [autoRefresh, refreshLive, frozen]);
-
-  // Drives the "updated Xs ago" label without re-deriving the page data.
-  React.useEffect(() => {
-    if (frozen) return;
-    const id = window.setInterval(() => setNow(Date.now()), 5_000);
-    return () => window.clearInterval(id);
-  }, [frozen]);
-
   /* ── Data — live, from the API ──────────────────────────────────────────── */
-  const data = useControlData(range, sort, tick, liveTick);
-  const { health, attention, fleet, latency, cost, activity } = data;
+  const data = useControlData(range, sort);
+  const { health, attention, fleet, latency, cost } = data;
   // Only the shape of the attention list is needed here — the items themselves
   // are rendered by the inbox.
   const attentionWorst = React.useMemo(
@@ -158,13 +116,6 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
                 value={rangeId}
                 onChange={(id) => setParam({ range: id })}
               />
-              <RefreshControl
-                ageMs={frozen ? 0 : Math.max(0, now - fetchedAt)}
-                refreshing={refreshing}
-                onRefresh={refresh}
-                autoRefresh={autoRefresh}
-                onAutoRefreshChange={setAutoRefresh}
-              />
             </>
           )
         }
@@ -198,7 +149,6 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
             latency={latency}
             cost={cost}
             range={range}
-            activity={activity}
             streamPaused={frozen}
           />
         </div>

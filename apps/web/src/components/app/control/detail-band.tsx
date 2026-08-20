@@ -10,11 +10,14 @@ import { Button } from "~/components/ui/button";
 import { LatencyDistributionChart } from "~/components/charts/latency-distribution";
 import { CostTrendChart } from "~/components/charts/cost-trend";
 import { ActivityStream } from "./activity-stream";
+import { useApi } from "~/lib/api/api-provider";
+import { useApiQuery } from "~/lib/api/hooks";
+import { queryKeys } from "~/lib/api/keys";
+import { useScope } from "~/lib/workspace/workspace-provider";
 import { formatCost, formatTokens } from "~/lib/format";
 import { formatAxisDuration } from "~/components/charts/scale";
 import type { CostTrend, LatencyDistribution, TimeRange } from "~/mocks/control";
 import { AgentBrainIcon } from "~/components/icons/domain";
-import type { contracts } from "@vectorbea/shared";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BAND 4 · DETAIL
@@ -32,13 +35,12 @@ export interface DetailBandProps {
   latency: LatencyDistribution;
   cost: CostTrend;
   range: TimeRange;
-  activity: contracts.ControlActivityEvent[];
   /** Frozen for screenshots. */
   streamPaused?: boolean;
   className?: string;
 }
 
-export function DetailBand({ latency, cost, range, activity, streamPaused, className }: DetailBandProps) {
+export function DetailBand({ latency, cost, range, streamPaused, className }: DetailBandProps) {
   const router = useRouter();
 
   return (
@@ -47,7 +49,7 @@ export function DetailBand({ latency, cost, range, activity, streamPaused, class
         Detail
       </Text>
 
-      <div className="grid gap-3 xl:grid-cols-2">
+      <div className="grid gap-3">
         <Panel
           title="Execution latency"
           meta={
@@ -57,8 +59,14 @@ export function DetailBand({ latency, cost, range, activity, streamPaused, class
             </>
           }
         >
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <Metric label="p50" value={formatAxisDuration(latency.p50)} />
+            <Metric label="p95" value={formatAxisDuration(latency.p95)} tone="waiting" />
+            <Metric label="p99" value={formatAxisDuration(latency.p99)} tone="failed" />
+          </div>
           <LatencyDistributionChart
             data={latency}
+            height={220}
             onSelectBucket={(lower, upper) =>
               router.push(
                 `/runs?duration_gte=${Math.round(lower)}&duration_lte=${Math.round(upper)}` as Route,
@@ -76,22 +84,86 @@ export function DetailBand({ latency, cost, range, activity, streamPaused, class
             </>
           }
         >
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <Metric label="Spend" value={formatCost(cost.totalUsd)} />
+            <Metric label="Tokens" value={formatTokens(cost.totalTokens)} />
+            <Metric
+              label="Bucket budget"
+              value={cost.budgetPerBucketUsd > 0 ? formatCost(cost.budgetPerBucketUsd) : "Not set"}
+              tone={cost.budgetPerBucketUsd > 0 ? "waiting" : undefined}
+            />
+          </div>
           <CostTrendChart
             data={cost}
             range={range}
+            height={220}
             onSelectBucket={(from, to) => router.push(`/runs?from=${from}&to=${to}` as Route)}
           />
         </Panel>
 
-        <div className="xl:col-span-2">
-          <ActivityStream events={activity} paused={streamPaused} />
-        </div>
+        <LiveActivityStream paused={streamPaused} />
 
-        <div className="xl:col-span-2">
-          <ArchitectEntry />
-        </div>
+        <ArchitectEntry />
       </div>
     </section>
+  );
+}
+
+function Metric({
+  label, value, tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "waiting" | "failed";
+}) {
+  return (
+    <div className="border-subtle bg-surface-sunken rounded-md border px-2.5 py-2">
+      <Text variant="caption" tone="muted" className="block">{label}</Text>
+      <Text
+        variant="body-sm"
+        tone="max"
+        tabular
+        className={cn(
+          "mt-0.5 block font-medium",
+          tone === "waiting" && "text-status-waiting",
+          tone === "failed" && "text-status-failed",
+        )}
+      >
+        {value}
+      </Text>
+    </div>
+  );
+}
+
+/** Owns the only polling query on Control, isolating activity updates from all metrics. */
+function LiveActivityStream({ paused = false }: { paused?: boolean }) {
+  const api = useApi();
+  const { workspaceId } = useScope();
+  const [tick, setTick] = React.useState(0);
+  const [autoRefresh, setAutoRefresh] = React.useState(true);
+  const scope = React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
+  const activity = useApiQuery({
+    queryKey: [...queryKeys.env(workspaceId, null), "control-activity", tick],
+    queryFn: () => api.controlActivity({ ...scope, limit: 20 }),
+    enabled: Boolean(workspaceId),
+    freshness: "live",
+  });
+
+  React.useEffect(() => {
+    if (paused || !autoRefresh) return;
+    const id = window.setInterval(() => setTick((value) => value + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [autoRefresh, paused]);
+
+  return (
+    <ActivityStream
+      events={activity.data ?? []}
+      paused={paused}
+      refreshing={activity.isFetching}
+      autoRefresh={autoRefresh}
+      onAutoRefreshChange={setAutoRefresh}
+      onRefresh={() => setTick((value) => value + 1)}
+    />
   );
 }
 

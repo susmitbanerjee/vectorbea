@@ -70,18 +70,21 @@ export interface BudgetPoint {
 }
 
 export interface FailureBudget {
-  target: number;
+  /** Null means the workspace has not configured a reliability objective. */
+  target: number | null;
   /** Allowed failures in the window, from the target and the run volume. */
-  allowed: number;
+  allowed: number | null;
   spent: number;
   /** spent / allowed. Over 1 means the budget is blown. */
-  burnRatio: number;
+  burnRatio: number | null;
   series: BudgetPoint[];
   /** The single largest contributor, so the number resolves to a cause. */
   topCause: { label: string; share: number; href: string } | null;
 }
 
 export interface ApprovalAging {
+  /** False when the approval source is unavailable; never present unknown as zero. */
+  available: boolean;
   count: number;
   oldestWaitedMs: number;
   oldestSlaMs: number;
@@ -92,7 +95,8 @@ export interface ApprovalAging {
 
 export interface SpendToday {
   spentUsd: number;
-  budgetUsd: number;
+  /** Null means spend is observed without a configured ceiling. */
+  budgetUsd: number | null;
   /** Straight-line projection to midnight from the current burn rate. */
   projectedUsd: number;
   /** Fraction of the day elapsed, for the projection marker. */
@@ -105,6 +109,15 @@ export interface HealthSnapshot {
   failureBudget: FailureBudget;
   approvals: ApprovalAging;
   spend: SpendToday;
+}
+
+/** Customer-configured workspace objectives used by Control. */
+export interface ControlBudgetSettings {
+  configured: boolean;
+  reliabilityTarget: number | null;
+  dailySpendLimitUsd: number | null;
+  approvalSlaMinutes: number | null;
+  updatedAt: string | null;
 }
 
 /* ── Band 2 · Attention ───────────────────────────────────────────────────── */

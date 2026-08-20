@@ -165,6 +165,7 @@ export function buildHealth(range: TimeRange, tick = 0): HealthSnapshot {
   const oldest = aged.reduce((max, a) => (a.waited > max.waited ? a : max), aged[0]);
 
   const approvals: ApprovalAging = {
+    available: true,
     count: APPROVALS.length,
     oldestWaitedMs: oldest?.waited ?? 0,
     oldestSlaMs: SLA_MS,

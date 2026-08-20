@@ -77,6 +77,8 @@ export interface TopbarProps {
 export function Topbar({
   environment, onEnvironmentChange, onOpenPalette, actions, onOpenSidebar,
 }: TopbarProps) {
+  const pathname = usePathname();
+  const showEnvironment = pathname !== "/control" && !pathname.startsWith("/control/");
   return (
     <header
       className={cn(
@@ -142,11 +144,13 @@ export function Topbar({
         </svg>
       </button>
 
-      <EnvironmentSwitcher
-        environment={environment}
-        onEnvironmentChange={onEnvironmentChange}
-        compact={false}
-      />
+      {showEnvironment ? (
+        <EnvironmentSwitcher
+          environment={environment}
+          onEnvironmentChange={onEnvironmentChange}
+          compact={false}
+        />
+      ) : null}
 
       <NotificationInbox />
 

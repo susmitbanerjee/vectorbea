@@ -38,10 +38,17 @@ export interface ActivityStreamProps {
   events: contracts.ControlActivityEvent[];
   /** Frozen for screenshots and for the loading state. */
   paused?: boolean;
+  refreshing?: boolean;
+  autoRefresh?: boolean;
+  onRefresh?: () => void;
+  onAutoRefreshChange?: (enabled: boolean) => void;
   className?: string;
 }
 
-export function ActivityStream({ events, paused = false, className }: ActivityStreamProps) {
+export function ActivityStream({
+  events, paused = false, refreshing = false, autoRefresh, onRefresh,
+  onAutoRefreshChange, className,
+}: ActivityStreamProps) {
   const [hovered, setHovered] = React.useState(false);
   const [focusWithin, setFocusWithin] = React.useState(false);
   const [visibleEvents, setVisibleEvents] = React.useState(events);
@@ -78,6 +85,32 @@ export function ActivityStream({ events, paused = false, className }: ActivitySt
         <Text variant="caption" tone="muted" className="ml-auto">
           {frozen ? (paused ? "Paused" : "Paused while you read") : "Live"}
         </Text>
+        {autoRefresh !== undefined && onAutoRefreshChange ? (
+          <button
+            type="button"
+            onClick={() => onAutoRefreshChange(!autoRefresh)}
+            aria-pressed={autoRefresh}
+            className={cn(
+              "font-ui text-caption rounded-sm px-1.5 py-1 outline-none focus-visible:focus-ring",
+              autoRefresh ? "text-accent" : "text-fg-muted hover:text-fg-primary",
+            )}
+          >
+            Auto
+          </button>
+        ) : null}
+        {onRefresh ? (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label="Refresh activity"
+            className="text-fg-muted hover:text-fg-primary grid size-6 place-items-center rounded-sm outline-none focus-visible:focus-ring disabled:opacity-50"
+          >
+            <svg viewBox="0 0 16 16" className={cn("size-3.5", refreshing && "animate-spin")} aria-hidden="true" fill="none">
+              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : null}
       </div>
 
       {/* aria-live is deliberately off. Re-announcing the list after every

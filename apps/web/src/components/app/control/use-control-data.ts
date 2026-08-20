@@ -12,7 +12,7 @@ import {
 } from "~/lib/control/derive";
 import type {
   AttentionItem, CostTrend, FleetRow, FleetSort, HealthSnapshot,
-  LatencyDistribution, TimeRange,
+  LatencyDistribution, TimeRange, ControlBudgetSettings,
 } from "~/lib/control/model";
 
 /**
@@ -40,7 +40,6 @@ export interface ControlData {
   fleet: FleetRow[];
   latency: LatencyDistribution;
   cost: CostTrend;
-  activity: import("@vectorbea/shared").contracts.ControlActivityEvent[];
   /** False when the run page did not cover the whole selected range. */
   complete: boolean;
   /** True until the first successful load of every query. */
@@ -55,10 +54,7 @@ export interface ControlData {
 export function useControlData(
   range: TimeRange,
   sort: FleetSort,
-  tick: number,
-  /** Drives only the runs/activity refetch — see control-view.tsx. Defaults
-   *  to `tick` so callers that don't split the two still refresh everything. */
-  liveTick: number = tick,
+  tick = 0,
 ): ControlData {
   const api = useApi();
   const { workspaceId } = useScope();
@@ -71,7 +67,7 @@ export function useControlData(
   const enabled = Boolean(workspaceId);
 
   const runs = useApiQuery({
-    queryKey: [...queryKeys.runs.list(keyScope, { pageSize: RUN_PAGE_SIZE }), liveTick],
+    queryKey: [...queryKeys.runs.list(keyScope, { pageSize: RUN_PAGE_SIZE }), tick],
     queryFn: () => api.runs.list({ ...scope, pageSize: RUN_PAGE_SIZE }),
     enabled,
     freshness: "list",
@@ -102,11 +98,17 @@ export function useControlData(
     enabled,
   });
 
-  const activity = useApiQuery({
-    queryKey: [...queryKeys.env(workspaceId, null), "control-activity", liveTick],
-    queryFn: () => api.controlActivity({ ...scope, limit: 20 }),
+  const budget = useApiQuery<ControlBudgetSettings>({
+    queryKey: [...queryKeys.env(workspaceId, null), "control-budget", tick],
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/settings/control-budget?workspaceId=${encodeURIComponent(workspaceId ?? "")}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) throw new Error("Failed to load operational budget");
+      return response.json() as Promise<ControlBudgetSettings>;
+    },
     enabled,
-    freshness: "live",
   });
 
   const now = Date.now();
@@ -127,19 +129,18 @@ export function useControlData(
       metrics.isError && "control metrics",
       incidents.isError && "incidents",
       connections.isError && "connections",
-      activity.isError && "activity",
+      budget.isError && "operational budget",
     ].filter((x): x is string => typeof x === "string");
 
     return {
-      health: deriveHealth(inRange, allRuns, metrics.data, incidentList, now),
+      health: deriveHealth(inRange, allRuns, metrics.data, incidentList, now, budget.data),
       attention: deriveAttention(inRange, workflowList, connectionList, incidentList, now),
       fleet: deriveFleet(inRange, workflowList, sort),
       latency: deriveLatency(inRange),
-      cost: deriveCostTrend(inRange, range, now),
-      activity: activity.data ?? [],
+      cost: deriveCostTrend(inRange, range, now, budget.data),
       complete: runsAreComplete(allRuns, range, now, runs.data?.total ?? allRuns.length),
-      loading: runs.isPending || workflows.isPending,
-      error: runs.error ?? workflows.error ?? null,
+      loading: runs.isPending || workflows.isPending || budget.isPending,
+      error: runs.error ?? workflows.error ?? budget.error ?? null,
       unavailable,
       refetch: () => {
         void runs.refetch();
@@ -152,5 +153,5 @@ export function useControlData(
     // `now` is recomputed each render by design; the tick in every query key is
     // what actually drives a refetch, so it is not a dependency here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runs, workflows, metrics, incidents, connections, activity, range, sort]);
+  }, [runs, workflows, metrics, incidents, connections, budget, range, sort]);
 }

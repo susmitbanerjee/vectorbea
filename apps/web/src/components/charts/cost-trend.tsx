@@ -49,6 +49,7 @@ export function CostTrendChart({ data, range, height = 168, onSelectBucket, clas
 
   const maxCost = niceMax(Math.max(data.budgetPerBucketUsd, ...data.points.map((p) => p.costUsd)));
   const maxTokens = Math.max(1, ...data.points.map((p) => p.tokens));
+  const hasBudget = data.budgetPerBucketUsd > 0;
 
   const x = linearScale([0, data.points.length - 1], [padL, width - padR]);
   const y = linearScale([0, maxCost], [height - padB, padT]);
@@ -66,7 +67,7 @@ export function CostTrendChart({ data, range, height = 168, onSelectBucket, clas
         viewBox={`0 0 ${width} ${height}`}
         className="block h-auto w-full min-w-[26rem]"
         role="img"
-        aria-label={`Spend and token volume. ${formatCost(data.totalUsd)} and ${formatTokens(data.totalTokens)} tokens in this range, against a budget of ${formatCost(data.budgetPerBucketUsd)} per bucket.`}
+        aria-label={`Spend and token volume. ${formatCost(data.totalUsd)} and ${formatTokens(data.totalTokens)} tokens in this range${hasBudget ? `, against a budget of ${formatCost(data.budgetPerBucketUsd)} per bucket` : "; no spend budget is configured"}.`}
         onMouseLeave={() => setHover(null)}
       >
         {/* Token volume, behind everything — context, not the subject. */}
@@ -75,7 +76,7 @@ export function CostTrendChart({ data, range, height = 168, onSelectBucket, clas
 
         {/* Cost bars. */}
         {data.points.map((p, i) => {
-          const over = p.costUsd > data.budgetPerBucketUsd;
+          const over = hasBudget && p.costUsd > data.budgetPerBucketUsd;
           const active = hover === i;
           return (
             <rect
@@ -96,16 +97,20 @@ export function CostTrendChart({ data, range, height = 168, onSelectBucket, clas
         })}
 
         {/* Budget line, on top of the bars so an overspend reads as a breach. */}
-        <line
-          x1={padL} x2={width - padR} y1={budgetY} y2={budgetY}
-          stroke="var(--status-waiting)" strokeWidth={1} strokeDasharray="4 3"
-        />
-        <text
-          x={width - padR} y={budgetY - 4} textAnchor="end"
-          className="font-ui" fontSize={9} fill="var(--status-waiting)"
-        >
-          budget {formatCost(data.budgetPerBucketUsd)}
-        </text>
+        {hasBudget ? (
+          <>
+            <line
+              x1={padL} x2={width - padR} y1={budgetY} y2={budgetY}
+              stroke="var(--status-waiting)" strokeWidth={1.5} strokeDasharray="5 3"
+            />
+            <text
+              x={width - padR} y={budgetY - 5} textAnchor="end"
+              className="font-ui" fontSize={10} fill="var(--status-waiting)"
+            >
+              budget {formatCost(data.budgetPerBucketUsd)}
+            </text>
+          </>
+        ) : null}
 
         {/* Y axis. */}
         {[maxCost / 2, maxCost].map((v) => (

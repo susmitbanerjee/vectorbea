@@ -34,8 +34,8 @@ export interface HealthStripProps {
 export function HealthStrip({ health, className }: HealthStripProps) {
   const { inFlight, failureBudget, approvals, spend } = health;
 
-  const overBudget = failureBudget.burnRatio > 1;
-  const projectedOver = spend.projectedUsd > spend.budgetUsd;
+  const overBudget = failureBudget.burnRatio !== null && failureBudget.burnRatio > 1;
+  const projectedOver = spend.budgetUsd !== null && spend.projectedUsd > spend.budgetUsd;
 
   /**
    * Past about 2× the allowance, a percentage stops being readable — "983%
@@ -43,10 +43,14 @@ export function HealthStrip({ health, className }: HealthStripProps) {
    * magnitude legible at any scale, which is the whole reason this metric
    * replaced "41% success rate".
    */
-  const burnLabel = failureBudget.burnRatio > 2
-    ? `${failureBudget.burnRatio.toFixed(1)}×`
-    : `${Math.round(failureBudget.burnRatio * 100)}%`;
-  const burnSuffix = failureBudget.burnRatio > 2 ? "over budget" : "burned";
+  const burnLabel = failureBudget.burnRatio === null
+    ? "Not set"
+    : failureBudget.burnRatio > 2
+      ? `${failureBudget.burnRatio.toFixed(1)}×`
+      : `${Math.round(failureBudget.burnRatio * 100)}%`;
+  const burnSuffix = failureBudget.burnRatio === null
+    ? "configure"
+    : failureBudget.burnRatio > 2 ? "over budget" : "burned";
 
   return (
     <section
@@ -93,7 +97,9 @@ export function HealthStrip({ health, className }: HealthStripProps) {
 
       {/* ── Failure budget ─────────────────────────────────────────────── */}
       <HealthCell
-        href={"/runs?status=failed" as Route}
+        href={(failureBudget.target === null
+          ? "/settings/usage#operational-budgets"
+          : "/runs?status=failed") as Route}
         icon={BudgetBurnIcon}
         label="Failure budget"
         tone={overBudget ? "failed" : "neutral"}
@@ -117,12 +123,18 @@ export function HealthStrip({ health, className }: HealthStripProps) {
         {/* Stacked under the metric, matching the spend cell. Side by side, the
             chart and the label fought for the same 40px once the strip narrowed
             to two columns. */}
-        <Burndown series={failureBudget.series} height={26} className="mt-2" />
+        {failureBudget.target !== null ? (
+          <Burndown series={failureBudget.series} height={26} className="mt-2" />
+        ) : null}
 
         <CellFoot>
-          <span className="tabular">{failureBudget.spent}</span> of{" "}
-          <span className="tabular">{failureBudget.allowed}</span> allowed ·{" "}
-          {(failureBudget.target * 100).toFixed(0)}% target
+          {failureBudget.target === null || failureBudget.allowed === null ? (
+            "Set a reliability target in Settings"
+          ) : (
+            <><span className="tabular">{failureBudget.spent}</span> of{" "}
+            <span className="tabular">{failureBudget.allowed.toFixed(2)}</span> allowed ·{" "}
+            {(failureBudget.target * 100).toFixed(2)}% target</>
+          )}
         </CellFoot>
       </HealthCell>
 
@@ -131,29 +143,32 @@ export function HealthStrip({ health, className }: HealthStripProps) {
         href={"/approvals" as Route}
         icon={SlaTimerIcon}
         label="Approvals aging"
-        tone={approvals.breached > 0 ? "failed" : approvals.pressured ? "waiting" : "neutral"}
+        tone={approvals.available && approvals.breached > 0 ? "failed" : approvals.available && approvals.pressured ? "waiting" : "neutral"}
       >
-        <div className="flex items-baseline gap-2">
-          <Text variant="display-md" tone="max" tabular>
-            <CountRoll value={approvals.count} />
-          </Text>
-          <Text variant="body-sm" tone="muted">waiting</Text>
-        </div>
-        <CellFoot>
-          oldest{" "}
-          <span
-            className={cn(
-              "tabular",
-              approvals.pressured ? "text-status-waiting" : undefined,
-            )}
-          >
-            {formatSpan(approvals.oldestWaitedMs)}
-          </span>{" "}
-          of a {formatSpan(approvals.oldestSlaMs)} SLA
-          {approvals.breached > 0 ? (
-            <> · <span className="text-status-failed">{approvals.breached} breached</span></>
-          ) : null}
-        </CellFoot>
+        {approvals.available ? (
+          <>
+            <div className="flex items-baseline gap-2">
+              <Text variant="display-md" tone="max" tabular>
+                <CountRoll value={approvals.count} />
+              </Text>
+              <Text variant="body-sm" tone="muted">waiting</Text>
+            </div>
+            <CellFoot>
+              oldest <span className={cn("tabular", approvals.pressured ? "text-status-waiting" : undefined)}>
+                {formatSpan(approvals.oldestWaitedMs)}
+              </span>{" "}
+              of a {formatSpan(approvals.oldestSlaMs)} SLA
+              {approvals.breached > 0 ? (
+                <> · <span className="text-status-failed">{approvals.breached} breached</span></>
+              ) : null}
+            </CellFoot>
+          </>
+        ) : (
+          <>
+            <Text variant="display-md" tone="max">Unavailable</Text>
+            <CellFoot>Approval telemetry did not answer; no count is inferred.</CellFoot>
+          </>
+        )}
       </HealthCell>
 
       {/* ── Spend ──────────────────────────────────────────────────────── */}
@@ -167,17 +182,17 @@ export function HealthStrip({ health, className }: HealthStripProps) {
           <Text variant="display-md" tone="max" tabular>
             {formatCost(spend.spentUsd)}
           </Text>
-          <Text variant="body-sm" tone="muted">of {formatCost(spend.budgetUsd)}</Text>
+          <Text variant="body-sm" tone="muted">
+            {spend.budgetUsd === null ? "no budget set" : `of ${formatCost(spend.budgetUsd)}`}
+          </Text>
         </div>
 
-        <SpendBar
-          spent={spend.spentUsd}
-          projected={spend.projectedUsd}
-          budget={spend.budgetUsd}
-        />
+        {spend.budgetUsd !== null ? (
+          <SpendBar spent={spend.spentUsd} projected={spend.projectedUsd} budget={spend.budgetUsd} />
+        ) : null}
 
         <CellFoot>
-          projecting{" "}
+          {spend.budgetUsd === null ? "Set a daily budget · projecting " : "projecting "}
           <span className={cn("tabular", projectedOver ? "text-status-waiting" : undefined)}>
             {formatCost(spend.projectedUsd)}
           </span>{" "}

@@ -2,7 +2,7 @@ import type { contracts } from "@vectorbea/shared";
 
 import {
   DAY, HOUR,
-  type AttentionItem, type CostTrend, type FleetRow, type FleetSort,
+  type AttentionItem, type ControlBudgetSettings, type CostTrend, type FleetRow, type FleetSort,
   type HealthSnapshot, type LatencyDistribution, type RunStatus, type TimeRange,
 } from "./model";
 
@@ -106,6 +106,7 @@ export function deriveHealth(
   metrics: ControlMetrics | undefined,
   incidents: FailureIncident[],
   now: number,
+  budget?: ControlBudgetSettings,
 ): HealthSnapshot {
   /**
    * Queue depth and queue age come from ALL runs, not the selected window.
@@ -130,20 +131,13 @@ export function deriveHealth(
   );
   const failures = terminal.filter((r) => r.status !== "completed");
 
-  /**
-   * Failure budget.
-   *
-   * There is no policy endpoint, so the 99% target is the platform default
-   * rather than something this workspace configured. `allowed` is derived from
-   * it and the observed run volume; both are real arithmetic over real runs.
-   */
-  const target = 0.99;
-  const allowed = Math.max(1, Math.round(terminal.length * (1 - target)));
+  const target = budget?.reliabilityTarget ?? null;
+  const allowed = target === null ? null : terminal.length * (1 - target);
   const spent = failures.length;
 
   // Burn-down across the window, oldest → newest, as failures accumulate.
   const ordered = [...terminal].sort((a, b) => runTime(a) - runTime(b));
-  const series = ordered.map((run, i) => {
+  const series = allowed === null || allowed <= 0 ? [] : ordered.map((run, i) => {
     const spentSoFar = ordered.slice(0, i + 1).filter((r) => r.status !== "completed").length;
     return {
       t: runTime(run),
@@ -167,7 +161,14 @@ export function deriveHealth(
 
   return {
     inFlight: { running, queued, previousRunning: running, oldestQueuedMs },
-    failureBudget: { target, allowed, spent, burnRatio: spent / allowed, series, topCause },
+    failureBudget: {
+      target,
+      allowed,
+      spent,
+      burnRatio: allowed === null || allowed <= 0 ? null : spent / allowed,
+      series,
+      topCause,
+    },
     /**
      * Approvals are ZERO, not unknown-shaped.
      *
@@ -176,12 +177,17 @@ export function deriveHealth(
      * aging figure, the count is zero and the band shows its own empty copy.
      * When the endpoint is fixed this becomes a real query.
      */
-    approvals: { count: 0, oldestWaitedMs: 0, oldestSlaMs: DAY, pressured: false, breached: 0 },
+    approvals: {
+      available: false,
+      count: 0,
+      oldestWaitedMs: 0,
+      oldestSlaMs: (budget?.approvalSlaMinutes ?? 1_440) * 60_000,
+      pressured: false,
+      breached: 0,
+    },
     spend: {
       spentUsd,
-      // No budget endpoint exists. Zero means "no budget set", which the strip
-      // renders as spend-without-a-target rather than as 100% of nothing.
-      budgetUsd: 0,
+      budgetUsd: budget?.dailySpendLimitUsd ?? null,
       projectedUsd: dayElapsed > 0 ? spentUsd / dayElapsed : spentUsd,
       dayElapsed,
       series: todays
@@ -372,7 +378,12 @@ export function deriveLatency(runs: RunSummary[]): LatencyDistribution {
   };
 }
 
-export function deriveCostTrend(runs: RunSummary[], range: TimeRange, now: number): CostTrend {
+export function deriveCostTrend(
+  runs: RunSummary[],
+  range: TimeRange,
+  now: number,
+  budget?: ControlBudgetSettings,
+): CostTrend {
   const span = range.durationMs ?? DAY;
   const bucketMs = range.bucketMs;
   const count = Math.max(1, Math.round(span / bucketMs));
@@ -393,8 +404,9 @@ export function deriveCostTrend(runs: RunSummary[], range: TimeRange, now: numbe
 
   return {
     points,
-    // No cost-budget endpoint exists, so there is no overlay line to draw.
-    budgetPerBucketUsd: 0,
+    budgetPerBucketUsd: budget?.dailySpendLimitUsd
+      ? budget.dailySpendLimitUsd * (bucketMs / DAY)
+      : 0,
     totalUsd: points.reduce((s, p) => s + p.costUsd, 0),
     totalTokens: points.reduce((s, p) => s + p.tokens, 0),
   };
