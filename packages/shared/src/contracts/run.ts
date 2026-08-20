@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDateTime, jsonObject, money, page, uuid } from "./primitives";
+import { isoDateTime, jsonObject, maybe, money, page, uuid } from "./primitives";
 
 /**
  * Run contracts.
@@ -15,19 +15,23 @@ import { isoDateTime, jsonObject, money, page, uuid } from "./primitives";
  */
 
 /*
- * A NOTE ON `.nullish()` BELOW
- * ----------------------------
- * Several fields are `.nullish()` rather than `.nullable()`. That is not
- * defensive padding — it is what the API actually does.
+ * A NOTE ON `maybe()` AND `.nullish()` BELOW
+ * ------------------------------------------
+ * Nullable columns are wrapped in `maybe()` rather than marked `.nullable()`.
+ * That is not defensive padding — it is what the API actually does.
  *
- * Every response is assembled as a Kotlin `mapOf(...)`, and Jackson's default
- * inclusion drops null entries rather than emitting `"field": null`. So an
- * absent value arrives as a MISSING KEY, and `z.string().nullable()` rejects a
- * missing key with "Required" — the whole response fails validation and the
- * transport raises `contract_mismatch`.
+ * Every response is assembled as a Kotlin `mapOf(...)`, and the response mapper
+ * is configured `JsonInclude.Include.NON_NULL`, so it drops null entries rather
+ * than emitting `"field": null`. An absent value therefore arrives as a MISSING
+ * KEY, and `z.string().nullable()` rejects a missing key with "Required" — the
+ * whole response fails validation and the transport raises `contract_mismatch`.
  *
  * That is why live data reached no screen: five of the eight endpoints the
  * Control page needs were failing validation before a component ever saw them.
+ * Fixing those by hand left the same latent bug in forty-eight other fields,
+ * one of which (`workflow.currentVersionId`) broke the workflows list the first
+ * time anybody created a workflow. `maybe()` is that fix applied once, in
+ * `primitives.ts`, so the next nullable column cannot reintroduce it.
  */
 
 export const runStatus = z.enum([
@@ -92,8 +96,8 @@ export const runSummary = z.object({
 export type RunSummary = z.infer<typeof runSummary>;
 
 export const runDetail = runSummary.extend({
-  outputJson: jsonObject.nullable(),
-  errorJson: jsonObject.nullable(),
+  outputJson: maybe(jsonObject),
+  errorJson: maybe(jsonObject),
 });
 export type RunDetail = z.infer<typeof runDetail>;
 
@@ -107,8 +111,8 @@ export const runEvent = z.object({
   environmentId: uuid,
   sequence: z.number(),
   type: z.string(),
-  status: z.string().nullable(),
-  source: z.string().nullable(),
+  status: maybe(z.string()),
+  source: maybe(z.string()),
   timestamp: isoDateTime,
   durationMs: z.number().nullish(),
 });
@@ -136,10 +140,10 @@ export const queuePositionWaiting = z.object({
   status: z.string(),
   queued: z.literal(true),
   position: z.number(),
-  executionClass: z.string().nullable(),
+  executionClass: maybe(z.string()),
   priority: z.number(),
   reason: z.enum(["tenant_cap", "global_saturation"]),
-  etaSeconds: z.number().nullable(),
+  etaSeconds: maybe(z.number()),
   throughputPerSecond: z.number(),
   message: z.string(),
 });
@@ -148,7 +152,15 @@ export const queuePositionSettled = z.object({
   runId: uuid,
   status: z.string(),
   queued: z.literal(false),
-  position: z.null(),
+  /**
+   * Always null — a run that is no longer waiting has no position.
+   *
+   * `maybe()` rather than `z.null()` because the route writes
+   * `"position" to null` and the NON_NULL mapper then drops the key, so the
+   * literal-null form matched a payload the API cannot produce. `queued` is
+   * what discriminates the union; this field only has to survive being absent.
+   */
+  position: maybe(z.null()),
   message: z.string(),
 });
 

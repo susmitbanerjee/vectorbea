@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDateTime, jsonObject, page, uuid } from "./primitives";
+import { isoDateTime, jsonObject, maybe, page, uuid } from "./primitives";
 
 /**
  * Approvals, failure incidents, workers, control metrics, debug snapshots.
@@ -143,15 +143,15 @@ export const controlMetrics = z.object({
     queueByPriority: z.array(z.object({ priority: z.string(), depth: z.number() })),
     inFlight: z.number(),
     inFlightByClass: z.record(z.string(), z.number()).nullish(),
-    maxConcurrentRuns: z.number().nullable(),
-    utilisation: z.number().nullable(),
+    maxConcurrentRuns: maybe(z.number()),
+    utilisation: maybe(z.number()),
   }),
   fleet: z.object({
     workersAlive: z.number(),
     slotsTotal: z.number(),
     slotsAvailable: z.number(),
   }),
-  waitReason: z.string().nullable(),
+  waitReason: maybe(z.string()),
   freshness: z.record(z.string(), z.string()),
 });
 export type ControlMetrics = z.infer<typeof controlMetrics>;
@@ -181,15 +181,15 @@ export const controlActivityList = z.array(controlActivityEvent);
  */
 export const nodeDebugSummary = z.object({
   nodeId: z.string(),
-  nodeType: z.string().nullable(),
-  nodeName: z.string().nullable(),
+  nodeType: maybe(z.string()),
+  nodeName: maybe(z.string()),
   status: z.string(),
   attempt: z.number(),
-  errorType: z.string().nullable(),
-  humanFailureReason: z.string().nullable(),
-  startedAt: isoDateTime.nullable(),
-  finishedAt: isoDateTime.nullable(),
-  durationMs: z.number().nullable(),
+  errorType: maybe(z.string()),
+  humanFailureReason: maybe(z.string()),
+  startedAt: maybe(isoDateTime),
+  finishedAt: maybe(isoDateTime),
+  durationMs: maybe(z.number()),
   hasFailure: z.boolean(),
 });
 export type NodeDebugSummary = z.infer<typeof nodeDebugSummary>;
@@ -217,10 +217,10 @@ export const variableSource = z.object({
   variable: z.string(),
   /** The input field this expression contributes to. */
   field: z.string(),
-  resolvedValue: z.unknown().nullable(),
+  resolvedValue: maybe(z.unknown()),
   /** Node label when it could be matched, otherwise the raw id from the template. */
-  sourceNode: z.string().nullable(),
-  sourcePath: z.string().nullable(),
+  sourceNode: maybe(z.string()),
+  sourcePath: maybe(z.string()),
   missing: z.boolean(),
 });
 export type VariableSource = z.infer<typeof variableSource>;
@@ -238,27 +238,27 @@ export const nodeDebugDetail = z.object({
   id: uuid,
   workflowRunId: uuid,
   nodeId: z.string(),
-  nodeType: z.string().nullable(),
-  nodeName: z.string().nullable(),
+  nodeType: maybe(z.string()),
+  nodeName: maybe(z.string()),
   attempt: z.number(),
   status: z.string(),
   /** Field -> raw template string, before any interpolation. */
-  inputTemplate: z.record(z.string(), z.unknown()).nullable(),
+  inputTemplate: maybe(z.record(z.string(), z.unknown())),
   /** Field -> resolved value, after interpolation. */
-  resolvedInput: z.record(z.string(), z.unknown()).nullable(),
+  resolvedInput: maybe(z.record(z.string(), z.unknown())),
   /** Redundant duplicate of variableSources. See the note above. */
-  resolvedVariables: z.array(variableSource).nullable(),
-  variableSources: z.array(variableSource).nullable(),
-  output: z.unknown().nullable(),
-  parsedOutput: z.unknown().nullable(),
-  schemaValidation: z.unknown().nullable(),
-  errorType: z.string().nullable(),
-  errorMessage: z.string().nullable(),
-  humanFailureReason: z.string().nullable(),
-  suggestedFix: z.string().nullable(),
-  modelProvider: z.string().nullable(),
-  modelName: z.string().nullable(),
-  tokensInput: z.number().nullable(),
-  tokensOutput: z.number().nullable(),
+  resolvedVariables: maybe(z.array(variableSource)),
+  variableSources: maybe(z.array(variableSource)),
+  output: maybe(z.unknown()),
+  parsedOutput: maybe(z.unknown()),
+  schemaValidation: maybe(z.unknown()),
+  errorType: maybe(z.string()),
+  errorMessage: maybe(z.string()),
+  humanFailureReason: maybe(z.string()),
+  suggestedFix: maybe(z.string()),
+  modelProvider: maybe(z.string()),
+  modelName: maybe(z.string()),
+  tokensInput: maybe(z.number()),
+  tokensOutput: maybe(z.number()),
 });
 export type NodeDebugDetail = z.infer<typeof nodeDebugDetail>;

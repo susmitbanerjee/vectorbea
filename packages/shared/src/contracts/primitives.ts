@@ -37,6 +37,34 @@ export const uuid = z.string().uuid();
  */
 export const isoDateTime = z.string().min(1);
 
+/**
+ * A field the API OMITS when it is null.
+ *
+ * `http/Json.kt` configures the response mapper with
+ * `JsonInclude.Include.NON_NULL`, so a null never reaches the wire as
+ * `"field": null` — the key is simply absent. `.nullable()` therefore describes
+ * something this API never sends: it permits null and still requires the key,
+ * so the first row with a null in that column fails validation and takes the
+ * whole response — every other row with it — down as `contract_mismatch`.
+ *
+ * That is not hypothetical. `workflow.currentVersionId` was `uuid.nullable()`,
+ * and a workflow has no current version between its creation and its first
+ * version being written — so creating a workflow made `GET /api/workflows`
+ * unparseable for the entire list.
+ *
+ * Accepts absent OR explicit null, and normalises both to `null`. Consumers
+ * keep the single `T | null` they already handle: "the key was missing" and
+ * "the value was null" are the same fact about the row, and making screens
+ * distinguish them would be inventing a difference the database does not have.
+ *
+ * Use this for every nullable column. Reach for `.nullable()` only where the
+ * API is known to emit an explicit null — which, while the mapper is NON_NULL,
+ * is nowhere.
+ */
+export function maybe<T extends z.ZodTypeAny>(schema: T) {
+  return schema.nullish().transform((value) => value ?? null);
+}
+
 /** Arbitrary JSON the API passes through from a `jsonb` column. */
 export const jsonObject = z.record(z.string(), z.unknown());
 

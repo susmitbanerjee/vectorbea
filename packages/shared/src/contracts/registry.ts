@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDateTime, jsonObject, page, uuid } from "./primitives";
+import { isoDateTime, jsonObject, maybe, page, uuid } from "./primitives";
 
 /**
  * Workflows, agents, tools, connections.
@@ -83,10 +83,10 @@ export const workflow = z.object({
   workspaceId: uuid,
   environmentId: uuid,
   name: z.string(),
-  slug: z.string().nullable(),
+  slug: maybe(z.string()),
   description: z.string().nullish(),
   status: z.string(),
-  currentVersionId: uuid.nullable(),
+  currentVersionId: maybe(uuid),
   stepCount: z.number(),
   agentCount: z.number(),
   toolCount: z.number(),
@@ -107,7 +107,7 @@ export const workflowVersion = z.object({
   retryPolicy: jsonObject,
   timeoutPolicy: jsonObject,
   budgetPolicy: jsonObject,
-  replaySupport: z.string().nullable(),
+  replaySupport: maybe(z.string()),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -141,11 +141,11 @@ export const connection = z.object({
   allowedPaths: z.array(z.string()),
   allowedSchemas: z.array(z.string()),
   allowedTables: z.array(z.string()),
-  lastTestedAt: isoDateTime.nullable(),
-  lastTestStatus: z.string().nullable(),
-  lastTestLatencyMs: z.number().nullable(),
-  lastTestErrorCode: z.string().nullable(),
-  lastTestErrorMessageSanitized: z.string().nullable(),
+  lastTestedAt: maybe(isoDateTime),
+  lastTestStatus: maybe(z.string()),
+  lastTestLatencyMs: maybe(z.number()),
+  lastTestErrorCode: maybe(z.string()),
+  lastTestErrorMessageSanitized: maybe(z.string()),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -199,7 +199,7 @@ export function roleAtLeast(role: WorkspaceRole, required: WorkspaceRole): boole
 export const meMembership = z.object({
   id: uuid,
   name: z.string(),
-  slug: z.string().nullable(),
+  slug: maybe(z.string()),
   role: z.unknown().transform(normalizeWorkspaceRole),
 });
 export type MeMembership = z.infer<typeof meMembership>;
@@ -207,10 +207,10 @@ export type MeMembership = z.infer<typeof meMembership>;
 export const me = z.object({
   user: z.object({
     id: uuid,
-    supabaseUserId: z.string().nullable(),
-    email: z.string().nullable(),
+    supabaseUserId: maybe(z.string()),
+    email: maybe(z.string()),
   }),
   workspaces: z.array(meMembership),
-  defaultWorkspaceId: uuid.nullable(),
+  defaultWorkspaceId: maybe(uuid),
 });
 export type Me = z.infer<typeof me>;
