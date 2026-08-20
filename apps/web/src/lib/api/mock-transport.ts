@@ -1,4 +1,8 @@
 import { AGENTS, CONNECTIONS, RUNS, TOOLS, WORKFLOWS } from "~/mocks/fixtures";
+import {
+  createMockSession, getMockSession, mockBuildSteps, mockPlan,
+  requirementToApi, updateMockRequirement,
+} from "~/mocks/architect-api";
 import { WORKSPACES } from "~/mocks/shell";
 import type { Run as UiRun, Workflow as UiWorkflow } from "~/mocks/domain";
 import { VectorbeaApiError } from "./errors";
@@ -315,6 +319,327 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         })),
         init,
       ),
+  ],
+
+  /* ── Workflow writes ──────────────────────────────────────────────────────
+     Without these, `POST /api/workflows` fell through to the catch-all echo at
+     the bottom of the transport, which returns `{ ok: true }` — so the create
+     form "succeeded" and then rendered an undefined id. A mutation with a
+     contract needs a mock that satisfies the contract. */
+  [
+    "POST",
+    "/api/workflows",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; slug?: string; description?: string; status?: string };
+      const name = body.name ?? "Untitled workflow";
+      const now = new Date().toISOString();
+      return {
+        id: uuidFrom(`wf_created_${name}_${now}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name,
+        slug: body.slug ?? name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+        description: body.description ?? null,
+        status: body.status ?? "draft",
+        currentVersionId: null,
+        stepCount: 0,
+        agentCount: 0,
+        toolCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/workflows/:id/versions",
+    (params, init) => {
+      const body = (init.body ?? {}) as Record<string, unknown>;
+      const now = new Date().toISOString();
+      return {
+        id: uuidFrom(`wfv_${params.id}_${now}`),
+        workflowId: params.id,
+        version: 1,
+        graph: body.graph ?? {},
+        inputSchema: body.inputSchema ?? {},
+        outputSchema: body.outputSchema ?? {},
+        triggerConfig: body.triggerConfig ?? {},
+        retryPolicy: body.retryPolicy ?? {},
+        timeoutPolicy: body.timeoutPolicy ?? {},
+        budgetPolicy: body.budgetPolicy ?? {},
+        replaySupport: (body.replaySupport as string) ?? "full",
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+  ],
+
+  /* ── Architect ────────────────────────────────────────────────────────────
+     The whole seven-stage pipeline, so the flow is walkable — and capturable —
+     without a running Kotlin API or an LLM key. Responses are the API's shapes,
+     adapted from the scripted fixture in `~/mocks/architect-api`. */
+  [
+    "GET",
+    "/api/architect/usage",
+    () => ({
+      used: 0,
+      limit: 1,
+      remaining: 1,
+      periodDays: 30,
+      locked: false,
+      lastBuildAt: null,
+      resetAt: new Date(Date.now() + 26 * 86_400_000).toISOString(),
+    }),
+  ],
+  [
+    "POST",
+    "/api/architect/sessions",
+    (_params, init) => {
+      const goal = String((init.body as { goal?: string } | undefined)?.goal ?? "");
+      const id = uuidFrom(`architect_${goal.slice(0, 64)}`);
+      const session = createMockSession(id, goal);
+      return {
+        id: session.id,
+        status: session.status,
+        currentStage: session.currentStage,
+        userGoal: session.goal,
+        // No clarification questions: the scripted prompt is specific enough to
+        // design against, and inventing questions would make the fixture flow
+        // depend on answers nobody can give meaningfully.
+        clarificationQuestions: [],
+        needsClarification: false,
+        createdAt: session.createdAt,
+      };
+    },
+  ],
+  [
+    "GET",
+    "/api/architect/sessions/:id",
+    (params) => {
+      const session = getMockSession(params.id);
+      if (!session) return notFound(`/api/architect/sessions/${params.id}`);
+      return {
+        id: session.id,
+        status: session.status,
+        currentStage: session.currentStage,
+        userGoal: session.goal,
+        plan: session.currentStage === "goal_capture" ? null : mockPlan(),
+        connectionRequirements: session.requirements.map(requirementToApi),
+        workflowId: session.workflowId,
+        readinessStatus: session.workflowId ? "simulation_ready" : null,
+        createdAt: session.createdAt,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/generate-plan",
+    (params) => {
+      const session = getMockSession(params.id);
+      if (session) session.currentStage = "plan_review";
+      return {
+        id: params.id,
+        status: "plan_generated",
+        currentStage: "plan_review",
+        plan: mockPlan(),
+        connectionRequirements: (session?.requirements ?? []).map(requirementToApi),
+        generatedTools: [],
+        generatedAgents: [],
+        animationSteps: [],
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/revise-plan",
+    (params) => ({
+      id: params.id,
+      status: "plan_generated",
+      currentStage: "plan_review",
+      // The fixture plan is scripted, so a revision returns it unchanged rather
+      // than pretending to have applied an instruction it cannot interpret.
+      plan: mockPlan(),
+      connectionRequirements: (getMockSession(params.id)?.requirements ?? []).map(requirementToApi),
+      animationSteps: [],
+    }),
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/approve-plan",
+    (params) => {
+      const session = getMockSession(params.id);
+      if (session) session.currentStage = "connection_setup";
+      const requirements = (session?.requirements ?? []).map(requirementToApi);
+      return {
+        id: params.id,
+        status: "plan_approved",
+        currentStage: "connection_setup",
+        connectionRequirements: requirements,
+        needsConnections: requirements.length > 0,
+      };
+    },
+  ],
+  [
+    "GET",
+    "/api/architect/sessions/:id/connection-requirements",
+    (params) => {
+      const requirements = (getMockSession(params.id)?.requirements ?? []).map(requirementToApi);
+      return {
+        connectionRequirements: requirements,
+        allReady: requirements.every(
+          (r) => !r.requiredForSimulation
+            || ["test_passed", "selected_existing", "created", "simulation_placeholder"].includes(r.status),
+        ),
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/connection-requirements/:reqId/bind-existing",
+    (params, init) => {
+      const connectionId = String((init.body as { connectionId?: string } | undefined)?.connectionId ?? "");
+      updateMockRequirement(params.id, params.reqId, {
+        status: "selected_existing",
+        boundConnectionId: connectionId,
+        testStatus: null,
+        testError: null,
+      });
+      return { id: params.reqId, status: "selected_existing" };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/connection-requirements/:reqId/use-simulation",
+    (params) => {
+      updateMockRequirement(params.id, params.reqId, { status: "simulation_placeholder" });
+      return { id: params.reqId, status: "simulation_placeholder" };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/connection-requirements/:reqId/test",
+    (params) => {
+      updateMockRequirement(params.id, params.reqId, {
+        status: "test_passed",
+        testStatus: "passed",
+        testError: null,
+      });
+      return {
+        id: params.reqId,
+        status: "test_passed",
+        testStatus: "passed",
+        ok: true,
+        latencyMs: 42,
+        message: "Connected.",
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/generate-tools",
+    () => {
+      const tools = mockPlan().tools.map((tool, index) => ({
+        id: uuidFrom(`gt_${tool.tempToolId}`),
+        tempToolId: tool.tempToolId,
+        toolId: uuidFrom(`tool_real_${index}`),
+        name: tool.name,
+        type: tool.type,
+        status: "created",
+        riskLevel: tool.riskLevel,
+        requiresApproval: tool.requiresApproval,
+      }));
+      return { tools, created: tools.length, blocked: 0 };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/generate-agents",
+    () => {
+      const agents = mockPlan().agents.map((agent, index) => ({
+        id: uuidFrom(`ga_${agent.tempAgentId}`),
+        tempAgentId: agent.tempAgentId,
+        agentId: uuidFrom(`agent_real_${index}`),
+        name: agent.name,
+        type: agent.type,
+        role: agent.role,
+        status: "created",
+        allowedTempToolIds: agent.allowedTempToolIds,
+        boundToolIds: [],
+      }));
+      return { agents, created: agents.length };
+    },
+  ],
+  [
+    "POST",
+    "/api/architect/sessions/:id/create-workflow",
+    (params) => {
+      const plan = mockPlan();
+      const session = getMockSession(params.id);
+      const workflowId = uuidFrom(`wf_architect_${params.id}`);
+      if (session) {
+        session.workflowId = workflowId;
+        session.status = "workflow_created";
+        session.currentStage = "complete";
+      }
+      const simulated = (session?.requirements ?? []).filter((r) => r.status === "simulation_placeholder");
+      return {
+        workflowId,
+        workflowVersionId: uuidFrom(`wfv_architect_${params.id}`),
+        workflowName: plan.workflowName,
+        animationSteps: mockBuildSteps(),
+        readinessStatus: simulated.length > 0 ? "simulation_ready" : "real_ready",
+        readinessIssues: simulated.map((r) => ({
+          severity: "info",
+          code: "REAL_EXECUTION_LOCKED",
+          message: `Real execution needs credentials for ${r.name}, which is currently simulated.`,
+          targetType: "connection",
+        })),
+        toolsCreated: plan.tools.length,
+        agentsCreated: plan.agents.length,
+        status: "workflow_created",
+      };
+    },
+  ],
+  ["GET", "/api/architect/sessions/:id/build-steps", () => ({ buildSteps: mockBuildSteps() })],
+  [
+    "GET",
+    "/api/architect/sessions/:id/readiness",
+    (params) => {
+      const session = getMockSession(params.id);
+      return {
+        readinessStatus: session?.workflowId ? "simulation_ready" : "needs_connections",
+        readinessIssues: [],
+        simulationReady: Boolean(session?.workflowId),
+        realExecutionReady: false,
+      };
+    },
+  ],
+  [
+    "GET",
+    "/api/architect/connections",
+    (_params, init) => {
+      const preferred = String(init.query?.type ?? "").toLowerCase();
+      return {
+        connections: CONNECTIONS.map((connection) => ({
+          id: uuidFrom(connection.id),
+          name: connection.name,
+          type: connection.provider,
+          provider: connection.provider,
+          status: connection.status,
+          testStatus: connection.status,
+          testedAt: connection.lastCheckedAt,
+          typeMatches: preferred === "" || connection.provider.toLowerCase().includes(preferred)
+            || preferred.includes(connection.provider.toLowerCase()),
+        })),
+        total: CONNECTIONS.length,
+        preferredType: init.query?.type ? String(init.query.type) : undefined,
+      };
+    },
+  ],
+  [
+    "GET",
+    "/api/bootstrap",
+    () => ({ workspaceId: WORKSPACE_ID, environmentId: ENVIRONMENT_ID }),
   ],
 
   [

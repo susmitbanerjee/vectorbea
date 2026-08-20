@@ -1,5 +1,10 @@
 import { contracts } from "@vectorbea/shared";
 import type { Workspace } from "~/mocks/shell";
+import type {
+  AnimationStep, ArchitectPlan, ArchitectSession, ArchitectUsage,
+  ConnectionRequirement, CreatedWorkflowResult, GeneratedAgent, GeneratedTool,
+  ReadinessIssue, WorkspaceConnectionOption,
+} from "~/lib/architect/types";
 
 import { isMockMode } from "./config";
 import { createMockTransport } from "./mock-transport";
@@ -77,10 +82,61 @@ export interface RunListFilters extends Scope, PageParams {
   workflowId?: string;
 }
 
+/**
+ * `POST /api/workflows` body, as `WorkflowRoutes.CreateWorkflowBody` declares it.
+ *
+ * There is no trigger field, and that absence is the API's shape rather than an
+ * omission here: a workflow row carries name, slug, description and status only.
+ * The trigger lives on a VERSION, which is why creating a scheduled workflow is
+ * two calls rather than one.
+ */
+export interface CreateWorkflowBody {
+  name: string;
+  slug?: string;
+  description?: string | null;
+  /** One of `WORKFLOW_STATUSES`. Defaults to `draft` server-side. */
+  status?: string;
+}
+
+/** `POST /api/workflows/:id/versions` body. `graph` is the only required field. */
+export interface CreateWorkflowVersionBody {
+  graph: Record<string, unknown>;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  triggerConfig?: Record<string, unknown>;
+  retryPolicy?: Record<string, unknown>;
+  timeoutPolicy?: Record<string, unknown>;
+  budgetPolicy?: Record<string, unknown>;
+  replaySupport?: string;
+}
+
+/**
+ * How long an LLM-backed architect call is given before the transport aborts it.
+ *
+ * Plan generation calls a frontier model with a long prompt; 15 seconds is not
+ * enough and the abort is not free — `createWorkflow` holds a per-workspace
+ * advisory lock, so a client that walks away mid-build leaves the next attempt
+ * to 409 until the server finishes.
+ */
+const ARCHITECT_TIMEOUT_MS = 120_000;
+
+/**
+ * `GET /api/bootstrap`. Workspace and environment UUIDs, no auth required.
+ *
+ * This is the only endpoint that hands back an ENVIRONMENT id, which is why it
+ * is on the client at all: the workspace provider carries the environment as a
+ * display slug, and every write endpoint wants the UUID.
+ */
+export interface BootstrapIds {
+  workspaceId?: string;
+  environmentId?: string;
+}
+
 export interface VectorbeaClient {
   readonly transport: Transport;
 
   me(options?: RequestOptions): Promise<CurrentUser>;
+  bootstrap(options?: RequestOptions): Promise<BootstrapIds>;
   workspaces(options?: RequestOptions): Promise<Workspace[]>;
   controlMetrics(scope?: Scope, options?: RequestOptions): Promise<ControlMetrics>;
   controlActivity(
@@ -102,9 +158,124 @@ export interface VectorbeaClient {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Workflow>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
     versions(id: string, scope?: Scope, options?: RequestOptions): Promise<WorkflowVersion[]>;
+    /**
+     * `POST /api/workflows`. The environment is NOT optional here the way it is
+     * on a read: `WorkflowRoutes.create` calls `requireEnvironmentId()`, so a
+     * scope carrying the display slug instead of a UUID fails with a 400 rather
+     * than degrading to workspace scope. Callers resolve the real id through
+     * `useEnvironmentUuid()`.
+     */
+    create(body: CreateWorkflowBody, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
+    /**
+     * `POST /api/workflows/:id/versions`.
+     *
+     * Also what materialises a cron schedule: `WorkflowRoutes.syncSchedule`
+     * reads `triggerConfig` off this body, so a workflow created without a
+     * version has no schedule row no matter which trigger the form selected.
+     */
+    createVersion(
+      id: string,
+      body: CreateWorkflowVersionBody,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<WorkflowVersion>;
     run(id: string, input?: unknown, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+  };
+
+  /**
+   * AI Workflow Architect.
+   *
+   * Every call is workspace-scoped and most are LLM-backed, so they carry a far
+   * longer timeout than the 15s default — plan generation against a real model
+   * routinely takes 30–60 seconds, and timing one out mid-flight spends a
+   * workspace's rationed build for nothing.
+   */
+  architect: {
+    usage(scope?: Scope, options?: RequestOptions): Promise<ArchitectUsage>;
+    createSession(goal: string, scope?: Scope, options?: RequestOptions): Promise<ArchitectSession>;
+    session(id: string, scope?: Scope, options?: RequestOptions): Promise<ArchitectSession>;
+    generatePlan(
+      id: string,
+      answers?: Record<string, string>,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<ArchitectSession & { plan: ArchitectPlan }>;
+    revisePlan(
+      id: string,
+      instruction: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<ArchitectSession & { plan: ArchitectPlan }>;
+    approvePlan(
+      id: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ connectionRequirements: ConnectionRequirement[]; needsConnections: boolean }>;
+    connectionRequirements(
+      id: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ connectionRequirements: ConnectionRequirement[]; allReady: boolean }>;
+    bindConnection(
+      id: string,
+      requirementId: string,
+      connectionId: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ id: string; status: string }>;
+    useSimulation(
+      id: string,
+      requirementId: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ id: string; status: string }>;
+    testConnection(
+      id: string,
+      requirementId: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{
+      id: string; status: string; testStatus: string;
+      ok: boolean; latencyMs: number; message: string;
+    }>;
+    generateTools(
+      id: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ tools: GeneratedTool[]; created: number; blocked: number }>;
+    generateAgents(
+      id: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ agents: GeneratedAgent[]; created: number }>;
+    createWorkflow(
+      id: string,
+      connectionBindings?: Record<string, string>,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<CreatedWorkflowResult>;
+    buildSteps(
+      id: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ buildSteps: AnimationStep[] }>;
+    readiness(
+      id: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{
+      readinessStatus: string;
+      readinessIssues: ReadinessIssue[];
+      simulationReady: boolean;
+      realExecutionReady: boolean;
+    }>;
+    connections(
+      preferredType?: string,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ connections: WorkspaceConnectionOption[]; total: number; preferredType?: string }>;
   };
 
   agents: {
@@ -206,6 +377,8 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
 
     me: (options) => call<CurrentUser>("/api/me", { schema: contracts.me, ...options }),
 
+    bootstrap: (options) => call<BootstrapIds>("/api/bootstrap", { ...options }),
+
     workspaces: async (options) => {
       const payload = await call<{ workspaces?: Workspace[] }>("/api/workspaces", {
         ...options,
@@ -279,6 +452,18 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           body: input ?? {},
           ...req(scope, undefined, options),
         }),
+      create: (body, scope, options) =>
+        call<Workflow>("/api/workflows", {
+          method: "POST",
+          body,
+          ...req(scope, contracts.workflow, options),
+        }),
+      createVersion: (id, body, scope, options) =>
+        call<WorkflowVersion>(`/api/workflows/${id}/versions`, {
+          method: "POST",
+          body,
+          ...req(scope, contracts.workflowVersion, options),
+        }),
       update: (id, patch, scope, options) =>
         call<Workflow>(`/api/workflows/${id}`, {
           method: "PATCH",
@@ -287,6 +472,130 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         }),
       delete: (id, scope, options) =>
         call<void>(`/api/workflows/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+    },
+
+    /**
+     * Architect calls are deliberately UNVALIDATED — no `schema` argument.
+     *
+     * The plan body is model-authored and its optional fields come and go with
+     * the prompt version. A Zod contract over it would convert "the model left
+     * out safetyNotes" into a hard client error on a response that is otherwise
+     * perfectly usable, and it would do so after the workspace had already
+     * spent one of its rationed builds. The types in `~/lib/architect/types`
+     * describe the shape; the view treats every optional field as optional.
+     */
+    architect: {
+      usage: (scope, options) =>
+        call<ArchitectUsage>("/api/architect/usage", req(scope, undefined, options)),
+
+      createSession: (goal, scope, options) =>
+        call<ArchitectSession>("/api/architect/sessions", {
+          method: "POST",
+          body: { goal },
+          timeoutMs: ARCHITECT_TIMEOUT_MS,
+          ...req(scope, undefined, options),
+        }),
+
+      session: (id, scope, options) =>
+        call<ArchitectSession>(`/api/architect/sessions/${id}`, req(scope, undefined, options)),
+
+      generatePlan: (id, answers, scope, options) =>
+        call<ArchitectSession & { plan: ArchitectPlan }>(
+          `/api/architect/sessions/${id}/generate-plan`,
+          {
+            method: "POST",
+            body: { answers: answers ?? {} },
+            timeoutMs: ARCHITECT_TIMEOUT_MS,
+            ...req(scope, undefined, options),
+          },
+        ),
+
+      revisePlan: (id, instruction, scope, options) =>
+        call<ArchitectSession & { plan: ArchitectPlan }>(
+          `/api/architect/sessions/${id}/revise-plan`,
+          {
+            method: "POST",
+            body: { instruction },
+            timeoutMs: ARCHITECT_TIMEOUT_MS,
+            ...req(scope, undefined, options),
+          },
+        ),
+
+      approvePlan: (id, scope, options) =>
+        call<{ connectionRequirements: ConnectionRequirement[]; needsConnections: boolean }>(
+          `/api/architect/sessions/${id}/approve-plan`,
+          { method: "POST", ...req(scope, undefined, options) },
+        ),
+
+      connectionRequirements: (id, scope, options) =>
+        call<{ connectionRequirements: ConnectionRequirement[]; allReady: boolean }>(
+          `/api/architect/sessions/${id}/connection-requirements`,
+          req(scope, undefined, options),
+        ),
+
+      bindConnection: (id, requirementId, connectionId, scope, options) =>
+        call<{ id: string; status: string }>(
+          `/api/architect/sessions/${id}/connection-requirements/${requirementId}/bind-existing`,
+          { method: "POST", body: { connectionId }, ...req(scope, undefined, options) },
+        ),
+
+      useSimulation: (id, requirementId, scope, options) =>
+        call<{ id: string; status: string }>(
+          `/api/architect/sessions/${id}/connection-requirements/${requirementId}/use-simulation`,
+          { method: "POST", ...req(scope, undefined, options) },
+        ),
+
+      testConnection: (id, requirementId, scope, options) =>
+        call<{
+          id: string; status: string; testStatus: string;
+          ok: boolean; latencyMs: number; message: string;
+        }>(
+          `/api/architect/sessions/${id}/connection-requirements/${requirementId}/test`,
+          { method: "POST", timeoutMs: 45_000, ...req(scope, undefined, options) },
+        ),
+
+      generateTools: (id, scope, options) =>
+        call<{ tools: GeneratedTool[]; created: number; blocked: number }>(
+          `/api/architect/sessions/${id}/generate-tools`,
+          { method: "POST", timeoutMs: ARCHITECT_TIMEOUT_MS, ...req(scope, undefined, options) },
+        ),
+
+      generateAgents: (id, scope, options) =>
+        call<{ agents: GeneratedAgent[]; created: number }>(
+          `/api/architect/sessions/${id}/generate-agents`,
+          { method: "POST", timeoutMs: ARCHITECT_TIMEOUT_MS, ...req(scope, undefined, options) },
+        ),
+
+      createWorkflow: (id, connectionBindings, scope, options) =>
+        call<CreatedWorkflowResult>(
+          `/api/architect/sessions/${id}/create-workflow`,
+          {
+            method: "POST",
+            body: { connectionBindings: connectionBindings ?? {} },
+            timeoutMs: ARCHITECT_TIMEOUT_MS,
+            ...req(scope, undefined, options),
+          },
+        ),
+
+      buildSteps: (id, scope, options) =>
+        call<{ buildSteps: AnimationStep[] }>(
+          `/api/architect/sessions/${id}/build-steps`,
+          req(scope, undefined, options),
+        ),
+
+      readiness: (id, scope, options) =>
+        call<{
+          readinessStatus: string;
+          readinessIssues: ReadinessIssue[];
+          simulationReady: boolean;
+          realExecutionReady: boolean;
+        }>(`/api/architect/sessions/${id}/readiness`, req(scope, undefined, options)),
+
+      connections: (preferredType, scope, options) =>
+        call<{ connections: WorkspaceConnectionOption[]; total: number; preferredType?: string }>(
+          "/api/architect/connections",
+          req(scope, undefined, options, { type: preferredType }),
+        ),
     },
 
     agents: {

@@ -136,7 +136,6 @@ const config = [
       "src/components/app/approvals/approvals-view.tsx",
       "src/components/app/approvals/gate-card.tsx",
       "src/components/app/approvals/sla-ring.tsx",
-      "src/components/app/architect/architect-view.tsx",
       "src/components/app/architect/blueprint-stream.tsx",
       "src/components/app/auth/ambient-run.tsx",
       "src/components/app/builder/builder-view.tsx",

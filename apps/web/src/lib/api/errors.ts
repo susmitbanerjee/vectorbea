@@ -82,6 +82,39 @@ function intentForStatus(status: number): ErrorIntent {
 export type FailureKind = "http" | "network" | "timeout" | "aborted" | "contract";
 
 /**
+ * Normalise the two error envelopes this API actually emits.
+ *
+ * `errors/ApiError.kt` wraps its failures as `{ error: { code, message } }`,
+ * and that is what most routes return. The architect routes do NOT go through
+ * it — they hand-roll `Response.json(429, { error: "CODE", message: "…" })`
+ * with the code as a bare STRING and the message alongside it.
+ *
+ * Reading only the nested shape turned every one of those into a generic
+ * "The API returned HTTP 429", discarding the one sentence the route wrote for
+ * the user — the reset date on a spent build quota, the reason a goal was out
+ * of scope. Both shapes collapse to the same envelope here.
+ */
+function readEnvelope(body: unknown): ApiErrorBody | null {
+  if (!body || typeof body !== "object" || !("error" in body)) return null;
+
+  const error = (body as { error: unknown }).error;
+
+  if (typeof error === "string") {
+    const flat = body as { message?: unknown; details?: unknown; requestId?: unknown };
+    return {
+      code: error,
+      message: typeof flat.message === "string" ? flat.message : error,
+      details: typeof flat.details === "object" && flat.details !== null
+        ? (flat.details as Record<string, unknown>)
+        : undefined,
+      requestId: typeof flat.requestId === "string" ? flat.requestId : undefined,
+    };
+  }
+
+  return (error as ApiErrorBody | null) ?? null;
+}
+
+/**
  * Every failure the API client can produce.
  *
  * Network faults and timeouts are the same class as an HTTP failure from a
@@ -102,6 +135,15 @@ export class VectorbeaApiError extends Error {
   /** Parsed from `Retry-After`, or from `details.retryAfterSeconds`. */
   readonly retryAfterSeconds: number | null;
   readonly body: ApiErrorBody | null;
+  /**
+   * The response body exactly as it arrived.
+   *
+   * Kept because not every route speaks the nested envelope: the architect
+   * routes attach domain payloads at the TOP level next to `error` (`usage` on
+   * a 429, `reason`/`category` on a 422), and those are the only things that
+   * let a screen say "your next build unlocks on the 3rd" instead of "429".
+   */
+  readonly raw: unknown;
 
   constructor(init: {
     message: string;
@@ -113,6 +155,7 @@ export class VectorbeaApiError extends Error {
     details?: Record<string, unknown>;
     retryAfterSeconds?: number | null;
     body?: ApiErrorBody | null;
+    raw?: unknown;
     cause?: unknown;
   }) {
     super(init.message, { cause: init.cause });
@@ -124,6 +167,7 @@ export class VectorbeaApiError extends Error {
     this.details = init.details ?? {};
     this.retryAfterSeconds = init.retryAfterSeconds ?? null;
     this.body = init.body ?? null;
+    this.raw = init.raw ?? null;
   }
 
   /** True when retrying the identical request could plausibly succeed. */
@@ -143,10 +187,7 @@ export class VectorbeaApiError extends Error {
     body: unknown,
     fallbackRequestId: string | null,
   ): VectorbeaApiError {
-    const envelope =
-      body && typeof body === "object" && "error" in body
-        ? ((body as { error: ApiErrorBody }).error ?? null)
-        : null;
+    const envelope = readEnvelope(body);
 
     const code = envelope?.code ?? `HTTP_${response.status}`;
     const requestId =
@@ -171,6 +212,7 @@ export class VectorbeaApiError extends Error {
       details,
       retryAfterSeconds,
       body: envelope,
+      raw: body,
     });
   }
 

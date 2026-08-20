@@ -6,7 +6,7 @@ import { Text } from "~/components/ui/text";
 import { cellPath } from "~/components/app/ribbon/geometry";
 import { layoutGraph } from "~/mocks/graph-layout";
 import { NODE_MARKS } from "~/components/icons/nodes";
-import type { Blueprint, BlueprintNode } from "~/mocks/architect";
+import type { Blueprint, BlueprintNode } from "~/lib/architect/blueprint";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE BLUEPRINT MATERIALISING — the moment the product is remembered for.

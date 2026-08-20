@@ -7,151 +7,160 @@ import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
+import { Input, Textarea } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Spinner } from "~/components/ui/spinner";
-import { formatCost, formatDuration } from "~/lib/format";
-import { CONNECTIONS } from "~/mocks/fixtures";
-import {
-  STAGES, QUOTA, EXAMPLE_PROMPTS, EMPTY_HINTS, ANALYSIS, BLUEPRINT,
-  manifestFor, buildStepsFor, requiredProviders, ERRORS,
-  type StageId, type StructuredHints, type Blueprint, type BlueprintNode,
-} from "~/mocks/architect";
+import { MonoId } from "~/components/ui/mono-id";
+import { formatPercent } from "~/lib/format";
+import { planToBlueprint, manifestForPlan, type Manifest } from "~/lib/architect/blueprint";
+import type {
+  ArchitectPlan, ClarifyQuestion, ConnectionRequirement,
+  ReadinessIssue, WorkspaceConnectionOption,
+} from "~/lib/architect/types";
+import type { ArchitectFailure } from "~/lib/architect/errors";
 import { useBlueprintStream, BlueprintCanvas, RationaleList } from "./blueprint-stream";
-import { RelativeTime } from "~/components/app/workflows/atoms";
+import {
+  useArchitectSession, STAGES,
+  type ArchitectSessionApi, type StageId,
+} from "./use-architect-session";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AI WORKFLOW ARCHITECT
 
-   The rail existed and did nothing. This makes each of its seven stages real,
-   and the state lives in ONE reducer rather than seven pieces of local state —
-   because the flow is cancellable at every stage and resumable after a
-   navigation, and both of those are impossible when the state is scattered
-   across the components that happen to be mounted.
+   Seven stages against the real `/api/architect/*` pipeline: a session is
+   created from the description, the model asks only the questions it genuinely
+   needs, the plan comes back and is drawn as it assembles, connections are
+   bound to real workspace credentials, and the build creates real tools, real
+   agents, a real workflow and its first version.
+
+   TWO THINGS DECIDE WHETHER A GENERATED PLAN IS TRUSTED, and both are on screen
+   rather than implied:
+
+   · RATIONALE PER DECISION. Every node says why it is there. A generated graph
+     is a claim; a generated graph that names the part of your description each
+     step came from is something you can check.
+   · WHAT WILL BE CREATED, BEFORE IT IS. The manifest in Review is the exact
+     resource list the build touches. Nothing outside it is written.
+
+   THE QUOTA IS SHOWN BEFORE THE PROMPT BOX, not after three paragraphs of
+   effort — one build per rolling window per workspace is a limit that has to be
+   discovered before the work, not at submission.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-const STORAGE_KEY = "vectorbea-architect-session";
+const EXAMPLE_PROMPTS = [
+  {
+    id: "renewals",
+    label: "Renewal outreach",
+    text: "Every morning, find contracts renewing in the next 30 days, draft outreach for each account, and post the batch to #billing-ops for a human to approve before anything is sent.",
+  },
+  {
+    id: "refunds",
+    label: "Refund approvals",
+    text: "When a refund over £500 is requested, pull the invoice and the account history, then ask billing to approve it before issuing the refund.",
+  },
+  {
+    id: "triage",
+    label: "Ticket triage",
+    text: "Classify every inbound support ticket by urgency and route anything urgent to the on-call rota in Slack.",
+  },
+  {
+    id: "digest",
+    label: "Failure digest",
+    text: "At the end of each day, collect failed runs, group them by root cause, and post the top three to the engineering channel.",
+  },
+];
 
-interface Session {
-  stage: StageId;
-  prompt: string;
-  hints: StructuredHints;
-  /** Findings revealed so far in Analyze. */
-  analysed: number;
-  blueprint: Blueprint | null;
-  /** Nodes the user removed before building. */
-  removed: string[];
-  name: string;
-  environment: string;
-  /** Build steps completed. -1 while not building. */
-  built: number;
-  failedAt: number | null;
-  error: string | null;
+/** Below this, the description is too thin for the model to design against. */
+const MIN_PROMPT = 24;
+const MAX_PROMPT = 2000;
+
+/**
+ * An instant, rendered deterministically in UTC.
+ *
+ * NOT `<RelativeTime>` from `~/components/app/workflows/atoms`: that one is
+ * pinned to a FROZEN clock (`NOW = 2026-08-11T14:20:00Z`) so the fixture
+ * screens produce identical screenshots on every capture run. Pointing it at a
+ * real quota reset date would render a confidently wrong "in 26d".
+ *
+ * A live relative time cannot be rendered here either — `Date.now()` differs
+ * between the server render and the client one, which React reports as a
+ * hydration mismatch. UTC is the honest middle: the same string on both sides,
+ * and unambiguous about which clock it is in.
+ */
+function InstantUtc({ iso }: { iso: string }) {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return null;
+  const d = new Date(at);
+  const date = d.toLocaleDateString("en-GB", {
+    day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+  });
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC",
+  });
+  return <time dateTime={iso}>{date} at {time} UTC</time>;
 }
 
-const EMPTY_SESSION: Session = {
-  stage: "describe",
-  prompt: "",
-  hints: EMPTY_HINTS,
-  analysed: 0,
-  blueprint: null,
-  removed: [],
-  name: "",
-  environment: "staging",
-  built: -1,
-  failedAt: null,
-  error: null,
-};
-
-export function ArchitectView({ quota = QUOTA }: { quota?: typeof QUOTA }) {
-  const [session, setSession] = React.useState<Session>(EMPTY_SESSION);
+export function ArchitectView() {
+  const session = useArchitectSession();
+  const { state } = session;
   const [selectedNode, setSelectedNode] = React.useState<string | null>(null);
 
-  const patch = React.useCallback((next: Partial<Session>) => {
-    setSession((current) => ({ ...current, ...next }));
-  }, []);
-
-  /* ── Resume ─────────────────────────────────────────────────────────────
-     Written on every change and read once after mount. Somebody who wrote a
-     paragraph, navigated away to create a connection and came back should find
-     their paragraph — and on a one-build-per-month quota, losing it is worse
-     than an inconvenience. */
-  React.useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setSession({ ...EMPTY_SESSION, ...JSON.parse(raw) });
-    } catch {}
-  }, []);
-
-  React.useEffect(() => {
-    try {
-      if (session.stage === "describe" && session.prompt === "") {
-        window.localStorage.removeItem(STORAGE_KEY);
-      } else {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-      }
-    } catch {}
-  }, [session]);
-
-  const exhausted = quota.used >= quota.limit;
-  const stageIndex = STAGES.findIndex((s) => s.id === session.stage);
-
-  const cancel = () => {
-    setSession(EMPTY_SESSION);
-    setSelectedNode(null);
-    try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
-  };
+  const stageIndex = STAGES.findIndex((s) => s.id === state.stage);
 
   return (
     <PageContainer>
       <PageHeader
         eyebrow={
-          <Link href={"/workflows/new" as Route} className="hover:text-fg-secondary rounded-xs outline-none transition-colors duration-fast focus-visible:focus-ring">
+          <Link
+            href={"/workflows/new" as Route}
+            className="rounded-xs outline-none transition-colors duration-fast hover:text-fg-secondary focus-visible:focus-ring"
+          >
             Build · New workflow
           </Link>
         }
         title="AI Architect"
         description="Describe what you want to happen. The Architect proposes a durable workflow, explains every decision, and builds it once you approve."
         actions={
-          session.stage !== "describe" ? (
-            <Button variant="secondary" size="sm" onClick={cancel}>Start over</Button>
+          state.stage !== "describe" ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={state.busy !== null}
+              onClick={() => { session.reset(); setSelectedNode(null); }}
+            >
+              Start over
+            </Button>
           ) : null
         }
       />
 
-      <StageRail current={session.stage} index={stageIndex} />
+      <StageRail current={state.stage} index={stageIndex} />
 
-      <div className="mt-4">
-        {session.error ? <ErrorPanel code={session.error} onDismiss={() => patch({ error: null })} onReturn={(stage) => patch({ error: null, stage })} /> : null}
-
-        {session.stage === "describe" ? (
-          <Describe
-            session={session}
-            patch={patch}
-            quota={quota}
-            exhausted={exhausted}
-            onStart={() => patch({ stage: "analyze", analysed: 0 })}
-          />
+      <div className="mt-4 grid gap-3">
+        {state.failure ? (
+          <FailurePanel failure={state.failure} onDismiss={session.dismissFailure} />
         ) : null}
 
-        {session.stage === "analyze" ? (
-          <Analyze session={session} patch={patch} onCancel={cancel} />
+        {state.busy === "resuming" ? (
+          <Panel title="Restoring your session">
+            <span className="flex items-center gap-2">
+              <Spinner className="size-4" />
+              <Text variant="body-sm" tone="secondary">
+                Reading the plan back from the server, so nothing you approved is lost.
+              </Text>
+            </span>
+          </Panel>
         ) : null}
 
-        {session.stage === "blueprint" ? (
-          <BlueprintStage
-            session={session}
-            patch={patch}
-            selectedNode={selectedNode}
-            onSelectNode={setSelectedNode}
-            onCancel={cancel}
-          />
+        {state.stage === "describe" ? <Describe session={session} /> : null}
+        {state.stage === "analyze" ? <Analyze session={session} /> : null}
+        {state.stage === "blueprint" ? (
+          <BlueprintStage session={session} selectedNode={selectedNode} onSelectNode={setSelectedNode} />
         ) : null}
-
-        {session.stage === "connect" ? <Connect session={session} patch={patch} /> : null}
-        {session.stage === "review" ? <Review session={session} patch={patch} /> : null}
-        {session.stage === "build" ? <Build session={session} patch={patch} /> : null}
-        {session.stage === "ready" ? <Ready session={session} /> : null}
+        {state.stage === "connect" ? <Connect session={session} /> : null}
+        {state.stage === "review" ? <Review session={session} /> : null}
+        {state.stage === "build" ? <Build session={session} /> : null}
+        {state.stage === "ready" ? <Ready session={session} /> : null}
       </div>
     </PageContainer>
   );
@@ -203,129 +212,111 @@ function StageRail({ current, index }: { current: StageId; index: number }) {
 
 /* ── 1 · Describe ─────────────────────────────────────────────────────────── */
 
-function Describe({
-  session, patch, quota, exhausted, onStart,
-}: {
-  session: Session;
-  patch: (next: Partial<Session>) => void;
-  quota: typeof QUOTA;
-  exhausted: boolean;
-  onStart: () => void;
-}) {
-  const tooShort = session.prompt.trim().length < 24;
+function Describe({ session }: { session: ArchitectSessionApi }) {
+  const { state, usage } = session;
+  const exhausted = usage ? usage.remaining <= 0 : false;
+  const tooShort = state.prompt.trim().length < MIN_PROMPT;
+  const tooLong = state.prompt.length > MAX_PROMPT;
+  const blocked = exhausted || !session.environmentReady;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <div className="grid gap-3">
-        {/* Quota BEFORE the prompt box, not after the effort. */}
-        <QuotaBanner quota={quota} exhausted={exhausted} />
+    <div className="grid gap-3">
+      {/* Quota BEFORE the prompt box, never after the effort. */}
+      <QuotaBanner session={session} exhausted={exhausted} />
 
-        <Panel title="Describe the workflow" help="Plain English. Say what starts it, what should happen, and where a person needs to decide.">
-          <textarea
-            value={session.prompt}
-            onChange={(e) => patch({ prompt: e.target.value })}
-            disabled={exhausted}
-            rows={6}
-            placeholder="Every morning, find contracts renewing in the next 30 days…"
-            aria-label="Describe the workflow"
-            className={cn(
-              "font-ui text-body-sm bg-surface-sunken border-subtle w-full rounded-md border p-2.5",
-              "text-fg-primary placeholder:text-fg-disabled resize-y",
-              "outline-none focus-visible:focus-ring disabled:opacity-50",
-            )}
-          />
-
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Text variant="caption" tone="muted" className="mr-1">Start from:</Text>
-            {EXAMPLE_PROMPTS.map((example) => (
-              <button
-                key={example.id}
-                type="button"
-                disabled={exhausted}
-                // Populates the box. Navigating away from a half-written prompt
-                // to look at an example is how the current version loses work.
-                onClick={() => patch({ prompt: example.text })}
-                className={cn(
-                  "font-ui text-caption border-subtle text-fg-secondary rounded-full border px-2.5 py-1",
-                  "hover:border-accent-border hover:text-accent transition-colors duration-fast",
-                  "outline-none focus-visible:focus-ring disabled:opacity-50",
-                )}
-              >
-                {example.label}
-              </button>
-            ))}
-          </div>
-        </Panel>
-
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {tooShort && !exhausted ? (
-            <Text variant="caption" tone="muted">
-              A sentence or two works better than a phrase — the plan is only as specific as the description.
-            </Text>
-          ) : null}
-          <Button variant="primary" size="sm" disabled={exhausted || tooShort} onClick={onStart}>
-            Analyse the description
-          </Button>
-        </div>
-      </div>
+      {!session.environmentReady && !session.environmentLoading ? (
+        <Notice tone="failed" title="No environment resolved">
+          The Architect creates real resources, which needs the workspace&rsquo;s environment id — and the
+          API could not be reached to resolve it. Reload once the API is up; nothing has been lost.
+        </Notice>
+      ) : null}
 
       <Panel
-        title="Hints (optional)"
-        help="Anything you already know. Supplying a hint removes a guess rather than adding a constraint."
+        title="Describe the workflow"
+        help="Plain English. Say what starts it, what should happen, and where a person needs to decide."
       >
-        <div className="grid gap-2">
-          <Field label="Trigger" help="How the workflow starts.">
-            <Select
-              options={[
-                { value: "unspecified", label: "Let the Architect decide" },
-                { value: "schedule", label: "On a schedule" },
-                { value: "webhook", label: "On a webhook" },
-                { value: "manual", label: "By hand" },
-                { value: "api", label: "Through the API" },
-              ]}
-              value={session.hints.trigger}
-              onValueChange={(v) => patch({ hints: { ...session.hints, trigger: v as StructuredHints["trigger"] } })}
-              aria-label="Trigger hint"
-            />
-          </Field>
+        <Textarea
+          value={state.prompt}
+          onChange={(e) => session.setPrompt(e.target.value)}
+          disabled={blocked}
+          minRows={6}
+          maxRows={14}
+          maxLength={MAX_PROMPT}
+          placeholder="Every morning, find contracts renewing in the next 30 days…"
+          aria-label="Describe the workflow"
+        />
 
-          <Field label="Schedule" help="If it runs on a clock, when?">
-            <Input
-              value={session.hints.schedule}
-              onChange={(e) => patch({ hints: { ...session.hints, schedule: e.target.value } })}
-              placeholder="Daily at 06:00 UTC"
-              className="h-7 text-body-sm"
-            />
-          </Field>
-
-          <Field label="Approvals" help="Whether a person must decide before anything leaves the workspace.">
-            <Select
-              options={[
-                { value: "unspecified", label: "Let the Architect decide" },
-                { value: "required", label: "Require an approval gate" },
-                { value: "none", label: "No approvals" },
-              ]}
-              value={session.hints.approval}
-              onValueChange={(v) => patch({ hints: { ...session.hints, approval: v as StructuredHints["approval"] } })}
-              aria-label="Approval hint"
-            />
-          </Field>
-
-          <Field label="Systems" help="Comma separated. Only systems you have connected can be used.">
-            <Input
-              value={session.hints.systems.join(", ")}
-              onChange={(e) => patch({ hints: { ...session.hints, systems: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
-              placeholder="Postgres, Slack"
-              className="h-7 text-body-sm"
-            />
-          </Field>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <Text variant="caption" tone="muted" className="mr-1">Start from:</Text>
+          {EXAMPLE_PROMPTS.map((example) => (
+            <button
+              key={example.id}
+              type="button"
+              disabled={blocked}
+              // Populates the box rather than navigating. Sending somebody away
+              // from a half-written prompt to look at an example is how the
+              // work gets lost.
+              onClick={() => session.setPrompt(example.text)}
+              className={cn(
+                "font-ui text-caption border-subtle text-fg-secondary rounded-full border px-2.5 py-1",
+                "hover:border-accent-border hover:text-accent transition-colors duration-fast",
+                "outline-none focus-visible:focus-ring disabled:opacity-50",
+              )}
+            >
+              {example.label}
+            </button>
+          ))}
         </div>
       </Panel>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {tooShort && !blocked ? (
+          <Text variant="caption" tone="muted">
+            A sentence or two works better than a phrase — the plan is only as specific as the description.
+          </Text>
+        ) : null}
+        <Button
+          variant="primary"
+          size="sm"
+          loading={state.busy === "starting" || state.busy === "planning"}
+          disabled={blocked || tooShort || tooLong}
+          onClick={() => void session.start()}
+        >
+          Analyse the description
+        </Button>
+      </div>
     </div>
   );
 }
 
-function QuotaBanner({ quota, exhausted }: { quota: typeof QUOTA; exhausted: boolean }) {
+function QuotaBanner({ session, exhausted }: { session: ArchitectSessionApi; exhausted: boolean }) {
+  const { usage, usageLoading } = session;
+
+  // No allowance figure is better than a made-up one: the endpoint is the only
+  // authority on it, and showing "1 of 1 left" while the real answer is unknown
+  // is how somebody spends effort against a quota they had already used.
+  if (usageLoading) {
+    return (
+      <div className="border-subtle bg-surface-raised rounded-md border px-3 py-2">
+        <span className="flex items-center gap-2">
+          <Spinner className="size-3.5" />
+          <Text variant="body-sm" tone="secondary">Checking this workspace&rsquo;s build allowance…</Text>
+        </span>
+      </div>
+    );
+  }
+
+  if (!usage) {
+    return (
+      <div className="border-subtle bg-surface-raised rounded-md border px-3 py-2">
+        <Text variant="body-sm" tone="secondary">
+          The build allowance could not be read. You can still describe a workflow — the limit is
+          enforced when you build, and a spent allowance is reported then rather than guessed now.
+        </Text>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -336,8 +327,8 @@ function QuotaBanner({ quota, exhausted }: { quota: typeof QUOTA; exhausted: boo
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Text variant="body-sm" tone="primary">
           {exhausted
-            ? `You have used your Architect build for this period.`
-            : `${quota.limit - quota.used} of ${quota.limit} Architect ${quota.limit === 1 ? "build" : "builds"} left on ${quota.plan}.`}
+            ? "You have used this workspace's Architect build for the period."
+            : `${usage.remaining} of ${usage.limit} Architect ${usage.limit === 1 ? "build" : "builds"} left.`}
         </Text>
         {exhausted ? (
           <Button asChild size="sm" variant="primary">
@@ -346,9 +337,18 @@ function QuotaBanner({ quota, exhausted }: { quota: typeof QUOTA; exhausted: boo
         ) : null}
       </div>
       <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">
-        {exhausted
-          ? <>The next one is available <RelativeTime iso={quota.resetsAt} />. You can still build workflows by hand or from a template — the quota applies only to generated plans.</>
-          : <>Only a completed build counts. Describing, analysing and discarding a blueprint costs nothing, so it is worth iterating before you build.</>}
+        {exhausted ? (
+          <>
+            {usage.resetAt ? <>The next one is available <InstantUtc iso={usage.resetAt} />. </> : null}
+            You can still build workflows by hand or from a template — the quota applies only to
+            generated plans.
+          </>
+        ) : (
+          <>
+            Only a completed build counts against it. Describing, planning, revising and discarding
+            cost nothing, so it is worth iterating before you build.
+          </>
+        )}
       </Text>
     </div>
   );
@@ -356,96 +356,199 @@ function QuotaBanner({ quota, exhausted }: { quota: typeof QUOTA; exhausted: boo
 
 /* ── 2 · Analyze ──────────────────────────────────────────────────────────── */
 
-function Analyze({
-  session, patch, onCancel,
-}: {
-  session: Session;
-  patch: (next: Partial<Session>) => void;
-  onCancel: () => void;
-}) {
-  /* Findings arrive one at a time. The rail's sub-steps are these findings, so
-     "analysing" is a sequence of results rather than a spinner with a label. */
-  React.useEffect(() => {
-    if (session.analysed >= ANALYSIS.length) {
-      const done = window.setTimeout(() => patch({ stage: "blueprint", blueprint: BLUEPRINT }), 700);
-      return () => window.clearTimeout(done);
-    }
-    const next = window.setTimeout(() => patch({ analysed: session.analysed + 1 }), 620);
-    return () => window.clearTimeout(next);
-  }, [session.analysed, patch]);
+/**
+ * What the model needs to know before it can design.
+ *
+ * The API asks zero questions for a clear goal and up to five for a vague one,
+ * so this stage is either a form or a progress panel — never a fake list of
+ * findings scrolling past while a request is in flight.
+ */
+function Analyze({ session }: { session: ArchitectSessionApi }) {
+  const { state } = session;
+  const planning = state.busy === "planning";
+
+  if (state.questions.length === 0) {
+    return (
+      <Panel
+        title="Designing the workflow"
+        help="The description was specific enough to design against, so the Architect went straight to the plan."
+      >
+        <WorkingRow
+          label={planning ? "Designing the graph, its agents and the connections it needs…" : "Waiting to start."}
+          busy={planning}
+        />
+        {!planning ? (
+          <div className="mt-3">
+            <Button variant="primary" size="sm" onClick={() => void session.generatePlan()}>
+              Generate the plan
+            </Button>
+          </div>
+        ) : null}
+      </Panel>
+    );
+  }
+
+  const unanswered = state.questions.filter((q) => !(state.answers[q.question] ?? "").trim()).length;
 
   return (
-    <Panel
-      title="Reading the description"
-      help="What the Architect has understood so far. Anything wrong here will be wrong in the plan, so it is worth reading before the blueprint arrives."
-      action={<Button size="xs" variant="ghost" onClick={onCancel}>Cancel</Button>}
-    >
-      <ol className="grid gap-2">
-        {ANALYSIS.slice(0, session.analysed).map((finding) => (
-          <li
-            key={finding.id}
-            data-motion="decorative"
-            className="border-subtle motion-safe:animate-[ink-fade-in_240ms_var(--ease-standard)_both] rounded-md border p-2.5"
-          >
-            <div className="flex flex-wrap items-baseline gap-x-2">
-              <Text variant="caption" tone="muted">{finding.label}</Text>
-              <Text variant="body-sm" tone="primary" className="font-medium">{finding.value}</Text>
-            </div>
-            <Text variant="caption" tone="secondary" className="mt-0.5 block leading-snug">{finding.detail}</Text>
-          </li>
-        ))}
+    <div className="grid gap-3">
+      <Panel
+        title={`${state.questions.length} question${state.questions.length === 1 ? "" : "s"} before designing`}
+        help="Only what the Architect genuinely needs. Each one says how the answer changes the design — anything you skip becomes a documented assumption rather than a blocker."
+      >
+        <ol className="grid gap-3">
+          {state.questions.map((question, index) => (
+            <QuestionRow
+              key={question.question}
+              index={index}
+              question={question}
+              value={state.answers[question.question] ?? ""}
+              disabled={planning}
+              onChange={(value) => session.setAnswer(question.question, value)}
+            />
+          ))}
+        </ol>
+      </Panel>
 
-        {session.analysed < ANALYSIS.length ? (
-          <li className="flex items-center gap-2 px-1 py-2">
-            <Spinner className="size-4" />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={planning}
+          onClick={() => session.goToStage("describe")}
+        >
+          Back to the description
+        </Button>
+        <span className="flex flex-wrap items-center gap-2">
+          {unanswered > 0 && !planning ? (
             <Text variant="caption" tone="muted">
-              {["Finding the trigger…", "Identifying systems…", "Looking for decision points…", "Looking for human checkpoints…"][session.analysed]}
+              {unanswered} unanswered — the Architect will assume a sensible default and say so in the plan.
             </Text>
-          </li>
-        ) : null}
-      </ol>
-    </Panel>
+          ) : null}
+          <Button
+            variant="primary"
+            size="sm"
+            loading={planning}
+            onClick={() => void session.generatePlan()}
+          >
+            Generate the plan
+          </Button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function QuestionRow({
+  index, question, value, disabled, onChange,
+}: {
+  index: number;
+  question: ClarifyQuestion;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <li className="border-subtle grid gap-1.5 rounded-md border p-2.5">
+      <div className="flex gap-2">
+        <Text variant="caption" tone="muted" className="font-code mt-0.5 shrink-0">{index + 1}</Text>
+        <div className="min-w-0">
+          <Text variant="body-sm" tone="primary" className="block">{question.question}</Text>
+          {question.why ? (
+            <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{question.why}</Text>
+          ) : null}
+        </div>
+      </div>
+
+      <Input
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Your answer (optional)"
+        aria-label={question.question}
+      />
+
+      {question.suggestions && question.suggestions.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {question.suggestions.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(suggestion)}
+              className={cn(
+                "font-ui text-caption border-subtle text-fg-secondary rounded-full border px-2 py-0.5",
+                "hover:border-accent-border hover:text-accent transition-colors duration-fast",
+                "outline-none focus-visible:focus-ring disabled:opacity-50",
+              )}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
 /* ── 3 · Blueprint ────────────────────────────────────────────────────────── */
 
 function BlueprintStage({
-  session, patch, selectedNode, onSelectNode, onCancel,
+  session, selectedNode, onSelectNode,
 }: {
-  session: Session;
-  patch: (next: Partial<Session>) => void;
+  session: ArchitectSessionApi;
   selectedNode: string | null;
   onSelectNode: (id: string | null) => void;
-  onCancel: () => void;
 }) {
-  const blueprint = React.useMemo(() => {
-    if (!session.blueprint) return null;
-    return {
-      ...session.blueprint,
-      nodes: session.blueprint.nodes.filter((n) => !session.removed.includes(n.id)),
-      edges: session.blueprint.edges.filter(
-        (e) => !session.removed.includes(e.from) && !session.removed.includes(e.to),
-      ),
-    };
-  }, [session.blueprint, session.removed]);
-
+  const { state } = session;
+  const blueprint = React.useMemo(() => planToBlueprint(state.plan), [state.plan]);
   const { landed, phase, skip, total } = useBlueprintStream(blueprint, blueprint !== null);
+  const [instruction, setInstruction] = React.useState("");
 
-  if (!blueprint) return null;
+  if (!state.plan) {
+    return (
+      <Panel title="No plan yet">
+        <Text variant="body-sm" tone="secondary" className="block">
+          The session has no plan on it. Go back and generate one.
+        </Text>
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" onClick={() => session.goToStage("analyze")}>
+            Back
+          </Button>
+        </div>
+      </Panel>
+    );
+  }
 
-  const manifest = manifestFor(blueprint);
+  if (!blueprint) {
+    return (
+      <Panel title="The plan has no steps">
+        <Text variant="body-sm" tone="secondary" className="block max-w-[68ch]">
+          The Architect returned a plan with no workflow steps in it. That is a generation failure
+          rather than a real design — revise it below, or start over with a description that names
+          the actions you want taken.
+        </Text>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={() => session.goToStage("describe")}>
+            Rewrite the description
+          </Button>
+        </div>
+      </Panel>
+    );
+  }
+
   const selected = blueprint.nodes.find((n) => n.id === selectedNode) ?? null;
   const streaming = phase !== "done";
+  const busy = state.busy === "revising" || state.busy === "approving";
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
       <div className="grid min-w-0 gap-3">
         <Panel
-          title="Blueprint"
+          title={blueprint.name}
           help={streaming
             ? "Assembling the plan. Steps land in execution order; approval gates land last."
-            : "Every step, with why it is there. Edit anything before building — this is a proposal, not a commitment."}
+            : "Every step, with why it is there. Nothing here has been created yet — this is a proposal."}
           action={
             streaming
               ? <Button size="xs" variant="ghost" onClick={skip}>Skip animation</Button>
@@ -461,25 +564,11 @@ function BlueprintStage({
           />
         </Panel>
 
-        {!streaming ? (
-          <Panel title="What will be created" help="The exact resource manifest. Nothing outside this list is touched.">
-            <div className="flex flex-wrap gap-x-5 gap-y-2">
-              <Count label="Agents" value={manifest.agents} />
-              <Count label="Tools" value={manifest.tools} />
-              <Count label="Connections needed" value={manifest.connections} />
-              <Count label="Approval gates" value={manifest.gates} />
-              <Count label="Cost per run" value={formatCost(manifest.costPerRunUsd)} />
-              <Count label="Estimated duration" value={formatDuration(manifest.durationMs)} />
-            </div>
-          </Panel>
-        ) : null}
+        {!streaming ? <PlanSummary plan={state.plan} /> : null}
       </div>
 
       <div className="grid min-w-0 gap-3">
-        <Panel
-          title="Why each step"
-          help="Each one names the part of your description it came from."
-        >
+        <Panel title="Why each step" help="Each one names the part of your description it came from.">
           <RationaleList
             blueprint={blueprint}
             landed={landed}
@@ -489,30 +578,67 @@ function BlueprintStage({
         </Panel>
 
         {selected && !streaming ? (
-          <NodeEditor
-            node={selected}
-            onRename={(name) => patch({
-              blueprint: session.blueprint
-                ? { ...session.blueprint, nodes: session.blueprint.nodes.map((n) => (n.id === selected.id ? { ...n, name } : n)) }
-                : null,
-            })}
-            onConfig={(key, value) => patch({
-              blueprint: session.blueprint
-                ? { ...session.blueprint, nodes: session.blueprint.nodes.map((n) => (n.id === selected.id ? { ...n, config: { ...n.config, [key]: value } } : n)) }
-                : null,
-            })}
-            onRemove={() => {
-              patch({ removed: [...session.removed, selected.id] });
-              onSelectNode(null);
-            }}
-          />
+          <Panel title={`Step — ${selected.kind}`}>
+            <Text variant="body-sm" tone="primary" className="block">{selected.name}</Text>
+            <Text variant="caption" tone="muted" className="mt-1 block leading-snug">{selected.rationale}</Text>
+            {Object.keys(selected.config).length > 0 ? (
+              <dl className="mt-2 grid gap-1">
+                {Object.entries(selected.config).map(([key, value]) => (
+                  <div key={key} className="flex flex-wrap items-baseline gap-2">
+                    <dt><Text variant="caption" tone="muted">{key}</Text></dt>
+                    <dd className="min-w-0">
+                      <Text variant="caption" tone="secondary" className="font-code truncate">
+                        {typeof value === "object" ? JSON.stringify(value) : String(value)}
+                      </Text>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+          </Panel>
+        ) : null}
+
+        {!streaming ? (
+          <Panel
+            title="Change something"
+            help="Say what to change in plain English. The Architect rewrites the plan — it does not start over."
+          >
+            <Textarea
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              disabled={busy}
+              minRows={2}
+              maxRows={5}
+              placeholder="Add an approval before the Slack post."
+              aria-label="Revision instruction"
+            />
+            <div className="mt-2">
+              <Button
+                size="xs"
+                variant="secondary"
+                loading={state.busy === "revising"}
+                disabled={busy || !instruction.trim()}
+                onClick={async () => { await session.revise(instruction); setInstruction(""); }}
+              >
+                Revise the plan
+              </Button>
+            </div>
+          </Panel>
         ) : null}
 
         {!streaming ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button variant="secondary" size="sm" onClick={onCancel}>Discard</Button>
-            <Button variant="primary" size="sm" onClick={() => patch({ stage: "connect" })}>
-              Continue to connections
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => session.reset()}>
+              Discard
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={state.busy === "approving"}
+              disabled={busy}
+              onClick={() => void session.approve()}
+            >
+              Approve and continue
             </Button>
           </div>
         ) : null}
@@ -521,151 +647,126 @@ function BlueprintStage({
   );
 }
 
-function NodeEditor({
-  node, onRename, onConfig, onRemove,
-}: {
-  node: BlueprintNode;
-  onRename: (name: string) => void;
-  onConfig: (key: string, value: unknown) => void;
-  onRemove: () => void;
-}) {
+function PlanSummary({ plan }: { plan: ArchitectPlan }) {
+  const notes = plan.safetyNotes ?? [];
   return (
-    <Panel title={`Edit — ${node.kind}`} help="Changes apply to the plan before it is built.">
-      <div className="grid gap-2">
-        <Field label="Step name" help="What it is called on the canvas and in run history.">
-          <Input value={node.name} onChange={(e) => onRename(e.target.value)} className="h-7 text-body-sm" />
-        </Field>
+    <Panel title="What the Architect understood" help="Check this against what you asked for.">
+      {plan.goalSummary ? (
+        <Text variant="body-sm" tone="secondary" className="block max-w-[80ch]">{plan.goalSummary}</Text>
+      ) : null}
 
-        {node.kind === "llm" || node.kind === "agent" ? (
-          <Field label="Model" help="A cheaper model costs less per run and is usually enough for internal steps.">
-            <Select
-              options={[
-                { value: "claude-haiku-4", label: "claude-haiku-4 — cheapest" },
-                { value: "claude-sonnet-4", label: "claude-sonnet-4 — balanced" },
-                { value: "gpt-4o", label: "gpt-4o" },
-              ]}
-              value={String(node.config.model ?? "claude-sonnet-4")}
-              onValueChange={(v) => onConfig("model", v)}
-              aria-label="Model"
-            />
-          </Field>
+      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+        {plan.trigger ? (
+          <Count label="Trigger" value={plan.trigger.description || plan.trigger.type} />
         ) : null}
-
-        {node.kind === "approval" ? (
-          <>
-            <Field label="Approver group" help="Anyone in the group may decide.">
-              <Select
-                options={["billing", "platform-ops", "growth", "support-eng"].map((g) => ({ value: g, label: g }))}
-                value={String(node.config.approverGroup ?? "billing")}
-                onValueChange={(v) => onConfig("approverGroup", v)}
-                aria-label="Approver group"
-              />
-            </Field>
-            <Field label="SLA (minutes)" help="How long before the gate is considered breached.">
-              <Input
-                type="number"
-                value={Number(node.config.slaMinutes ?? 240)}
-                onChange={(e) => onConfig("slaMinutes", Number(e.target.value))}
-                className="h-7 text-body-sm"
-              />
-            </Field>
-          </>
+        {typeof plan.confidence === "number" ? (
+          <Count label="Confidence" value={formatPercent(plan.confidence * 100, 0)} />
         ) : null}
-
-        {node.kind === "trigger" ? (
-          <Field label="Cron" help="Five-field cron in the workflow's timezone.">
-            <Input
-              value={String(node.config.cron ?? "")}
-              onChange={(e) => onConfig("cron", e.target.value)}
-              className="h-7 font-code text-mono-sm"
-            />
-          </Field>
-        ) : null}
-
-        <div className="mt-1">
-          <Button size="xs" variant="ghost" onClick={onRemove} className="text-status-failed">
-            Remove this step
-          </Button>
-        </div>
+        <Count label="Steps" value={(plan.workflowSteps ?? []).length} />
       </div>
+
+      {notes.length > 0 ? (
+        <div className="mt-3">
+          <Text variant="caption" tone="muted" className="mb-1 block">Safety notes</Text>
+          <ul className="grid gap-1">
+            {notes.map((note) => (
+              <li key={note} className="flex items-start gap-2">
+                <span className="bg-status-waiting mt-[7px] size-1.5 shrink-0 rounded-full" aria-hidden="true" />
+                <Text variant="caption" tone="secondary" className="leading-snug">{note}</Text>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </Panel>
   );
 }
 
 /* ── 4 · Connect ──────────────────────────────────────────────────────────── */
 
-function Connect({ session, patch }: { session: Session; patch: (next: Partial<Session>) => void }) {
-  const providers = session.blueprint ? requiredProviders(session.blueprint) : [];
-  const [tested, setTested] = React.useState<Record<string, "idle" | "testing" | "ok">>({});
+/**
+ * Credentials cannot be generated, so this is the one stage the Architect
+ * cannot do for you. It is also the stage most likely to send somebody away to
+ * create a connection — which is exactly why the session is resumable.
+ */
+function Connect({ session }: { session: ArchitectSessionApi }) {
+  const { state } = session;
+  const [options, setOptions] = React.useState<WorkspaceConnectionOption[] | null>(null);
 
-  const missing = providers.filter((p) => !CONNECTIONS.some((c) => c.provider === p));
-  const canContinue = missing.length === 0;
+  React.useEffect(() => {
+    let cancelled = false;
+    void session.connectionOptions().then((result) => {
+      if (!cancelled) setOptions(result);
+    });
+    return () => { cancelled = true; };
+    // Loaded once per stage entry: the list is the workspace's connections, not
+    // per-requirement, and refetching it per row would be N identical requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const requirements = state.requirements;
+  const blocking = requirements.filter(
+    (r) => r.requiredForSimulation && !isSatisfied(r),
+  );
+
+  if (requirements.length === 0) {
+    return (
+      <div className="grid gap-3">
+        <Panel title="No connections needed">
+          <Text variant="body-sm" tone="secondary" className="block max-w-[68ch]">
+            Nothing in this plan reaches outside the workspace, so there are no credentials to
+            supply. It can be built and simulated straight away.
+          </Text>
+        </Panel>
+        <StageNav
+          session={session}
+          back="blueprint"
+          next="review"
+          nextLabel="Continue to review"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-3">
       <Panel
         title="Connections this workflow needs"
-        help="Credentials cannot be generated. Anything missing has to be connected before the workflow can run — you can do it here without losing the plan."
+        help="Credentials cannot be generated. Bind an existing connection, or mark one as simulated to build now and connect it later — the workflow installs either way, but a simulated connection cannot make a real call."
       >
         <ul className="grid gap-2">
-          {providers.map((provider) => {
-            const connection = CONNECTIONS.find((c) => c.provider === provider);
-            const state = tested[provider] ?? "idle";
-
-            return (
-              <li key={provider} className="border-subtle flex flex-wrap items-center gap-2 rounded-md border p-2.5">
-                <span
-                  className={cn(
-                    "size-2 shrink-0 rounded-full",
-                    !connection ? "bg-fg-disabled"
-                      : connection.status === "healthy" ? "bg-status-success"
-                        : connection.status === "degraded" ? "bg-status-waiting" : "bg-status-failed",
-                  )}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1">
-                  <Text variant="body-sm" tone="primary" className="block capitalize">{provider}</Text>
-                  <Text variant="caption" tone="muted" className="block">
-                    {connection
-                      ? connection.status === "healthy"
-                        ? `${connection.name} — connected, ${connection.latencyMs}ms`
-                        : `${connection.name} — ${connection.status}. The workflow will install but its first run fails here.`
-                      : "Not connected. The workflow cannot run until it is."}
-                  </Text>
-                </span>
-
-                {connection ? (
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    loading={state === "testing"}
-                    onClick={() => {
-                      setTested((t) => ({ ...t, [provider]: "testing" }));
-                      window.setTimeout(() => setTested((t) => ({ ...t, [provider]: "ok" })), 700);
-                    }}
-                  >
-                    {state === "ok" ? "Tested" : "Test"}
-                  </Button>
-                ) : (
-                  <Button asChild size="xs" variant="primary">
-                    <Link href={"/connections" as Route}>Connect</Link>
-                  </Button>
-                )}
-              </li>
-            );
-          })}
+          {requirements.map((requirement) => (
+            <RequirementRow
+              key={requirement.id}
+              requirement={requirement}
+              options={options}
+              session={session}
+            />
+          ))}
         </ul>
       </Panel>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button variant="secondary" size="sm" onClick={() => patch({ stage: "blueprint" })}>Back</Button>
-        <span className="flex items-center gap-2">
-          {!canContinue ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={state.busy !== null}
+          onClick={() => session.goToStage("blueprint")}
+        >
+          Back
+        </Button>
+        <span className="flex flex-wrap items-center gap-2">
+          {blocking.length > 0 ? (
             <Text variant="caption" tone="muted">
-              {missing.length} connection{missing.length === 1 ? "" : "s"} still missing
+              {blocking.length} still needed before this can even be simulated
             </Text>
           ) : null}
-          <Button variant="primary" size="sm" disabled={!canContinue} onClick={() => patch({ stage: "review" })}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={state.busy !== null || blocking.length > 0}
+            onClick={() => session.goToStage("review")}
+          >
             Continue to review
           </Button>
         </span>
@@ -674,84 +775,232 @@ function Connect({ session, patch }: { session: Session; patch: (next: Partial<S
   );
 }
 
+function isSatisfied(requirement: ConnectionRequirement): boolean {
+  return ["selected_existing", "created", "test_passed", "simulation_placeholder"].includes(
+    requirement.status,
+  );
+}
+
+const REQUIREMENT_STATE: Record<
+  ConnectionRequirement["status"],
+  { tone: "success" | "waiting" | "failed" | "idle"; label: string }
+> = {
+  missing: { tone: "idle", label: "Not connected" },
+  selected_existing: { tone: "success", label: "Bound" },
+  created: { tone: "success", label: "Created" },
+  test_pending: { tone: "waiting", label: "Testing" },
+  test_failed: { tone: "failed", label: "Test failed" },
+  test_passed: { tone: "success", label: "Tested" },
+  simulation_placeholder: { tone: "waiting", label: "Simulated" },
+};
+
+function RequirementRow({
+  requirement, options, session,
+}: {
+  requirement: ConnectionRequirement;
+  options: WorkspaceConnectionOption[] | null;
+  session: ArchitectSessionApi;
+}) {
+  const { state } = session;
+  const rowBusy = state.busyRequirementId === requirement.id;
+  const status = REQUIREMENT_STATE[requirement.status] ?? REQUIREMENT_STATE.missing;
+
+  /* Preferred-type matches first: the API returns every connection and ranks
+     rather than filters, because the model's type names ("http_api") and the
+     stored ones ("http") do not always agree, and filtering on that mismatch is
+     how a workspace with the right connection is told it has none. */
+  const ranked = React.useMemo(() => {
+    if (!options) return null;
+    const type = (requirement.type ?? "").toLowerCase();
+    const matches = (option: WorkspaceConnectionOption) => {
+      const stored = (option.type ?? "").toLowerCase();
+      return option.typeMatches ?? (stored === type || stored.includes(type) || type.includes(stored));
+    };
+    return [...options].sort((a, b) => Number(matches(b)) - Number(matches(a)));
+  }, [options, requirement.type]);
+
+  return (
+    <li className="border-subtle grid gap-2 rounded-md border p-2.5">
+      <div className="flex flex-wrap items-start gap-2">
+        <StatusDot tone={status.tone} />
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-2">
+            <Text variant="body-sm" tone="primary">{requirement.name}</Text>
+            <Text variant="caption" tone="muted" className="font-code">{requirement.type}</Text>
+            <Text
+              variant="caption"
+              tone="inherit"
+              className={cn(
+                status.tone === "success" ? "text-status-success"
+                  : status.tone === "failed" ? "text-status-failed"
+                    : status.tone === "waiting" ? "text-status-waiting" : "text-fg-muted",
+              )}
+            >
+              {status.label}
+            </Text>
+          </span>
+          {requirement.description ? (
+            <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">
+              {requirement.description}
+            </Text>
+          ) : null}
+          {requirement.testError ? (
+            <Text variant="caption" tone="inherit" className="text-status-failed mt-0.5 block leading-snug">
+              {requirement.testError}
+            </Text>
+          ) : null}
+          {!requirement.requiredForSimulation ? (
+            <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">
+              Only needed for real runs — the workflow can be simulated without it.
+            </Text>
+          ) : null}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {ranked === null ? (
+          <Text variant="caption" tone="muted">Loading connections…</Text>
+        ) : ranked.length === 0 ? (
+          <Button asChild size="xs" variant="primary">
+            <Link href={"/connections/new" as Route}>Create a connection</Link>
+          </Button>
+        ) : (
+          <div className="min-w-0 flex-1 sm:max-w-xs">
+            <Select
+              size="sm"
+              options={ranked.map((option) => ({
+                value: option.id,
+                label: option.name,
+                description: [option.type, option.status].filter(Boolean).join(" · "),
+              }))}
+              value={requirement.boundConnectionId ?? undefined}
+              disabled={rowBusy}
+              placeholder="Bind a connection…"
+              aria-label={`Connection for ${requirement.name}`}
+              onValueChange={(value) => void session.bind(requirement.id, value)}
+            />
+          </div>
+        )}
+
+        {requirement.boundConnectionId ? (
+          <Button
+            size="xs"
+            variant="secondary"
+            loading={rowBusy && state.busy === "testing"}
+            disabled={rowBusy}
+            onClick={() => void session.test(requirement.id)}
+          >
+            Test
+          </Button>
+        ) : null}
+
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={rowBusy || requirement.status === "simulation_placeholder"}
+          onClick={() => void session.useSimulation(requirement.id)}
+        >
+          {requirement.status === "simulation_placeholder" ? "Simulated" : "Simulate instead"}
+        </Button>
+
+        {rowBusy ? <Spinner className="size-3.5" /> : null}
+      </div>
+    </li>
+  );
+}
+
+function StatusDot({ tone }: { tone: "success" | "waiting" | "failed" | "idle" }) {
+  return (
+    <span
+      className={cn(
+        "mt-[6px] size-2 shrink-0 rounded-full",
+        tone === "success" ? "bg-status-success"
+          : tone === "failed" ? "bg-status-failed"
+            : tone === "waiting" ? "bg-status-waiting" : "bg-fg-disabled",
+      )}
+      aria-hidden="true"
+    />
+  );
+}
+
 /* ── 5 · Review ───────────────────────────────────────────────────────────── */
 
-function Review({ session, patch }: { session: Session; patch: (next: Partial<Session>) => void }) {
-  const blueprint = session.blueprint;
-  if (!blueprint) return null;
-  const manifest = manifestFor(blueprint);
-  const runsPerMonth = 30;
+function Review({ session }: { session: ArchitectSessionApi }) {
+  const { state } = session;
+  const bound = React.useMemo(
+    () => new Set(state.requirements.filter(isSatisfied).map((r) => r.tempConnectionId)),
+    [state.requirements],
+  );
+  const manifest = React.useMemo(() => manifestForPlan(state.plan, bound), [state.plan, bound]);
+
+  if (!state.plan) return null;
+
+  const gates = manifest.gates;
+  const simulatedOnly = state.requirements.filter((r) => r.status === "simulation_placeholder");
 
   return (
     <div className="grid gap-3">
-      <Panel title="Name it" help="Lowercase with hyphens reads best in run history and in the CLI.">
-        <Input
-          value={session.name || blueprint.name}
-          onChange={(e) => patch({ name: e.target.value })}
-          className="h-8 text-body-sm"
-        />
-        <div className="mt-2">
-          <Field label="Environment" help="Where it is created. Staging first is the safe default for a generated plan.">
-            <Select
-              options={[
-                { value: "staging", label: "Staging" },
-                { value: "development", label: "Development" },
-                { value: "production", label: "Production" },
-              ]}
-              value={session.environment}
-              onValueChange={(v) => patch({ environment: v })}
-              aria-label="Environment"
-            />
-          </Field>
-        </div>
+      <Panel title="Name" help="What it is called in the list, in run history and in alerts.">
+        <Text variant="heading-sm" tone="max" as="p" className="block">{state.plan.workflowName}</Text>
+        {state.plan.workflowDescription ? (
+          <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[80ch]">
+            {state.plan.workflowDescription}
+          </Text>
+        ) : null}
+        <Text variant="caption" tone="muted" className="mt-2 block leading-snug">
+          The Architect names the workflow from the plan. Rename it on the canvas afterwards — a
+          rename here would not match the graph it is about to compile.
+        </Text>
       </Panel>
 
-      <Panel title="Resource manifest" help="Everything the build will touch.">
-        <ul className="grid gap-1.5">
-          {manifest.entries.map((entry) => (
-            <li key={`${entry.kind}-${entry.name}`} className="flex flex-wrap items-baseline gap-2">
-              <span className="border-subtle text-fg-muted font-code rounded-xs border px-1 text-[10px] uppercase">
-                {entry.kind}
-              </span>
-              <Text variant="body-sm" tone="primary" className="min-w-0 truncate">{entry.name}</Text>
-              <Text variant="caption" tone="muted" className="min-w-0 flex-1 truncate">{entry.detail}</Text>
-              {entry.existing ? (
-                <Text variant="caption" tone="disabled" className="shrink-0">exists</Text>
-              ) : (
-                <Text variant="caption" tone="inherit" className="text-status-success shrink-0">new</Text>
-              )}
-            </li>
-          ))}
-        </ul>
-      </Panel>
-
-      <Panel title="Cost" help="At the schedule in the plan. The monthly figure is what shows up on a bill.">
-        <div className="flex flex-wrap gap-x-5 gap-y-2">
-          <Count label="Per run" value={formatCost(manifest.costPerRunUsd)} />
-          <Count label="Per month" value={formatCost(manifest.costPerRunUsd * runsPerMonth)} />
-          <Count label="Runs per month" value={runsPerMonth} />
-          <Count label="Duration" value={formatDuration(manifest.durationMs)} />
+      <Panel title="What will be created" help="The exact resource list. Nothing outside it is touched.">
+        <div className="mb-3 flex flex-wrap gap-x-6 gap-y-2">
+          <Count label="Agents" value={manifest.agents} />
+          <Count label="Tools" value={manifest.tools} />
+          <Count label="Connections" value={manifest.connections} />
+          <Count label="Approval gates" value={manifest.gates} />
         </div>
+        <ManifestList manifest={manifest} />
       </Panel>
 
       <Panel
         title="Permissions and risk"
         help="What this workflow will be able to do once it runs."
-        tone={manifest.gates > 0 ? undefined : "warning"}
+        tone={gates > 0 ? undefined : "warning"}
       >
-        <Text variant="body-sm" tone="secondary" className="block">
-          {manifest.gates > 0
-            ? `${manifest.gates} approval ${manifest.gates === 1 ? "gate" : "gates"} — nothing leaves the workspace without a person deciding.`
-            : "No approval gates. Every step runs unattended, including anything with an external effect."}
+        <Text variant="body-sm" tone="secondary" className="block max-w-[80ch]">
+          {gates > 0
+            ? `${gates} approval ${gates === 1 ? "gate" : "gates"} — nothing past ${gates === 1 ? "it" : "them"} runs without a person deciding.`
+            : "No approval gates. Every step runs unattended, including anything with an effect outside the workspace."}
         </Text>
-        <Text variant="caption" tone="muted" className="mt-1 block leading-snug">
-          Created in {session.environment} as a draft. Nothing runs until you publish it.
+        {simulatedOnly.length > 0 ? (
+          <Text variant="caption" tone="muted" className="mt-1.5 block leading-snug">
+            {simulatedOnly.length} connection{simulatedOnly.length === 1 ? " is" : "s are"} simulated,
+            so {simulatedOnly.length === 1 ? "that step" : "those steps"} cannot make a real call until
+            you bind real credentials.
+          </Text>
+        ) : null}
+        <Text variant="caption" tone="muted" className="mt-1.5 block leading-snug">
+          Created as a draft. Nothing runs until you publish it.
         </Text>
       </Panel>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button variant="secondary" size="sm" onClick={() => patch({ stage: "connect" })}>Back</Button>
-        <Button variant="primary" size="sm" onClick={() => patch({ stage: "build", built: 0, failedAt: null })}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={state.busy !== null}
+          onClick={() => session.goToStage("connect")}
+        >
+          Back
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          loading={state.busy === "building"}
+          disabled={state.busy !== null || !session.environmentReady}
+          onClick={() => void session.build()}
+        >
           Build it
         </Button>
       </div>
@@ -759,139 +1008,244 @@ function Review({ session, patch }: { session: Session; patch: (next: Partial<Se
   );
 }
 
-/* ── 6 · Build ────────────────────────────────────────────────────────────── */
-
-function Build({ session, patch }: { session: Session; patch: (next: Partial<Session>) => void }) {
-  const blueprint = session.blueprint;
-  const steps = React.useMemo(
-    () => (blueprint ? buildStepsFor(blueprint, manifestFor(blueprint)) : []),
-    [blueprint],
-  );
-
-  React.useEffect(() => {
-    if (session.built < 0 || session.built >= steps.length) {
-      if (session.built >= steps.length && steps.length > 0) {
-        const done = window.setTimeout(() => patch({ stage: "ready" }), 500);
-        return () => window.clearTimeout(done);
-      }
-      return;
-    }
-    const next = window.setTimeout(() => patch({ built: session.built + 1 }), 520);
-    return () => window.clearTimeout(next);
-  }, [session.built, steps.length, patch]);
+function ManifestList({ manifest }: { manifest: Manifest }) {
+  if (manifest.entries.length === 0) {
+    return (
+      <Text variant="body-sm" tone="secondary" className="block">
+        The plan creates no resources of its own — every step binds to something that already exists.
+      </Text>
+    );
+  }
 
   return (
-    <Panel
-      title="Building"
-      help="Each resource is created in order. If any one fails, everything already created is rolled back — a half-built workflow is worse than none."
-    >
-      <ol className="grid gap-1.5">
-        {steps.map((step, i) => {
-          const done = i < session.built;
-          const running = i === session.built;
-          return (
-            <li key={step.id} className="flex items-center gap-2">
-              <span className="shrink-0">
-                {done ? (
-                  <svg viewBox="0 0 12 12" className="text-status-success size-3.5" aria-hidden="true">
-                    <path d="M2.5 6.4 5 8.8 9.5 3.6" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : running ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <span className="border-subtle block size-3 rounded-full border" />
-                )}
-              </span>
-              <span className="min-w-0 flex-1">
-                <Text variant="body-sm" tone={done || running ? "primary" : "disabled"} className="block">
-                  {step.label}
-                </Text>
-                <Text variant="caption" tone="muted" className="block truncate">{step.detail}</Text>
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-    </Panel>
+    <ul className="grid gap-1.5">
+      {manifest.entries.map((entry) => (
+        <li key={`${entry.kind}-${entry.name}`} className="flex flex-wrap items-baseline gap-2">
+          <span className="border-subtle text-fg-muted font-code rounded-xs border px-1 text-[10px] uppercase">
+            {entry.kind}
+          </span>
+          <Text variant="body-sm" tone="primary" className="min-w-0 truncate">{entry.name}</Text>
+          <Text variant="caption" tone="muted" className="min-w-0 flex-1 truncate">{entry.detail}</Text>
+          {entry.existing ? (
+            <Text variant="caption" tone="disabled" className="shrink-0">exists</Text>
+          ) : entry.blocking ? (
+            <Text variant="caption" tone="inherit" className="text-status-waiting shrink-0">needed</Text>
+          ) : (
+            <Text variant="caption" tone="inherit" className="text-status-success shrink-0">new</Text>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/* ── 6 · Build ────────────────────────────────────────────────────────────── */
+
+/**
+ * One request does the whole build server-side — tools, agents, the graph, the
+ * workflow row and its first version, under a per-workspace advisory lock. So
+ * this is honest about being a single long operation rather than pretending to
+ * tick through steps it is not actually observing.
+ */
+function Build({ session }: { session: ArchitectSessionApi }) {
+  const { state } = session;
+  const building = state.busy === "building";
+
+  return (
+    <div className="grid gap-3">
+      <Panel
+        title="Building"
+        help="Tools, agents, the graph and the first version are created in one transaction. If any part fails, everything created is rolled back — a half-built workflow is worse than none."
+      >
+        <WorkingRow
+          label={building
+            ? "Creating tools and agents, compiling the graph, recording version 1…"
+            : "The build did not complete."}
+          busy={building}
+        />
+
+        {state.buildSteps.length > 0 ? (
+          <ol className="mt-3 grid gap-1.5">
+            {state.buildSteps.map((step, index) => (
+              <li key={`${step.sequence ?? index}-${step.title}`} className="flex items-start gap-2">
+                <svg viewBox="0 0 12 12" className="text-status-success mt-[3px] size-3.5 shrink-0" aria-hidden="true">
+                  <path d="M2.5 6.4 5 8.8 9.5 3.6" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="min-w-0">
+                  <Text variant="body-sm" tone="primary" className="block">{step.title}</Text>
+                  {step.description ? (
+                    <Text variant="caption" tone="muted" className="block leading-snug">{step.description}</Text>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </Panel>
+
+      {!building ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button variant="secondary" size="sm" onClick={() => session.goToStage("review")}>
+            Back to review
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => void session.build()}>
+            Try the build again
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 /* ── 7 · Ready ────────────────────────────────────────────────────────────── */
 
-function Ready({ session }: { session: Session }) {
-  const blueprint = session.blueprint;
-  if (!blueprint) return null;
-  const manifest = manifestFor(blueprint);
-  const name = session.name || blueprint.name;
+function Ready({ session }: { session: ArchitectSessionApi }) {
+  const { state } = session;
+  const created = state.created;
+  if (!created) return null;
+
+  const errors = state.readinessIssues.filter((i) => i.severity === "error");
+  const warnings = state.readinessIssues.filter((i) => i.severity === "warning");
+  const infos = state.readinessIssues.filter((i) => i.severity === "info");
 
   return (
     <div className="grid gap-3">
       <Panel title="Created">
         <Text variant="heading-sm" tone="inherit" as="p" className="text-status-success block">
-          {name} exists as a draft in {session.environment}
+          {created.workflowName} exists as a draft
         </Text>
-        <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
-          Nothing is running yet. It has version 1 recorded, its graph written, and its connections
-          bound — publishing is what starts it.
+        <Text variant="body-sm" tone="secondary" className="mt-1.5 block max-w-[80ch]">
+          {created.toolsCreated ?? 0} tool{created.toolsCreated === 1 ? "" : "s"} and{" "}
+          {created.agentsCreated ?? 0} agent{created.agentsCreated === 1 ? "" : "s"} were registered,
+          the graph was compiled and version 1 is recorded. Nothing is running — publishing is what
+          starts it.
         </Text>
 
-        <ul className="mt-3 grid gap-1">
-          {manifest.entries.filter((e) => !e.existing).map((entry) => (
-            <li key={`${entry.kind}-${entry.name}`} className="flex items-baseline gap-2">
-              <span className="border-subtle text-fg-muted font-code rounded-xs border px-1 text-[10px] uppercase">
-                {entry.kind}
-              </span>
-              <Text variant="body-sm" tone="secondary">{entry.name}</Text>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Text variant="caption" tone="muted">Workflow id</Text>
+          <MonoId value={created.workflowId} srLabel="Workflow id" />
+        </div>
+
+        {created.readinessStatus ? (
+          <div className="mt-2">
+            <Text variant="caption" tone="muted">
+              Readiness:{" "}
+              <Text
+                variant="caption"
+                tone="inherit"
+                as="span"
+                className={created.readinessStatus === "real_ready" ? "text-status-success" : "text-status-waiting"}
+              >
+                {created.readinessStatus === "real_ready" ? "ready for real runs"
+                  : created.readinessStatus === "simulation_ready" ? "ready to simulate"
+                    : "needs connections"}
+              </Text>
+            </Text>
+          </div>
+        ) : null}
       </Panel>
+
+      {errors.length + warnings.length + infos.length > 0 ? (
+        <Panel
+          title="Before it can run for real"
+          help="Reported by the server after the build, against the graph it actually compiled."
+          tone={errors.length > 0 ? "warning" : undefined}
+        >
+          <ul className="grid gap-1.5">
+            {[...errors, ...warnings, ...infos].map((issue) => (
+              <IssueRow key={`${issue.code}-${issue.message}`} issue={issue} />
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="primary" size="sm">
-          <Link href={"/workflows" as Route}>Open in builder</Link>
+          <Link href={"/workflows" as Route}>Back to workflows</Link>
         </Button>
         <Button asChild variant="secondary" size="sm">
-          <Link href={"/workflows" as Route}>Run a simulation</Link>
+          <Link href={"/connections" as Route}>Manage connections</Link>
         </Button>
-        <Button asChild variant="secondary" size="sm">
-          <Link href={"/workflows" as Route}>Review and publish</Link>
+        <Button variant="ghost" size="sm" onClick={() => session.reset()}>
+          Start another
         </Button>
       </div>
     </div>
   );
 }
 
-/* ── Errors ───────────────────────────────────────────────────────────────── */
-
-function ErrorPanel({
-  code, onDismiss, onReturn,
-}: {
-  code: string;
-  onDismiss: () => void;
-  onReturn: (stage: StageId) => void;
-}) {
-  const error = ERRORS[code];
-  if (!error) return null;
-
+function IssueRow({ issue }: { issue: ReadinessIssue }) {
   return (
-    <div className="border-status-failed-border bg-status-failed-subtle mb-4 rounded-md border p-3">
+    <li className="flex items-start gap-2">
+      <span
+        className={cn(
+          "mt-[7px] size-1.5 shrink-0 rounded-full",
+          issue.severity === "error" ? "bg-status-failed"
+            : issue.severity === "warning" ? "bg-status-waiting" : "bg-fg-disabled",
+        )}
+        aria-hidden="true"
+      />
+      <span className="min-w-0">
+        <Text variant="body-sm" tone="secondary" className="block leading-snug">{issue.message}</Text>
+        <Text variant="caption" tone="disabled" className="font-code block">{issue.code}</Text>
+      </span>
+    </li>
+  );
+}
+
+/* ── Failures ─────────────────────────────────────────────────────────────── */
+
+function FailurePanel({ failure, onDismiss }: { failure: ArchitectFailure; onDismiss: () => void }) {
+  return (
+    <div role="alert" className="border-status-failed-border bg-status-failed-subtle rounded-md border p-3">
       <Text variant="body-sm" tone="inherit" className="text-status-failed block font-medium">
-        {error.title}
+        {failure.title}
       </Text>
-      <Text variant="body-sm" tone="secondary" className="mt-1 block">{error.detail}</Text>
-      <Text variant="caption" tone="muted" className="mt-1 block">{error.fix}</Text>
-      <div className="mt-2 flex gap-2">
-        <Button size="xs" variant="secondary" onClick={() => onReturn(error.stage)}>
-          Back to {STAGES.find((s) => s.id === error.stage)?.label}
-        </Button>
+      <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[80ch]">{failure.detail}</Text>
+      <Text variant="caption" tone="muted" className="mt-1 block leading-snug">{failure.fix}</Text>
+
+      {failure.usage?.resetAt ? (
+        <Text variant="caption" tone="muted" className="mt-1 block">
+          Next build <InstantUtc iso={failure.usage.resetAt} />.
+        </Text>
+      ) : null}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button size="xs" variant="ghost" onClick={onDismiss}>Dismiss</Button>
+        {failure.reference ? (
+          <Text variant="caption" tone="disabled" className="font-code">{failure.reference}</Text>
+        ) : null}
       </div>
     </div>
   );
 }
 
 /* ── Chrome ───────────────────────────────────────────────────────────────── */
+
+function StageNav({
+  session, back, next, nextLabel,
+}: {
+  session: ArchitectSessionApi;
+  back: StageId;
+  next: StageId;
+  nextLabel: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <Button variant="secondary" size="sm" onClick={() => session.goToStage(back)}>Back</Button>
+      <Button variant="primary" size="sm" onClick={() => session.goToStage(next)}>{nextLabel}</Button>
+    </div>
+  );
+}
+
+function WorkingRow({ label, busy }: { label: string; busy: boolean }) {
+  return (
+    <span className="flex items-center gap-2">
+      {busy ? <Spinner className="size-4" /> : null}
+      <Text variant="body-sm" tone={busy ? "secondary" : "muted"}>{label}</Text>
+    </span>
+  );
+}
 
 function Panel({
   title, help, action, children, tone,
@@ -906,13 +1260,17 @@ function Panel({
     <section
       className={cn(
         "rounded-lg border",
-        tone === "warning" ? "border-status-waiting-border bg-status-waiting-subtle" : "border-subtle bg-surface-raised",
+        tone === "warning"
+          ? "border-status-waiting-border bg-status-waiting-subtle"
+          : "border-subtle bg-surface-raised",
       )}
     >
       <header className="border-subtle flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
         <div className="min-w-0">
           <Text variant="eyebrow" tone="muted">{title}</Text>
-          {help ? <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{help}</Text> : null}
+          {help ? (
+            <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{help}</Text>
+          ) : null}
         </div>
         {action}
       </header>
@@ -921,13 +1279,32 @@ function Panel({
   );
 }
 
-function Field({ label, help, children }: { label: string; help: string; children: React.ReactNode }) {
+function Notice({
+  tone, title, children,
+}: {
+  tone: "failed" | "waiting";
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <label className="grid min-w-0 gap-1">
-      <Text variant="caption" tone="secondary">{label}</Text>
-      {children}
-      <Text variant="caption" tone="muted" className="leading-snug">{help}</Text>
-    </label>
+    <div
+      role="alert"
+      className={cn(
+        "rounded-md border p-2.5",
+        tone === "failed"
+          ? "border-status-failed-border bg-status-failed-subtle"
+          : "border-status-waiting-border bg-status-waiting-subtle",
+      )}
+    >
+      <Text
+        variant="body-sm"
+        tone="inherit"
+        className={cn("block font-medium", tone === "failed" ? "text-status-failed" : "text-status-waiting")}
+      >
+        {title}
+      </Text>
+      <Text variant="body-sm" tone="secondary" className="mt-0.5 block leading-snug">{children}</Text>
+    </div>
   );
 }
 

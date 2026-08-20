@@ -129,7 +129,8 @@ for (const theme of ["dark", "light"]) {
   await clickUntil(
     page,
     (p) => p.getByRole("button", { name: "Analyse the description" }),
-    async (p) => (await p.getByText("Reading the description").count()) > 0,
+    async (p) => (await p.getByText("Designing the workflow").count()) > 0
+      || (await p.getByText("Why each step").count()) > 0,
     "start analyze",
   );
   await page.waitForTimeout(1500);
@@ -142,16 +143,25 @@ for (const theme of ["dark", "light"]) {
 
   await clickUntil(
     page,
-    (p) => p.getByRole("button", { name: "Continue to connections" }),
-    async (p) => (await p.getByText("Connections this workflow needs").count()) > 0,
+    (p) => p.getByRole("button", { name: "Approve and continue" }),
+    async (p) => (await p.getByText("Connections this workflow needs").count()) > 0
+      || (await p.getByText("No connections needed").count()) > 0,
     "connect",
   );
+
+  /* Every requirement has to be satisfied before Review unlocks — the button is
+     disabled while anything the plan needs for simulation is unbound, which is
+     the point of the stage rather than an obstacle to work around. */
+  for (const button of await page.getByRole("button", { name: "Simulate instead" }).all()) {
+    await button.click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
   await shot(page, `architect-4-connect-${theme}`);
 
   await clickUntil(
     page,
     (p) => p.getByRole("button", { name: "Continue to review" }),
-    async (p) => (await p.getByText("Resource manifest").count()) > 0,
+    async (p) => (await p.getByText("What will be created").count()) > 0,
     "review",
   );
   await shot(page, `architect-5-review-${theme}`, { fullPage: true });
@@ -165,20 +175,21 @@ for (const theme of ["dark", "light"]) {
   await page.waitForTimeout(900);
   await shot(page, `architect-6-build-${theme}`);
 
-  await page.waitForTimeout(4500);
+  await page.waitForSelector("text=exists as a draft", { timeout: 60000 }).catch(() => {});
   await shot(page, `architect-7-ready-${theme}`);
   await done(page);
 }
 
-console.log("\narchitect quota exhausted:");
-{
-  // The upgrade path, shown before any effort is invested in a prompt.
-  const page = await open("/workflows/new/architect", { theme: "dark" });
-  await page.evaluate(() => {
-    const banner = document.querySelector("main");
-    if (banner) banner.setAttribute("data-quota", "exhausted");
-  });
-  await shot(page, "architect-quota");
+console.log("\nnew workflow:");
+for (const theme of ["dark", "light"]) {
+  const page = await open("/workflows/new", { theme });
+  await shot(page, `new-workflow-${theme}`, { fullPage: true });
+
+  // The schedule trigger reveals the cron editor and its occurrence preview,
+  // which is the half of this form worth looking at.
+  await page.getByText("Schedule", { exact: true }).first().click().catch(() => {});
+  await page.waitForTimeout(600);
+  await shot(page, `new-workflow-schedule-${theme}`, { fullPage: true });
   await done(page);
 }
 
@@ -199,7 +210,8 @@ console.log("\nrecording the blueprint materialising:");
   await clickUntil(
     page,
     (p) => p.getByRole("button", { name: "Analyse the description" }),
-    async (p) => (await p.getByText("Reading the description").count()) > 0,
+    async (p) => (await p.getByText("Designing the workflow").count()) > 0
+      || (await p.getByText("Why each step").count()) > 0,
     "start analyze",
   );
 

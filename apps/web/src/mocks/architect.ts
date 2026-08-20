@@ -2,6 +2,7 @@ import { CONNECTIONS } from "./fixtures";
 import { toolNode, llmNode, agentNode, type VersionNode } from "./workflow-nodes";
 import { simulateVersion } from "./workflow-versions";
 import type { NodeKind } from "./domain";
+import type { Blueprint, BlueprintNode } from "~/lib/architect/blueprint";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AI WORKFLOW ARCHITECT
@@ -157,24 +158,13 @@ export const ANALYSIS: AnalysisFinding[] = [
 
 /* ── Blueprint ────────────────────────────────────────────────────────────── */
 
-export interface BlueprintNode extends VersionNode {
-  /** Why the Architect put this step here. The thing that earns trust. */
-  rationale: string;
-  /** Rendered in the manifest as a resource that will be created. */
-  creates: "agent" | "tool" | "connection" | "gate" | null;
-}
-
-export interface BlueprintEdge {
-  from: string;
-  to: string;
-  label?: string;
-}
-
-export interface Blueprint {
-  name: string;
-  nodes: BlueprintNode[];
-  edges: BlueprintEdge[];
-}
+/**
+ * The blueprint shapes now live in `~/lib/architect/blueprint` — the canvas is
+ * driven by REAL plans from `/api/architect/*`, and live code cannot import
+ * this file. Re-exported here so the fixture below and anything still reading
+ * it keep one definition rather than two that drift.
+ */
+export type { Blueprint, BlueprintEdge, BlueprintNode } from "~/lib/architect/blueprint";
 
 const plain = (kind: NodeKind, id: string, name: string, config: Record<string, unknown> = {}): VersionNode =>
   ({ id, name, kind, config });
