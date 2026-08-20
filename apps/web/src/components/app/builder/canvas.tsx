@@ -116,6 +116,29 @@ export function Canvas({
   const [hoverPath, setHoverPath] = React.useState<Set<string> | null>(null);
   const dragRef = React.useRef<Record<string, { x: number; y: number }>>({});
 
+  /* THE HOVER BLINK.
+     `pathThrough(node.id, ...)` builds a brand-new Set every call, even when
+     the pointer is still over the same node — React Flow's pane keeps firing
+     mouseenter for a node whose underlying DOM element gets recreated by a
+     nodes-array reference change, and that new Set is a new `hoverPath`,
+     which rebuilds the `nodes`/`edges` memos below, which changes the
+     nodes-array reference, which can trigger mouseenter again. Same shape as
+     the drag blink and the old onSelectionChange loop: state kept getting
+     reset to an equal-but-not-identical value every frame. Tracking the
+     hovered id separately and only calling setHoverPath when it actually
+     changes breaks the cycle. */
+  const hoveredNodeIdRef = React.useRef<string | null>(null);
+  const onNodeHoverStart = React.useCallback((nodeId: string, edges: BuilderState["edges"]) => {
+    if (hoveredNodeIdRef.current === nodeId) return;
+    hoveredNodeIdRef.current = nodeId;
+    setHoverPath(pathThrough(nodeId, edges));
+  }, []);
+  const onNodeHoverEnd = React.useCallback(() => {
+    if (hoveredNodeIdRef.current === null) return;
+    hoveredNodeIdRef.current = null;
+    setHoverPath(null);
+  }, []);
+
   /* ── Derived per-node facts ─────────────────────────────────────────────── */
 
   const issuesByNode = React.useMemo(() => {
@@ -335,8 +358,8 @@ export function Canvas({
         onSelectionEnd={onSelectionEnd}
         onConnect={onConnect}
         onConnectEnd={handleConnectEnd}
-        onNodeMouseEnter={(_, node) => setHoverPath(pathThrough(node.id, state.edges))}
-        onNodeMouseLeave={() => setHoverPath(null)}
+        onNodeMouseEnter={(_, node) => onNodeHoverStart(node.id, state.edges)}
+        onNodeMouseLeave={onNodeHoverEnd}
         onNodeDoubleClick={(_, node) => onOpenNode(node.id)}
         onEdgeClick={(_, edge) => dispatch({ type: "selectEdge", id: edge.id })}
         onPaneClick={() => { dispatch({ type: "select", ids: [] }); }}

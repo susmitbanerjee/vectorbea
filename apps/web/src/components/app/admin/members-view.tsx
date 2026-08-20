@@ -38,7 +38,15 @@ export function MembersView() {
           <th className="px-3 py-2 text-left font-normal">Member</th><th className="px-3 py-2 text-left font-normal">Email</th><th className="px-3 py-2 text-left font-normal">Role</th><th className="px-3 py-2 text-left font-normal">Joined</th>
         </tr></thead>
         <tbody>{members.data.map((member) => <tr key={member.id} className="border-subtle border-b last:border-0">
-          <td className="px-3 py-2"><span className="flex items-center gap-2"><span className="bg-accent-subtle text-accent flex size-7 items-center justify-center rounded-full text-caption">{member.displayName.slice(0, 1).toUpperCase()}</span><Text variant="body-sm" tone="primary">{member.displayName}</Text></span></td>
+          <td className="px-3 py-2"><span className="flex items-center gap-2">
+            {member.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- external provider avatar, not a local asset
+              <img src={member.avatarUrl} alt="" className="size-7 shrink-0 rounded-full object-cover" />
+            ) : (
+              <span className="bg-accent-subtle text-accent flex size-7 shrink-0 items-center justify-center rounded-full text-caption">{member.displayName.slice(0, 1).toUpperCase()}</span>
+            )}
+            <Text variant="body-sm" tone="primary">{member.displayName}</Text>
+          </span></td>
           <td className="px-3 py-2"><Text variant="caption" tone="secondary">{member.email}</Text></td>
           <td className="px-3 py-2"><span className="border-subtle bg-surface-sunken text-fg-secondary rounded-full border px-2 py-0.5 text-caption capitalize">{member.role}</span></td>
           <td className="px-3 py-2"><Text variant="caption" tone="muted"><RelativeTime iso={member.joinedAt} /></Text></td>
