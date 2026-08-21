@@ -133,7 +133,14 @@ export async function getCompatibleConnectionsForAgent(agentType: string): Promi
   return all.filter((c) => compatTypes.includes(c.type));
 }
 
-export async function createConnection(payload: Partial<Connection>): Promise<Connection> {
+export interface CreateConnectionPayload extends Omit<Partial<Connection>, "type" | "config"> {
+  /** Backend connection vocabulary: llm, database, http, tool, vector_store, object_storage. */
+  type?: ConnectionType | "llm" | "http" | "tool";
+  config?: Record<string, unknown>;
+  plaintextSecret?: string;
+}
+
+export async function createConnection(payload: CreateConnectionPayload): Promise<Connection> {
   const workspaceId = getActiveWorkspaceId();
   const conn = await api<Connection>(withWorkspace("/api/connections", workspaceId), {
     method: "POST",
