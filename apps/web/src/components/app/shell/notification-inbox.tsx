@@ -234,6 +234,7 @@ export function NotificationInbox() {
         <PopoverPrimitive.Trigger
           className={cn(
             "relative grid size-7 place-items-center rounded-sm",
+            "cursor-pointer",
             "text-fg-secondary transition-colors duration-fast outline-none",
             "hover:bg-surface-hover hover:text-fg-primary focus-visible:focus-ring",
           )}

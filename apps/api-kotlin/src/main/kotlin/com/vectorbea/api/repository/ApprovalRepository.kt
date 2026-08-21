@@ -7,11 +7,11 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * Read-only repository for human-in-the-loop approvals.
+ * Repository for human-in-the-loop approvals.
  *
  * Approvals are created by the workflow executor when an agent step requires
- * human sign-off. The API surfaces them for review; approval/rejection is
- * a separate write operation (handled by the execution engine prompt).
+ * human sign-off. `run_approvals` is authoritative after V027; keeping reads
+ * and decisions on that table prevents approved gates appearing as pending.
  *
  * Security: [payloadJsonSanitized] has already had secrets stripped by the executor.
  */
@@ -49,10 +49,14 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     override val log = LoggerFactory.getLogger(ApprovalRepository::class.java)
 
     private val cols = """
-        a.id, a.run_id, a.workflow_id, a.step_id, a.agent_id, a.status,
-        a.title, a.message, a.risk_level, a.requested_by, a.decided_by,
-        a.requested_at, a.decided_at, a.decision_reason,
-        a.payload_json_sanitized, a.created_at, a.updated_at
+        a.id, a.run_id, COALESCE(a.workflow_id, r.workflow_id) AS workflow_id,
+        a.node_id AS step_id, a.agent_id, a.status,
+        COALESCE(a.title, 'Approval gate') AS title, a.message,
+        COALESCE(a.risk_level, 'medium') AS risk_level, a.requested_by,
+        a.resolved_by AS decided_by, a.created_at AS requested_at,
+        a.resolved_at AS decided_at, a.decision_reason,
+        COALESCE(a.decision_context_json, a.metadata_json) AS payload_json_sanitized,
+        a.created_at, a.updated_at
     """.trimIndent()
 
     /**
@@ -64,17 +68,15 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
      */
     fun decide(req: DecideApprovalRequest): Boolean = execute(
         """
-        UPDATE approvals a
-        SET status        = ?,
-            decided_by    = ?,
-            decided_at    = now(),
+        UPDATE run_approvals a
+        SET status        = UPPER(?),
+            resolved_by   = ?,
+            resolved_at   = now(),
             decision_reason = ?,
             updated_at    = now()
-        FROM agent_runs r
         WHERE a.id = ?
-          AND a.run_id = r.id
-          AND r.workspace_id = ?
-          AND a.status = 'pending'
+          AND a.workspace_id = ?
+          AND UPPER(a.status) = 'PENDING'
         """.trimIndent(),
     ) {
         setString(1, req.decision)
@@ -91,9 +93,9 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     fun findById(id: UUID, workspaceId: UUID): Approval? = queryOne(
         """
         SELECT $cols
-        FROM approvals a
+        FROM run_approvals a
         JOIN agent_runs r ON r.id = a.run_id
-        WHERE a.id = ? AND r.workspace_id = ?
+        WHERE a.id = ? AND a.workspace_id = ?
         """.trimIndent(),
         { setUuid(1, id); setUuid(2, workspaceId) },
         ::mapRow,
@@ -107,10 +109,10 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         params: PageParams = PageParams(),
     ): Page<Approval> {
         val filters = buildList {
-            add("r.workspace_id = ?")
-            if (workflowId != null) add("a.workflow_id = ?")
+            add("a.workspace_id = ?")
+            if (workflowId != null) add("COALESCE(a.workflow_id, r.workflow_id) = ?")
             if (runId != null) add("a.run_id = ?")
-            // Case-insensitive: frontend sends PENDING/APPROVED; DB stores pending/approved
+            // Case-insensitive for clients and rows created before V027 normalization.
             if (status != null) add("LOWER(a.status) = LOWER(?)")
         }
         val where = "WHERE ${filters.joinToString(" AND ")}"
@@ -124,13 +126,13 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         return queryPage(
             sql = """
                 SELECT $cols
-                FROM approvals a JOIN agent_runs r ON r.id = a.run_id
+                FROM run_approvals a JOIN agent_runs r ON r.id = a.run_id
                 $where
-                ORDER BY a.requested_at DESC
+                ORDER BY a.created_at DESC
             """.trimIndent(),
             countSql = """
                 SELECT COUNT(*)
-                FROM approvals a JOIN agent_runs r ON r.id = a.run_id
+                FROM run_approvals a JOIN agent_runs r ON r.id = a.run_id
                 $where
             """.trimIndent(),
             params = params,

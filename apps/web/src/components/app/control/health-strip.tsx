@@ -70,7 +70,7 @@ export function HealthStrip({ health, className }: HealthStripProps) {
     >
       {/* ── In flight ──────────────────────────────────────────────────── */}
       <HealthCell
-        href={"/runs?status=running" as Route}
+        href={(inFlight.queued > 0 ? "/runs?q=status%3Aqueued" : "/runs?q=status%3Arunning") as Route}
         icon={InFlightIcon}
         label="In flight now"
         tone={inFlight.running > 0 ? "live" : "neutral"}
@@ -99,7 +99,7 @@ export function HealthStrip({ health, className }: HealthStripProps) {
       <HealthCell
         href={(failureBudget.target === null
           ? "/settings/usage#operational-budgets"
-          : "/runs?status=failed") as Route}
+          : "/runs?q=status%3Afailed") as Route}
         icon={BudgetBurnIcon}
         label="Failure budget"
         tone={overBudget ? "failed" : "neutral"}

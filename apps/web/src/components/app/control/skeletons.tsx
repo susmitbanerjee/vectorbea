@@ -51,26 +51,6 @@ export function HealthStripSkeleton() {
   );
 }
 
-/**
- * The attention line, not the old feed.
- *
- * One row rather than three: the triage feed moved to the notification inbox
- * and what remains on Control is a single severity summary. A three-row
- * skeleton would reserve height the loaded page never uses, which is exactly
- * the reflow a skeleton exists to prevent.
- */
-export function AttentionSummarySkeleton() {
-  return (
-    <div aria-hidden="true" className="border-subtle bg-surface-raised rounded-md border px-3 py-2">
-      <div className="flex items-center gap-2.5">
-        <Shimmer className="size-4 shrink-0 rounded-sm" />
-        <Shimmer className="h-3 w-48" />
-        <Shimmer className="h-2.5 w-28" />
-      </div>
-    </div>
-  );
-}
-
 export function FleetSkeleton({ rows = 8 }: { rows?: number }) {
   return (
     <div aria-hidden="true" className="border-subtle bg-surface-raised overflow-hidden rounded-lg border">
@@ -131,7 +111,6 @@ export function ControlSkeleton() {
     <div className="grid gap-6">
       <p role="status" className="sr-only">Loading workspace health.</p>
       <HealthStripSkeleton />
-      <AttentionSummarySkeleton />
       <FleetSkeleton />
       <DetailSkeleton />
     </div>

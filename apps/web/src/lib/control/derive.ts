@@ -31,6 +31,7 @@ type RunSummary = contracts.RunSummary;
 type Workflow = contracts.Workflow;
 type FailureIncident = contracts.FailureIncident;
 type ControlMetrics = contracts.ControlMetrics;
+type Approval = contracts.Approval;
 
 /* ── Status translation ───────────────────────────────────────────────────── */
 
@@ -107,6 +108,8 @@ export function deriveHealth(
   incidents: FailureIncident[],
   now: number,
   budget?: ControlBudgetSettings,
+  approvals?: Approval[],
+  approvalsAvailable = approvals !== undefined,
 ): HealthSnapshot {
   /**
    * Queue depth and queue age come from ALL runs, not the selected window.
@@ -125,6 +128,11 @@ export function deriveHealth(
   // is not bounded by the page of runs we happen to hold.
   const running = metrics?.workspace.inFlight ?? runs.filter((r) => r.status === "running").length;
   const queued = metrics?.workspace.queued ?? queuedRuns.length;
+
+  const pendingApprovals = (approvals ?? []).filter((a) => a.status === "PENDING");
+  const approvalSlaMs = (budget?.approvalSlaMinutes ?? 1_440) * 60_000;
+  const approvalAges = pendingApprovals.map((a) => Math.max(0, now - at(a.requestedAt)));
+  const oldestApprovalMs = approvalAges.length > 0 ? Math.max(...approvalAges) : 0;
 
   const terminal = runs.filter(
     (r) => r.status === "completed" || r.status === "failed" || r.status === "timed_out",
@@ -169,21 +177,13 @@ export function deriveHealth(
       series,
       topCause,
     },
-    /**
-     * Approvals are ZERO, not unknown-shaped.
-     *
-     * `GET /api/approvals` returns HTTP 500 against the live schema — it queries
-     * an `approvals` table that migration V027 renamed away. Rather than fake an
-     * aging figure, the count is zero and the band shows its own empty copy.
-     * When the endpoint is fixed this becomes a real query.
-     */
     approvals: {
-      available: false,
-      count: 0,
-      oldestWaitedMs: 0,
-      oldestSlaMs: (budget?.approvalSlaMinutes ?? 1_440) * 60_000,
-      pressured: false,
-      breached: 0,
+      available: approvalsAvailable,
+      count: pendingApprovals.length,
+      oldestWaitedMs: oldestApprovalMs,
+      oldestSlaMs: approvalSlaMs,
+      pressured: approvalAges.some((age) => age >= approvalSlaMs / 2),
+      breached: approvalAges.filter((age) => age >= approvalSlaMs).length,
     },
     spend: {
       spentUsd,
@@ -213,6 +213,8 @@ export function deriveAttention(
   connections: contracts.Connection[],
   incidents: FailureIncident[],
   now: number,
+  approvals: Approval[] = [],
+  approvalSlaMs = DAY,
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
   const nameOf = new Map(workflows.map((w) => [w.id, w.name]));
@@ -226,7 +228,7 @@ export function deriveAttention(
       problem: `Connection ‘${c.name}’ is failing its health check`,
       blastRadius: [
         ...(blocked > 0
-          ? [{ label: blocked === 1 ? "queued run" : "queued runs", value: String(blocked), href: "/runs?status=queued" }]
+          ? [{ label: blocked === 1 ? "queued run" : "queued runs", value: String(blocked), href: "/runs?q=status%3Aqueued" }]
           : []),
       ],
       since: c.lastTestedAt ? now - at(c.lastTestedAt) : 0,
@@ -251,7 +253,7 @@ export function deriveAttention(
       severity: "critical",
       problem: `Every recent run of ‘${nameOf.get(workflowId) ?? "this workflow"}’ has failed`,
       blastRadius: [
-        { label: "consecutive failures", value: String(failed.length), href: "/runs?status=failed" },
+        { label: "consecutive failures", value: String(failed.length), href: "/runs?q=status%3Afailed" },
       ],
       since: now - runTime(recent[0]!),
       action: { label: "Open workflow", href: `/workflows/${workflowId}` },
@@ -270,6 +272,19 @@ export function deriveAttention(
       ],
       since: now - at(inc.detectedAt),
       action: { label: "Investigate", href: `/runs/${inc.runId}` },
+    });
+  }
+
+  for (const approval of approvals.filter((a) => a.status === "PENDING")) {
+    const age = Math.max(0, now - at(approval.requestedAt));
+    items.push({
+      id: `attn-approval-${approval.id}`,
+      kind: "approval",
+      severity: age >= approvalSlaMs ? "critical" : age >= approvalSlaMs / 2 ? "high" : "medium",
+      problem: approval.title ?? "An approval is waiting for a decision",
+      blastRadius: [{ label: "run", value: approval.runId, id: true }],
+      since: age,
+      action: { label: "Review approval", href: `/approvals?approval=${approval.id}` },
     });
   }
 

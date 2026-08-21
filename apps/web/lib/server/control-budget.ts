@@ -25,6 +25,11 @@ const EMPTY_BUDGET: WorkspaceControlBudget = {
   updatedAt: null,
 };
 
+function isMissingBudgetTable(error: { code?: string; message?: string }): boolean {
+  return error.code === "42P01" || error.code === "PGRST205" ||
+    Boolean(error.message?.includes("workspace_control_budgets") && error.message.includes("schema cache"));
+}
+
 function numeric(value: number | string | null): number | null {
   if (value === null) return null;
   const parsed = Number(value);
@@ -56,6 +61,10 @@ export async function getWorkspaceControlBudget(
     .select("reliability_target,daily_spend_limit_usd,approval_sla_minutes,updated_at")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
+  // A deployment can briefly run the web image before V035 reaches PostgREST's
+  // schema cache. No row/table means "not configured" for this optional
+  // setting; it must not degrade the whole Control screen.
+  if (error && isMissingBudgetTable(error)) return EMPTY_BUDGET;
   if (error) throw new Error(`Failed to load operational budget: ${error.message}`);
   return fromRow(data as BudgetRow | null);
 }
@@ -81,4 +90,3 @@ export async function saveWorkspaceControlBudget(args: {
   if (error) throw new Error(`Failed to save operational budget: ${error.message}`);
   return fromRow(data as BudgetRow);
 }
-

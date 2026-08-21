@@ -60,4 +60,32 @@ describe("Control operational budgets", () => {
     expect(health.approvals.oldestSlaMs).toBe(120 * 60_000);
     expect(cost.budgetPerBucketUsd).toBe(1);
   });
+
+  it("uses the authoritative workspace queue telemetry", () => {
+    const metrics = { workspace: { queued: 18, inFlight: 0 } } as never;
+    const health = deriveHealth([], [], metrics, [], now);
+    expect(health.inFlight.queued).toBe(18);
+  });
+
+  it("derives approval aging from pending approvals", () => {
+    const budget: ControlBudgetSettings = {
+      configured: true,
+      reliabilityTarget: null,
+      dailySpendLimitUsd: null,
+      approvalSlaMinutes: 120,
+      updatedAt: new Date(now).toISOString(),
+    };
+    const approvals = [{
+      id: "approval-1",
+      status: "PENDING",
+      requestedAt: new Date(now - 60 * 60_000).toISOString(),
+    }] as never;
+    const health = deriveHealth([], [], undefined, [], now, budget, approvals);
+
+    expect(health.approvals.available).toBe(true);
+    expect(health.approvals.count).toBe(1);
+    expect(health.approvals.oldestWaitedMs).toBe(60 * 60_000);
+    expect(health.approvals.pressured).toBe(true);
+    expect(health.approvals.breached).toBe(0);
+  });
 });

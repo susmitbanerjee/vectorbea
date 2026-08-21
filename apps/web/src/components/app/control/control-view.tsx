@@ -5,14 +5,12 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { HealthStrip } from "./health-strip";
-import { AttentionSummary } from "./attention-summary";
 import { FleetHeatstrip } from "./fleet-heatstrip";
 import { DetailBand } from "./detail-band";
 import { TimeRangeControl } from "./time-range";
 import { EmptyWorkspace } from "./empty-workspace";
-import { worstSeverity } from "~/components/app/shell/inbox-signal";
 import {
-  HealthStripSkeleton, AttentionSummarySkeleton, FleetSkeleton, DetailSkeleton,
+  HealthStripSkeleton, FleetSkeleton, DetailSkeleton,
 } from "./skeletons";
 import { useControlData } from "./use-control-data";
 import { resolveRange, DEFAULT_RANGE } from "~/lib/control/range";
@@ -23,15 +21,12 @@ import type { FleetSort, TimeRangeId } from "~/lib/control/model";
 
    The order is the argument: an operator arriving because something is wrong
    reads top to bottom and stops as soon as they know what to do. Health tells
-   them whether it is bad, the attention line tells them how much needs doing
-   and how badly, Fleet tells them how far it has spread, and Detail is there
-   for the diagnosis afterwards.
+   them whether it is bad, Fleet tells them how far it has spread, and Detail
+   is there for the diagnosis afterwards.
 
    The triage feed itself has moved to the notification inbox, which makes it
-   reachable from every screen rather than only this one. What stayed is a
-   single severity-weighted line that opens it — see attention-summary.tsx for
-   why burying it entirely would have cost more than it saved. Fleet is promoted
-   into the space that freed up.
+   reachable from every screen rather than only this one. Control does not
+   duplicate its empty or actionable states; the bell is the single inbox.
 
    Every number is a link. That is the single rule this rebuild exists to
    enforce — the old Overview reported "41% success rate" and "1 failed" and
@@ -80,13 +75,7 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
 
   /* ── Data — live, from the API ──────────────────────────────────────────── */
   const data = useControlData(range, sort);
-  const { health, attention, fleet, latency, cost } = data;
-  // Only the shape of the attention list is needed here — the items themselves
-  // are rendered by the inbox.
-  const attentionWorst = React.useMemo(
-    () => worstSeverity(attention.map((a) => a.severity)),
-    [attention],
-  );
+  const { health, fleet, latency, cost } = data;
 
   /* ── First-paint loading ────────────────────────────────────────────────── */
   const [booted, setBooted] = React.useState(frozen);
@@ -127,7 +116,6 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
         <div className="grid gap-6">
           <p role="status" className="sr-only">Loading workspace health.</p>
           <HealthStripSkeleton />
-          <AttentionSummarySkeleton />
           <BandHeading>Fleet</BandHeading>
           <FleetSkeleton />
           <BandHeading>Detail</BandHeading>
@@ -139,7 +127,6 @@ export function ControlView({ forceState, frozen: frozenProp }: ControlViewProps
             <UnavailableNotice endpoints={data.unavailable} />
           ) : null}
           <HealthStrip health={health} />
-          <AttentionSummary count={attention.length} worst={attentionWorst} />
           <FleetHeatstrip
             rows={fleet}
             sort={sort}

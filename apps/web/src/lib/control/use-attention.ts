@@ -49,6 +49,12 @@ export function useAttention(): { items: AttentionItem[]; loading: boolean } {
     queryFn: () => api.incidents.list({ ...scope, limit: 50 }),
     enabled,
   });
+  const approvals = useApiQuery({
+    queryKey: queryKeys.approvals.list(keyScope, { page: 1, pageSize: 100, status: "PENDING" }),
+    queryFn: () => api.approvals.list({ ...scope, page: 1, pageSize: 100, status: "PENDING" }),
+    enabled,
+    freshness: "live",
+  });
 
   return React.useMemo(
     () => ({
@@ -58,9 +64,10 @@ export function useAttention(): { items: AttentionItem[]; loading: boolean } {
         connections.data?.items ?? [],
         incidents.data ?? [],
         Date.now(),
+        approvals.data?.items ?? [],
       ),
-      loading: runs.isPending || incidents.isPending,
+      loading: runs.isPending || incidents.isPending || approvals.isPending,
     }),
-    [runs.data, workflows.data, connections.data, incidents.data, runs.isPending, incidents.isPending],
+    [runs.data, workflows.data, connections.data, incidents.data, approvals.data, runs.isPending, incidents.isPending, approvals.isPending],
   );
 }
