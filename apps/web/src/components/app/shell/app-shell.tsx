@@ -239,8 +239,6 @@ function ShellInner({ children, user }: AppShellProps) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
-          environment={environment}
-          onEnvironmentChange={changeEnvironment}
           onOpenPalette={() => setPaletteOpen(true)}
           onOpenSidebar={() => setDrawerOpen(true)}
         />

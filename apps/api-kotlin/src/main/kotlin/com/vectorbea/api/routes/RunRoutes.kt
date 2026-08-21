@@ -204,6 +204,7 @@ class RunRoutes(
         router.sseGet("/api/runs/:id/stream", ::streamEvents)
 
         // Durable control operations
+        router.post("/api/runs/purge-queued",     ::purgeQueuedRuns)
         router.post("/api/runs/:id/cancel",     ::cancelRun)
         router.post("/api/runs/:id/retry",      ::retryRun)
         router.post("/api/runs/:id/retry-node", ::retryNode)
@@ -638,6 +639,13 @@ class RunRoutes(
     }
 
     // ── POST /api/runs/:id/cancel ─────────────────────────────────────────────
+
+    private fun purgeQueuedRuns(req: Request): Response {
+        val ctx = req.context()
+        val purged = runRepo.purgeQueued(ctx.workspaceId)
+        log.info("[run] queued runs purged workspaceId={} count={}", ctx.workspaceId, purged)
+        return Response.ok(mapOf("purged" to purged, "status" to "cancelled"))
+    }
 
     /**
      * Request cancellation of an in-progress run.

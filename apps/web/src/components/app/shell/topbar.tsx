@@ -7,9 +7,7 @@ import { cn } from "~/lib/cn";
 import { Kbd } from "~/components/ui/kbd";
 import { MonoId } from "~/components/ui/mono-id";
 import { segmentLabel, isIdSegment } from "./nav";
-import { EnvironmentSwitcher } from "./environment";
 import { NotificationInbox } from "./notification-inbox";
-import type { EnvironmentId } from "~/mocks/shell";
 
 /**
  * Breadcrumb derived from the route.
@@ -65,8 +63,6 @@ function Breadcrumb() {
 }
 
 export interface TopbarProps {
-  environment: EnvironmentId;
-  onEnvironmentChange: (env: EnvironmentId) => void;
   onOpenPalette: () => void;
   /** Page-level actions, supplied by the route. */
   actions?: React.ReactNode;
@@ -75,10 +71,8 @@ export interface TopbarProps {
 }
 
 export function Topbar({
-  environment, onEnvironmentChange, onOpenPalette, actions, onOpenSidebar,
+  onOpenPalette, actions, onOpenSidebar,
 }: TopbarProps) {
-  const pathname = usePathname();
-  const showEnvironment = pathname !== "/control" && !pathname.startsWith("/control/");
   return (
     <header
       className={cn(
@@ -143,14 +137,6 @@ export function Topbar({
           <path d="m10.2 10.2 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </button>
-
-      {showEnvironment ? (
-        <EnvironmentSwitcher
-          environment={environment}
-          onEnvironmentChange={onEnvironmentChange}
-          compact={false}
-        />
-      ) : null}
 
       <NotificationInbox />
 

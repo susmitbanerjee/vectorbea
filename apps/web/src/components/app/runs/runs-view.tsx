@@ -8,6 +8,7 @@ import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
+import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { DataTable, type DataColumn, type TableStatus } from "~/components/data/table/data-table";
@@ -215,6 +216,51 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       : "ready");
 
   const [operationError, setOperationError] = React.useState<string | null>(null);
+  const [operationSuccess, setOperationSuccess] = React.useState<string | null>(null);
+  const [purgeOpen, setPurgeOpen] = React.useState(false);
+  const [purging, setPurging] = React.useState(false);
+  const [incidentPurgeOpen, setIncidentPurgeOpen] = React.useState(false);
+  const [purgingIncidents, setPurgingIncidents] = React.useState(false);
+
+  const purgeQueued = React.useCallback(async () => {
+    setOperationError(null);
+    setOperationSuccess(null);
+    setPurging(true);
+    try {
+      const result = await api.runs.purgeQueued(data.scope);
+      setPurgeOpen(false);
+      setOperationSuccess(
+        result.purged === 0
+          ? "The queue was already empty."
+          : `${result.purged.toLocaleString("en-GB")} queued ${result.purged === 1 ? "run was" : "runs were"} cancelled.`,
+      );
+      await data.refetch();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "The queue purge failed.");
+    } finally {
+      setPurging(false);
+    }
+  }, [api, data]);
+
+  const purgeIncidents = React.useCallback(async () => {
+    setOperationError(null);
+    setOperationSuccess(null);
+    setPurgingIncidents(true);
+    try {
+      const result = await api.incidents.resolveAll(data.scope);
+      setIncidentPurgeOpen(false);
+      setOperationSuccess(
+        result.resolved === 0
+          ? "There were no open incidents to resolve."
+          : `${result.resolved.toLocaleString("en-GB")} ${result.resolved === 1 ? "incident was" : "incidents were"} resolved.`,
+      );
+      await data.refetch();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "The incident purge failed.");
+    } finally {
+      setPurgingIncidents(false);
+    }
+  }, [api, data]);
 
   const retryRuns = React.useCallback(async (runs: Run[]) => {
     setOperationError(null);
@@ -412,6 +458,12 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
         actions={
           <>
             <TimeRangeControl value={rangeId} onChange={(id) => setParams({ range: id })} />
+            <Button size="sm" variant="danger" onClick={() => setPurgeOpen(true)}>
+              Purge queue
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setIncidentPurgeOpen(true)}>
+              Purge incidents
+            </Button>
             <SavedViewsMenu
               views={views}
               currentQuery={queryInput}
@@ -430,6 +482,11 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
             <Text variant="body-sm" tone="inherit" className="text-status-failed">
               {operationError}
             </Text>
+          </div>
+        ) : null}
+        {operationSuccess ? (
+          <div role="status" className="border-status-success-border bg-status-success-subtle rounded-md border px-3 py-2">
+            <Text variant="body-sm" tone="primary">{operationSuccess}</Text>
           </div>
         ) : null}
         <QueryBar
@@ -533,6 +590,25 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
         onCancel={(runs) => void cancelRuns(runs)}
         onCompare={(runs) => router.push(`/runs/compare?a=${runs[0].id}&b=${runs[1].id}` as Route)}
         onExport={(runs) => exportCsv(runs)}
+      />
+
+      <DestructiveConfirmDialog
+        open={purgeOpen}
+        onOpenChange={setPurgeOpen}
+        title="Purge queued runs"
+        description="Every queued run in this workspace will be cancelled. Run records and audit history are retained, and running workflows are not affected."
+        confirmLabel="Cancel all queued runs"
+        pending={purging}
+        onConfirm={() => void purgeQueued()}
+      />
+      <DestructiveConfirmDialog
+        open={incidentPurgeOpen}
+        onOpenChange={setIncidentPurgeOpen}
+        title="Purge incidents"
+        description="Every open incident in this workspace will be marked resolved. Incident records remain available for audit, and failed run history is not deleted."
+        confirmLabel="Resolve all incidents"
+        pending={purgingIncidents}
+        onConfirm={() => void purgeIncidents()}
       />
     </PageContainer>
   );

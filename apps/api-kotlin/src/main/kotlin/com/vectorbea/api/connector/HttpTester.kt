@@ -128,7 +128,15 @@ object HttpTester {
             return testSlackAuth(input, start)
         }
 
-        // Try HEAD first (no response body), fall back to GET
+        // Provider health endpoints often reject HEAD or skip authentication
+        // for it. Use GET when a deliberate health path was configured so the
+        // credential itself is validated (GitHub /user, Gmail profile, etc.).
+        if (!input.healthPath.isNullOrBlank()) {
+            return doRequest(url, "GET", input, start)
+        }
+
+        // Generic endpoints use HEAD first (no response body), then GET if the
+        // transport itself rejects HEAD.
         return try {
             doRequest(url, "HEAD", input, start)
         } catch (_: Exception) {
@@ -210,9 +218,10 @@ object HttpTester {
                 ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed — check API key")
             status == 403 ->
                 ConnectionTestResult.failed(latency, "AUTH_FAILED", "Endpoint returned 403 Forbidden")
+            status == 404 && !input.healthPath.isNullOrBlank() ->
+                ConnectionTestResult.failed(latency, "ENDPOINT_NOT_FOUND", "Configured test endpoint was not found")
             status == 404 ->
-                // 404 on health path is still a reachable server
-                ConnectionTestResult.connected(latency, "Endpoint reachable (404 — health path not found)")
+                ConnectionTestResult.connected(latency, "Endpoint reachable (404)")
             status == 429 ->
                 ConnectionTestResult.failed(latency, "RATE_LIMITED", "Rate limit exceeded")
             status in 300..399 ->

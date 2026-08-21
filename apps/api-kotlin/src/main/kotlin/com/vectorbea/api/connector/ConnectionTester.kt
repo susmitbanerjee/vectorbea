@@ -22,9 +22,6 @@ class ConnectionTester(private val secretService: SecretService) {
 
     private val log = LoggerFactory.getLogger(ConnectionTester::class.java)
 
-    /** Types where a test is meaningless without credentials. */
-    private val SECRET_REQUIRED_TYPES = setOf("llm", "database", "http")
-
     fun test(connection: Connection): ConnectionTestResult {
         log.info("Testing connection [id={}, type={}, provider={}]",
             connection.id, connection.type, connection.provider)
@@ -37,7 +34,9 @@ class ConnectionTester(private val secretService: SecretService) {
         // LLM, database and HTTP connections cannot be meaningfully tested without
         // credentials. The reachability-style types (MCP / vector store / object
         // storage) can still be tested unauthenticated, so they don't require one.
-        if (type in SECRET_REQUIRED_TYPES && resolvedSecret == null) {
+        val secretRequired = type == "llm" || type == "database" ||
+            (type == "http" && connection.authType.lowercase() != "none")
+        if (secretRequired && resolvedSecret == null) {
             return ConnectionTestResult.failed(
                 0, "SECRET_MISSING",
                 "No secret configured for this connection. Add credentials first."
@@ -100,6 +99,7 @@ class ConnectionTester(private val secretService: SecretService) {
                     url = url,
                     authType = if (plaintextSecret.isNullOrBlank()) "none" else at,
                     apiKey = plaintextSecret, username = null, password = null, apiKeyHeaderName = header,
+                    healthPath = config["healthPath"] as? String,
                 ))
             }
             "object_storage", "object-storage", "storage", "blob" -> {
@@ -179,6 +179,7 @@ class ConnectionTester(private val secretService: SecretService) {
             host = config["host"] as? String,
             port = (config["port"] as? Number)?.toInt(),
             database = config["database"] as? String ?: config["db"] as? String,
+            sslRequired = config["sslRequired"] as? Boolean,
         ))
     }
 
@@ -203,6 +204,7 @@ class ConnectionTester(private val secretService: SecretService) {
             host = config["host"] as? String,
             port = (config["port"] as? Number)?.toInt(),
             database = config["database"] as? String ?: config["db"] as? String,
+            sslRequired = config["sslRequired"] as? Boolean,
         ))
     }
 
@@ -322,6 +324,7 @@ class ConnectionTester(private val secretService: SecretService) {
             username = null,
             password = null,
             apiKeyHeaderName = headerName,
+            healthPath = config["healthPath"] as? String,
         ))
     }
 

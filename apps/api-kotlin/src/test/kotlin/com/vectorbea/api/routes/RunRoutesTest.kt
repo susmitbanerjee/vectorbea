@@ -301,6 +301,16 @@ class RunRoutesTest {
 
         assertTrue(events.any { it.first == "run_complete" }, "Expected run_complete for terminal run")
     }
+
+    @Test
+    fun `purge queued cancels all queued runs in workspace`() {
+        runRepo.purgeResult = 3
+        val response = post("/api/runs/purge-queued", emptyMap<String, Any>())
+
+        assertEquals(200, response.status)
+        assertEquals(workspaceId, runRepo.purgedWorkspaceId)
+        assertEquals(3, fromJson<Map<String, Any>>(response.body)["purged"])
+    }
 }
 
 // ── Stub implementations ──────────────────────────────────────────────────────
@@ -308,6 +318,8 @@ class RunRoutesTest {
 class StubRunRepository : RunRepository(FakeDs()) {
     val created = mutableListOf<AgentRun>()
     val statusUpdates = mutableListOf<String>()
+    var purgeResult = 0
+    var purgedWorkspaceId: UUID? = null
     private val store = mutableMapOf<UUID, AgentRun>()
 
     fun seed(
@@ -335,6 +347,11 @@ class StubRunRepository : RunRepository(FakeDs()) {
     override fun updateStatus(id: UUID, workspaceId: UUID, status: String): Boolean {
         statusUpdates += status
         return true
+    }
+
+    override fun purgeQueued(workspaceId: UUID): Int {
+        purgedWorkspaceId = workspaceId
+        return purgeResult
     }
 
     override fun list(

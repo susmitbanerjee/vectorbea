@@ -107,6 +107,7 @@ export interface DatabaseConnectionConfig {
   host?: string;
   port?: number;
   database?: string;
+  username?: string;
   sslRequired: boolean;
   readOnly: boolean;
   allowedSchemas: string[];
@@ -118,6 +119,7 @@ export interface DatabaseConnectionConfig {
 export interface HttpApiConnectionConfig {
   baseUrl: string;
   authType: AuthType;
+  apiKeyHeaderName?: string;
   defaultHeaders: Record<string, string>;
   allowedPaths: string[];
   blockedPaths: string[];
@@ -145,6 +147,7 @@ export interface VectorStoreConnectionConfig {
   embeddingModel?: string;
   /** Index host / API endpoint used to reach (and test) the store. */
   endpoint?: string;
+  healthPath?: string;
 }
 
 export interface ObjectStorageConnectionConfig {

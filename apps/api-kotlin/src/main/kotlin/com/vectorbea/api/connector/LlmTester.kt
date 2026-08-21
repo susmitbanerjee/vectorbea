@@ -1,6 +1,7 @@
 package com.vectorbea.api.connector
 
 import com.vectorbea.api.security.Redactor
+import com.vectorbea.api.security.SsrfGuard
 import org.slf4j.LoggerFactory
 import java.net.HttpURLConnection
 import java.net.URL
@@ -45,12 +46,14 @@ object LlmTester {
             when (input.provider.lowercase()) {
                 "openai"         -> testOpenAi(input, start)
                 "anthropic"      -> testAnthropic(input, start)
-                "google", "gemini" -> testGoogle(input, start)
+                "google", "gemini", "google_gemini" -> testGoogle(input, start)
                 "azure_openai"   -> testAzureOpenAi(input, start)
                 "custom", "mistral", "cohere", "openai_compatible" ->
                     testOpenAiCompatible(input, start)
                 else             -> testOpenAiCompatible(input, start)
             }
+        } catch (e: SsrfGuard.SsrfBlockedException) {
+            ConnectionTestResult.privateHost(System.currentTimeMillis() - start)
         } catch (e: Exception) {
             val latency = System.currentTimeMillis() - start
             // SECURITY: sanitize — do not include e.message which may contain key fragments
@@ -136,8 +139,8 @@ object LlmTester {
     // ── HTTP helpers ──────────────────────────────────────────────────────────
 
     private fun openConnection(url: String, method: String = "GET"): HttpURLConnection {
-        // SECURITY: SsrfGuard is called by ConnectionTestRoutes before reaching here
-        // but we also validate in case this is called directly
+        // Validate every provider/custom URL at the final outbound boundary.
+        SsrfGuard.validate(url)
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = method
         conn.connectTimeout = CONNECT_TIMEOUT_MS

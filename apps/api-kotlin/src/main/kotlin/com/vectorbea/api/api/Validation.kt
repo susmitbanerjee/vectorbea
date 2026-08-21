@@ -37,7 +37,7 @@ fun requirePositiveDouble(value: Double?, fieldName: String): Double? {
 }
 
 /** Connection type allowlist */
-val CONNECTION_TYPES = setOf("llm", "database", "http", "tool")
+val CONNECTION_TYPES = setOf("llm", "database", "http", "tool", "vector_store", "object_storage")
 
 /** Provider allowlist for LLM connections */
 val LLM_PROVIDERS = setOf("openai", "anthropic", "google", "mistral", "cohere", "azure_openai", "custom")

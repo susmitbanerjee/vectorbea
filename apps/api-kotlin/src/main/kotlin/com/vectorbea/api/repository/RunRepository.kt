@@ -165,6 +165,18 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setUuid(3, workspaceId)
         } > 0
 
+    /** Cancel every queued run in a workspace without deleting its audit trail. */
+    open fun purgeQueued(workspaceId: UUID): Int = execute(
+        """
+        UPDATE agent_runs
+           SET status = 'cancelled',
+               completed_at = COALESCE(completed_at, now()),
+               duration_ms = COALESCE(duration_ms, 0),
+               updated_at = now()
+         WHERE workspace_id = ? AND status = 'queued'
+        """.trimIndent(),
+    ) { setUuid(1, workspaceId) }
+
     open fun list(
         workspaceId: UUID,
         environmentId: UUID? = null,
@@ -190,7 +202,9 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             sql = """
                 SELECT r.*, w.name AS workflow_name,
                        COALESCE(e.slug, e.type) AS environment_name,
-                       fi.id AS incident_id
+                       fi.id AS incident_id,
+                       COALESCE(usage.total_tokens, r.token_count::bigint) AS effective_token_count,
+                       COALESCE(usage.total_cost, r.estimated_cost) AS effective_estimated_cost
                   FROM agent_runs r
                   JOIN workflows w
                     ON w.id = r.workflow_id AND w.workspace_id = r.workspace_id
@@ -203,6 +217,12 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                        ORDER BY detected_at DESC
                        LIMIT 1
                   ) fi ON true
+                  LEFT JOIN LATERAL (
+                      SELECT SUM(token_count)::bigint AS total_tokens,
+                             SUM(estimated_cost)::numeric AS total_cost
+                        FROM run_events
+                       WHERE run_id = r.id
+                  ) usage ON true
                   $where
                  ORDER BY r.created_at DESC
             """.trimIndent(),
@@ -217,6 +237,8 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         workflowName = rs.getString("workflow_name"),
         environmentName = rs.getString("environment_name"),
         incidentId = rs.uuidOrNull("incident_id"),
+        tokenCount = (rs.getObject("effective_token_count") as? Number)?.toInt(),
+        estimatedCost = (rs.getObject("effective_estimated_cost") as? Number)?.toDouble(),
     )
 
     private fun mapRow(rs: java.sql.ResultSet) = AgentRun(

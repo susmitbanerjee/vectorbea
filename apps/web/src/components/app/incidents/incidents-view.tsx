@@ -8,11 +8,13 @@ import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
+import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { formatCost } from "~/lib/format";
 import { formatSpan } from "~/lib/control/model";
 import type { IncidentSeverity, IncidentStatus, IncidentView } from "~/lib/incidents/model";
 import { IncidentIcon } from "~/components/icons/domain";
 import { useIncidentsData } from "./use-incidents-data";
+import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    INCIDENTS — grouped by failure signature.
@@ -38,12 +40,36 @@ export const STATUS_STYLE: Record<IncidentStatus, string> = {
 };
 
 export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {}) {
+  const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   void (frozenProp ?? params.get("frozen") === "1");
   const data = useIncidentsData();
   const incidents = data.rows;
+  const [purgeOpen, setPurgeOpen] = React.useState(false);
+  const [purging, setPurging] = React.useState(false);
+  const [operationMessage, setOperationMessage] = React.useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  const purgeIncidents = React.useCallback(async () => {
+    setPurging(true);
+    setOperationMessage(null);
+    try {
+      const result = await api.incidents.resolveAll(data.scope);
+      setPurgeOpen(false);
+      setOperationMessage({
+        tone: "success",
+        text: result.resolved === 0
+          ? "There were no open incidents to resolve."
+          : `${result.resolved.toLocaleString("en-GB")} ${result.resolved === 1 ? "incident was" : "incidents were"} resolved.`,
+      });
+      await data.refetch();
+    } catch (error) {
+      setOperationMessage({ tone: "error", text: error instanceof Error ? error.message : "The incident purge failed." });
+    } finally {
+      setPurging(false);
+    }
+  }, [api, data]);
 
   const status = params.get("status") ?? "";
   const severity = params.get("severity") ?? "";
@@ -76,7 +102,32 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
         eyebrow="Observe"
         title="Incidents"
         description={`${totalRuns} failed runs across ${incidents.length} signatures. The signature is the problem; the runs are symptoms.`}
+        actions={
+          <Button size="sm" variant="danger" onClick={() => setPurgeOpen(true)}>
+            Purge incidents
+          </Button>
+        }
       />
+
+      {operationMessage ? (
+        <div
+          role={operationMessage.tone === "error" ? "alert" : "status"}
+          className={cn(
+            "mb-3 rounded-md border px-3 py-2",
+            operationMessage.tone === "error"
+              ? "border-status-failed-border bg-status-failed-subtle"
+              : "border-status-success-border bg-status-success-subtle",
+          )}
+        >
+          <Text
+            variant="body-sm"
+            tone={operationMessage.tone === "error" ? "inherit" : "primary"}
+            className={operationMessage.tone === "error" ? "text-status-failed" : undefined}
+          >
+            {operationMessage.text}
+          </Text>
+        </div>
+      ) : null}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Filter label="Status" value={status} onChange={(v) => setParam("status", v)}
@@ -109,6 +160,16 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
           {visible.map((incident) => <IncidentRow key={incident.id} incident={incident} />)}
         </ul>
       )}
+
+      <DestructiveConfirmDialog
+        open={purgeOpen}
+        onOpenChange={setPurgeOpen}
+        title="Purge incidents"
+        description="Every open incident in this workspace will be marked resolved. Incident records remain available for audit and can still be viewed with the resolved filter."
+        confirmLabel="Resolve all incidents"
+        pending={purging}
+        onConfirm={() => void purgeIncidents()}
+      />
     </PageContainer>
   );
 }

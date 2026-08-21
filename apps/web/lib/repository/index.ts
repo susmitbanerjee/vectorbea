@@ -41,6 +41,7 @@ export {
   updateConnection,
   deleteConnection,
   testConnection,
+  testUnsavedConnection,
 } from "./connections";
 
 // ─── Internal fetch alias (delegates to typed API client) ─────────────────────

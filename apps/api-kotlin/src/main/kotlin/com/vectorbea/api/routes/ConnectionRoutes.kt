@@ -21,6 +21,7 @@ import com.vectorbea.api.http.mapper
 import com.vectorbea.api.repository.Connection
 import com.vectorbea.api.repository.ConnectionRepository
 import com.vectorbea.api.repository.CreateConnectionRequest
+import com.vectorbea.api.repository.EnvironmentRepository
 import com.vectorbea.api.repository.Page
 import com.vectorbea.api.secrets.SecretService
 import com.vectorbea.api.secrets.SecretServiceUnavailableException
@@ -34,6 +35,8 @@ private data class CreateConnectionBody(
     val type: String?,
     val provider: String?,
     val authType: String?,
+    /** Environment slug selected by the user (development/staging/production). */
+    val environment: String? = null,
     val config: Map<String, Any>? = null,
     val allowedHosts: List<String>? = null,
     val allowedPaths: List<String>? = null,
@@ -130,6 +133,7 @@ class ConnectionRoutes(
      * blast radius.
      */
     private val audit: com.vectorbea.api.audit.AuditLog? = null,
+    private val environmentRepo: EnvironmentRepository? = null,
 ) {
     private val log = LoggerFactory.getLogger(ConnectionRoutes::class.java)
     fun register(router: Router) {
@@ -159,8 +163,15 @@ class ConnectionRoutes(
 
     private fun create(req: Request): Response {
         val ctx = req.context()
-        val envId = ctx.requireEnvironmentId()
         val body = req.bodyAs<CreateConnectionBody>()
+
+        val envId = body.environment?.trim()?.takeIf { it.isNotBlank() }?.let { requested ->
+            val slug = requireOneOf(
+                requested, "environment", setOf("development", "staging", "production"),
+            )
+            environmentRepo?.findOrCreate(ctx.workspaceId, slug)?.id
+                ?: throw ApiError.ServiceUnavailable("Environment repository is not available")
+        } ?: ctx.requireEnvironmentId()
 
         val name = requireMaxLength(requireField(body.name, "name"), "name", 255)
         val type = requireOneOf(requireField(body.type, "type"), "type", CONNECTION_TYPES)

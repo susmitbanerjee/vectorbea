@@ -130,6 +130,17 @@ class FailureIncidentRepository(private val ds: DataSource) {
         }
     }
 
+    fun markAllResolved(workspaceId: UUID): Int {
+        ds.connection.use { conn ->
+            conn.prepareStatement(
+                "UPDATE failure_incidents SET resolution_status='resolved',resolved_at=now(),updated_at=now() WHERE workspace_id=? AND LOWER(resolution_status) <> 'resolved'"
+            ).use { stmt ->
+                stmt.setObject(1, workspaceId)
+                return stmt.executeUpdate()
+            }
+        }
+    }
+
     private fun mapRow(rs: java.sql.ResultSet) = FailureIncidentRow(
         id = UUID.fromString(rs.getString("id")),
         workspaceId = UUID.fromString(rs.getString("workspace_id")),

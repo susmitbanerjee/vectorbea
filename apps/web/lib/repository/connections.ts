@@ -30,11 +30,19 @@ function normalizeConnection(conn: Connection): Connection {
     tool: "mcp_server",
     // "database" is the same on both sides
   };
-  const mappedType = typeMap[conn.type as string];
+  const saasProviders = new Set(["gmail", "hubspot", "github"]);
+  const apiType = conn.type as string;
+  const mappedType = apiType === "http" && saasProviders.has(conn.provider)
+    ? "saas"
+    : typeMap[apiType];
 
   // Normalize error field: API returns lastTestErrorMessageSanitized, UI reads lastTestError
-  const raw = conn as Connection & { lastTestErrorMessageSanitized?: string | null };
+  const raw = conn as unknown as {
+    lastTestErrorMessageSanitized?: string | null;
+    lastTestStatus?: string | null;
+  };
   const lastTestError = conn.lastTestError ?? raw.lastTestErrorMessageSanitized ?? null;
+  const configuredEnvironment = (conn.config as { environment?: Connection["environment"] } | undefined)?.environment;
 
   return {
     ...conn,
@@ -44,10 +52,13 @@ function normalizeConnection(conn: Connection): Connection {
     usedByToolIds:  conn.usedByToolIds  ?? [],
     networkPolicy:  conn.networkPolicy  ?? { requireWhitelist: false, privateRunnerRequired: false, networkStatus: "unknown" },
     config:         conn.config         ?? ({} as Connection["config"]),
+    environment:    configuredEnvironment ?? conn.environment ?? "production",
     secretRef:      conn.secretRef      ?? null,
     secretMasked:   conn.secretMasked   ?? null,
     lastTestedAt:          conn.lastTestedAt         ?? null,
-    lastTestStatus:        conn.lastTestStatus        ?? null,
+    lastTestStatus:        raw.lastTestStatus === "connected" ? "ok" :
+                           raw.lastTestStatus === "failed" ? "failed" :
+                           conn.lastTestStatus ?? null,
     lastTestLatencyMs:     conn.lastTestLatencyMs     ?? null,
     lastTestError,
     lastTestErrorMessageSanitized: raw.lastTestErrorMessageSanitized ?? null,
@@ -212,12 +223,22 @@ export interface ConnectionTestResult {
 
 export async function testConnection(id: string): Promise<ConnectionTestResult | null> {
   const workspaceId = getActiveWorkspaceId();
-  try {
-    return await api<ConnectionTestResult>(
-      withWorkspace(`/api/connections/${encodeURIComponent(id)}/test`, workspaceId),
-      { method: "POST" },
-    );
-  } catch {
-    return null;
-  }
+  return api<ConnectionTestResult>(
+    withWorkspace(`/api/connections/${encodeURIComponent(id)}/test`, workspaceId),
+    { method: "POST" },
+  );
+}
+
+export async function testUnsavedConnection(payload: {
+  type: string;
+  provider: string;
+  authType: string;
+  plaintextSecret?: string;
+  config: Record<string, unknown>;
+}): Promise<ConnectionTestResult> {
+  const workspaceId = getActiveWorkspaceId();
+  return api<ConnectionTestResult>(withWorkspace("/api/connections/test-unsaved", workspaceId), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

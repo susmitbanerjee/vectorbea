@@ -16,6 +16,7 @@ class FailureIncidentRoutes(private val repo: FailureIncidentRepository) {
     fun register(router: Router) {
         router.get("/api/runs/:runId/failure-incident",    ::getByRun)
         router.get("/api/failure-incidents",               ::list)
+        router.post("/api/failure-incidents/mark-all-resolved", ::markAllResolved)
         router.get("/api/failure-incidents/:id",           ::getById)
         router.post("/api/failure-incidents/:id/mark-resolved", ::markResolved)
     }
@@ -49,6 +50,13 @@ class FailureIncidentRoutes(private val repo: FailureIncidentRepository) {
         val updated = repo.markResolved(id, ctx.workspaceId)
         if (!updated) throw ApiError.NotFound("FailureIncident")
         return Response.ok(mapOf("resolved" to true))
+    }
+
+    private fun markAllResolved(req: Request): Response {
+        val ctx = req.context()
+        val resolved = repo.markAllResolved(ctx.workspaceId)
+        log.info("[recovery] incidents resolved workspaceId={} count={}", ctx.workspaceId, resolved)
+        return Response.ok(mapOf("resolved" to resolved))
     }
 
     private fun FailureIncidentRow.toResponse() = mapOf(

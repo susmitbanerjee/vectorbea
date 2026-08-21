@@ -149,6 +149,7 @@ export interface VectorbeaClient {
     list(filters?: RunListFilters, options?: RequestOptions): Promise<Paged<Run>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<RunDetail>;
     queuePosition(id: string, scope?: Scope, options?: RequestOptions): Promise<QueuePosition>;
+    purgeQueued(scope?: Scope, options?: RequestOptions): Promise<{ purged: number; status: string }>;
     cancel(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     retry(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     retryNode(id: string, nodeId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
@@ -334,6 +335,7 @@ export interface VectorbeaClient {
     ): Promise<FailureIncident[]>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<FailureIncident>;
     resolve(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    resolveAll(scope?: Scope, options?: RequestOptions): Promise<{ resolved: number }>;
   };
 
   debug: {
@@ -426,6 +428,11 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           `/api/runs/${id}/queue-position`,
           req(scope, contracts.queuePosition, options),
         ),
+      purgeQueued: (scope, options) =>
+        call<{ purged: number; status: string }>("/api/runs/purge-queued", {
+          method: "POST",
+          ...req(scope, undefined, options),
+        }),
       cancel: (id, scope, options) =>
         call<void>(`/api/runs/${id}/cancel`, {
           method: "POST",
@@ -687,6 +694,8 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<FailureIncident>(`/api/failure-incidents/${id}`, req(scope, contracts.failureIncident, options)),
       resolve: (id, scope, options) =>
         call<unknown>(`/api/failure-incidents/${id}/mark-resolved`, { method: "POST", ...req(scope, undefined, options) }),
+      resolveAll: (scope, options) =>
+        call<{ resolved: number }>("/api/failure-incidents/mark-all-resolved", { method: "POST", ...req(scope, undefined, options) }),
     },
 
     schedules: {

@@ -56,6 +56,22 @@ class EnvironmentRepository(dataSource: DataSource) : BaseRepository(dataSource)
             ::mapRow,
         )
 
+    fun findOrCreate(workspaceId: UUID, slug: String): Environment = executeReturning(
+        """
+        INSERT INTO environments (workspace_id, name, slug, type)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (workspace_id, slug) DO UPDATE SET slug = EXCLUDED.slug
+        RETURNING $cols
+        """.trimIndent(),
+        {
+            setUuid(1, workspaceId)
+            setString(2, slug.replaceFirstChar { it.uppercase() })
+            setString(3, slug)
+            setString(4, slug)
+        },
+        ::mapRow,
+    )
+
     fun update(id: UUID, workspaceId: UUID, name: String, type: String): Environment? = queryOne(
         """
         UPDATE environments

@@ -14,7 +14,6 @@ import {
   Database,
   DatabaseZap,
   Globe,
-  HardDrive,
   Loader2,
   MessageSquare,
   RefreshCw,
@@ -25,7 +24,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { ConnectionType, LlmProvider, DatabaseProvider, SaasProvider, AuthType, VectorStoreProvider, ObjectStorageProvider } from "@/types/connections";
 import { LLM_PROVIDER_MODELS, VECTORBEE_OUTBOUND_IPS, isPrivateHost } from "@/types/connections";
-import { createConnection, testConnection } from "@/lib/repository";
+import { createConnection, testConnection, testUnsavedConnection } from "@/lib/repository";
 
 // ─── Type cards ───────────────────────────────────────────────────────────────
 
@@ -37,13 +36,12 @@ const TYPE_CARDS: {
   description: string;
   examples: string;
 }[] = [
-  { type: "llm_provider",   label: "LLM Provider",   icon: BrainCircuit, color: "#7C3AED", description: "Connect to an AI model API to power native agents and LLM steps.", examples: "OpenAI, Anthropic, Azure OpenAI, Gemini, Bedrock" },
-  { type: "database",       label: "Database",        icon: Database,     color: "#0369A1", description: "Read from or write to SQL and NoSQL databases safely.", examples: "PostgreSQL, MySQL, MongoDB, Snowflake, BigQuery" },
+  { type: "llm_provider",   label: "LLM Provider",   icon: BrainCircuit, color: "#7C3AED", description: "Connect to an AI model API to power native agents and LLM steps.", examples: "OpenAI, Anthropic, Azure OpenAI, Gemini" },
+  { type: "database",       label: "Database",        icon: Database,     color: "#0369A1", description: "Read from or write to PostgreSQL databases safely.", examples: "PostgreSQL, Neon, Supabase" },
   { type: "http_api",       label: "HTTP / API",      icon: Globe,        color: "#2563EB", description: "Call internal or third-party REST APIs from tools.", examples: "CRM API, Billing API, Internal microservices" },
-  { type: "saas",           label: "SaaS Integration",icon: MessageSquare,color: "#059669", description: "Connect to SaaS platforms for notifications and data sync.", examples: "Gmail, Salesforce, HubSpot, Jira, GitHub" },
+  { type: "saas",           label: "SaaS Integration",icon: MessageSquare,color: "#059669", description: "Connect to supported SaaS APIs with token validation.", examples: "Gmail, HubSpot, GitHub" },
   { type: "mcp_server",     label: "MCP Server",      icon: Cable,        color: "#D97706", description: "Connect to an MCP server to expose its tools to agents.", examples: "Remote MCP server, Local MCP bridge" },
-  { type: "vector_store",   label: "Vector Store",    icon: DatabaseZap,  color: "#DB2777", description: "Long-term semantic memory and retrieval for agents.", examples: "Pinecone, Weaviate, Qdrant, pgvector, Redis" },
-  { type: "object_storage", label: "Object Storage",  icon: HardDrive,    color: "#6B7280", description: "Store and retrieve workflow artifacts and files.", examples: "S3, GCS, Azure Blob, Cloudflare R2" },
+  { type: "vector_store",   label: "Vector Store",    icon: DatabaseZap,  color: "#DB2777", description: "Long-term semantic memory and retrieval for agents.", examples: "Pinecone, Weaviate, Qdrant" },
 ];
 
 // ─── Field helpers ────────────────────────────────────────────────────────────
@@ -56,6 +54,12 @@ const ENV_OPTIONS: AppSelectOption[] = [
   { value: "staging", label: "Staging" },
   { value: "production", label: "Production" },
 ];
+
+const VECTOR_HEALTH_PATHS: Record<string, string> = {
+  pinecone: "/indexes",
+  weaviate: "/v1/meta",
+  qdrant: "/collections",
+};
 
 function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
@@ -148,7 +152,6 @@ function LlmForm({ name, setName, provider, setProvider, apiKey, setApiKey, base
               { value: "anthropic", label: "Anthropic" },
               { value: "azure_openai", label: "Azure OpenAI" },
               { value: "google_gemini", label: "Google Gemini" },
-              { value: "aws_bedrock", label: "AWS Bedrock" },
               { value: "openai_compatible", label: "OpenAI-compatible endpoint" },
             ]}
           />
@@ -218,12 +221,6 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
             onValueChange={(v) => setDbProvider(v as DatabaseProvider)}
             options={[
               { value: "postgresql", label: "PostgreSQL" },
-              { value: "mysql", label: "MySQL" },
-              { value: "sqlserver", label: "SQL Server" },
-              { value: "mongodb", label: "MongoDB" },
-              { value: "snowflake", label: "Snowflake" },
-              { value: "bigquery", label: "BigQuery" },
-              { value: "redshift", label: "Redshift" },
             ]}
           />
         </Field>
@@ -285,11 +282,12 @@ function DatabaseForm({ name, setName, dbProvider, setDbProvider, connString, se
   );
 }
 
-function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, secret, setSecret, environment, setEnvironment }: {
+function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, secret, setSecret, apiKeyHeaderName, setApiKeyHeaderName, environment, setEnvironment }: {
   name: string; setName: (v: string) => void;
   baseUrl: string; setBaseUrl: (v: string) => void;
   authType: AuthType; setAuthType: (v: AuthType) => void;
   secret: string; setSecret: (v: string) => void;
+  apiKeyHeaderName: string; setApiKeyHeaderName: (v: string) => void;
   environment: string; setEnvironment: (v: string) => void;
 }) {
   const showPrivateWarning = isPrivateHost(baseUrl);
@@ -319,15 +317,17 @@ function HttpForm({ name, setName, baseUrl, setBaseUrl, authType, setAuthType, s
               { value: "none", label: "None" },
               { value: "api_key", label: "API key header" },
               { value: "bearer", label: "Bearer token" },
-              { value: "basic", label: "Basic auth" },
-              { value: "oauth2", label: "OAuth 2.0 (placeholder)" },
-              { value: "custom", label: "Custom header" },
             ]}
           />
         </Field>
         {authType !== "none" && (
           <Field label="Secret / token" hint="Stored through secrets backend. Never displayed after save.">
             <input className={inputCls} type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="••••••••" />
+          </Field>
+        )}
+        {authType === "api_key" && (
+          <Field label="API key header" hint="Header that receives the key, for example X-API-Key.">
+            <input className={inputCls} value={apiKeyHeaderName} onChange={(e) => setApiKeyHeaderName(e.target.value)} placeholder="Authorization" />
           </Field>
         )}
       </Section>
@@ -362,10 +362,7 @@ function SaasForm({ name, setName, saasProvider, setSaasProvider, token, setToke
             onValueChange={(v) => setSaasProvider(v as SaasProvider)}
             options={[
               { value: "gmail", label: "Gmail / Email" },
-              { value: "salesforce", label: "Salesforce" },
               { value: "hubspot", label: "HubSpot" },
-              { value: "zendesk", label: "Zendesk" },
-              { value: "jira", label: "Jira" },
               { value: "github", label: "GitHub" },
             ]}
           />
@@ -452,8 +449,6 @@ function VectorStoreForm({ name, setName, provider, setProvider, endpoint, setEn
               { value: "pinecone", label: "Pinecone" },
               { value: "weaviate", label: "Weaviate" },
               { value: "qdrant", label: "Qdrant" },
-              { value: "pgvector", label: "pgvector (PostgreSQL)" },
-              { value: "redis", label: "Redis" },
             ]}
           />
         </Field>
@@ -463,7 +458,7 @@ function VectorStoreForm({ name, setName, provider, setProvider, endpoint, setEn
       </Section>
       <Divider />
       <Section title="Endpoint">
-        <Field label="Endpoint URL" required hint={provider === "pgvector" ? "PostgreSQL host or connection string" : "Index host / API endpoint — used by Test connection."}>
+        <Field label="Endpoint URL" required hint="Provider API base URL — used to validate both reachability and credentials.">
           <input className={inputCls} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://my-index-abc123.svc.pinecone.io" />
         </Field>
         <Field label="Index / collection (optional)">
@@ -624,6 +619,7 @@ export default function NewConnectionPage() {
   const [httpBaseUrl, setHttpBaseUrl] = useState("");
   const [authType, setAuthType] = useState<AuthType>("api_key");
   const [secret, setSecret] = useState("");
+  const [apiKeyHeaderName, setApiKeyHeaderName] = useState("Authorization");
 
   // SaaS
   const [saasProvider, setSaasProvider] = useState<SaasProvider>("gmail");
@@ -652,9 +648,34 @@ export default function NewConnectionPage() {
   const needsNetworkStep = type === "database" || type === "http_api" || type === "mcp_server";
   const totalSteps = needsNetworkStep ? 4 : 3;
 
+  function configurationError(): string | null {
+    if (!type) return "Choose an integration type.";
+    if (!name.trim()) return "Connection name is required.";
+    if (type === "llm_provider") {
+      if (!apiKey.trim()) return "API key is required.";
+      if ((llmProvider === "azure_openai" || llmProvider === "openai_compatible") && !baseUrl.trim()) {
+        return "Base URL is required for this provider.";
+      }
+    }
+    if (type === "database") {
+      if (!connString.trim() && (!host.trim() || !database.trim() || !username.trim() || !password.trim())) {
+        return "Provide a PostgreSQL connection string or host, database, username, and password.";
+      }
+    }
+    if (type === "http_api") {
+      if (!httpBaseUrl.trim()) return "Base URL is required.";
+      if (authType !== "none" && !secret.trim()) return "A credential is required for the selected authentication type.";
+    }
+    if (type === "saas" && !saasToken.trim()) return `${saasProvider} token is required.`;
+    if (type === "mcp_server" && !mcpUrl.trim()) return "MCP server URL is required.";
+    if (type === "vector_store" && !vectorEndpoint.trim()) return "Vector store endpoint is required.";
+    return null;
+  }
+
   async function handleSave(skipTest = false) {
     if (saving) return; // prevent double-submit
-    if (!type || !name.trim()) { toast.error("Name is required."); return; }
+    const invalid = configurationError();
+    if (invalid || !type) { toast.error(invalid ?? "Configuration is incomplete."); return; }
     setSaving(true);
     try {
       let config: Parameters<typeof createConnection>[0]["config"];
@@ -663,14 +684,20 @@ export default function NewConnectionPage() {
 
       if (type === "llm_provider") {
         provider = llmProvider;
-        config = { provider: llmProvider, defaultModel, allowedModels: LLM_PROVIDER_MODELS[llmProvider] ?? [], requestTimeoutMs: 30000 };
+        config = {
+          provider: llmProvider,
+          ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+          defaultModel,
+          allowedModels: LLM_PROVIDER_MODELS[llmProvider] ?? [],
+          requestTimeoutMs: 30000,
+        };
       } else if (type === "database") {
         provider = dbProvider;
         connAuthType = "connection_string";
         config = {
           provider: dbProvider,
           connectionMode: connString ? "connection_string" : "host_port",
-          host, port: parseInt(port) || 5432, database, sslRequired, readOnly,
+          host, port: parseInt(port) || 5432, database, username, sslRequired, readOnly,
           allowedSchemas: [] as string[],
           allowedTables:  [] as string[],
           queryTimeoutMs: 10000, maxRows: 1000,
@@ -678,23 +705,24 @@ export default function NewConnectionPage() {
       } else if (type === "http_api") {
         provider = "http_api";
         connAuthType = authType;
-        config = { baseUrl: httpBaseUrl, authType, defaultHeaders: {}, allowedPaths: [], blockedPaths: [], requestTimeoutMs: 15000, retryAttempts: 2 };
+        config = { baseUrl: httpBaseUrl, authType, apiKeyHeaderName, defaultHeaders: {}, allowedPaths: [], blockedPaths: [], requestTimeoutMs: 15000, retryAttempts: 2 };
       } else if (type === "saas") {
         provider = saasProvider;
         connAuthType = "bearer";
-        // baseUrl is required by the HTTP connection tester — map each SaaS provider
-        // to its canonical API base so "Test connection" can reach a health endpoint.
         const SAAS_BASE_URLS: Record<string, string> = {
           gmail:       "https://gmail.googleapis.com",
-          salesforce:  "https://login.salesforce.com/services/data/v59.0",
           hubspot:     "https://api.hubapi.com",
-          zendesk:     "https://api.zendesk.com/api/v2",
-          jira:        "https://api.atlassian.com",
           github:      "https://api.github.com",
+        };
+        const SAAS_HEALTH_PATHS: Record<string, string> = {
+          gmail: "/gmail/v1/users/me/profile",
+          hubspot: "/account-info/v3/details",
+          github: "/user",
         };
         config = {
           provider: saasProvider,
           baseUrl: SAAS_BASE_URLS[saasProvider] ?? "",
+          healthPath: SAAS_HEALTH_PATHS[saasProvider] ?? "",
           workspace,
           allowedResources: [],
         };
@@ -705,7 +733,7 @@ export default function NewConnectionPage() {
       } else if (type === "vector_store") {
         provider = vectorProvider;
         connAuthType = vectorApiKey ? "api_key" : "none";
-        config = { provider: vectorProvider as VectorStoreProvider, endpoint: vectorEndpoint, indexName: vectorIndex };
+        config = { provider: vectorProvider as VectorStoreProvider, endpoint: vectorEndpoint, indexName: vectorIndex, healthPath: VECTOR_HEALTH_PATHS[vectorProvider] };
       } else if (type === "object_storage") {
         provider = storageProvider;
         connAuthType = storageSecretKey ? "basic" : "none";
@@ -714,6 +742,10 @@ export default function NewConnectionPage() {
         provider = type;
         config = {} as Parameters<typeof createConnection>[0]["config"];
       }
+
+      // Preserve the human-readable environment in non-secret config because
+      // the API response exposes only the environment UUID.
+      config = { ...config, environment } as unknown as typeof config;
 
       // Determine if the target host is private (RFC1918 / .internal / localhost)
       const targetHost =
@@ -730,7 +762,7 @@ export default function NewConnectionPage() {
       // it server-side and returns only a masked display value + opaque secretRef.
       const plaintextSecret =
         type === "llm_provider"   ? apiKey :
-        type === "database"       ? (connString || (password ? `postgres://${username}:${password}@${host}:${port}/${database}` : "")) :
+        type === "database"       ? (connString || password) :
         type === "http_api"       ? (authType !== "none" ? secret : "") :
         type === "saas"           ? saasToken :
         type === "mcp_server"     ? mcpToken :
@@ -812,7 +844,8 @@ export default function NewConnectionPage() {
 
   async function handleTest() {
     if (saving || testing) return; // prevent double-submit
-    if (!type || !name.trim()) { toast.error("Name is required."); return; }
+    const invalid = configurationError();
+    if (invalid || !type) { toast.error(invalid ?? "Configuration is incomplete."); return; }
     setTesting(true);
     setTestResult(null);
     try {
@@ -830,9 +863,63 @@ export default function NewConnectionPage() {
           }
         }
       } else {
-        // First time — save then test
-        await handleSave(false);
+        const apiType = type === "llm_provider" ? "llm"
+          : type === "http_api" || type === "saas" ? "http"
+          : type === "mcp_server" ? "tool"
+          : type;
+        const provider = type === "llm_provider" ? llmProvider
+          : type === "database" ? dbProvider
+          : type === "saas" ? saasProvider
+          : type === "vector_store" ? vectorProvider
+          : type === "object_storage" ? storageProvider
+          : type === "mcp_server" ? "mcp"
+          : "http_api";
+        const testAuthType: AuthType = type === "database" ? "connection_string"
+          : type === "saas" ? "bearer"
+          : type === "mcp_server" ? (mcpToken ? "bearer" : "none")
+          : type === "vector_store" ? (vectorApiKey ? "api_key" : "none")
+          : type === "object_storage" ? "none"
+          : type === "llm_provider" ? "api_key"
+          : authType;
+        const plaintextSecret = type === "llm_provider" ? apiKey
+          : type === "database" ? (connString || password)
+          : type === "http_api" ? secret
+          : type === "saas" ? saasToken
+          : type === "mcp_server" ? mcpToken
+          : type === "vector_store" ? vectorApiKey
+          : "";
+        const testConfig: Record<string, unknown> = type === "llm_provider"
+          ? { baseUrl }
+          : type === "database"
+            ? { host, port: parseInt(port) || 5432, database, username, sslRequired }
+            : type === "http_api"
+              ? { baseUrl: httpBaseUrl, apiKeyHeaderName }
+              : type === "saas"
+                ? {
+                    baseUrl: ({ gmail: "https://gmail.googleapis.com", hubspot: "https://api.hubapi.com", github: "https://api.github.com" } as Record<string, string>)[saasProvider],
+                    healthPath: ({ gmail: "/gmail/v1/users/me/profile", hubspot: "/account-info/v3/details", github: "/user" } as Record<string, string>)[saasProvider],
+                  }
+                : type === "mcp_server"
+                  ? { serverUrl: mcpUrl, transport }
+                  : type === "vector_store"
+                    ? { endpoint: vectorEndpoint, indexName: vectorIndex, healthPath: VECTOR_HEALTH_PATHS[vectorProvider] }
+                    : { endpoint: storageEndpoint, bucket: storageBucket, region: storageRegion };
+
+        const result = await testUnsavedConnection({
+          type: apiType,
+          provider,
+          authType: testAuthType,
+          plaintextSecret: plaintextSecret || undefined,
+          config: testConfig,
+        });
+        const passed = result.status === "connected";
+        setTestResult(passed ? "ok" : "failed");
+        if (passed) toast.success(`Connection test passed — ${result.latencyMs}ms`);
+        else toast.error(`Test failed: ${result.message ?? "Could not reach host"}`);
       }
+    } catch (error) {
+      setTestResult("failed");
+      toast.error(error instanceof Error ? error.message : "Connection test failed.");
     } finally {
       setTesting(false);
     }
@@ -911,7 +998,7 @@ export default function NewConnectionPage() {
             <DatabaseForm name={name} setName={setName} dbProvider={dbProvider} setDbProvider={setDbProvider} connString={connString} setConnString={setConnString} host={host} setHost={setHost} port={port} setPort={setPort} database={database} setDatabase={setDatabase} username={username} setUsername={setUsername} password={password} setPassword={setPassword} sslRequired={sslRequired} setSslRequired={setSslRequired} readOnly={readOnly} setReadOnly={setReadOnly} environment={environment} setEnvironment={setEnvironment} />
           )}
           {type === "http_api" && (
-            <HttpForm name={name} setName={setName} baseUrl={httpBaseUrl} setBaseUrl={setHttpBaseUrl} authType={authType} setAuthType={setAuthType} secret={secret} setSecret={setSecret} environment={environment} setEnvironment={setEnvironment} />
+            <HttpForm name={name} setName={setName} baseUrl={httpBaseUrl} setBaseUrl={setHttpBaseUrl} authType={authType} setAuthType={setAuthType} secret={secret} setSecret={setSecret} apiKeyHeaderName={apiKeyHeaderName} setApiKeyHeaderName={setApiKeyHeaderName} environment={environment} setEnvironment={setEnvironment} />
           )}
           {type === "saas" && (
             <SaasForm name={name} setName={setName} saasProvider={saasProvider} setSaasProvider={setSaasProvider} token={saasToken} setToken={setSaasToken} workspace={workspace} setWorkspace={setWorkspace} environment={environment} setEnvironment={setEnvironment} />
@@ -998,7 +1085,7 @@ export default function NewConnectionPage() {
             </button>
             <button
               type="button"
-              onClick={() => void handleSave()}
+              onClick={() => void handleSave(false)}
               disabled={saving}
               className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0B0D0F] px-4 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#23272B] disabled:opacity-40"
             >

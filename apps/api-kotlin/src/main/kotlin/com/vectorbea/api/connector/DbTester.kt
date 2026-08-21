@@ -3,6 +3,9 @@ package com.vectorbea.api.connector
 import com.vectorbea.api.security.Redactor
 import org.slf4j.LoggerFactory
 import java.sql.DriverManager
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.Properties
 
 /**
@@ -31,6 +34,7 @@ object DbTester {
         val host: String?,
         val port: Int?,
         val database: String?,
+        val sslRequired: Boolean? = null,
     )
 
     fun test(input: DbTestInput): ConnectionTestResult {
@@ -55,19 +59,19 @@ object DbTester {
     // ── Postgres ──────────────────────────────────────────────────────────────
 
     private fun testPostgres(input: DbTestInput, start: Long): ConnectionTestResult {
-        val jdbcUrl = resolvePostgresUrl(input)
+        val target = resolvePostgresTarget(input)
         val props = Properties().apply {
             setProperty("connectTimeout", CONNECT_TIMEOUT_SECONDS.toString())
             setProperty("socketTimeout", QUERY_TIMEOUT_SECONDS.toString())
             setProperty("loginTimeout", CONNECT_TIMEOUT_SECONDS.toString())
             // SECURITY: SSL preferred but not required for test (may be self-signed in dev)
-            setProperty("sslmode", "prefer")
-            if (!input.username.isNullOrBlank()) setProperty("user", input.username)
-            if (!input.password.isNullOrBlank()) setProperty("password", input.password)
+            setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
+            if (!target.username.isNullOrBlank()) setProperty("user", target.username)
+            if (!target.password.isNullOrBlank()) setProperty("password", target.password)
         }
 
         // SECURITY: do not log jdbcUrl — it may contain credentials
-        DriverManager.getConnection(jdbcUrl, props).use { conn ->
+        DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
             conn.createStatement().use { stmt ->
                 stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
                 stmt.executeQuery("SELECT 1").use { rs ->
@@ -84,24 +88,53 @@ object DbTester {
         }
     }
 
-    private fun resolvePostgresUrl(input: DbTestInput): String {
-        // If full URL supplied (may be from secret), use it directly as JDBC URL
+    internal data class PostgresTarget(
+        val jdbcUrl: String,
+        val username: String?,
+        val password: String?,
+    )
+
+    /** Convert common postgres:// URLs into a JDBC URL and JDBC properties.
+     * PostgreSQL's JDBC driver does not accept user:password in the URL authority,
+     * so credentials must be extracted before opening the connection. */
+    internal fun resolvePostgresTarget(input: DbTestInput): PostgresTarget {
         if (!input.connectionUrl.isNullOrBlank()) {
-            // Convert postgres:// to jdbc:postgresql:// if needed
             val url = input.connectionUrl
-            return when {
-                url.startsWith("jdbc:") -> url
-                url.startsWith("postgres://") -> "jdbc:postgresql://" + url.removePrefix("postgres://")
-                url.startsWith("postgresql://") -> "jdbc:postgresql://" + url.removePrefix("postgresql://")
-                else -> "jdbc:postgresql://${url}"
+            val uriValue = when {
+                url.startsWith("jdbc:postgresql://") -> url.removePrefix("jdbc:")
+                url.startsWith("postgres://") -> "postgresql://" + url.removePrefix("postgres://")
+                url.startsWith("postgresql://") -> url
+                else -> null
             }
+            if (uriValue != null) {
+                val uri = URI(uriValue)
+                val userInfo = uri.rawUserInfo?.split(":", limit = 2).orEmpty()
+                val decodedUser = userInfo.getOrNull(0)?.let(::percentDecode)
+                val decodedPassword = userInfo.getOrNull(1)?.let(::percentDecode)
+                val host = uri.host ?: throw IllegalArgumentException("PostgreSQL URL must include a host")
+                val renderedHost = if (host.contains(':')) "[$host]" else host
+                val authority = if (uri.port >= 0) "$renderedHost:${uri.port}" else renderedHost
+                val query = uri.rawQuery?.let { "?$it" }.orEmpty()
+                return PostgresTarget(
+                    jdbcUrl = "jdbc:postgresql://$authority${uri.rawPath.orEmpty()}$query",
+                    username = input.username ?: decodedUser,
+                    password = input.password ?: decodedPassword,
+                )
+            }
+            return PostgresTarget(
+                jdbcUrl = if (url.startsWith("jdbc:")) url else "jdbc:postgresql://$url",
+                username = input.username,
+                password = input.password,
+            )
         }
-        // Build from components
         val host = input.host ?: "localhost"
         val port = input.port ?: 5432
         val db = input.database ?: "postgres"
-        return "jdbc:postgresql://$host:$port/$db"
+        return PostgresTarget("jdbc:postgresql://$host:$port/$db", input.username, input.password)
     }
+
+    private fun percentDecode(value: String): String =
+        URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8)
 
     // ── MySQL ─────────────────────────────────────────────────────────────────
 

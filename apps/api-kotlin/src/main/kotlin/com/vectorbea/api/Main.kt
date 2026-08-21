@@ -314,7 +314,10 @@ fun main() {
     com.vectorbea.api.telemetry.AdminConsoleRoutes().register(router)
 
     if (connectionRepo != null) {
-        ConnectionRoutes(connectionRepo, cacheService, secretService, telemetry, auditLog).register(router)
+        ConnectionRoutes(
+            connectionRepo, cacheService, secretService, telemetry, auditLog,
+            com.vectorbea.api.repository.EnvironmentRepository(ds!!),
+        ).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
     } else log.warn("ConnectionRoutes disabled — no database")
