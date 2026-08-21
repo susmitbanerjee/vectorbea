@@ -6,7 +6,6 @@ import type { Route } from "next";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
 import { Switch } from "~/components/ui/choice";
 import { Spinner } from "~/components/ui/spinner";
 import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
@@ -14,6 +13,9 @@ import { formatCost, formatDuration, formatTokens } from "~/lib/format";
 import { DetailSheet, Section, Facts } from "./detail-sheet";
 import { RiskBadge, RegistryStatusBadge, HealthDot, EnvironmentScope, Sparkline, DistributionBar } from "./atoms";
 import { grantFindings, type AgentRecord, type ToolGrant } from "~/lib/registry/model";
+import { AgentEditor } from "./registry-editor";
+import { useApi } from "~/lib/api/api-provider";
+import { useScope } from "~/lib/workspace/workspace-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AGENT DETAIL
@@ -40,14 +42,17 @@ const TABS = [
 ];
 
 export function AgentDetail({
-  agent, open, onClose, tab, onTabChange,
+  agent, open, onClose, tab, onTabChange, onUpdated,
 }: {
   agent: AgentRecord | null;
   open: boolean;
   onClose: () => void;
   tab: string;
   onTabChange: (id: string) => void;
+  onUpdated: () => void | Promise<void>;
 }) {
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { setEditing(false); }, [agent?.id]);
   if (!agent) return null;
 
   const findings = grantFindings(agent);
@@ -89,19 +94,21 @@ export function AgentDetail({
           ) : null}
         </>
       }
-      actions={<Button size="sm" variant="secondary">Edit</Button>}
+      actions={<Button size="sm" variant={editing ? "subtle" : "secondary"} onClick={() => setEditing((value) => !value)}>{editing ? "Close editor" : "Edit"}</Button>}
       tabs={TABS.map((t) => (t.id === "grants" ? { ...t, badge: findings.length } : t))}
       activeTab={tab}
       onTabChange={onTabChange}
     >
       <div className="grid gap-3 p-4">
-        {tab === "overview" ? <Overview agent={agent} connection={connection} /> : null}
-        {tab === "grants" ? <Grants agent={agent} /> : null}
-        {tab === "guardrails" ? <GuardrailsPane agent={agent} /> : null}
-        {tab === "prompt" ? <PromptHistory agent={agent} /> : null}
-        {tab === "performance" ? <Performance agent={agent} /> : null}
-        {tab === "usage" ? <UsedBy agent={agent} /> : null}
-        {tab === "test" ? <TestConsole agent={agent} /> : null}
+        {editing ? <AgentEditor id={agent.id} onCancel={() => setEditing(false)} onSaved={async () => { await onUpdated(); setEditing(false); }} /> : <>
+          {tab === "overview" ? <Overview agent={agent} connection={connection} /> : null}
+          {tab === "grants" ? <Grants agent={agent} /> : null}
+          {tab === "guardrails" ? <GuardrailsPane agent={agent} /> : null}
+          {tab === "prompt" ? <PromptHistory agent={agent} /> : null}
+          {tab === "performance" ? <Performance agent={agent} /> : null}
+          {tab === "usage" ? <UsedBy agent={agent} /> : null}
+          {tab === "test" ? <TestConsole agent={agent} /> : null}
+        </>}
       </div>
     </DetailSheet>
   );
@@ -457,38 +464,37 @@ function UsedBy({ agent }: { agent: AgentRecord }) {
 /* ── Test console ─────────────────────────────────────────────────────────── */
 
 function TestConsole({ agent }: { agent: AgentRecord }) {
-  const [input, setInput] = React.useState("Northwind Trading Ltd is 12 days from renewal at £842.");
+  const api = useApi();
+  const { workspaceId } = useScope();
   const [running, setRunning] = React.useState(false);
   const [trace, setTrace] = React.useState<{ step: string; detail: string; ms: number }[] | null>(null);
 
-  const run = () => {
+  const run = async () => {
     setRunning(true);
-    window.setTimeout(() => {
-      setTrace([
-        { step: "System prompt", detail: `${agent.systemPrompt.split("\n")[0]}…`, ms: 0 },
-        { step: "Model call", detail: `${agent.model}, temperature ${agent.temperature}`, ms: 1240 },
-        ...(agent.grants[0] ? [{ step: `Tool call — ${agent.grants[0].tool}`, detail: "Mocked. Returned 1 row.", ms: 380 }] : []),
-        { step: "Model call", detail: "Second pass with the tool result", ms: 980 },
-        { step: "Result", detail: '{"decision":"outreach","reason":"renewal inside 14 days"}', ms: 0 },
-      ]);
+    const started = performance.now();
+    try {
+      const result = await api.agents.test(agent.id, { workspaceId, environmentId: null });
+      setTrace([{ step: result.valid ? "Readiness passed" : "Readiness failed", detail: result.message, ms: Math.round(performance.now() - started) }]);
+    } catch (error) {
+      setTrace([{ step: "Readiness failed", detail: error instanceof Error ? error.message : "Agent readiness test failed.", ms: Math.round(performance.now() - started) }]);
+    } finally {
       setRunning(false);
-    }, 900);
+    }
   };
 
   return (
     <>
-      <Section title="Input" help="Anything you would pass this agent as its working data. Tool calls are mocked; nothing external is touched.">
-        <Input value={input} onChange={(e) => setInput(e.target.value)} className="h-8 text-body-sm" />
-        <div className="mt-2 flex items-center gap-2">
-          <Button size="sm" variant="primary" onClick={run} loading={running}>
-            {running ? "Running" : "Run agent"}
+      <Section title="Readiness test" help="Validates the saved agent and tests its registered model connection through the API. No tool side effects are executed.">
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="primary" onClick={() => void run()} loading={running}>
+            {running ? "Testing" : "Test readiness"}
           </Button>
           {running ? <Spinner className="size-4" /> : null}
         </div>
       </Section>
 
       {trace ? (
-        <Section title="Trace" help="Every step the agent took, in order, with what each one cost in time.">
+        <Section title="Readiness result" help="The API result from validating the saved definition and its model connection.">
           <ol className="grid gap-1.5">
             {trace.map((entry, i) => (
               <li key={i} className="border-subtle flex items-baseline gap-2 border-b pb-1.5 last:border-b-0">

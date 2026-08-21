@@ -50,7 +50,7 @@ function toRecord(connection: contracts.Connection, tools: contracts.Tool[], age
     status,
     latencyMs: connection.lastTestLatencyMs,
     latencyTrend: connection.lastTestLatencyMs === null ? [] : [connection.lastTestLatencyMs],
-    lastCheckedAt: connection.lastTestedAt ?? connection.updatedAt,
+    lastCheckedAt: connection.lastTestedAt,
     createdAt: connection.createdAt,
     lastUsedAt: connection.updatedAt,
     expiresAt: stringFrom(connection.config.expiresAt),
@@ -68,7 +68,7 @@ function toRecord(connection: contracts.Connection, tools: contracts.Tool[], age
 function toHealth(value: string): ConnectionHealth {
   const normalized = value.toLowerCase();
   if (["failed", "failing", "error", "unhealthy"].includes(normalized)) return "failing";
-  if (["degraded", "warning", "slow"].includes(normalized)) return "degraded";
+  if (["degraded", "warning", "slow", "not_tested", "pending", "unknown"].includes(normalized)) return "degraded";
   return "healthy";
 }
 function toType(authType: string, type: string): ConnectionType {

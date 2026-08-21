@@ -12,6 +12,9 @@ import { formatDuration } from "~/lib/format";
 import { DetailSheet, Section, Facts } from "./detail-sheet";
 import { RiskBadge, RegistryStatusBadge, HealthDot, EnvironmentScope, Sparkline, DistributionBar } from "./atoms";
 import { policyFindings, policyForRisk, TOOL_TYPE_LABEL, type ToolRecord, type SchemaParameter } from "~/lib/registry/model";
+import { ToolEditor } from "./registry-editor";
+import { useApi } from "~/lib/api/api-provider";
+import { useScope } from "~/lib/workspace/workspace-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    TOOL DETAIL
@@ -39,14 +42,17 @@ const TABS = [
 ];
 
 export function ToolDetail({
-  tool, open, onClose, tab, onTabChange,
+  tool, open, onClose, tab, onTabChange, onUpdated,
 }: {
   tool: ToolRecord | null;
   open: boolean;
   onClose: () => void;
   tab: string;
   onTabChange: (id: string) => void;
+  onUpdated: () => void | Promise<void>;
 }) {
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { setEditing(false); }, [tool?.id]);
   if (!tool) return null;
 
   const findings = policyFindings(tool);
@@ -91,19 +97,21 @@ export function ToolDetail({
           ) : null}
         </>
       }
-      actions={<Button size="sm" variant="secondary">Edit</Button>}
+      actions={<Button size="sm" variant={editing ? "subtle" : "secondary"} onClick={() => setEditing((value) => !value)}>{editing ? "Close editor" : "Edit"}</Button>}
       tabs={TABS.map((t) => (t.id === "policy" ? { ...t, badge: findings.length } : t))}
       activeTab={tab}
       onTabChange={onTabChange}
     >
       <div className="grid gap-3 p-4">
-        {tab === "overview" ? <Overview tool={tool} connection={connection} /> : null}
-        {tab === "schema" ? <Schema tool={tool} /> : null}
-        {tab === "policy" ? <Policy tool={tool} /> : null}
-        {tab === "reliability" ? <Reliability tool={tool} /> : null}
-        {tab === "usage" ? <UsedBy tool={tool} /> : null}
-        {tab === "versions" ? <Versions tool={tool} /> : null}
-        {tab === "test" ? <TestConsole tool={tool} /> : null}
+        {editing ? <ToolEditor id={tool.id} onCancel={() => setEditing(false)} onSaved={async () => { await onUpdated(); setEditing(false); }} /> : <>
+          {tab === "overview" ? <Overview tool={tool} connection={connection} /> : null}
+          {tab === "schema" ? <Schema tool={tool} /> : null}
+          {tab === "policy" ? <Policy tool={tool} /> : null}
+          {tab === "reliability" ? <Reliability tool={tool} /> : null}
+          {tab === "usage" ? <UsedBy tool={tool} /> : null}
+          {tab === "versions" ? <Versions tool={tool} /> : null}
+          {tab === "test" ? <TestConsole tool={tool} /> : null}
+        </>}
       </div>
     </DetailSheet>
   );
@@ -484,6 +492,8 @@ function Versions({ tool }: { tool: ToolRecord }) {
 /* ── Test console ─────────────────────────────────────────────────────────── */
 
 function TestConsole({ tool }: { tool: ToolRecord }) {
+  const api = useApi();
+  const { workspaceId } = useScope();
   const [values, setValues] = React.useState<Record<string, string>>(
     Object.fromEntries(tool.parameters.map((p) => [p.name, p.defaultValue ?? ""])),
   );
@@ -496,31 +506,32 @@ function TestConsole({ tool }: { tool: ToolRecord }) {
     return `curl -X POST '${tool.endpoint.replace(/^POST\s+/, "")}' \\\n  -H 'Authorization: Bearer $VECTORBEA_TOKEN' \\\n  -H 'Content-Type: application/json' \\\n  -d '${body}'`;
   }, [tool.endpoint, values]);
 
-  const run = () => {
+  const run = async () => {
     setRunning(true);
-    window.setTimeout(() => {
+    const started = performance.now();
+    try {
+      const response = await api.tools.test(tool.id, { workspaceId, environmentId: null });
       setResult({
-        ms: tool.p95LatencyMs,
-        body: JSON.stringify(
-          Object.fromEntries(tool.outputFields.map((f) => [f.name, f.type.startsWith("array") ? [] : f.type === "integer" ? 1 : "…"])),
-          null, 2,
-        ),
+        ms: Math.round(performance.now() - started),
+        body: JSON.stringify(response, null, 2),
       });
+    } catch (error) {
+      setResult({ ms: Math.round(performance.now() - started), body: JSON.stringify({ valid: false, message: error instanceof Error ? error.message : "Tool validation failed." }, null, 2) });
+    } finally {
       setRunning(false);
-    }, 700);
+    }
   };
 
   return (
     <>
       <Section
         title="Parameters"
-        help="Invokes the real tool through its real connection. Side effects are real — a write tool will write."
+        help="Validates the persisted adapter, schemas, and connection binding through the API. It never executes side effects."
         tone={tool.risk === "critical" || tool.risk === "high" ? "warning" : undefined}
       >
         {tool.risk === "critical" || tool.risk === "high" ? (
           <Text variant="caption" tone="inherit" className="text-status-waiting mb-2 block leading-snug">
-            This is a {tool.risk}-risk tool. Running it here performs the action for real, outside any
-            approval gate a workflow would impose.
+            This is a {tool.risk}-risk tool. Validation is side-effect free; execute it only through a governed workflow.
           </Text>
         ) : null}
 
@@ -542,8 +553,8 @@ function TestConsole({ tool }: { tool: ToolRecord }) {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="primary" onClick={run} loading={running}>
-            {running ? "Calling" : "Call tool"}
+          <Button size="sm" variant="primary" onClick={() => void run()} loading={running}>
+            {running ? "Validating" : "Validate tool"}
           </Button>
           <Button
             size="sm"

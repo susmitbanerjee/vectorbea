@@ -341,6 +341,7 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         onClose={() => setParams({ tool: null, tab: null })}
         tab={detailTab}
         onTabChange={(id) => setParams({ tab: id })}
+        onUpdated={data.refetch}
       />
 
       <RegistryBulkBar

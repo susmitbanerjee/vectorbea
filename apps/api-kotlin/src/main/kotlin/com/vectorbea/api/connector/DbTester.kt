@@ -7,6 +7,8 @@ import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.Properties
+import java.sql.SQLException
+import java.sql.SQLTimeoutException
 
 /**
  * Tests database connections by opening a JDBC connection and executing
@@ -139,26 +141,15 @@ object DbTester {
     // ── MySQL ─────────────────────────────────────────────────────────────────
 
     private fun testMysql(input: DbTestInput, start: Long): ConnectionTestResult {
-        val jdbcUrl = if (!input.connectionUrl.isNullOrBlank()) {
-            val url = input.connectionUrl
-            when {
-                url.startsWith("jdbc:") -> url
-                url.startsWith("mysql://") -> "jdbc:mysql://" + url.removePrefix("mysql://")
-                else -> "jdbc:mysql://${url}"
-            }
-        } else {
-            val host = input.host ?: "localhost"
-            val port = input.port ?: 3306
-            val db = input.database ?: ""
-            "jdbc:mysql://$host:$port/$db?connectTimeout=${CONNECT_TIMEOUT_SECONDS * 1000}&socketTimeout=${QUERY_TIMEOUT_SECONDS * 1000}"
-        }
-
+        val target = resolveMysqlTarget(input)
         val props = Properties().apply {
-            if (!input.username.isNullOrBlank()) setProperty("user", input.username)
-            if (!input.password.isNullOrBlank()) setProperty("password", input.password)
+            setProperty("connectTimeout", (CONNECT_TIMEOUT_SECONDS * 1000).toString())
+            setProperty("socketTimeout", (QUERY_TIMEOUT_SECONDS * 1000).toString())
+            if (!target.username.isNullOrBlank()) setProperty("user", target.username)
+            if (!target.password.isNullOrBlank()) setProperty("password", target.password)
         }
 
-        DriverManager.getConnection(jdbcUrl, props).use { conn ->
+        DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
             conn.createStatement().use { stmt ->
                 stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
                 stmt.executeQuery("SELECT 1").use { rs ->
@@ -167,6 +158,48 @@ object DbTester {
                     return ConnectionTestResult.connected(latency, "MySQL connection successful")
                 }
             }
+        }
+    }
+
+    internal data class MysqlTarget(
+        val jdbcUrl: String,
+        val username: String?,
+        val password: String?,
+    )
+
+    internal fun resolveMysqlTarget(input: DbTestInput): MysqlTarget {
+        if (!input.connectionUrl.isNullOrBlank()) {
+            val raw = input.connectionUrl
+            val uriValue = when {
+                raw.startsWith("jdbc:mysql://") -> raw.removePrefix("jdbc:")
+                raw.startsWith("mysql://") -> raw
+                else -> null
+            }
+            if (uriValue != null) {
+                val uri = URI(uriValue)
+                val userInfo = uri.rawUserInfo?.split(":", limit = 2).orEmpty()
+                val host = uri.host ?: throw IllegalArgumentException("MySQL URL must include a host")
+                val renderedHost = if (host.contains(':')) "[$host]" else host
+                val authority = if (uri.port >= 0) "$renderedHost:${uri.port}" else renderedHost
+                val query = uri.rawQuery?.let { "?$it" }.orEmpty()
+                return MysqlTarget(
+                    jdbcUrl = "jdbc:mysql://$authority${uri.rawPath.orEmpty()}$query",
+                    username = input.username ?: userInfo.getOrNull(0)?.let(::percentDecode),
+                    password = input.password ?: userInfo.getOrNull(1)?.let(::percentDecode),
+                )
+            }
+            return MysqlTarget(
+                jdbcUrl = if (raw.startsWith("jdbc:")) raw else "jdbc:mysql://$raw",
+                username = input.username,
+                password = input.password,
+            )
+        }
+
+        return run {
+            val host = input.host ?: "localhost"
+            val port = input.port ?: 3306
+            val db = input.database ?: ""
+            MysqlTarget("jdbc:mysql://$host:$port/$db", input.username, input.password)
         }
     }
 
@@ -188,25 +221,34 @@ object DbTester {
         conn.metaData.databaseProductVersion
     } catch (_: Exception) { null }
 
-    private fun classifyException(e: Exception): Pair<String, String> {
-        val msg = e.message?.lowercase() ?: ""
+    internal fun classifyException(e: Exception): Pair<String, String> {
+        val chain = generateSequence<Throwable>(e) { it.cause }.take(12).toList()
+        val msg = chain.joinToString(" ") { it.message.orEmpty().lowercase() }
+        val sqlState = chain.filterIsInstance<SQLException>().firstNotNullOfOrNull { it.sqlState }
         return when {
-            e is java.sql.SQLTimeoutException || msg.contains("timeout") ->
-                "TIMEOUT" to "Connection timed out"
-            msg.contains("authentication") || msg.contains("password") || msg.contains("auth") ->
+            chain.any { it is SQLTimeoutException || it is java.net.SocketTimeoutException } || msg.contains("timeout") ->
+                "TIMEOUT" to "Database connection timed out — check network access, host, and port"
+            sqlState?.startsWith("28") == true || msg.contains("authentication") ||
+                msg.contains("password authentication failed") || msg.contains("access denied for user") ->
                 "AUTH_FAILED" to "Database authentication failed — check credentials"
-            msg.contains("ssl") || msg.contains("tls") ->
-                "TLS_FAILED" to "TLS/SSL handshake failed"
-            e is java.net.UnknownHostException || msg.contains("unknown host") ->
-                "DNS_FAILED" to "DNS resolution failed — check host"
-            e is java.net.ConnectException || msg.contains("connection refused") ->
-                "CONNECTION_REFUSED" to "Connection refused — check host and port"
-            msg.contains("database") && msg.contains("not exist") ->
+            sqlState == "3D000" || (msg.contains("database") && msg.contains("not exist")) ->
                 "DATABASE_NOT_FOUND" to "Database not found — check database name"
-            e is java.sql.SQLException ->
-                "SQL_ERROR" to "Database connection failed"
+            msg.contains("no suitable driver") ->
+                "DRIVER_NOT_AVAILABLE" to "This database driver is not available in the API service"
+            msg.contains("ssl") || msg.contains("tls") || msg.contains("certificate") ->
+                "TLS_FAILED" to "TLS/SSL handshake failed — check the server certificate and SSL mode"
+            chain.any { it is java.net.UnknownHostException } || msg.contains("unknown host") ->
+                "DNS_FAILED" to "Database host could not be resolved — check the hostname"
+            chain.any { it is java.net.ConnectException } || msg.contains("connection refused") ->
+                "CONNECTION_REFUSED" to "Database refused the connection — check host, port, and firewall rules"
+            e is IllegalArgumentException || e is java.net.URISyntaxException ->
+                "INVALID_CONNECTION_STRING" to "The database connection string is invalid"
+            sqlState?.startsWith("08") == true ->
+                "NETWORK_UNREACHABLE" to "Database could not be reached from Vectorbea — allow the service egress IPs or configure a private runner"
+            chain.any { it is SQLException } ->
+                "DATABASE_ERROR" to "Database rejected the connection test"
             else ->
-                "CONNECTION_ERROR" to "Connection failed"
+                "CONNECTION_ERROR" to "Database connection failed — verify the connection settings and network access"
         }
     }
 }

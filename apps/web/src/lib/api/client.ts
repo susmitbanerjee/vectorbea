@@ -35,6 +35,15 @@ type WorkflowVersion = contracts.WorkflowVersion;
 type Agent = contracts.Agent;
 type Tool = contracts.Tool;
 type Connection = contracts.Connection;
+export interface ConnectionTestResult {
+  status: "connected" | "failed" | "private_runner_required" | "whitelist_required";
+  latencyMs: number;
+  errorCode: string | null;
+  message: string;
+  testedAt: string;
+  details: Record<string, unknown>;
+}
+export interface RegistryTestResult { valid: boolean; message: string; details?: Record<string, unknown> }
 type Approval = contracts.Approval;
 type FailureIncident = contracts.FailureIncident;
 type Schedule = contracts.Schedule;
@@ -293,6 +302,8 @@ export interface VectorbeaClient {
   agents: {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Agent>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Agent>;
+    create(body: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Agent>;
+    test(id: string, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Agent>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
@@ -300,6 +311,8 @@ export interface VectorbeaClient {
   tools: {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Tool>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Tool>;
+    create(body: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
+    test(id: string, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
@@ -307,7 +320,10 @@ export interface VectorbeaClient {
   connections: {
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Connection>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Connection>;
-    test(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    create(body: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Connection>;
+    update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Connection>;
+    delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    test(id: string, scope?: Scope, options?: RequestOptions): Promise<ConnectionTestResult>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
@@ -624,6 +640,15 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<Agent>(`/api/agents/${id}`, req(scope, contracts.agent, options)),
+      create: (body, scope, options) =>
+        call<Agent>("/api/agents", { method: "POST", body, ...req(scope, contracts.agent, options) }),
+      test: async (id, scope, options) => {
+        const agent = await call<Agent>(`/api/agents/${id}`, req(scope, contracts.agent, options));
+        if (!agent.instructions?.trim()) return { valid: false, message: "Agent has no system instructions." };
+        if (!agent.llmConnectionId) return { valid: true, message: "Agent configuration is valid and uses the workspace model connection." };
+        const result = await call<ConnectionTestResult>(`/api/connections/${agent.llmConnectionId}/test`, { method: "POST", ...req(scope, undefined, options) });
+        return { valid: result.status === "connected", message: result.message, details: { connectionStatus: result.status, latencyMs: result.latencyMs } };
+      },
       update: (id, patch, scope, options) =>
         call<Agent>(`/api/agents/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.agent, options) }),
       delete: (id, scope, options) =>
@@ -638,6 +663,16 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<Tool>(`/api/tools/${id}`, req(scope, contracts.tool, options)),
+      create: (body, scope, options) =>
+        call<Tool>("/api/tools", { method: "POST", body, ...req(scope, contracts.tool, options) }),
+      test: async (id, scope, options) => {
+        const tool = await call<Tool>(`/api/tools/${id}`, req(scope, contracts.tool, options));
+        return call<RegistryTestResult>("/api/tools/test-unsaved", {
+          method: "POST",
+          body: { type: tool.type, connectionId: tool.connectionId, inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, config: tool.config },
+          ...req(scope, undefined, options),
+        });
+      },
       update: (id, patch, scope, options) =>
         call<Tool>(`/api/tools/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.tool, options) }),
       delete: (id, scope, options) =>
@@ -655,8 +690,18 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<Connection>(`/api/connections/${id}`, req(scope, contracts.connection, options)),
+      create: (body, scope, options) =>
+        call<Connection>("/api/connections", { method: "POST", body, ...req(scope, contracts.connection, options) }),
+      update: (id, patch, scope, options) =>
+        call<Connection>(`/api/connections/${id}`, {
+          method: "PATCH",
+          body: patch,
+          ...req(scope, contracts.connection, options),
+        }),
+      delete: (id, scope, options) =>
+        call<void>(`/api/connections/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
       test: (id, scope, options) =>
-        call<unknown>(`/api/connections/${id}/test`, {
+        call<ConnectionTestResult>(`/api/connections/${id}/test`, {
           method: "POST",
           ...req(scope, undefined, options),
         }),

@@ -126,7 +126,11 @@ object LlmTester {
     }
 
     private fun testOpenAiCompatible(input: LlmTestInput, start: Long): ConnectionTestResult {
-        val base = input.baseUrl?.trimEnd('/')
+        val providerDefault = when (input.provider.lowercase()) {
+            "mistral" -> "https://api.mistral.ai/v1"
+            else -> null
+        }
+        val base = (input.baseUrl ?: providerDefault)?.trimEnd('/')
             ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR", "Custom/OpenAI-compatible provider requires baseUrl")
         val url = "$base/models"
         val conn = openConnection(url)

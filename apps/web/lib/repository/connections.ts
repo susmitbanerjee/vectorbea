@@ -149,17 +149,15 @@ export async function createConnection(payload: CreateConnectionPayload): Promis
   return normalizeConnection(conn);
 }
 
-export async function updateConnection(id: string, payload: Partial<Connection>): Promise<Connection | null> {
+export type UpdateConnectionPayload = Partial<Connection> & { plaintextSecret?: string };
+
+export async function updateConnection(id: string, payload: UpdateConnectionPayload): Promise<Connection> {
   const workspaceId = getActiveWorkspaceId();
-  try {
-    const conn = await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId), {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
-    return normalizeConnection(conn);
-  } catch {
-    return null;
-  }
+  const conn = await api<Connection>(withWorkspace(`/api/connections/${encodeURIComponent(id)}`, workspaceId), {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return normalizeConnection(conn);
 }
 
 export async function deleteConnection(id: string): Promise<boolean> {

@@ -35,6 +35,9 @@ dependencies {
 
     // Postgres JDBC driver
     implementation("org.postgresql:postgresql:42.7.4")
+    // MySQL is exposed in the integrations catalogue, so its test path must be
+    // backed by a real driver rather than failing with "No suitable driver".
+    implementation("com.mysql:mysql-connector-j:9.0.0")
 
     // DB migrations — Flyway (core only, no Spring)
     implementation("org.flywaydb:flyway-core:10.20.1")

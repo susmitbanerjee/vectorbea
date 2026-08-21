@@ -104,18 +104,22 @@ export function LastRunCell({ status, at }: { status: RunStatus | null; at: stri
 export function RelativeTime({ iso, className }: { iso: string; className?: string }) {
   const at = Date.parse(iso);
   const absolute = `${new Date(at).toISOString().replace("T", " ").slice(0, 19)}Z`;
-  const delta = NOW - at;
+  // Use the viewer's actual clock. `NOW` is intentionally frozen for fixture
+  // generation, but using it here made newly-created records appear to have
+  // been checked days in the future once the fixture date had passed.
+  const delta = Date.now() - at;
   const ahead = delta < 0;
   const abs = Math.abs(delta);
   const span =
-    abs < 60_000 ? `${Math.round(abs / 1000)}s`
+    abs < 30_000 ? "just now"
+      : abs < 60_000 ? `${Math.round(abs / 1000)}s`
       : abs < 3_600_000 ? `${Math.round(abs / 60_000)}m`
         : abs < 86_400_000 ? `${Math.round(abs / 3_600_000)}h`
           : `${Math.round(abs / 86_400_000)}d`;
 
   return (
-    <time dateTime={iso} title={absolute} className={className}>
-      {ahead ? `in ${span}` : `${span} ago`}
+    <time dateTime={iso} title={absolute} className={className} suppressHydrationWarning>
+      {span === "just now" ? span : ahead ? `in ${span}` : `${span} ago`}
     </time>
   );
 }

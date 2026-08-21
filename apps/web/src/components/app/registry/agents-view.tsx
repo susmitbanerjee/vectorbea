@@ -321,6 +321,7 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
         onClose={() => setParams({ agent: null, tab: null })}
         tab={detailTab}
         onTabChange={(id) => setParams({ tab: id })}
+        onUpdated={data.refetch}
       />
 
       <RegistryBulkBar

@@ -9,7 +9,7 @@ export interface ConnectionRecord {
   status: ConnectionHealth;
   latencyMs: number | null;
   latencyTrend: number[];
-  lastCheckedAt: string;
+  lastCheckedAt: string | null;
   createdAt: string;
   lastUsedAt: string;
   expiresAt: string | null;

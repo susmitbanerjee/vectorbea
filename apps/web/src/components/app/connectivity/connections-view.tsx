@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
+import { toast } from "sonner";
 import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
@@ -21,6 +22,8 @@ import {
 } from "~/lib/connectivity/model";
 import { useConnectionsData } from "./use-connections-data";
 import { useApi } from "~/lib/api/api-provider";
+import type { ConnectionTestResult, Scope } from "~/lib/api/client";
+import { ConnectionEditor } from "./connection-editor";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    CONNECTIONS — the operational view.
@@ -38,6 +41,7 @@ const DETAIL_TABS = [
   { id: "health", label: "Health" },
   { id: "access", label: "Access" },
   { id: "audit", label: "Audit" },
+  { id: "settings", label: "Settings" },
 ];
 
 export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
@@ -146,10 +150,10 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
                 c.status === "healthy" ? "text-status-success" : c.status === "degraded" ? "text-status-waiting" : "text-status-failed",
               )}
             >
-              {c.status}
+              {c.lastCheckedAt ? c.status : "not tested"}
             </Text>
             <Text variant="caption" tone="disabled" className="truncate">
-              checked <RelativeTime iso={c.lastCheckedAt} />
+              {c.lastCheckedAt ? <>checked <RelativeTime iso={c.lastCheckedAt} /></> : "Run a connection test"}
             </Text>
           </span>
         </span>
@@ -280,7 +284,24 @@ export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
 
       <ConnectionDetail
         connection={open}
-        onTest={async (id) => { await api.connections.test(id, data.scope); await data.refetch(); }}
+        onTest={async (id) => {
+          const result = await api.connections.test(id, data.scope);
+          await data.refetch();
+          return result;
+        }}
+        onDelete={async (id) => {
+          try {
+            await api.connections.delete(id, data.scope);
+            setParams({ connection: null, tab: null });
+            await data.refetch();
+            toast.success("Connection deleted.");
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to delete connection.");
+            throw error;
+          }
+        }}
+        scope={data.scope}
+        onUpdated={data.refetch}
         onClose={() => setParams({ connection: null, tab: null })}
         tab={detailTab}
         onTabChange={(id) => setParams({ tab: id })}
@@ -367,16 +388,19 @@ function FailingBanner({ failing, onShow }: { failing: ConnectionRecord[]; onSho
 /* ── Detail ───────────────────────────────────────────────────────────────── */
 
 function ConnectionDetail({
-  connection, onClose, tab, onTabChange, onTest,
+  connection, onClose, tab, onTabChange, onTest, onDelete, scope, onUpdated,
 }: {
   connection: ConnectionRecord | null;
   onClose: () => void;
   tab: string;
   onTabChange: (id: string) => void;
-  onTest: (id: string) => Promise<void>;
+  onTest: (id: string) => Promise<ConnectionTestResult>;
+  onDelete: (id: string) => Promise<void>;
+  scope: Scope;
+  onUpdated: () => void | Promise<void>;
 }) {
-  const [tested, setTested] = React.useState<"idle" | "testing" | "ok" | "failed">("idle");
-  React.useEffect(() => { setTested("idle"); }, [connection?.id]);
+  const [testResult, setTestResult] = React.useState<ConnectionTestResult | "testing" | null>(null);
+  React.useEffect(() => { setTestResult(null); }, [connection?.id]);
 
   if (!connection) return null;
   const radius = blastRadius(connection);
@@ -407,44 +431,56 @@ function ConnectionDetail({
         ) : null
       }
       actions={
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={tested === "testing"}
-          onClick={() => {
-            setTested("testing");
-            void onTest(connection.id).then(() => setTested("ok"), () => setTested("failed"));
-          }}
-        >
-          Test
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant={tab === "settings" ? "subtle" : "secondary"} onClick={() => onTabChange("settings")}>Edit</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={testResult === "testing"}
+            onClick={() => {
+              setTestResult("testing");
+              void onTest(connection.id).then(setTestResult, (error: unknown) => {
+                setTestResult({
+                  status: "failed",
+                  latencyMs: 0,
+                  errorCode: "REQUEST_FAILED",
+                  message: error instanceof Error ? error.message : "The connection test request failed.",
+                  testedAt: new Date().toISOString(),
+                  details: {},
+                });
+              });
+            }}
+          >
+            Test
+          </Button>
+        </div>
       }
       tabs={DETAIL_TABS.map((t) => (t.id === "blast" && connection.status !== "healthy" ? { ...t, badge: radius.workflows.length } : t))}
       activeTab={tab}
       onTabChange={onTabChange}
     >
       <div className="grid gap-3 p-4">
-        {tested !== "idle" && tested !== "testing" ? (
-          <Section title={tested === "ok" ? "Test passed" : "Test failed"} tone={tested === "ok" ? undefined : "error"}>
+        {testResult && testResult !== "testing" ? (
+          <Section title={testResult.status === "connected" ? "Test passed" : "Test failed"} tone={testResult.status === "connected" ? undefined : "error"}>
             <Text variant="body-sm" tone="secondary">
-              {tested === "ok"
-                ? `Reached ${connection.provider} in ${connection.latencyMs}ms with the granted scopes.`
-                : `Could not reach ${connection.provider}. The credential may be revoked, or the host may be unreachable from Vectorbea's network.`}
+              {testResult.message}
             </Text>
+            {testResult.errorCode ? <Text variant="caption" tone="muted" className="mt-1 block font-mono">{testResult.errorCode}</Text> : null}
           </Section>
         ) : null}
 
-        {tab === "overview" ? <Overview connection={connection} /> : null}
+        {tab === "overview" ? <Overview connection={connection} onDelete={onDelete} onEdit={() => onTabChange("settings")} /> : null}
         {tab === "blast" ? <Blast connection={connection} radius={radius} /> : null}
         {tab === "health" ? <Health connection={connection} /> : null}
         {tab === "access" ? <Access connection={connection} /> : null}
         {tab === "audit" ? <Audit connection={connection} /> : null}
+        {tab === "settings" ? <ConnectionEditor id={connection.id} scope={scope} onUpdated={onUpdated} /> : null}
       </div>
     </DetailSheet>
   );
 }
 
-function Overview({ connection }: { connection: ConnectionRecord }) {
+function Overview({ connection, onDelete, onEdit }: { connection: ConnectionRecord; onDelete: (id: string) => Promise<void>; onEdit: () => void }) {
   return (
     <>
       <Section title="Configuration" help="Secrets are never displayed — only replaced. There is no path in this product that reads a credential back out.">
@@ -459,8 +495,19 @@ function Overview({ connection }: { connection: ConnectionRecord }) {
           ]}
         />
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary">Rotate credentials</Button>
-          <Button size="sm" variant="ghost" className="text-status-failed">Delete</Button>
+          <Button size="sm" variant="secondary" onClick={onEdit}>Rotate credentials</Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-status-failed"
+            onClick={() => {
+              if (window.confirm(`Delete ${connection.name}? This cannot be undone.`)) {
+                void onDelete(connection.id).catch(() => undefined);
+              }
+            }}
+          >
+            Delete
+          </Button>
         </div>
       </Section>
 
