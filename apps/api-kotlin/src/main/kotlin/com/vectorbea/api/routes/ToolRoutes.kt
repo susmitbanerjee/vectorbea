@@ -60,6 +60,14 @@ private data class UpdateToolBody(
     val status: String? = null,
 )
 
+private data class TestToolBody(
+    val type: String?,
+    val connectionId: String? = null,
+    val inputSchema: Map<String, Any>? = null,
+    val outputSchema: Map<String, Any>? = null,
+    val config: Map<String, Any>? = null,
+)
+
 @Suppress("UNCHECKED_CAST")
 private fun Tool.toResponse(): Map<String, Any?> = mapOf(
     "id" to id.toString(),
@@ -91,9 +99,49 @@ class ToolRoutes(
     fun register(router: Router) {
         router.get("/api/tools", ::list)
         router.post("/api/tools", ::create)
+        router.post("/api/tools/test-unsaved", ::testUnsaved)
         router.get("/api/tools/:id", ::getById)
         router.patch("/api/tools/:id", ::update)
         router.delete("/api/tools/:id", ::delete)
+    }
+
+    /**
+     * Validates the exact unsaved configuration that the registry form will
+     * persist. This is deliberately side-effect free: validating a POST,
+     * DELETE, email, or database-write tool must never execute it.
+     */
+    private fun testUnsaved(req: Request): Response {
+        val ctx = req.context()
+        val body = req.bodyAs<TestToolBody>()
+        val type = requireOneOf(requireField(body.type, "type"), "type", TOOL_TYPES)
+        val config = body.config ?: emptyMap()
+        validateConfigJsonNotContainsSecrets(config, "config")
+
+        if (body.connectionId != null) {
+            validateToolConnection(body.connectionId, type, ctx.workspaceId)
+        } else if (toolRequiresConnection(type)) {
+            throw ApiError.ValidationError("connectionId is required for tool type '$type'")
+        }
+
+        when (type) {
+            "http" -> {
+                val url = requireField(config["url"] as? String, "config.url")
+                val uri = runCatching { java.net.URI(url) }.getOrElse {
+                    throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                }
+                if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) {
+                    throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                }
+                val method = (config["method"] as? String)?.uppercase() ?: "GET"
+                requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE"))
+            }
+            "database" -> requireField(config["sqlTemplate"] as? String, "config.sqlTemplate")
+        }
+
+        return Response.ok(mapOf(
+            "valid" to true,
+            "message" to "Configuration validated. No external action was executed.",
+        ))
     }
 
     private fun list(req: Request): Response {

@@ -30,6 +30,7 @@ import java.util.UUID
 private data class CreateAgentBody(
     val name: String?,
     val slug: String? = null,
+    val description: String? = null,
     val type: String?,
     val role: String? = null,
     val instructions: String? = null,
@@ -49,6 +50,7 @@ private data class CreateAgentBody(
 
 private data class UpdateAgentBody(
     val name: String? = null,
+    val description: String? = null,
     val role: String? = null,
     val instructions: String? = null,
     val llmConnectionId: String? = null,
@@ -74,6 +76,7 @@ private fun Agent.toResponse(): Map<String, Any?> = mapOf(
     "environmentId" to environmentId.toString(),
     "name" to name,
     "slug" to slug,
+    "description" to description,
     "type" to type,
     "role" to role,
     "instructions" to instructions,
@@ -152,6 +155,7 @@ class AgentRoutes(
                 environmentId = envId,
                 name = name,
                 slug = slug,
+                description = body.description,
                 type = type,
                 role = body.role,
                 instructions = body.instructions,
@@ -198,6 +202,7 @@ class AgentRoutes(
             id = id,
             workspaceId = ctx.workspaceId,
             name = body.name?.trim()?.takeIf { it.isNotBlank() },
+            description = body.description,
             role = body.role,
             instructions = body.instructions,
             llmConnectionId = llmConnectionId,

@@ -16,6 +16,7 @@ data class Workflow(
     val name: String,
     val slug: String,
     val description: String?,
+    val creationMode: String,
     val status: String,
     val currentVersionId: UUID?,
     val createdAt: Instant,
@@ -28,6 +29,7 @@ data class CreateWorkflowRequest(
     val name: String,
     val slug: String,
     val description: String? = null,
+    val creationMode: String = "native",
     val status: String = "draft",
 )
 
@@ -77,7 +79,7 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
     override val log = LoggerFactory.getLogger(WorkflowRepository::class.java)
 
     private val cols = """
-        id, workspace_id, environment_id, name, slug, description,
+        id, workspace_id, environment_id, name, slug, description, creation_mode,
         status, current_version_id, created_at, updated_at
     """.trimIndent()
 
@@ -178,8 +180,8 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
 
     fun create(req: CreateWorkflowRequest): Workflow = executeReturning(
         """
-        INSERT INTO workflows (workspace_id, environment_id, name, slug, description, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO workflows (workspace_id, environment_id, name, slug, description, creation_mode, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -188,7 +190,8 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
             setString(3, req.name)
             setString(4, req.slug)
             setString(5, req.description)
-            setString(6, req.status)
+            setString(6, req.creationMode)
+            setString(7, req.status)
         },
         ::mapRow,
     )
@@ -312,6 +315,7 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
         name = rs.getString("name"),
         slug = rs.getString("slug"),
         description = rs.getString("description"),
+        creationMode = rs.getString("creation_mode"),
         status = rs.getString("status"),
         currentVersionId = rs.uuidOrNull("current_version_id"),
         createdAt = rs.instant("created_at"),

@@ -18,6 +18,7 @@ import type {
   RunEvent,
   RunFilters,
   Tool,
+  ToolType,
   Workflow,
   WorkflowFilters,
   WorkflowVersion,
@@ -320,12 +321,38 @@ export async function createTool(payload: Partial<Tool>): Promise<Tool> {
   // Preserve the original UI type in config so the detail page can show the
   // right label (e.g. "Database (Read)" vs "Database (Write)", "Slack", etc.)
   const config = {
-    ...(payload.dbConfig ?? (payload as Record<string, unknown>).config ?? {}),
+    ...((payload as Record<string, unknown>).config ?? {}),
+    ...(payload.httpConfig ?? {}),
+    ...(payload.dbConfig ?? {}),
     uiToolType: uiType,
   };
   return api<Tool>(withWorkspace("/api/tools"), {
     method: "POST",
-    body: JSON.stringify({ ...payload, type: apiType, config }),
+    body: JSON.stringify({
+      ...payload,
+      type: apiType,
+      config,
+      requiresApproval: payload.dbConfig?.requireApproval
+        ?? (payload.riskLevel === "high" || payload.riskLevel === "critical"),
+      idempotencyStrategy: payload.idempotent ? "input_hash" : "none",
+    }),
+  });
+}
+
+export async function testUnsavedTool(payload: {
+  type: ToolType;
+  connectionId: string | null;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  config: Record<string, unknown>;
+}): Promise<{ valid: boolean; message: string }> {
+  return api<{ valid: boolean; message: string }>(withWorkspace("/api/tools/test-unsaved"), {
+    method: "POST",
+    body: JSON.stringify({
+      ...payload,
+      type: toApiToolType(payload.type),
+      config: { ...payload.config, uiToolType: payload.type },
+    }),
   });
 }
 

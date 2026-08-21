@@ -13,6 +13,7 @@ data class Agent(
     val environmentId: UUID,
     val name: String,
     val slug: String,
+    val description: String?,
     val type: String,
     val role: String?,
     val instructions: String?,
@@ -37,6 +38,7 @@ data class CreateAgentRequest(
     val environmentId: UUID,
     val name: String,
     val slug: String,
+    val description: String? = null,
     val type: String,
     val role: String? = null,
     val instructions: String? = null,
@@ -58,7 +60,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     override val log = LoggerFactory.getLogger(AgentRepository::class.java)
 
     private val cols = """
-        id, workspace_id, environment_id, name, slug, type, role, instructions,
+        id, workspace_id, environment_id, name, slug, description, type, role, instructions,
         llm_connection_id, model_name, temperature, max_tokens, max_iterations,
         allowed_tool_ids,
         memory_policy_json, retry_policy_json, timeout_policy_json,
@@ -101,12 +103,12 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     fun create(req: CreateAgentRequest): Agent = executeReturning(
         """
         INSERT INTO agents (
-            workspace_id, environment_id, name, slug, type, role, instructions,
+            workspace_id, environment_id, name, slug, description, type, role, instructions,
             llm_connection_id, model_name, temperature, max_tokens, max_iterations,
             allowed_tool_ids,
             memory_policy_json, retry_policy_json, timeout_policy_json,
             approval_policy_json, output_schema_json, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -114,21 +116,22 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setUuid(2, req.environmentId)
             setString(3, req.name)
             setString(4, req.slug)
-            setString(5, req.type)
-            setString(6, req.role)
-            setString(7, req.instructions)
-            setUuidOrNull(8, req.llmConnectionId)
-            setString(9, req.modelName)
-            if (req.temperature != null) setDouble(10, req.temperature) else setNull(10, java.sql.Types.NUMERIC)
-            if (req.maxTokens != null) setInt(11, req.maxTokens) else setNull(11, java.sql.Types.INTEGER)
-            if (req.maxIterations != null) setInt(12, req.maxIterations) else setNull(12, java.sql.Types.INTEGER)
-            setTextArray(13, req.allowedToolIds)
-            setJsonb(14, req.memoryPolicy)
-            setJsonb(15, req.retryPolicy)
-            setJsonb(16, req.timeoutPolicy)
-            setJsonb(17, req.approvalPolicy)
-            setJsonb(18, req.outputSchema)
-            setString(19, req.status)
+            setString(5, req.description)
+            setString(6, req.type)
+            setString(7, req.role)
+            setString(8, req.instructions)
+            setUuidOrNull(9, req.llmConnectionId)
+            setString(10, req.modelName)
+            if (req.temperature != null) setDouble(11, req.temperature) else setNull(11, java.sql.Types.NUMERIC)
+            if (req.maxTokens != null) setInt(12, req.maxTokens) else setNull(12, java.sql.Types.INTEGER)
+            if (req.maxIterations != null) setInt(13, req.maxIterations) else setNull(13, java.sql.Types.INTEGER)
+            setTextArray(14, req.allowedToolIds)
+            setJsonb(15, req.memoryPolicy)
+            setJsonb(16, req.retryPolicy)
+            setJsonb(17, req.timeoutPolicy)
+            setJsonb(18, req.approvalPolicy)
+            setJsonb(19, req.outputSchema)
+            setString(20, req.status)
         },
         ::mapRow,
     )
@@ -137,6 +140,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         id: UUID,
         workspaceId: UUID,
         name: String? = null,
+        description: String? = null,
         role: String? = null,
         instructions: String? = null,
         llmConnectionId: UUID? = null,
@@ -154,6 +158,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     ): Agent? {
         val setClauses = buildList {
             if (name != null) add("name = ?")
+            if (description != null) add("description = ?")
             if (role != null) add("role = ?")
             if (instructions != null) add("instructions = ?")
             if (llmConnectionId != null) add("llm_connection_id = ?")
@@ -176,6 +181,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             {
                 var i = 1
                 if (name != null) setString(i++, name)
+                if (description != null) setString(i++, description)
                 if (role != null) setString(i++, role)
                 if (instructions != null) setString(i++, instructions)
                 if (llmConnectionId != null) setUuid(i++, llmConnectionId)
@@ -215,6 +221,7 @@ class AgentRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         environmentId = rs.uuid("environment_id"),
         name = rs.getString("name"),
         slug = rs.getString("slug"),
+        description = rs.getString("description"),
         type = rs.getString("type"),
         role = rs.getString("role"),
         instructions = rs.getString("instructions"),

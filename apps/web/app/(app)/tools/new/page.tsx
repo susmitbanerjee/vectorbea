@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import type { RiskLevel, ToolType, RetryPolicy } from "@/types/platform";
 import type { Connection } from "@/types/connections";
 import { CONNECTION_TOOL_COMPAT } from "@/types/connections";
-import { createTool, getCompatibleConnectionsForTool } from "@/lib/repository";
+import { createTool, getCompatibleConnectionsForTool, testUnsavedTool } from "@/lib/repository";
 import { SchemaPickerPanel, type SchemaSelection } from "@/components/connections/SchemaPickerPanel";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -19,9 +19,11 @@ const TOOL_TYPES: { type: ToolType; label: string }[] = [
   { type: "mcp_tool",        label: "MCP" },
   { type: "database_read",   label: "Database (Read)" },
   { type: "database_write",  label: "Database (Write)" },
+  { type: "slack",           label: "Slack" },
   { type: "email",           label: "Email" },
   { type: "crm",             label: "CRM" },
   { type: "custom_function", label: "Custom Function" },
+  { type: "imported_tool",   label: "Imported Tool" },
 ];
 
 const RISK_LEVELS: { level: RiskLevel; label: string; description: string; color: string }[] = [
@@ -184,12 +186,27 @@ export default function NewToolPage() {
     }
   }
 
-  function handleTest() {
+  async function handleTest() {
     setTesting(true);
-    setTimeout(() => {
+    try {
+      const parsedInput = JSON.parse(inputSchema) as Record<string, unknown>;
+      const parsedOutput = JSON.parse(outputSchema) as Record<string, unknown>;
+      const parsedHeaders = JSON.parse(headers) as Record<string, string>;
+      const result = await testUnsavedTool({
+        type,
+        connectionId: connectionId || null,
+        inputSchema: parsedInput,
+        outputSchema: parsedOutput,
+        config: type === "http"
+          ? { method, url: url.trim(), headers: parsedHeaders, bodyTemplate }
+          : { sqlTemplate: sqlTemplate.trim(), maxRows: parseInt(dbMaxRows) || 100 },
+      });
+      toast.success(result.message);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Tool configuration could not be validated.");
+    } finally {
       setTesting(false);
-      toast.info("Test is mocked — connect to a real backend to enable live tool testing.");
-    }, 1200);
+    }
   }
 
   return (
@@ -463,7 +480,7 @@ export default function NewToolPage() {
         {type === "http" && (
           <button
             type="button"
-            onClick={handleTest}
+            onClick={() => void handleTest()}
             disabled={testing || !url.trim()}
             className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#E0E3E6] bg-white px-4 text-[13px] font-medium text-[#374151] transition-colors hover:bg-[#F7F8F9] disabled:opacity-50"
           >

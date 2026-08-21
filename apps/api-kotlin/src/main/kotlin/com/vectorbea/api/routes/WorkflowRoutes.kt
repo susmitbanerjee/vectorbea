@@ -37,6 +37,7 @@ private data class CreateWorkflowBody(
     val name: String?,
     val slug: String? = null,
     val description: String? = null,
+    val creationMode: String? = null,
     val status: String? = null,
 )
 
@@ -88,6 +89,7 @@ private fun Workflow.toResponse(graphJson: String? = null): Map<String, Any?> {
         "name" to name,
         "slug" to slug,
         "description" to description,
+        "creationMode" to creationMode,
         "status" to status,
         "currentVersionId" to currentVersionId?.toString(),
         "stepCount"  to stepCount,
@@ -159,6 +161,11 @@ class WorkflowRoutes(
         val status = if (body.status != null)
             requireOneOf(body.status, "status", WORKFLOW_STATUSES)
         else "draft"
+        val creationMode = requireOneOf(
+            body.creationMode ?: "native",
+            "creationMode",
+            setOf("native", "imported", "instrumented", "endpoint_only"),
+        )
         val slug = slugify(body.slug?.takeIf { it.isNotBlank() } ?: name)
 
         val workflow = repo.create(
@@ -168,6 +175,7 @@ class WorkflowRoutes(
                 name = name,
                 slug = slug,
                 description = body.description,
+                creationMode = creationMode,
                 status = status,
             )
         )

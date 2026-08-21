@@ -14,10 +14,11 @@ import { createAgent, getTools, getConnectionsByType } from "@/lib/repository";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const LLM_AGENT_TYPES = new Set<AgentType>(["native_llm_agent", "router_agent", "imported_langgraph_node"]);
+const LLM_AGENT_TYPES = new Set<AgentType>(["native_llm_agent", "iterative_agent", "router_agent", "imported_langgraph_node"]);
 
 const AGENT_TYPES: { type: AgentType; label: string; description: string }[] = [
   { type: "native_llm_agent",            label: "Native LLM Agent",           description: "Direct LLM calls with tool use. Vectorbea owns execution, replay, and checkpoints." },
+  { type: "iterative_agent",             label: "Iterative Agent",            description: "Loops through plan, act and evaluate cycles until its goal or iteration limit is reached." },
   { type: "tool_agent",                  label: "Tool Agent",                  description: "Primarily orchestrates tool calls in sequence or parallel." },
   { type: "router_agent",               label: "Router Agent",                description: "Delegates tasks to sub-agents based on input or context." },
   { type: "approval_agent",             label: "Approval Agent",              description: "Pauses workflow execution and waits for a human decision." },
@@ -100,8 +101,9 @@ export default function NewAgentPage() {
       setLlmConnections(conns);
       if (conns.length > 0 && conns[0]) {
         setLlmConnectionId(conns[0].id);
-        const cfg = conns[0].config as import("@/types/connections").LlmConnectionConfig;
-        setModel(cfg.defaultModel);
+        const cfg = conns[0].config as Partial<import("@/types/connections").LlmConnectionConfig>;
+        const models = cfg.allowedModels ?? LLM_PROVIDER_MODELS[(cfg.provider ?? conns[0].provider) as keyof typeof LLM_PROVIDER_MODELS] ?? [];
+        setModel(cfg.defaultModel ?? models[0] ?? "");
       }
     });
   }, []);
@@ -110,14 +112,18 @@ export default function NewAgentPage() {
     setLlmConnectionId(connId);
     const conn = llmConnections.find(c => c.id === connId);
     if (conn) {
-      const cfg = conn.config as import("@/types/connections").LlmConnectionConfig;
-      setModel(cfg.defaultModel);
+      const cfg = conn.config as Partial<import("@/types/connections").LlmConnectionConfig>;
+      const models = cfg.allowedModels ?? LLM_PROVIDER_MODELS[(cfg.provider ?? conn.provider) as keyof typeof LLM_PROVIDER_MODELS] ?? [];
+      setModel(cfg.defaultModel ?? models[0] ?? "");
     }
   }
 
   const selectedLlmConn = llmConnections.find(c => c.id === llmConnectionId);
+  const selectedLlmConfig = selectedLlmConn?.config as Partial<import("@/types/connections").LlmConnectionConfig> | undefined;
   const availableModels: string[] = selectedLlmConn
-    ? (selectedLlmConn.config as import("@/types/connections").LlmConnectionConfig).allowedModels
+    ? selectedLlmConfig?.allowedModels
+      ?? LLM_PROVIDER_MODELS[(selectedLlmConfig?.provider ?? selectedLlmConn.provider) as keyof typeof LLM_PROVIDER_MODELS]
+      ?? []
     : [];
 
   function toggleTool(id: string) {
@@ -152,7 +158,7 @@ export default function NewAgentPage() {
         type,
         status,
         instructions: instructions.trim(),
-        modelProvider: selectedLlmConn ? (selectedLlmConn.config as import("@/types/connections").LlmConnectionConfig).provider : "",
+        modelProvider: selectedLlmConn ? selectedLlmConfig?.provider ?? selectedLlmConn.provider : "",
         modelName: model,
         temperature: parseFloat(temperature) || 0.1,
         maxIterations: parseInt(maxIter) || 10,
