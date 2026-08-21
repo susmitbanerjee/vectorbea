@@ -10,12 +10,10 @@ import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Select } from "~/components/ui/select";
-import { Checkbox } from "~/components/ui/choice";
 import { ProviderLogo } from "~/components/ui/provider-logo";
 import {
   INTEGRATIONS, integrationById, INTEGRATION_CATEGORY_LABEL, AUTH_LABEL,
-  type IntegrationCategory, type IntegrationRecord, type AuthMethod,
+  type IntegrationCategory, type IntegrationRecord,
 } from "~/mocks/connectivity";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -30,6 +28,12 @@ import {
 const CATEGORIES: (IntegrationCategory | "all")[] = [
   "all", "ai", "database", "messaging", "crm", "productivity", "developer", "generic",
 ];
+
+/** Only advertise integrations backed by the real connection/test API. */
+const SUPPORTED_INTEGRATIONS = new Set([
+  "postgres", "openai", "anthropic", "gemini",
+  "gmail", "hubspot", "github", "http", "webhook",
+]);
 
 export function IntegrationsView() {
   const router = useRouter();
@@ -58,7 +62,8 @@ export function IntegrationsView() {
       .join(" ").toLowerCase().includes(needle);
   }, [category, search]);
 
-  const shown = INTEGRATIONS.filter(matches);
+  const shown = INTEGRATIONS.filter((integration) =>
+    SUPPORTED_INTEGRATIONS.has(integration.id) && matches(integration));
   const connected = shown.filter((i) => i.connectionNames.length > 0);
   const available = shown.filter((i) => i.connectionNames.length === 0);
 
@@ -159,7 +164,7 @@ function Grid({ integrations, onOpen }: { integrations: IntegrationRecord[]; onO
               onClick={() => onOpen(integration.id)}
               className={cn(
                 "bg-surface-raised border-subtle flex h-full w-full flex-col gap-2 rounded-lg border p-3 text-left",
-                "hover:border-default transition-colors duration-fast",
+                "hover:border-default cursor-pointer transition-colors duration-fast",
                 "outline-none focus-visible:focus-ring",
               )}
             >
@@ -331,136 +336,20 @@ function IntegrationDetail({
 /* ── Connect flow ─────────────────────────────────────────────────────────── */
 
 function ConnectFlow({ integration, onClose }: { integration: IntegrationRecord | null; onClose: () => void }) {
-  const [method, setMethod] = React.useState<AuthMethod>("oauth");
-  const [name, setName] = React.useState("");
-  const [secret, setSecret] = React.useState("");
-  const [scopes, setScopes] = React.useState<string[]>([]);
-  const [tested, setTested] = React.useState<"idle" | "testing" | "ok" | "failed">("idle");
+  const router = useRouter();
 
   React.useEffect(() => {
     if (!integration) return;
-    setMethod(integration.authMethods[0]);
-    setName(`${integration.name} — ${new Date().getUTCFullYear()}`);
-    setScopes(integration.scopes.filter((s) => s.required).map((s) => s.name));
-    setSecret("");
-    setTested("idle");
-  }, [integration]);
+    router.push(`/connections/new?integration=${encodeURIComponent(integration.id)}` as Route);
+  }, [integration, router]);
 
   if (!integration) return null;
-  const needsSecret = method === "api-key" || method === "connection-string";
-
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="motion-fade z-overlay bg-surface-canvas/70 fixed inset-0 backdrop-blur-[2px]" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className={cn(
-            "motion-overlay z-modal fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-            "bg-surface-overlay border-subtle shadow-3 flex max-h-[90dvh] w-[min(34rem,calc(100vw-2rem))] flex-col rounded-lg border p-4",
-          )}
-        >
-          <Dialog.Title asChild>
-            <Text variant="heading-sm" tone="max" as="h2">Connect {integration.name}</Text>
-          </Dialog.Title>
-
-          <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-y-auto">
-            <Field label="Method" help="OAuth is preferable where it exists — it can be revoked from the provider's side.">
-              <Select
-                options={integration.authMethods.map((m) => ({ value: m, label: AUTH_LABEL[m] }))}
-                value={method}
-                onValueChange={(v) => setMethod(v as AuthMethod)}
-                aria-label="Authentication method"
-              />
-            </Field>
-
-            <Field label="Name" help="How it appears wherever a workflow binds it. Include the account if you will have more than one.">
-              <Input value={name} onChange={(e) => setName(e.target.value)} className="h-8 text-body-sm" />
-            </Field>
-
-            {needsSecret ? (
-              <Field
-                label={method === "api-key" ? "API key" : "Connection string"}
-                help="Encrypted at rest and never displayed again. Rotating replaces it; there is no way to read it back."
-              >
-                <Input
-                  type="password"
-                  value={secret}
-                  onChange={(e) => { setSecret(e.target.value); setTested("idle"); }}
-                  placeholder={method === "api-key" ? "sk-…" : "postgres://…"}
-                  className="h-8 font-code text-mono-sm"
-                />
-              </Field>
-            ) : (
-              <div className="border-subtle rounded-md border p-2.5">
-                <Text variant="body-sm" tone="secondary" className="block">
-                  You will be sent to {integration.name} to authorise, then returned here.
-                </Text>
-              </div>
-            )}
-
-            {integration.scopes.length > 0 ? (
-              <div>
-                <Text variant="caption" tone="secondary" className="mb-1 block">Scopes</Text>
-                <ul className="grid gap-1.5">
-                  {integration.scopes.map((scope) => (
-                    <li key={scope.name}>
-                      <Checkbox
-                        checked={scopes.includes(scope.name)}
-                        disabled={scope.required}
-                        onCheckedChange={(v) => setScopes((s) => (v === true ? [...s, scope.name] : s.filter((x) => x !== scope.name)))}
-                      >
-                        <span className="min-w-0">
-                          <code className="font-code text-mono-sm text-fg-primary">{scope.name}</code>
-                          <Text variant="caption" tone="muted" className="block leading-snug">{scope.description}</Text>
-                        </span>
-                      </Checkbox>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {/* Test before save — a connection that saves and then fails is a
-                connection somebody discovers at 3am. */}
-            <div className="border-subtle rounded-md border p-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Text variant="body-sm" tone="primary">Test before saving</Text>
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  loading={tested === "testing"}
-                  disabled={needsSecret && !secret}
-                  onClick={() => {
-                    setTested("testing");
-                    window.setTimeout(() => setTested("ok"), 800);
-                  }}
-                >
-                  Test connection
-                </Button>
-              </div>
-              <Text
-                variant="caption"
-                tone={tested === "ok" ? "inherit" : "muted"}
-                className={cn("mt-1 block leading-snug", tested === "ok" && "text-status-success")}
-              >
-                {tested === "ok"
-                  ? "Reached the provider and the granted scopes verified."
-                  : tested === "testing"
-                    ? "Contacting the provider…"
-                    : "A credential that saves and then fails is one somebody finds at 3am. Test it now."}
-              </Text>
-            </div>
-          </div>
-
-          <div className="border-subtle mt-3 flex justify-end gap-2 border-t pt-3">
-            <Dialog.Close asChild>
-              <Button variant="secondary" size="sm">Cancel</Button>
-            </Dialog.Close>
-            <Button variant="primary" size="sm" disabled={tested !== "ok"}>
-              Save connection
-            </Button>
-          </div>
+        <Dialog.Content aria-describedby={undefined} className="sr-only">
+          <Dialog.Title>Opening {integration.name} connection setup</Dialog.Title>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -509,15 +398,5 @@ function Section({ title, help, children }: { title: string; help?: string; chil
       {help ? <Text variant="caption" tone="muted" className="mb-1.5 mt-0.5 block leading-snug">{help}</Text> : <div className="mb-1.5" />}
       {children}
     </section>
-  );
-}
-
-function Field({ label, help, children }: { label: string; help: string; children: React.ReactNode }) {
-  return (
-    <label className="grid min-w-0 gap-1">
-      <Text variant="caption" tone="secondary">{label}</Text>
-      {children}
-      <Text variant="caption" tone="muted" className="leading-snug">{help}</Text>
-    </label>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -587,6 +587,7 @@ function StepIndicator({ step, total }: { step: number; total: number }) {
 
 export default function NewConnectionPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState(1);
   const [type, setType] = useState<ConnectionType | null>(null);
   const [saving, setSaving] = useState(false);
@@ -644,6 +645,40 @@ export default function NewConnectionPage() {
   const [storageRegion, setStorageRegion] = useState("");
   const [storageAccessKey, setStorageAccessKey] = useState("");
   const [storageSecretKey, setStorageSecretKey] = useState("");
+
+  // Integration catalogue cards land here. Preselect the real, API-backed
+  // provider form instead of opening the former mock save dialog.
+  useEffect(() => {
+    const integration = searchParams.get("integration");
+    if (!integration) return;
+    const displayNames: Record<string, string> = {
+      postgres: "Postgres",
+      openai: "OpenAI",
+      anthropic: "Anthropic",
+      gemini: "Google Gemini",
+      gmail: "Gmail",
+      hubspot: "HubSpot",
+      github: "GitHub",
+      http: "Generic HTTP",
+      webhook: "Outbound webhook",
+    };
+    setName(`${displayNames[integration] ?? integration} connection`);
+    if (integration === "postgres") {
+      setType("database");
+      setDbProvider("postgresql");
+    } else if (["openai", "anthropic", "gemini"].includes(integration)) {
+      setType("llm_provider");
+      setLlmProvider(integration === "gemini" ? "google_gemini" : integration as LlmProvider);
+    } else if (["gmail", "hubspot", "github"].includes(integration)) {
+      setType("saas");
+      setSaasProvider(integration as SaasProvider);
+    } else if (integration === "http" || integration === "webhook") {
+      setType("http_api");
+    } else {
+      return;
+    }
+    setStep(2);
+  }, [searchParams]);
 
   const needsNetworkStep = type === "database" || type === "http_api" || type === "mcp_server";
   const totalSteps = needsNetworkStep ? 4 : 3;
