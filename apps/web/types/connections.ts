@@ -119,7 +119,7 @@ export interface DatabaseConnectionConfig {
 export interface HttpApiConnectionConfig {
   baseUrl: string;
   authType: AuthType;
-  apiKeyHeaderName?: string;
+  authHeaderName?: string;
   defaultHeaders: Record<string, string>;
   allowedPaths: string[];
   blockedPaths: string[];

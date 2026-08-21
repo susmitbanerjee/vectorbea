@@ -228,7 +228,8 @@ class ConnectionTester(private val secretService: SecretService) {
             apiKey = secret,
             username = config["username"] as? String,
             password = null,  // password resolved via secret
-            apiKeyHeaderName = config["apiKeyHeaderName"] as? String,
+            apiKeyHeaderName = config["authHeaderName"] as? String
+                ?: config["apiKeyHeaderName"] as? String,
             healthPath = healthPath,
         ))
     }
@@ -270,7 +271,8 @@ class ConnectionTester(private val secretService: SecretService) {
             apiKey = plaintextSecret,
             username = config["username"] as? String,
             password = null,
-            apiKeyHeaderName = config["apiKeyHeaderName"] as? String,
+            apiKeyHeaderName = config["authHeaderName"] as? String
+                ?: config["apiKeyHeaderName"] as? String,
             healthPath = config["healthPath"] as? String,
         ))
     }

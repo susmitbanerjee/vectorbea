@@ -648,25 +648,25 @@ export default function NewConnectionPage() {
   const needsNetworkStep = type === "database" || type === "http_api" || type === "mcp_server";
   const totalSteps = needsNetworkStep ? 4 : 3;
 
-  function configurationError(): string | null {
+  function configurationError(requireCredentials = true): string | null {
     if (!type) return "Choose an integration type.";
     if (!name.trim()) return "Connection name is required.";
     if (type === "llm_provider") {
-      if (!apiKey.trim()) return "API key is required.";
+      if (requireCredentials && !apiKey.trim()) return "API key is required.";
       if ((llmProvider === "azure_openai" || llmProvider === "openai_compatible") && !baseUrl.trim()) {
         return "Base URL is required for this provider.";
       }
     }
     if (type === "database") {
-      if (!connString.trim() && (!host.trim() || !database.trim() || !username.trim() || !password.trim())) {
+      if (requireCredentials && !connString.trim() && (!host.trim() || !database.trim() || !username.trim() || !password.trim())) {
         return "Provide a PostgreSQL connection string or host, database, username, and password.";
       }
     }
     if (type === "http_api") {
       if (!httpBaseUrl.trim()) return "Base URL is required.";
-      if (authType !== "none" && !secret.trim()) return "A credential is required for the selected authentication type.";
+      if (requireCredentials && authType !== "none" && !secret.trim()) return "A credential is required for the selected authentication type.";
     }
-    if (type === "saas" && !saasToken.trim()) return `${saasProvider} token is required.`;
+    if (requireCredentials && type === "saas" && !saasToken.trim()) return `${saasProvider} token is required.`;
     if (type === "mcp_server" && !mcpUrl.trim()) return "MCP server URL is required.";
     if (type === "vector_store" && !vectorEndpoint.trim()) return "Vector store endpoint is required.";
     return null;
@@ -674,7 +674,7 @@ export default function NewConnectionPage() {
 
   async function handleSave(skipTest = false) {
     if (saving) return; // prevent double-submit
-    const invalid = configurationError();
+    const invalid = configurationError(!skipTest);
     if (invalid || !type) { toast.error(invalid ?? "Configuration is incomplete."); return; }
     setSaving(true);
     try {
@@ -705,7 +705,7 @@ export default function NewConnectionPage() {
       } else if (type === "http_api") {
         provider = "http_api";
         connAuthType = authType;
-        config = { baseUrl: httpBaseUrl, authType, apiKeyHeaderName, defaultHeaders: {}, allowedPaths: [], blockedPaths: [], requestTimeoutMs: 15000, retryAttempts: 2 };
+        config = { baseUrl: httpBaseUrl, authType, authHeaderName: apiKeyHeaderName, defaultHeaders: {}, allowedPaths: [], blockedPaths: [], requestTimeoutMs: 15000, retryAttempts: 2 };
       } else if (type === "saas") {
         provider = saasProvider;
         connAuthType = "bearer";
@@ -818,19 +818,16 @@ export default function NewConnectionPage() {
             if (passed) {
               toast.success(`Connection test passed — ${result.latencyMs}ms`);
             } else {
-              toast.error(`Test failed: ${result.message ?? "Could not reach host"}`);
+              toast.warning(`Connection saved, but its test failed: ${result.message ?? "Could not reach host"}`);
             }
-            // Auto-navigate to detail page after short delay on success
-            if (passed) {
-              setTimeout(() => router.push(`/connections/${conn.id}` as never), 1200);
-            }
-            return; // stay on page so user can see result
+            setTimeout(() => router.push(`/connections/${conn.id}` as never), passed ? 800 : 0);
+            return;
           }
         } catch (testErr) {
-          toast.error(
-            `Connection saved but test failed: ${testErr instanceof Error ? testErr.message : "Unknown error"}`,
+          toast.warning(
+            `Connection saved, but testing was unavailable: ${testErr instanceof Error ? testErr.message : "Unknown error"}`,
           );
-          setSaving(false);
+          router.push(`/connections/${conn.id}` as never);
           return;
         }
       }
@@ -893,7 +890,7 @@ export default function NewConnectionPage() {
           : type === "database"
             ? { host, port: parseInt(port) || 5432, database, username, sslRequired }
             : type === "http_api"
-              ? { baseUrl: httpBaseUrl, apiKeyHeaderName }
+              ? { baseUrl: httpBaseUrl, authHeaderName: apiKeyHeaderName }
               : type === "saas"
                 ? {
                     baseUrl: ({ gmail: "https://gmail.googleapis.com", hubspot: "https://api.hubapi.com", github: "https://api.github.com" } as Record<string, string>)[saasProvider],
@@ -960,7 +957,7 @@ export default function NewConnectionPage() {
                   type="button"
                   onClick={() => { setType(card.type); setStep(2); }}
                   className={cn(
-                    "flex items-start gap-3 rounded-[12px] border bg-white p-4 text-left transition-all",
+                    "flex cursor-pointer items-start gap-3 rounded-[12px] border bg-white p-4 text-left transition-all",
                     type === card.type
                       ? "border-[#007F4E] ring-2 ring-[#007F4E]/12"
                       : "border-[#E0E3E6] hover:border-[#C9CED4] hover:bg-[#FAFBFB]",
