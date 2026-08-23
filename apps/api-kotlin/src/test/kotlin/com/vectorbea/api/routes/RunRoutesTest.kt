@@ -95,6 +95,7 @@ class RunRoutesTest {
         slug = "test-workflow",
         description = null,
         status = status,
+        creationMode = "native",
         currentVersionId = versionId,
         createdAt = Instant.now(),
         updatedAt = Instant.now(),

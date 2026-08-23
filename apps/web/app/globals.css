@@ -132,6 +132,39 @@
     box-sizing: border-box;
   }
 
+  /* ── Pointer affordance ─────────────────────────────────────────────────────
+     Tailwind v4's preflight sets `cursor: default` on <button>, reversing v3.
+     The consequence is not cosmetic: every button, select trigger, checkbox,
+     radio, tab and menu item in the product stopped telling you it was
+     clickable, so controls that work read as decoration — which is exactly how
+     "the dropdowns aren't working" gets reported for a dropdown that opens fine.
+
+     Restored here rather than per component because it has to hold for the
+     legacy layer too, and because a component that FORGETS the utility is
+     invisible in review. Disabled is excluded in all three of the spellings the
+     product uses: the DOM property, the ARIA state, and Radix's data attribute.
+     ────────────────────────────────────────────────────────────────────────── */
+  button:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+  summary,
+  select:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="tab"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="radio"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="checkbox"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="switch"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="option"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="menuitem"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="menuitemcheckbox"]:not([aria-disabled="true"]):not([data-disabled]),
+  [role="menuitemradio"]:not([aria-disabled="true"]):not([data-disabled]) {
+    cursor: pointer;
+  }
+
+  /* The combobox role is worn by BOTH a select trigger (a button — pointer) and
+     a text input you type into (an I-beam). Only the non-input ones qualify. */
+  [role="combobox"]:not(input):not(:disabled):not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
   html {
     @apply scroll-smooth;
     font-family: var(--font-sans), "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

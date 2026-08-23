@@ -1,6 +1,7 @@
 package com.vectorbea.api.security
 
 import com.vectorbea.api.api.RequestContext
+import com.vectorbea.api.api.context
 import com.vectorbea.api.auth.AuthPrincipal
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.http.Request

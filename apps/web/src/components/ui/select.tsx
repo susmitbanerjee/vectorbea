@@ -15,10 +15,31 @@ import { Checkbox } from "./choice";
  * shadow-2 elevation token. Defined once so a menu can never drift from a
  * popover, which is how design systems start to look assembled rather than
  * designed.
+ *
+ * WHY z-popover (50) AND NOT z-dropdown (20).
+ *
+ * Radix portals this to <body>, so its stacking is decided against every other
+ * portalled surface rather than against the control that opened it. At
+ * z-dropdown it sits BELOW z-modal (40) — which means every Select, MultiSelect
+ * and Combobox opened inside a dialog rendered its menu *behind* that dialog.
+ * The menu was mounted, focusable and keyboard-operable, and completely
+ * invisible; hit-testing its centre returned the dialog. Registering a
+ * connection was the worst case, because choosing an auth method is the first
+ * thing that screen asks for.
+ *
+ * There is no value that is correct both under a modal and above one, and no
+ * reason to want the former: Radix dismisses an open menu when a dialog opens
+ * over it, so "menu below modal" is a state the user cannot reach on purpose.
+ * 50 puts it above modals and below toast (60) and tooltip (70), which is where
+ * a transient panel belongs.
+ *
+ * The z-scale keeps `dropdown` for non-portalled, in-flow layering (a sticky
+ * table header against a row, say) where the modal comparison never arises.
  */
 export const overlaySurface = [
   "bg-surface-overlay border-subtle border rounded-md shadow-2",
-  "z-dropdown overflow-hidden",
+  // z-popover (50), NOT z-dropdown (20) — see the note below.
+  "z-popover overflow-hidden",
 ].join(" ");
 
 /**
@@ -69,6 +90,10 @@ export const Select = React.forwardRef<React.ElementRef<typeof SelectPrimitive.T
           aria-describedby={field["aria-describedby"]}
           className={cn(
             controlBase, controlSize[size],
+            // controlBase is shared with <input>, which wants an I-beam. A
+            // select trigger is a button, and Tailwind v4's preflight sets
+            // `cursor: default` on those — so it says so here rather than there.
+            "cursor-pointer disabled:cursor-not-allowed",
             "flex items-center justify-between gap-2 text-left",
             "data-[placeholder]:text-fg-muted",
             className,
@@ -151,6 +176,7 @@ export const MultiSelect = React.forwardRef<HTMLButtonElement, MultiSelectProps>
         aria-describedby={field["aria-describedby"]}
         className={cn(
           controlBase, controlSize[size],
+          "cursor-pointer disabled:cursor-not-allowed",
           "flex items-center justify-between gap-2 text-left",
           value.length === 0 && "text-fg-muted",
           className,

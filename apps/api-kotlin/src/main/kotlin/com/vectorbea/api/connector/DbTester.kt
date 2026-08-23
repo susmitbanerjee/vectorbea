@@ -42,21 +42,123 @@ object DbTester {
     fun test(input: DbTestInput): ConnectionTestResult {
         val start = System.currentTimeMillis()
         return try {
-            when (input.dbType.lowercase()) {
-                "postgres", "postgresql", "neon", "supabase" -> testPostgres(input, start)
-                "mysql", "mariadb" -> testMysql(input, start)
+            when (val kind = input.dbType.lowercase()) {
+                in POSTGRES_WIRE -> testPostgres(input, start)
+                in MYSQL_WIRE -> testMysql(input, start)
                 "mongodb" -> testMongoDB(input, start)
                 else -> ConnectionTestResult.failed(0, "UNSUPPORTED_DB",
-                    "Database type '${input.dbType}' is not yet supported for testing")
+                    "Database type '$kind' is not yet supported for testing")
             }
         } catch (e: Exception) {
             val latency = System.currentTimeMillis() - start
             // SECURITY: do not include e.message (may contain connection string details)
             val (code, msg) = classifyException(e)
             log.warn("DB connection test failed [dbType={}] errorClass={}", input.dbType, e.javaClass.simpleName)
-            ConnectionTestResult.failed(latency, code, msg)
+            // The HOST is not a secret - it is the one part of the connection
+            // string that turns "it failed" into "here is what to change".
+            val guidance = hostGuidance(code, hostOf(input))
+            ConnectionTestResult.failed(latency, code, if (guidance == null) msg else "$msg. $guidance")
         }
     }
+
+    /* -- Wire-protocol families ------------------------------------------------
+       Keyed on the WIRE PROTOCOL, not the vendor. Every product below speaks
+       PostgreSQL's or MySQL's protocol, so the stock JDBC driver already talks
+       to it. The previous four-name allowlist turned Timescale, Cockroach,
+       Redshift, RDS, Aurora and PlanetScale away with "not yet supported for
+       testing" purely because nobody had added the string - a support gap that
+       was never a capability gap. */
+    private val POSTGRES_WIRE = setOf(
+        "postgres", "postgresql", "pgsql", "neon", "supabase", "timescale", "timescaledb",
+        "cockroach", "cockroachdb", "yugabyte", "yugabytedb", "redshift", "citus",
+        "aurora_postgresql", "aurora-postgresql", "rds_postgresql", "rds-postgresql",
+        "cloudsql_postgresql", "alloydb", "digitalocean_postgres",
+    )
+
+    private val MYSQL_WIRE = setOf(
+        "mysql", "mariadb", "planetscale", "singlestore", "vitess", "tidb",
+        "aurora_mysql", "aurora-mysql", "rds_mysql", "rds-mysql", "cloudsql_mysql",
+    )
+
+    private val NETWORK_LEVEL_CODES = setOf(
+        "NETWORK_UNREACHABLE", "CONNECTION_REFUSED", "DNS_FAILED", "TIMEOUT", "CONNECTION_ERROR",
+    )
+
+    private val PRIVATE_172 = Regex("^172\\.(1[6-9]|2\\d|3[01])\\.")
+
+    /** The host being dialled, for diagnosis only. Never the credentials. */
+    internal fun hostOf(input: DbTestInput): String? {
+        input.host?.takeIf { it.isNotBlank() }?.let { return it }
+        val url = input.connectionUrl?.takeIf { it.isNotBlank() } ?: return null
+        val normalised = if (url.startsWith("jdbc:")) url.removePrefix("jdbc:") else url
+        return try { URI(normalised).host } catch (_: Exception) { null }
+    }
+
+    /**
+     * The sentence that turns a network failure into a fix.
+     *
+     * "Database could not be reached" is true and useless. The overwhelmingly
+     * common causes are knowable from the hostname alone, and each has its own
+     * remedy:
+     *
+     *  - SUPABASE DIRECT HOSTS (db.<ref>.supabase.co) publish AAAA records only,
+     *    unless the project has bought the IPv4 add-on. Vectorbea's API dials
+     *    over IPv4, so the socket fails before TLS or authentication are ever
+     *    attempted - which looks exactly like "unreachable" even though the
+     *    credentials are perfect. Supabase's own Supavisor pooler
+     *    (aws-0-<region>.pooler.supabase.com) is dual-stack, and is what the
+     *    dashboard hands out under "Connection pooling". Whether the host really
+     *    resolved to any IPv4 address is CHECKED before saying so, so the advice
+     *    is a measurement rather than a guess.
+     *
+     *  - LOOPBACK AND PRIVATE ADDRESSES cannot be reached from a hosted API at
+     *    all, and no amount of retrying changes that.
+     */
+    internal fun hostGuidance(code: String, host: String?): String? {
+        if (host.isNullOrBlank()) return null
+        if (code !in NETWORK_LEVEL_CODES) return null
+        val h = host.lowercase()
+
+        return when {
+            h.startsWith("db.") && h.endsWith(".supabase.co") && resolvesIpv4(h) == false ->
+                "This Supabase host publishes no IPv4 address and Vectorbea connects over IPv4. " +
+                    "Use the connection-pooling URL from Supabase, Project Settings then Database " +
+                    "(host aws-0-<region>.pooler.supabase.com, user postgres.<project-ref>), " +
+                    "or enable Supabase's IPv4 add-on"
+
+            // Same advice, hedged rather than asserted: DNS could not be
+            // consulted, so we cannot claim the host is IPv6-only. The REMEDY is
+            // identical either way, and withholding it until we can prove the
+            // cause would leave the user with nothing to try.
+            h.startsWith("db.") && h.endsWith(".supabase.co") ->
+                "Supabase direct hosts are often IPv6-only, and Vectorbea connects over IPv4. " +
+                    "Try the connection-pooling URL from Supabase, Project Settings then Database " +
+                    "(host aws-0-<region>.pooler.supabase.com, user postgres.<project-ref>)"
+
+            h == "localhost" || h == "127.0.0.1" || h == "::1" || h.endsWith(".local") ->
+                "This address means 'this machine', and the machine running the test is " +
+                    "Vectorbea's API rather than yours. Use a hostname reachable from the " +
+                    "internet, or run a private runner inside your network"
+
+            isPrivateAddress(h) ->
+                "This is a private network address, which a hosted API cannot route to. " +
+                    "Expose the database, or run a private runner inside your network"
+
+            else -> null
+        }
+    }
+
+    /** True/false when DNS answered, null when it could not be asked. */
+    internal fun resolvesIpv4(host: String): Boolean? = try {
+        java.net.InetAddress.getAllByName(host).any { it is java.net.Inet4Address }
+    } catch (_: java.net.UnknownHostException) {
+        null
+    } catch (_: SecurityException) {
+        null
+    }
+
+    internal fun isPrivateAddress(host: String): Boolean =
+        host.startsWith("10.") || host.startsWith("192.168.") || PRIVATE_172.containsMatchIn(host)
 
     // ── Postgres ──────────────────────────────────────────────────────────────
 
@@ -66,8 +168,14 @@ object DbTester {
             setProperty("connectTimeout", CONNECT_TIMEOUT_SECONDS.toString())
             setProperty("socketTimeout", QUERY_TIMEOUT_SECONDS.toString())
             setProperty("loginTimeout", CONNECT_TIMEOUT_SECONDS.toString())
-            // SECURITY: SSL preferred but not required for test (may be self-signed in dev)
-            setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
+            // SECURITY: SSL preferred but not required for test (may be self-signed in dev).
+            // An sslmode already present in the URL WINS: a user who wrote
+            // ?sslmode=verify-full asked for certificate verification, and
+            // silently downgrading them to "prefer" would make the test pass on
+            // a connection the engine would later refuse.
+            if (!target.jdbcUrl.contains("sslmode=", ignoreCase = true)) {
+                setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
+            }
             if (!target.username.isNullOrBlank()) setProperty("user", target.username)
             if (!target.password.isNullOrBlank()) setProperty("password", target.password)
         }

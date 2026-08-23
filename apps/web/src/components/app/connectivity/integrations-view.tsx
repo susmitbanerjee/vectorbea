@@ -13,7 +13,8 @@ import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Checkbox } from "~/components/ui/choice";
 import { ProviderLogo } from "~/components/ui/provider-logo";
-import { createConnection, getConnections, testUnsavedConnection } from "@/lib/repository";
+import { getConnections } from "@/lib/repository";
+import { CreateConnectionDialog } from "./create-connection-dialog";
 import type { Connection } from "@/types/connections";
 import {
   INTEGRATIONS, integrationById, INTEGRATION_CATEGORY_LABEL, AUTH_LABEL,
@@ -158,11 +159,12 @@ export function IntegrationsView() {
         onClose={() => setParams({ integration: null })}
         onConnect={(id) => setParams({ integration: null, connect: id })}
       />
-      <ConnectFlow
-        integration={connectTo}
-        onClose={() => setParams({ connect: null })}
-        onSaved={async () => {
-          await refreshConnections();
+      <CreateConnectionDialog
+        open={connectTo !== null}
+        presetProvider={connectTo?.id ?? null}
+        onOpenChange={(next) => { if (!next) setParams({ connect: null }); }}
+        onCreated={() => {
+          void refreshConnections();
           setParams({ connect: null });
         }}
       />
@@ -352,220 +354,6 @@ function IntegrationDetail({
   );
 }
 
-/* ── Connect flow ─────────────────────────────────────────────────────────── */
-
-function ConnectFlow({
-  integration, onClose, onSaved,
-}: {
-  integration: IntegrationRecord | null;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  const [method, setMethod] = React.useState<AuthMethod>("api-key");
-  const [name, setName] = React.useState("");
-  const [secret, setSecret] = React.useState("");
-  const [endpoint, setEndpoint] = React.useState("");
-  const [scopes, setScopes] = React.useState<string[]>([]);
-  const [tested, setTested] = React.useState<"idle" | "testing" | "ok" | "failed">("idle");
-  const [saving, setSaving] = React.useState(false);
-  const [message, setMessage] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (!integration) return;
-    setMethod(integration.authMethods[0]);
-    setName(`${integration.name} — ${new Date().getUTCFullYear()}`);
-    setSecret("");
-    setEndpoint(defaultEndpoint(integration.id) ?? "");
-    setScopes(integration.scopes.filter((scope) => scope.required).map((scope) => scope.name));
-    setTested("idle");
-    setSaving(false);
-    setMessage(null);
-  }, [integration]);
-
-  if (!integration) return null;
-  const needsSecret = method !== "none";
-  const needsEndpoint = integration.id === "http" || integration.id === "webhook";
-  const payload = connectionPayload(integration, method, name, secret, endpoint, scopes);
-
-  async function handleTest() {
-    if (!payload) return;
-    setTested("testing");
-    setMessage(null);
-    try {
-      const result = await testUnsavedConnection({
-        type: payload.type,
-        provider: payload.provider,
-        authType: payload.authType,
-        plaintextSecret: payload.plaintextSecret,
-        config: payload.config,
-      });
-      const passed = result.status === "connected";
-      setTested(passed ? "ok" : "failed");
-      setMessage(passed
-        ? `Connection test passed in ${result.latencyMs} ms.`
-        : result.message || "The provider could not be reached with these settings.");
-    } catch (error) {
-      setTested("failed");
-      setMessage(error instanceof Error ? error.message : "The connection test failed.");
-    }
-  }
-
-  async function handleSave() {
-    if (!payload) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await createConnection(payload);
-      setMessage("Connection saved.");
-      await onSaved();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The connection could not be saved.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const missingRequired = !name.trim() || (needsSecret && !secret.trim()) || (needsEndpoint && !endpoint.trim());
-
-  return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="motion-fade z-overlay bg-surface-canvas/70 fixed inset-0 backdrop-blur-[2px]" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className={cn(
-            "motion-overlay z-modal fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-            "bg-surface-overlay border-subtle shadow-3 flex max-h-[90dvh] w-[min(34rem,calc(100vw-2rem))] flex-col rounded-lg border p-4",
-          )}
-        >
-          <Dialog.Title asChild>
-            <Text variant="heading-sm" tone="max" as="h2">Connect {integration.name}</Text>
-          </Dialog.Title>
-
-          <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-y-auto">
-            <Field label="Method" help="Choose the credential type issued by the provider.">
-              <Select
-                options={integration.authMethods.map((item) => ({ value: item, label: AUTH_LABEL[item] }))}
-                value={method}
-                onValueChange={(value) => {
-                  setMethod(value as AuthMethod);
-                  setTested("idle");
-                  setMessage(null);
-                }}
-                aria-label="Authentication method"
-              />
-            </Field>
-
-            <Field label="Name" help="This name appears wherever a workflow binds the connection.">
-              <Input value={name} onChange={(event) => setName(event.target.value)} className="h-8 text-body-sm" />
-            </Field>
-
-            {needsEndpoint ? (
-              <Field label="Endpoint URL" help="Use the HTTPS base URL that Vectorbea should call.">
-                <Input
-                  type="url"
-                  value={endpoint}
-                  onChange={(event) => { setEndpoint(event.target.value); setTested("idle"); }}
-                  placeholder="https://api.example.com"
-                  className="h-8 font-code text-mono-sm"
-                />
-              </Field>
-            ) : null}
-
-            {needsSecret ? (
-              <Field
-                label={method === "connection-string" ? "Connection string" : method === "oauth" ? "OAuth access token" : "API key or token"}
-                help="Encrypted at rest and never displayed again. Rotating replaces it; it cannot be read back."
-              >
-                <Input
-                  type="password"
-                  value={secret}
-                  onChange={(event) => { setSecret(event.target.value); setTested("idle"); setMessage(null); }}
-                  placeholder={method === "connection-string" ? `${integration.id}://…` : "Paste credential"}
-                  className="h-8 font-code text-mono-sm"
-                />
-              </Field>
-            ) : (
-              <div className="border-subtle rounded-md border p-2.5">
-                <Text variant="body-sm" tone="secondary" className="block">
-                  This endpoint will be saved without credentials.
-                </Text>
-              </div>
-            )}
-
-            {integration.scopes.length > 0 ? (
-              <div>
-                <Text variant="caption" tone="secondary" className="mb-1 block">Scopes</Text>
-                <ul className="grid gap-1.5">
-                  {integration.scopes.map((scope) => (
-                    <li key={scope.name}>
-                      <Checkbox
-                        checked={scopes.includes(scope.name)}
-                        disabled={scope.required}
-                        onCheckedChange={(checked) => setScopes((current) => checked === true
-                          ? [...new Set([...current, scope.name])]
-                          : current.filter((item) => item !== scope.name))}
-                      >
-                        <span className="min-w-0">
-                          <code className="font-code text-mono-sm text-fg-primary">{scope.name}</code>
-                          <Text variant="caption" tone="muted" className="block leading-snug">{scope.description}</Text>
-                        </span>
-                      </Checkbox>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            <div className="border-subtle rounded-md border p-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Text variant="body-sm" tone="primary">Test before saving</Text>
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  loading={tested === "testing"}
-                  disabled={missingRequired}
-                  onClick={() => void handleTest()}
-                >
-                  Test connection
-                </Button>
-              </div>
-              <Text
-                variant="caption"
-                tone={tested === "ok" ? "inherit" : "muted"}
-                className={cn(
-                  "mt-1 block leading-snug",
-                  tested === "ok" && "text-status-success",
-                  tested === "failed" && "text-status-failed",
-                )}
-              >
-                {message ?? (tested === "testing" ? "Contacting the provider…" : "Verify the credentials and endpoint before saving.")}
-              </Text>
-            </div>
-          </div>
-
-          <div className="border-subtle mt-3 flex justify-end gap-2 border-t pt-3">
-            <Dialog.Close asChild>
-              <Button variant="secondary" size="sm">Cancel</Button>
-            </Dialog.Close>
-            <Button
-              variant="primary"
-              size="sm"
-              loading={saving}
-              disabled={missingRequired}
-              onClick={() => void handleSave()}
-            >
-              Save connection
-            </Button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
-
-/* ── Bits ─────────────────────────────────────────────────────────────────── */
-
 function RequestIntegration() {
   return (
     <div className="border-subtle mt-2 rounded-lg border border-dashed p-4 text-center">
@@ -619,74 +407,8 @@ function Field({ label, help, children }: { label: string; help: string; childre
   );
 }
 
-const PROVIDER_ENDPOINTS: Record<string, { baseUrl: string; healthPath?: string }> = {
-  slack: { baseUrl: "https://slack.com/api", healthPath: "/api.test" },
-  gmail: { baseUrl: "https://gmail.googleapis.com", healthPath: "/gmail/v1/users/me/profile" },
-  hubspot: { baseUrl: "https://api.hubapi.com", healthPath: "/account-info/v3/details" },
-  github: { baseUrl: "https://api.github.com", healthPath: "/user" },
-  notion: { baseUrl: "https://api.notion.com/v1", healthPath: "/users/me" },
-  airtable: { baseUrl: "https://api.airtable.com/v0/meta", healthPath: "/bases" },
-  jira: { baseUrl: "https://api.atlassian.com" },
-  "google-sheets": { baseUrl: "https://sheets.googleapis.com/v4" },
-};
-
-function defaultEndpoint(provider: string): string | null {
-  return PROVIDER_ENDPOINTS[provider]?.baseUrl ?? null;
-}
-
 function providerMatches(catalogueProvider: string, savedProvider: string): boolean {
   if (catalogueProvider === savedProvider) return true;
   return (catalogueProvider === "postgres" && savedProvider === "postgresql")
     || (catalogueProvider === "gemini" && savedProvider === "google_gemini");
-}
-
-type CreateIntegrationPayload = Parameters<typeof createConnection>[0] & {
-  type: string;
-  provider: string;
-  authType: string;
-  plaintextSecret?: string;
-  environment: "production";
-  config: Record<string, unknown>;
-};
-
-function connectionPayload(
-  integration: IntegrationRecord,
-  method: AuthMethod,
-  name: string,
-  secret: string,
-  endpoint: string,
-  scopes: string[],
-): CreateIntegrationPayload | null {
-  if (!name.trim()) return null;
-
-  const isLlm = ["openai", "anthropic", "gemini", "mistral"].includes(integration.id);
-  const isDatabase = ["postgres", "mysql"].includes(integration.id);
-  const provider = integration.id === "postgres" ? "postgresql"
-    : integration.id === "gemini" ? "google_gemini"
-      : integration.id;
-  const type = isLlm ? "llm" : isDatabase ? "database" : "http";
-  const authType = method === "api-key" ? "api_key"
-    : method === "connection-string" ? "connection_string"
-      : method === "oauth" ? "bearer"
-        : "none";
-  const knownEndpoint = PROVIDER_ENDPOINTS[integration.id];
-  const baseUrl = (integration.id === "http" || integration.id === "webhook")
-    ? endpoint.trim()
-    : knownEndpoint?.baseUrl;
-  const config: Record<string, unknown> = {
-    scopes,
-    ...(baseUrl ? { baseUrl } : {}),
-    ...(knownEndpoint?.healthPath ? { healthPath: knownEndpoint.healthPath } : {}),
-    ...(isDatabase ? { connectionMode: "connection_string", sslRequired: true } : {}),
-  };
-
-  return {
-    name: name.trim(),
-    type,
-    provider,
-    authType,
-    environment: "production",
-    config,
-    ...(secret.trim() ? { plaintextSecret: secret.trim() } : {}),
-  } as CreateIntegrationPayload;
 }

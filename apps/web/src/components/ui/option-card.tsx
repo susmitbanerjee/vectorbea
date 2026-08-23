@@ -215,10 +215,13 @@ export function Segmented<T extends string = string>({
             className={cn(
               "font-ui text-body-sm flex flex-1 items-center justify-center gap-1.5 rounded-xs px-2 py-1",
               "transition-colors duration-fast outline-none focus-visible:focus-ring",
-              "disabled:cursor-not-allowed disabled:opacity-50",
+              // Pointer on the selected segment too: it is still a live target
+              // (re-clicking it is a no-op, but the cursor must not imply the
+              // control has gone inert), and only `disabled` says otherwise.
+              "cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
               selected
                 ? "bg-surface-raised text-fg-max shadow-1"
-                : "text-fg-muted hover:text-fg-primary cursor-pointer",
+                : "text-fg-muted hover:text-fg-primary",
             )}
           >
             {option.markerClassName ? (

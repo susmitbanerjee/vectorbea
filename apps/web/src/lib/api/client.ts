@@ -45,6 +45,23 @@ export interface ConnectionTestResult {
 }
 export interface RegistryTestResult { valid: boolean; message: string; details?: Record<string, unknown> }
 
+/**
+ * `POST /api/connections/test-unsaved` body, as `ConnectionTestRoutes.UnsavedTestBody`
+ * declares it.
+ *
+ * The point of this endpoint is that it runs BEFORE anything is written: the
+ * plaintext credential is posted over TLS, used for one probe, and never stored
+ * or logged. Testing after saving would leave a broken connection in the
+ * registry every time somebody fat-fingers a password.
+ */
+export interface TestConnectionDraftBody {
+  type: string;
+  provider: string;
+  authType?: string;
+  plaintextSecret?: string | null;
+  config?: Record<string, unknown>;
+}
+
 /** `POST /api/tools/test-unsaved` body, as `ToolRoutes.TestToolBody` declares it. */
 export interface TestToolDraftBody {
   type: string;
@@ -353,6 +370,12 @@ export interface VectorbeaClient {
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Connection>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     test(id: string, scope?: Scope, options?: RequestOptions): Promise<ConnectionTestResult>;
+    /** Probe a credential that has not been saved. Side-effect free. */
+    testDraft(
+      body: TestConnectionDraftBody,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<ConnectionTestResult>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
@@ -735,6 +758,21 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         }),
       delete: (id, scope, options) =>
         call<void>(`/api/connections/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      testDraft: (body, scope, options) =>
+        call<ConnectionTestResult>("/api/connections/test-unsaved", {
+          method: "POST",
+          body: {
+            ...body,
+            authType: body.authType ?? "api_key",
+            plaintextSecret: body.plaintextSecret ?? null,
+            config: body.config ?? {},
+          },
+          // A real provider round trip. The 15s default abandons a cold
+          // database or a slow SaaS before it has answered, and reports that as
+          // a timeout the user cannot distinguish from a wrong host.
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
       test: (id, scope, options) =>
         call<ConnectionTestResult>(`/api/connections/${id}/test`, {
           method: "POST",

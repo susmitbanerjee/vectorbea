@@ -18,7 +18,7 @@ import java.net.URL
  *
  * Supported providers:
  *   openai     — GET /v1/models  (Authorization: Bearer <key>)
- *   anthropic  — POST /v1/messages  (x-api-key: <key>, anthropic-version)
+ *   anthropic  — GET /v1/models  (x-api-key: <key>, anthropic-version)
  *   google     — GET /v1beta/models  (x-goog-api-key: <key>  — NOT in URL)
  *   custom     — GET <baseUrl>/models or HEAD <baseUrl>  (Authorization: Bearer <key>)
  */
@@ -29,6 +29,9 @@ object LlmTester {
     private const val CONNECT_TIMEOUT_MS = 8_000
     private const val READ_TIMEOUT_MS = 15_000
     private const val MAX_RESPONSE_BYTES = 32_768  // 32 KB — enough for model list
+
+    /** Required on every Anthropic API request. Version pinning is not optional there. */
+    private const val ANTHROPIC_VERSION = "2023-06-01"
 
     data class LlmTestInput(
         val provider: String,
@@ -73,35 +76,44 @@ object LlmTester {
         return executeGet(conn, start, expectedStatus = 200)
     }
 
+    /**
+     * Anthropic connectivity, via GET /v1/models.
+     *
+     * This used to POST /v1/messages with `"model":"claude-haiku-20240307"` and
+     * treat 200/400 as success. That model id does not exist — the real one is
+     * `claude-3-haiku-20240307` — so the API answered 404 `not_found_error` and
+     * the `when` fell through to UNEXPECTED_STATUS. The result: a perfectly good
+     * Anthropic key could never pass its connection test, and the failure named
+     * an HTTP status rather than anything the user could act on.
+     *
+     * The models list is the right probe regardless of that bug. It is the
+     * documented capability-discovery endpoint, it authenticates exactly like a
+     * real call, it cannot be broken by a model being renamed or retired, and it
+     * generates no tokens — so testing a connection never costs the customer
+     * money. `anthropic-version` is required on every request to this API.
+     */
     private fun testAnthropic(input: LlmTestInput, start: Long): ConnectionTestResult {
-        // Use POST /v1/messages with minimal payload — cheapest real call
         val base = (input.baseUrl?.trimEnd('/') ?: "https://api.anthropic.com").trimEnd('/')
-        val url = "$base/v1/messages"
-        val conn = openConnection(url, method = "POST")
+        val conn = openConnection("$base/v1/models")
         // SECURITY: API key in header, never in URL
         conn.setRequestProperty("x-api-key", input.apiKey ?: "")
-        conn.setRequestProperty("anthropic-version", "2023-06-01")
-        conn.setRequestProperty("Content-Type", "application/json")
-
-        // Minimal request that fails quickly with auth error if key is wrong,
-        // or succeeds (402/200) if key is valid. max_tokens=1 to minimize cost.
-        val body = """{"model":"claude-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"""
-        conn.doOutput = true
-        conn.outputStream.use { it.write(body.toByteArray()) }
+        conn.setRequestProperty("anthropic-version", ANTHROPIC_VERSION)
 
         val status = conn.responseCode
         val latency = System.currentTimeMillis() - start
 
         return when (status) {
-            200, 400 -> {
-                // 400 can mean valid key but bad request params — still authenticated
-                ConnectionTestResult.connected(latency, "Anthropic API reachable (status=$status)")
-            }
-            401 -> ConnectionTestResult.failed(latency, "AUTH_FAILED", "Invalid Anthropic API key")
-            403 -> ConnectionTestResult.failed(latency, "AUTH_FAILED", "Anthropic API key unauthorized")
-            429 -> ConnectionTestResult.failed(latency, "RATE_LIMITED", "Anthropic rate limit reached")
-            529 -> ConnectionTestResult.failed(latency, "OVERLOADED", "Anthropic API overloaded")
-            else -> ConnectionTestResult.failed(latency, "UNEXPECTED_STATUS", "Unexpected HTTP status $status from Anthropic")
+            200 -> ConnectionTestResult.connected(latency, "Anthropic API key is valid")
+            401 -> ConnectionTestResult.failed(latency, "AUTH_FAILED",
+                "Anthropic rejected the API key. Check it was copied whole and has not been revoked.")
+            403 -> ConnectionTestResult.failed(latency, "AUTH_FAILED",
+                "This Anthropic key is not authorised for the Messages API. Check the workspace it belongs to.")
+            429 -> ConnectionTestResult.failed(latency, "RATE_LIMITED",
+                "Anthropic rate limit reached. The key works — retry in a minute.")
+            529 -> ConnectionTestResult.failed(latency, "OVERLOADED",
+                "Anthropic is overloaded. The key works — retry shortly.")
+            else -> ConnectionTestResult.failed(latency, "UNEXPECTED_STATUS",
+                "Anthropic answered HTTP $status. Check the base URL if this connection uses a proxy.")
         }
     }
 

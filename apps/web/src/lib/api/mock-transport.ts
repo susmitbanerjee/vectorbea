@@ -523,6 +523,26 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       };
     },
   ],
+  /* A connection probe that says what it is. The real route opens a socket to
+     the provider; a fixture cannot, and pretending otherwise would let a demo
+     "verify" a credential that has never been dialled. So it reports success
+     and names the reason in the same breath. */
+  [
+    "POST",
+    "/api/connections/test-unsaved",
+    (_params, init) => {
+      const body = (init.body ?? {}) as Record<string, unknown>;
+      return {
+        status: "connected",
+        latencyMs: 128,
+        errorCode: null,
+        message: `Validated against fixtures — no ${String(body.provider ?? "provider")} socket was opened.`,
+        testedAt: new Date().toISOString(),
+        details: {},
+      };
+    },
+  ],
+
   [
     "POST",
     "/api/tools/test-unsaved",

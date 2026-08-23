@@ -20,6 +20,10 @@ import { useFieldControl } from "./field";
 
 const box = [
   "peer shrink-0 rounded-xs border border-strong bg-surface-sunken",
+  // Radix renders these as <button>, and Tailwind v4's preflight sets
+  // `cursor: default` on buttons. The wrapping label already says pointer, but
+  // the box is the thing people aim at, and a bare Checkbox has no label.
+  "cursor-pointer",
   "transition-[background-color,border-color,box-shadow] duration-fast ease-standard",
   "outline-none",
   "hover:not-disabled:border-accent",
@@ -196,6 +200,7 @@ export const Switch = React.forwardRef<
       disabled={disabled ?? field.disabled}
       className={cn(
         "peer inline-flex h-4.5 w-8 shrink-0 items-center rounded-full border p-px",
+        "cursor-pointer",
         "transition-[background-color,border-color,box-shadow] duration-fast ease-standard",
         "outline-none focus-visible:focus-ring",
         "bg-surface-active border-strong",
