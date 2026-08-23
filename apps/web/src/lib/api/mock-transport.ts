@@ -48,6 +48,39 @@ function delay(): Promise<void> {
  * fixture ids are hashed into stable UUIDs. Stable matters: `run.workflowId`
  * has to keep matching `workflow.id` across reloads.
  */
+/** The slug the real routes derive server-side, mirrored so fixtures match. */
+function slugFor(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/* ── Connection vocabulary ────────────────────────────────────────────────────
+   The fixture rows carry a PROVIDER ("postgres", "slack") and no type, because
+   that is all the connectivity screens ever needed. The API's `type` is a
+   different, closed vocabulary — `CONNECTION_TYPES` in Validation.kt — and the
+   two are not interchangeable.
+
+   Emitting the provider as the type, which this mock used to do, breaks every
+   consumer that filters on it: `compatibleConnectionTypes` maps an http tool to
+   `["http"]`, an agent wants `type === "llm"`, and no fixture connection ever
+   matched either. The visible symptom was a connection picker that is empty in
+   mock mode no matter how many connections exist — which reads as a broken
+   screen rather than as a fixture that never had the field. */
+const DATABASE_PROVIDERS = new Set(["postgres", "postgresql", "mysql", "mssql", "snowflake", "bigquery"]);
+const LLM_PROVIDERS = new Set(["openai", "anthropic", "google", "gemini", "mistral", "cohere", "azure_openai"]);
+
+function connectionTypeFor(provider: string): string {
+  if (DATABASE_PROVIDERS.has(provider)) return "database";
+  if (LLM_PROVIDERS.has(provider)) return "llm";
+  // Everything else in the fixture set — Stripe, Slack, Gmail, HubSpot, GitHub
+  // — is reached over HTTP, which is what the API would store for them.
+  return "http";
+}
+
+/** `AUTH_TYPES` uses snake_case. The connectivity fixtures use a display form. */
+function authTypeFor(provider: string): string {
+  return ["slack", "gmail", "github", "hubspot"].includes(provider) ? "oauth2" : "api_key";
+}
+
 function uuidFrom(seed: string): string {
   // FNV-1a over four offset streams. Not cryptographic; it only needs to be
   // deterministic and collision-free across a few hundred fixture ids.
@@ -370,11 +403,11 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
           environmentId: ENVIRONMENT_ID,
           name: connection.name,
           slug: connection.id,
-          type: connection.provider,
+          type: connectionTypeFor(connection.provider),
           provider: connection.provider,
           status: connection.status,
           networkStatus: connection.status === "healthy" ? "reachable" : "degraded",
-          authType: "api-key",
+          authType: authTypeFor(connection.provider),
           secretConfigured: true,
           config: {},
           allowedHosts: [],
@@ -447,6 +480,85 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       // Newest first, matching the real route's `ORDER BY version DESC`.
       SAVED_VERSIONS.set(params.id, [version, ...previous]);
       return version;
+    },
+  ],
+
+  /* ── Registry writes ──────────────────────────────────────────────────────
+     Same reason as the workflow writes above: without these, `POST /api/agents`
+     and `POST /api/tools` fall through to the catch-all echo, the create dialog
+     reports success, and the contract check then fails on a body that is
+     `{ ok: true }`. A mutation with a Zod contract needs a mock that satisfies
+     it. `test-unsaved` is mocked as ALWAYS VALID and says so in its message —
+     the real route runs adapter-specific checks this fixture cannot. */
+  [
+    "POST",
+    "/api/agents",
+    (_params, init) => {
+      const body = (init.body ?? {}) as Record<string, unknown>;
+      const now = new Date().toISOString();
+      const name = String(body.name ?? "Untitled agent");
+      return {
+        id: uuidFrom(`agent_created_${name}_${now}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name,
+        slug: slugFor(name),
+        type: String(body.type ?? "native_llm_agent"),
+        role: (body.role as string | null) ?? null,
+        instructions: (body.instructions as string | null) ?? null,
+        llmConnectionId: (body.llmConnectionId as string | null) ?? null,
+        modelName: (body.modelName as string | null) ?? null,
+        temperature: (body.temperature as number | null) ?? null,
+        maxTokens: (body.maxTokens as number | null) ?? null,
+        maxIterations: (body.maxIterations as number | null) ?? null,
+        memoryPolicy: (body.memoryPolicy as Record<string, unknown>) ?? {},
+        retryPolicy: (body.retryPolicy as Record<string, unknown>) ?? {},
+        timeoutPolicy: (body.timeoutPolicy as Record<string, unknown>) ?? {},
+        approvalPolicy: (body.approvalPolicy as Record<string, unknown>) ?? {},
+        allowedToolIds: Array.isArray(body.allowedToolIds) ? body.allowedToolIds : [],
+        outputSchema: (body.outputSchema as Record<string, unknown>) ?? {},
+        status: String(body.status ?? "active"),
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/tools/test-unsaved",
+    () => ({
+      valid: true,
+      message: "Configuration validated against fixtures. No external action was executed.",
+    }),
+  ],
+  [
+    "POST",
+    "/api/tools",
+    (_params, init) => {
+      const body = (init.body ?? {}) as Record<string, unknown>;
+      const now = new Date().toISOString();
+      const name = String(body.name ?? "Untitled tool");
+      return {
+        id: uuidFrom(`tool_created_${name}_${now}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name,
+        slug: slugFor(name),
+        type: String(body.type ?? "http"),
+        description: (body.description as string | null) ?? null,
+        connectionId: (body.connectionId as string | null) ?? null,
+        inputSchema: (body.inputSchema as Record<string, unknown>) ?? {},
+        outputSchema: (body.outputSchema as Record<string, unknown>) ?? {},
+        config: (body.config as Record<string, unknown>) ?? {},
+        riskLevel: String(body.riskLevel ?? "low"),
+        requiresApproval: body.requiresApproval === true,
+        timeoutMs: (body.timeoutMs as number | null) ?? null,
+        retryPolicy: (body.retryPolicy as Record<string, unknown>) ?? {},
+        idempotencyStrategy: (body.idempotencyStrategy as string | null) ?? null,
+        status: String(body.status ?? "active"),
+        createdAt: now,
+        updatedAt: now,
+      };
     },
   ],
 

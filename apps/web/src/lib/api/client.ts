@@ -44,6 +44,15 @@ export interface ConnectionTestResult {
   details: Record<string, unknown>;
 }
 export interface RegistryTestResult { valid: boolean; message: string; details?: Record<string, unknown> }
+
+/** `POST /api/tools/test-unsaved` body, as `ToolRoutes.TestToolBody` declares it. */
+export interface TestToolDraftBody {
+  type: string;
+  connectionId?: string | null;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+}
 type Approval = contracts.Approval;
 type FailureIncident = contracts.FailureIncident;
 type Schedule = contracts.Schedule;
@@ -103,6 +112,15 @@ export interface CreateWorkflowBody {
   name: string;
   slug?: string;
   description?: string | null;
+  /**
+   * One of `native`, `imported`, `instrumented`, `endpoint_only`.
+   *
+   * Defaults to `native` server-side, and `WorkflowRoutes.create` validates it
+   * against that set — sending anything else is a 400, and sending nothing is
+   * how a workflow that was meant to wrap existing code ends up claiming full
+   * replay it cannot deliver.
+   */
+  creationMode?: string;
   /** One of `WORKFLOW_STATUSES`. Defaults to `draft` server-side. */
   status?: string;
 }
@@ -313,6 +331,17 @@ export interface VectorbeaClient {
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     create(body: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     test(id: string, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
+    /**
+     * `POST /api/tools/test-unsaved` — validate a configuration that has not
+     * been persisted, so the registry form can check its work BEFORE it writes
+     * a row.
+     *
+     * Side-effect free by contract: the route validates the adapter, the
+     * connection compatibility and the config shape, and never executes the
+     * tool. That is the whole point — a DELETE endpoint or a database write
+     * must be checkable without being fired.
+     */
+    testDraft(body: TestToolDraftBody, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
@@ -673,6 +702,12 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           ...req(scope, undefined, options),
         });
       },
+      testDraft: (body, scope, options) =>
+        call<RegistryTestResult>("/api/tools/test-unsaved", {
+          method: "POST",
+          body: { ...body, connectionId: body.connectionId ?? null },
+          ...req(scope, undefined, options),
+        }),
       update: (id, patch, scope, options) =>
         call<Tool>(`/api/tools/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.tool, options) }),
       delete: (id, scope, options) =>

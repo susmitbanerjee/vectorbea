@@ -599,6 +599,23 @@ export const CONNECTIONS: Connection[] = [
     blastRadius: { workflows: 2, tools: 2 },
     lastCheckedAt: iso(NOW - 30_000),
   },
+  /* The two model providers the AGENTS fixture actually runs on.
+     Without them this workspace has agents on claude-sonnet-5 and gpt-4o-mini
+     and no LLM connection for either to bill to — which is not a workspace that
+     could exist, and it makes the agent registration flow undemoable: its model
+     step correctly refuses to continue when there is nothing to bind to. */
+  {
+    id: `conn_${uuid().slice(0, 8)}`, name: "Anthropic — Production", provider: "anthropic",
+    status: "healthy", latencyMs: 412,
+    blastRadius: { workflows: 5, tools: 1 },
+    lastCheckedAt: iso(NOW - 52_000),
+  },
+  {
+    id: `conn_${uuid().slice(0, 8)}`, name: "OpenAI — Platform", provider: "openai",
+    status: "healthy", latencyMs: 664,
+    blastRadius: { workflows: 3, tools: 2 },
+    lastCheckedAt: iso(NOW - 78_000),
+  },
 ];
 
 /* ── Incidents ────────────────────────────────────────────────────────────── */

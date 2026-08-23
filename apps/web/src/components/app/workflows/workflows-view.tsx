@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
@@ -28,6 +29,7 @@ import { WorkflowBulkBar } from "./bulk-bar";
 import { WorkflowCardGrid } from "./workflow-cards";
 import type { Workflow } from "~/lib/workflows/model";
 import { useWorkflowsData } from "./use-workflows-data";
+import { CreateWorkflowDialog } from "./create-workflow-dialog";
 import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -115,6 +117,9 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const workflows = data.rows;
 
   const frozen = params.get("frozen") === "1";
+  /* Creation is URL-synced so `/workflows/new` can redirect here and the dialog
+     is linkable — "start a workflow for me" is a link, not a set of clicks. */
+  const creating = params.get("create") === "1";
   const urlQuery = params.get("q") ?? "";
   const stateParam = params.get("state") as TableStatus | null;
   const sortParam = params.get("sort") ?? "health:asc";
@@ -128,17 +133,9 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
     [sortParam],
   );
 
-  const setParams = React.useCallback(
-    (updates: Record<string, string | null>) => {
-      const next = new URLSearchParams(params.toString());
-      for (const [key, value] of Object.entries(updates)) {
-        if (value === null || value === "") next.delete(key);
-        else next.set(key, value);
-      }
-      router.replace(`${pathname}?${next.toString()}` as never, { scroll: false });
-    },
-    [params, pathname, router],
-  );
+  /* Two writes in one tick must merge, not overwrite — the create dialogs do
+     exactly that on success. See use-search-param-writer.ts. */
+  const setParams = useSearchParamWriter();
 
   /* Local so typing is never gated on a router round trip; the URL catches up on
      submit and on chip or view selection. */
@@ -413,8 +410,8 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
               onRemove={remove}
               onUpdate={update}
             />
-            <Button asChild variant="primary" size="sm">
-              <Link href={"/workflows/new" as Route}>New workflow</Link>
+            <Button variant="primary" size="sm" onClick={() => setParams({ create: "1" })}>
+              New workflow
             </Button>
           </>
         }
@@ -442,7 +439,12 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
             onPreferencesChange={setPreferences}
             status={status}
             renderState={(s) => (
-              <WorkflowsTableState status={s} query={queryInput} onClear={() => applyQuery("")} />
+              <WorkflowsTableState
+                status={s}
+                query={queryInput}
+                onClear={() => applyQuery("")}
+                onCreate={() => setParams({ create: "1" })}
+              />
             )}
             sort={sort}
             onSortChange={(next) =>
@@ -467,11 +469,21 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
         ) : (
           <div className="border-subtle bg-surface-raised grid place-items-center rounded-lg border px-4 py-16">
             {status === "loading" ? <CardSkeletons /> : (
-              <WorkflowsTableState status={status} query={queryInput} onClear={() => applyQuery("")} />
+              <WorkflowsTableState
+                status={status}
+                query={queryInput}
+                onClear={() => applyQuery("")}
+                onCreate={() => setParams({ create: "1" })}
+              />
             )}
           </div>
         )}
       </div>
+
+      <CreateWorkflowDialog
+        open={creating}
+        onOpenChange={(next) => setParams({ create: next ? "1" : null })}
+      />
 
       <WorkflowBulkBar
         selected={selected}
@@ -625,11 +637,12 @@ function CardSkeletons() {
 /* ── Non-happy states ─────────────────────────────────────────────────────── */
 
 function WorkflowsTableState({
-  status, query, onClear,
+  status, query, onClear, onCreate,
 }: {
   status: Exclude<TableStatus, "ready">;
   query: string;
   onClear: () => void;
+  onCreate: () => void;
 }) {
   if (status === "loading") return null;
 
@@ -643,8 +656,8 @@ function WorkflowsTableState({
           describe what you want and let the Architect draft it.
         </Text>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button asChild variant="primary" size="sm">
-            <Link href={"/workflows/new" as Route}>New workflow</Link>
+          <Button variant="primary" size="sm" onClick={onCreate}>
+            New workflow
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link href={"/templates" as Route}>Browse templates</Link>

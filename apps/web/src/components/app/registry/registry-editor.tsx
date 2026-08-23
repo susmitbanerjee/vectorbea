@@ -1,31 +1,70 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import type { contracts } from "@vectorbea/shared";
 import { toast } from "sonner";
-import { PageContainer, PageHeader } from "~/components/ui/page";
+import { useQueryClient } from "@tanstack/react-query";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/ssr";
+
+import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
+import { Icon } from "~/components/ui/icon";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input, Textarea } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Checkbox } from "~/components/ui/choice";
+import { Slider } from "~/components/ui/slider";
+import { CodeEditor } from "~/components/ui/code-editor";
+import { Segmented } from "~/components/ui/option-card";
 import { useApi } from "~/lib/api/api-provider";
+import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   THE INLINE EDITORS
+
+   These are the EDIT surfaces, opened inside the registry detail sheet. Creation
+   is a different act on a different surface — see `create-agent-dialog.tsx` and
+   `create-tool-dialog.tsx` — because creating means choosing an adapter and a
+   behaviour type that can never be changed afterwards, and editing means
+   adjusting the things that can.
+
+   THE WIRING BUG THIS FIXES. The agent editor used to offer "Workspace default"
+   as an LLM connection. There is no workspace default: `AgentRoutes` calls
+   `requireField` on `llmConnectionId` for a `native_llm_agent`, so saving with
+   that option selected returned a 400 that read as a product defect. The
+   connection is required when the type requires it, the form says so, and the
+   save button is unavailable until it is satisfied.
+══════════════════════════════════════════════════════════════════════════════ */
 
 type Tool = contracts.Tool;
 type Agent = contracts.Agent;
 type Connection = contracts.Connection;
 
-function Panel({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+const RISK_DOT: Record<string, string> = {
+  low: "bg-risk-low",
+  medium: "bg-risk-medium",
+  high: "bg-risk-high",
+  critical: "bg-risk-critical",
+};
+
+function Panel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="border-subtle bg-surface-raised rounded-lg border p-4">
-      <div className="mb-4 border-b border-subtle pb-3">
-        <Text variant="heading-sm" tone="max" as="h2">{title}</Text>
-        <Text variant="caption" tone="muted" className="mt-1 block">{description}</Text>
-      </div>
-      <div className="grid gap-4">{children}</div>
+    <section className="border-subtle bg-surface-raised rounded-lg border">
+      <header className="border-subtle border-b px-4 py-3">
+        <Text variant="heading-sm" tone="max" as="h2" className="block">{title}</Text>
+        <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{description}</Text>
+      </header>
+      <div className="grid gap-4 p-4">{children}</div>
     </section>
   );
 }
@@ -44,186 +83,533 @@ function json(value: Record<string, unknown> | undefined): string {
   return JSON.stringify(value ?? {}, null, 2);
 }
 
-export function ToolEditorPage() {
-  const router = useRouter();
+function EditorSkeleton() {
   return (
-    <PageContainer>
-      <PageHeader eyebrow="Build / Tools" title="Register tool" description="Declare capability, schema, credentials, and policy in one governed registry entry." />
-      <ToolEditor onCancel={() => router.push("/tools")} onSaved={(tool) => router.push(`/tools?tool=${tool.id}`)} />
-    </PageContainer>
+    <div className="grid gap-3" aria-hidden="true">
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="border-subtle bg-surface-raised h-40 animate-pulse rounded-lg border" />
+      ))}
+    </div>
   );
 }
 
-export function AgentEditorPage() {
-  const router = useRouter();
-  return (
-    <PageContainer>
-      <PageHeader eyebrow="Build / Agents" title="Register agent" description="Define model behaviour, tool grants, limits, and approval policy as a reusable agent." />
-      <AgentEditor onCancel={() => router.push("/agents")} onSaved={(agent) => router.push(`/agents?agent=${agent.id}`)} />
-    </PageContainer>
-  );
-}
+/* ── Tools ────────────────────────────────────────────────────────────────── */
 
-export function ToolEditor({ id, onSaved, onCancel }: { id?: string; onSaved: (tool: Tool) => void | Promise<void>; onCancel: () => void }) {
+export function ToolEditor({
+  id,
+  onSaved,
+  onCancel,
+}: {
+  id: string;
+  onSaved: (tool: Tool) => void | Promise<void>;
+  onCancel: () => void;
+}) {
   const api = useApi();
   const { workspaceId } = useScope();
+  const queryClient = useQueryClient();
   const scope = React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
+
   const [connections, setConnections] = React.useState<Connection[]>([]);
-  const [loading, setLoading] = React.useState(Boolean(id));
+  const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
+
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
+  /** Immutable after registration — the adapter decides the whole config shape. */
   const [type, setType] = React.useState("http");
   const [connectionId, setConnectionId] = React.useState("none");
   const [riskLevel, setRiskLevel] = React.useState("low");
   const [status, setStatus] = React.useState("active");
   const [requiresApproval, setRequiresApproval] = React.useState(false);
   const [timeoutMs, setTimeoutMs] = React.useState("10000");
-  const [config, setConfig] = React.useState('{\n  "method": "GET",\n  "url": "https://api.example.com/resource"\n}');
-  const [inputSchema, setInputSchema] = React.useState('{\n  "type": "object",\n  "properties": {}\n}');
-  const [outputSchema, setOutputSchema] = React.useState('{\n  "type": "object",\n  "properties": {}\n}');
+  const [config, setConfig] = React.useState("{}");
+  const [inputSchema, setInputSchema] = React.useState("{}");
+  const [outputSchema, setOutputSchema] = React.useState("{}");
 
   React.useEffect(() => {
     let alive = true;
-    void api.connections.list({ ...scope, page: 1, pageSize: 100 }).then((page) => { if (alive) setConnections(page.items); });
-    if (id) {
-      void api.tools.get(id, scope).then((tool) => {
+    void api.connections.list({ ...scope, page: 1, pageSize: 100 })
+      .then((page) => { if (alive) setConnections(page.items); })
+      .catch(() => { if (alive) setConnections([]); });
+
+    void api.tools.get(id, scope)
+      .then((tool) => {
         if (!alive) return;
-        setName(tool.name); setDescription(tool.description ?? ""); setType(tool.type);
-        setConnectionId(tool.connectionId ?? "none"); setRiskLevel(tool.riskLevel); setStatus(tool.status);
-        setRequiresApproval(tool.requiresApproval); setTimeoutMs(String(tool.timeoutMs ?? 10000));
-        setConfig(json(tool.config)); setInputSchema(json(tool.inputSchema)); setOutputSchema(json(tool.outputSchema));
-      }).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not load tool."))
-        .finally(() => { if (alive) setLoading(false); });
-    }
+        setName(tool.name);
+        setDescription(tool.description ?? "");
+        setType(tool.type);
+        setConnectionId(tool.connectionId ?? "none");
+        setRiskLevel(tool.riskLevel);
+        setStatus(tool.status);
+        setRequiresApproval(tool.requiresApproval);
+        setTimeoutMs(String(tool.timeoutMs ?? 10000));
+        setConfig(json(tool.config));
+        setInputSchema(json(tool.inputSchema));
+        setOutputSchema(json(tool.outputSchema));
+      })
+      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not load tool."))
+      .finally(() => { if (alive) setLoading(false); });
+
     return () => { alive = false; };
   }, [api, id, scope]);
 
+  const requiresConnection = ["http", "database", "llm_generate"].includes(type);
+  const compatible = connections.filter((connection) =>
+    type === "custom"
+      || (type === "http" && connection.type === "http")
+      || (type === "database" && connection.type === "database")
+      || (type === "llm_generate" && connection.type === "llm"),
+  );
+
+  const timeoutValue = Number(timeoutMs);
+  const timeoutValid = Number.isInteger(timeoutValue) && timeoutValue > 0;
+  const blocked = !name.trim() || !timeoutValid || (requiresConnection && connectionId === "none");
+
   async function save() {
-    if (!name.trim()) { toast.error("Tool name is required."); return; }
-    if (["http", "database", "llm_generate"].includes(type) && connectionId === "none") {
-      toast.error("This adapter type requires a compatible connection."); return;
-    }
+    if (blocked) return;
     setSaving(true);
     try {
-      const body = {
-        name: name.trim(), description: description.trim() || null, type,
-        connectionId: connectionId === "none" ? null : connectionId,
-        riskLevel, status, requiresApproval, timeoutMs: Number(timeoutMs) || 10000,
-        config: parseObject(config, "Configuration"),
-        inputSchema: parseObject(inputSchema, "Input schema"),
-        outputSchema: parseObject(outputSchema, "Output schema"),
-        retryPolicy: {}, idempotencyStrategy: "input_hash",
-      };
-      const result = id ? await api.tools.update(id, body, scope) : await api.tools.create(body, scope);
-      toast.success(id ? "Tool updated." : "Tool registered.");
+      const result = await api.tools.update(
+        id,
+        {
+          name: name.trim(),
+          description: description.trim() || null,
+          connectionId: connectionId === "none" ? null : connectionId,
+          riskLevel,
+          status,
+          requiresApproval,
+          timeoutMs: timeoutValue,
+          config: parseObject(config, "Configuration"),
+          inputSchema: parseObject(inputSchema, "Input schema"),
+          outputSchema: parseObject(outputSchema, "Output schema"),
+        },
+        scope,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all({ workspaceId, environmentId: null }) });
+      toast.success("Tool updated.");
       await onSaved(result);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save tool.");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   }
 
-  if (loading) return <div className="border-subtle bg-surface-raised h-48 animate-pulse rounded-lg border" />;
+  if (loading) return <EditorSkeleton />;
+
   return (
     <div className="grid gap-3">
-      <Panel title="Identity and execution" description="The stable registry identity and runtime adapter.">
+      <Panel title="Identity" description="The adapter is fixed at registration — it decides the shape of everything below.">
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Customer lookup" /></Field>
-          <Field label="Adapter type" required><Select disabled={Boolean(id)} value={type} onValueChange={(value) => { setType(value); setConnectionId("none"); }} options={[
-            { value: "http", label: "HTTP API" }, { value: "database", label: "Database" }, { value: "code", label: "Code" },
-            { value: "builtin", label: "Built-in" }, { value: "llm_generate", label: "LLM generation" }, { value: "custom", label: "Custom / MCP" },
-          ]} /></Field>
+          <Field label="Name" required>
+            <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={255} />
+          </Field>
+          <Field label="Adapter" description="Cannot be changed. Register a new tool to switch adapter.">
+            <Select
+              disabled
+              value={type}
+              onValueChange={setType}
+              options={[
+                { value: "http", label: "HTTP API" },
+                { value: "database", label: "Database" },
+                { value: "code", label: "Code" },
+                { value: "builtin", label: "Built-in" },
+                { value: "llm_generate", label: "LLM generation" },
+                { value: "custom", label: "Custom / MCP" },
+              ]}
+            />
+          </Field>
         </div>
-        <Field label="Description"><Textarea value={description} onChange={(e) => setDescription(e.target.value)} minRows={2} /></Field>
+        <Field label="Description">
+          <Textarea value={description} onChange={(event) => setDescription(event.target.value)} minRows={2} maxRows={5} />
+        </Field>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Connection"><Select value={connectionId} onValueChange={setConnectionId} options={[{ value: "none", label: "No connection" }, ...connections.filter((connection) => type === "custom" || (type === "http" && connection.type === "http") || (type === "database" && connection.type === "database") || (type === "llm_generate" && connection.type === "llm")).map((c) => ({ value: c.id, label: `${c.name} · ${c.provider}` }))]} /></Field>
-          <Field label="Timeout (ms)"><Input mono type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(e.target.value)} /></Field>
+          <Field
+            label="Connection"
+            required={requiresConnection}
+            description={requiresConnection ? "Required for this adapter." : "Optional for this adapter."}
+            error={requiresConnection && connectionId === "none" ? "This adapter cannot run without a connection." : undefined}
+          >
+            <Select
+              value={connectionId}
+              onValueChange={setConnectionId}
+              options={[
+                ...(requiresConnection ? [] : [{ value: "none", label: "No connection" }]),
+                ...compatible.map((connection) => ({
+                  value: connection.id,
+                  label: connection.name,
+                  description: connection.provider,
+                })),
+              ]}
+            />
+          </Field>
+          <Field
+            label="Timeout"
+            description="Milliseconds."
+            error={!timeoutValid ? "Must be a whole number above zero." : undefined}
+          >
+            <Input
+              mono
+              type="number"
+              min={1}
+              value={timeoutMs}
+              onChange={(event) => setTimeoutMs(event.target.value)}
+              suffix={<Text variant="caption" tone="muted">ms</Text>}
+            />
+          </Field>
         </div>
       </Panel>
-      <Panel title="Risk and control" description="Controls are persisted with the tool and enforced independently of the UI.">
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Risk tier"><Select value={riskLevel} onValueChange={setRiskLevel} options={["low", "medium", "high", "critical"].map((v) => ({ value: v, label: v[0]!.toUpperCase() + v.slice(1) }))} /></Field>
-          <Field label="Lifecycle"><Select value={status} onValueChange={setStatus} options={["active", "paused", "draft"].map((v) => ({ value: v, label: v[0]!.toUpperCase() + v.slice(1) }))} /></Field>
-        </div>
-        <Checkbox checked={requiresApproval} onCheckedChange={(v) => setRequiresApproval(v === true)} description="Require a human approval before execution.">Approval gate</Checkbox>
+
+      <Panel title="Risk and control" description="Persisted with the tool and enforced by the engine, independently of this UI.">
+        <Field label="Risk tier">
+          <Segmented
+            label="Risk tier"
+            value={riskLevel}
+            onValueChange={setRiskLevel}
+            options={(["low", "medium", "high", "critical"] as const).map((value) => ({
+              value,
+              label: value[0]!.toUpperCase() + value.slice(1),
+              markerClassName: RISK_DOT[value]!,
+            }))}
+          />
+        </Field>
+        <Field label="Lifecycle">
+          <Select
+            value={status}
+            onValueChange={setStatus}
+            options={["active", "paused", "draft"].map((value) => ({
+              value,
+              label: value[0]!.toUpperCase() + value.slice(1),
+            }))}
+          />
+        </Field>
+        <Checkbox
+          checked={requiresApproval}
+          onCheckedChange={(value) => setRequiresApproval(value === true)}
+          description="A run reaching this tool pauses until a person approves it."
+        >
+          Require human approval
+        </Checkbox>
       </Panel>
-      <Panel title="Configuration and schemas" description="JSON is validated before the API mutation is sent.">
-        <Field label="Runtime configuration"><Textarea mono autoGrow={false} minRows={7} value={config} onChange={(e) => setConfig(e.target.value)} /></Field>
+
+      <Panel title="Configuration and schemas" description="JSON is validated here before the mutation is sent.">
+        <Field label="Runtime configuration">
+          <CodeEditor value={config} onValueChange={setConfig} minRows={6} aria-label="Runtime configuration" />
+        </Field>
         <div className="grid gap-4 lg:grid-cols-2">
-          <Field label="Input schema"><Textarea mono autoGrow={false} minRows={9} value={inputSchema} onChange={(e) => setInputSchema(e.target.value)} /></Field>
-          <Field label="Output schema"><Textarea mono autoGrow={false} minRows={9} value={outputSchema} onChange={(e) => setOutputSchema(e.target.value)} /></Field>
+          <Field label="Input schema">
+            <CodeEditor value={inputSchema} onValueChange={setInputSchema} minRows={8} aria-label="Input schema" />
+          </Field>
+          <Field label="Output schema">
+            <CodeEditor value={outputSchema} onValueChange={setOutputSchema} minRows={8} aria-label="Output schema" />
+          </Field>
         </div>
       </Panel>
-      <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button><Button variant="primary" loading={saving} onClick={() => void save()}>{id ? "Save changes" : "Register tool"}</Button></div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button variant="primary" loading={saving} loadingLabel="Saving" disabled={blocked} onClick={() => void save()}>
+          Save changes
+        </Button>
+      </div>
     </div>
   );
 }
 
-export function AgentEditor({ id, onSaved, onCancel }: { id?: string; onSaved: (agent: Agent) => void | Promise<void>; onCancel: () => void }) {
+/* ── Agents ───────────────────────────────────────────────────────────────── */
+
+export function AgentEditor({
+  id,
+  onSaved,
+  onCancel,
+}: {
+  id: string;
+  onSaved: (agent: Agent) => void | Promise<void>;
+  onCancel: () => void;
+}) {
   const api = useApi();
   const { workspaceId } = useScope();
+  const queryClient = useQueryClient();
   const scope = React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
+
   const [connections, setConnections] = React.useState<Connection[]>([]);
   const [tools, setTools] = React.useState<Tool[]>([]);
-  const [loading, setLoading] = React.useState(Boolean(id));
+  const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
-  const [name, setName] = React.useState(""); const [role, setRole] = React.useState("");
-  const [type, setType] = React.useState("native_llm_agent"); const [status, setStatus] = React.useState("active");
-  const [instructions, setInstructions] = React.useState(""); const [connectionId, setConnectionId] = React.useState("none");
-  const [modelName, setModelName] = React.useState(""); const [temperature, setTemperature] = React.useState("0.1");
-  const [maxTokens, setMaxTokens] = React.useState("4096"); const [maxIterations, setMaxIterations] = React.useState("10");
+
+  const [name, setName] = React.useState("");
+  const [role, setRole] = React.useState("");
+  const [type, setType] = React.useState("native_llm_agent");
+  const [status, setStatus] = React.useState("active");
+  const [instructions, setInstructions] = React.useState("");
+  const [connectionId, setConnectionId] = React.useState("none");
+  const [modelName, setModelName] = React.useState("");
+  const [temperature, setTemperature] = React.useState(0.1);
+  const [maxTokens, setMaxTokens] = React.useState("4096");
+  const [maxIterations, setMaxIterations] = React.useState("10");
   const [allowedToolIds, setAllowedToolIds] = React.useState<string[]>([]);
+  const [toolQuery, setToolQuery] = React.useState("");
 
   React.useEffect(() => {
     let alive = true;
-    void Promise.all([api.connections.list({ ...scope, page: 1, pageSize: 100 }), api.tools.list({ ...scope, page: 1, pageSize: 100 })]).then(([c, t]) => {
-      if (alive) { setConnections(c.items.filter((item) => item.type === "llm")); setTools(t.items); }
-    });
-    if (id) void api.agents.get(id, scope).then((agent) => {
-      if (!alive) return;
-      setName(agent.name); setRole(agent.role ?? ""); setType(agent.type); setStatus(agent.status); setInstructions(agent.instructions ?? "");
-      setConnectionId(agent.llmConnectionId ?? "none"); setModelName(agent.modelName ?? ""); setTemperature(String(agent.temperature ?? 0.1));
-      setMaxTokens(String(agent.maxTokens ?? 4096)); setMaxIterations(String(agent.maxIterations ?? 10)); setAllowedToolIds(agent.allowedToolIds);
-    }).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not load agent."))
+    void Promise.all([
+      api.connections.list({ ...scope, page: 1, pageSize: 100 }),
+      api.tools.list({ ...scope, page: 1, pageSize: 100 }),
+    ])
+      .then(([connectionPage, toolPage]) => {
+        if (!alive) return;
+        setConnections(connectionPage.items.filter((item) => item.type === "llm"));
+        setTools(toolPage.items);
+      })
+      .catch(() => { if (alive) { setConnections([]); setTools([]); } });
+
+    void api.agents.get(id, scope)
+      .then((agent) => {
+        if (!alive) return;
+        setName(agent.name);
+        setRole(agent.role ?? "");
+        setType(agent.type);
+        setStatus(agent.status);
+        setInstructions(agent.instructions ?? "");
+        setConnectionId(agent.llmConnectionId ?? "none");
+        setModelName(agent.modelName ?? "");
+        setTemperature(agent.temperature ?? 0.1);
+        setMaxTokens(String(agent.maxTokens ?? 4096));
+        setMaxIterations(String(agent.maxIterations ?? 10));
+        setAllowedToolIds(agent.allowedToolIds);
+      })
+      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not load agent."))
       .finally(() => { if (alive) setLoading(false); });
+
     return () => { alive = false; };
   }, [api, id, scope]);
 
+  /**
+   * `native_llm_agent` is the one type the API validates hard: instructions,
+   * modelName and llmConnectionId are all `requireField`ed. Anything else may
+   * leave them empty.
+   */
+  const needsModel = type === "native_llm_agent";
+  const maxTokensValue = Number(maxTokens);
+  const maxIterationsValue = Number(maxIterations);
+  const limitsValid =
+    Number.isInteger(maxTokensValue) && maxTokensValue > 0 &&
+    Number.isInteger(maxIterationsValue) && maxIterationsValue > 0;
+
+  const blocked =
+    !name.trim()
+    || !limitsValid
+    || (needsModel && (connectionId === "none" || !modelName.trim() || !instructions.trim()));
+
+  const visibleTools = React.useMemo(() => {
+    const query = toolQuery.trim().toLowerCase();
+    if (!query) return tools;
+    return tools.filter((tool) => `${tool.name} ${tool.riskLevel} ${tool.type}`.toLowerCase().includes(query));
+  }, [tools, toolQuery]);
+
   async function save() {
-    if (!name.trim()) { toast.error("Agent name is required."); return; }
+    if (blocked) return;
     setSaving(true);
     try {
-      const body = {
-        name: name.trim(), role: role.trim() || null, type, status, instructions: instructions.trim(),
-        llmConnectionId: connectionId === "none" ? null : connectionId, modelName: modelName.trim() || null,
-        temperature: Number(temperature), maxTokens: Number(maxTokens) || 4096, maxIterations: Number(maxIterations) || 10,
-        allowedToolIds, memoryPolicy: { type: "session" }, retryPolicy: { maxAttempts: 2 },
-        timeoutPolicy: { timeoutMs: 60000 }, approvalPolicy: {}, outputSchema: {},
-      };
-      const result = id ? await api.agents.update(id, body, scope) : await api.agents.create(body, scope);
-      toast.success(id ? "Agent updated." : "Agent registered."); await onSaved(result);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save agent."); }
-    finally { setSaving(false); }
+      const result = await api.agents.update(
+        id,
+        {
+          name: name.trim(),
+          role: role.trim() || null,
+          status,
+          instructions: instructions.trim() || null,
+          llmConnectionId: connectionId === "none" ? null : connectionId,
+          modelName: modelName.trim() || null,
+          temperature,
+          maxTokens: maxTokensValue,
+          maxIterations: maxIterationsValue,
+          allowedToolIds,
+        },
+        scope,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents.all({ workspaceId, environmentId: null }) });
+      toast.success("Agent updated.");
+      await onSaved(result);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save agent.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  if (loading) return <div className="border-subtle bg-surface-raised h-48 animate-pulse rounded-lg border" />;
+  if (loading) return <EditorSkeleton />;
+
   return (
     <div className="grid gap-3">
-      <Panel title="Identity and behaviour" description="Reusable identity and the instructions that define agent behaviour.">
-        <div className="grid gap-4 md:grid-cols-2"><Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} /></Field><Field label="Role"><Input value={role} onChange={(e) => setRole(e.target.value)} /></Field></div>
-        <div className="grid gap-4 md:grid-cols-2"><Field label="Agent type"><Select disabled={Boolean(id)} value={type} onValueChange={setType} options={[
-          ["native_llm_agent", "Native LLM agent"], ["iterative_agent", "Iterative agent"], ["tool_agent", "Tool agent"], ["router_agent", "Router agent"], ["approval_agent", "Approval agent"], ["external_instrumented_agent", "External instrumented agent"],
-        ].map(([value, label]) => ({ value: value!, label: label! }))} /></Field><Field label="Lifecycle"><Select value={status} onValueChange={setStatus} options={["active", "paused", "draft"].map((v) => ({ value: v, label: v[0]!.toUpperCase() + v.slice(1) }))} /></Field></div>
-        <Field label="System instructions" required><Textarea mono minRows={8} value={instructions} onChange={(e) => setInstructions(e.target.value)} /></Field>
+      <Panel title="Identity" description="The behaviour type is fixed at registration.">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Name" required>
+            <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={255} />
+          </Field>
+          <Field label="Role">
+            <Input value={role} onChange={(event) => setRole(event.target.value)} />
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Agent type" description="Cannot be changed. Register a new agent to switch behaviour.">
+            <Select
+              disabled
+              value={type}
+              onValueChange={setType}
+              options={[
+                { value: "native_llm_agent", label: "Native LLM agent" },
+                { value: "iterative_agent", label: "Iterative agent" },
+                { value: "tool_agent", label: "Tool agent" },
+                { value: "router_agent", label: "Router agent" },
+                { value: "approval_agent", label: "Approval agent" },
+                { value: "external_instrumented_agent", label: "External agent" },
+              ]}
+            />
+          </Field>
+          <Field label="Lifecycle">
+            <Select
+              value={status}
+              onValueChange={setStatus}
+              options={["active", "paused", "draft"].map((value) => ({
+                value,
+                label: value[0]!.toUpperCase() + value.slice(1),
+              }))}
+            />
+          </Field>
+        </div>
+        <Field
+          label="System instructions"
+          required={needsModel}
+          characterCount={{ value: instructions.length, max: 20000 }}
+          error={needsModel && !instructions.trim() ? "Required for a native LLM agent." : undefined}
+        >
+          <Textarea
+            mono
+            autoGrow={false}
+            minRows={10}
+            maxLength={20000}
+            value={instructions}
+            onChange={(event) => setInstructions(event.target.value)}
+          />
+        </Field>
       </Panel>
-      <Panel title="Model and limits" description="Model selection is bound to a registered LLM connection; limits are persisted with the agent.">
-        <div className="grid gap-4 md:grid-cols-2"><Field label="LLM connection"><Select value={connectionId} onValueChange={setConnectionId} options={[{ value: "none", label: "Workspace default" }, ...connections.map((c) => ({ value: c.id, label: `${c.name} · ${c.provider}` }))]} /></Field><Field label="Model"><Input mono value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="gpt-5" /></Field></div>
-        <div className="grid gap-4 md:grid-cols-3"><Field label="Temperature"><Input mono type="number" step="0.1" value={temperature} onChange={(e) => setTemperature(e.target.value)} /></Field><Field label="Max tokens"><Input mono type="number" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} /></Field><Field label="Max iterations"><Input mono type="number" value={maxIterations} onChange={(e) => setMaxIterations(e.target.value)} /></Field></div>
+
+      <Panel title="Model and limits" description="Model calls are billed to the credential on the connection.">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="LLM connection"
+            required={needsModel}
+            description={needsModel ? "Required for a native LLM agent — there is no workspace default." : "Optional for this agent type."}
+            error={needsModel && connectionId === "none" ? "Pick the connection this agent runs on." : undefined}
+          >
+            <Select
+              value={connectionId}
+              onValueChange={setConnectionId}
+              options={[
+                ...(needsModel ? [] : [{ value: "none", label: "No model connection" }]),
+                ...connections.map((connection) => ({
+                  value: connection.id,
+                  label: connection.name,
+                  description: connection.provider,
+                })),
+              ]}
+            />
+          </Field>
+          <Field
+            label="Model"
+            required={needsModel}
+            error={needsModel && !modelName.trim() ? "Name the model this agent runs on." : undefined}
+          >
+            <Input mono value={modelName} onChange={(event) => setModelName(event.target.value)} placeholder="claude-sonnet-5" />
+          </Field>
+        </div>
+        <Field label="Temperature" description="Low is repeatable, high is varied.">
+          <Slider
+            value={[temperature]}
+            onValueChange={([next]) => setTemperature(next ?? 0)}
+            min={0}
+            max={2}
+            step={0.1}
+            format={(value) => value.toFixed(1)}
+            aria-label="Temperature"
+          />
+        </Field>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Max tokens"
+            error={!(Number.isInteger(maxTokensValue) && maxTokensValue > 0) ? "Must be a whole number above zero." : undefined}
+          >
+            <Input mono type="number" min={1} value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />
+          </Field>
+          <Field
+            label="Max iterations"
+            error={!(Number.isInteger(maxIterationsValue) && maxIterationsValue > 0) ? "Must be a whole number above zero." : undefined}
+          >
+            <Input mono type="number" min={1} value={maxIterations} onChange={(event) => setMaxIterations(event.target.value)} />
+          </Field>
+        </div>
       </Panel>
-      <Panel title="Tool grants" description="Only explicitly granted tools can be called by this agent.">
-        {tools.length === 0 ? <Text variant="body-sm" tone="muted">No tools are registered yet.</Text> : <div className="grid gap-2 md:grid-cols-2">{tools.map((tool) => <Checkbox key={tool.id} checked={allowedToolIds.includes(tool.id)} onCheckedChange={(v) => setAllowedToolIds((current) => v === true ? [...new Set([...current, tool.id])] : current.filter((item) => item !== tool.id))} description={`${tool.riskLevel} risk`}>{tool.name}</Checkbox>)}</div>}
+
+      <Panel title="Tool grants" description="Only what is granted here can be called. Everything else is refused by the engine.">
+        {tools.length === 0 ? (
+          <Text variant="body-sm" tone="muted">No tools are registered yet.</Text>
+        ) : (
+          <>
+            <Input
+              value={toolQuery}
+              onChange={(event) => setToolQuery(event.target.value)}
+              placeholder="Filter by name, adapter or risk"
+              prefix={<Icon icon={MagnifyingGlass} size="sm" decorative />}
+            />
+            <div className="border-subtle divide-subtle max-h-72 divide-y overflow-y-auto rounded-md border">
+              {visibleTools.map((tool) => {
+                const granted = allowedToolIds.includes(tool.id);
+                return (
+                  <label
+                    key={tool.id}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors duration-fast",
+                      granted ? "bg-surface-selected" : "hover:bg-surface-hover",
+                    )}
+                  >
+                    <Checkbox
+                      checked={granted}
+                      aria-label={`Grant ${tool.name}`}
+                      onCheckedChange={(value) =>
+                        setAllowedToolIds((current) =>
+                          value === true
+                            ? [...new Set([...current, tool.id])]
+                            : current.filter((item) => item !== tool.id),
+                        )
+                      }
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-x-2">
+                        <Text variant="body-sm" tone="primary" className="font-medium">{tool.name}</Text>
+                        <span className="inline-flex items-center gap-1">
+                          <span aria-hidden="true" className={cn("size-1.5 rounded-full", RISK_DOT[tool.riskLevel] ?? RISK_DOT.low)} />
+                          <Text variant="caption" tone="muted" className="capitalize">{tool.riskLevel}</Text>
+                        </span>
+                        {tool.requiresApproval ? <Text variant="caption" tone="muted">· approval gated</Text> : null}
+                      </span>
+                      <Text variant="caption" tone="muted" className="mt-0.5 block truncate">
+                        {tool.description ?? `${tool.type} tool`}
+                      </Text>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        )}
       </Panel>
-      <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button><Button variant="primary" loading={saving} onClick={() => void save()}>{id ? "Save changes" : "Register agent"}</Button></div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button variant="primary" loading={saving} loadingLabel="Saving" disabled={blocked} onClick={() => void save()}>
+          Save changes
+        </Button>
+      </div>
     </div>
   );
 }

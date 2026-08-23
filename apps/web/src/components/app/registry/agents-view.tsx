@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
@@ -21,6 +22,7 @@ import { RelativeTime } from "~/components/app/workflows/atoms";
 import { AgentDetail } from "./agent-detail";
 import { RegistryBulkBar } from "./bulk-bar";
 import { useAgentsData } from "./use-registry-data";
+import { CreateAgentDialog } from "./create-agent-dialog";
 import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -45,6 +47,9 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
   const stateParam = params.get("state") as TableStatus | null;
   const sortParam = params.get("sort") ?? "runs:desc";
   const openId = params.get("agent");
+  /* Creation is URL-synced so `/agents/new` can redirect here and the dialog is
+     linkable — "open the register form for me" is a link, not a set of clicks. */
+  const creating = params.get("create") === "1";
   const detailTab = params.get("tab") ?? "overview";
 
   const sort = React.useMemo(
@@ -55,14 +60,9 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
     [sortParam],
   );
 
-  const setParams = React.useCallback((updates: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
-    for (const [key, value] of Object.entries(updates)) {
-      if (value === null || value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    router.replace(`${pathname}?${next.toString()}` as never, { scroll: false });
-  }, [params, pathname, router]);
+  /* Two writes in one tick must merge, not overwrite — the create dialogs do
+     exactly that on success. See use-search-param-writer.ts. */
+  const setParams = useSearchParamWriter();
 
   const [queryInput, setQueryInput] = React.useState(urlQuery);
   React.useEffect(() => { setQueryInput(urlQuery); }, [urlQuery]);
@@ -282,7 +282,11 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
         eyebrow="Build"
         title="Agents"
         description="Every registered agent, with what it costs, how often it works, and exactly what it is permitted to do."
-        actions={<Button asChild variant="primary" size="sm"><Link href={"/agents/new" as Route}>New agent</Link></Button>}
+        actions={
+          <Button variant="primary" size="sm" onClick={() => setParams({ create: "1" })}>
+            New agent
+          </Button>
+        }
       />
 
       <div className="grid gap-3">
@@ -304,7 +308,14 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
           preferences={preferences}
           onPreferencesChange={setPreferences}
           status={status}
-          renderState={(s) => <AgentsState status={s} query={queryInput} onClear={() => applyQuery("")} />}
+          renderState={(s) => (
+            <AgentsState
+              status={s}
+              query={queryInput}
+              onClear={() => applyQuery("")}
+              onCreate={() => setParams({ create: "1" })}
+            />
+          )}
           sort={sort}
           onSortChange={(next) => setParams({ sort: next.map((s) => `${s.id}:${s.desc ? "desc" : "asc"}`).join(",") })}
           isSelected={selection.isSelected}
@@ -314,6 +325,12 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
           height={620}
         />
       </div>
+
+      <CreateAgentDialog
+        open={creating}
+        onOpenChange={(next) => setParams({ create: next ? "1" : null })}
+        onCreated={(agent) => setParams({ create: null, agent: agent.id, tab: null })}
+      />
 
       <AgentDetail
         agent={openAgent}
@@ -353,11 +370,12 @@ function exportAgents(agents: AgentRecord[]) {
 }
 
 function AgentsState({
-  status, query, onClear,
+  status, query, onClear, onCreate,
 }: {
   status: Exclude<TableStatus, "ready">;
   query: string;
   onClear: () => void;
+  onCreate: () => void;
 }) {
   if (status === "loading") return null;
 
@@ -372,7 +390,7 @@ function AgentsState({
           and also the risk this page exists to make visible.
         </Text>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button asChild variant="primary" size="sm"><Link href={"/agents/new" as Route}>Register an agent</Link></Button>
+          <Button variant="primary" size="sm" onClick={onCreate}>Register an agent</Button>
           <Button asChild variant="secondary" size="sm">
             <Link href={"/docs/first-workflow" as Route}>Read the tutorial</Link>
           </Button>

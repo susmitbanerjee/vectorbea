@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { PageContainer, PageHeader } from "~/components/ui/page";
@@ -18,6 +19,7 @@ import { RiskBadge, RegistryStatusBadge, RateCell, HealthDot } from "./atoms";
 import { ToolDetail } from "./tool-detail";
 import { RegistryBulkBar } from "./bulk-bar";
 import { useToolsData } from "./use-registry-data";
+import { CreateToolDialog } from "./create-tool-dialog";
 import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -43,6 +45,9 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
   const stateParam = params.get("state") as TableStatus | null;
   const sortParam = params.get("sort") ?? "risk:asc";
   const openId = params.get("tool");
+  /* Creation is URL-synced so `/tools/new` can redirect here and the dialog is
+     linkable — "open the register form for me" is a link, not a set of clicks. */
+  const creating = params.get("create") === "1";
   const detailTab = params.get("tab") ?? "overview";
 
   const sort = React.useMemo(
@@ -53,14 +58,9 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
     [sortParam],
   );
 
-  const setParams = React.useCallback((updates: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
-    for (const [key, value] of Object.entries(updates)) {
-      if (value === null || value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    router.replace(`${pathname}?${next.toString()}` as never, { scroll: false });
-  }, [params, pathname, router]);
+  /* Two writes in one tick must merge, not overwrite — the create dialogs do
+     exactly that on success. See use-search-param-writer.ts. */
+  const setParams = useSearchParamWriter();
 
   const [queryInput, setQueryInput] = React.useState(urlQuery);
   React.useEffect(() => { setQueryInput(urlQuery); }, [urlQuery]);
@@ -286,7 +286,11 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         eyebrow="Build"
         title="Tools"
         description="Every registered tool, riskiest first — what it can do, what it is allowed to do, and how often it works."
-        actions={<Button asChild variant="primary" size="sm"><Link href={"/tools/new" as Route}>New tool</Link></Button>}
+        actions={
+          <Button variant="primary" size="sm" onClick={() => setParams({ create: "1" })}>
+            New tool
+          </Button>
+        }
       />
 
       <div className="grid gap-3">
@@ -324,7 +328,14 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
           preferences={preferences}
           onPreferencesChange={setPreferences}
           status={status}
-          renderState={(s) => <ToolsState status={s} query={queryInput} onClear={() => applyQuery("")} />}
+          renderState={(s) => (
+            <ToolsState
+              status={s}
+              query={queryInput}
+              onClear={() => applyQuery("")}
+              onCreate={() => setParams({ create: "1" })}
+            />
+          )}
           sort={sort}
           onSortChange={(next) => setParams({ sort: next.map((s) => `${s.id}:${s.desc ? "desc" : "asc"}`).join(",") })}
           isSelected={selection.isSelected}
@@ -334,6 +345,12 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
           height={620}
         />
       </div>
+
+      <CreateToolDialog
+        open={creating}
+        onOpenChange={(next) => setParams({ create: next ? "1" : null })}
+        onCreated={(tool) => setParams({ create: null, tool: tool.id, tab: null })}
+      />
 
       <ToolDetail
         tool={openTool}
@@ -371,11 +388,12 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
 }
 
 function ToolsState({
-  status, query, onClear,
+  status, query, onClear, onCreate,
 }: {
   status: Exclude<TableStatus, "ready">;
   query: string;
   onClear: () => void;
+  onCreate: () => void;
 }) {
   if (status === "loading") return null;
 
@@ -390,7 +408,7 @@ function ToolsState({
           needs a human first.
         </Text>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button asChild variant="primary" size="sm"><Link href={"/tools/new" as Route}>Register a tool</Link></Button>
+          <Button variant="primary" size="sm" onClick={onCreate}>Register a tool</Button>
           <Button variant="secondary" size="sm">Import from OpenAPI</Button>
           <Button asChild variant="secondary" size="sm">
             <Link href={"/integrations" as Route}>Browse integrations</Link>
