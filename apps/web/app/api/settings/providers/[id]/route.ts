@@ -1,20 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
-import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { assertWorkspaceMember, requireWorkspaceRole } from "@/lib/server/assert-workspace-member";
 
+/**
+ * Admin-or-above, resolved once.
+ *
+ * This re-queried the role from `vectorbea.workspace_members` (Supabase) after
+ * `assertWorkspaceMember` had already resolved it from the authoritative store,
+ * and the two disagree: sign-up writes memberships to Neon, so the Supabase copy
+ * is empty for normally-created users and the lookup returned nothing — DENYING
+ * EVERY ADMIN. The second bug survived the first: `role !== "admin"` also
+ * refuses `owner`, which is a higher role and is what every OAuth sign-up is
+ * given, so the check was wrong even against a populated table.
+ *
+ * `assertWorkspaceMember` already carries the resolved role, and
+ * `requireWorkspaceRole` orders the four roles properly, so both problems go
+ * away by not asking twice.
+ */
 async function requireAdmin(request: NextRequest, workspaceId: string) {
   const authResult = await assertWorkspaceMember(request, workspaceId);
   if (authResult.error) return { error: authResult.error, user: null };
-  const supabase = createVectorBeaAdminClient();
-  const { data: membership } = await supabase
-    .from("workspace_members")
-    .select("role")
-    .eq("workspace_id", workspaceId)
-    .eq("user_id", authResult.user.id)
-    .maybeSingle();
-  if (!membership || membership.role !== "admin") {
-    return { error: NextResponse.json({ error: "Admin role required." }, { status: 403 }), user: null };
-  }
+  const denied = requireWorkspaceRole(
+    authResult.user.role,
+    "admin",
+    "Changing provider configuration needs the admin or owner role.",
+  );
+  if (denied) return { error: denied, user: null };
   return { error: null, user: authResult.user };
 }
 

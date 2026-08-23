@@ -13,8 +13,8 @@
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS vectorbea.workspace_members (
-  workspace_id  uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id       uuid NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  workspace_id  uuid NOT NULL REFERENCES vectorbea.workspaces(id) ON DELETE CASCADE,
+  user_id       uuid NOT NULL REFERENCES vectorbea.app_users(id) ON DELETE CASCADE,
   role          text NOT NULL DEFAULT 'viewer' CHECK (role IN ('owner', 'admin', 'editor', 'viewer')),
   status        text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invited', 'suspended', 'removed')),
   created_at    timestamptz NOT NULL DEFAULT now(),

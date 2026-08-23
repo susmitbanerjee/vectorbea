@@ -109,6 +109,13 @@ export const Field = React.forwardRef<HTMLDivElement, FieldProps>(function Field
             <span
               className={cn(
                 "font-code text-mono-sm tabular shrink-0",
+                // The count borrows the LABEL's line-height rather than mono's.
+                // The row is as tall as its tallest inline box, and mono-sm's
+                // line box is ~1px taller than the label's — so a field with a
+                // character count sat 1px above the field beside it, for the
+                // whole life of the form. Not enough to name, exactly enough to
+                // look untidy. Baseline alignment still positions it.
+                "leading-(--text-label--line-height)",
                 over ? "text-status-failed" : "text-fg-muted",
               )}
               aria-live="polite"

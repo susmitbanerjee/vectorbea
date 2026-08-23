@@ -401,7 +401,14 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 description="The name is what appears in an agent's grant list and in every audit line."
               >
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Name" required characterCount={{ value: name.length, max: 255 }}>
+                  {/* Keeps the header the same shape as Lifecycle beside it,
+                      so the two controls land on one line. */}
+                  <Field
+                    label="Name"
+                    required
+                    description="Renaming later is safe — agents bind by id."
+                    characterCount={{ value: name.length, max: 255 }}
+                  >
                     <Input
                       value={name}
                       onChange={(event) => setName(event.target.value)}

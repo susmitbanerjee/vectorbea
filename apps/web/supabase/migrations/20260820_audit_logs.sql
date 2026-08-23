@@ -17,7 +17,7 @@
 
 CREATE TABLE IF NOT EXISTS vectorbea.audit_logs (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id       uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  workspace_id       uuid NOT NULL REFERENCES vectorbea.workspaces(id) ON DELETE CASCADE,
   prompt_version_id  uuid,
   prompt_name        text NOT NULL DEFAULT '',
   version_tag        text NOT NULL DEFAULT '',

@@ -89,13 +89,15 @@ export function DashboardOverview({
           );
         }
 
-        const [nextSummary, nextAuditLogs] = await Promise.all([
+        const [nextSummary, nextAuditPage] = await Promise.all([
           summaryResponse.json() as Promise<DashboardSummary>,
-          auditResponse.json() as Promise<AuditLogView[]>,
+          // /api/audit returns a page envelope so the audit screen can filter
+          // and page in the database rather than in the browser.
+          auditResponse.json() as Promise<{ items: AuditLogView[] }>,
         ]);
 
         setDashboardSummary(nextSummary);
-        setAuditLogs(nextAuditLogs);
+        setAuditLogs(nextAuditPage.items ?? []);
 
         if (showToast) {
           toast.success("Dashboard refreshed.");

@@ -307,7 +307,15 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
             <div className="grid gap-4">
               <ModalSection title="Identity" description="How this agent is referred to in workflows, runs and audit.">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Name" required characterCount={{ value: name.length, max: 255 }}>
+                  {/* The description is not decoration: its neighbour has one,
+                      and a field without it sits a line higher than the field
+                      beside it. Same-row fields keep the same header shape. */}
+                  <Field
+                    label="Name"
+                    required
+                    description="Renaming later is safe — workflows bind by id."
+                    characterCount={{ value: name.length, max: 255 }}
+                  >
                     <Input
                       value={name}
                       onChange={(event) => setName(event.target.value)}

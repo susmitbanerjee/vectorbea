@@ -2,6 +2,8 @@ import "server-only";
 
 import type { PlanTier } from "@/lib/api";
 import { getPlanDefinition, normalizePlanTier } from "@/lib/server/plan-config";
+import { neon } from "@neondatabase/serverless";
+
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 type WorkspaceLimitRecord = {
@@ -79,15 +81,35 @@ export async function getWorkspacePromptCount(workspaceId: string) {
   return count ?? 0;
 }
 
+/**
+ * Seats in use, counted where members ACTUALLY LIVE.
+ *
+ * `workspace_members` exists in two stores and they do not agree:
+ *
+ *   - Neon / `public` — written by every sign-up path (`neon-auth.createUser`,
+ *     `oauth-upsert`) and read by the authorisation gate
+ *     (`assertWorkspaceMember`) and the Members screen. This is the authority.
+ *   - Supabase / `vectorbea` — read in nine places, written in exactly one
+ *     (`invitations.ts`). For a workspace whose members all signed up normally
+ *     it is EMPTY.
+ *
+ * This function read the Supabase copy, so "Workspace seats" reported 0 of N on
+ * a workspace with real members — a number that looks like a working meter and
+ * is simply wrong. Reading the same store the Members screen reads makes the
+ * two agree, which is the minimum bar for a seat count that governs a plan
+ * limit. The wider split is not resolved here — see docs/audit for the
+ * remaining eight readers.
+ */
 export async function getWorkspaceMemberCount(workspaceId: string) {
-  const supabase = createVectorBeaAdminClient();
-  const { count, error } = await supabase
-    .from("workspace_members")
-    .select("user_id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("status", "active");
-  if (error) throw new Error(`Failed to count workspace members: ${error.message}`);
-  return count ?? 0;
+  const url = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
+  if (!url) throw new Error("DATABASE_URL not set");
+  const sql = neon(url);
+  const rows = await sql`
+    SELECT count(*)::int AS seats
+    FROM workspace_members
+    WHERE workspace_id = ${workspaceId} AND status = 'active'
+  ` as { seats: number }[];
+  return rows[0]?.seats ?? 0;
 }
 
 export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {
