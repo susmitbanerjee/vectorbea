@@ -163,16 +163,42 @@ export function WorkspaceProvider({
   });
 
   /**
+   * Headcount per workspace, which `/api/me` does not carry.
+   *
+   * The switcher renders "{n} members" and n was always 0, because
+   * `Workspace.members` is populated by the mock transport and by nothing else.
+   * This is a separate, non-blocking query on purpose: scope resolution must
+   * not wait on a decoration, and a workspace with an unknown count renders
+   * without the line rather than with a confident zero.
+   */
+  const memberCounts = useQuery({
+    queryKey: ["session", "member-counts"],
+    queryFn: async (): Promise<Record<string, number>> => {
+      const response = await fetch("/api/workspaces/member-counts", { cache: "no-store" });
+      if (!response.ok) return {};
+      const json = (await response.json()) as { counts?: Record<string, number> };
+      return json.counts ?? {};
+    },
+    staleTime: 5 * 60_000,
+    networkMode: "always",
+  });
+
+  /**
    * Memberships win over the server-rendered seed the moment they arrive.
    *
    * The seed comes from `/api/bootstrap` and is not user-specific, so it is only
    * ever a first-paint placeholder and a dev-mode fallback.
    */
   const authoritative = meQuery.data?.workspaces;
+  const counts = memberCounts.data;
   const resolvedWorkspaces = React.useMemo<Workspace[]>(() => {
-    if (!authoritative) return workspaces;
-    return authoritative.map((m) => ({ id: m.id, name: m.name }));
-  }, [authoritative, workspaces]);
+    const withCount = (workspace: Workspace): Workspace =>
+      counts?.[workspace.id] === undefined
+        ? workspace
+        : { ...workspace, members: counts[workspace.id] };
+    if (!authoritative) return workspaces.map(withCount);
+    return authoritative.map((m) => withCount({ id: m.id, name: m.name }));
+  }, [authoritative, workspaces, counts]);
 
   const resolvedDefault = meQuery.data?.defaultWorkspaceId ?? defaultWorkspaceId;
 

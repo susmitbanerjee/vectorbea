@@ -7,7 +7,7 @@ import {
   SITE, createMetadata, organizationSchema, websiteSchema, softwareApplicationSchema,
 } from "@/lib/seo";
 
-// Homepage uses the exact site title (no "| Vectorbea" template) and is the
+// Homepage uses the exact site title (no "- Vectorbea" template) and is the
 // canonical root. The visual is a client component (SSR'd, so fully crawlable);
 // this server wrapper owns the metadata + structured data.
 export const metadata: Metadata = createMetadata({

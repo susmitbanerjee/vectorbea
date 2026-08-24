@@ -145,12 +145,14 @@ function ShellInner({ children, user }: AppShellProps) {
   const workspaceList: Workspace[] = realWorkspaces.map((w) => ({
     id: w.id,
     name: w.name,
-    members: w.members ?? 0,
+    // Carried through as undefined when unknown rather than defaulted to 0 —
+    // the switcher omits the line instead of asserting an empty workspace.
+    members: w.members,
     environment: environment,
   }));
   const workspace: Workspace =
     workspaceList.find((w) => w.id === workspaceId) ??
-    workspaceList[0] ?? { id: "", name: "No workspace", members: 0, environment };
+    workspaceList[0] ?? { id: "", name: "No workspace", environment };
 
   /* ── Shortcuts ────────────────────────────────────────────────────────── */
   useShortcut({

@@ -61,6 +61,12 @@ interface MemberList {
   yourUserId: string | null;
 }
 
+interface EmailDelivery {
+  sent: boolean;
+  reason: string | null;
+  configured: boolean;
+}
+
 interface Invitation {
   id: string;
   email: string;
@@ -366,10 +372,11 @@ function InvitePanel({
   const [role, setRole] = React.useState<Role>("developer");
   const [status, setStatus] = React.useState<SaveState>(null);
   const [lastLink, setLastLink] = React.useState<string | null>(null);
+  const [delivery, setDelivery] = React.useState<EmailDelivery | null>(null);
 
   const invite = useMutation({
     mutationFn: async () =>
-      readJson<{ invitation: Invitation; acceptUrl: string }>(
+      readJson<{ invitation: Invitation; acceptUrl: string; delivery: EmailDelivery }>(
         await fetch(`/api/workspaces/${encodeURIComponent(workspaceId!)}/invitations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -380,7 +387,14 @@ function InvitePanel({
     onSuccess: (result) => {
       setEmail("");
       setLastLink(result.acceptUrl);
-      setStatus({ tone: "ok", text: `Invited ${result.invitation.email}. The link expires in 72 hours.` });
+      setDelivery(result.delivery);
+      // Two different outcomes, said differently. "Invited" over a mail failure
+      // is the reason nobody knew the emails were not going out.
+      setStatus(
+        result.delivery.sent
+          ? { tone: "ok", text: `Invitation emailed to ${result.invitation.email}. The link expires in 72 hours.` }
+          : { tone: "error", text: `${result.invitation.email} was invited, but the email did not send.` },
+      );
       onChanged();
     },
     onError: (error: Error) => setStatus({ tone: "error", text: error.message }),
@@ -429,7 +443,7 @@ function InvitePanel({
             loading={invite.isPending}
             loadingLabel="Inviting"
             iconLeft={<Icon icon={PaperPlaneTilt} size="sm" decorative />}
-            onClick={() => { setStatus(null); setLastLink(null); invite.mutate(); }}
+            onClick={() => { setStatus(null); setLastLink(null); setDelivery(null); invite.mutate(); }}
           >
             Send invitation
           </Button>
@@ -460,11 +474,36 @@ function InvitePanel({
         </Field>
       </div>
 
+      {delivery && !delivery.sent ? (
+        <AdminInlineState
+          tone="waiting"
+          title={
+            delivery.configured
+              ? "The invitation exists, but the email did not send"
+              : "Email is not configured for this deployment"
+          }
+          body={
+            <>
+              {delivery.reason ?? "The email provider did not accept the message."}{" "}
+              The invitation itself is valid — send them the link below and it works exactly the same.
+            </>
+          }
+        />
+      ) : null}
+
       {lastLink ? (
-        <div className="border-accent-border bg-accent-subtle grid gap-1.5 rounded-md border p-2.5">
+        <div
+          className={cn(
+            "grid gap-1.5 rounded-md border p-2.5",
+            delivery?.sent
+              ? "border-accent-border bg-accent-subtle"
+              : "border-status-waiting-border bg-status-waiting-subtle",
+          )}
+        >
           <Text variant="caption" tone="secondary" className="block leading-snug">
-            The invitation email is on its way. If it does not arrive, this link works just as well — it is
-            shown once and cannot be read back.
+            {delivery?.sent
+              ? "The invitation email has been sent. This link is the same one it contains — shown once, and it cannot be read back."
+              : "Send this link to them directly. It is shown once and cannot be read back, so copy it before you leave this page."}
           </Text>
           <div className="flex flex-wrap items-center gap-2">
             <Text variant="mono-sm" tone="primary" className="min-w-0 flex-1 truncate">{lastLink}</Text>

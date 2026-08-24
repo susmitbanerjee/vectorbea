@@ -95,7 +95,7 @@ export async function POST(
       return NextResponse.json({ error: "That workspace no longer exists." }, { status: 404 });
     }
 
-    const { invitation, token } = await createInvitation({
+    const { invitation, token, delivery } = await createInvitation({
       workspaceId: id,
       email: parsed.data.email,
       role: parsed.data.role ?? "viewer",
@@ -109,7 +109,7 @@ export async function POST(
       action: AuditAction.MEMBER_INVITE,
       targetType: "invitation",
       targetId: invitation.id,
-      after: { email: invitation.email, role: invitation.role },
+      after: { email: invitation.email, role: invitation.role, emailSent: delivery.sent },
       ...actor,
       request,
     });
@@ -117,9 +117,13 @@ export async function POST(
     // The raw token is returned ONCE, to the admin who created the invitation,
     // so the screen can offer a copyable link when mail is unavailable. It is
     // not stored and cannot be read back.
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+    //
+    // `delivery` is returned rather than swallowed: an admin who is told
+    // "invited" and never asked why nothing arrived is the exact failure this
+    // whole route was reported for.
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").replace(/\/+$/, "");
     return NextResponse.json(
-      { invitation, acceptUrl: `${appUrl}/auth/accept-invite?token=${token}` },
+      { invitation, acceptUrl: `${appUrl}/auth/accept-invite?token=${token}`, delivery },
       { status: 201 },
     );
   } catch (error) {

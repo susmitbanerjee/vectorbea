@@ -1,8 +1,18 @@
 import "server-only";
 
-const APP_URL = () => process.env.APP_URL ?? "https://app.vectorbea.app";
-const PREF_URL = (workspaceId: string) =>
-  `${APP_URL()}/settings?tab=notifications${workspaceId ? `&org=${encodeURIComponent(workspaceId)}` : ""}`;
+/**
+ * Where the links point.
+ *
+ * `NEXT_PUBLIC_APP_URL` first, because that is the variable the rest of the app
+ * reads and the one that is actually set. `APP_URL` was read alone here, is set
+ * nowhere, and its fallback was `app.vectorbea.app` — a host that does not
+ * serve this product. Every link in every email pointed at it.
+ */
+const APP_URL = () =>
+  (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "https://vectorbea.com").replace(/\/+$/, "");
+
+const SETTINGS_URL = (workspaceId?: string) =>
+  `${APP_URL()}/settings${workspaceId ? `?org=${encodeURIComponent(workspaceId)}` : ""}`;
 
 type StatusTone = "success" | "warning" | "failure" | "info" | "neutral";
 
@@ -16,8 +26,12 @@ const T = {
   textBody:      "#1F2937",
   textSecondary: "#374151",
   textMuted:     "#4B5563",
-  accent:        "#2563EB",
-  accentDark:    "#1D4ED8",
+  // Iris — the product's brand colour (`--iris-600`, the light-theme accent in
+  // src/styles/tokens/colour.css). It was a generic `#2563EB` blue, which
+  // belongs to nothing: the button in the email looked like a different product
+  // from the button the recipient lands on.
+  accent:        "#4644d6",
+  accentDark:    "#3735ac",
   successText:   "#047857",
   successHeading:"#064E3B",
   successBg:     "#ECFDF5",
@@ -98,6 +112,32 @@ function nextStep(text: string): string {
 </div>`;
 }
 
+/**
+ * The same destination as the button, in copyable plain text.
+ *
+ * Corporate mail clients and security gateways routinely strip or rewrite
+ * styled anchors, and a recipient staring at a dead button has no way to
+ * proceed. On an invitation this is the difference between joining and giving
+ * up, so it is not optional decoration.
+ */
+function linkFallback(href: string): string {
+  return `<p style="margin:0 0 4px;font-size:12px;color:${T.textMuted};line-height:1.5;">Or paste this into your browser:</p>
+<p style="margin:0 0 20px;font-size:12px;line-height:1.5;word-break:break-all;"><a href="${href}" style="color:${T.accent};text-decoration:none;">${esc(href)}</a></p>`;
+}
+
+/** One line of facts, comma-separated. Lighter than a table when there are two or three. */
+function metaLine(parts: Array<{ label: string; value: string | null | undefined }>): string {
+  const filtered = parts.filter((part) => part.value != null && String(part.value).trim().length > 0);
+  if (filtered.length === 0) return "";
+  const body = filtered
+    .map(
+      (part) =>
+        `<span style="white-space:nowrap;"><span style="color:${T.textMuted};">${esc(part.label)}</span> <span style="color:${T.textPrimary};font-weight:600;">${esc(part.value ?? "")}</span></span>`,
+    )
+    .join(`<span style="color:${T.borderStrong};padding:0 8px;">·</span>`);
+  return `<p style="margin:0 0 22px;font-size:13px;line-height:1.9;">${body}</p>`;
+}
+
 function sectionHeading(text: string): string {
   return `<p style="margin:20px 0 8px;font-size:11px;font-weight:700;color:${T.textMuted};">${esc(text)}</p>`;
 }
@@ -135,10 +175,22 @@ function layout(args: {
   preheader?: string;
   body: string;
   reason?: string;
+  /**
+   * The one link in the footer. Defaults to this workspace's settings.
+   *
+   * It used to be a hardcoded "Manage notification preferences" pointing at
+   * `/settings?tab=notifications` — a tab that does not exist. A dead link in
+   * the footer of every email the product sends is the sort of detail that
+   * decides whether the rest of it is believed.
+   */
+  footerLink?: { label: string; href: string } | null;
 }) {
   const preheader = args.preheader ?? "";
-  const workspaceName = args.workspaceName ? esc(args.workspaceName) : "VectorBea";
-  const prefsLink = PREF_URL(args.workspaceId ?? "");
+  const workspaceName = args.workspaceName ? esc(args.workspaceName) : "Vectorbea";
+  const footerLink =
+    args.footerLink === null
+      ? null
+      : (args.footerLink ?? { label: "Workspace settings", href: SETTINGS_URL(args.workspaceId) });
   const reason = args.reason ?? "You received this because notifications are enabled for this workspace";
 
   // Inline SVG logo as base64 data URI — renders in all email clients without
@@ -152,7 +204,7 @@ function layout(args: {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-<title>VectorBea notification</title>
+<title>Vectorbea notification</title>
 <!--[if !mso]><!-->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
@@ -177,7 +229,7 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
               <tr>
                 <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">
                   <a href="${APP_URL()}" style="text-decoration:none;color:${T.textPrimary};">
-                    <img src="${LOGO_URI}" width="20" height="20" alt="VectorBea" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:6px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;letter-spacing:-0.02em;">VectorBea</span>
+                    <img src="${LOGO_URI}" width="20" height="20" alt="Vectorbea" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:6px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;letter-spacing:-0.02em;">Vectorbea</span>
                   </a>
                 </td>
                 <td align="right" style="font-size:11px;font-weight:600;color:${T.textMuted};">${workspaceName}</td>
@@ -201,9 +253,11 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
         <tr>
           <td style="padding:16px 4px 8px;">
             <p style="margin:0 0 6px;font-size:12px;color:${T.textMuted};line-height:1.5;">${esc(reason)}</p>
-            <p style="margin:0;font-size:12px;color:${T.textMuted};">
-              <a href="${prefsLink}" style="color:${T.accent};text-decoration:none;font-weight:600;">Manage notification preferences</a>
-            </p>
+            ${footerLink
+              ? `<p style="margin:0;font-size:12px;color:${T.textMuted};">
+              <a href="${footerLink.href}" style="color:${T.accent};text-decoration:none;font-weight:600;">${esc(footerLink.label)}</a>
+            </p>`
+              : ""}
           </td>
         </tr>
 
@@ -274,29 +328,135 @@ export function teamInvitationEmail(args: {
   acceptUrl: string;
   expiresAt: string;
 }) {
-  const subject = `${args.inviterName} invited you to ${args.workspaceName} on VectorBea`;
-  const expiryDate = new Date(args.expiresAt).toLocaleDateString("en-US", { dateStyle: "long" });
+  const subject = `${args.inviterName} invited you to ${args.workspaceName} on Vectorbea`;
+  const expiry = new Date(args.expiresAt);
+  const expiryDate = expiry.toLocaleDateString("en-US", { dateStyle: "long" });
+  const roleLabel = ROLE_LABELS[args.role] ?? args.role;
+
+  /*
+   * ONE THING TO DO, AND EVERYTHING NEEDED TO DECIDE IT.
+   *
+   * The previous version stacked a badge, a heading, a restatement of the
+   * heading, a three-row table, a button, and a "Recommended next step" box
+   * that repeated the expiry date already in the table — six blocks to say
+   * "someone invited you, click here". An invitation is read in four seconds on
+   * a phone: who, where, as what, by when, and the button.
+   *
+   * `ROLE_LABELS` explains the role rather than naming it. "Developer" tells
+   * somebody outside the company nothing about what they are accepting.
+   */
   const body = `
-${statusBadge("Workspace invite", "info")}
-<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">You have been invited to join ${esc(args.workspaceName)}</h1>
-<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">${esc(args.inviterName)} has invited you to collaborate on VectorBea</p>
-${kvTable([
-  { key: "Workspace", value: args.workspaceName },
-  { key: "Role", value: args.role },
-  { key: "Expires", value: expiryDate },
+<h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:${T.textPrimary};letter-spacing:-0.01em;">Join ${esc(args.workspaceName)} on Vectorbea</h1>
+<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${esc(args.inviterName)} invited you to this workspace as ${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong> — ${esc(roleLabel.summary)}.</p>
+${metaLine([
+  { label: "Workspace", value: args.workspaceName },
+  { label: "Invited by", value: args.inviterName },
+  { label: "Expires", value: expiryDate },
 ])}
 ${actionButton("Accept invitation", args.acceptUrl)}
-${nextStep("Accept this invitation from a secure, trusted device. The link expires on " + expiryDate + ".")}
+${linkFallback(args.acceptUrl)}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
-      preheader: `Invitation to join ${args.workspaceName} on VectorBea`,
+      preheader: `${args.inviterName} invited you to ${args.workspaceName}. The link expires ${expiryDate}.`,
       body,
-      reason: "You received this because a workspace admin invited your email address",
+      reason: `You received this because ${args.inviterName} invited this address to ${args.workspaceName}. If you were not expecting it, ignore this email — the invitation expires on its own.`,
+      // No footer link: the recipient is not a member yet, so every in-product
+      // destination would refuse them.
+      footerLink: null,
     }),
-    text: `Invited to ${args.workspaceName}\nBy ${args.inviterName}\nRole ${args.role}\nExpires ${expiryDate}\nAccept ${args.acceptUrl}`,
+    text: [
+      `Join ${args.workspaceName} on Vectorbea`,
+      ``,
+      `${args.inviterName} invited you as ${roleLabel.name} — ${roleLabel.summary}.`,
+      `The invitation expires on ${expiryDate}.`,
+      ``,
+      `Accept: ${args.acceptUrl}`,
+      ``,
+      `If you were not expecting this, ignore it — the invitation expires on its own.`,
+    ].join("\n"),
+  };
+}
+
+/**
+ * What a role actually means, for somebody outside the company.
+ *
+ * Matches `ROLE_OPTIONS` in the Members screen. An invitation that says
+ * "Developer" and nothing else asks the recipient to accept a permission set
+ * they cannot see.
+ */
+const ROLE_LABELS: Record<string, { name: string; article: string; summary: string }> = {
+  owner: { name: "Owner", article: "an", summary: "full control, including billing and deleting the workspace" },
+  admin: { name: "Admin", article: "an", summary: "manage members, settings and connections" },
+  developer: { name: "Developer", article: "a", summary: "build and run workflows" },
+  editor: { name: "Developer", article: "a", summary: "build and run workflows" },
+  viewer: { name: "Viewer", article: "a", summary: "read-only access across the workspace" },
+};
+
+// ─── Template 1b: Welcome, after an invitation is accepted ───────────────────
+
+/**
+ * Sent once, to the person who just joined.
+ *
+ * Not a duplicate of the invitation: that one asked a question, this one
+ * confirms the answer and orients somebody who has never seen this workspace
+ * before. It matters most for the case the invitation cannot cover — a person
+ * who already has their own workspace and now has two, and needs to know the
+ * switcher exists before they go looking for work that is not in the one they
+ * are staring at.
+ */
+export function workspaceWelcomeEmail(args: {
+  workspaceName: string;
+  workspaceId: string;
+  role: string;
+  invitedByName?: string | null;
+  /** True when this is not the only workspace they belong to. */
+  hasOtherWorkspaces: boolean;
+}) {
+  const roleLabel = ROLE_LABELS[args.role] ?? { name: args.role, article: "a", summary: "" };
+  const openUrl = `${APP_URL()}/control?org=${encodeURIComponent(args.workspaceId)}`;
+  const subject = `You are in — ${args.workspaceName} on Vectorbea`;
+
+  const body = `
+${statusBadge("You're in", "success")}
+<h1 style="margin:16px 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:${T.textPrimary};letter-spacing:-0.01em;">Welcome to ${esc(args.workspaceName)}</h1>
+<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${args.invitedByName ? `${esc(args.invitedByName)} added you as ` : "You joined as "}${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong>${roleLabel.summary ? ` — ${esc(roleLabel.summary)}` : ""}.</p>
+${args.hasOtherWorkspaces
+  // Neutral, not `info`: the info tone's blue sits beside the iris button and
+  // reads as a second brand colour, and an orientation note is guidance rather
+  // than a status. Nothing here is a state anybody has to act on.
+  ? calloutBox(
+      `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them — ${args.workspaceName} will not appear in your other workspace's runs, workflows or connections.`,
+      "neutral",
+    )
+  : ""}
+${actionButton(`Open ${args.workspaceName}`, openUrl)}
+${linkFallback(openUrl)}
+`;
+
+  return {
+    subject,
+    html: layout({
+      workspaceId: args.workspaceId,
+      workspaceName: args.workspaceName,
+      preheader: `You joined ${args.workspaceName} as ${roleLabel.name}.`,
+      body,
+      reason: `You received this because you accepted an invitation to ${args.workspaceName}.`,
+      footerLink: { label: "Leave this workspace", href: `${APP_URL()}/settings/members?org=${encodeURIComponent(args.workspaceId)}` },
+    }),
+    text: [
+      `Welcome to ${args.workspaceName}`,
+      ``,
+      `${args.invitedByName ? `${args.invitedByName} added you as ` : "You joined as "}${roleLabel.article} ${roleLabel.name}${roleLabel.summary ? ` — ${roleLabel.summary}` : ""}.`,
+      args.hasOtherWorkspaces
+        ? `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them.`
+        : ``,
+      ``,
+      `Open it: ${openUrl}`,
+    ].filter(Boolean).join("\n"),
   };
 }
 
@@ -606,7 +766,7 @@ ${args.gateResults.map((g) => gateRow(g.gate, g.status)).join("")}
   const body = `
 ${statusBadge("Rollout blocked", "failure")}
 <h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Rollout blocked for ${esc(args.promptName)}</h1>
-<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">VectorBea blocked this rollout because one or more safety gates failed</p>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">Vectorbea blocked this rollout because one or more safety gates failed</p>
 ${calloutBox("This version cannot be rolled out until the failing gates are resolved.", "failure")}
 ${sectionHeading("Rollout details")}
 ${kvTable([

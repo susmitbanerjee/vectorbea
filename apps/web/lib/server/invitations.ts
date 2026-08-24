@@ -3,8 +3,8 @@ import "server-only";
 import { createHash, randomBytes, randomUUID } from "crypto";
 
 import { appQuery, appQueryOne, withTransaction } from "@/lib/server/app-db";
-import { sendEmail } from "@/lib/server/email";
-import { teamInvitationEmail } from "@/lib/server/email-templates";
+import { emailConfigured, sendEmail } from "@/lib/server/email";
+import { teamInvitationEmail, workspaceWelcomeEmail } from "@/lib/server/email-templates";
 import { parseRole, type MemberRole } from "@/lib/server/workspace-members";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -111,7 +111,7 @@ export async function createInvitation(args: {
   invitedBy: string | null;
   inviterName: string;
   workspaceName: string;
-}): Promise<{ invitation: Invitation; token: string }> {
+}): Promise<{ invitation: Invitation; token: string; delivery: EmailDelivery }> {
   const role = parseRole(args.role);
   if (!INVITABLE_ROLES.includes(role)) {
     throw new Error("Ownership is transferred from the Members list, not invited.");
@@ -173,24 +173,67 @@ export async function createInvitation(args: {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "https://vectorbea.com";
   const acceptUrl = `${appUrl.replace(/\/+$/, "")}/auth/accept-invite?token=${rawToken}`;
 
-  // Sending is not awaited and never rethrows: the invitation exists either
-  // way, and the screen offers the link to copy, so a mail outage degrades to
-  // "send them this link" rather than losing the invitation.
-  const template = teamInvitationEmail({
-    inviterName: args.inviterName,
-    workspaceName: args.workspaceName,
-    role,
-    acceptUrl,
-    expiresAt: expires,
-  });
-  void sendEmail({ ...template, to: email }).catch((error: unknown) => {
-    console.warn(
-      "[invitations] the invitation was created but the email failed:",
-      error instanceof Error ? error.message : error,
-    );
-  });
+  const delivery = await deliver(email, () =>
+    teamInvitationEmail({
+      inviterName: args.inviterName,
+      workspaceName: args.workspaceName,
+      role,
+      acceptUrl,
+      expiresAt: expires,
+    }),
+  );
 
-  return { invitation: toInvitation(row), token: rawToken };
+  return { invitation: toInvitation(row), token: rawToken, delivery };
+}
+
+export interface EmailDelivery {
+  sent: boolean;
+  /** Why it did not send — shown to the admin who clicked Invite, not swallowed. */
+  reason: string | null;
+  configured: boolean;
+}
+
+/**
+ * Send, and AWAIT it.
+ *
+ * This was `void sendEmail(...).catch(...)`, which is the single most common way
+ * to lose mail from a serverless function: the handler returns, the runtime
+ * freezes the instance, and the in-flight fetch to the provider is discarded
+ * mid-request. Nothing throws and nothing logs, so the product reports "invited"
+ * and no email exists — which is exactly the symptom reported. `sendEmail` also
+ * retries with backoff, so the window it needs is longer than a request that has
+ * already returned.
+ *
+ * Awaiting costs the admin a few hundred milliseconds on a click they are
+ * already watching, and buys a truthful answer.
+ *
+ * It still never throws: the invitation row exists either way, and the screen
+ * offers the link to copy — so a mail outage degrades to "send them this link"
+ * rather than to a failed invitation the admin has to guess about.
+ */
+async function deliver(
+  to: string,
+  build: () => { subject: string; html: string; text: string },
+): Promise<EmailDelivery> {
+  const configured = emailConfigured();
+  if (!configured) {
+    return {
+      sent: false,
+      configured: false,
+      reason:
+        "Email is not configured for this deployment, so no message was sent. Set RESEND_API_KEY (or SMTP/SendGrid credentials) and EMAIL_FROM.",
+    };
+  }
+  try {
+    const result = await sendEmail({ ...build(), to });
+    if (result.ok) return { sent: true, configured, reason: null };
+    console.error(`[invitations] email to ${to} failed via ${result.provider}: ${result.error}`);
+    return { sent: false, configured, reason: result.error ?? "The email provider rejected the message." };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`[invitations] email to ${to} threw: ${reason}`);
+    return { sent: false, configured, reason };
+  }
 }
 
 export async function listInvitations(workspaceId: string): Promise<Invitation[]> {
@@ -220,6 +263,8 @@ export interface AcceptedInvitation {
   workspaceId: string;
   workspaceName: string;
   role: MemberRole;
+  /** Whether the welcome email reached them. Never blocks the join. */
+  welcome: EmailDelivery;
 }
 
 /**
@@ -233,7 +278,7 @@ export interface AcceptedInvitation {
 export async function acceptInvitation(token: string, userId: string): Promise<AcceptedInvitation> {
   const tokenHash = hashToken(token);
 
-  return withTransaction(async (tx) => {
+  const joined = await withTransaction(async (tx) => {
     const rows = await tx.query<InvitationRow & { workspace_name: string }>(
       `UPDATE workspace_invitations i
           SET accepted_at = now()
@@ -266,6 +311,47 @@ export async function acceptInvitation(token: string, userId: string): Promise<A
       [row.workspace_id, userId, role],
     );
 
-    return { workspaceId: row.workspace_id, workspaceName: row.workspace_name, role };
+    return {
+      workspaceId: row.workspace_id,
+      workspaceName: row.workspace_name,
+      role,
+      inviterName: row.inviter_name,
+    };
   });
+
+  /*
+   * The welcome email is sent AFTER the transaction commits, never inside it.
+   *
+   * Inside, a mail provider timing out would roll back a membership that was
+   * legitimately earned — the person would click a now-burned link and be told
+   * their invitation is invalid. Joining is the guarantee; the email is a
+   * courtesy that follows it.
+   */
+  const context = await appQueryOne<{ email: string | null; other_workspaces: string }>(
+    `SELECT u.email,
+            (SELECT count(*) FROM workspace_members m
+              WHERE m.user_id = u.id AND m.status = 'active'
+                AND m.workspace_id <> $2::uuid) AS other_workspaces
+       FROM app_users u WHERE u.id = $1::uuid`,
+    [userId, joined.workspaceId],
+  );
+
+  const welcome = context?.email
+    ? await deliver(context.email, () =>
+        workspaceWelcomeEmail({
+          workspaceName: joined.workspaceName,
+          workspaceId: joined.workspaceId,
+          role: joined.role,
+          invitedByName: joined.inviterName || null,
+          hasOtherWorkspaces: Number(context.other_workspaces ?? 0) > 0,
+        }),
+      )
+    : { sent: false, configured: emailConfigured(), reason: "No email address on file for this account." };
+
+  return {
+    workspaceId: joined.workspaceId,
+    workspaceName: joined.workspaceName,
+    role: joined.role,
+    welcome,
+  };
 }

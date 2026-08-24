@@ -13,7 +13,7 @@
 
 export interface MarketingPage {
   slug: string;
-  /** Page topic used in <title> ("<title> | Vectorbea") and nav. */
+  /** Page topic used in <title> ("<title> - Vectorbea") and nav. */
   title: string;
   /** Short label for compact nav/related lists. */
   navLabel: string;

@@ -84,9 +84,7 @@ export function WorkspaceSwitcher({
               <span className="font-ui text-body-sm text-fg-primary block truncate font-medium">
                 {workspace.name}
               </span>
-              <span className="font-ui text-caption text-fg-muted block">
-                <span className="tabular">{workspace.members}</span> members
-              </span>
+              <MemberCount count={workspace.members} />
             </span>
             <svg viewBox="0 0 16 16" className="text-fg-muted size-3.5 shrink-0" fill="none" aria-hidden="true">
               <path d="M5.5 6.5 8 4l2.5 2.5M5.5 9.5 8 12l2.5-2.5" stroke="currentColor" strokeWidth="1.4"
@@ -148,9 +146,7 @@ export function WorkspaceSwitcher({
                         <PatternedInitial name={w.name} size="sm" />
                         <span className="min-w-0 flex-1">
                           <span className="font-ui text-body-sm text-fg-primary block truncate">{w.name}</span>
-                          <span className="font-ui text-caption text-fg-muted block">
-                            <span className="tabular">{w.members}</span> members
-                          </span>
+                          <MemberCount count={w.members} />
                         </span>
                       </button>
                     );
@@ -179,5 +175,23 @@ export function WorkspaceSwitcher({
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+  );
+}
+
+/**
+ * The headcount, or nothing.
+ *
+ * An unknown count renders no line at all rather than "0 members". The zero was
+ * not a real reading — `/api/me` does not return a count, and `?? 0` turned the
+ * absence into an assertion that the workspace was empty, which is exactly the
+ * kind of number somebody trusts because it looks like every other number on
+ * the screen.
+ */
+function MemberCount({ count }: { count: number | undefined }) {
+  if (count === undefined) return null;
+  return (
+    <span className="font-ui text-caption text-fg-muted block">
+      <span className="tabular">{count}</span> {count === 1 ? "member" : "members"}
+    </span>
   );
 }

@@ -16,7 +16,14 @@ import { APPROVALS, CONNECTIONS, INCIDENTS } from "./fixtures";
 export interface Workspace {
   id: string;
   name: string;
-  members: number;
+  /**
+   * Active member count, or undefined when it has not been read.
+   *
+   * Optional on purpose: `/api/me` does not carry it, and coercing the absence
+   * to 0 rendered "0 members" under a workspace with people in it — a wrong
+   * number nobody could tell apart from a right one.
+   */
+  members?: number;
   environment: EnvironmentId;
 }
 

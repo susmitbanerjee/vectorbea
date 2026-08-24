@@ -30,13 +30,18 @@ interface Section {
   prefix?: string;
 }
 
+/*
+ * The audit log is deliberately absent. It is a record you go and read, not a
+ * thing you configure, and it keeps its own top-level place in the sidebar —
+ * listing it here too would give it two front doors and highlight neither
+ * correctly.
+ */
 const SECTIONS: Section[] = [
   { href: "/settings" as Route, label: "General" },
   { href: "/settings/profile" as Route, label: "Profile" },
   { href: "/settings/members" as Route, label: "Members" },
   { href: "/settings/billing" as Route, label: "Plan & access" },
   { href: "/settings/usage" as Route, label: "Usage & limits" },
-  { href: "/audit-log" as Route, label: "Audit log" },
   { href: "/settings/sdk" as Route, label: "SDK & ingest" },
 ];
 

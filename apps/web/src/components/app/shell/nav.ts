@@ -85,9 +85,19 @@ export const NAV: NavGroup[] = [
   {
     id: "govern",
     label: "Govern",
+    /*
+     * Usage & limits and Members are sections OF Settings, and listing them
+     * here as well gave each two front doors with no way to tell which was
+     * canonical — the sidebar highlighted one thing while the settings nav
+     * highlighted another on the same screen. They are reachable from Settings
+     * and from the command palette.
+     *
+     * The audit log stays top-level and is deliberately NOT a settings section:
+     * it is a record you go and read during an incident or a review, not a
+     * thing you configure, and burying it two clicks deep is how a governance
+     * surface stops being consulted.
+     */
     items: [
-      { label: "Usage & limits", href: "/settings/usage" as Route, icon: TokenMeterIcon },
-      { label: "Members", href: "/settings/members" as Route, icon: UsersThree as IconComponent },
       { label: "Audit log", href: "/audit-log" as Route, icon: ByokKeyIcon },
       { label: "Settings", href: "/settings" as Route, icon: GearSix as IconComponent },
     ],
