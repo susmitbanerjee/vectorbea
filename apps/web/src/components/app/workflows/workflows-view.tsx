@@ -6,6 +6,7 @@ import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
+import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
@@ -109,6 +110,7 @@ export interface WorkflowsViewProps {
 }
 
 export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
+  const { canBuild } = useWorkspaceRole();
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -410,7 +412,13 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
               onRemove={remove}
               onUpdate={update}
             />
-            <Button variant="primary" size="sm" onClick={() => setParams({ create: "1" })}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!canBuild}
+              title={canBuild ? undefined : "Creating a workflow needs the developer role or higher. Ask an owner or admin."}
+              onClick={() => setParams({ create: "1" })}
+            >
               New workflow
             </Button>
           </>

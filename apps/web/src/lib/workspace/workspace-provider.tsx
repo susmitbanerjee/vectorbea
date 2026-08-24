@@ -8,7 +8,7 @@ import type { Route } from "next";
 import { useApi } from "~/lib/api/api-provider";
 import { isUnauthenticated } from "~/lib/api/errors";
 import { queryKeys } from "~/lib/api/keys";
-import type { Environment, Workspace } from "./types";
+import { hasRole, type Environment, type Workspace, type WorkspaceRole } from "./types";
 
 const WORKSPACE_STORAGE_KEY = "vectorbea-workspace";
 const ENVIRONMENT_STORAGE_KEY = "vectorbea-environment";
@@ -60,6 +60,19 @@ export interface WorkspaceState {
   workspaceId: string | null;
   workspace: Workspace | null;
   environmentId: Environment;
+  /**
+   * Your role in the ACTIVE workspace, from `/api/me`.
+   *
+   * One source, resolved where scope is resolved, because role is per
+   * membership: the same person is an owner in one workspace and a viewer in
+   * the next. Screens that derived it separately are how "Your role: Viewer"
+   * once appeared beside a row reading Owner.
+   *
+   * Null until memberships arrive. Treat that as "not yet known", never as
+   * "no permission" — a UI that hides its controls during a load flashes a
+   * read-only screen at an owner on every refresh.
+   */
+  role: WorkspaceRole | null;
   /** True until the first resolution completes. */
   resolving: boolean;
   /** Set when there is no usable workspace, and why. See [WorkspaceProblem]. */
@@ -201,6 +214,7 @@ export function WorkspaceProvider({
   }, [authoritative, workspaces, counts]);
 
   const resolvedDefault = meQuery.data?.defaultWorkspaceId ?? defaultWorkspaceId;
+
 
   const urlWorkspace = searchParams.get("ws");
   const urlEnvironment = searchParams.get("env");
@@ -354,6 +368,23 @@ export function WorkspaceProvider({
    * Reported rather than left as "resolving", because the three causes need
    * three different screens: sign in, ask for an invitation, or try again.
    */
+/**
+   * The role carried by the ACTIVE membership.
+   *
+   * `editor` is a legacy value that the database's CHECK constraint does not
+   * permit; it is read as `developer`, matching `normalizeRole` on the server.
+   * An unrecognised role falls to `viewer` — an unknown role must mean less
+   * access, never more.
+   */
+  const role = React.useMemo<WorkspaceRole | null>(() => {
+    if (!workspaceId || !meQuery.data) return null;
+    const raw = meQuery.data.workspaces.find((w) => w.id === workspaceId)?.role;
+    if (raw === undefined) return null;
+    if (raw === "owner" || raw === "admin" || raw === "developer" || raw === "viewer") return raw;
+    if (raw === "editor") return "developer";
+    return "viewer";
+  }, [meQuery.data, workspaceId]);
+
   const problem = React.useMemo<WorkspaceProblem | null>(() => {
     if (workspaceId !== null || resolving) return null;
     // Authenticated with a real answer: zero memberships is the answer.
@@ -372,6 +403,7 @@ export function WorkspaceProvider({
       workspaceId,
       workspace: resolvedWorkspaces.find((w) => w.id === workspaceId) ?? null,
       environmentId,
+      role,
       resolving,
       problem,
       retry,
@@ -387,6 +419,7 @@ export function WorkspaceProvider({
       resolvedWorkspaces,
       workspaceId,
       environmentId,
+      role,
       resolving,
       problem,
       retry,
@@ -415,4 +448,42 @@ export function useWorkspace(): WorkspaceState {
 export function useScope(): { workspaceId: string | null; environmentId: Environment } {
   const { workspaceId, environmentId } = useWorkspace();
   return React.useMemo(() => ({ workspaceId, environmentId }), [workspaceId, environmentId]);
+}
+
+/**
+ * Your role in the active workspace, and the permission questions worth asking.
+ *
+ * The API is the enforcement — `RbacGuard` in the Kotlin service refuses on the
+ * role carried by the verified session. This hook exists so the UI does not
+ * OFFER what the API will refuse: a delete button that always returns 403 is a
+ * worse experience than no delete button, and it teaches people that errors are
+ * normal.
+ *
+ * Never treat this as the security boundary. Anything gated here alone is
+ * ungated.
+ */
+export function useWorkspaceRole(): {
+  role: WorkspaceRole | null;
+  /** Still resolving — show controls optimistically rather than flashing read-only. */
+  resolving: boolean;
+  is(required: WorkspaceRole): boolean;
+  /** Build, run and delete workflows, agents and tools. */
+  canBuild: boolean;
+  /** Connections, schedules, members, workspace settings. */
+  canAdminister: boolean;
+  /** Delete the workspace, transfer ownership. */
+  isOwner: boolean;
+} {
+  const { role, resolving } = useWorkspace();
+  return React.useMemo(
+    () => ({
+      role,
+      resolving,
+      is: (required: WorkspaceRole) => hasRole(role, required),
+      canBuild: hasRole(role, "developer"),
+      canAdminister: hasRole(role, "admin"),
+      isOwner: hasRole(role, "owner"),
+    }),
+    [role, resolving],
+  );
 }

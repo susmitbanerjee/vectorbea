@@ -280,10 +280,16 @@ class RunRoutes(
         val requestedMode = if (body.mode == "real") "real" else "simulation"
         if (requestedMode == "real" && beta != null) {
             val controls = beta.getWorkspaceBetaControls(ctx.workspaceId)
-            val realEnabled = controls?.realExecutionEnabled ?: false
+            // No controls row means nobody has made a decision about this
+            // workspace, so the deployment's default applies. This read
+            // `?: false` regardless of DEFAULT_EXECUTION_MODE, which made that
+            // setting inert: it existed, was documented, and changed nothing.
+            // An explicit row still wins in both directions.
+            val realEnabled = controls?.realExecutionEnabled
+                ?: (appConfig?.defaultExecutionMode == "real_execution_enabled")
             if (!realEnabled) {
-                throw ApiError.Forbidden("REAL_EXECUTION_NOT_ENABLED: Real execution requires admin approval. " +
-                    "Contact your Vectorbea admin or run in simulation mode.")
+                throw ApiError.Forbidden("REAL_EXECUTION_NOT_ENABLED: Real execution is switched off for this " +
+                    "workspace. Ask a Vectorbea admin to enable it, or run in simulation mode.")
             }
         }
 

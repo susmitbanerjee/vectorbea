@@ -305,13 +305,22 @@ export async function getWorkspaceExecutionAccess(
   );
 
   if (!row) {
-    // Matches RunRoutes: with no controls row, simulation is allowed and real
-    // execution is not. Stating the effective answer beats stating "unknown".
+    /*
+     * No controls row means nobody has made a decision about this workspace, so
+     * the platform default applies — real execution since V039, matching
+     * `RunRoutes` and `AppConfig.defaultExecutionMode`. Stating the effective
+     * answer beats stating "unknown".
+     *
+     * This mirrors the API rather than deciding anything: if a deployment sets
+     * DEFAULT_EXECUTION_MODE=simulation_only, that variable is not readable
+     * from the web app, so the honest reading is "provisioned: false" and the
+     * screen says these are platform defaults rather than this workspace's.
+     */
     return {
       provisioned: false,
-      accessStatus: "pending",
-      executionMode: "simulation_only",
-      realExecutionEnabled: false,
+      accessStatus: "approved",
+      executionMode: "real_execution_enabled",
+      realExecutionEnabled: true,
       simulationEnabled: true,
       disabledReason: null,
     };

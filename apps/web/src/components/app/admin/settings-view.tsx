@@ -17,10 +17,10 @@ import { Input } from "~/components/ui/input";
 import { MonoId } from "~/components/ui/mono-id";
 import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalLayout, ModalSection } from "~/components/ui/modal";
-import { useScope } from "~/lib/workspace/workspace-provider";
+import { useScope, useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { AdminInlineState, describeAdminFailure } from "./admin-states";
 import { SettingsNav } from "./settings-nav";
-import { Fact, Panel, StatusLine, type SaveState } from "./settings-chrome";
+import { Fact, Panel, StatusLine, type SaveState, SettingsDenied } from "./settings-chrome";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    SETTINGS — GENERAL
@@ -94,6 +94,8 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
 }
 
 export function SettingsView() {
+  const workspaceRole = useWorkspaceRole();
+
   const { workspaceId } = useScope();
   const queryClient = useQueryClient();
 
@@ -113,6 +115,24 @@ export function SettingsView() {
   const canRename = role === "owner" || role === "admin";
   const canDelete = role === "owner";
 
+  /*
+   * Below admin, this section is refused by the API — every settings route runs
+   * `requireWorkspaceRole`. Returning early rather than rendering a disabled
+   * page keeps one answer on screen instead of a form nobody can submit.
+   *
+   * Only once the role is KNOWN: `resolving` renders the page as normal, so an
+   * owner never sees a denial flash while memberships load.
+   */
+  if (!workspaceRole.resolving && !workspaceRole.canAdminister) {
+    return (
+      <PageContainer>
+        <PageHeader eyebrow="Govern" title="Settings" description="This workspace's identity, the model providers it can call, and the controls that end it." />
+        <SettingsNav />
+        <SettingsDenied role={workspaceRole.role} section="Workspace settings" />
+      </PageContainer>
+    );
+  }
+
   return (
     <PageContainer>
       <PageHeader
@@ -130,6 +150,7 @@ export function SettingsView() {
       />
 
       <SettingsNav />
+
 
       {workspace.error ? (() => {
         const failure = describeAdminFailure(workspace.error, "workspace settings");

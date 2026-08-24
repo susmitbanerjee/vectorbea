@@ -305,6 +305,12 @@ fun main() {
 
     // 7. Router + routes
     val router = Router()
+    // Role enforcement, installed once for every route on this router. See
+    // RbacGuard: membership alone was previously checked, so a viewer could
+    // create and delete workflows, agents and tools.
+    router.authorize = { req, method, pattern ->
+        com.vectorbea.api.auth.RbacGuard.check(req, method, pattern)
+    }
     HealthRoutes(config, database, redis).register(router)
     VersionRoutes(config).register(router)
     NetworkRoutes().register(router)

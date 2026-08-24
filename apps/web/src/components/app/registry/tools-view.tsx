@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
+import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
@@ -33,6 +34,7 @@ import { useApi } from "~/lib/api/api-provider";
 const RISK_ORDER = { critical: 0, high: 1, medium: 2, low: 3 } as const;
 
 export function ToolsView({ forceState }: { forceState?: TableStatus }) {
+  const { canBuild } = useWorkspaceRole();
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -287,7 +289,13 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         title="Tools"
         description="Every registered tool, riskiest first — what it can do, what it is allowed to do, and how often it works."
         actions={
-          <Button variant="primary" size="sm" onClick={() => setParams({ create: "1" })}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!canBuild}
+            title={canBuild ? undefined : "Creating a tool needs the developer role or higher. Ask an owner or admin."}
+            onClick={() => setParams({ create: "1" })}
+          >
             New tool
           </Button>
         }

@@ -6,6 +6,7 @@ import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
+import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
@@ -35,6 +36,7 @@ import { useApi } from "~/lib/api/api-provider";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function AgentsView({ forceState }: { forceState?: TableStatus }) {
+  const { canBuild } = useWorkspaceRole();
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -283,7 +285,13 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
         title="Agents"
         description="Every registered agent, with what it costs, how often it works, and exactly what it is permitted to do."
         actions={
-          <Button variant="primary" size="sm" onClick={() => setParams({ create: "1" })}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!canBuild}
+            title={canBuild ? undefined : "Creating an agent needs the developer role or higher. Ask an owner or admin."}
+            onClick={() => setParams({ create: "1" })}
+          >
             New agent
           </Button>
         }

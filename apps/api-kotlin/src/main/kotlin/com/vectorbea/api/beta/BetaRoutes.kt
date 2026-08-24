@@ -34,6 +34,16 @@ class BetaRoutes(
     private val log    = org.slf4j.LoggerFactory.getLogger(BetaRoutes::class.java)
     private val mapper = jacksonObjectMapper()
 
+    /**
+     * What a workspace with no `workspace_beta_controls` row may do.
+     *
+     * Read from the deployment's `DEFAULT_EXECUTION_MODE` rather than hardcoded
+     * to false — see [AppConfig.defaultExecutionMode]. An explicit row always
+     * wins, in both directions, so a workspace an admin disabled stays disabled.
+     */
+    private val defaultRealExecution: Boolean
+        get() = config.defaultExecutionMode == "real_execution_enabled"
+
     fun register(router: Router) {
         // Public beta routes (require auth but NOT beta approval)
         router.get( "/api/beta/status", ::getBetaStatus)
@@ -75,8 +85,8 @@ class BetaRoutes(
             "alreadySubmitted"     to (existingApplication != null),
             "canAccessProduct"     to canAccess,
             "canRunSimulation"     to (canAccess && (controls?.simulationEnabled ?: true)),
-            "canRunRealExecution"  to (canAccess && (controls?.realExecutionEnabled ?: false)),
-            "executionMode"        to (controls?.executionMode ?: "simulation_only"),
+            "canRunRealExecution"  to (canAccess && (controls?.realExecutionEnabled ?: defaultRealExecution)),
+            "executionMode"        to (controls?.executionMode ?: config.defaultExecutionMode),
             "workspaceStatus"      to (controls?.accessStatus ?: "pending"),
             // Limits
             "maxRunsPerDay"        to maxRuns,
@@ -340,7 +350,7 @@ class BetaRoutes(
             "workspaceId"          to wsId.toString(),
             "accessStatus"         to (controls?.accessStatus ?: "unknown"),
             "executionMode"        to (controls?.executionMode ?: "unknown"),
-            "realExecutionEnabled" to (controls?.realExecutionEnabled ?: false),
+            "realExecutionEnabled" to (controls?.realExecutionEnabled ?: defaultRealExecution),
             "runsToday"            to runsToday,
             "maxRunsPerDay"        to (policy?.maxRunsPerDay ?: config.betaDefaultMaxRunsPerDay),
             "maxWorkflows"         to (policy?.maxWorkflows ?: config.betaDefaultMaxWorkflows),

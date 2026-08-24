@@ -12,10 +12,10 @@ import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalLayout } from "~/components/ui/modal";
 import { cn } from "~/lib/cn";
-import { useScope } from "~/lib/workspace/workspace-provider";
+import { useScope, useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { AdminInlineState, describeAdminFailure } from "./admin-states";
 import { SettingsNav } from "./settings-nav";
-import { Panel, StatusLine, type SaveState } from "./settings-chrome";
+import { Panel, StatusLine, type SaveState, SettingsDenied } from "./settings-chrome";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    PLAN & ACCESS
@@ -109,6 +109,8 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
 }
 
 export function PlanView() {
+  const workspaceRole = useWorkspaceRole();
+
   const { workspaceId } = useScope();
 
   const usage = useQuery<UsageResponse, Error>({
@@ -143,6 +145,24 @@ export function PlanView() {
   const open = requests.data?.requests.filter((request) => request.status === "open") ?? [];
   const openKinds = new Set(open.map((request) => request.kind));
 
+  /*
+   * Below admin, this section is refused by the API — every settings route runs
+   * `requireWorkspaceRole`. Returning early rather than rendering a disabled
+   * page keeps one answer on screen instead of a form nobody can submit.
+   *
+   * Only once the role is KNOWN: `resolving` renders the page as normal, so an
+   * owner never sees a denial flash while memberships load.
+   */
+  if (!workspaceRole.resolving && !workspaceRole.canAdminister) {
+    return (
+      <PageContainer>
+        <PageHeader eyebrow="Govern" title="Plan & access" description="What this workspace is allowed to do, who decides it, and how to ask for more." />
+        <SettingsNav />
+        <SettingsDenied role={workspaceRole.role} section="Plan & access" />
+      </PageContainer>
+    );
+  }
+
   return (
     <PageContainer>
       <PageHeader
@@ -162,6 +182,7 @@ export function PlanView() {
       />
 
       <SettingsNav />
+
 
       {usage.error ? (() => {
         const failure = describeAdminFailure(usage.error, "plan and access");

@@ -16,10 +16,10 @@ import { Select } from "~/components/ui/select";
 import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { RelativeTime } from "~/components/app/workflows/atoms";
 import { cn } from "~/lib/cn";
-import { useScope } from "~/lib/workspace/workspace-provider";
+import { useScope, useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { AdminInlineState, describeAdminFailure } from "./admin-states";
 import { SettingsNav } from "./settings-nav";
-import { Panel, StatusLine, type SaveState } from "./settings-chrome";
+import { Panel, StatusLine, type SaveState, SettingsDenied } from "./settings-chrome";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    MEMBERS
@@ -99,6 +99,8 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
 }
 
 export function MembersView() {
+  const workspaceRole = useWorkspaceRole();
+
   const { workspaceId } = useScope();
   const queryClient = useQueryClient();
   const [failure, setFailure] = React.useState<string | null>(null);
@@ -133,6 +135,24 @@ export function MembersView() {
   const rows = members.data?.members ?? [];
   const activeOwners = rows.filter((member) => member.role === "owner" && member.status === "active").length;
 
+  /*
+   * Below admin, this section is refused by the API — every settings route runs
+   * `requireWorkspaceRole`. Returning early rather than rendering a disabled
+   * page keeps one answer on screen instead of a form nobody can submit.
+   *
+   * Only once the role is KNOWN: `resolving` renders the page as normal, so an
+   * owner never sees a denial flash while memberships load.
+   */
+  if (!workspaceRole.resolving && !workspaceRole.canAdminister) {
+    return (
+      <PageContainer>
+        <PageHeader eyebrow="Govern" title="Members" description="Who can reach this workspace, at what role, and who is still waiting on an invitation." />
+        <SettingsNav />
+        <SettingsDenied role={workspaceRole.role} section="Members" />
+      </PageContainer>
+    );
+  }
+
   return (
     <PageContainer>
       <PageHeader
@@ -150,6 +170,7 @@ export function MembersView() {
       />
 
       <SettingsNav />
+
 
       {failure ? (
         <div className="mb-3">

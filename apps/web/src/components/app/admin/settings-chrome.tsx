@@ -139,3 +139,40 @@ export function ReadOnlyRow({
     </div>
   );
 }
+
+/**
+ * The permission-denied state for a workspace settings section.
+ *
+ * Every settings route is enforced on the server by `assertWorkspaceMember` +
+ * `requireWorkspaceRole`; this is what the person sees instead of a 403 they
+ * have to interpret. It names the role they hold, the role the section needs,
+ * and the one place they can still go — because "access denied" with no route
+ * forward is how somebody ends up filing a support ticket to change their own
+ * display name.
+ */
+export function SettingsDenied({ role, section }: { role: string | null; section: string }) {
+  // Say what the role CAN do, accurately. "Which can build and run" under a
+  // Viewer is a false statement about their own account, on the one screen
+  // they went to in order to understand their access.
+  const capability =
+    role === "developer"
+      ? "which can build and run workflows but not change how the workspace is configured"
+      : role === "viewer"
+        ? "which is read-only across the workspace"
+        : "which does not cover workspace configuration";
+
+  return (
+    <div className="border-subtle bg-surface-raised grid place-items-center rounded-lg border p-8 text-center">
+      <div className="max-w-[44rem]">
+        <Text variant="heading-sm" tone="max" as="p" className="block">
+          {section} is managed by owners and admins
+        </Text>
+        <Text variant="body-sm" tone="secondary" className="mt-1.5 block leading-snug">
+          Your role in this workspace is{" "}
+          <strong className="text-fg-primary capitalize">{role ?? "not set"}</strong>, {capability}. Ask an
+          owner or admin if this needs to change. Your own name, avatar and password are on Profile.
+        </Text>
+      </div>
+    </div>
+  );
+}

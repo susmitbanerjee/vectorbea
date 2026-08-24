@@ -87,6 +87,7 @@ class AuthMiddleware(
             appUserId              = profile.id,
             email                  = claims.email,
             authorizedWorkspaceIds = profile.authorizedWorkspaceIds,
+            workspaceRoles         = profile.workspaceRoles,
             betaStatus             = profile.betaStatus,
             isPlatformAdmin        = profile.isPlatformAdmin || config?.isAdmin(claims.email) == true,
         )

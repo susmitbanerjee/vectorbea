@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
+import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    SETTINGS NAVIGATION
@@ -16,18 +17,26 @@ import { Text } from "~/components/ui/text";
    peers; they get a persistent nav and the hub page becomes one of them
    (General) rather than a lobby.
 
-   THE LIST IS NOT ROLE-FILTERED. A viewer can open General and see the
-   workspace name with the rename disabled and the reason attached — which
-   teaches the rule. Hiding the section instead teaches nothing, and makes
-   "where do I change the name" unanswerable for the person who has to ask an
-   admin to do it.
+   WORKSPACE SECTIONS ARE ROLE-FILTERED; PROFILE IS NOT. Everything except
+   Profile configures the workspace, and the API refuses those writes below
+   admin — so listing them for a developer or viewer offers four doors that all
+   end in 403. Profile stays, because it is theirs.
+
+   This is presentation only. `assertWorkspaceMember` + `requireWorkspaceRole`
+   on every settings route is the enforcement; nothing here is a boundary.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 interface Section {
   href: Route;
   label: string;
-  /** Matches this href and everything under it. */
-  prefix?: string;
+  /**
+   * True for sections that belong to the PERSON rather than the workspace.
+   *
+   * Personal sections are reachable at every role; workspace sections need
+   * admin or owner. A developer who cannot rename the workspace can still
+   * change their own name and password.
+   */
+  personal?: boolean;
 }
 
 /*
@@ -35,23 +44,32 @@ interface Section {
  * thing you configure, and it keeps its own top-level place in the sidebar —
  * listing it here too would give it two front doors and highlight neither
  * correctly.
+ *
+ * SDK & ingest is gone: it belongs to the previous stack (the LLM-proxy ingest
+ * tokens), not to this one.
  */
 const SECTIONS: Section[] = [
+  // Profile first, because it is the only section every role can reach.
+  { href: "/settings/profile" as Route, label: "Profile", personal: true },
   { href: "/settings" as Route, label: "General" },
-  { href: "/settings/profile" as Route, label: "Profile" },
   { href: "/settings/members" as Route, label: "Members" },
   { href: "/settings/billing" as Route, label: "Plan & access" },
   { href: "/settings/usage" as Route, label: "Usage & limits" },
-  { href: "/settings/sdk" as Route, label: "SDK & ingest" },
 ];
 
 export function SettingsNav() {
   const pathname = usePathname();
+  const { canAdminister, resolving } = useWorkspaceRole();
+
+  // While the role is still resolving, show everything rather than flashing a
+  // one-item nav at an owner on every page load. The pages behind it render
+  // their own permission-denied state if it turns out they cannot be read.
+  const sections = SECTIONS.filter((section) => section.personal || canAdminister || resolving);
 
   return (
     <nav aria-label="Settings sections" className="border-subtle mb-5 border-b">
       <ul className="-mb-px flex flex-wrap items-center gap-x-1">
-        {SECTIONS.map((section) => {
+        {sections.map((section) => {
           // `/settings` must not light up for `/settings/profile`, so the root
           // matches exactly while the others match their subtree.
           const active =

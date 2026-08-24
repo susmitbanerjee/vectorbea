@@ -8,10 +8,11 @@ import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import { useScope } from "~/lib/workspace/workspace-provider";
+import { useScope, useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import { cn } from "~/lib/cn";
 import { AdminState, AdminInlineState, describeAdminFailure } from "./admin-states";
 import { SettingsNav } from "./settings-nav";
+import { SettingsDenied } from "./settings-chrome";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    USAGE & LIMITS
@@ -124,6 +125,8 @@ const EXECUTION_LABEL: Record<ExecutionAccess["executionMode"], string> = {
 };
 
 export function UsageView() {
+  const workspaceRole = useWorkspaceRole();
+
   const { workspaceId } = useScope();
 
   const query = useQuery<UsageResponse, Error>({
@@ -152,6 +155,24 @@ export function UsageView() {
   const execution = query.data?.execution;
   const auditEvents = query.data?.auditEvents;
 
+  /*
+   * Below admin, this section is refused by the API — every settings route runs
+   * `requireWorkspaceRole`. Returning early rather than rendering a disabled
+   * page keeps one answer on screen instead of a form nobody can submit.
+   *
+   * Only once the role is KNOWN: `resolving` renders the page as normal, so an
+   * owner never sees a denial flash while memberships load.
+   */
+  if (!workspaceRole.resolving && !workspaceRole.canAdminister) {
+    return (
+      <PageContainer>
+        <PageHeader eyebrow="Govern" title="Usage & limits" description="What this workspace is allowed, what it has used, and which of the two the platform will stop you on." />
+        <SettingsNav />
+        <SettingsDenied role={workspaceRole.role} section="Usage & limits" />
+      </PageContainer>
+    );
+  }
+
   return (
     <PageContainer>
       <PageHeader
@@ -177,6 +198,7 @@ export function UsageView() {
       />
 
       <SettingsNav />
+
 
       {query.isPending ? <UsageSkeleton /> : null}
 

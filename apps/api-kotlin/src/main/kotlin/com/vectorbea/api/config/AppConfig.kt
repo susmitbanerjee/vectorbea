@@ -47,7 +47,18 @@ data class AppConfig(
      * cannot trust, which is worse than not having one.
      */
     val telemetryInternalToken: String? = null,
-    val defaultExecutionMode: String = "simulation_only",
+    /**
+     * What a workspace with no explicit `workspace_beta_controls` row may do.
+     *
+     * Was "simulation_only", which is the right default for a closed beta and
+     * the wrong one for a live product: every new workspace could build
+     * workflows and none could run them for real, with no self-service way out.
+     * Set DEFAULT_EXECUTION_MODE=simulation_only to restore the beta posture.
+     *
+     * An explicit row still wins in both directions — a workspace an admin has
+     * disabled stays disabled.
+     */
+    val defaultExecutionMode: String = "real_execution_enabled",
     val realExecutionRequiresAdminApproval: Boolean = true,
     val byokRequiredForRealExecution: Boolean = true,
     val allowPlatformLlmForWorkflowExecution: Boolean = false,
@@ -170,7 +181,7 @@ data class AppConfig(
                 ?: !isProductionEnv  // production defaults to signup CLOSED
             val adminEmails        = (env("ADMIN_EMAILS") ?: "")
                 .split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-            val defaultExecMode    = env("DEFAULT_EXECUTION_MODE") ?: "simulation_only"
+            val defaultExecMode    = env("DEFAULT_EXECUTION_MODE") ?: "real_execution_enabled"
             val realExecApproval   = env("REAL_EXECUTION_REQUIRES_ADMIN_APPROVAL")?.lowercase() != "false"
             val byokRequired       = env("BYOK_REQUIRED_FOR_REAL_EXECUTION")?.lowercase() != "false"
             val allowPlatformLlm   = env("ALLOW_PLATFORM_LLM_FOR_WORKFLOW_EXECUTION")?.lowercase() == "true"
