@@ -16,38 +16,56 @@ const SETTINGS_URL = (workspaceId?: string) =>
 
 type StatusTone = "success" | "warning" | "failure" | "info" | "neutral";
 
-// ─── Design tokens ─────────────────────────────────────────────────────────────
+/* ─── Design tokens ───────────────────────────────────────────────────────────
+   THE PRODUCT'S PALETTE, NOT A SECOND ONE.
+
+   These were a warm cream page (`#F8F5EF`) over generic Tailwind greys and
+   blues — the amber marketing identity, which is a different visual language
+   from the app the recipient lands in. An email that looks like another product
+   is the last thing somebody sees before deciding whether a link is genuine.
+
+   Every value below is the literal resolution of a token in
+   `src/styles/tokens/colour.css`, light theme, named in the comment. Email has
+   no CSS variables, so this is the one place they are restated — the mapping is
+   spelled out so a token change can be followed here.
+─────────────────────────────────────────────────────────────────────────────── */
 const T = {
-  page:          "#F8F5EF",
-  card:          "#FFFFFF",
-  border:        "#E5E0D8",
-  borderStrong:  "#DED8CE",
-  textPrimary:   "#111827",
-  textBody:      "#1F2937",
-  textSecondary: "#374151",
-  textMuted:     "#4B5563",
-  // Iris — the product's brand colour (`--iris-600`, the light-theme accent in
-  // src/styles/tokens/colour.css). It was a generic `#2563EB` blue, which
-  // belongs to nothing: the button in the email looked like a different product
-  // from the button the recipient lands on.
-  accent:        "#4644d6",
-  accentDark:    "#3735ac",
-  successText:   "#047857",
-  successHeading:"#064E3B",
-  successBg:     "#ECFDF5",
-  successBorder: "#A7F3D0",
-  warningText:   "#D97706",
-  warningHeading:"#92400E",
-  warningBg:     "#FFFBEB",
-  warningBorder: "#FDE68A",
-  failureText:   "#DC2626",
-  failureHeading:"#991B1B",
-  failureBg:     "#FEF2F2",
-  failureBorder: "#FECACA",
-  infoText:      "#1D4ED8",
-  infoBg:        "#EFF6FF",
-  infoBorder:    "#BFDBFE",
-  neutralBg:     "#FAF7F0",
+  page:          "#f3f5f9", // --bg-canvas  (paper-100)
+  card:          "#ffffff", // --bg-base    (paper-0)
+  sunken:        "#f3f5f9", // --bg-sunken  (paper-100)
+  border:        "#e9ecf3", // --border-subtle (paper-200)
+  borderStrong:  "#d7dce7", // paper-300
+  textMax:       "#0a0c12", // --fg-max       (paper-1000)
+  textPrimary:   "#1b2030", // --fg-primary   (paper-900)
+  textBody:      "#1b2030", // --fg-primary
+  textSecondary: "#4a5266", // --fg-secondary (paper-700)
+  textMuted:     "#5e6880", // --fg-muted     (paper-600)
+
+  // Brand. Iris is the only hue permitted to mean "Vectorbea".
+  accent:        "#4644d6", // --accent       (iris-600)
+  accentDark:    "#3735ac", // --accent-hover (iris-700)
+  accentSubtle:  "#eff0fe", // --accent-subtle(iris-50)
+
+  successText:   "#0a7a4f", // --status-success        (verdant-700)
+  successHeading:"#0a7a4f",
+  successBg:     "#e6f7ef", // --status-success-subtle (verdant-50)
+  successBorder: "#0e9c66", // --status-success-border (verdant-600)
+
+  warningText:   "#94520f", // --status-waiting        (ember-700)
+  warningHeading:"#94520f",
+  warningBg:     "#ffe3bc", // --status-waiting-subtle (ember-200)
+  warningBorder: "#94520f", // --status-waiting-border (ember-700)
+
+  failureText:   "#ac1c33", // --status-failed        (signal-700)
+  failureHeading:"#ac1c33",
+  failureBg:     "#fdeaed", // --status-failed-subtle (signal-50)
+  failureBorder: "#d62842", // --status-failed-border (signal-600)
+
+  infoText:      "#0a748f", // --status-live        (pulse-700)
+  infoBg:        "#e3f6fb", // --status-live-subtle (pulse-50)
+  infoBorder:    "#0c93b4", // --status-live-border (pulse-600)
+
+  neutralBg:     "#f3f5f9", // --bg-sunken
 } as const;
 
 function toneColors(tone: StatusTone) {
@@ -193,10 +211,21 @@ function layout(args: {
       : (args.footerLink ?? { label: "Workspace settings", href: SETTINGS_URL(args.workspaceId) });
   const reason = args.reason ?? "You received this because notifications are enabled for this workspace";
 
-  // Inline SVG logo as base64 data URI — renders in all email clients without
-  // needing an external image request (Gmail, Outlook, Apple Mail all support this).
-  const LOGO_B64 = "PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZyBzdHJva2U9IiM3QzUyMDAiIHN0cm9rZS13aWR0aD0iMS42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPGVsbGlwc2UgY3g9IjcuNSIgY3k9IjgiIHJ4PSIzLjIiIHJ5PSIyLjIiIG9wYWNpdHk9IjAuNjUiIGZpbGw9IiNGOEQzNkEiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMTYuNSIgY3k9IjgiIHJ4PSIzLjIiIHJ5PSIyLjIiIG9wYWNpdHk9IjAuNjUiIGZpbGw9IiNGOEQzNkEiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMTIiIGN5PSIxNCIgcng9IjQuMiIgcnk9IjUuMiIgZmlsbD0iI0Y1Qjk0MiIgZmlsbC1vcGFjaXR5PSIwLjMyIiAvPgogICAgPHBhdGggZD0iTTguNCAxMi42aDcuMiIgLz4KICAgIDxwYXRoIGQ9Ik04LjEgMTUuMmg3LjgiIC8+CiAgICA8cGF0aCBkPSJNOC42IDE3LjhoNi44IiAvPgogICAgPHBhdGggZD0iTTEwLjQgOS4yIEw5LjIgNi40IiAvPgogICAgPHBhdGggZD0iTTEzLjYgOS4yIEwxNC44IDYuNCIgLz4KICAgIDxjaXJjbGUgY3g9IjkuMiIgY3k9IjYuMiIgcj0iMC42IiBmaWxsPSIjN0M1MjAwIiAvPgogICAgPGNpcmNsZSBjeD0iMTQuOCIgY3k9IjYuMiIgcj0iMC42IiBmaWxsPSIjN0M1MjAwIiAvPgogIDwvZz4KPC9zdmc+Cg==";
-  const LOGO_URI = `data:image/svg+xml;base64,${LOGO_B64}`;
+  /*
+   * The mark: a hosted PNG, not an inline SVG.
+   *
+   * The previous logo was a base64 `data:image/svg+xml` of the amber bee — two
+   * problems in one line. It was the marketing identity rather than the
+   * product's, and GMAIL STRIPS SVG ENTIRELY, data URIs included, so for most
+   * recipients there was no logo at all.
+   *
+   * `/email/vectorbea-mark.png` is the checkpoint cell from `app/icon.svg`,
+   * rasterised at 128px for retina and served over https. Remote images can be
+   * blocked by default in some clients, which is exactly why the wordmark
+   * beside it is REAL TEXT: with images off the lockup still reads "Vectorbea"
+   * in the brand colour rather than collapsing to a broken-image box.
+   */
+  const LOGO_URI = `${APP_URL()}/email/vectorbea-mark.png`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -227,12 +256,12 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
           <td style="padding:0 0 6px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">
-                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textPrimary};">
-                    <img src="${LOGO_URI}" width="20" height="20" alt="Vectorbea" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:6px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;letter-spacing:-0.02em;">Vectorbea</span>
+                <td style="font-size:17px;font-weight:700;color:${T.textMax};letter-spacing:-0.02em;">
+                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textMax};">
+                    <img src="${LOGO_URI}" width="22" height="22" alt="" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:8px;border-radius:5px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:17px;font-weight:700;letter-spacing:-0.02em;color:${T.textMax};">Vectorbea</span>
                   </a>
                 </td>
-                <td align="right" style="font-size:11px;font-weight:600;color:${T.textMuted};">${workspaceName}</td>
+                <td align="right" style="font-size:12px;font-weight:500;color:${T.textMuted};">${workspaceName}</td>
               </tr>
             </table>
           </td>

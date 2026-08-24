@@ -34,6 +34,13 @@ export type RequireUserResult =
 
 export async function requireAuthenticatedUser(
   request: NextRequest,
+  /**
+   * What the caller was trying to do, completing "Sign in to …".
+   *
+   * A 401 is read by a person, and "Sign in to change your profile" on the
+   * invitation endpoint sends them looking for a profile they were not editing.
+   */
+  action = "continue",
 ): Promise<RequireUserResult> {
   const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   const cookie = request.cookies.get(AUTH_COOKIE_NAME)?.value?.trim();
@@ -42,7 +49,7 @@ export async function requireAuthenticatedUser(
   if (!token) {
     return {
       error: NextResponse.json(
-        { error: "Sign in to change your profile.", code: "unauthenticated" },
+        { error: `Sign in to ${action}.`, code: "unauthenticated" },
         { status: 401 },
       ),
     };

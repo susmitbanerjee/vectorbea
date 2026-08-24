@@ -33,7 +33,7 @@ const PatchSchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await requireAuthenticatedUser(request);
+    const auth = await requireAuthenticatedUser(request, "see your profile");
     if (auth.error) return auth.error;
 
     const profile = await getUserProfile(auth.user.id);
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const auth = await requireAuthenticatedUser(request);
+    const auth = await requireAuthenticatedUser(request, "change your profile");
     if (auth.error) return auth.error;
 
     const parsed = PatchSchema.safeParse(await request.json().catch(() => ({})));

@@ -259,6 +259,65 @@ export async function revokeInvitation(workspaceId: string, invitationId: string
   return toInvitation(row);
 }
 
+export type InvitationPreview =
+  | {
+      valid: true;
+      email: string;
+      role: MemberRole;
+      workspaceId: string;
+      workspaceName: string;
+      inviterName: string;
+      expiresAt: string;
+    }
+  | { valid: false; reason: "expired" | "accepted" | "revoked" | "unknown" };
+
+/**
+ * Look at an invitation without redeeming it.
+ *
+ * The accept page needs this for two reasons. It has to show somebody WHAT they
+ * are joining before they join it — "Join Acme Operations as a Developer" is a
+ * decision; a spinner that silently adds you to a tenant is not. And it lets
+ * the page state the real reason a link does not work, instead of the previous
+ * page's fixed paragraph listing every possible reason at once ("the link has
+ * expired, was already accepted, or was revoked") on top of any failure,
+ * including failures that had nothing to do with the invitation.
+ *
+ * No session required: the token is the authorisation, and requiring a login
+ * first means the invitee cannot see what they are being asked to sign in for.
+ * Only the fields already known to whoever holds the link are returned.
+ */
+export async function previewInvitation(token: string): Promise<InvitationPreview> {
+  const row = await appQueryOne<InvitationRow & { workspace_name: string }>(
+    `SELECT i.id, i.workspace_id, i.email, i.role, i.invited_by, i.inviter_name,
+            i.expires_at, i.accepted_at, i.revoked_at, i.created_at,
+            w.name AS workspace_name
+       FROM workspace_invitations i
+       JOIN workspaces w ON w.id = i.workspace_id
+      WHERE i.token_hash = $1`,
+    [hashToken(token)],
+  );
+
+  if (!row) return { valid: false, reason: "unknown" };
+  const invitation = toInvitation(row);
+  if (invitation.state !== "pending") {
+    return {
+      valid: false,
+      reason: invitation.state === "accepted" ? "accepted"
+        : invitation.state === "revoked" ? "revoked"
+          : "expired",
+    };
+  }
+  return {
+    valid: true,
+    email: invitation.email,
+    role: invitation.role,
+    workspaceId: invitation.workspaceId,
+    workspaceName: row.workspace_name,
+    inviterName: invitation.inviterName,
+    expiresAt: invitation.expiresAt,
+  };
+}
+
 export interface AcceptedInvitation {
   workspaceId: string;
   workspaceName: string;

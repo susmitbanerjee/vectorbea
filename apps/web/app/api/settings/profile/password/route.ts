@@ -27,7 +27,7 @@ const BodySchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireAuthenticatedUser(request);
+    const auth = await requireAuthenticatedUser(request, "change your password");
     if (auth.error) return auth.error;
 
     const parsed = BodySchema.safeParse(await request.json().catch(() => ({})));
