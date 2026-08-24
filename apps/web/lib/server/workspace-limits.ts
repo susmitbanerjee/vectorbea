@@ -2,7 +2,7 @@ import "server-only";
 
 import type { PlanTier } from "@/lib/api";
 import { getPlanDefinition, normalizePlanTier } from "@/lib/server/plan-config";
-import { neon } from "@neondatabase/serverless";
+import { getWorkspaceSeatCount } from "@/lib/server/workspace-usage";
 
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
@@ -99,17 +99,14 @@ export async function getWorkspacePromptCount(workspaceId: string) {
  * two agree, which is the minimum bar for a seat count that governs a plan
  * limit. The wider split is not resolved here — see docs/audit for the
  * remaining eight readers.
+ *
+ * It also no longer goes through `neon()`. That driver speaks HTTP to Neon's
+ * endpoint only, so this count threw against the local and containerised
+ * Postgres every developer runs — the seat meter was dead outside production
+ * for a reason that had nothing to do with seats.
  */
 export async function getWorkspaceMemberCount(workspaceId: string) {
-  const url = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
-  if (!url) throw new Error("DATABASE_URL not set");
-  const sql = neon(url);
-  const rows = await sql`
-    SELECT count(*)::int AS seats
-    FROM workspace_members
-    WHERE workspace_id = ${workspaceId} AND status = 'active'
-  ` as { seats: number }[];
-  return rows[0]?.seats ?? 0;
+  return getWorkspaceSeatCount(workspaceId);
 }
 
 export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {

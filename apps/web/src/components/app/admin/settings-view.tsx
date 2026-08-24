@@ -219,7 +219,10 @@ export function SettingsView() {
           {providers.isPending ? <ProviderSkeleton /> : null}
 
           {providers.error ? (() => {
-            const described = describeAdminFailure(providers.error, "model providers");
+            // Provider settings are the one governance surface still backed by
+            // the legacy Supabase project, so the remediation must name that
+            // migration set rather than the Flyway one.
+            const described = describeAdminFailure(providers.error, "model providers", "supabase");
             return (
               <AdminInlineState
                 tone={described.tone}

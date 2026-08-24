@@ -49,9 +49,9 @@ const REGISTRY = {
     blockedBy: "GAP-06 — no endpoint computes the dependent workflows/tools/runs.",
   },
   auditLog: {
-    default: false,
+    default: true,
     description: "Governance audit trail screen.",
-    blockedBy: "GAP-08 — audit_log table and writer exist, no read endpoint.",
+    blockedBy: "None — GAP-08 closed: GET /api/audit reads public.audit_log.",
   },
   approvalDecisionContext: {
     default: false,

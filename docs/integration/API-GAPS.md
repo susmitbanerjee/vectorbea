@@ -139,7 +139,7 @@ Legend: ✅ exists and matches · ⚠️ exists, shape differs · ❌ no endpoin
 
 | # | Need | State | Detail |
 |---|---|---|---|
-| GAP-08 | Audit log read | ❌ | **Table exists** (V027), **writer exists** (`api/audit/AuditLog.kt`, wired into `ConnectionRoutes`). There is **no read endpoint** and no `AuditRoutes.kt`. Data is being written that nothing can retrieve. |
+| GAP-08 | Audit log read | ✅ | **Closed.** `GET /api/audit` (Next.js, `lib/server/audit-records.ts`) reads `public.audit_log` with workspace scoping, range/action/result/actor filters and a `COUNT` over the same predicates. There is still no Kotlin `AuditRoutes.kt`: the web app queries Postgres directly, as it already does for members, support and auth. Moving the read into the API later is a refactor, not a gap. |
 | GAP-09 | Approval decision context | ⚠️ | The largest single delta. V027 made `run_approvals` authoritative and added `sla_deadline_at`, `escalation_policy_json`, `decision_context_json` (**resolved** values, not templates) and `confidence_score`. `ApprovalRepository` **still queries the legacy `approvals` table**, so none of the four reach the API. The approvals screen is designed around exactly those fields. |
 | GAP-17 | Approval SLA countdown | ⚠️ | Part of GAP-09: `slaRemainingMs` has a column and no read path. |
 | GAP-18 | Approval evidence steps | ❌ | UI `EvidenceStep` links each context field to the run node that produced it. No endpoint. |
@@ -177,7 +177,7 @@ gap that keeps it off, so the two cannot drift apart.
 | **GAP-02/03** name + environment | One join each in `RunRepository.list`. Removes an N+1 the Runs page would otherwise do on every render. | ~20 lines |
 | **GAP-20** `stepCount` zero | Return `null` on the list instead of `0`. A wrong number is worse than an absent one. | ~2 lines |
 | **GAP-21** heartbeat | Return the ISO timestamp; let the client format. | ~3 lines |
-| **GAP-08** audit read | Table, writer and indexes exist. A read endpoint with workspace scoping and cursor pagination is the only missing piece, and enterprise buyers ask about this on the first call. | ~120 lines |
+| ~~**GAP-08** audit read~~ | Done. `GET /api/audit` serves `public.audit_log`; filtering and the total both run in the database. Offset paging, not cursor — the screen needs "page 7 of 249" and a total, which a cursor cannot give. | shipped |
 | **GAP-09** approvals | Point `ApprovalRepository` at `run_approvals` and expose the four V027 columns. The migration already did the hard part; leaving two approval tables live is also a correctness risk in its own right. | ~150 lines |
 
 ### (b) Feature-flag off — real feature, needs real backend work

@@ -8,17 +8,24 @@ import { Text } from "~/components/ui/text";
    ADMIN SURFACE STATES
 
    The three governance screens share one failure mode that nothing else in the
-   product has: the capability can be absent rather than broken. Usage, audit
-   and provider settings are backed by Supabase tables that a given deployment
-   may simply not have — the API answers 503 `missing_database_migration`, and
-   every one of these screens rendered that as a red box with a sentence
-   addressed to somebody who is not looking at it ("Contact your admin to apply
-   the latest schema updates" — shown to the admin).
+   product has: the capability can be absent rather than broken. A backing table
+   may simply not exist in a given deployment — the API answers 503
+   `missing_database_migration`, and every one of these screens rendered that as
+   a red box with a sentence addressed to somebody who is not looking at it
+   ("Contact your admin to apply the latest schema updates" — shown to the
+   admin).
 
    SO THE STATE SAYS WHICH THREE THINGS ARE TRUE:
      what is unavailable   — this capability, not "the page"
      why                   — a table is missing, you are not permitted, it broke
      who can act, and how  — the exact command, when there is one
+
+   AND IT NAMES THE RIGHT DATABASE. There are two stores behind these screens:
+   the application Postgres, migrated by Flyway out of the Kotlin API, and the
+   legacy Supabase project that only the provider settings still read. Telling
+   an operator to run `supabase db push` when the missing table is a Flyway one
+   sends them to fix a database that was never the problem, so the remediation
+   sentence is chosen by the caller that knows which store it queried.
 
    AN UNPROVISIONED CAPABILITY IS NOT AN ERROR, and it is drawn as `waiting`
    rather than `failed` for that reason. Nothing has gone wrong; a migration has
@@ -113,14 +120,32 @@ export interface AdminFailure {
   retryable: boolean;
 }
 
+/** Which database the caller queried, so the remediation names the right one. */
+export type AdminStore = "app" | "supabase";
+
+const REMEDIATION: Record<AdminStore, string> = {
+  app:
+    "Apply the Flyway migrations in apps/api-kotlin/src/main/resources/db/migration — the API runs them on " +
+    "boot when RUN_MIGRATIONS is true — and reload.",
+  supabase:
+    "Apply the migrations in apps/web/supabase/migrations (supabase db push, or paste them into the SQL " +
+    "editor) and reload.",
+};
+
 /**
  * Turn an API failure into the three sentences above.
  *
  * `noun` names the capability, so the same helper produces "Usage meters are
  * not provisioned" and "The audit log is not provisioned" rather than a generic
- * line that leaves the reader guessing which part of the page died.
+ * line that leaves the reader guessing which part of the page died. `store`
+ * names the database, because the two behind these screens are migrated by
+ * different tools and the wrong instruction costs an afternoon.
  */
-export function describeAdminFailure(error: unknown, noun: string): AdminFailure {
+export function describeAdminFailure(
+  error: unknown,
+  noun: string,
+  store: AdminStore = "app",
+): AdminFailure {
   const code = (error as { code?: string } | null)?.code;
   const message = error instanceof Error ? error.message : String(error ?? "");
 
@@ -129,9 +154,9 @@ export function describeAdminFailure(error: unknown, noun: string): AdminFailure
       tone: "waiting",
       title: `${capitalise(noun)} are not provisioned in this environment`,
       body:
-        `The tables behind ${noun} have not been created in this deployment's Supabase project, so there is nothing to read — ` +
-        "this is a deployment step, not a fault. Apply the migrations in apps/web/supabase/migrations (supabase db push, " +
-        "or paste them into the SQL editor) and reload. Everything else on this page is unaffected.",
+        `The tables behind ${noun} have not been created in this deployment's database, so there is nothing ` +
+        `to read — this is a deployment step, not a fault. ${REMEDIATION[store]} Everything else on this ` +
+        "page is unaffected.",
       retryable: true,
     };
   }
