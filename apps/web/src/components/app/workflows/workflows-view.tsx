@@ -25,7 +25,7 @@ import {
   WorkflowStatusBadge, TriggerCell, SuccessRateCell, LastRunCell, TagList,
   EnvironmentChip, StepsCell,
 } from "./atoms";
-import { WorkflowRowActions, type WorkflowActionHandlers } from "./row-actions";
+import { WorkflowRowActions, DeleteWorkflowDialog, type WorkflowActionHandlers } from "./row-actions";
 import { WorkflowBulkBar } from "./bulk-bar";
 import { WorkflowCardGrid } from "./workflow-cards";
 import type { Workflow } from "~/lib/workflows/model";
@@ -111,6 +111,7 @@ export interface WorkflowsViewProps {
 
 export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const { canBuild } = useWorkspaceRole();
+  const [pendingDelete, setPendingDelete] = React.useState<Workflow | null>(null);
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -239,7 +240,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const handlers = React.useMemo<WorkflowActionHandlers>(() => ({
     onRunNow: (w) => { void api.workflows.run(w.id, {}, data.scope); },
     onExport: (w) => exportJson([w]),
-    onDelete: (w) => { void api.workflows.delete(w.id, data.scope).then(data.refetch); },
+    onRequestDelete: (w) => setPendingDelete(w),
     onSetStatus: (w, s) => { void api.workflows.update(w.id, { status: s }, data.scope).then(data.refetch); },
   }), [api, data]);
 
@@ -361,11 +362,11 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
       id: "actions", header: "", width: 44, locked: true, skeletonWidth: 14,
       cell: (workflow) => (
         <span data-row-stop className="flex justify-end">
-          <WorkflowRowActions workflow={workflow} handlers={handlers} />
+          <WorkflowRowActions workflow={workflow} handlers={handlers} canBuild={canBuild} />
         </span>
       ),
     },
-  ], [selection, router, handlers]);
+  ], [selection, router, handlers, canBuild]);
 
   /* ── Quick filters ──────────────────────────────────────────────────────── */
   const counts = React.useMemo(() => ({
@@ -471,6 +472,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
             isSelected={selection.isSelected}
             onToggleSelect={selection.toggle}
             handlers={handlers}
+            canBuild={canBuild}
             onSelectTag={(tag) => applyQuery(`tag:${tag}`)}
             onOpenRun={(runId) => router.push(`/runs/${runId}` as Route)}
           />
@@ -501,6 +503,20 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
             .then(data.refetch);
         }}
         onExport={exportJson}
+      />
+      {/*
+        ONE dialog for the whole table, mounted outside it. Per-row it sat under
+        the row's click handler, so dismissing it opened the workflow detail
+        whichever button you pressed.
+      */}
+      <DeleteWorkflowDialog
+        workflow={pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const workflow = pendingDelete;
+          setPendingDelete(null);
+          if (workflow) void api.workflows.delete(workflow.id, data.scope).then(data.refetch);
+        }}
       />
     </PageContainer>
   );

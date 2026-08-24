@@ -27,25 +27,41 @@ import type { Workflow } from "~/lib/workflows/model";
 
    Typing the name to confirm is reserved for exactly this: it is the one action
    on the list with off-product blast radius.
+
+   THE CONFIRMATION IS NOT RENDERED HERE. It used to be, once per row, inside
+   the row's own DOM — under the row click handler that opens the workflow. So
+   dismissing it delivered a click to the row and the detail page opened whether
+   you pressed Keep it or Delete permanently. The view mounts ONE dialog outside
+   the table and this menu only asks for it.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export interface WorkflowActionHandlers {
   onRunNow: (workflow: Workflow) => void;
   onExport: (workflow: Workflow) => void;
-  onDelete: (workflow: Workflow) => void;
+  /** Opens the confirmation, which the VIEW owns — see [DeleteWorkflowDialog]. */
+  onRequestDelete: (workflow: Workflow) => void;
   onSetStatus: (workflow: Workflow, status: Workflow["status"]) => void;
 }
 
 export function WorkflowRowActions({
-  workflow, handlers, align = "end",
+  workflow, handlers, canBuild, align = "end",
 }: {
   workflow: Workflow;
   handlers: WorkflowActionHandlers;
+  /**
+   * Developer and up. A viewer gets no trigger at all.
+   *
+   * Every item in this menu writes — run, pause, delete — so for a viewer the
+   * menu is empty, and an empty menu is a worse answer than no menu. The API
+   * refuses these regardless (`RbacGuard`); this is only about not offering them.
+   */
+  canBuild: boolean;
   align?: "start" | "end";
 }) {
-  const [confirming, setConfirming] = React.useState(false);
   const paused = workflow.status === "paused";
   const archived = workflow.status === "archived";
+
+  if (!canBuild) return null;
 
   return (
     <>
@@ -109,12 +125,15 @@ export function WorkflowRowActions({
 
             <DropdownMenu.Item
               className={cn(menuItem, "text-status-failed data-[highlighted]:text-status-failed")}
-              onSelect={(e) => {
-                // Radix closes the menu on select, which would unmount the
-                // dialog's trigger context before it opens. Defer to the next
-                // frame so the dialog mounts against the page instead.
-                e.preventDefault();
-                requestAnimationFrame(() => setConfirming(true));
+              onSelect={() => {
+                // Do NOT preventDefault: that is what kept the menu open
+                // underneath the modal, and left it open after the modal went.
+                // Radix closes on select; the timeout lets that commit land
+                // before the dialog claims the top layer.
+                //
+                // setTimeout, not requestAnimationFrame: rAF does not fire in a
+                // tab that is not compositing, so the dialog would never open.
+                setTimeout(() => handlers.onRequestDelete(workflow), 0);
               }}
             >
               Delete
@@ -123,11 +142,6 @@ export function WorkflowRowActions({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      <DeleteWorkflowDialog
-        workflow={confirming ? workflow : null}
-        onClose={() => setConfirming(false)}
-        onConfirm={() => { handlers.onDelete(workflow); setConfirming(false); }}
-      />
     </>
   );
 }
@@ -143,6 +157,15 @@ export function DeleteWorkflowDialog({
 }) {
   const [typed, setTyped] = React.useState("");
   React.useEffect(() => { setTyped(""); }, [workflow?.id]);
+
+  /*
+   * The dialog animates out after `workflow` goes null, and re-rendering the
+   * title as "Delete workflow" for those 150ms reads as a glitch. Holding the
+   * last one keeps the closing frame identical to the open one.
+   */
+  const shown = React.useRef<Workflow | null>(null);
+  if (workflow) shown.current = workflow;
+  const subject = workflow ?? shown.current;
 
   const confirmed = workflow !== null && typed.trim() === workflow.name;
 
@@ -162,7 +185,7 @@ export function DeleteWorkflowDialog({
         >
           <Dialog.Title asChild>
             <Text variant="heading-sm" tone="max" as="h2">
-              Delete {workflow?.name ?? "workflow"}
+              Delete {subject?.name ?? "workflow"}
             </Text>
           </Dialog.Title>
 
@@ -175,7 +198,7 @@ export function DeleteWorkflowDialog({
 
           <div className="mt-4">
             <Field
-              label={`Type ${workflow?.name ?? ""} to confirm`}
+              label={`Type ${subject?.name ?? ""} to confirm`}
               description="Deliberately awkward. This is the only action here that breaks callers outside this workspace."
             >
               <Input
@@ -183,7 +206,7 @@ export function DeleteWorkflowDialog({
                 onChange={(e) => setTyped(e.target.value)}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder={workflow?.name}
+                placeholder={subject?.name}
               />
             </Field>
           </div>

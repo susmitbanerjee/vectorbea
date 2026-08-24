@@ -11,10 +11,15 @@ import { Button } from "~/components/ui/button";
    Shared by both registries because the actions are identical; only the noun
    differs. Two copies would have drifted the first time one of them gained a
    confirmation.
+
+   EXPORT IS THE ONLY ONE A VIEWER KEEPS. The rest write, and the API refuses
+   them below developer, so offering them here would only produce 403s. Delete
+   is new: the registries shipped with no way to remove an agent or a tool at
+   any role, so one created by mistake could be paused and never removed.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function RegistryBulkBar({
-  count, noun, onClear, onActivate, onDeactivate, onExport,
+  count, noun, onClear, onActivate, onDeactivate, onExport, onDelete, canBuild = true,
 }: {
   count: number;
   noun: string;
@@ -22,6 +27,10 @@ export function RegistryBulkBar({
   onActivate: () => void;
   onDeactivate: () => void;
   onExport: () => void;
+  /** Absent means the registry does not support bulk delete. */
+  onDelete?: () => void;
+  /** Developer and up. A viewer gets export only — the rest all write. */
+  canBuild?: boolean;
 }) {
   if (count === 0) return null;
 
@@ -45,9 +54,16 @@ export function RegistryBulkBar({
         </Text>
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <Button size="sm" variant="secondary" onClick={onActivate}>Activate</Button>
-          <Button size="sm" variant="secondary" onClick={onDeactivate}>Deactivate</Button>
+          {canBuild ? (
+            <>
+              <Button size="sm" variant="secondary" onClick={onActivate}>Activate</Button>
+              <Button size="sm" variant="secondary" onClick={onDeactivate}>Deactivate</Button>
+            </>
+          ) : null}
           <Button size="sm" variant="secondary" onClick={onExport}>Export</Button>
+          {canBuild && onDelete ? (
+            <Button size="sm" variant="danger" onClick={onDelete}>Delete</Button>
+          ) : null}
           <button
             onClick={onClear}
             aria-label="Clear selection"

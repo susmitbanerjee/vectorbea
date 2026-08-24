@@ -19,6 +19,8 @@ import { policyFindings, TOOL_TYPE_LABEL, type ToolRecord } from "~/lib/registry
 import { RiskBadge, RegistryStatusBadge, RateCell, HealthDot } from "./atoms";
 import { ToolDetail } from "./tool-detail";
 import { RegistryBulkBar } from "./bulk-bar";
+import { RegistryRowActions, type RegistryActionHandlers } from "./row-actions";
+import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { useToolsData } from "./use-registry-data";
 import { CreateToolDialog } from "./create-tool-dialog";
 import { useApi } from "~/lib/api/api-provider";
@@ -35,6 +37,8 @@ const RISK_ORDER = { critical: 0, high: 1, medium: 2, low: 3 } as const;
 
 export function ToolsView({ forceState }: { forceState?: TableStatus }) {
   const { canBuild } = useWorkspaceRole();
+  const [bulkDelete, setBulkDelete] = React.useState(false);
+  const [pendingDelete, setPendingDelete] = React.useState<ToolRecord | null>(null);
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -140,6 +144,19 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
     ?? (data.loading || !booted ? "loading" : data.error ? "error" : tools.length === 0 ? "empty" : sorted.length === 0 ? "no-results" : "ready");
 
   const openTool = React.useMemo(() => tools.find((t) => t.id === openId) ?? null, [openId, tools]);
+
+  /*
+   * Row actions. Delete opens a confirmation the VIEW owns rather than one
+   * mounted per row: a dialog rendered inside a table row sits under the row's
+   * own click handler, and closing it lands the click on the row.
+   */
+  const handlers = React.useMemo<RegistryActionHandlers<ToolRecord>>(() => ({
+    onSetStatus: (record, status) => {
+      void api.tools.update(record.id, { status }, data.scope).then(data.refetch);
+    },
+    onExport: (record) => exportTools([record]),
+    onRequestDelete: (record) => setPendingDelete(record),
+  }), [api, data]);
 
   const columns = React.useMemo<DataColumn<ToolRecord>[]>(() => [
     {
@@ -260,7 +277,23 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       id: "status", header: "Status", width: 96, minWidth: 80, sortValue: (t) => t.status, skeletonWidth: 60,
       cell: (tool) => <RegistryStatusBadge status={tool.status} />,
     },
-  ], [selection]);
+    {
+      // Locked to the right, like selection on the left: row actions are
+      // furniture, not a column somebody should be able to hide or reorder.
+      id: "actions", header: "", width: 44, locked: true, skeletonWidth: 14,
+      cell: (tool) => (
+        <span data-row-stop className="flex justify-end">
+          <RegistryRowActions
+            record={tool}
+            noun="tool"
+            detailHref={`/tools/${tool.id}` as Route}
+            handlers={handlers}
+            canBuild={canBuild}
+          />
+        </span>
+      ),
+    },
+  ], [selection, canBuild, handlers]);
 
   const counts = React.useMemo(() => ({
     violations: tools.filter((t) => policyFindings(t).length > 0).length,
@@ -372,6 +405,8 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       <RegistryBulkBar
         count={selected.length}
         noun="tool"
+        canBuild={canBuild}
+        onDelete={() => setBulkDelete(true)}
         onClear={selection.clear}
         onActivate={() => {
           void Promise.all(selected.map((tool) => api.tools.update(tool.id, { status: "active" }, data.scope)))
@@ -381,18 +416,65 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
           void Promise.all(selected.map((tool) => api.tools.update(tool.id, { status: "paused" }, data.scope)))
             .then(data.refetch);
         }}
-        onExport={() => {
-          const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `tools-${selected.length}.json`;
-          a.click();
-          URL.revokeObjectURL(url);
+        onExport={() => exportTools(selected)}
+      />
+
+      <DestructiveConfirmDialog
+        open={bulkDelete}
+        title={`Delete ${selected.length} ${selected.length === 1 ? "tool" : "tools"}?`}
+        description={
+          <>
+            Anything bound to them starts failing on its next run. The definitions and their history go;
+            nothing recreates them.
+          </>
+        }
+        confirmLabel={`Delete ${selected.length} ${selected.length === 1 ? "tool" : "tools"}`}
+        onOpenChange={(open) => { if (!open) setBulkDelete(false); }}
+        onConfirm={() => {
+          const doomed = [...selected];
+          setBulkDelete(false);
+          selection.clear();
+          void Promise.all(doomed.map((record) => api.tools.delete(record.id, data.scope)))
+            .then(data.refetch);
+        }}
+      />
+
+      {/*
+        Owned by the view, not by the row. A confirmation mounted inside a table
+        row lives under that row's click handler, so dismissing it lands a click
+        on the row and navigates away — which is exactly what "it opens the
+        detail even when I press Keep it" was.
+      */}
+      <DestructiveConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete ${pendingDelete?.name ?? "tool"}?`}
+        description={
+          <>
+            Every agent granted it and every workflow node calling it starts failing on its next run. The definition and its history go; nothing recreates it.
+            Pausing it instead stops it being used and keeps it.
+          </>
+        }
+        confirmLabel="Delete tool"
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        onConfirm={() => {
+          const record = pendingDelete;
+          setPendingDelete(null);
+          if (record) void api.tools.delete(record.id, data.scope).then(data.refetch);
         }}
       />
     </PageContainer>
   );
+}
+
+/** One implementation, shared by the row menu and the bulk bar. */
+function exportTools(tools: ToolRecord[]) {
+  const blob = new Blob([JSON.stringify(tools, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = tools.length === 1 ? `tool-${tools[0].name}.json` : `tools-${tools.length}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function ToolsState({

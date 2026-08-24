@@ -310,15 +310,34 @@ function GraphPreview({ graph, label }: { graph: BuilderGraph; label: string }) 
     [graph.nodes],
   );
 
+  /*
+   * FIT THE WIDTH, SCROLL THE HEIGHT, NEVER ZOOM PAST 1:1.
+   *
+   * This used to set the SVG's width to the graph's raw pixel width, clamp only
+   * its HEIGHT to 380, and anchor with `xMinYMin`. On any workflow taller than
+   * it is wide — which is most of them, since they run downward — `meet` scaled
+   * the whole drawing down to satisfy the clamped height while the box stayed
+   * full width, and `xMinYMin` pinned the result into the top-left. The card
+   * showed a cluster of unreadable nodes, several hundred pixels of empty
+   * space, and a horizontal scrollbar for the emptiness.
+   *
+   * Scaling to fit BOTH axes is not the fix either: a tall graph still collapses
+   * to a thumbnail. A workflow is read in its flow direction, so the preview
+   * fits the width and scrolls down, which is the direction the graph goes.
+   *
+   * `maxWidth: width` stops a narrow graph being magnified past its natural
+   * size — nodes are drawn at fixed font sizes and blowing them up looks like a
+   * rendering fault. Narrower graphs sit centred instead.
+   */
   return (
-    <div className="bg-surface-sunken border-subtle overflow-auto rounded-md border" style={{ maxHeight: 380 }}>
+    <div className="bg-surface-sunken border-subtle overflow-y-auto overflow-x-hidden rounded-md border" style={{ maxHeight: 380 }}>
       <svg
         viewBox={`${bounds.minX - pad} ${bounds.minY - pad} ${width} ${height}`}
         role="img"
         aria-label={`${label}. ${graph.nodes.length} steps: ${graph.nodes.map((n) => n.node.name).join(", ")}.`}
-        style={{ width, minWidth: "100%", height: Math.min(height, 380) }}
-        preserveAspectRatio="xMinYMin meet"
-        className="block"
+        preserveAspectRatio="xMidYMin meet"
+        style={{ width: "100%", maxWidth: width, aspectRatio: `${width} / ${height}` }}
+        className="mx-auto block"
       >
         {graph.edges.map((edge) => {
           const a = byId.get(edge.source);

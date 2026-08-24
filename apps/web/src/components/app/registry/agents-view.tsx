@@ -22,6 +22,8 @@ import { RegistryStatusBadge, RateCell, RiskBadge } from "./atoms";
 import { RelativeTime } from "~/components/app/workflows/atoms";
 import { AgentDetail } from "./agent-detail";
 import { RegistryBulkBar } from "./bulk-bar";
+import { RegistryRowActions, type RegistryActionHandlers } from "./row-actions";
+import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { useAgentsData } from "./use-registry-data";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { useApi } from "~/lib/api/api-provider";
@@ -37,6 +39,8 @@ import { useApi } from "~/lib/api/api-provider";
 
 export function AgentsView({ forceState }: { forceState?: TableStatus }) {
   const { canBuild } = useWorkspaceRole();
+  const [bulkDelete, setBulkDelete] = React.useState(false);
+  const [pendingDelete, setPendingDelete] = React.useState<AgentRecord | null>(null);
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -149,6 +153,19 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
   const openAgent = React.useMemo(() => agents.find((a) => a.id === openId) ?? null, [agents, openId]);
 
   /* ── Columns ────────────────────────────────────────────────────────────── */
+  /*
+   * Row actions. Delete opens a confirmation the VIEW owns rather than one
+   * mounted per row: a dialog rendered inside a table row sits under the row's
+   * own click handler, and closing it lands the click on the row.
+   */
+  const handlers = React.useMemo<RegistryActionHandlers<AgentRecord>>(() => ({
+    onSetStatus: (record, status) => {
+      void api.agents.update(record.id, { status }, data.scope).then(data.refetch);
+    },
+    onExport: (record) => exportAgents([record]),
+    onRequestDelete: (record) => setPendingDelete(record),
+  }), [api, data]);
+
   const columns = React.useMemo<DataColumn<AgentRecord>[]>(() => [
     {
       id: "select", header: "", width: 36, locked: true, skeletonWidth: 14,
@@ -256,7 +273,23 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
       id: "owner", header: "Owner", width: 112, minWidth: 84, sortValue: (a) => a.owner, skeletonWidth: 70,
       cell: (agent) => <Text variant="caption" tone="secondary" className="truncate">{agent.owner}</Text>,
     },
-  ], [selection]);
+    {
+      // Locked to the right, like selection on the left: row actions are
+      // furniture, not a column somebody should be able to hide or reorder.
+      id: "actions", header: "", width: 44, locked: true, skeletonWidth: 14,
+      cell: (agent) => (
+        <span data-row-stop className="flex justify-end">
+          <RegistryRowActions
+            record={agent}
+            noun="agent"
+            detailHref={`/agents/${agent.id}` as Route}
+            handlers={handlers}
+            canBuild={canBuild}
+          />
+        </span>
+      ),
+    },
+  ], [selection, canBuild, handlers]);
 
   const counts = React.useMemo(() => ({
     ungated: agents.filter((a) => grantFindings(a).length > 0).length,
@@ -352,6 +385,8 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
       <RegistryBulkBar
         count={selected.length}
         noun="agent"
+        canBuild={canBuild}
+        onDelete={() => setBulkDelete(true)}
         onClear={selection.clear}
         onActivate={() => {
           void Promise.all(selected.map((agent) => api.agents.update(agent.id, { status: "active" }, data.scope)))
@@ -362,6 +397,50 @@ export function AgentsView({ forceState }: { forceState?: TableStatus }) {
             .then(data.refetch);
         }}
         onExport={() => exportAgents(selected)}
+      />
+
+      <DestructiveConfirmDialog
+        open={bulkDelete}
+        title={`Delete ${selected.length} ${selected.length === 1 ? "agent" : "agents"}?`}
+        description={
+          <>
+            Anything bound to them starts failing on its next run. The definitions and their history go;
+            nothing recreates them.
+          </>
+        }
+        confirmLabel={`Delete ${selected.length} ${selected.length === 1 ? "agent" : "agents"}`}
+        onOpenChange={(open) => { if (!open) setBulkDelete(false); }}
+        onConfirm={() => {
+          const doomed = [...selected];
+          setBulkDelete(false);
+          selection.clear();
+          void Promise.all(doomed.map((record) => api.agents.delete(record.id, data.scope)))
+            .then(data.refetch);
+        }}
+      />
+
+      {/*
+        Owned by the view, not by the row. A confirmation mounted inside a table
+        row lives under that row's click handler, so dismissing it lands a click
+        on the row and navigates away — which is exactly what "it opens the
+        detail even when I press Keep it" was.
+      */}
+      <DestructiveConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete ${pendingDelete?.name ?? "agent"}?`}
+        description={
+          <>
+            Every workflow node bound to it starts failing on its next run. The definition and its history go; nothing recreates it.
+            Pausing it instead stops it being used and keeps it.
+          </>
+        }
+        confirmLabel="Delete agent"
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        onConfirm={() => {
+          const record = pendingDelete;
+          setPendingDelete(null);
+          if (record) void api.agents.delete(record.id, data.scope).then(data.refetch);
+        }}
       />
     </PageContainer>
   );

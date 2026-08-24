@@ -28,12 +28,14 @@ import type { Workflow } from "~/lib/workflows/model";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function WorkflowCardGrid({
-  workflows, isSelected, onToggleSelect, handlers, onSelectTag, onOpenRun,
+  workflows, isSelected, onToggleSelect, handlers, canBuild, onSelectTag, onOpenRun,
 }: {
   workflows: Workflow[];
   isSelected: (id: string) => boolean;
   onToggleSelect: (id: string, index: number, shiftKey: boolean) => void;
   handlers: WorkflowActionHandlers;
+  /** Developer and up — a viewer gets no row menu. */
+  canBuild: boolean;
   onSelectTag: (tag: string) => void;
   onOpenRun: (runId: string) => void;
 }) {
@@ -46,6 +48,7 @@ export function WorkflowCardGrid({
             index={index}
             selected={isSelected(workflow.id)}
             onToggleSelect={onToggleSelect}
+            canBuild={canBuild}
             handlers={handlers}
             onSelectTag={onSelectTag}
             onOpenRun={onOpenRun}
@@ -57,13 +60,15 @@ export function WorkflowCardGrid({
 }
 
 const WorkflowCard = React.memo(function WorkflowCard({
-  workflow, index, selected, onToggleSelect, handlers, onSelectTag, onOpenRun,
+  workflow, index, selected, onToggleSelect, handlers, canBuild, onSelectTag, onOpenRun,
 }: {
   workflow: Workflow;
   index: number;
   selected: boolean;
   onToggleSelect: (id: string, index: number, shiftKey: boolean) => void;
   handlers: WorkflowActionHandlers;
+  /** Developer and up — a viewer gets no row menu. */
+  canBuild: boolean;
   onSelectTag: (tag: string) => void;
   onOpenRun: (runId: string) => void;
 }) {
@@ -105,7 +110,7 @@ const WorkflowCard = React.memo(function WorkflowCard({
 
         <div className="flex shrink-0 items-center gap-1">
           <WorkflowStatusBadge status={workflow.status} />
-          <WorkflowRowActions workflow={workflow} handlers={handlers} />
+          <WorkflowRowActions workflow={workflow} handlers={handlers} canBuild={canBuild} />
         </div>
       </header>
 
