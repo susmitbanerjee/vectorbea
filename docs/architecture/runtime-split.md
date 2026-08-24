@@ -1,7 +1,7 @@
 # Vectorbea — Runtime Architecture & Migration Plan
 
 > Last updated: 2026-05-25
-> Status: **Phase 1 complete** — boundary isolation done; Kotlin services not yet built
+> Status: **Phase 1 complete** — boundary isolation done; Kotlin services not yet built.
 
 ---
 
