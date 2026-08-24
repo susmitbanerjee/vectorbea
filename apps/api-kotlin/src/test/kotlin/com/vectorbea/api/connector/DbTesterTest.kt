@@ -146,15 +146,15 @@ class DbTesterTest {
     @Test
     fun `sql states and nested network causes produce actionable errors`() {
         assertEquals(
-            "AUTH_FAILED" to "Database authentication failed — check credentials",
+            "AUTH_FAILED" to "Database authentication failed - check credentials",
             DbTester.classifyException(SQLException("redacted", "28P01")),
         )
         assertEquals(
-            "DNS_FAILED" to "Database host could not be resolved — check the hostname",
+            "DNS_FAILED" to "Database host could not be resolved - check the hostname",
             DbTester.classifyException(SQLException("connection attempt failed", "08001", UnknownHostException())),
         )
         assertEquals(
-            "CONNECTION_REFUSED" to "Database refused the connection — check host, port, and firewall rules",
+            "CONNECTION_REFUSED" to "Database refused the connection - check host, port, and firewall rules",
             DbTester.classifyException(SQLException("connection attempt failed", "08001", ConnectException())),
         )
     }

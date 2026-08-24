@@ -3,9 +3,6 @@ package com.vectorbea.api.connector
 import com.vectorbea.api.security.Redactor
 import org.slf4j.LoggerFactory
 import java.sql.DriverManager
-import java.net.URI
-import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
 import java.util.Properties
 import java.sql.SQLException
 import java.sql.SQLTimeoutException
@@ -56,7 +53,7 @@ object DbTester {
             log.warn("DB connection test failed [dbType={}] errorClass={}", input.dbType, e.javaClass.simpleName)
             // The HOST is not a secret - it is the one part of the connection
             // string that turns "it failed" into "here is what to change".
-            val guidance = hostGuidance(code, hostOf(input))
+            val guidance = hostGuidance(code, hostOf(input)) ?: credentialGuidance(code, input)
             ConnectionTestResult.failed(latency, code, if (guidance == null) msg else "$msg. $guidance")
         }
     }
@@ -86,12 +83,26 @@ object DbTester {
 
     private val PRIVATE_172 = Regex("^172\\.(1[6-9]|2\\d|3[01])\\.")
 
-    /** The host being dialled, for diagnosis only. Never the credentials. */
+    /**
+     * The host being dialled, for diagnosis only. Never the credentials.
+     *
+     * Uses the tolerant parser rather than `URI`, which is the whole point: a
+     * password containing `#` or a space made `URI` throw or return a null
+     * host, so the one piece of guidance that could have helped went missing on
+     * exactly the connection strings that needed it most.
+     */
     internal fun hostOf(input: DbTestInput): String? {
         input.host?.takeIf { it.isNotBlank() }?.let { return it }
-        val url = input.connectionUrl?.takeIf { it.isNotBlank() } ?: return null
+        val url = input.connectionUrl?.takeIf { it.isNotBlank() }?.trim() ?: return null
         val normalised = if (url.startsWith("jdbc:")) url.removePrefix("jdbc:") else url
-        return try { URI(normalised).host } catch (_: Exception) { null }
+        val parsed = ConnectionUrl.parse(normalised) ?: return null
+        // hostAndPath is "host[:port][/db][?query]"; take the host, allowing for
+        // a bracketed IPv6 literal.
+        val authority = parsed.hostAndPath.substringBefore('/').substringBefore('?')
+        return when {
+            authority.startsWith("[") -> authority.substringAfter('[').substringBefore(']')
+            else -> authority.substringBefore(':')
+        }.takeIf { it.isNotBlank() }
     }
 
     /**
@@ -148,6 +159,97 @@ object DbTester {
         }
     }
 
+    /**
+     * What to change when the server said the credentials are wrong.
+     *
+     * "Database authentication failed - check credentials" is true and leaves
+     * the user staring at a password they can see is correct. The two causes
+     * that actually produce it here are both knowable without the secret:
+     *
+     *  - SUPABASE POOLERS TAKE A DIFFERENT USERNAME from the direct host. The
+     *    pooler expects `postgres.<project-ref>`; the plain `postgres` that
+     *    works against `db.<ref>.supabase.co` is rejected as a bad login. The
+     *    dashboard shows both, one screen apart, and they are easy to mix.
+     *
+     *  - AN AMBIGUOUS PASSWORD. A password that looks like percent-encoded text
+     *    cannot be distinguished from percent-encoded text, so `%2F` may have
+     *    been read as `/`. Saying so is the difference between a fixable
+     *    problem and a haunting.
+     *
+     * Neither branch echoes the password, and the username is only referred to
+     * by shape.
+     */
+    internal fun credentialGuidance(code: String, input: DbTestInput): String? {
+        if (code != "AUTH_FAILED") return null
+        val target = runCatching { resolvePostgresTarget(input) }.getOrNull()
+        val host = hostOf(input)?.lowercase()
+        val user = target?.username
+
+        if (host != null && host.endsWith(".pooler.supabase.com") && user != null && !user.contains('.')) {
+            return "Supabase's pooler expects the username \"postgres.<project-ref>\" rather than " +
+                "\"$user\" - the plain form only works against the direct db.<project-ref>.supabase.co host"
+        }
+        // Both readings of an ambiguous password have already been TRIED by the
+        // time this runs (see attemptWithFallback), so neither was right and
+        // the encoding is not the story. Say the one thing left that is useful.
+        if (target?.alternatePassword != null) {
+            return "Both readings of the password in this URL were tried - as written, and " +
+                "percent-decoded - and the server rejected both. Reset the database password, " +
+                "or supply it in the separate password field where no decoding is applied"
+        }
+        // No ambiguity to resolve, but the password does carry characters a
+        // stricter client would have required encoded. It was read literally
+        // here, which is what the user meant; other tools may disagree.
+        if (ConnectionUrl.containsUnencodedReserved(target?.password)) {
+            return "The password contains characters that are reserved in a URL (@ / ? # [ ] or a " +
+                "space) and was read literally. If you percent-encoded it before pasting, supply " +
+                "it in the separate password field instead, where no decoding is applied"
+        }
+        return null
+    }
+
+    /**
+     * Try the password, and on an authentication failure try the other reading.
+     *
+     * A connection string cannot say whether `%2F` in a password is an escape
+     * for `/` or four literal characters. Both populations exist: people paste
+     * an already-encoded URL out of a dashboard, and people type their password
+     * in raw. Whichever way the parser guesses, it is wrong for the other half,
+     * and being wrong looks like "Database authentication failed - check
+     * credentials" against credentials that are, visibly, correct. That is the
+     * bug this whole path exists to close.
+     *
+     * So it stops guessing and asks the server, which is the only party that
+     * knows. Bounded deliberately:
+     *
+     *  - only on AUTH_FAILED, never on a timeout or an unreachable host, where
+     *    a second dial would just double the wait;
+     *  - only when the two readings actually differ, so the ordinary case makes
+     *    exactly one attempt;
+     *  - once. There is no third interpretation to try.
+     *
+     * That is at most one extra login attempt, on a connection test the user
+     * explicitly asked for, and only when the first was already rejected.
+     *
+     * The ORIGINAL failure is what surfaces if the retry also fails: the user
+     * asked about the credentials they supplied, and an error describing our
+     * fallback guess would send them after a password they never typed.
+     */
+    private fun <T> attemptWithFallback(
+        primary: String?,
+        alternate: String?,
+        open: (String?) -> T,
+    ): T = try {
+        open(primary)
+    } catch (first: Exception) {
+        if (alternate == null || classifyException(first).first != "AUTH_FAILED") throw first
+        try {
+            open(alternate)
+        } catch (_: Exception) {
+            throw first
+        }
+    }
+
     /** True/false when DNS answered, null when it could not be asked. */
     internal fun resolvesIpv4(host: String): Boolean? = try {
         java.net.InetAddress.getAllByName(host).any { it is java.net.Inet4Address }
@@ -164,35 +266,37 @@ object DbTester {
 
     private fun testPostgres(input: DbTestInput, start: Long): ConnectionTestResult {
         val target = resolvePostgresTarget(input)
-        val props = Properties().apply {
-            setProperty("connectTimeout", CONNECT_TIMEOUT_SECONDS.toString())
-            setProperty("socketTimeout", QUERY_TIMEOUT_SECONDS.toString())
-            setProperty("loginTimeout", CONNECT_TIMEOUT_SECONDS.toString())
-            // SECURITY: SSL preferred but not required for test (may be self-signed in dev).
-            // An sslmode already present in the URL WINS: a user who wrote
-            // ?sslmode=verify-full asked for certificate verification, and
-            // silently downgrading them to "prefer" would make the test pass on
-            // a connection the engine would later refuse.
-            if (!target.jdbcUrl.contains("sslmode=", ignoreCase = true)) {
-                setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
+        return attemptWithFallback(target.password, target.alternatePassword) { password ->
+            val props = Properties().apply {
+                setProperty("connectTimeout", CONNECT_TIMEOUT_SECONDS.toString())
+                setProperty("socketTimeout", QUERY_TIMEOUT_SECONDS.toString())
+                setProperty("loginTimeout", CONNECT_TIMEOUT_SECONDS.toString())
+                // SECURITY: SSL preferred but not required for test (may be self-signed in dev).
+                // An sslmode already present in the URL WINS: a user who wrote
+                // ?sslmode=verify-full asked for certificate verification, and
+                // silently downgrading them to "prefer" would make the test pass on
+                // a connection the engine would later refuse.
+                if (!target.jdbcUrl.contains("sslmode=", ignoreCase = true)) {
+                    setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
+                }
+                if (!target.username.isNullOrBlank()) setProperty("user", target.username)
+                if (!password.isNullOrBlank()) setProperty("password", password)
             }
-            if (!target.username.isNullOrBlank()) setProperty("user", target.username)
-            if (!target.password.isNullOrBlank()) setProperty("password", target.password)
-        }
 
-        // SECURITY: do not log jdbcUrl — it may contain credentials
-        DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
-            conn.createStatement().use { stmt ->
-                stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
-                stmt.executeQuery("SELECT 1").use { rs ->
-                    rs.next()
-                    val latencyMs = System.currentTimeMillis() - start
-                    val version = safeGetDbVersion(conn)
-                    return ConnectionTestResult.connected(
-                        latencyMs = latencyMs,
-                        message = "PostgreSQL connection successful",
-                        details = mapOf("dbVersion" to version),
-                    )
+            // SECURITY: do not log jdbcUrl — it may contain credentials
+            DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
+                conn.createStatement().use { stmt ->
+                    stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
+                    stmt.executeQuery("SELECT 1").use { rs ->
+                        rs.next()
+                        val latencyMs = System.currentTimeMillis() - start
+                        val version = safeGetDbVersion(conn)
+                        ConnectionTestResult.connected(
+                            latencyMs = latencyMs,
+                            message = "PostgreSQL connection successful",
+                            details = mapOf("dbVersion" to version),
+                        )
+                    }
                 }
             }
         }
@@ -202,6 +306,16 @@ object DbTester {
         val jdbcUrl: String,
         val username: String?,
         val password: String?,
+        /**
+         * The password read the other way, or null when there is only one reading.
+         *
+         * `%2F` inside a password is either an escape for `/` or four literal
+         * characters, and the connection string cannot say which. Guessing wrong
+         * produced AUTH_FAILED against a password the user could see was correct.
+         * Rather than explain that in prose, [testPostgres] tries this on an
+         * authentication failure. See [attemptWithFallback].
+         */
+        val alternatePassword: String? = null,
     )
 
     /** Convert common postgres:// URLs into a JDBC URL and JDBC properties.
@@ -209,61 +323,70 @@ object DbTester {
      * so credentials must be extracted before opening the connection. */
     internal fun resolvePostgresTarget(input: DbTestInput): PostgresTarget {
         if (!input.connectionUrl.isNullOrBlank()) {
-            val url = input.connectionUrl
-            val uriValue = when {
+            val url = input.connectionUrl.trim()
+            val parseable = when {
                 url.startsWith("jdbc:postgresql://") -> url.removePrefix("jdbc:")
                 url.startsWith("postgres://") -> "postgresql://" + url.removePrefix("postgres://")
                 url.startsWith("postgresql://") -> url
                 else -> null
             }
-            if (uriValue != null) {
-                val uri = URI(uriValue)
-                val userInfo = uri.rawUserInfo?.split(":", limit = 2).orEmpty()
-                val decodedUser = userInfo.getOrNull(0)?.let(::percentDecode)
-                val decodedPassword = userInfo.getOrNull(1)?.let(::percentDecode)
-                val host = uri.host ?: throw IllegalArgumentException("PostgreSQL URL must include a host")
-                val renderedHost = if (host.contains(':')) "[$host]" else host
-                val authority = if (uri.port >= 0) "$renderedHost:${uri.port}" else renderedHost
-                val query = uri.rawQuery?.let { "?$it" }.orEmpty()
+            val parsed = parseable?.let { ConnectionUrl.parse(it) }
+            if (parsed != null) {
                 return PostgresTarget(
-                    jdbcUrl = "jdbc:postgresql://$authority${uri.rawPath.orEmpty()}$query",
-                    username = input.username ?: decodedUser,
-                    password = input.password ?: decodedPassword,
+                    jdbcUrl = "jdbc:postgresql://${parsed.hostAndPath}",
+                    // Blank, not merely null: an empty field in the form used to
+                    // win over the credentials embedded in the URL, and an empty
+                    // user makes the driver fall back to the OS account — which
+                    // fails as AUTH_FAILED with nothing to suggest the username
+                    // was never sent at all.
+                    username = input.username?.takeIf { it.isNotBlank() } ?: parsed.username,
+                    password = input.password?.takeIf { it.isNotBlank() } ?: parsed.password,
+                    // Only when the URL supplied the password. A password typed
+                    // into its own form field is never percent-encoded, so there
+                    // is no second reading to try.
+                    alternatePassword = if (input.password.isNullOrBlank()) {
+                        parsed.rawPassword?.takeIf { it != parsed.password }
+                    } else {
+                        null
+                    },
                 )
             }
             return PostgresTarget(
                 jdbcUrl = if (url.startsWith("jdbc:")) url else "jdbc:postgresql://$url",
-                username = input.username,
-                password = input.password,
+                username = input.username?.takeIf { it.isNotBlank() },
+                password = input.password?.takeIf { it.isNotBlank() },
             )
         }
         val host = input.host ?: "localhost"
         val port = input.port ?: 5432
         val db = input.database ?: "postgres"
-        return PostgresTarget("jdbc:postgresql://$host:$port/$db", input.username, input.password)
+        return PostgresTarget(
+            "jdbc:postgresql://$host:$port/$db",
+            input.username?.takeIf { it.isNotBlank() },
+            input.password?.takeIf { it.isNotBlank() },
+        )
     }
-
-    private fun percentDecode(value: String): String =
-        URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8)
 
     // ── MySQL ─────────────────────────────────────────────────────────────────
 
     private fun testMysql(input: DbTestInput, start: Long): ConnectionTestResult {
         val target = resolveMysqlTarget(input)
-        val props = Properties().apply {
-            setProperty("connectTimeout", (CONNECT_TIMEOUT_SECONDS * 1000).toString())
-            setProperty("socketTimeout", (QUERY_TIMEOUT_SECONDS * 1000).toString())
-            if (!target.username.isNullOrBlank()) setProperty("user", target.username)
-            if (!target.password.isNullOrBlank()) setProperty("password", target.password)
-        }
+        return attemptWithFallback(target.password, target.alternatePassword) { password ->
+            val props = Properties().apply {
+                setProperty("connectTimeout", (CONNECT_TIMEOUT_SECONDS * 1000).toString())
+                setProperty("socketTimeout", (QUERY_TIMEOUT_SECONDS * 1000).toString())
+                if (!target.username.isNullOrBlank()) setProperty("user", target.username)
+                if (!password.isNullOrBlank()) setProperty("password", password)
+            }
 
-        DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
-            conn.createStatement().use { stmt ->
-                stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
-                stmt.executeQuery("SELECT 1").use { rs ->
-                    rs.next()
-                    val latency = System.currentTimeMillis() - start
-                    return ConnectionTestResult.connected(latency, "MySQL connection successful")
+            DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
+                conn.createStatement().use { stmt ->
+                    stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
+                    stmt.executeQuery("SELECT 1").use { rs ->
+                        rs.next()
+                        val latency = System.currentTimeMillis() - start
+                        ConnectionTestResult.connected(latency, "MySQL connection successful")
+                    }
                 }
             }
         }
@@ -273,33 +396,37 @@ object DbTester {
         val jdbcUrl: String,
         val username: String?,
         val password: String?,
+        /** The password read the other way. See [PostgresTarget.alternatePassword]. */
+        val alternatePassword: String? = null,
     )
 
     internal fun resolveMysqlTarget(input: DbTestInput): MysqlTarget {
         if (!input.connectionUrl.isNullOrBlank()) {
-            val raw = input.connectionUrl
-            val uriValue = when {
+            val raw = input.connectionUrl.trim()
+            val parseable = when {
                 raw.startsWith("jdbc:mysql://") -> raw.removePrefix("jdbc:")
                 raw.startsWith("mysql://") -> raw
                 else -> null
             }
-            if (uriValue != null) {
-                val uri = URI(uriValue)
-                val userInfo = uri.rawUserInfo?.split(":", limit = 2).orEmpty()
-                val host = uri.host ?: throw IllegalArgumentException("MySQL URL must include a host")
-                val renderedHost = if (host.contains(':')) "[$host]" else host
-                val authority = if (uri.port >= 0) "$renderedHost:${uri.port}" else renderedHost
-                val query = uri.rawQuery?.let { "?$it" }.orEmpty()
+            // Same parser as Postgres: MySQL passwords carry the same reserved
+            // characters and broke in exactly the same way.
+            val parsed = parseable?.let { ConnectionUrl.parse(it) }
+            if (parsed != null) {
                 return MysqlTarget(
-                    jdbcUrl = "jdbc:mysql://$authority${uri.rawPath.orEmpty()}$query",
-                    username = input.username ?: userInfo.getOrNull(0)?.let(::percentDecode),
-                    password = input.password ?: userInfo.getOrNull(1)?.let(::percentDecode),
+                    jdbcUrl = "jdbc:mysql://${parsed.hostAndPath}",
+                    username = input.username?.takeIf { it.isNotBlank() } ?: parsed.username,
+                    password = input.password?.takeIf { it.isNotBlank() } ?: parsed.password,
+                    alternatePassword = if (input.password.isNullOrBlank()) {
+                        parsed.rawPassword?.takeIf { it != parsed.password }
+                    } else {
+                        null
+                    },
                 )
             }
             return MysqlTarget(
                 jdbcUrl = if (raw.startsWith("jdbc:")) raw else "jdbc:mysql://$raw",
-                username = input.username,
-                password = input.password,
+                username = input.username?.takeIf { it.isNotBlank() },
+                password = input.password?.takeIf { it.isNotBlank() },
             )
         }
 
@@ -307,7 +434,11 @@ object DbTester {
             val host = input.host ?: "localhost"
             val port = input.port ?: 3306
             val db = input.database ?: ""
-            MysqlTarget("jdbc:mysql://$host:$port/$db", input.username, input.password)
+            MysqlTarget(
+                "jdbc:mysql://$host:$port/$db",
+                input.username?.takeIf { it.isNotBlank() },
+                input.password?.takeIf { it.isNotBlank() },
+            )
         }
     }
 
@@ -335,28 +466,28 @@ object DbTester {
         val sqlState = chain.filterIsInstance<SQLException>().firstNotNullOfOrNull { it.sqlState }
         return when {
             chain.any { it is SQLTimeoutException || it is java.net.SocketTimeoutException } || msg.contains("timeout") ->
-                "TIMEOUT" to "Database connection timed out — check network access, host, and port"
+                "TIMEOUT" to "Database connection timed out - check network access, host, and port"
             sqlState?.startsWith("28") == true || msg.contains("authentication") ||
                 msg.contains("password authentication failed") || msg.contains("access denied for user") ->
-                "AUTH_FAILED" to "Database authentication failed — check credentials"
+                "AUTH_FAILED" to "Database authentication failed - check credentials"
             sqlState == "3D000" || (msg.contains("database") && msg.contains("not exist")) ->
-                "DATABASE_NOT_FOUND" to "Database not found — check database name"
+                "DATABASE_NOT_FOUND" to "Database not found - check database name"
             msg.contains("no suitable driver") ->
                 "DRIVER_NOT_AVAILABLE" to "This database driver is not available in the API service"
             msg.contains("ssl") || msg.contains("tls") || msg.contains("certificate") ->
-                "TLS_FAILED" to "TLS/SSL handshake failed — check the server certificate and SSL mode"
+                "TLS_FAILED" to "TLS/SSL handshake failed - check the server certificate and SSL mode"
             chain.any { it is java.net.UnknownHostException } || msg.contains("unknown host") ->
-                "DNS_FAILED" to "Database host could not be resolved — check the hostname"
+                "DNS_FAILED" to "Database host could not be resolved - check the hostname"
             chain.any { it is java.net.ConnectException } || msg.contains("connection refused") ->
-                "CONNECTION_REFUSED" to "Database refused the connection — check host, port, and firewall rules"
+                "CONNECTION_REFUSED" to "Database refused the connection - check host, port, and firewall rules"
             e is IllegalArgumentException || e is java.net.URISyntaxException ->
                 "INVALID_CONNECTION_STRING" to "The database connection string is invalid"
             sqlState?.startsWith("08") == true ->
-                "NETWORK_UNREACHABLE" to "Database could not be reached from Vectorbea — allow the service egress IPs or configure a private runner"
+                "NETWORK_UNREACHABLE" to "Database could not be reached from Vectorbea - allow the service egress IPs or configure a private runner"
             chain.any { it is SQLException } ->
                 "DATABASE_ERROR" to "Database rejected the connection test"
             else ->
-                "CONNECTION_ERROR" to "Database connection failed — verify the connection settings and network access"
+                "CONNECTION_ERROR" to "Database connection failed - verify the connection settings and network access"
         }
     }
 }

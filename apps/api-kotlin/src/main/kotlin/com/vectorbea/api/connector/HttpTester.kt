@@ -178,12 +178,12 @@ object HttpTester {
                     val botName = json["user"]?.toString() ?: "bot"
                     val team    = json["team"]?.toString() ?: ""
                     ConnectionTestResult.connected(latency,
-                        "Slack token valid — $botName @ $team (chat:write scope required to post)")
+                        "Slack token valid - $botName @ $team (chat:write scope required to post)")
                 }
                 json["ok"] == false -> {
                     val error = json["error"]?.toString() ?: "unknown"
                     ConnectionTestResult.failed(latency, "SLACK_AUTH_FAILED",
-                        "Slack token invalid: $error — check your Bot Token in the connection settings")
+                        "Slack token invalid: $error - check your Bot Token in the connection settings")
                 }
                 else ->
                     ConnectionTestResult.failed(latency, "SLACK_UNEXPECTED",
@@ -213,9 +213,9 @@ object HttpTester {
 
         return when {
             status in 200..299 ->
-                ConnectionTestResult.connected(latency, "HTTP $method $status — endpoint reachable")
+                ConnectionTestResult.connected(latency, "HTTP $method $status - endpoint reachable")
             status == 401 ->
-                ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed — check API key")
+                ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed - check API key")
             status == 403 ->
                 ConnectionTestResult.failed(latency, "AUTH_FAILED", "Endpoint returned 403 Forbidden")
             status == 404 && !input.healthPath.isNullOrBlank() ->
@@ -225,7 +225,7 @@ object HttpTester {
             status == 429 ->
                 ConnectionTestResult.failed(latency, "RATE_LIMITED", "Rate limit exceeded")
             status in 300..399 ->
-                ConnectionTestResult.connected(latency, "Endpoint redirects (status=$status) — reachable")
+                ConnectionTestResult.connected(latency, "Endpoint redirects (status=$status) - reachable")
             status in 500..599 ->
                 ConnectionTestResult.failed(latency, "SERVER_ERROR", "Server returned $status")
             else ->
@@ -267,9 +267,9 @@ object HttpTester {
         e.javaClass.name.contains("SSL") || e.javaClass.name.contains("TLS") ->
             "TLS_FAILED" to "TLS/SSL handshake failed"
         e is java.net.UnknownHostException ->
-            "DNS_FAILED" to "DNS resolution failed — check URL"
+            "DNS_FAILED" to "DNS resolution failed - check URL"
         e is java.net.ConnectException ->
-            "CONNECTION_REFUSED" to "Connection refused — check host and port"
+            "CONNECTION_REFUSED" to "Connection refused - check host and port"
         else -> "CONNECTION_ERROR" to "Connection failed"
     }
 }

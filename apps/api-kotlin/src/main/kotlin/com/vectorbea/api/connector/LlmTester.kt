@@ -109,9 +109,9 @@ object LlmTester {
             403 -> ConnectionTestResult.failed(latency, "AUTH_FAILED",
                 "This Anthropic key is not authorised for the Messages API. Check the workspace it belongs to.")
             429 -> ConnectionTestResult.failed(latency, "RATE_LIMITED",
-                "Anthropic rate limit reached. The key works — retry in a minute.")
+                "Anthropic rate limit reached. The key works - retry in a minute.")
             529 -> ConnectionTestResult.failed(latency, "OVERLOADED",
-                "Anthropic is overloaded. The key works — retry shortly.")
+                "Anthropic is overloaded. The key works - retry shortly.")
             else -> ConnectionTestResult.failed(latency, "UNEXPECTED_STATUS",
                 "Anthropic answered HTTP $status. Check the base URL if this connection uses a proxy.")
         }
@@ -179,7 +179,7 @@ object LlmTester {
             status == expectedStatus || status in 200..299 ->
                 ConnectionTestResult.connected(latency, "Connection successful (status=$status)")
             status == 401 ->
-                ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed — check API key")
+                ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed - check API key")
             status == 403 ->
                 ConnectionTestResult.failed(latency, "AUTH_FAILED", "API key unauthorized")
             status == 429 ->
@@ -197,9 +197,9 @@ object LlmTester {
         e.javaClass.name.contains("SSL") || e.javaClass.name.contains("TLS") ->
             "TLS_FAILED" to "TLS/SSL handshake failed"
         e is java.net.UnknownHostException ->
-            "DNS_FAILED" to "DNS resolution failed — check provider endpoint"
+            "DNS_FAILED" to "DNS resolution failed - check provider endpoint"
         e is java.net.ConnectException ->
-            "CONNECTION_REFUSED" to "Connection refused — check host and port"
+            "CONNECTION_REFUSED" to "Connection refused - check host and port"
         else -> "CONNECTION_ERROR" to "Connection failed"
     }
 }
