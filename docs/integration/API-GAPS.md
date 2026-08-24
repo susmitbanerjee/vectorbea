@@ -453,12 +453,17 @@ header was the visible half of an authorization defect.
 Fifteen tests in `__tests__/workspace-role.test.ts`, including a regression
 guard that fails if the union is ever re-narrowed.
 
-**Related, not yet fixed — GAP-42.** `app/api/workspaces/[id]/invitations/route.ts`
-defaults new invitations to `role: "editor"`, and `lib/server/invitations.ts`
-inserts `inv.role` straight into `workspace_members`. `editor` violates the
-CHECK constraint, so **accepting a default-role invitation fails at the
-database**. The default should be `developer`. Left alone because it is a
-behaviour change in the legacy invitation flow, not a reconciliation.
+**Related — GAP-42, now closed.** `app/api/workspaces/[id]/invitations/route.ts`
+defaulted new invitations to `role: "editor"`, and `lib/server/invitations.ts`
+inserted `inv.role` straight into `workspace_members`. `editor` violates the
+CHECK constraint, so accepting a default-role invitation failed at the database.
+The default is now `viewer`, `parseRole` accepts `editor` only as an alias for
+`developer`, and `owner` is refused outright — ownership is transferred from the
+Members list, not invited. The whole flow also moved off the Supabase
+`vectorbea.workspace_invitations` table, which no deployment provisions, onto
+`public.workspace_invitations` (V038); `POST /api/auth/accept-invite` verifies
+the application's own JWT rather than calling `supabase.auth.getUser`, which had
+rejected every accept regardless of the token presented.
 
 ### 8.2 Secrets — verified never returned ✅
 

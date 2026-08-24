@@ -1,70 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
-import { getUserById } from "@/lib/auth/neon-auth";
-import { neon } from "@neondatabase/serverless";
+
+import { assertWorkspaceMember } from "@/lib/server/assert-workspace-member";
+import { toSafeApiError } from "@/lib/server/safe-api-errors";
+import { auditActor } from "@/lib/server/settings-auth";
+import { listWorkspaceMembers } from "@/lib/server/workspace-members";
 
 export const dynamic = "force-dynamic";
 
-function db() {
-  const url = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
-  if (!url) throw new Error("DATABASE_URL not set");
-  return neon(url);
-}
+/* ══════════════════════════════════════════════════════════════════════════════
+   GET /api/workspaces/:id/members
+
+   Membership is read here and MUTATED at `./[userId]`, so the two cannot drift:
+   one module (`lib/server/workspace-members.ts`) owns both, and the last-owner
+   guard is part of the write rather than a rule the list happens to imply.
+
+   This handler used to hand-roll the auth check — cookie, JWT, resolve the
+   subject, query membership — a second implementation of
+   `assertWorkspaceMember` that could disagree with the real one. It now uses
+   the same gate as every other workspace route.
+══════════════════════════════════════════════════════════════════════════════ */
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id: workspaceId } = await params;
-    const cookieStore = await cookies();
+    const auth = await assertWorkspaceMember(request, workspaceId);
+    if (auth.error) return auth.error;
 
-    // Verify caller is authenticated and is a member of this workspace
-    let user: { id: string; email: string } | null = null;
-    try { user = await getAuthenticatedUserFromCookies(cookieStore); } catch {}
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const members = await listWorkspaceMembers(workspaceId);
+    const actor = auditActor(auth.user);
 
-    // The JWT `sub` is app_users.id for password accounts but supabase_user_id
-    // for OAuth accounts — resolve to the canonical app_users.id before
-    // comparing against workspace_members.user_id, which is always app_users.id.
-    const resolvedUser = await getUserById(user.id);
-    if (!resolvedUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const sql = db();
-
-    // Verify membership
-    const membership = await sql`
-      SELECT role FROM workspace_members
-      WHERE workspace_id = ${workspaceId} AND user_id = ${resolvedUser.id} AND status = 'active'
-      LIMIT 1
-    ` as { role: string }[];
-    if (!membership[0]) return NextResponse.json({ error: "Not a member" }, { status: 403 });
-
-    // Load all members with user info from Neon app_users
-    const rows = await sql`
-      SELECT wm.user_id as id, wm.role, wm.created_at as joined_at,
-             au.email, au.full_name, au.avatar_url
-      FROM workspace_members wm
-      JOIN app_users au ON au.id = wm.user_id
-      WHERE wm.workspace_id = ${workspaceId} AND wm.status = 'active'
-      ORDER BY wm.created_at ASC
-    ` as { id: string; role: string; joined_at: string; email: string; full_name: string | null; avatar_url: string | null }[];
-
-    const members = rows.map(m => ({
-      id:          m.id,
-      email:       m.email,
-      displayName: m.full_name ?? m.email,
-      avatarUrl:   m.avatar_url,
-      role:        m.role,
-      joinedAt:    m.joined_at,
-    }));
-
-    return NextResponse.json(members);
-  } catch (err) {
-    return NextResponse.json(
-      { error: "Failed to load members" },
-      { status: 500 },
-    );
+    return NextResponse.json({
+      members,
+      yourRole: auth.user.role,
+      yourUserId: actor.actorId,
+    });
+  } catch (error) {
+    const safe = toSafeApiError(error, "The member list could not be loaded");
+    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
 }

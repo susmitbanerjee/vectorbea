@@ -11,6 +11,7 @@ import { Input } from "~/components/ui/input";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { cn } from "~/lib/cn";
 import { AdminState, AdminInlineState, describeAdminFailure } from "./admin-states";
+import { SettingsNav } from "./settings-nav";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    USAGE & LIMITS
@@ -174,6 +175,8 @@ export function UsageView() {
           ) : undefined
         }
       />
+
+      <SettingsNav />
 
       {query.isPending ? <UsageSkeleton /> : null}
 

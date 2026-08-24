@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 import { verifyToken } from "@/lib/auth/jwt";
 import { getUserById } from "@/lib/auth/neon-auth";
+import { appQueryOne } from "@/lib/server/app-db";
 
 /**
  * P0 Tenant Isolation Guard
@@ -129,23 +130,25 @@ export async function assertWorkspaceMember(
     };
   }
 
-  // ── 3. Verify workspace membership via Neon ───────────────────────────────
-  const { Pool } = await import("@neondatabase/serverless");
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+  // ── 3. Verify workspace membership in the application database ────────────
+  // Through the shared pool rather than a per-request `Pool` from
+  // `@neondatabase/serverless`: that driver is WebSocket-only and cannot reach
+  // the local or containerised Postgres this repo's quickstart runs, so the
+  // gate failed closed on every developer machine — and opening and ending a
+  // connection on every authorised request is a cost paid on the hot path of
+  // every workspace route.
   let membership: { role: string } | null = null;
   try {
-    const { rows } = await pool.query<{ role: string }>(
-      "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND status = 'active' LIMIT 1",
+    membership = await appQueryOne<{ role: string }>(
+      `SELECT role FROM workspace_members
+        WHERE workspace_id = $1::uuid AND user_id = $2::uuid AND status = 'active' LIMIT 1`,
       [workspaceId, user.id],
     );
-    membership = rows[0] ?? null;
   } catch (e) {
     console.error("[assertWorkspaceMember] membership query error:", e);
     return {
       error: NextResponse.json({ error: "Failed to verify workspace access" }, { status: 500 }),
     };
-  } finally {
-    await pool.end();
   }
 
   if (!membership) {

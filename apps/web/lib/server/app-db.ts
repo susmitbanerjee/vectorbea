@@ -89,3 +89,80 @@ export async function appCount(text: string, params: unknown[] = []): Promise<nu
   const value = Number(row?.count ?? 0);
   return Number.isFinite(value) ? value : 0;
 }
+
+/**
+ * A tagged template that parameterises every interpolation.
+ *
+ * A drop-in for `neon()`'s template so the auth modules keep their existing
+ * call sites, minus the driver that could only talk to Neon. Interpolations
+ * become `$1…$n` placeholders — never string concatenation — so this is not a
+ * SQL-injection footgun dressed as convenience.
+ *
+ *   const rows = await appSql`SELECT id FROM app_users WHERE email = ${email}`;
+ */
+export async function appSql<T extends QueryResultRow = QueryResultRow>(
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+): Promise<T[]> {
+  const text = strings.reduce(
+    (accumulated, part, index) => accumulated + part + (index < values.length ? `$${index + 1}` : ""),
+    "",
+  );
+  return appQuery<T>(text, values);
+}
+
+/** One statement, run on a caller-held connection inside a transaction. */
+export interface AppTransaction {
+  query<T extends QueryResultRow = QueryResultRow>(text: string, params?: unknown[]): Promise<T[]>;
+  /**
+   * Run `work` inside a savepoint. Returns false and unwinds to the savepoint if
+   * it throws, leaving the enclosing transaction usable — which a bare failed
+   * statement would not, since Postgres aborts the whole transaction on error.
+   */
+  attempt(work: (tx: AppTransaction) => Promise<void>): Promise<boolean>;
+}
+
+/**
+ * Run `work` in a transaction, committing on return and rolling back on throw.
+ *
+ * Multi-statement writes that must not half-apply — deleting a workspace,
+ * changing a role and recording why — go through here. The connection is held
+ * for the duration and always released.
+ */
+export async function withTransaction<T>(
+  work: (tx: AppTransaction) => Promise<T>,
+): Promise<T> {
+  const client = await getPool().connect();
+  let savepoint = 0;
+
+  const wrap = (): AppTransaction => ({
+    async query<R extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
+      const result = await client.query<R>(text, params as never[]);
+      return result.rows;
+    },
+    async attempt(inner) {
+      const name = `sp_${(savepoint += 1)}`;
+      await client.query(`SAVEPOINT ${name}`);
+      try {
+        await inner(wrap());
+        await client.query(`RELEASE SAVEPOINT ${name}`);
+        return true;
+      } catch {
+        await client.query(`ROLLBACK TO SAVEPOINT ${name}`);
+        return false;
+      }
+    },
+  });
+
+  try {
+    await client.query("BEGIN");
+    const result = await work(wrap());
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
