@@ -24,6 +24,8 @@ export interface Workspace {
    * number nobody could tell apart from a right one.
    */
   members?: number;
+  /** Your role in this workspace — the switcher groups owned vs shared on it. */
+  role?: "owner" | "admin" | "developer" | "viewer";
   environment: EnvironmentId;
 }
 

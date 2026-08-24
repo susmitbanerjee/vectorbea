@@ -8,7 +8,7 @@ import type { Route } from "next";
 import { useApi } from "~/lib/api/api-provider";
 import { isUnauthenticated } from "~/lib/api/errors";
 import { queryKeys } from "~/lib/api/keys";
-import { hasRole, type Environment, type Workspace, type WorkspaceRole } from "./types";
+import { hasRole, normalizeRole, type Environment, type Workspace, type WorkspaceRole } from "./types";
 
 const WORKSPACE_STORAGE_KEY = "vectorbea-workspace";
 const ENVIRONMENT_STORAGE_KEY = "vectorbea-environment";
@@ -210,7 +210,9 @@ export function WorkspaceProvider({
         ? workspace
         : { ...workspace, members: counts[workspace.id] };
     if (!authoritative) return workspaces.map(withCount);
-    return authoritative.map((m) => withCount({ id: m.id, name: m.name }));
+    return authoritative.map((m) =>
+      withCount({ id: m.id, name: m.name, role: normalizeRole(m.role) }),
+    );
   }, [authoritative, workspaces, counts]);
 
   const resolvedDefault = meQuery.data?.defaultWorkspaceId ?? defaultWorkspaceId;
@@ -377,13 +379,9 @@ export function WorkspaceProvider({
    * access, never more.
    */
   const role = React.useMemo<WorkspaceRole | null>(() => {
-    if (!workspaceId || !meQuery.data) return null;
-    const raw = meQuery.data.workspaces.find((w) => w.id === workspaceId)?.role;
-    if (raw === undefined) return null;
-    if (raw === "owner" || raw === "admin" || raw === "developer" || raw === "viewer") return raw;
-    if (raw === "editor") return "developer";
-    return "viewer";
-  }, [meQuery.data, workspaceId]);
+    if (!workspaceId) return null;
+    return resolvedWorkspaces.find((w) => w.id === workspaceId)?.role ?? null;
+  }, [resolvedWorkspaces, workspaceId]);
 
   const problem = React.useMemo<WorkspaceProblem | null>(() => {
     if (workspaceId !== null || resolving) return null;

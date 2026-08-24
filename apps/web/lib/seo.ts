@@ -20,7 +20,10 @@ const rawSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || PROD_URL;
 export const SITE = {
   name: "Vectorbea",
   /** Used as the <title> on the homepage and as the OG/Twitter site name. */
-  defaultTitle: "Vectorbea — Durable Agentic AI Workflows",
+  // A hyphen, not an em dash, matching `titleTemplate` below. A tab strip
+  // renders the two at very different weights, so mixing them made the
+  // homepage tab look like it belonged to a different site.
+  defaultTitle: "Vectorbea - Durable Agentic AI Workflows",
   /**
    * Applied to every other page: "<Page> - Vectorbea".
    *

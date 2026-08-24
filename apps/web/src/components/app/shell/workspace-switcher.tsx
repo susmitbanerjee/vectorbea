@@ -42,23 +42,51 @@ export function WorkspaceSwitcher({
   const [active, setActive] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
+  /*
+   * EVERY WORKSPACE, INCLUDING THE ONE YOU ARE IN.
+   *
+   * This listed only the OTHERS, so somebody who belongs to a single workspace
+   * opened the switcher and was told `No workspace matches ""` — the not-found
+   * copy, rendered for an empty query, about a list that had been filtered to
+   * nothing on purpose. It reads as "your workspaces are missing".
+   *
+   * Owned and shared are separated because they answer different questions:
+   * what is mine, and what have I been invited into. The role comes from
+   * `/api/me` and is the same one the API enforces, so the grouping cannot
+   * drift from what you can actually do once you switch.
+   */
   const results = React.useMemo(() => {
-    // No "Recent" group any more: recency was a fixture constant, and there is
-    // no endpoint that records which workspaces this user visited last.
-    const others = workspaces.filter((w) => w.id !== workspace.id);
-    if (!query.trim()) {
-      return others.length ? [{ label: "All workspaces", items: others }] : [];
+    const matching = query.trim()
+      ? fuzzyRank(workspaces, query, (w) => w.name).map((r) => r.item)
+      : workspaces;
+
+    if (query.trim()) {
+      return matching.length ? [{ label: "Results", items: matching }] : [];
     }
-    const ranked = fuzzyRank(others, query, (w) => w.name).map((r) => r.item);
-    return ranked.length ? [{ label: "Results", items: ranked }] : [];
-  }, [query, workspace.id, workspaces]);
+
+    const owned = matching.filter((w) => w.role === "owner");
+    const shared = matching.filter((w) => w.role !== "owner");
+
+    // One heading over a list with no sibling is noise, so the split only
+    // appears when there is genuinely something on both sides.
+    if (owned.length === 0 || shared.length === 0) {
+      return matching.length ? [{ label: "Workspaces", items: matching }] : [];
+    }
+    return [
+      { label: "Owned by you", items: owned },
+      { label: "Shared with you", items: shared },
+    ];
+  }, [query, workspaces]);
 
   const flat = React.useMemo(() => results.flatMap((g) => g.items), [results]);
 
   React.useEffect(() => { setActive(0); }, [query]);
 
   const commit = (id: string) => {
-    onWorkspaceChange(id);
+    // Switching to where you already are is a no-op in the provider, but the
+    // popover should still close — nothing happening after a click reads as a
+    // broken control.
+    if (id !== workspace.id) onWorkspaceChange(id);
     setOpen(false);
     setQuery("");
   };
@@ -123,7 +151,9 @@ export function WorkspaceSwitcher({
           <div className="max-h-72 overflow-y-auto p-1">
             {results.length === 0 ? (
               <p className="font-ui text-caption text-fg-muted px-2 py-3">
-                No workspace matches “{query}”. Try a shorter term.
+                {query.trim()
+                  ? `No workspace matches “${query}”. Try a shorter term.`
+                  : "You do not belong to any workspace yet."}
               </p>
             ) : (
               results.map((group) => (
@@ -148,6 +178,12 @@ export function WorkspaceSwitcher({
                           <span className="font-ui text-body-sm text-fg-primary block truncate">{w.name}</span>
                           <MemberCount count={w.members} />
                         </span>
+                        {w.id === workspace.id ? (
+                          // The one you are already in. Listed rather than
+                          // hidden so the switcher answers "what do I have",
+                          // and marked so it does not read as switchable.
+                          <span className="font-ui text-caption text-accent shrink-0">Current</span>
+                        ) : null}
                       </button>
                     );
                   })}

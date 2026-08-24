@@ -148,6 +148,8 @@ function ShellInner({ children, user }: AppShellProps) {
     // Carried through as undefined when unknown rather than defaulted to 0 —
     // the switcher omits the line instead of asserting an empty workspace.
     members: w.members,
+    // The switcher separates owned from shared on this.
+    role: w.role,
     environment: environment,
   }));
   const workspace: Workspace =

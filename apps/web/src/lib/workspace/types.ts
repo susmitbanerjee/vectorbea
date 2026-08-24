@@ -12,6 +12,14 @@ export interface Workspace {
   name: string;
   /** Present in fixtures and the API's workspace list; not required to resolve scope. */
   members?: number;
+  /**
+   * Your role in THIS workspace, from `/api/me`.
+   *
+   * Carried per workspace, not just for the active one, so the switcher can
+   * separate the workspaces you own from the ones you were invited into
+   * without a second request.
+   */
+  role?: WorkspaceRole;
 }
 
 /**
@@ -49,3 +57,18 @@ export const ROLE_LABEL: Record<WorkspaceRole, string> = {
   developer: "Developer",
   viewer: "Viewer",
 };
+
+/**
+ * Read a role off the wire.
+ *
+ * `editor` is a legacy value the database's CHECK constraint does not permit;
+ * it means `developer`. Anything unrecognised falls to `viewer`, because an
+ * unknown role must mean LESS access, never more. `undefined` stays undefined —
+ * "not reported" is not the same claim as "viewer".
+ */
+export function normalizeRole(raw: string | null | undefined): WorkspaceRole | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (raw === "owner" || raw === "admin" || raw === "developer" || raw === "viewer") return raw;
+  if (raw === "editor") return "developer";
+  return "viewer";
+}

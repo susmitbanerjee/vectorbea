@@ -168,7 +168,7 @@ function gateRow(gate: string, status: "passed" | "failed" | "missing" | "not_re
   const icons: Record<string, string> = {
     passed: "✓",
     failed: "✗",
-    missing: "—",
+    missing: "·",
     not_required: "·",
   };
   const colors: Record<string, string> = {
@@ -376,7 +376,7 @@ export function teamInvitationEmail(args: {
    */
   const body = `
 <h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:${T.textPrimary};letter-spacing:-0.01em;">Join ${esc(args.workspaceName)} on Vectorbea</h1>
-<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${esc(args.inviterName)} invited you to this workspace as ${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong> — ${esc(roleLabel.summary)}.</p>
+<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${esc(args.inviterName)} invited you to this workspace as ${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong>. That role can ${esc(roleLabel.summary)}.</p>
 ${metaLine([
   { label: "Workspace", value: args.workspaceName },
   { label: "Invited by", value: args.inviterName },
@@ -392,7 +392,7 @@ ${linkFallback(args.acceptUrl)}
       workspaceName: args.workspaceName,
       preheader: `${args.inviterName} invited you to ${args.workspaceName}. The link expires ${expiryDate}.`,
       body,
-      reason: `You received this because ${args.inviterName} invited this address to ${args.workspaceName}. If you were not expecting it, ignore this email — the invitation expires on its own.`,
+      reason: `You received this because ${args.inviterName} invited this address to ${args.workspaceName}. If you were not expecting it, ignore this email. The invitation expires on its own.`,
       // No footer link: the recipient is not a member yet, so every in-product
       // destination would refuse them.
       footerLink: null,
@@ -400,12 +400,12 @@ ${linkFallback(args.acceptUrl)}
     text: [
       `Join ${args.workspaceName} on Vectorbea`,
       ``,
-      `${args.inviterName} invited you as ${roleLabel.name} — ${roleLabel.summary}.`,
+      `${args.inviterName} invited you as ${roleLabel.name}. That role can ${roleLabel.summary}.`,
       `The invitation expires on ${expiryDate}.`,
       ``,
       `Accept: ${args.acceptUrl}`,
       ``,
-      `If you were not expecting this, ignore it — the invitation expires on its own.`,
+      `If you were not expecting this, ignore it. The invitation expires on its own.`,
     ].join("\n"),
   };
 }
@@ -447,18 +447,18 @@ export function workspaceWelcomeEmail(args: {
 }) {
   const roleLabel = ROLE_LABELS[args.role] ?? { name: args.role, article: "a", summary: "" };
   const openUrl = `${APP_URL()}/control?org=${encodeURIComponent(args.workspaceId)}`;
-  const subject = `You are in — ${args.workspaceName} on Vectorbea`;
+  const subject = `Welcome to ${args.workspaceName} on Vectorbea`;
 
   const body = `
 ${statusBadge("You're in", "success")}
 <h1 style="margin:16px 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:${T.textPrimary};letter-spacing:-0.01em;">Welcome to ${esc(args.workspaceName)}</h1>
-<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${args.invitedByName ? `${esc(args.invitedByName)} added you as ` : "You joined as "}${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong>${roleLabel.summary ? ` — ${esc(roleLabel.summary)}` : ""}.</p>
+<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${args.invitedByName ? `${esc(args.invitedByName)} added you as ` : "You joined as "}${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong>${roleLabel.summary ? `. That role can ${esc(roleLabel.summary)}` : ""}.</p>
 ${args.hasOtherWorkspaces
   // Neutral, not `info`: the info tone's blue sits beside the iris button and
   // reads as a second brand colour, and an orientation note is guidance rather
   // than a status. Nothing here is a state anybody has to act on.
   ? calloutBox(
-      `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them — ${args.workspaceName} will not appear in your other workspace's runs, workflows or connections.`,
+      `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them. ${args.workspaceName} will not appear in your other workspace's runs, workflows or connections.`,
       "neutral",
     )
   : ""}
@@ -479,7 +479,7 @@ ${linkFallback(openUrl)}
     text: [
       `Welcome to ${args.workspaceName}`,
       ``,
-      `${args.invitedByName ? `${args.invitedByName} added you as ` : "You joined as "}${roleLabel.article} ${roleLabel.name}${roleLabel.summary ? ` — ${roleLabel.summary}` : ""}.`,
+      `${args.invitedByName ? `${args.invitedByName} added you as ` : "You joined as "}${roleLabel.article} ${roleLabel.name}${roleLabel.summary ? `. That role can ${roleLabel.summary}` : ""}.`,
       args.hasOtherWorkspaces
         ? `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them.`
         : ``,
@@ -520,7 +520,7 @@ export function evaluationCompletedEmail(args: {
   const isBehavioral = args.runType === "behavioral" || args.runType === "behavioral_rubric" || args.runType === "provider_arena";
 
   const subjectVerdict = isFailed ? "needs attention" : isReview ? "needs review" : "passed";
-  const subject = `Evaluation ${subjectVerdict} — ${args.promptName} ${args.versionTag}`;
+  const subject = `Evaluation ${subjectVerdict}: ${args.promptName} ${args.versionTag}`;
 
   const summaryRows = [
     { key: "Evaluation type",  value: fmtRunType(args.runType) },
@@ -570,12 +570,12 @@ ${nextStep(nextStepText)}
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${args.promptName} ${args.versionTag} — ${verdict}`,
+      preheader: `${args.promptName} ${args.versionTag}: ${verdict}`,
       body,
       reason: "You received this because evaluation notifications are enabled for this workspace",
     }),
     text: [
-      `Evaluation completed — ${args.promptName} ${args.versionTag}`,
+      `Evaluation completed: ${args.promptName} ${args.versionTag}`,
       `Verdict: ${verdict}`,
       `Score: ${fmtScore(args.score)}`,
       args.datasetName ? `Dataset: ${args.datasetName}` : "",
@@ -601,7 +601,7 @@ export function evaluationFailedEmail(args: {
   model?: string | null;
   startedBy?: string | null;
 }) {
-  const subject = `Evaluation failed — ${args.promptName} ${args.versionTag}`;
+  const subject = `Evaluation failed: ${args.promptName} ${args.versionTag}`;
   const safeReason = args.reason.slice(0, 300); // never leak full stack traces
 
   const body = `
@@ -629,7 +629,7 @@ ${nextStep("Check provider connectivity and model availability. Inspect executio
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Evaluation failed — ${args.promptName}`,
+      preheader: `Evaluation failed: ${args.promptName}`,
       body,
       reason: "You received this because evaluation failure notifications are enabled for this workspace",
     }),
@@ -652,7 +652,7 @@ export function regressionFailedEmail(args: {
   datasetName?: string | null;
   promptVersion?: string | null;
 }) {
-  const subject = `Regression failed — ${args.scheduleName}`;
+  const subject = `Regression failed: ${args.scheduleName}`;
   const hasScores = args.previousScore != null && args.currentScore != null;
   const scoreDelta = hasScores ? Math.round((args.currentScore! - args.previousScore!) * 100) : null;
 
@@ -682,12 +682,12 @@ ${nextStep("Compare failed cases against previous passing results. Look for rece
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Regression failed — ${args.scheduleName}`,
+      preheader: `Regression failed: ${args.scheduleName}`,
       body,
       reason: "You received this because regression notifications are enabled for this workspace",
     }),
     text: [
-      `Regression failed — ${args.scheduleName}`,
+      `Regression failed: ${args.scheduleName}`,
       args.promptName ? `Prompt: ${args.promptName}` : "",
       hasScores ? `Score: ${fmtScore(args.previousScore)} → ${fmtScore(args.currentScore)}` : "",
       `Reason: ${args.reason}`,
@@ -722,7 +722,7 @@ export function alertTriggeredEmail(args: {
   const isError = args.metricType === "error_rate";
   const tone: StatusTone = isError && args.metricValue >= args.threshold * 2 ? "failure" : "warning";
 
-  const subject = `Alert triggered — ${args.ruleName}`;
+  const subject = `Alert triggered: ${args.ruleName}`;
 
   const body = `
 ${statusBadge("Alert triggered", tone)}
@@ -750,12 +750,12 @@ ${nextStep("Review recent traces for the affected prompt. Compare against the ba
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${args.ruleName} — ${metricLabel} ${metricVal}`,
+      preheader: `${args.ruleName}: ${metricLabel} ${metricVal}`,
       body,
       reason: "You received this because alert notifications are enabled for this workspace",
     }),
     text: [
-      `Alert triggered — ${args.ruleName}`,
+      `Alert triggered: ${args.ruleName}`,
       `Metric: ${metricLabel}`,
       `Current: ${metricVal}`,
       `Threshold: ${comparison} ${threshVal}`,
@@ -780,7 +780,7 @@ export function rolloutBlockedEmail(args: {
   rolloutPercentage?: number | null;
   gateResults?: Array<{ gate: string; status: "passed" | "failed" | "missing" | "not_required" }>;
 }) {
-  const subject = `Rollout blocked — ${args.promptName} ${args.versionTag}`;
+  const subject = `Rollout blocked: ${args.promptName} ${args.versionTag}`;
 
   const reasonsList = args.reasons
     .map((r) => `<li style="margin:0 0 6px;color:${T.textBody};font-size:13px;line-height:1.5;">${esc(r)}</li>`)
@@ -817,12 +817,12 @@ ${nextStep("Open the failing gate and review the latest evaluation result. Fix t
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Rollout blocked — ${args.promptName} ${args.versionTag}`,
+      preheader: `Rollout blocked: ${args.promptName} ${args.versionTag}`,
       body,
       reason: "You received this because rollout notifications are enabled for this workspace",
     }),
     text: [
-      `Rollout blocked — ${args.promptName} ${args.versionTag}`,
+      `Rollout blocked: ${args.promptName} ${args.versionTag}`,
       `Reasons: ${args.reasons.join("; ")}`,
       `Open: ${args.promptUrl}`,
     ].filter(Boolean).join("\n"),
@@ -844,8 +844,8 @@ export function quotaWarningEmail(args: {
   const label = args.usageType.replaceAll("_", " ");
   const tone: StatusTone = isExceeded ? "failure" : "warning";
   const subject = isExceeded
-    ? `Usage limit reached — ${args.workspaceName}`
-    : `Usage nearing limit — ${args.workspaceName}`;
+    ? `Usage limit reached: ${args.workspaceName}`
+    : `Usage nearing limit: ${args.workspaceName}`;
 
   const body = `
 ${statusBadge(isExceeded ? "Quota exceeded" : "Quota nearing", tone)}
@@ -872,11 +872,11 @@ ${nextStep("Review usage patterns and consider upgrading the plan or adjusting r
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${label} ${pct}% — ${args.workspaceName}`,
+      preheader: `${label} ${pct}%: ${args.workspaceName}`,
       body,
       reason: "You received this because quota notifications are enabled and you are a workspace admin or owner",
     }),
-    text: `Usage notification — ${args.workspaceName}\n${label}: ${args.used.toLocaleString()} / ${args.limit.toLocaleString()} (${pct}%)\nManage: ${args.billingUrl}`,
+    text: `Usage notification: ${args.workspaceName}\n${label}: ${args.used.toLocaleString()} / ${args.limit.toLocaleString()} (${pct}%)\nManage: ${args.billingUrl}`,
   };
 }
 
@@ -890,7 +890,7 @@ export function promptPromotedEmail(args: {
   promotedBy: string;
   promptUrl: string;
 }) {
-  const subject = `Rollout approved — ${args.promptName} ${args.versionTag}`;
+  const subject = `Rollout approved: ${args.promptName} ${args.versionTag}`;
 
   const body = `
 ${statusBadge("Rollout approved", "success")}
@@ -911,10 +911,10 @@ ${nextStep("Continue monitoring metrics, alerts, and scheduled regressions as tr
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Rollout approved — ${args.promptName} ${args.versionTag}`,
+      preheader: `Rollout approved: ${args.promptName} ${args.versionTag}`,
       body,
       reason: "You received this because rollout notifications are enabled for this workspace",
     }),
-    text: `Rollout approved — ${args.promptName} ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen: ${args.promptUrl}`,
+    text: `Rollout approved: ${args.promptName} ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen: ${args.promptUrl}`,
   };
 }
