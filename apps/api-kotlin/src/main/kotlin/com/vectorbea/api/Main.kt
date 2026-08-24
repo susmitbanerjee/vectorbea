@@ -70,7 +70,7 @@ import org.slf4j.LoggerFactory
  *  6. Repositories
  *  7. Routes
  *  8. HTTP server
- *  9. Shutdown hook
+ *  9. Shutdown hook.
  *
  * Security: DATABASE_URL, REDIS_URL, and SECRET_ENCRYPTION_KEY values are NEVER logged.
  */
