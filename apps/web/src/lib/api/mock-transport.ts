@@ -624,6 +624,32 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       ],
     }),
   ],
+  /* Triggering a run.
+     The real route enqueues onto Redis and a worker executes the graph. A
+     fixture cannot, so it mints a run id and says which mode it would have
+     used — enough for the builder to navigate somewhere and for the failure
+     paths to be exercised, without pretending a worker ran. */
+  [
+    "POST",
+    "/api/workflows/:id/run",
+    (params, init) => {
+      const body = (init.body ?? {}) as Record<string, unknown>;
+      return {
+        runId: uuidFrom(`run_${params.id}_${Date.now()}`),
+        status: "QUEUED",
+        mode: String(body.mode ?? "simulation"),
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/workflows/:id/runs/debug",
+    (params) => ({
+      runId: uuidFrom(`debugrun_${params.id}_${Date.now()}`),
+      status: "QUEUED",
+      debugMode: true,
+    }),
+  ],
   [
     "POST",
     "/api/tools/test-unsaved",

@@ -43,12 +43,20 @@ export interface TopBarProps {
   onSimulate: () => void;
   onRun: () => void;
   onDebugRun: () => void;
+  /**
+   * Which trigger is in flight, if any.
+   *
+   * Starting a run is a POST that can take a moment and, in the "real" case, has
+   * consequences outside this product. Without a busy state the button looks
+   * inert and gets pressed again, which is how one click becomes three runs.
+   */
+  triggering?: "test" | "run" | "debug" | null;
 }
 
 export function TopBar({
   workflow, versionNumber, isDraft, summary, saveState, lastSavedAt,
   presentation, onTogglePresentation, onToggleFullscreen, fullscreen,
-  onSave, onTest, onSimulate, onRun, onDebugRun,
+  onSave, onTest, onSimulate, onRun, onDebugRun, triggering = null,
 }: TopBarProps) {
   if (presentation) {
     return (
@@ -150,17 +158,24 @@ export function TopBar({
         <Button size="sm" variant="secondary" onClick={onSave} disabled={saveState === "saved" || saveState === "saving"}>
           {saveState === "saving" ? "Saving…" : "Save"}
         </Button>
-        <Button size="sm" variant="secondary" onClick={onTest}>Test</Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={onTest}
+          disabled={triggering !== null}
+        >
+          {triggering === "test" ? "Starting…" : "Test"}
+        </Button>
         <Button size="sm" variant="secondary" onClick={onSimulate}>Simulate</Button>
 
         <Button
           size="sm"
           variant="primary"
           onClick={onRun}
-          disabled={summary.errors > 0}
+          disabled={summary.errors > 0 || triggering !== null}
           title={summary.errors > 0 ? "Fix the errors first" : "Run against live connections"}
         >
-          Run
+          {triggering === "run" ? "Starting…" : "Run"}
         </Button>
 
         {/* Deliberately separated and differently shaped. Debug Run has the same
@@ -171,7 +186,7 @@ export function TopBar({
           size="sm"
           variant="secondary"
           onClick={onDebugRun}
-          disabled={summary.errors > 0}
+          disabled={summary.errors > 0 || triggering !== null}
           title="Steps through node by node against live connections, capturing full payloads"
           className="border-status-waiting-border text-status-waiting hover:border-status-waiting border-dashed"
         >
@@ -179,7 +194,7 @@ export function TopBar({
             <circle cx="6" cy="6.4" r="2.8" />
             <path d="M6 3.6V2.2M3.2 5.2 2 4.6M8.8 5.2 10 4.6M3.2 7.8 2 8.4M8.8 7.8 10 8.4" />
           </svg>
-          Debug run
+          {triggering === "debug" ? "Starting…" : "Debug run"}
         </Button>
       </div>
     </header>

@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Route } from "next";
+import { toast } from "sonner";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
@@ -18,6 +20,8 @@ import { AlignToolbar } from "./align-toolbar";
 import { SimulatePanel } from "./simulate-panel";
 import { CommentLayer } from "./comments";
 import { useBuilderStore, type BuilderAction, type BuilderState } from "./store";
+import { useApi } from "~/lib/api/api-provider";
+import { useScope } from "~/lib/workspace/workspace-provider";
 import { validateGraph, summarise } from "./validation";
 import { autoLayout, snap } from "./layout";
 import { useKeyboardGraph } from "./keyboard-graph";
@@ -107,6 +111,15 @@ function BuilderInner({
   data: WorkflowGraphData;
 }) {
   const flow = useReactFlow();
+  const api = useApi();
+  const router = useRouter();
+  const { workspaceId } = useScope();
+  /* The run endpoints resolve the environment server-side from the workspace
+     scope, the same way every other write on this screen does. */
+  const scope = React.useMemo(
+    () => ({ workspaceId, environmentId: null }),
+    [workspaceId],
+  );
   const [store, dispatch] = useBuilderStore(graph);
   const { state } = store;
 
@@ -139,6 +152,94 @@ function BuilderInner({
     if (!state.dirty) return;
     markDirty();
   }, [state.dirty, markDirty]);
+
+  /* ── Starting a run ─────────────────────────────────────────────────────── */
+
+  /**
+   * TEST, RUN AND DEBUG RUN WERE `console.info` CALLS.
+   *
+   * All three rendered as enabled buttons, and all three did nothing at all:
+   * no request, no error, no feedback. The endpoints behind them existed the
+   * whole time.
+   *
+   *   Test       POST /api/workflows/:id/run   mode "simulation"
+   *   Run        POST /api/workflows/:id/run   mode "real"
+   *   Debug run  POST /api/workflows/:id/runs/debug
+   *
+   * THE SAVE IS PART OF THE ACTION, NOT A PRECONDITION THE USER MUST REMEMBER.
+   * The API runs `workflow.currentVersionId` — the last version WRITTEN — so
+   * triggering with unsaved edits on the canvas silently runs the previous
+   * graph. That is the worst possible failure here: it succeeds, and it
+   * executes something other than what is on screen. So a dirty canvas is
+   * saved first and the run is abandoned if that save fails.
+   *
+   * EVERY REFUSAL IS SHOWN. The API turns several conditions away by design —
+   * no published version, real execution disabled for the workspace, the daily
+   * run limit, the queue being down — and each one arrives as a sentence worth
+   * reading. They are surfaced verbatim rather than flattened into "failed".
+   */
+  const [triggering, setTriggering] = React.useState<null | "test" | "run" | "debug">(null);
+
+  const trigger = React.useCallback(async (
+    kind: "test" | "run" | "debug",
+    start: () => Promise<{ runId: string }>,
+    started: string,
+  ) => {
+    if (triggering) return;
+    setTriggering(kind);
+    try {
+      // Save first, so the run executes the graph the user is looking at.
+      if (graphRef.current.dirty) {
+        const saved = await data.save({
+          nodes: graphRef.current.nodes,
+          edges: graphRef.current.edges,
+        });
+        if (!saved) {
+          toast.error(data.saveError ?? "The version could not be saved, so the run was not started.");
+          return;
+        }
+        dispatch({ type: "markSaved" });
+      }
+
+      const { runId } = await start();
+      toast.success(started);
+      router.push(`/runs/${runId}` as Route);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "The run could not be started. Check the connection to the API and try again.",
+      );
+    } finally {
+      setTriggering(null);
+    }
+    // `data` is rebuilt each render; the two fields used are read through it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggering, data.save, data.saveError, dispatch, router]);
+
+  const handleTest = React.useCallback(() => {
+    void trigger(
+      "test",
+      () => api.workflows.run(workflow.id, { mode: "simulation" }, scope),
+      "Test run started. Nothing external was called.",
+    );
+  }, [trigger, api, workflow.id, scope]);
+
+  const handleRun = React.useCallback(() => {
+    void trigger(
+      "run",
+      () => api.workflows.run(workflow.id, { mode: "real" }, scope),
+      "Run started against live connections.",
+    );
+  }, [trigger, api, workflow.id, scope]);
+
+  const handleDebugRun = React.useCallback(() => {
+    void trigger(
+      "debug",
+      () => api.workflows.startDebugRun(workflow.id, {}, scope),
+      "Debug run started. Every node's payloads are being captured.",
+    );
+  }, [trigger, api, workflow.id, scope]);
 
   /* ── Viewport helpers ───────────────────────────────────────────────────── */
   /**
@@ -367,10 +468,11 @@ function BuilderInner({
             if (saved) dispatch({ type: "markSaved" });
           });
         }}
-        onTest={() => console.info("test", workflow.id)}
+        onTest={handleTest}
         onSimulate={() => setSimulating(true)}
-        onRun={() => console.info("run", workflow.id)}
-        onDebugRun={() => console.info("debug run", workflow.id)}
+        onRun={handleRun}
+        onDebugRun={handleDebugRun}
+        triggering={triggering}
       />
 
       <div className="flex min-h-0 flex-1">

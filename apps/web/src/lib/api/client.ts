@@ -208,6 +208,32 @@ export interface SchemaPreviewResult {
   fetchedAt: string;
 }
 
+/**
+ * `POST /api/workflows/:id/run`, as `RunRoutes.triggerRun` declares it.
+ *
+ * `mode` is the one that matters: "simulation" executes the graph without
+ * touching a live connection, "real" is the real thing and is separately gated
+ * per workspace (`REAL_EXECUTION_NOT_ENABLED`). It defaults to "simulation"
+ * SERVER-SIDE, so omitting it is safe but never obvious — every caller here
+ * states it.
+ */
+export interface TriggerRunBody {
+  input?: Record<string, unknown>;
+  mode?: "simulation" | "real";
+  triggerType?: "manual" | "api" | "schedule";
+  /** Replays the same run instead of starting a second one. */
+  idempotencyKey?: string;
+}
+
+/** The 202 body. Queue fields are absent when the run starts immediately. */
+export interface TriggeredRun {
+  runId: string;
+  status: string;
+  queuePosition?: number;
+  etaSeconds?: number;
+  idempotencyHit?: boolean;
+}
+
 export interface VectorbeaClient {
   readonly transport: Transport;
 
@@ -267,7 +293,33 @@ export interface VectorbeaClient {
       scope?: Scope,
       options?: RequestOptions,
     ): Promise<WorkflowVersion>;
-    run(id: string, input?: unknown, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /**
+     * Start a run. Returns the run id, which is the only way to watch it.
+     *
+     * This used to be typed `Promise<unknown>` and every caller discarded it,
+     * so a run that the API refused — no published version, real execution
+     * disabled, daily limit reached, queue down — looked exactly like a run
+     * that started.
+     */
+    run(
+      id: string,
+      body?: TriggerRunBody,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<TriggeredRun>;
+    /**
+     * `POST /api/workflows/:id/runs/debug`.
+     *
+     * Executes against live connections exactly as `run` does, and additionally
+     * records every node's inputs and outputs for `debug.nodes`. It is a
+     * separate endpoint, not a flag, because it is a separate decision.
+     */
+    startDebugRun(
+      id: string,
+      input?: Record<string, unknown>,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<TriggeredRun>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Workflow>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
   };
@@ -570,10 +622,24 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           `/api/workflows/${id}/versions`,
           req({ workspaceId, environmentId }, contracts.workflowVersionPage, options, { page, pageSize }),
         ),
-      run: (id, input, scope, options) =>
-        call<unknown>(`/api/workflows/${id}/run`, {
+      run: (id, body, scope, options) =>
+        call<TriggeredRun>(`/api/workflows/${id}/run`, {
           method: "POST",
-          body: input ?? {},
+          body: {
+            input: body?.input ?? {},
+            // Stated rather than defaulted: the server's own default is
+            // "simulation", and a caller that means "real" and forgets would
+            // silently get a simulation that looks like a successful run.
+            mode: body?.mode ?? "simulation",
+            triggerType: body?.triggerType ?? "manual",
+            ...(body?.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+          },
+          ...req(scope, undefined, options),
+        }),
+      startDebugRun: (id, input, scope, options) =>
+        call<TriggeredRun>(`/api/workflows/${id}/runs/debug`, {
+          method: "POST",
+          body: { input: input ?? {} },
           ...req(scope, undefined, options),
         }),
       create: (body, scope, options) =>

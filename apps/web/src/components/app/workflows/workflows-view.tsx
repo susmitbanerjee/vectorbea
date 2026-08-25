@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { toast } from "sonner";
 import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
@@ -238,11 +239,27 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   );
 
   const handlers = React.useMemo<WorkflowActionHandlers>(() => ({
-    onRunNow: (w) => { void api.workflows.run(w.id, {}, data.scope); },
+    /* Same defect the builder's Run button had: the promise was discarded, so
+       a refusal — no published version, real execution disabled, daily limit —
+       was indistinguishable from a run that started. "Run now" from a list is
+       a simulation: nothing on this screen asked for live connections. */
+    onRunNow: (w) => {
+      void api.workflows.run(w.id, { mode: "simulation" }, data.scope)
+        .then(({ runId }) => {
+          toast.success(`Test run started for ${w.name}.`, {
+            action: { label: "Watch", onClick: () => router.push(`/runs/${runId}` as Route) },
+          });
+        })
+        .catch((error: unknown) => {
+          toast.error(
+            error instanceof Error ? error.message : `${w.name} could not be started.`,
+          );
+        });
+    },
     onExport: (w) => exportJson([w]),
     onRequestDelete: (w) => setPendingDelete(w),
     onSetStatus: (w, s) => { void api.workflows.update(w.id, { status: s }, data.scope).then(data.refetch); },
-  }), [api, data]);
+  }), [api, data, router]);
 
   /* ── Columns ────────────────────────────────────────────────────────────── */
   const columns = React.useMemo<DataColumn<Workflow>[]>(() => [
