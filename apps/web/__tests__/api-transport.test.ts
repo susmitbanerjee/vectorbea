@@ -37,6 +37,9 @@ function errorBody(code: string, message: string, requestId = "req-1", details?:
   return { error: { code, message, requestId, details } };
 }
 
+/** A real UUID: the transport sends the environment header only for these. */
+const ENVIRONMENT_UUID = "3f1c9a24-5b7e-4d61-9f0a-2c8e7b5d4a13";
+
 describe("fetch transport", () => {
   it("attaches the bearer token, request id and scope headers", async () => {
     const { impl, calls } = stubFetch([json({ ok: true })]);
@@ -48,14 +51,45 @@ describe("fetch transport", () => {
 
     await transport.request("/api/runs", {
       workspaceId: "ws_1",
-      environmentId: "env_1",
+      environmentId: ENVIRONMENT_UUID,
     });
 
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer tok_abc");
     expect(headers["X-Workspace-Id"]).toBe("ws_1");
-    expect(headers["X-Environment-Id"]).toBe("env_1");
+    expect(headers["X-Environment-Id"]).toBe(ENVIRONMENT_UUID);
     expect(headers["X-Request-Id"]).toBeTruthy();
+  });
+
+  /**
+   * THE ENVIRONMENT HEADER IS UUID-GATED, AND THAT IS LOAD-BEARING.
+   *
+   * The workspace provider carries the environment as a SLUG ("development")
+   * for display and URL state. Sending that verbatim made the API reject every
+   * workspace-scoped request with `400 X-Environment-Id must be a valid UUID`,
+   * so the transport omits anything that is not one.
+   *
+   * The consequence is easy to trip over and was: omitting the header is fine
+   * on a read, which degrades to workspace scope, and fatal on a write, because
+   * `requireEnvironmentId()` refuses outright. A caller that needs to write must
+   * resolve a real UUID first — see `useEnvironmentUuid`. Both halves are
+   * asserted here so neither can drift.
+   */
+  it("omits the environment header unless it is a UUID", async () => {
+    const { impl, calls } = stubFetch([json({ ok: true }), json({ ok: true })]);
+    const transport = createFetchTransport({
+      getToken: async () => "tok_abc",
+      baseUrl: BASE,
+      fetchImpl: impl,
+    });
+
+    // A slug, which is what the provider holds for display.
+    await transport.request("/api/runs", { workspaceId: "ws_1", environmentId: "development" });
+    expect((calls[0].init.headers as Record<string, string>)["X-Environment-Id"]).toBeUndefined();
+
+    // Nothing resolved at all.
+    await transport.request("/api/runs", { workspaceId: "ws_1", environmentId: null });
+    expect((calls[1].init.headers as Record<string, string>)["X-Environment-Id"]).toBeUndefined();
   });
 
   it("maps API error codes to UI intent, not to status", async () => {

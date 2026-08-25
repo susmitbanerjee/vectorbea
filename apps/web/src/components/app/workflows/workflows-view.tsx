@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
+import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
@@ -115,6 +116,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
   const [pendingDelete, setPendingDelete] = React.useState<Workflow | null>(null);
   const api = useApi();
   const router = useRouter();
+  const environment = useEnvironmentUuid();
   const pathname = usePathname();
   const params = useSearchParams();
   const data = useWorkflowsData();
@@ -244,7 +246,22 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
        was indistinguishable from a run that started. "Run now" from a list is
        a simulation: nothing on this screen asked for live connections. */
     onRunNow: (w) => {
-      void api.workflows.run(w.id, { mode: "simulation" }, data.scope)
+      /* Same environment header the builder needs — `data.scope` carries
+         `environmentId: null`, which is fine for the reads on this screen and
+         is refused outright by the run endpoint. */
+      if (!environment.environmentId) {
+        toast.error(
+          environment.loading
+            ? "Still resolving this workspace's environment. Try again in a moment."
+            : "No environment resolved for this workspace, so the run cannot be started.",
+        );
+        return;
+      }
+      void api.workflows.run(
+        w.id,
+        { mode: "simulation" },
+        { workspaceId: data.scope.workspaceId, environmentId: environment.environmentId },
+      )
         .then(({ runId }) => {
           toast.success(`Test run started for ${w.name}.`, {
             action: { label: "Watch", onClick: () => router.push(`/runs/${runId}` as Route) },
@@ -259,7 +276,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
     onExport: (w) => exportJson([w]),
     onRequestDelete: (w) => setPendingDelete(w),
     onSetStatus: (w, s) => { void api.workflows.update(w.id, { status: s }, data.scope).then(data.refetch); },
-  }), [api, data, router]);
+  }), [api, data, router, environment.environmentId, environment.loading]);
 
   /* ── Columns ────────────────────────────────────────────────────────────── */
   const columns = React.useMemo<DataColumn<Workflow>[]>(() => [
