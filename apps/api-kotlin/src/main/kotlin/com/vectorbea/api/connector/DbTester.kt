@@ -235,7 +235,7 @@ object DbTester {
      * asked about the credentials they supplied, and an error describing our
      * fallback guess would send them after a password they never typed.
      */
-    private fun <T> attemptWithFallback(
+    internal fun <T> attemptWithFallback(
         primary: String?,
         alternate: String?,
         open: (String?) -> T,

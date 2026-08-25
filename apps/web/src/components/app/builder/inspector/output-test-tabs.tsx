@@ -8,9 +8,11 @@ import { Button } from "~/components/ui/button";
 import { Spinner } from "~/components/ui/spinner";
 import { formatCost, formatDuration } from "~/lib/format";
 import {
-  outputSchemaFor, flattenSchema, inputsFor, parseExpression, formatResolved,
+  outputSchemaFor, flattenSchema, parseExpression, formatResolved,
   TYPE_LABEL, type Binding, type FieldSchema,
 } from "~/mocks/io-schema";
+import { nodeInputs } from "./node-inputs";
+import { useBuilderRegistry, type BuilderRegistry } from "../use-builder-registry";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 
@@ -44,6 +46,9 @@ export function consumersOf(
   nodes: BuilderNode[],
   edges: BuilderEdge[],
   bindingsByNode: Record<string, Binding[]>,
+  /* Needed to read a tool node's real parameters; a plain function, so it is
+     passed rather than read from context. */
+  registry: BuilderRegistry,
 ): Consumer[] {
   // Downstream set first, so a node that merely mentions the id in a comment
   // is not counted as a consumer.
@@ -63,7 +68,7 @@ export function consumersOf(
   for (const id of downstream) {
     const node = nodes.find((n) => n.node.id === id);
     if (!node) continue;
-    const declarations = inputsFor(node.node);
+    const declarations = nodeInputs(node.node, registry);
     for (const binding of bindingsByNode[id] ?? []) {
       const parsed = parseExpression(binding.expression);
       if (!parsed || parsed.nodeId !== nodeId) continue;
@@ -86,11 +91,12 @@ export function OutputTab({
   edges: BuilderEdge[];
   bindingsByNode: Record<string, Binding[]>;
 }) {
+  const registry = useBuilderRegistry();
   const schema = React.useMemo(() => outputSchemaFor(node), [node]);
   const flat = React.useMemo(() => flattenSchema(schema), [schema]);
   const consumers = React.useMemo(
-    () => consumersOf(node.id, nodes, edges, bindingsByNode),
-    [node.id, nodes, edges, bindingsByNode],
+    () => consumersOf(node.id, nodes, edges, bindingsByNode, registry),
+    [node.id, nodes, edges, bindingsByNode, registry],
   );
 
   const byPath = React.useMemo(() => {
@@ -195,7 +201,8 @@ export function TestTab({
   node: VersionNode;
   bindings: Binding[];
 }) {
-  const inputs = React.useMemo(() => inputsFor(node), [node]);
+  const registry = useBuilderRegistry();
+  const inputs = React.useMemo(() => nodeInputs(node, registry), [node, registry]);
   const [values, setValues] = React.useState<Record<string, string>>({});
   const [result, setResult] = React.useState<TestResult | null>(null);
   const [running, setRunning] = React.useState(false);

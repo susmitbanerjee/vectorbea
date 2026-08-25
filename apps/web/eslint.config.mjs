@@ -145,6 +145,9 @@ const config = [
       "src/components/app/builder/inspector/configure-tab.tsx",
       "src/components/app/builder/inspector/inputs-tab.tsx",
       "src/components/app/builder/inspector/node-inspector.tsx",
+      // Reads `inputsFor` only as the fallback for non-tool node kinds; tool
+      // parameters now come from the registered tool's own input schema.
+      "src/components/app/builder/inspector/node-inputs.ts",
       "src/components/app/builder/inspector/output-test-tabs.tsx",
       "src/components/app/builder/keyboard-graph.ts",
       "src/components/app/builder/layout.ts",

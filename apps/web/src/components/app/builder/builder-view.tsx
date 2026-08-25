@@ -22,6 +22,7 @@ import { validateGraph, summarise } from "./validation";
 import { autoLayout, snap } from "./layout";
 import { useKeyboardGraph } from "./keyboard-graph";
 import { useWorkflowGraph, type WorkflowGraphData } from "./use-workflow-graph";
+import { BuilderRegistryProvider, useBuilderRegistry } from "./use-builder-registry";
 import type { BuilderGraph } from "~/lib/workflows/builder-graph";
 import type { Binding } from "~/mocks/io-schema";
 import { NODE_MARKS } from "~/components/icons/nodes";
@@ -66,6 +67,7 @@ export function BuilderView({ workflowId }: { workflowId: string }) {
   const workflow: BuilderWorkflow = { id: data.workflow.id, name: data.workflow.name };
 
   return (
+    <BuilderRegistryProvider>
     <ReactFlowProvider>
       {/* THE BLINK AND THE REVERTED EDITS.
           This used to be keyed on `data.version?.id`. Every autosave writes a
@@ -93,6 +95,7 @@ export function BuilderView({ workflowId }: { workflowId: string }) {
         data={data}
       />
     </ReactFlowProvider>
+    </BuilderRegistryProvider>
   );
 }
 
@@ -120,9 +123,12 @@ function BuilderInner({
   const markDirty = data.markDirty;
 
   /* ── Validation, continuous ─────────────────────────────────────────────── */
+  /* The registry is memoised by its provider and changes only when one of its
+     queries resolves, so this does not re-validate on every drag frame. */
+  const registry = useBuilderRegistry();
   const issues = React.useMemo(
-    () => validateGraph(state.nodes, state.edges, state.disabled),
-    [state.nodes, state.edges, state.disabled],
+    () => validateGraph(state.nodes, state.edges, state.disabled, registry),
+    [state.nodes, state.edges, state.disabled, registry],
   );
   const summary = React.useMemo(() => summarise(issues), [issues]);
 

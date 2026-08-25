@@ -28,7 +28,8 @@ import { WorkflowNode, type WorkflowNodeData, type NodeRunState } from "./workfl
 import { WorkflowEdge, type WorkflowEdgeData } from "./workflow-edge";
 import { snap, guidesFor, type Guide } from "./layout";
 import { NODE_SIZE, type BuilderAction, type BuilderState } from "./store";
-import { boundResource, nodeChrome, type BuilderNode } from "~/mocks/builder";
+import { nodeChrome, type BuilderNode } from "~/mocks/builder";
+import { useBuilderRegistry, boundResourceFor } from "./use-builder-registry";
 import type { Issue } from "./validation";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -46,6 +47,23 @@ import type { Issue } from "./validation";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 const COMPACT_BELOW = 0.6;
+
+/**
+ * Guide equality, by value.
+ *
+ * Guides are small flat records and there are rarely more than a handful, so
+ * comparing them is far cheaper than the render their inequality would cause.
+ */
+function sameGuides(a: Guide[], b: Guide[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].axis !== b[i].axis || a[i].at !== b[i].at || a[i].from !== b[i].from || a[i].to !== b[i].to) {
+      return false;
+    }
+  }
+  return true;
+}
 
 function nearestHandles(
   source: { x: number; y: number } | undefined,
@@ -132,6 +150,28 @@ export function Canvas({
   const [guides, setGuides] = React.useState<Guide[]>([]);
   const dragRef = React.useRef<Record<string, { x: number; y: number }>>({});
 
+  /**
+   * ANOTHER SOURCE OF DRAG-TIME RE-RENDERS.
+   *
+   * `guidesFor` builds a fresh array on every pointer frame, and handing a new
+   * array to `setGuides` is a state change whether or not the guides differ —
+   * so the canvas re-rendered sixty times a second during a drag even in the
+   * common case where the answer is the same empty array every frame. Each of
+   * those renders rebuilds the `nodes` and `edges` arrays and walks every node
+   * and edge comparator.
+   *
+   * The memo comparators mean that work usually ends without touching the DOM,
+   * which is why the previous fix held for graphs small enough to keep up. It
+   * is still per-frame work proportional to the size of the graph, done to
+   * discover that nothing changed.
+   *
+   * Comparing by value first keeps the guide state still unless the guides
+   * really moved.
+   */
+  const setGuidesIfChanged = React.useCallback((next: Guide[]) => {
+    setGuides((current) => (sameGuides(current, next) ? current : next));
+  }, []);
+
   /* Hover stays local to each rendered node/edge. Canvas-level hover state
      replaced every React Flow element under the pointer and created an
      enter/leave feedback loop that made the entire graph blink. */
@@ -168,16 +208,22 @@ export function Canvas({
    */
   const versionNodes = useStable(React.useMemo(() => state.nodes.map((n) => n.node), [state.nodes]));
 
+  /* Real agents, tools and connections. `registry` is memoised by its provider
+     and changes only when one of those queries resolves — never on a drag —
+     which is what keeps the decoration identities below stable, and the canvas
+     from flickering while a node is moved. */
+  const registry = useBuilderRegistry();
+
   const decoration = React.useMemo(() => {
-    const map = new Map<string, { resource: ReturnType<typeof boundResource>; chrome: ReturnType<typeof nodeChrome> }>();
+    const map = new Map<string, { resource: ReturnType<typeof boundResourceFor>; chrome: ReturnType<typeof nodeChrome> }>();
     for (const node of versionNodes) {
       map.set(node.id, {
-        resource: boundResource(node),
+        resource: boundResourceFor(node, registry),
         chrome: nodeChrome(node, state.edges, versionNodes),
       });
     }
     return map;
-  }, [versionNodes, state.edges]);
+  }, [versionNodes, state.edges, registry]);
 
   const nodes = React.useMemo<Node<WorkflowNodeData>[]>(() => {
     const disabled = new Set(state.disabled);
@@ -282,10 +328,10 @@ export function Canvas({
     const movingId = Object.keys(positions)[0];
     const moving = state.nodes.find((n) => n.node.id === movingId);
     if (moving) {
-      setGuides(guidesFor({ ...moving, ...positions[movingId] }, state.nodes));
+      setGuidesIfChanged(guidesFor({ ...moving, ...positions[movingId] }, state.nodes));
     }
     dispatch({ type: "move", positions, commit: false });
-  }, [dispatch, state.nodes]);
+  }, [dispatch, state.nodes, setGuidesIfChanged]);
 
   const onNodeDragStart = React.useCallback<OnNodeDrag>(() => {
     dragRef.current = {};

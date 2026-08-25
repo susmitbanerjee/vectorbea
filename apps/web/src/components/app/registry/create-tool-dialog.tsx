@@ -29,6 +29,11 @@ import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { SummaryList, SummaryRow, ConnectionPicker } from "./create-atoms";
+import {
+  SqlBuilder, generateSql, EMPTY_BUILDER,
+  type SqlBuilderValue,
+} from "./sql-builder";
+import type { SchemaPreviewResult } from "~/lib/api/client";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    REGISTER A TOOL
@@ -165,6 +170,17 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const [url, setUrl] = React.useState("");
   const [sqlTemplate, setSqlTemplate] = React.useState("");
   const [writes, setWrites] = React.useState(false);
+
+  /* The guided builder owns the statement for database tools. `handWritten`
+     is the escape hatch: generated SQL covers the shapes people actually
+     register, not every statement anybody could ever want, and a builder with
+     no way out is a worse tool than a textarea. */
+  const [handWritten, setHandWritten] = React.useState(false);
+  const [builder, setBuilder] = React.useState<SqlBuilderValue>(EMPTY_BUILDER);
+  const [schema, setSchema] = React.useState<SchemaPreviewResult | null>(null);
+  const [schemaLoading, setSchemaLoading] = React.useState(false);
+  const [schemaError, setSchemaError] = React.useState<string | null>(null);
+  const [schemaNonce, setSchemaNonce] = React.useState(0);
   const [extraConfig, setExtraConfig] = React.useState("{}");
   const [inputSchema, setInputSchema] = React.useState(EMPTY_SCHEMA);
   const [outputSchema, setOutputSchema] = React.useState(EMPTY_SCHEMA);
@@ -189,6 +205,43 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       .catch(() => { if (alive) setConnections([]); });
     return () => { alive = false; };
   }, [api, open, scope.workspaceId]);
+
+  /**
+   * Read the chosen database's structure.
+   *
+   * Keyed on the connection so switching connections re-reads rather than
+   * offering the previous database's tables, which would generate a statement
+   * against tables the new connection has never heard of.
+   */
+  React.useEffect(() => {
+    if (!open || type !== "database" || !connectionId) {
+      setSchema(null);
+      setSchemaError(null);
+      return;
+    }
+    let alive = true;
+    setSchemaLoading(true);
+    setSchemaError(null);
+    void api.connections
+      .schemaPreview(connectionId, { workspaceId: scope.workspaceId, environmentId: null })
+      .then((result) => { if (alive) { setSchema(result); setSchemaLoading(false); } })
+      .catch((cause: unknown) => {
+        if (!alive) return;
+        setSchema(null);
+        setSchemaLoading(false);
+        setSchemaError(
+          cause instanceof Error
+            ? cause.message
+            : "The database did not answer. Test the connection, then try again.",
+        );
+      });
+    return () => { alive = false; };
+  }, [api, open, type, connectionId, scope.workspaceId, schemaNonce]);
+
+  /* Switching to another table's shape invalidates a selection made against the
+     old one. Resetting here rather than in the panel keeps the builder value the
+     single source of truth. */
+  React.useEffect(() => { setBuilder(EMPTY_BUILDER); }, [connectionId]);
 
   React.useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [step]);
 
@@ -216,6 +269,28 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     return connections.filter((connection) => (spec.connectionTypes as string[]).includes(connection.type));
   }, [connections, spec.connectionTypes]);
 
+  const selectedTable = React.useMemo(
+    () => (schema?.tables ?? []).find((t) => `${t.schema}.${t.table}` === builder.table) ?? null,
+    [schema, builder.table],
+  );
+
+  /** What the builder would register. Recomputed from the choices, never stored. */
+  const generated = React.useMemo(() => generateSql(builder, selectedTable), [builder, selectedTable]);
+
+  /* The builder drives the statement, the write flag and both schemas. Mirroring
+     them into the same state the hand-written path uses means the review step,
+     the payload and the validation call all stay in one shape. */
+  React.useEffect(() => {
+    if (type !== "database" || handWritten) return;
+    setSqlTemplate(generated.sql);
+    setWrites(generated.writes);
+    setInputSchema(JSON.stringify(generated.inputSchema, null, 2));
+    setOutputSchema(JSON.stringify(generated.outputSchema, null, 2));
+  }, [type, handWritten, generated]);
+
+  /** True while the builder owns the two schema documents. */
+  const schemasAreGenerated = type === "database" && !handWritten;
+
   const trimmedName = name.trim();
   const parsedExtra = parseObject(extraConfig);
   const parsedInput = parseObject(inputSchema);
@@ -231,9 +306,20 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       base.sqlTemplate = sqlTemplate.trim();
       base.write = writes;
       base.readOnly = !writes;
+      /* THE ORDER OF THESE KEYS IS THE ORDER OF `$1..$n`.
+         `ToolNodeExecutor` builds its positional bind list by walking
+         `config.parameters` in key order, so this object is not a set of
+         defaults — it is the parameter vector. It is written from the generated
+         list rather than from the input schema for exactly that reason: a JSON
+         Schema `properties` object carries no ordering guarantee anyone should
+         rely on, and getting it wrong binds the right values to the wrong
+         placeholders. */
+      if (!handWritten && generated.parameters.length > 0) {
+        base.parameters = Object.fromEntries(generated.parameters.map((key) => [key, null]));
+      }
     }
     return base;
-  }, [parsedExtra, type, method, url, sqlTemplate, writes]);
+  }, [parsedExtra, type, method, url, sqlTemplate, writes, handWritten, generated.parameters]);
 
   const forbiddenKey = forbiddenConfigKey(config);
   const timeoutValue = Number(timeoutMs);
@@ -246,8 +332,12 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       : null,
     type === "http" && !validUrl(url)
       ? "Enter the full endpoint URL, including https://."
-      : type === "database" && !sqlTemplate.trim()
-        ? "Enter the SQL template this tool runs."
+      : type === "database" && !handWritten && generated.problem
+        ? generated.problem
+        : type === "database" && !sqlTemplate.trim()
+          ? handWritten
+            ? "Enter the SQL statement this tool runs."
+            : "Finish the statement above before continuing."
         : parsedExtra === null
           ? "Extra configuration must be a JSON object."
           : forbiddenKey
@@ -341,6 +431,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       setName(""); setDescription(""); setType("http"); setConnectionId(null);
       setMethod("GET"); setUrl(""); setSqlTemplate(""); setWrites(false);
       setExtraConfig("{}"); setInputSchema(EMPTY_SCHEMA); setOutputSchema(EMPTY_SCHEMA);
+      setBuilder(EMPTY_BUILDER); setHandWritten(false);
+      setSchema(null); setSchemaError(null);
       setRisk("low"); setRequiresApproval(false); setApprovalTouched(false);
       setTimeoutMs("10000"); setIdempotency("input_hash"); setLifecycle("active");
       setValidation(null);
@@ -550,26 +642,59 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
               ) : null}
 
               {type === "database" ? (
-                <ModalSection title="Statement" description="Parameterised only. Values are bound from the input schema, never interpolated.">
-                  <Field label="SQL template" required>
-                    <Textarea
-                      mono
-                      autoGrow={false}
-                      minRows={5}
-                      value={sqlTemplate}
-                      onChange={(event) => setSqlTemplate(event.target.value)}
-                      placeholder="SELECT id, name, plan FROM customers WHERE id = :customerId"
-                      spellCheck={false}
+                <>
+                  {handWritten ? (
+                    <ModalSection
+                      title="Statement"
+                      description="Bind values with $1, $2 … and list them in order under Additional configuration as `parameters`."
+                    >
+                      <Field label="SQL statement" required>
+                        <Textarea
+                          mono
+                          autoGrow={false}
+                          minRows={5}
+                          value={sqlTemplate}
+                          onChange={(event) => setSqlTemplate(event.target.value)}
+                          placeholder="SELECT id, email, tier FROM customers WHERE id = $1"
+                          spellCheck={false}
+                        />
+                      </Field>
+                      <Checkbox
+                        checked={writes}
+                        onCheckedChange={(value) => setWrites(value === true)}
+                        description="Registers the tool as a write. Database writes are approval-gated by default."
+                      >
+                        This statement modifies data
+                      </Checkbox>
+                    </ModalSection>
+                  ) : (
+                    <SqlBuilder
+                      value={builder}
+                      onChange={setBuilder}
+                      schema={schema}
+                      loading={schemaLoading}
+                      error={schemaError}
+                      onRetry={() => setSchemaNonce((n) => n + 1)}
+                      hasConnection={Boolean(connectionId)}
+                      generated={generated}
                     />
-                  </Field>
-                  <Checkbox
-                    checked={writes}
-                    onCheckedChange={(value) => setWrites(value === true)}
-                    description="Registers the tool as a write. Database writes are approval-gated by default."
-                  >
-                    This statement modifies data
-                  </Checkbox>
-                </ModalSection>
+                  )}
+
+                  <div className="flex justify-end">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        // Leaving the builder keeps whatever it generated, so
+                        // the textarea opens on the statement just built rather
+                        // than on an empty box.
+                        setHandWritten((previous) => !previous);
+                      }}
+                    >
+                      {handWritten ? "Back to the guided builder" : "Write the SQL myself"}
+                    </Button>
+                  </div>
+                </>
               ) : null}
 
               <ModalSection
@@ -594,14 +719,30 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
               <ModalSection
                 title="Schemas"
-                description="What an agent must pass, and what it can rely on getting back. Both are JSON Schema objects."
+                description={
+                  schemasAreGenerated
+                    ? "Derived from the fields and filters you chose. Switch to writing the SQL yourself to edit them directly."
+                    : "What an agent must pass, and what it can rely on getting back. Both are JSON Schema objects."
+                }
               >
                 <div className="grid gap-3 lg:grid-cols-2">
                   <Field label="Input schema">
-                    <CodeEditor value={inputSchema} onValueChange={setInputSchema} minRows={8} aria-label="Input schema" />
+                    <CodeEditor
+                      value={inputSchema}
+                      onValueChange={setInputSchema}
+                      minRows={8}
+                      aria-label="Input schema"
+                      disabled={schemasAreGenerated}
+                    />
                   </Field>
                   <Field label="Output schema">
-                    <CodeEditor value={outputSchema} onValueChange={setOutputSchema} minRows={8} aria-label="Output schema" />
+                    <CodeEditor
+                      value={outputSchema}
+                      onValueChange={setOutputSchema}
+                      minRows={8}
+                      aria-label="Output schema"
+                      disabled={schemasAreGenerated}
+                    />
                   </Field>
                 </div>
               </ModalSection>

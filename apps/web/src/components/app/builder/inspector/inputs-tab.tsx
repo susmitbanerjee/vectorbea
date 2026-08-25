@@ -7,11 +7,13 @@ import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { NODE_MARKS } from "~/components/icons/nodes";
 import {
-  inputsFor, upstreamOf, flattenSchema, makeExpression, parseExpression,
+  upstreamOf, flattenSchema, makeExpression, parseExpression,
   describeExpression, resolveExpression, checkType, typeOfField, evaluateTransform,
   formatResolved, TRANSFORM_FUNCTIONS, TYPE_LABEL, NULL_POLICY_LABEL, NULL_POLICY_HELP,
   type Binding, type FieldSchema, type InputDeclaration, type NullPolicy, type UpstreamNode,
 } from "~/mocks/io-schema";
+import { nodeInputs } from "./node-inputs";
+import { useBuilderRegistry } from "../use-builder-registry";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 
@@ -52,7 +54,8 @@ export function InputsTab({
   node, nodes, edges, bindings, onChange,
   nullPolicies, onNullPolicyChange, defaults, onDefaultChange, expanded,
 }: InputsTabProps) {
-  const inputs = React.useMemo(() => inputsFor(node), [node]);
+  const registry = useBuilderRegistry();
+  const inputs = React.useMemo(() => nodeInputs(node, registry), [node, registry]);
   const upstream = React.useMemo(() => upstreamOf(node.id, nodes, edges), [node.id, nodes, edges]);
 
   const [activeInput, setActiveInput] = React.useState<string | null>(inputs[0]?.id ?? null);

@@ -543,6 +543,73 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     },
   ],
 
+  /* Schema introspection, as a fixture.
+     The real route opens a connection and reads `information_schema`. A mock
+     cannot, so it serves a small, obviously-fake database rather than an empty
+     one: an empty result is indistinguishable from a broken introspection, and
+     the tool builder is unusable without tables to pick. The names say plainly
+     that nothing was dialled. */
+  [
+    "POST",
+    "/api/connections/:id/schema-preview",
+    () => ({
+      schemas: ["public", "billing"],
+      provider: "postgresql",
+      databaseName: "fixtures",
+      fetchedAt: new Date().toISOString(),
+      tables: [
+        {
+          schema: "public",
+          table: "customers",
+          tableType: "TABLE",
+          rowCountEstimate: 12480,
+          columns: [
+            { name: "id", dataType: "uuid", nullable: false, isPrimaryKey: true, defaultValue: "gen_random_uuid()", maxLength: null },
+            { name: "email", dataType: "text", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
+            { name: "full_name", dataType: "text", nullable: true, isPrimaryKey: false, defaultValue: null, maxLength: null },
+            { name: "tier", dataType: "text", nullable: false, isPrimaryKey: false, defaultValue: "'free'", maxLength: 32 },
+            { name: "created_at", dataType: "timestamptz", nullable: false, isPrimaryKey: false, defaultValue: "now()", maxLength: null },
+          ],
+        },
+        {
+          schema: "public",
+          table: "subscriptions",
+          tableType: "TABLE",
+          rowCountEstimate: 9310,
+          columns: [
+            { name: "id", dataType: "uuid", nullable: false, isPrimaryKey: true, defaultValue: "gen_random_uuid()", maxLength: null },
+            { name: "customer_id", dataType: "uuid", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
+            { name: "status", dataType: "text", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: 24 },
+            { name: "renews_at", dataType: "timestamptz", nullable: true, isPrimaryKey: false, defaultValue: null, maxLength: null },
+            { name: "amount_cents", dataType: "integer", nullable: false, isPrimaryKey: false, defaultValue: "0", maxLength: null },
+          ],
+        },
+        {
+          schema: "billing",
+          table: "invoices",
+          tableType: "TABLE",
+          rowCountEstimate: 40218,
+          columns: [
+            { name: "id", dataType: "uuid", nullable: false, isPrimaryKey: true, defaultValue: "gen_random_uuid()", maxLength: null },
+            { name: "customer_id", dataType: "uuid", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
+            { name: "total_cents", dataType: "integer", nullable: false, isPrimaryKey: false, defaultValue: "0", maxLength: null },
+            { name: "paid", dataType: "boolean", nullable: false, isPrimaryKey: false, defaultValue: "false", maxLength: null },
+            { name: "issued_on", dataType: "date", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
+          ],
+        },
+        {
+          schema: "public",
+          table: "active_customers",
+          tableType: "VIEW",
+          rowCountEstimate: null,
+          columns: [
+            { name: "id", dataType: "uuid", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
+            { name: "email", dataType: "text", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
+          ],
+        },
+      ],
+    }),
+  ],
   [
     "POST",
     "/api/tools/test-unsaved",

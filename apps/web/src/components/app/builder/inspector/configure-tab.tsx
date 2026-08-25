@@ -8,9 +8,11 @@ import { Select } from "~/components/ui/select";
 import { Switch } from "~/components/ui/choice";
 import { Button } from "~/components/ui/button";
 import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
-import { AGENTS, TOOLS, CONNECTIONS } from "~/mocks/fixtures";
-import { inputsFor, TYPE_LABEL } from "~/mocks/io-schema";
-import { boundResource } from "~/mocks/builder";
+import { TYPE_LABEL } from "~/mocks/io-schema";
+import { nodeInputs } from "./node-inputs";
+import {
+  useBuilderRegistry, resolveTool, resolveAgent, resolveConnection,
+} from "../use-builder-registry";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 import type { RiskLevel } from "~/mocks/domain";
 
@@ -37,7 +39,20 @@ export function ConfigureTab({
   node: VersionNode;
   onChange: (patch: { name?: string; config?: Record<string, unknown> }) => void;
 }) {
-  const set = (key: string, value: unknown) => onChange({ config: { ...node.config, [key]: value } });
+  /**
+   * Write SEVERAL config keys in one patch.
+   *
+   * `set` spreads `node.config` as captured by the current render, so two
+   * `set` calls in one handler both build their patch from the same starting
+   * config and the second silently discards the first. That was invisible while
+   * every control wrote a single key; binding a tool writes four (`toolId`,
+   * `toolName`, `toolType`, `connectionId`) and only the last one survived, so
+   * the picker appeared to do nothing at all.
+   */
+  const setMany = (patch: Record<string, unknown>) =>
+    onChange({ config: { ...node.config, ...patch } });
+
+  const set = (key: string, value: unknown) => setMany({ [key]: value });
 
   return (
     <div className="grid gap-4 p-3">
@@ -63,8 +78,8 @@ export function ConfigureTab({
       </Section>
 
       {/* ── Resource binding ─────────────────────────────────────────────── */}
-      {node.kind === "tool" ? <ToolConfig node={node} set={set} /> : null}
-      {node.kind === "agent" ? <AgentConfig node={node} set={set} /> : null}
+      {node.kind === "tool" ? <ToolConfig node={node} set={set} setMany={setMany} /> : null}
+      {node.kind === "agent" ? <AgentConfig node={node} set={set} setMany={setMany} /> : null}
       {node.kind === "llm" ? <LlmConfig node={node} set={set} /> : null}
       {node.kind === "branch" ? <BranchConfig node={node} set={set} /> : null}
       {node.kind === "parallel" ? <ParallelConfig node={node} set={set} /> : null}
@@ -88,16 +103,54 @@ export function ConfigureTab({
 
 /* ── Tool ─────────────────────────────────────────────────────────────────── */
 
-function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unknown) => void }) {
+function ToolConfig({ node, set, setMany }: {
+  node: VersionNode;
+  set: (k: string, v: unknown) => void;
+  setMany: (patch: Record<string, unknown>) => void;
+}) {
   const [query, setQuery] = React.useState("");
-  const selected = TOOLS.find((t) => t.name === node.config.tool);
-  const connection = CONNECTIONS.find((c) => c.name === node.config.connection);
-  const params = React.useMemo(() => inputsFor(node), [node]);
+  const registry = useBuilderRegistry();
+  const config = node.config as Record<string, unknown>;
+
+  const selected = resolveTool(config, registry);
+  const connection = resolveConnection(config, registry)
+    ?? (selected?.connectionId ? registry.byConnectionId.get(selected.connectionId) ?? null : null);
+  const params = React.useMemo(() => nodeInputs(node, registry), [node, registry]);
 
   const matches = React.useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return TOOLS.filter((t) => !needle || t.name.toLowerCase().includes(needle)).slice(0, 8);
-  }, [query]);
+    return registry.tools
+      .filter((t) => !needle || t.name.toLowerCase().includes(needle) || t.type.toLowerCase().includes(needle))
+      .slice(0, 8);
+  }, [query, registry.tools]);
+
+  /* A node can name a tool that no longer exists — it was deleted, or the graph
+     came from another workspace. Saying so is the only way the operator learns
+     why the run will fail. */
+  const namedButMissing = !selected && typeof config.tool === "string" && config.tool;
+
+  /**
+   * Bind by ID.
+   *
+   * `ToolNodeExecutor` reads `config.toolId` and fails the node without it. The
+   * name is written alongside purely so a graph stays readable in a diff, and so
+   * the node still labels itself while the registry is loading.
+   */
+  const choose = (tool: (typeof registry.tools)[number]) => {
+    setMany({
+      toolId: tool.id,
+      toolName: tool.name,
+      toolType: tool.type,
+      // The legacy name key would otherwise keep resolving to the old tool and
+      // win, because resolution prefers an id but falls back to a name.
+      tool: tool.name,
+      ...(!config.connectionId && tool.connectionId ? { connectionId: tool.connectionId } : {}),
+    });
+  };
+
+  const clear = () => {
+    setMany({ toolId: null, toolName: null, toolType: null, tool: null });
+  };
 
   return (
     <>
@@ -105,8 +158,8 @@ function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
         {selected ? (
           <div className="border-subtle bg-surface-sunken flex flex-wrap items-center gap-2 rounded-sm border p-2">
             <ProviderLogo
-              provider={selected.provider as ProviderId}
-              connected={connection?.status === "healthy"}
+              provider={(connection?.provider ?? "http") as ProviderId}
+              connected={connection?.status === "active"}
               size={14}
               decorative
               className="!size-6"
@@ -114,16 +167,29 @@ function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
             <span className="min-w-0 flex-1">
               <span className="font-code text-mono-sm text-fg-primary block truncate">{selected.name}</span>
               <span className="font-ui text-caption text-fg-muted block">
-                {Math.round(selected.timeoutMs / 1000)}s default timeout · used by {selected.usedByCount} workflows
+                {selected.type}
+                {selected.timeoutMs ? ` · ${Math.round(selected.timeoutMs / 1000)}s timeout` : ""}
+                {selected.requiresApproval ? " · approval required" : ""}
               </span>
             </span>
-            <span className={cn("font-ui rounded-xs border px-1 text-[10px] uppercase", RISK_TONE[selected.risk])}>
-              {selected.risk}
+            <span className={cn("font-ui rounded-xs border px-1 text-[10px] uppercase", RISK_TONE[selected.riskLevel as RiskLevel] ?? RISK_TONE.low)}>
+              {selected.riskLevel}
             </span>
-            <Button size="xs" variant="ghost" onClick={() => set("tool", "")}>Change</Button>
+            <Button size="xs" variant="ghost" onClick={clear}>Change</Button>
           </div>
         ) : (
           <>
+            {namedButMissing ? (
+              <div className="border-status-failed-border bg-status-failed-subtle mb-1.5 rounded-sm border px-2 py-1">
+                <Text variant="caption" tone="inherit" className="text-status-failed">
+                  &ldquo;{String(config.tool)}&rdquo; is not a tool in this workspace
+                </Text>
+                <Text variant="caption" tone="secondary" className="mt-0.5 block leading-snug">
+                  This step will fail when the run reaches it. Pick a registered tool below.
+                </Text>
+              </div>
+            ) : null}
+
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -131,29 +197,44 @@ function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
               aria-label="Search tools"
               className="h-7 text-body-sm"
             />
-            <ul className="mt-1.5 grid gap-px">
-              {matches.map((tool) => (
-                <li key={tool.id}>
-                  <button
-                    type="button"
-                    onClick={() => set("tool", tool.name)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left",
-                      "hover:bg-surface-hover transition-colors duration-fast outline-none focus-visible:focus-ring",
-                    )}
-                  >
-                    <span className="font-code text-mono-sm text-fg-primary min-w-0 flex-1 truncate">{tool.name}</span>
-                    {tool.lastError ? (
-                      <span className="bg-status-failed size-1.5 shrink-0 rounded-full" title={tool.lastError} />
-                    ) : null}
-                    <span className={cn("font-ui shrink-0 rounded-xs border px-1 text-[9px] uppercase", RISK_TONE[tool.risk])}>
-                      {tool.risk}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <Button size="xs" variant="ghost" className="mt-1.5">Create a new tool</Button>
+
+            {registry.loading ? (
+              <Text variant="caption" tone="muted" className="mt-1.5 block">Loading the registry…</Text>
+            ) : registry.tools.length === 0 ? (
+              <Text variant="caption" tone="muted" className="mt-1.5 block">
+                No tools are registered in this workspace yet. Register one and it appears here.
+              </Text>
+            ) : matches.length === 0 ? (
+              <Text variant="caption" tone="muted" className="mt-1.5 block">
+                No tool matches that search.
+              </Text>
+            ) : (
+              <ul className="mt-1.5 grid gap-px">
+                {matches.map((tool) => (
+                  <li key={tool.id}>
+                    <button
+                      type="button"
+                      onClick={() => choose(tool)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left",
+                        "hover:bg-surface-hover transition-colors duration-fast outline-none focus-visible:focus-ring",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="font-code text-mono-sm text-fg-primary block truncate">{tool.name}</span>
+                        <span className="font-ui text-caption text-fg-muted block truncate">{tool.type}</span>
+                      </span>
+                      {tool.status !== "active" ? (
+                        <span className="font-ui text-fg-muted shrink-0 text-[9px] uppercase">{tool.status}</span>
+                      ) : null}
+                      <span className={cn("font-ui shrink-0 rounded-xs border px-1 text-[9px] uppercase", RISK_TONE[tool.riskLevel as RiskLevel] ?? RISK_TONE.low)}>
+                        {tool.riskLevel}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         )}
       </Section>
@@ -161,11 +242,15 @@ function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
       <Section title="Connection" help="Which credentials the call runs under. Health is live — a failing connection means this step fails on its next run.">
         <Select
           options={[
-            { value: "", label: "Workspace default" },
-            ...CONNECTIONS.map((c) => ({ value: c.name, label: `${c.name} — ${c.status}` })),
+            { value: "", label: selected?.connectionId ? "The tool's own connection" : "Workspace default" },
+            ...registry.connections.map((c) => ({
+              value: c.id,
+              label: `${c.name} - ${c.status}`,
+              description: c.provider,
+            })),
           ]}
-          value={String(node.config.connection ?? "")}
-          onValueChange={(v) => set("connection", v || null)}
+          value={connection?.id ?? ""}
+          onValueChange={(v) => setMany({ connectionId: v || null, connection: null })}
           aria-label="Connection"
         />
         {connection ? (
@@ -173,27 +258,24 @@ function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                connection.status === "healthy" ? "bg-status-success"
+                connection.status === "active" ? "bg-status-success"
                   : connection.status === "degraded" ? "bg-status-waiting" : "bg-status-failed",
               )}
               aria-hidden="true"
             />
             <Text variant="caption" tone="muted">
-              {connection.status === "healthy"
-                ? `Responding in ${connection.latencyMs}ms.`
-                : `${connection.status}. ${connection.blastRadius.workflows} workflows and ${connection.blastRadius.tools} tools depend on it.`}
+              {connection.provider} · {connection.status}
             </Text>
           </div>
-        ) : (
+        ) : registry.connections.length === 0 && !registry.loading ? (
           <Text variant="caption" tone="muted" className="mt-1.5 block">
-            The workspace default is used. Bind one explicitly if this step should run under a
-            specific account.
+            No connections exist yet. Create one under Connect, then Connections.
           </Text>
-        )}
+        ) : null}
       </Section>
 
       {params.length > 0 ? (
-        <Section title="Parameters" help="Generated from the tool's schema. Values are bound on the Inputs tab, where you can see what each one resolves to.">
+        <Section title="Parameters" help="Read from the tool's own input schema. Values are bound on the Inputs tab, where you can see what each one resolves to.">
           <ul className="grid gap-1">
             {params.map((p) => (
               <li key={p.id} className="flex items-baseline gap-2">
@@ -215,26 +297,76 @@ function ToolConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
 
 /* ── Agent ────────────────────────────────────────────────────────────────── */
 
-function AgentConfig({ node, set }: { node: VersionNode; set: (k: string, v: unknown) => void }) {
-  const agent = AGENTS.find((a) => a.model === node.config.model);
-  const override = String(node.config.taskOverride ?? "");
+function AgentConfig({ node, set, setMany }: {
+  node: VersionNode;
+  set: (k: string, v: unknown) => void;
+  setMany: (patch: Record<string, unknown>) => void;
+}) {
+  const registry = useBuilderRegistry();
+  const config = node.config as Record<string, unknown>;
+  const agent = resolveAgent(config, registry);
+  const override = String(config.taskOverride ?? "");
+
+  /* Named an agent that is not here. Same reasoning as the tool picker: this is
+     the only place the operator can learn why the step will fail. */
+  const namedButMissing = !agent && typeof config.model === "string" && config.model;
 
   return (
     <>
-      <Section title="Agent" help="The registered agent this step runs. Its model, cost and tool grants come from the registry.">
-        <Select
-          options={AGENTS.map((a) => ({ value: a.model, label: `${a.name} — ${a.model}` }))}
-          value={String(node.config.model ?? "")}
-          onValueChange={(v) => set("model", v)}
-          aria-label="Agent"
-        />
-        {agent ? (
+      <Section title="Agent" help="The registered agent this step runs. Its model and tool grants come from the registry.">
+        {registry.loading ? (
+          <Text variant="caption" tone="muted" className="block">Loading the registry…</Text>
+        ) : registry.agents.length === 0 ? (
+          <Text variant="caption" tone="muted" className="block">
+            No agents are registered in this workspace yet. Register one under Build, then Agents,
+            and it appears here.
+          </Text>
+        ) : (
+          <Select
+            options={registry.agents.map((a) => ({
+              value: a.id,
+              label: a.name,
+              description: a.modelName ?? a.type,
+            }))}
+            value={agent?.id ?? ""}
+            onValueChange={(v) => {
+              /* Bind by ID. `AgentNodeExecutor` reads `config.agentId` and fails
+                 the node without it; the model name it used to write was never
+                 read by anything that runs. */
+              const picked = registry.byAgentId.get(v) ?? null;
+              setMany({
+                agentId: v || null,
+                agentName: picked?.name ?? null,
+                modelName: picked?.modelName ?? null,
+                // The legacy key would otherwise keep resolving to whichever
+                // agent happens to share the old model name.
+                model: picked?.modelName ?? null,
+                // Grants are per-agent; carrying them across would grant tools
+                // the new agent is not allowed to call.
+                toolGrants: [],
+              });
+            }}
+            aria-label="Agent"
+          />
+        )}
+        {namedButMissing ? (
+          <div className="border-status-failed-border bg-status-failed-subtle mt-1.5 rounded-sm border px-2 py-1">
+            <Text variant="caption" tone="inherit" className="text-status-failed">
+              &ldquo;{String(config.model)}&rdquo; is not an agent in this workspace
+            </Text>
+            <Text variant="caption" tone="secondary" className="mt-0.5 block leading-snug">
+              This step will fail when the run reaches it. Choose a registered agent.
+            </Text>
+          </div>
+        ) : agent ? (
           <Text variant="caption" tone="muted" className="mt-1.5 block">
-            {agent.provider} · about ${agent.costPerRunUsd.toFixed(4)} per run · {agent.toolGrants} tool
-            grants · prompt v{agent.promptVersion}
+            {agent.modelName ?? "no model set"}
+            {agent.llmConnectionId
+              ? ` · ${registry.byConnectionId.get(agent.llmConnectionId)?.name ?? "connection missing"}`
+              : " · no connection"}
+            {` · ${agent.allowedToolIds.length} tool grant${agent.allowedToolIds.length === 1 ? "" : "s"}`}
           </Text>
         ) : null}
-        <Button size="xs" variant="ghost" className="mt-1.5">Register a new agent</Button>
       </Section>
 
       <Section
@@ -296,24 +428,54 @@ function AgentConfig({ node, set }: { node: VersionNode; set: (k: string, v: unk
       </Section>
 
       <Section title="Tool grants" help="Which tools the agent may call from this step. Narrower than the agent's registered grants is allowed; wider is not.">
-        <ul className="grid gap-1">
-          {TOOLS.slice(0, 6).map((tool) => {
-            const grants = (node.config.toolGrants as string[] | undefined) ?? [];
-            const granted = grants.includes(tool.name);
-            return (
-              <li key={tool.id} className="flex items-center gap-2">
-                <Switch
-                  checked={granted}
-                  onCheckedChange={(v) => set("toolGrants", v ? [...grants, tool.name] : grants.filter((g) => g !== tool.name))}
-                />
-                <span className="font-code text-mono-sm text-fg-primary min-w-0 flex-1 truncate">{tool.name}</span>
-                <span className={cn("font-ui shrink-0 rounded-xs border px-1 text-[9px] uppercase", RISK_TONE[tool.risk])}>
-                  {tool.risk}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        {/* THE LIST IS THE AGENT'S OWN GRANTS, NOT THE WHOLE REGISTRY.
+            The help text above has always promised that a step cannot widen
+            what the agent is allowed to call, and the previous version offered
+            the first six tools in the workspace regardless — so the one rule
+            this section states was the one thing it did not enforce. */}
+        {!agent ? (
+          <Text variant="caption" tone="muted" className="block">
+            Choose an agent first. Its registered grants are what this step may narrow.
+          </Text>
+        ) : agent.allowedToolIds.length === 0 ? (
+          <Text variant="caption" tone="muted" className="block">
+            {agent.name} has no tool grants, so this step cannot call any tool. Grant tools on the
+            agent to change that.
+          </Text>
+        ) : (
+          <ul className="grid gap-1">
+            {agent.allowedToolIds.map((toolId) => {
+              const tool = registry.byToolId.get(toolId);
+              const grants = (config.toolGrants as string[] | undefined) ?? [];
+              // No explicit narrowing means the agent's full grant list applies.
+              const granted = grants.length === 0 || grants.includes(toolId);
+              return (
+                <li key={toolId} className="flex items-center gap-2">
+                  <Switch
+                    checked={granted}
+                    onCheckedChange={(v) => {
+                      const base = grants.length === 0 ? agent.allowedToolIds : grants;
+                      set("toolGrants", v ? [...new Set([...base, toolId])] : base.filter((g) => g !== toolId));
+                    }}
+                    aria-label={tool?.name ?? toolId}
+                  />
+                  <span className="font-code text-mono-sm text-fg-primary min-w-0 flex-1 truncate">
+                    {tool?.name ?? toolId}
+                  </span>
+                  {tool ? (
+                    <span className={cn("font-ui shrink-0 rounded-xs border px-1 text-[9px] uppercase", RISK_TONE[tool.riskLevel as RiskLevel] ?? RISK_TONE.low)}>
+                      {tool.riskLevel}
+                    </span>
+                  ) : (
+                    <Text variant="caption" tone="inherit" className="text-status-failed shrink-0">
+                      missing
+                    </Text>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Section>
     </>
   );

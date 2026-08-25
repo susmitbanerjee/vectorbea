@@ -7,7 +7,8 @@ import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Switch } from "~/components/ui/choice";
 import { formatCost, formatDuration } from "~/lib/format";
-import { inputsFor } from "~/mocks/io-schema";
+import { nodeInputs } from "./node-inputs";
+import { useBuilderRegistry } from "../use-builder-registry";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -93,10 +94,11 @@ export function AdvancedTab({
   workflowBudgetMs: number;
   nodeNames: { id: string; name: string }[];
 }) {
+  const registry = useBuilderRegistry();
   const schedule = React.useMemo(() => attemptSchedule(config.retry), [config.retry]);
   const totalMs = schedule[schedule.length - 1] + config.timeoutMs;
   const overBudget = totalMs > workflowBudgetMs;
-  const inputs = React.useMemo(() => inputsFor(node), [node]);
+  const inputs = React.useMemo(() => nodeInputs(node, registry), [node, registry]);
 
   const idempotencyIsRunScoped = config.idempotencyKey.includes("{{run.id}}");
   const hasSideEffects = node.kind === "tool" || node.kind === "output";

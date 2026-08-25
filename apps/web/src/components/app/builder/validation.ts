@@ -1,4 +1,6 @@
-import { CONNECTIONS, TOOLS } from "~/mocks/fixtures";
+import {
+  resolveTool, resolveConnection, type BuilderRegistry,
+} from "./use-builder-registry";
 import { downstreamOf } from "./store";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 
@@ -48,10 +50,33 @@ export const CATEGORY_LABEL: Record<IssueCategory, string> = {
 /** Risk tiers that may not run unattended in production. */
 const GATED_RISK = new Set(["high", "critical"]);
 
+/** True when a node claims a tool at all, under any of the binding keys. */
+function bindsTool(config: Record<string, unknown>): boolean {
+  return Boolean(
+    (typeof config.toolId === "string" && config.toolId)
+    || (typeof config.tool === "string" && config.tool)
+    || (typeof config.toolName === "string" && config.toolName),
+  );
+}
+
 export function validateGraph(
   nodes: BuilderNode[],
   edges: BuilderEdge[],
   disabled: string[] = [],
+  /**
+   * The workspace's real agents, tools and connections.
+   *
+   * These rules used to check the graph against `~/mocks/fixtures`, which made
+   * the two that matter most say the wrong thing: "Connection X does not exist"
+   * fired for every real connection (none of them are in the fixtures), and the
+   * approval-gate rule read its risk tier from a fictional tool of the same
+   * name — so a genuinely critical tool went ungated whenever the fixtures
+   * happened not to contain it.
+   *
+   * Optional so the reducer's own tests can validate a graph without a
+   * registry; resource rules are then skipped rather than answered wrongly.
+   */
+  registry?: BuilderRegistry,
 ): Issue[] {
   const issues: Issue[] = [];
   const off = new Set(disabled);
@@ -177,26 +202,34 @@ export function validateGraph(
       });
     }
 
-    /* Resource. */
-    const connectionName = config.connection;
-    if (typeof connectionName === "string" && connectionName) {
-      const record = CONNECTIONS.find((c) => c.name === connectionName);
-      if (!record) {
-        issues.push({
-          id: `missing-conn-${id}`, category: "resource", severity: "error", nodeId: id,
-          title: `Connection ‘${connectionName}’ does not exist`,
-          detail: `‘${name}’ binds credentials this workspace does not have.`,
-          fix: `Create ‘${connectionName}’ under Connections, or bind a different one.`,
-        });
-      } else if (record.status !== "healthy") {
-        issues.push({
-          id: `unhealthy-conn-${id}`, category: "resource", severity: "warning", nodeId: id,
-          title: `Connection ‘${connectionName}’ is ${record.status}`,
-          detail: `‘${name}’ will fail here until it recovers. This is an operational condition, not a defect in the graph.`,
-          fix: `Fix or rotate ‘${connectionName}’ — or publish anyway if this change is what fixes it.`,
-        });
-      }
-    } else if (kind === "tool" && config.tool) {
+    /* Resource.
+       Skipped entirely without a registry: "this connection does not exist" is
+       a claim about the workspace, and answering it from an empty list would
+       condemn every correctly-bound node while the lists were still loading. */
+    const boundTool = registry ? resolveTool(config, registry) : null;
+    const boundConnection = registry ? resolveConnection(config, registry) : null;
+    const namesConnection =
+      (typeof config.connectionId === "string" && config.connectionId)
+      || (typeof config.connection === "string" && config.connection);
+
+    if (registry && !registry.loading && namesConnection && !boundConnection) {
+      const label = typeof config.connection === "string" && config.connection
+        ? config.connection
+        : String(config.connectionId);
+      issues.push({
+        id: `missing-conn-${id}`, category: "resource", severity: "error", nodeId: id,
+        title: `Connection ‘${label}’ does not exist`,
+        detail: `‘${name}’ binds credentials this workspace does not have.`,
+        fix: `Create it under Connections, or bind a different one.`,
+      });
+    } else if (registry && boundConnection && boundConnection.status !== "active") {
+      issues.push({
+        id: `unhealthy-conn-${id}`, category: "resource", severity: "warning", nodeId: id,
+        title: `Connection ‘${boundConnection.name}’ is ${boundConnection.status}`,
+        detail: `‘${name}’ will fail here until it recovers. This is an operational condition, not a defect in the graph.`,
+        fix: `Fix or rotate ‘${boundConnection.name}’ — or publish anyway if this change is what fixes it.`,
+      });
+    } else if (kind === "tool" && bindsTool(config) && !namesConnection && !boundTool?.connectionId) {
       issues.push({
         id: `no-conn-${id}`, category: "resource", severity: "warning", nodeId: id,
         title: `‘${name}’ has no connection bound`,
@@ -205,10 +238,24 @@ export function validateGraph(
       });
     }
 
+    /* A tool node naming a tool the workspace does not have cannot run at all,
+       and the engine reports it only once the run reaches the node. */
+    if (registry && !registry.loading && kind === "tool" && bindsTool(config) && !boundTool) {
+      const label = typeof config.toolName === "string" && config.toolName
+        ? config.toolName
+        : typeof config.tool === "string" ? config.tool : String(config.toolId);
+      issues.push({
+        id: `missing-tool-${id}`, category: "resource", severity: "error", nodeId: id,
+        title: `Tool ‘${label}’ is not registered`,
+        detail: `‘${name}’ calls a tool this workspace does not have, so the run fails when it reaches this step.`,
+        fix: "Register the tool, or bind one that exists.",
+      });
+    }
+
     /* Policy — the risk tiers doing real work. */
-    if (kind === "tool" && typeof config.tool === "string" && config.tool) {
-      const tool = TOOLS.find((t) => t.name === config.tool);
-      if (tool && GATED_RISK.has(tool.risk)) {
+    if (kind === "tool" && bindsTool(config)) {
+      const tool = boundTool;
+      if (tool && GATED_RISK.has(tool.riskLevel)) {
         const upstream = upstreamOf(id, liveEdges);
         const gated = [...upstream].some((up) => byId.get(up)?.node.kind === "approval");
         if (!gated) {
@@ -218,10 +265,10 @@ export function validateGraph(
             // Critical is an error; high is a warning. A refund issued without
             // review is a different class of problem from a Slack message sent
             // without review, and flattening them makes the whole category noise.
-            severity: tool.risk === "critical" ? "error" : "warning",
+            severity: tool.riskLevel === "critical" ? "error" : "warning",
             nodeId: id,
-            title: `‘${tool.name}’ is ${tool.risk} risk with no approval upstream`,
-            detail: `Nothing between the trigger and ‘${name}’ stops for a person, so this ${tool.risk}-risk call runs unattended.`,
+            title: `‘${tool.name}’ is ${tool.riskLevel} risk with no approval upstream`,
+            detail: `Nothing between the trigger and ‘${name}’ stops for a person, so this ${tool.riskLevel}-risk call runs unattended.`,
             fix: "Add an approval gate upstream, or bind a lower-risk tool.",
           });
         }

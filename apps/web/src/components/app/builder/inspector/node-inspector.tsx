@@ -9,7 +9,9 @@ import { InputsTab } from "./inputs-tab";
 import { ConfigureTab } from "./configure-tab";
 import { AdvancedTab, type AdvancedConfig } from "./advanced-tab";
 import { OutputTab, TestTab } from "./output-test-tabs";
-import { inputsFor, type Binding, type NullPolicy } from "~/mocks/io-schema";
+import { type Binding, type NullPolicy } from "~/mocks/io-schema";
+import { nodeInputs } from "./node-inputs";
+import { useBuilderRegistry } from "../use-builder-registry";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 
@@ -217,9 +219,10 @@ export function NodeInspector({
     };
   }, [width]);
 
+  const registry = useBuilderRegistry();
   const entry = NODE_MARKS.find((m) => m.type === node.kind);
   const Icon = entry?.Icon;
-  const declarations = inputsFor(node);
+  const declarations = nodeInputs(node, registry);
   const unbound = declarations.filter(
     (d) => d.required && !edits.bindings.some((b) => b.inputId === d.id),
   ).length;

@@ -61,6 +61,23 @@ object DbSchemaFetcher {
         val fetchedAt: String = java.time.Instant.now().toString(),
     )
 
+    /**
+     * The tester's input shape, so both paths resolve credentials identically.
+     *
+     * Schema preview and "test connection" must agree about what a connection
+     * string means. When they parsed it separately they disagreed, and a
+     * connection that tested green could still fail to list a single table.
+     */
+    private fun SchemaInput.toTestInput() = DbTester.DbTestInput(
+        dbType = dbType,
+        connectionUrl = connectionUrl,
+        password = password,
+        username = username,
+        host = host,
+        port = port,
+        database = database,
+    )
+
     fun fetch(input: SchemaInput): SchemaResult {
         return when (input.dbType.lowercase()) {
             "postgres", "postgresql", "neon", "supabase" -> fetchPostgres(input)
@@ -74,17 +91,26 @@ object DbSchemaFetcher {
     // ── PostgreSQL ────────────────────────────────────────────────────────────
 
     private fun fetchPostgres(input: SchemaInput): SchemaResult {
-        val jdbcUrl = resolvePostgresUrl(input)
+        // Resolved by the SAME parser the connection tester uses. This used to
+        // build the JDBC URL by string-swapping the scheme, which left
+        // `user:password@` sitting in the authority - and the PostgreSQL driver
+        // does not accept credentials there, so it read the whole `user:pass@host`
+        // blob as a hostname. The effect was that schema preview failed for every
+        // connection string that carried its own credentials, which is nearly all
+        // of them. See ConnectionUrl.kt for why URI parsing cannot do this.
+        val target = DbTester.resolvePostgresTarget(input.toTestInput())
+
+        return DbTester.attemptWithFallback(target.password, target.alternatePassword) { password ->
         val props = Properties().apply {
             setProperty("connectTimeout", CONNECT_TIMEOUT_SECONDS.toString())
             setProperty("socketTimeout", QUERY_TIMEOUT_SECONDS.toString())
             setProperty("loginTimeout", CONNECT_TIMEOUT_SECONDS.toString())
-            setProperty("sslmode", "prefer")
-            if (!input.username.isNullOrBlank()) setProperty("user", input.username)
-            if (!input.password.isNullOrBlank()) setProperty("password", input.password)
+            if (!target.jdbcUrl.contains("sslmode=", ignoreCase = true)) setProperty("sslmode", "prefer")
+            if (!target.username.isNullOrBlank()) setProperty("user", target.username)
+            if (!password.isNullOrBlank()) setProperty("password", password)
         }
 
-        DriverManager.getConnection(jdbcUrl, props).use { conn ->
+        DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
             // 1. Fetch non-system schemas
             val schemas = mutableListOf<String>()
             conn.prepareStatement(
@@ -132,28 +158,43 @@ object DbSchemaFetcher {
             }
 
             val dbName = try { conn.catalog } catch (_: Exception) { input.database }
-            return SchemaResult(
+            SchemaResult(
                 schemas = schemas,
                 tables  = tables,
                 provider = "postgresql",
                 databaseName = dbName,
             )
         }
+        }
     }
 
     private fun fetchPostgresColumns(conn: java.sql.Connection, schema: String, table: String): List<ColumnInfo> {
         // Fetch columns
         val pkCols = mutableSetOf<String>()
+        // READ FROM THE CATALOG, NOT information_schema.
+        //
+        // `information_schema.table_constraints` only shows constraints on
+        // tables the current role owns or holds a privilege OTHER THAN SELECT
+        // on. A read-only reporting role - exactly the kind of credential you
+        // would point at a reporting database - therefore sees NO primary keys
+        // at all, and every column came back `isPrimaryKey = false`. Measured
+        // against a SELECT-only role: information_schema returned 0 rows for a
+        // table that plainly has a primary key, while the catalog returned it.
+        //
+        // That silence is expensive here: the tool builder derives the WHERE
+        // clause for updates and deletes from the primary key, so an invisible
+        // key means an unqualified statement.
+        //
+        // `pg_index` is readable by every role, and `indisprimary` is the same
+        // fact without the privilege filter.
         conn.prepareStatement(
             """
-            SELECT kcu.column_name
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-             AND tc.table_schema = kcu.table_schema
-             AND tc.table_name = kcu.table_name
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-              AND tc.table_schema = ? AND tc.table_name = ?
+            SELECT a.attname
+            FROM pg_index i
+            JOIN pg_class c ON c.oid = i.indrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+            WHERE i.indisprimary AND n.nspname = ? AND c.relname = ?
             """.trimIndent()
         ).use { stmt ->
             stmt.queryTimeout = QUERY_TIMEOUT_SECONDS
@@ -202,23 +243,16 @@ object DbSchemaFetcher {
     // ── MySQL ─────────────────────────────────────────────────────────────────
 
     private fun fetchMysql(input: SchemaInput): SchemaResult {
-        val jdbcUrl = if (!input.connectionUrl.isNullOrBlank()) {
-            val url = input.connectionUrl
-            when {
-                url.startsWith("jdbc:") -> url
-                url.startsWith("mysql://") -> "jdbc:mysql://" + url.removePrefix("mysql://")
-                else -> "jdbc:mysql://${url}"
-            }
-        } else {
-            "jdbc:mysql://${input.host ?: "localhost"}:${input.port ?: 3306}/${input.database ?: ""}?connectTimeout=${CONNECT_TIMEOUT_SECONDS * 1000}"
-        }
+        // Same shared resolver as Postgres, for the same reason.
+        val target = DbTester.resolveMysqlTarget(input.toTestInput())
 
+        return DbTester.attemptWithFallback(target.password, target.alternatePassword) { password ->
         val props = Properties().apply {
-            if (!input.username.isNullOrBlank()) setProperty("user", input.username)
-            if (!input.password.isNullOrBlank()) setProperty("password", input.password)
+            if (!target.username.isNullOrBlank()) setProperty("user", target.username)
+            if (!password.isNullOrBlank()) setProperty("password", password)
         }
 
-        DriverManager.getConnection(jdbcUrl, props).use { conn ->
+        DriverManager.getConnection(target.jdbcUrl, props).use { conn ->
             val dbName = try { conn.catalog } catch (_: Exception) { input.database }
 
             val schemas = mutableListOf<String>()
@@ -248,7 +282,8 @@ object DbSchemaFetcher {
                 }
             }
 
-            return SchemaResult(schemas = schemas, tables = tables, provider = "mysql", databaseName = dbName)
+            SchemaResult(schemas = schemas, tables = tables, provider = "mysql", databaseName = dbName)
+        }
         }
     }
 
@@ -276,19 +311,4 @@ object DbSchemaFetcher {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun resolvePostgresUrl(input: SchemaInput): String {
-        if (!input.connectionUrl.isNullOrBlank()) {
-            val url = input.connectionUrl
-            return when {
-                url.startsWith("jdbc:") -> url
-                url.startsWith("postgres://") -> "jdbc:postgresql://" + url.removePrefix("postgres://")
-                url.startsWith("postgresql://") -> "jdbc:postgresql://" + url.removePrefix("postgresql://")
-                else -> "jdbc:postgresql://${url}"
-            }
-        }
-        val host = input.host ?: "localhost"
-        val port = input.port ?: 5432
-        val db   = input.database ?: "postgres"
-        return "jdbc:postgresql://$host:$port/$db"
-    }
 }

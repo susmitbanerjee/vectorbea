@@ -176,6 +176,38 @@ export interface BootstrapIds {
   environmentId?: string;
 }
 
+/** One column, as `information_schema` describes it. */
+export interface SchemaColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  defaultValue: string | null;
+  maxLength: number | null;
+}
+
+export interface SchemaTable {
+  schema: string;
+  table: string;
+  tableType: "TABLE" | "VIEW";
+  rowCountEstimate: number | null;
+  columns: SchemaColumn[];
+}
+
+/**
+ * What a database actually contains, read from `information_schema` only.
+ *
+ * Structure, never rows. This is what lets the tool builder offer real tables
+ * and real columns instead of asking someone to remember them and write SQL.
+ */
+export interface SchemaPreviewResult {
+  schemas: string[];
+  tables: SchemaTable[];
+  provider: string;
+  databaseName: string | null;
+  fetchedAt: string;
+}
+
 export interface VectorbeaClient {
   readonly transport: Transport;
 
@@ -376,6 +408,12 @@ export interface VectorbeaClient {
       scope?: Scope,
       options?: RequestOptions,
     ): Promise<ConnectionTestResult>;
+    /**
+     * Read a saved database connection's schemas, tables and columns.
+     *
+     * Metadata only - no row data ever crosses this boundary.
+     */
+    schemaPreview(id: string, scope?: Scope, options?: RequestOptions): Promise<SchemaPreviewResult>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
@@ -776,6 +814,17 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
       test: (id, scope, options) =>
         call<ConnectionTestResult>(`/api/connections/${id}/test`, {
           method: "POST",
+          ...req(scope, undefined, options),
+        }),
+      schemaPreview: (id, scope, options) =>
+        call<SchemaPreviewResult>(`/api/connections/${id}/schema-preview`, {
+          method: "POST",
+          body: {},
+          // Introspection opens a real connection and runs several
+          // information_schema queries over it. The 15s default abandons a cold
+          // pooler mid-answer and reports it as a timeout the user cannot tell
+          // apart from a wrong host.
+          timeoutMs: 30_000,
           ...req(scope, undefined, options),
         }),
     },
