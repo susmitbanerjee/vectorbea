@@ -51,7 +51,43 @@ export interface ComboboxProps {
   virtualiseAfter?: number;
 }
 
+/**
+ * Row heights, and why there are two.
+ *
+ * The virtualiser positions rows by multiplying an index by a FIXED height, so
+ * this number is not styling — it is the layout contract. A single 32px row
+ * fits one line, but an option may also carry a `description`, and two lines
+ * need 44. Rendering a two-line row inside a 32px box clipped the description
+ * everywhere, and once the list passed `virtualiseAfter` it was worse than
+ * cosmetic: rows are absolutely positioned at `index * height`, so every row
+ * overlapped the one below it.
+ *
+ * Measured on the schema-table picker, whose options all carry a description:
+ * every row reported `scrollHeight` 34 against `clientHeight` 32.
+ */
 const ROW_HEIGHT = 32;
+const ROW_HEIGHT_WITH_DESCRIPTION = 44;
+
+/**
+ * The scroller's viewport height, in one place because two things need it.
+ *
+ * It caps the list, and it SEEDS the virtualiser. `useVirtualizer` starts with
+ * `initialRect: { width: 0, height: 0 }` and only learns the real size when a
+ * ResizeObserver fires. A zero-height viewport has no visible range, so the
+ * first render of a virtualised list is empty — `getTotalSize()` is right,
+ * because it is just count times row height, while `getVirtualItems()` returns
+ * nothing at all.
+ *
+ * Inside a popover that mounts and measures in the same tick, that empty first
+ * frame is what the user sees: open the picker against a database with more
+ * than `virtualiseAfter` tables and the list is blank, with a correctly-sized
+ * scrollbar beside it. Measured at 52 tables: scroller 288px, total range
+ * 2288px, rows mounted 0.
+ *
+ * Seeding the rect means the first frame already has rows and the observer only
+ * ever refines it.
+ */
+const LIST_MAX_HEIGHT = 288;
 
 export const Combobox = React.forwardRef<HTMLInputElement, ComboboxProps>(function Combobox(
   {
@@ -107,13 +143,22 @@ export const Combobox = React.forwardRef<HTMLInputElement, ComboboxProps>(functi
 
   React.useEffect(() => { setActive(0); }, [query, open]);
 
+  /* One height for the whole list rather than per row: the virtualiser needs a
+     uniform step, and a list where only some rows are taller would stagger. */
+  const rowHeight = React.useMemo(
+    () => (options.some((o) => o.description) ? ROW_HEIGHT_WITH_DESCRIPTION : ROW_HEIGHT),
+    [options],
+  );
+
   const virtualise = options.length > virtualiseAfter;
   const virtualizer = useVirtualizer({
     count: options.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 8,
     enabled: virtualise,
+    // Width is irrelevant to a vertical list; height is what decides the range.
+    initialRect: { width: 0, height: LIST_MAX_HEIGHT },
   });
 
   const selected = (staticOptions ?? remote).find((o) => o.value === value) ?? null;
@@ -143,7 +188,9 @@ export const Combobox = React.forwardRef<HTMLInputElement, ComboboxProps>(functi
     else if (e.key === "Escape") { setOpen(false); }
   };
 
-  const rows = virtualise ? virtualizer.getVirtualItems() : options.map((_, i) => ({ index: i, key: i, start: i * ROW_HEIGHT, size: ROW_HEIGHT }));
+  const rows = virtualise
+    ? virtualizer.getVirtualItems()
+    : options.map((_, i) => ({ index: i, key: i, start: i * rowHeight, size: rowHeight }));
 
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
@@ -164,6 +211,14 @@ export const Combobox = React.forwardRef<HTMLInputElement, ComboboxProps>(functi
             value={open ? query : (selected?.label ?? "")}
             onChange={(e) => { setQuery(e.target.value); if (!open) setOpen(true); }}
             onFocus={() => setOpen(true)}
+            /* CLICKING THE FIELD HAS TO OPEN IT.
+               Opening on focus alone works exactly once. The input KEEPS focus
+               after a selection is committed and after Escape, so no focus
+               event fires the next time it is clicked and the list simply never
+               came back — the field looked dead until you clicked something
+               else and returned to it. Idempotent on purpose: clicking an
+               already-open list should not toggle it shut under the pointer. */
+            onClick={() => setOpen(true)}
             onKeyDown={onKeyDown}
             className={cn(
               controlBase, controlSize[size], "pr-8",
@@ -200,7 +255,10 @@ export const Combobox = React.forwardRef<HTMLInputElement, ComboboxProps>(functi
                renders zero rows while still reporting the full 19,200px range.
                The bug is invisible in code review and obvious the moment you
                count mounted nodes. */
-            className="max-h-72 overflow-y-auto"
+            className="overflow-y-auto"
+            // Not `max-h-72`: the virtualiser is seeded with this number, and a
+            // class and a constant that must agree will eventually not.
+            style={{ maxHeight: LIST_MAX_HEIGHT }}
           >
             <div
               style={virtualise ? { height: virtualizer.getTotalSize(), position: "relative" } : undefined}
@@ -219,11 +277,11 @@ export const Combobox = React.forwardRef<HTMLInputElement, ComboboxProps>(functi
                     data-disabled={o.disabled ? "" : undefined}
                     onMouseEnter={() => setActive(row.index)}
                     onClick={() => commit(o)}
-                    className={cn(menuItem, "h-8")}
+                    className={menuItem}
                     style={
                       virtualise
-                        ? { position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${row.start}px)` }
-                        : undefined
+                        ? { position: "absolute", top: 0, left: 0, width: "100%", height: rowHeight, transform: `translateY(${row.start}px)` }
+                        : { height: rowHeight }
                     }
                   >
                     <span className="flex min-w-0 flex-col">

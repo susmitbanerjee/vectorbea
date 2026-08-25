@@ -225,51 +225,113 @@ export function Canvas({
     return map;
   }, [versionNodes, state.edges, registry]);
 
+  /**
+   * THE FAST-DRAG FLICKER LIVED HERE, AND IT WAS NOT A RENDERING COST.
+   *
+   * React Flow keeps a node's measured size and handle bounds only when the
+   * node object it is handed is IDENTITY-EQUAL to the one from the previous
+   * update — `updateNodeInternals` checks `userNode === internals.userNode` and
+   * takes a fast path that reuses everything. Any other object goes down the
+   * else-branch, which rebuilds the internal node with
+   * `measured: { width: userNode.measured?.width, ... }`.
+   *
+   * These node objects never carried `measured` — the dimensions are measured
+   * from the DOM, deliberately — so every rebuilt node came back UNMEASURED.
+   * An unmeasured node fails `isNodeInitialized`, and React Flow then drops
+   * every edge touching it (`getEdgePosition` returns null) and stamps
+   * `visibility: hidden` on the node itself until a re-measure lands.
+   *
+   * This memo rebuilt EVERY node object on EVERY frame, because a drag replaces
+   * `state.nodes` sixty times a second. So the whole graph was being wiped and
+   * re-measured continuously while a node moved. Dragging slowly leaves enough
+   * time between frames for the re-measure to land invisibly; dragging fast
+   * does not, and the nodes and edges visibly blink.
+   *
+   * Reusing the previous object whenever nothing about a node actually changed
+   * means a drag hands React Flow one new object — the node being dragged — and
+   * nine unchanged ones that keep their measurements. Everything else on the
+   * canvas stops being touched at all.
+   *
+   * The memo comparators on `WorkflowNode` and `WorkflowEdge` do NOT help here:
+   * they decide whether React re-renders a component, and this is React Flow's
+   * own bookkeeping, several layers below them.
+   */
+  const nodeCache = React.useRef(new Map<string, Node<WorkflowNodeData>>());
+
   const nodes = React.useMemo<Node<WorkflowNodeData>[]>(() => {
     const disabled = new Set(state.disabled);
     const selected = new Set(state.selection);
+    const previous = nodeCache.current;
+    const next = new Map<string, Node<WorkflowNodeData>>();
 
-    return state.nodes.map((n) => {
-      const nodeIssues = issuesByNode.get(n.node.id) ?? [];
+    const list = state.nodes.map((n) => {
+      const id = n.node.id;
+      const nodeIssues = issuesByNode.get(id) ?? [];
       const hasError = nodeIssues.some((i) => i.severity === "error");
-      const runState = runStates?.[n.node.id];
+      const runState = runStates?.[id];
 
       /* Run state wins over configuration state. During a run, "executing" is
          the answer to "what is this node doing"; whether it also has an unbound
          input is true but not what anybody is looking at. */
       const nodeState: NodeRunState =
         runState
-        ?? (disabled.has(n.node.id) ? "disabled"
+        ?? (disabled.has(id) ? "disabled"
           : hasError ? "has-error"
             : nodeIssues.length > 0 ? "has-warning"
               : isConfigured(n) ? "configured" : "ready");
 
-      const decor = decoration.get(n.node.id);
+      const decor = decoration.get(id);
+      const resource = decor?.resource ?? null;
+      const chrome = decor?.chrome ?? nodeChrome(n.node, state.edges, versionNodes);
+      const isSelected = selected.has(id);
 
-      return {
-        id: n.node.id,
+      /* Compared field by field against what was handed over last time. Every
+         field below is one React Flow or `WorkflowNode` actually reads; if none
+         of them moved, the previous object is still a correct description of
+         this node and handing it back is what preserves the measurements. */
+      const held = previous.get(id);
+      if (
+        held
+        && held.position.x === n.x
+        && held.position.y === n.y
+        && held.selected === isSelected
+        && held.data.node === n.node
+        && held.data.state === nodeState
+        && held.data.resource === resource
+        && held.data.chrome === chrome
+        && held.data.issueCount === nodeIssues.length
+        && held.data.compact === compact
+        && held.data.onOpenIssues === onOpenIssues
+      ) {
+        next.set(id, held);
+        return held;
+      }
+
+      const built: Node<WorkflowNodeData> = {
+        id,
         type: "workflow",
         position: { x: n.x, y: n.y },
-        selected: selected.has(n.node.id),
+        selected: isSelected,
         data: {
           node: n.node,
           state: nodeState,
-          resource: decor?.resource ?? null,
-          chrome: decor?.chrome ?? nodeChrome(n.node, state.edges, versionNodes),
+          resource,
+          chrome,
           issueCount: nodeIssues.length,
           compact,
           dimmed: false,
           emphasised: false,
           onOpenIssues,
         },
-        /* Dimensions are MEASURED, not declared.
-           Both `width`/`height` and `initialWidth`/`initialHeight` left
-           `measured` unset for long enough that edge culling — which tests
-           against `measured` — dropped every edge on the canvas while the nodes
-           drew perfectly. Letting React Flow measure costs one layout pass at
-           mount and is the only version where the edges exist. */
+        /* Dimensions are MEASURED, not declared, so they are absent here — see
+           the note above about why that made identity load-bearing. */
       };
+      next.set(id, built);
+      return built;
     });
+
+    nodeCache.current = next;
+    return list;
   }, [
     state.nodes, state.edges, state.selection, state.disabled,
     issuesByNode, runStates, compact, onOpenIssues, versionNodes, decoration,
@@ -311,6 +373,7 @@ export function Canvas({
     };
     });
   }, [state.edges, state.nodes, state.selectedEdgeId, flowingEdges, presentation, dispatch]);
+
 
   /* ── Interaction ────────────────────────────────────────────────────────── */
 

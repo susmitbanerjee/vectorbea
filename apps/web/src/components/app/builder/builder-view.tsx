@@ -141,15 +141,28 @@ function BuilderInner({
   }, [state.dirty, markDirty]);
 
   /* ── Viewport helpers ───────────────────────────────────────────────────── */
+  /**
+   * MUST NOT DEPEND ON `state.nodes`.
+   *
+   * A drag replaces `state.nodes` on every pointer frame. While this closed
+   * over it, `reveal` was a new function every frame, so `handleOpenIssues` was
+   * too, so `data.onOpenIssues` on every node object changed — and React Flow
+   * only reuses a node's measured size when it is handed the identical object.
+   * Every node was therefore rebuilt, unmeasured, and re-measured sixty times a
+   * second, which is what made a fast drag blink. See the note on the `nodes`
+   * memo in canvas.tsx.
+   *
+   * The lookup it needed `state.nodes` for was redundant anyway: `flow.getNode`
+   * on the next line answers the same question, from the store that actually
+   * decides whether the node can be revealed.
+   */
   const reveal = React.useCallback((nodeId: string) => {
-    const node = state.nodes.find((n) => n.node.id === nodeId);
-    if (!node) return;
     // Only recentre when the node is actually off-screen. Recentring on every
     // Tab makes the canvas lurch under a reader who can already see the node.
     const rendered = flow.getNode(nodeId);
     if (!rendered) return;
     flow.fitView({ nodes: [rendered], duration: 220, padding: 1.6, maxZoom: 1.2, minZoom: 0.5 });
-  }, [flow, state.nodes]);
+  }, [flow]);
 
   const centreOfViewport = React.useCallback(() => {
     const rect = shellRef.current?.getBoundingClientRect();

@@ -597,6 +597,20 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
             { name: "issued_on", dataType: "date", nullable: false, isPrimaryKey: false, defaultValue: null, maxLength: null },
           ],
         },
+        /* Enough tables to cross `virtualiseAfter` in the picker. A real
+           database has dozens; a four-table fixture never exercised the
+           virtualised path, which is where the row-height bug bit hardest. */
+        ...Array.from({ length: 48 }, (_, i) => ({
+          schema: i % 3 === 0 ? "billing" : "public",
+          table: `events_${String(i + 1).padStart(2, "0")}`,
+          tableType: "TABLE" as const,
+          rowCountEstimate: (i + 1) * 1013,
+          columns: [
+            { name: "id", dataType: "uuid", nullable: false, isPrimaryKey: true, defaultValue: "gen_random_uuid()", maxLength: null },
+            { name: "occurred_at", dataType: "timestamptz", nullable: false, isPrimaryKey: false, defaultValue: "now()", maxLength: null },
+            { name: "payload", dataType: "jsonb", nullable: true, isPrimaryKey: false, defaultValue: null, maxLength: null },
+          ],
+        })),
         {
           schema: "public",
           table: "active_customers",
