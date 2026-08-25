@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import type { Run, RunNode, CellState } from "~/mocks/domain";
+import type { contracts } from "@vectorbea/shared";
+import type { Run, RunNode, CellState } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    REPLAY — the spine of this screen.
@@ -30,6 +31,17 @@ import type { Run, RunNode, CellState } from "~/mocks/domain";
 
 export interface ReplayState {
   run: Run;
+  /**
+   * The run's real event log, and the detail response behind it.
+   *
+   * Carried on this context because the four panes take no props — they read
+   * the run from here — and the log, the event history and the inspector all
+   * need the same server-side record. Before this they each generated their own
+   * content from a seeded RNG, so three panes describing one run could not even
+   * agree with each other.
+   */
+  events: contracts.RunEvent[];
+  detail: contracts.RunDetail | null;
   /** Pointer position during a scrub, else null. */
   scrubIndex: number | null;
   /** Committed selection. */
@@ -51,11 +63,13 @@ export function useReplay(): ReplayState {
 }
 
 export function ReplayProvider({
-  run, children, initialIndex,
+  run, children, initialIndex, events = [], detail = null,
 }: {
   run: Run;
   children: React.ReactNode;
   initialIndex?: number;
+  events?: contracts.RunEvent[];
+  detail?: contracts.RunDetail | null;
 }) {
   /* Default to the failed step when there is one. On a failed run that is the
      only step anyone opens the page to look at. */
@@ -86,6 +100,8 @@ export function ReplayProvider({
 
   const value: ReplayState = {
     run,
+    events,
+    detail,
     scrubIndex,
     selectedIndex,
     focusIndex: scrubIndex ?? selectedIndex,

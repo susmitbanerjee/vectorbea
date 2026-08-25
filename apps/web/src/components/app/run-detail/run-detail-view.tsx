@@ -16,10 +16,12 @@ import { CanvasMirror } from "./canvas-mirror";
 import { Inspector } from "./inspector";
 import { LogStream } from "./log-stream";
 import { CompareView, EventHistory } from "./compare-and-events";
-import { diagnose, getRun } from "~/mocks/run-detail";
-import { SIGNATURE_RUN } from "~/mocks/fixtures";
+import { diagnoseRun } from "./diagnose-run";
 import { ApprovalGateIcon } from "~/components/icons/domain";
-import type { Run } from "~/mocks/domain";
+import type { contracts } from "@vectorbea/shared";
+import type { Run } from "~/lib/runs/model";
+import { useRunDetailData } from "./use-run-detail-data";
+import { ControlSkeleton } from "~/components/app/control/skeletons";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    RUN DETAIL — panes, not tabs.
@@ -45,13 +47,26 @@ export interface RunDetailViewProps {
 export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps) {
   const params = useSearchParams();
   const frozen = frozenProp ?? params.get("frozen") === "1";
+  const data = useRunDetailData(runId);
 
   /* `?demo=` swaps the run for a state, so every state has a real URL rather
-     than living only in Storybook. */
-  const demo = params.get("demo");
-  const run = React.useMemo(() => resolveRun(runId, demo), [runId, demo]);
+     than living only in Storybook.
 
-  if (!run) {
+     It is an OVERRIDE of a real run, never a substitute for one. It used to be
+     the other way round — the fixture answered first and the real run was never
+     asked for — which is how every real run id ended up rendering the same
+     fabricated one. */
+  const demo = params.get("demo");
+  const run = React.useMemo(
+    () => (data.run ? applyDemoState(data.run, demo) : null),
+    [data.run, demo],
+  );
+
+  if (data.loading) {
+    return <PageContainer><ControlSkeleton /></PageContainer>;
+  }
+
+  if (data.notFound || (!run && !data.error)) {
     return (
       <PageContainer>
         <div className="border-subtle mx-auto mt-16 max-w-[32rem] rounded-lg border p-6 text-center">
@@ -68,16 +83,43 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
     );
   }
 
+  if (!run) {
+    /* Reachable only when the API could not be asked. Distinct from "not
+       found" on purpose: one means the run is gone, the other means we do not
+       know, and telling someone their run does not exist when the API is
+       simply down sends them looking for the wrong problem. */
+    return (
+      <PageContainer>
+        <div className="border-subtle mx-auto mt-16 max-w-[32rem] rounded-lg border p-6 text-center">
+          <Text variant="heading-sm" tone="max" as="h1" className="block">This run could not be loaded</Text>
+          <Text variant="body-sm" tone="secondary" className="mt-1.5 block">
+            {data.error?.message ?? "The API did not answer. The run itself is unaffected."}
+          </Text>
+          <div className="mt-4 flex justify-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => void data.refetch()}>Try again</Button>
+            <Button asChild variant="ghost" size="sm">
+              <Link href={"/runs" as Route}>Back to runs</Link>
+            </Button>
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
+
   return (
-    <ReplayProvider run={run}>
-      <RunDetailBody run={run} frozen={frozen} />
+    <ReplayProvider run={run} events={data.events} detail={data.detail}>
+      <RunDetailBody run={run} frozen={frozen} incident={data.incident} />
     </ReplayProvider>
   );
 }
 
-function RunDetailBody({ run, frozen }: { run: Run; frozen: boolean }) {
+function RunDetailBody({ run, frozen, incident }: {
+  run: Run;
+  frozen: boolean;
+  incident: contracts.FailureIncident | null;
+}) {
   const { select } = useReplay();
-  const diagnosis = React.useMemo(() => diagnose(run), [run]);
+  const diagnosis = React.useMemo(() => diagnoseRun(run, incident), [run, incident]);
 
   const [comparing, setComparing] = React.useState(false);
   const [showEvents, setShowEvents] = React.useState(false);
@@ -293,11 +335,17 @@ function CollapsedRail({ label, onExpand }: { label: string; onExpand: () => voi
 
 /* ── Demo states ──────────────────────────────────────────────────────────── */
 
-function resolveRun(runId: string, demo: string | null): Run | undefined {
-  const base = getRun(runId) ?? SIGNATURE_RUN;
+/**
+ * Recast a REAL run into a demo state, for the `?demo=` URLs.
+ *
+ * Every state is derived from the run in front of you rather than from a
+ * fixture, so the demo URLs stay useful and never conjure a run that does not
+ * exist. Without `?demo=` this returns the run untouched.
+ */
+function applyDemoState(base: Run, demo: string | null): Run {
   if (!demo) return base;
 
-  const nodes = SIGNATURE_RUN.nodes;
+  const nodes = base.nodes;
   const mid = Math.floor(nodes.length / 2);
 
   switch (demo) {

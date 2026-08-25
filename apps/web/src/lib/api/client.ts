@@ -30,6 +30,7 @@ import { createFetchTransport } from "./transport";
 
 type Run = contracts.RunSummary;
 type RunDetail = contracts.RunDetail;
+type RunEvent = contracts.RunEvent;
 type Workflow = contracts.Workflow;
 type WorkflowVersion = contracts.WorkflowVersion;
 type Agent = contracts.Agent;
@@ -255,6 +256,19 @@ export interface VectorbeaClient {
     cancel(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     retry(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     retryNode(id: string, nodeId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /**
+     * `GET /api/runs/:id/events` — the run's own event log.
+     *
+     * This is the only server-side record of what a run actually did, step by
+     * step. The endpoint accepts up to 500 per page precisely because a
+     * parallel run emits more than the generic 100 cap and the tail is the part
+     * anybody reading a failure needs.
+     */
+    events(
+      id: string,
+      params?: Scope & PageParams & { afterSequence?: number; type?: string },
+      options?: RequestOptions,
+    ): Promise<Paged<RunEvent>>;
   };
 
   workflows: {
@@ -581,6 +595,16 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       get: (id, scope, options) =>
         call<RunDetail>(`/api/runs/${id}`, req(scope, contracts.runDetail, options)),
+      events: (id, { workspaceId, environmentId, page, pageSize, afterSequence, type } = {}, options) =>
+        call<Paged<RunEvent>>(
+          `/api/runs/${id}/events`,
+          req({ workspaceId, environmentId }, contracts.runEventPage, options, {
+            page,
+            pageSize: pageSize ?? 200,
+            afterSequence,
+            type,
+          }),
+        ),
       queuePosition: (id, scope, options) =>
         call<QueuePosition>(
           `/api/runs/${id}/queue-position`,

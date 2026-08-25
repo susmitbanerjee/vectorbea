@@ -5,7 +5,7 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { formatCost, formatDuration, formatTokens } from "~/lib/format";
 import { useReplay, statesAt } from "./replay";
-import type { CellState } from "~/mocks/domain";
+import type { CellState } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    LEFT PANE · STEP TIMELINE

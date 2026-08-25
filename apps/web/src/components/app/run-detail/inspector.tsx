@@ -7,7 +7,10 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { formatCost, formatDuration, formatTokens, EMPTY } from "~/lib/format";
-import { resolvedInputs, sampleOutput } from "~/mocks/run-detail";
+import type { ResolvedInput } from "~/mocks/run-detail";
+import { useApi } from "~/lib/api/api-provider";
+import { useApiQuery } from "~/lib/api/hooks";
+import { useScope } from "~/lib/workspace/workspace-provider";
 import { useReplay } from "./replay";
 import { PaneHeader } from "./step-timeline";
 
@@ -116,9 +119,73 @@ function Overview() {
   );
 }
 
-function Inputs() {
+/* ══════════════════════════════════════════════════════════════════════════════
+   THE PAYLOADS ARE CAPTURED, NOT GENERATED.
+
+   `resolvedInputs` and `sampleOutput` produced field names and values from a
+   seeded RNG. They looked exactly like real payloads — stable per node, plausibly
+   typed — which made them worse than an empty pane: the one screen someone opens
+   to find out what a step actually received was answering with fiction.
+
+   `GET /api/workflow-runs/:runId/debug/nodes/:nodeId` is the real record. It is
+   written per node when a run executes, and it is the ONLY source of a step's
+   inputs and outputs. A run that captured nothing gets a pane that says so.
+══════════════════════════════════════════════════════════════════════════════ */
+
+/** The focused node's captured debug record, or null when there is none. */
+function useNodeDebug() {
   const { run, focusIndex } = useReplay();
-  const inputs = resolvedInputs(run, focusIndex);
+  const api = useApi();
+  const { workspaceId } = useScope();
+  const nodeId = run.nodes[focusIndex]?.id ?? null;
+  const scope = React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
+
+  const query = useApiQuery({
+    queryKey: ["run-debug", workspaceId, run.id, nodeId],
+    queryFn: () => api.debug.node(run.id, nodeId!, scope),
+    enabled: Boolean(workspaceId) && Boolean(nodeId),
+    // A step that was never captured 404s, and that is an answer, not a fault.
+    retry: false,
+  });
+
+  return { detail: query.data ?? null, loading: query.isPending && Boolean(nodeId) };
+}
+
+function Inputs() {
+  const { detail, loading } = useNodeDebug();
+
+  const inputs = React.useMemo<ResolvedInput[]>(() => {
+    const sources = detail?.variableSources ?? detail?.resolvedVariables ?? [];
+    if (sources.length > 0) {
+      return sources.map((source) => ({
+        field: source.field,
+        value: source.missing ? "—" : format(source.resolvedValue),
+        fromNode: source.sourceNode ?? "unresolved",
+        path: source.sourcePath ?? source.variable,
+      }));
+    }
+    // No provenance recorded, but the resolved values were. Showing them
+    // without inventing a source is better than showing neither.
+    return Object.entries(detail?.resolvedInput ?? {}).map(([field, value]) => ({
+      field,
+      value: format(value),
+      fromNode: "—",
+      path: "not recorded",
+    }));
+  }, [detail]);
+
+  if (loading) {
+    return <Text variant="caption" tone="muted">Loading this step&rsquo;s inputs…</Text>;
+  }
+
+  if (!detail) {
+    return (
+      <Text variant="caption" tone="muted">
+        No inputs were captured for this step. Payload capture is recorded per node while a run
+        executes — start a debug run to capture them.
+      </Text>
+    );
+  }
 
   if (inputs.length === 0) {
     return <Text variant="caption" tone="muted">This step takes no bound inputs.</Text>;
@@ -145,9 +212,51 @@ function Inputs() {
 }
 
 function Output() {
-  const { run, focusIndex } = useReplay();
-  const value = sampleOutput(run, focusIndex);
-  return <JsonViewer value={value} />;
+  const { run, focusIndex, detail: runDetail } = useReplay();
+  const { detail, loading } = useNodeDebug();
+
+  if (loading) {
+    return <Text variant="caption" tone="muted">Loading this step&rsquo;s output…</Text>;
+  }
+
+  if (detail) {
+    if (detail.errorMessage || detail.humanFailureReason) {
+      return (
+        <JsonViewer
+          value={{
+            error: {
+              type: detail.errorType,
+              message: detail.errorMessage,
+              reason: detail.humanFailureReason,
+              ...(detail.suggestedFix ? { suggestedFix: detail.suggestedFix } : {}),
+            },
+          }}
+        />
+      );
+    }
+    const output = detail.parsedOutput ?? detail.output;
+    if (output !== undefined && output !== null) return <JsonViewer value={output} />;
+  }
+
+  /* Nothing per-node, but the run itself may carry a result. Only shown on the
+     LAST step — attaching the run's output to an arbitrary step would claim
+     that step produced it. */
+  const isFinal = focusIndex === run.nodes.length - 1;
+  if (isFinal && runDetail?.errorJson) return <JsonViewer value={runDetail.errorJson} />;
+  if (isFinal && runDetail?.outputJson) return <JsonViewer value={runDetail.outputJson} />;
+
+  return (
+    <Text variant="caption" tone="muted">
+      No output was captured for this step.
+    </Text>
+  );
+}
+
+/** A captured value, as a single readable line. */
+function format(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
 
 function ToolCall() {

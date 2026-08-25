@@ -4,10 +4,13 @@ import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { cellPath } from "~/components/app/ribbon/geometry";
-import { buildGraph } from "~/mocks/run-detail";
+// `layoutGraph` only places the nodes it is given — it invents nothing. Called
+// directly rather than through `buildGraph(run)` so the graph is laid out from
+// the REAL run's nodes and nothing else travels with it.
+import { layoutGraph } from "~/mocks/graph-layout";
 import { useReplay, statesAt } from "./replay";
 import { PaneHeader } from "./step-timeline";
-import type { CellState } from "~/mocks/domain";
+import type { CellState } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    CENTRE PANE · CANVAS MIRROR
@@ -41,7 +44,7 @@ const STATE_FILL: Record<CellState, { fill: string; stroke: string; text: string
 
 export function CanvasMirror({ className }: { className?: string }) {
   const { run, focusIndex, selectedIndex, scrubbing, select } = useReplay();
-  const graph = React.useMemo(() => buildGraph(run), [run]);
+  const graph = React.useMemo(() => layoutGraph(run.nodes), [run.nodes]);
   const states = React.useMemo(
     () => statesAt(run.nodes, focusIndex, scrubbing),
     [run.nodes, focusIndex, scrubbing],
@@ -51,8 +54,12 @@ export function CanvasMirror({ className }: { className?: string }) {
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const wrapRef = React.useRef<HTMLDivElement>(null);
 
-  const minY = Math.min(...graph.nodes.map((n) => n.y));
-  const viewBox = `${-24} ${minY - NODE_H} ${graph.width + 48} ${graph.height + NODE_H}`;
+  /* `Math.min()` of no arguments is Infinity, and an Infinity in a viewBox is
+     an SVG parse error the browser reports and then ignores — leaving the pane
+     blank. A run with no steps is now an ordinary case: a queued run has not
+     committed any, so the ribbon is genuinely empty. */
+  const minY = graph.nodes.length > 0 ? Math.min(...graph.nodes.map((n) => n.y)) : 0;
+  const viewBox = `${-24} ${minY - NODE_H} ${Math.max(1, graph.width + 48)} ${Math.max(1, graph.height + NODE_H)}`;
 
   /**
    * The SVG is rendered at its natural size and the container scrolls.

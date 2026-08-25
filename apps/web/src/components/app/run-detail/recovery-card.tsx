@@ -8,7 +8,7 @@ import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { formatCost } from "~/lib/format";
 import { RecoveryEngineIcon, RootCauseIcon, BlastRadiusIcon, CheckpointIcon } from "~/components/icons/domain";
-import type { Diagnosis } from "~/mocks/run-detail";
+import type { Diagnosis } from "./diagnose-run";
 import { useReplay } from "./replay";
 
 /* ══════════════════════════════════════════════════════════════════════════════

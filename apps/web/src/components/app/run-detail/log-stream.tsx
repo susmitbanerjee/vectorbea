@@ -4,7 +4,8 @@ import * as React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
-import { buildLog, type LogLevel, type LogLine } from "~/mocks/run-detail";
+import type { contracts } from "@vectorbea/shared";
+import type { LogLevel, LogLine } from "~/mocks/run-detail";
 import { useReplay, timeAt } from "./replay";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -44,9 +45,18 @@ export function LogStream({
   onToggleFullscreen?: () => void;
   className?: string;
 }) {
-  const { run, focusIndex, scrubbing, select } = useReplay();
+  const { run, events, focusIndex, scrubbing, select } = useReplay();
 
-  const all = React.useMemo(() => buildLog(run, padTo ?? 0), [run, padTo]);
+  /* THE LOG IS THE RUN'S EVENT LOG.
+     `buildLog` generated plausible-looking lines from a seeded RNG — timings,
+     messages, levels, all invented. On a real run that meant a log that read
+     like a log and described nothing that happened. These lines are the events
+     the worker actually recorded; when there are none, the pane says so rather
+     than filling itself in. */
+  const all = React.useMemo(
+    () => toLogLines(events, run.nodes.map((node) => node.id)),
+    [events, run.nodes],
+  );
 
   const [minLevel, setMinLevel] = React.useState<LogLevel>("debug");
   const [nodeFilter, setNodeFilter] = React.useState<number | null>(null);
@@ -296,4 +306,43 @@ function Highlighted({ text, query }: { text: string; query: string }) {
       {text.slice(index + query.length)}
     </>
   );
+}
+
+/** Event type → severity, using the type's own vocabulary rather than a guess. */
+function levelFor(type: string, status: string | null | undefined): LogLevel {
+  const text = `${type} ${status ?? ""}`.toLowerCase();
+  if (/fail|error|timeout|dead|reject/.test(text)) return "error";
+  if (/retry|recover|warn|cancel|skip|yield/.test(text)) return "warn";
+  if (/debug|trace/.test(text)) return "debug";
+  return "info";
+}
+
+/**
+ * A run's events, as log lines.
+ *
+ * `nodeIndex` is what the pane filters and scrubs by. A run event carries no
+ * node reference, so it is resolved from the event type where the type happens
+ * to name a step and left at -1 otherwise — which the pane reads as "belongs to
+ * the run, not to a step". Inventing an index would silently file lines under
+ * whichever step the scrubber happened to be on.
+ */
+function toLogLines(events: contracts.RunEvent[], nodeIds: string[]): LogLine[] {
+  return [...events]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((event) => {
+      const index = nodeIds.findIndex((id) => event.type.includes(id));
+      const detail = [
+        event.status ? `status=${event.status}` : null,
+        event.source ? `source=${event.source}` : null,
+        event.durationMs != null ? `${event.durationMs}ms` : null,
+      ].filter(Boolean).join(" ");
+      return {
+        seq: event.sequence,
+        at: Date.parse(event.timestamp),
+        level: levelFor(event.type, event.status),
+        nodeIndex: index,
+        nodeName: index === -1 ? "run" : nodeIds[index],
+        message: detail ? `${event.type} ${detail}` : event.type,
+      };
+    });
 }

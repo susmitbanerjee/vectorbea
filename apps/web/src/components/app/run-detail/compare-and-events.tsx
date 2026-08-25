@@ -6,9 +6,15 @@ import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { MonoId } from "~/components/ui/mono-id";
 import { formatCost, formatDuration, formatTokens, EMPTY } from "~/lib/format";
-import { compareRuns, lastSuccessful, buildEvents, type RunEvent } from "~/mocks/run-detail";
+import { compareRuns } from "~/mocks/run-detail";
+import { useApi } from "~/lib/api/api-provider";
+import { useApiQuery } from "~/lib/api/hooks";
+import { queryKeys } from "~/lib/api/keys";
+import { useScope } from "~/lib/workspace/workspace-provider";
+import { toUiRun } from "~/components/app/runs/use-runs-data";
 import { useReplay } from "./replay";
-import type { Run } from "~/mocks/domain";
+import type { contracts } from "@vectorbea/shared";
+import type { Run } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    COMPARE MODE + EVENT HISTORY
@@ -22,7 +28,40 @@ import type { Run } from "~/mocks/domain";
  * two runs stopped agreeing tells you where.
  */
 export function CompareView({ run, onClose }: { run: Run; onClose: () => void }) {
-  const baseline = React.useMemo(() => lastSuccessful(run), [run]);
+  /* THE BASELINE IS A REAL RUN.
+     `lastSuccessful` searched the fixture array, so the comparison was always
+     against a run that had never happened — and on a real workflow it either
+     found nothing or, worse, found a fixture. The most recent succeeded run of
+     the SAME workflow is a query, not a lookup. */
+  const api = useApi();
+  const { workspaceId } = useScope();
+  const scope = React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
+  const keyScope = { workspaceId, environmentId: null };
+
+  const history = useApiQuery({
+    queryKey: queryKeys.runs.list(keyScope, { page: 1, pageSize: 100, workflowId: run.workflowId }),
+    queryFn: () => api.runs.list({ ...scope, page: 1, pageSize: 100 }),
+    enabled: Boolean(workspaceId),
+  });
+
+  const baseline = React.useMemo(() => {
+    const candidates = (history.data?.items ?? [])
+      .filter((candidate) =>
+        candidate.workflowId === run.workflowId
+        && candidate.id !== run.id
+        && (candidate.status === "succeeded" || candidate.status === "completed"))
+      .sort((a, b) =>
+        Date.parse(b.completedAt ?? b.createdAt) - Date.parse(a.completedAt ?? a.createdAt));
+    return candidates[0] ? toUiRun(candidates[0]) : undefined;
+  }, [history.data, run.workflowId, run.id]);
+
+  if (history.isPending) {
+    return (
+      <div className="border-subtle bg-surface-raised rounded-lg border p-4">
+        <Text variant="body-sm" tone="secondary" className="block">Looking for the last successful run…</Text>
+      </div>
+    );
+  }
 
   if (!baseline) {
     return (
@@ -164,14 +203,44 @@ const EVENT_TONE = (type: string) =>
  * every other view on this page is a projection of it. Sequence numbers are
  * shown because gaplessness is the property that makes it trustworthy.
  */
+/**
+ * The shape this pane renders, adapted from the API's event.
+ *
+ * `payload` carries what the event ACTUALLY has — status, source, duration —
+ * and nothing more. The generated events it replaces carried invented payloads
+ * with node ids in them, which is why rows used to be clickable: there is no
+ * node linkage on a real run event, so there is nothing to click through to.
+ */
+interface DisplayEvent {
+  seq: number;
+  at: number;
+  type: string;
+  payload: Record<string, unknown>;
+}
+
+function toDisplayEvents(events: contracts.RunEvent[]): DisplayEvent[] {
+  return events
+    .map((event) => ({
+      seq: event.sequence,
+      at: Date.parse(event.timestamp),
+      type: event.type,
+      payload: {
+        ...(event.status ? { status: event.status } : {}),
+        ...(event.source ? { source: event.source } : {}),
+        ...(event.durationMs != null ? { durationMs: event.durationMs } : {}),
+      },
+    }))
+    .sort((a, b) => a.seq - b.seq);
+}
+
 export function EventHistory({ run }: { run: Run }) {
-  const { select } = useReplay();
-  const events = React.useMemo(() => buildEvents(run), [run]);
+  const { events: raw } = useReplay();
+  const events = React.useMemo(() => toDisplayEvents(raw), [raw]);
   const [query, setQuery] = React.useState("");
   const [expanded, setExpanded] = React.useState<number | null>(null);
 
   const filtered = query
-    ? events.filter((e) => e.type.includes(query.toLowerCase()) || JSON.stringify(e.payload).toLowerCase().includes(query.toLowerCase()))
+    ? events.filter((e) => e.type.toLowerCase().includes(query.toLowerCase()) || JSON.stringify(e.payload).toLowerCase().includes(query.toLowerCase()))
     : events;
 
   const exportJson = () => {
@@ -191,7 +260,9 @@ export function EventHistory({ run }: { run: Run }) {
           Event history
         </Text>
         <Text variant="caption" tone="muted" tabular>
-          {events.length} events · seq 0–{events.length - 1}, no gaps
+          {events.length === 0
+            ? "No events recorded"
+            : `${events.length} event${events.length === 1 ? "" : "s"} · seq ${events[0].seq}–${events[events.length - 1].seq}`}
         </Text>
         <div className="ml-auto flex items-center gap-1.5">
           <input
@@ -210,6 +281,12 @@ export function EventHistory({ run }: { run: Run }) {
       </div>
 
       <div className="max-h-80 overflow-y-auto">
+        {events.length === 0 ? (
+          <Text variant="caption" tone="muted" className="block px-3 py-4">
+            This run has not emitted any events yet. A queued run emits its first the moment a
+            worker picks it up.
+          </Text>
+        ) : null}
         <ul>
           {filtered.map((event) => (
             <EventRow
@@ -218,10 +295,6 @@ export function EventHistory({ run }: { run: Run }) {
               startedAt={Date.parse(run.startedAt)}
               expanded={expanded === event.seq}
               onToggle={() => setExpanded((e) => (e === event.seq ? null : event.seq))}
-              onSelectNode={(nodeId) => {
-                const index = run.nodes.findIndex((n) => n.id === nodeId);
-                if (index !== -1) select(index);
-              }}
             />
           ))}
         </ul>
@@ -231,20 +304,17 @@ export function EventHistory({ run }: { run: Run }) {
 }
 
 function EventRow({
-  event, startedAt, expanded, onToggle, onSelectNode,
+  event, startedAt, expanded, onToggle,
 }: {
-  event: RunEvent;
+  event: DisplayEvent;
   startedAt: number;
   expanded: boolean;
   onToggle: () => void;
-  onSelectNode: (nodeId: string) => void;
 }) {
-  const nodeId = typeof event.payload.nodeId === "string" ? event.payload.nodeId : null;
-
   return (
     <li className="border-subtle border-b last:border-b-0">
       <button
-        onClick={() => { onToggle(); if (nodeId) onSelectNode(nodeId); }}
+        onClick={onToggle}
         aria-expanded={expanded}
         className={cn(
           "hover:bg-surface-hover flex w-full items-baseline gap-2 px-3 py-1.5 text-left",

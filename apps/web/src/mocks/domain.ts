@@ -51,7 +51,12 @@ export interface Run {
   workflowId: string;
   workflowName: string;
   status: RunStatus;
-  environment: "production" | "staging" | "development";
+  /* Includes "unknown" to match `~/lib/runs/model`, which is the model real
+     runs are adapted into. The two describe the same object and the pure
+     helpers in `run-detail.ts` are shared between them; a union that differed
+     by one member meant a real run could not be passed to a function that never
+     reads this field. */
+  environment: "production" | "staging" | "development" | "unknown";
   trigger: "schedule" | "webhook" | "manual" | "api";
   startedAt: string;
   finishedAt: string | null;

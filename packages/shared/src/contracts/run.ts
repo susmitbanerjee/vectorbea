@@ -117,6 +117,8 @@ export const runEvent = z.object({
   durationMs: z.number().nullish(),
 });
 export type RunEvent = z.infer<typeof runEvent>;
+/** `GET /api/runs/:id/events` returns the standard Page envelope. */
+export const runEventPage = page(runEvent);
 
 /**
  * `GET /api/runs/:id/queue-position` (`routes/QueuePositionRoutes.kt`).

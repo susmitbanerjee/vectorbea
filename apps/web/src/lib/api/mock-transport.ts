@@ -126,6 +126,58 @@ function toApiStatus(status: UiRun["status"]): string {
 }
 
 /** A fixture run, adapted to `contracts.runSummary`. */
+/**
+ * Runs started through the mock trigger endpoints.
+ *
+ * Without this, triggering a run in mock mode minted an id that
+ * `GET /api/runs/:id` had never heard of, so the run page answered "not found"
+ * for a run the same fixture had just reported starting. Keeping them makes the
+ * trigger-then-watch path coherent end to end.
+ *
+ * They are QUEUED and stay that way: no worker exists here, and advancing them
+ * on a timer would be inventing an execution that never happened.
+ */
+const TRIGGERED_RUNS = new Map<string, Record<string, unknown>>();
+
+function rememberTriggeredRun(
+  runId: string,
+  workflowId: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const now = new Date().toISOString();
+  const workflow = WORKFLOWS.find((w) => uuidFrom(w.id) === workflowId || w.id === workflowId);
+  const run = {
+    id: runId,
+    workspaceId: WORKSPACE_ID,
+    environmentId: ENVIRONMENT_ID,
+    workflowId,
+    workflowVersionId: uuidFrom(`wfv_seed_${workflowId}`),
+    status: "queued",
+    triggerType: "manual",
+    currentStepId: null,
+    currentAgentId: null,
+    idempotencyKey: null,
+    startedAt: null,
+    completedAt: null,
+    durationMs: null,
+    totalTokens: null,
+    estimatedCostUsd: null,
+    createdAt: now,
+    updatedAt: now,
+    hasOutput: false,
+    hasError: false,
+    workflowName: workflow?.name ?? null,
+    environment: "production",
+    nodeTotal: null,
+    nodeCommitted: 0,
+    ribbonJson: "[]",
+    incidentId: null,
+    ...extra,
+  };
+  TRIGGERED_RUNS.set(runId, run);
+  return run;
+}
+
 function toApiRun(run: UiRun) {
   return {
     id: uuidFrom(run.id),
@@ -268,9 +320,53 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "GET",
     "/api/runs/:id",
     (params) => {
+      const triggered = TRIGGERED_RUNS.get(params.id);
+      if (triggered) return { ...triggered, outputJson: null, errorJson: null };
       const run = RUNS.find((r) => uuidFrom(r.id) === params.id || r.id === params.id);
       if (!run) return notFound(`/api/runs/${params.id}`);
       return { ...toApiRun(run), outputJson: null, errorJson: null };
+    },
+  ],
+
+  /* The run's event log. A run this fixture minted has exactly one event —
+     it was queued — because nothing here executes it. */
+  [
+    "GET",
+    "/api/runs/:id/events",
+    (params, init) => {
+      const triggered = TRIGGERED_RUNS.get(params.id);
+      if (triggered) {
+        return paged([{
+          id: uuidFrom(`ev_${params.id}_1`),
+          runId: params.id,
+          workspaceId: WORKSPACE_ID,
+          environmentId: ENVIRONMENT_ID,
+          sequence: 1,
+          type: "RUN_QUEUED",
+          status: "queued",
+          source: "api",
+          timestamp: String(triggered.createdAt),
+          durationMs: null,
+        }], init);
+      }
+      const run = RUNS.find((r) => uuidFrom(r.id) === params.id || r.id === params.id);
+      if (!run) return notFound(`/api/runs/${params.id}/events`);
+      return paged(run.nodes.map((node, index) => ({
+        id: uuidFrom(`ev_${run.id}_${index}`),
+        runId: uuidFrom(run.id),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        sequence: index + 1,
+        type:
+          node.state === "failed" ? "STEP_FAILED"
+            : node.state === "committed" || node.state === "recovered" ? "STEP_COMPLETED"
+              : node.state === "executing" ? "STEP_STARTED"
+                : "STEP_PENDING",
+        status: node.state,
+        source: "worker",
+        timestamp: node.at ?? run.startedAt,
+        durationMs: node.durationMs,
+      })), init);
     },
   ],
 
@@ -634,21 +730,19 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "/api/workflows/:id/run",
     (params, init) => {
       const body = (init.body ?? {}) as Record<string, unknown>;
-      return {
-        runId: uuidFrom(`run_${params.id}_${Date.now()}`),
-        status: "QUEUED",
-        mode: String(body.mode ?? "simulation"),
-      };
+      const runId = uuidFrom(`run_${params.id}_${Date.now()}`);
+      rememberTriggeredRun(runId, params.id);
+      return { runId, status: "QUEUED", mode: String(body.mode ?? "simulation") };
     },
   ],
   [
     "POST",
     "/api/workflows/:id/runs/debug",
-    (params) => ({
-      runId: uuidFrom(`debugrun_${params.id}_${Date.now()}`),
-      status: "QUEUED",
-      debugMode: true,
-    }),
+    (params) => {
+      const runId = uuidFrom(`debugrun_${params.id}_${Date.now()}`);
+      rememberTriggeredRun(runId, params.id);
+      return { runId, status: "QUEUED", debugMode: true };
+    },
   ],
   [
     "POST",

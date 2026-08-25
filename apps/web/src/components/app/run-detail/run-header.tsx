@@ -11,7 +11,7 @@ import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { formatCost, formatDuration, formatTokens, EMPTY } from "~/lib/format";
 import { POLICY } from "~/mocks/control";
 import { useReplay } from "./replay";
-import type { Run } from "~/mocks/domain";
+import type { Run } from "~/lib/runs/model";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    RUN HEADER — status, identity, metadata, actions, and the Ribbon at lg.
@@ -47,6 +47,10 @@ const ENV_STYLE: Record<Run["environment"], string> = {
   production: "text-status-failed border-status-failed-border",
   staging: "text-status-waiting border-status-waiting-border",
   development: "text-fg-muted border-subtle",
+  // A run whose environment the API did not name. Drawn like development
+  // rather than like production: guessing "production" on a run we cannot
+  // place would put a red badge on something that may be harmless.
+  unknown: "text-fg-muted border-subtle",
 };
 
 export interface RunHeaderProps {
