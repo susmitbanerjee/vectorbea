@@ -206,6 +206,21 @@ data class WorkflowGraph(
                     .ifEmpty { stringMap(mergedConfig["outputMapping"]) }
                     .ifEmpty { stringMap(mergedConfig["outputMappings"]) }
 
+            /*
+             * POLICIES WERE NEVER READ.
+             *
+             * `WorkflowNode` has carried `retryPolicy`, `timeoutPolicy` and
+             * `failurePolicy` since it was written, and `WorkflowRuntime` has always
+             * honoured them - but this converter never populated any of them, so every
+             * node in every workflow ran with the defaults. `RetryPolicy().maxAttempts`
+             * is 0, which means the retry loop executed exactly once and the retry
+             * count, backoff curve and jitter toggle configured on the canvas changed
+             * nothing at all. The builder drew a retry timeline the worker never ran.
+             */
+            val retryPolicy = readRetryPolicy(mergedConfig, data)
+            val timeoutPolicy = readTimeoutPolicy(mergedConfig, data)
+            val failurePolicy = readFailurePolicy(mergedConfig, data)
+
             return WorkflowNode(
                 id            = rf.id,
                 type          = rf.type,
@@ -213,6 +228,9 @@ data class WorkflowGraph(
                 config        = config,
                 inputMapping  = inputMapping,
                 outputMapping = outputMapping,
+                retryPolicy   = retryPolicy,
+                timeoutPolicy = timeoutPolicy,
+                failurePolicy = failurePolicy,
             )
         }
 
@@ -304,6 +322,84 @@ data class WorkflowGraph(
                 ?.mapValues { (_, v) -> v as String }
                 ?: emptyMap()
 
+        /**
+         * The node's retry policy, from whichever dialect wrote it.
+         *
+         * The current builder stores `config.retry = {attempts, backoff, baseDelayMs,
+         * maxDelayMs}` where `backoff` is one of fixed / linear / exponential /
+         * exponential-jitter. The legacy inspector stored
+         * `data.retryPolicyJson = {maxAttempts, backoffType, backoffMs}`. Both are
+         * read; neither used to be.
+         */
+        private fun readRetryPolicy(config: Map<String, Any>, data: Map<String, Any?>): RetryPolicy {
+            @Suppress("UNCHECKED_CAST")
+            val fromBuilder = config["retry"] as? Map<String, Any?>
+            @Suppress("UNCHECKED_CAST")
+            val fromLegacy = data["retryPolicyJson"] as? Map<String, Any?>
+
+            val source = fromBuilder ?: fromLegacy ?: return RetryPolicy()
+
+            val attempts = num(source["attempts"] ?: source["maxAttempts"])?.toInt()
+                ?: return RetryPolicy()
+
+            val declared = (source["backoff"] ?: source["backoffType"])?.toString()?.lowercase()
+            val strategy = when {
+                declared == null                 -> "exponential"
+                declared.startsWith("fixed")     -> "fixed"
+                declared.startsWith("linear")    -> "linear"
+                else                             -> "exponential"
+            }
+
+            return RetryPolicy(
+                maxAttempts       = attempts.coerceAtLeast(0),
+                backoffMs         = num(source["baseDelayMs"] ?: source["backoffMs"])?.toLong() ?: 1_000L,
+                backoffMultiplier = num(source["backoffMultiplier"])?.toDouble() ?: 2.0,
+                strategy          = strategy,
+                // The builder encodes jitter INSIDE the strategy name
+                // ("exponential-jitter") as well as offering a separate flag.
+                jitter            = (source["jitter"] as? Boolean)
+                    ?: (declared?.contains("jitter") == true),
+                maxBackoffMs      = num(source["maxDelayMs"] ?: source["maxBackoffMs"])?.toLong() ?: 0L,
+            )
+        }
+
+        /** Per-step timeout, from `config.timeoutMs` or the legacy `timeoutPolicyJson`. */
+        private fun readTimeoutPolicy(config: Map<String, Any>, data: Map<String, Any?>): TimeoutPolicy {
+            @Suppress("UNCHECKED_CAST")
+            val legacy = data["timeoutPolicyJson"] as? Map<String, Any?>
+            val ms = num(config["timeoutMs"])?.toLong()
+                ?: num(legacy?.get("stepTimeoutMs"))?.toLong()
+                ?: num(legacy?.get("timeoutMs"))?.toLong()
+                ?: return TimeoutPolicy()
+            return TimeoutPolicy(timeoutMs = ms.coerceAtLeast(0L))
+        }
+
+        /**
+         * What happens to the run when this node fails.
+         *
+         * The builder writes `errorPolicy: "fail-run" | "continue" | …` with a hyphen;
+         * the runtime's vocabulary uses an underscore. Normalised here rather than
+         * left to mismatch silently, which would read as "fail_run" for every value.
+         */
+        private fun readFailurePolicy(config: Map<String, Any>, data: Map<String, Any?>): FailurePolicy {
+            val raw = (config["errorPolicy"] ?: config["onFailure"] ?: data["errorPolicy"])
+                ?.toString()?.lowercase()?.replace('-', '_')
+                ?: return FailurePolicy()
+            val normalised = when (raw) {
+                "continue", "ignore", "skip"        -> "continue"
+                "follow_failure_edge", "failure_edge" -> "follow_failure_edge"
+                else                                 -> "fail_run"
+            }
+            return FailurePolicy(onFailure = normalised)
+        }
+
+        /** A config value as a Number, whether it arrived as one or as a string. */
+        private fun num(value: Any?): Number? = when (value) {
+            is Number -> value
+            is String -> value.trim().toDoubleOrNull()
+            else      -> null
+        }
+
         private fun buildLlmMessages(systemPrompt: String?, userPrompt: String?): List<Map<String, Any>> {
             val messages = mutableListOf<Map<String, Any>>()
             if (!systemPrompt.isNullOrBlank()) {
@@ -372,7 +468,35 @@ data class RetryPolicy(
     val maxAttempts: Int = 0,
     val backoffMs: Long = 1_000L,
     val backoffMultiplier: Double = 2.0,
-)
+    /** `fixed` | `linear` | `exponential`. The builder's own vocabulary. */
+    val strategy: String = "exponential",
+    /** Spread retries out so N nodes failing together do not retry in lockstep. */
+    val jitter: Boolean = false,
+    /** Ceiling for a single backoff. 0 means "use the runtime's own ceiling". */
+    val maxBackoffMs: Long = 0L,
+) {
+    /**
+     * How long to wait before [attempt] + 1, in milliseconds.
+     *
+     * On the policy rather than in the runtime so the schedule the builder DRAWS and
+     * the schedule the worker WAITS can be compared, and so it can be tested without
+     * standing up a run.
+     *
+     * Full jitter - a uniform draw from [0, delay] rather than delay ± a little -
+     * matches `ProviderThrottle`, which documents why: partial jitter still leaves a
+     * peak, and the peak is the thing that knocks a recovering dependency back over.
+     */
+    fun delayForAttempt(attempt: Int, random: java.util.random.RandomGenerator): Long {
+        val base = when (strategy.lowercase()) {
+            "fixed"  -> backoffMs.toDouble()
+            "linear" -> backoffMs.toDouble() * attempt
+            else     -> backoffMs.toDouble() * Math.pow(backoffMultiplier, (attempt - 1).toDouble())
+        }
+        val capped = if (maxBackoffMs > 0) minOf(base, maxBackoffMs.toDouble()) else base
+        val withJitter = if (jitter && capped >= 1.0) random.nextDouble() * capped else capped
+        return withJitter.toLong()
+    }
+}
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TimeoutPolicy(

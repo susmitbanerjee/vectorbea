@@ -197,6 +197,22 @@
   }
 }
 
+/* Running halo — pulse (live) at 12%→26% on a 1.8s sine.
+   Faster and slightly stronger than the gate halo because it answers a different
+   question: the gate is a state you are waiting on, this is work happening NOW,
+   and the eye should be able to find it while scanning a graph.
+   Opacity only, per §9 — a ring that scaled would shift its neighbours' apparent
+   positions and make a row of running nodes shimmer. */
+@keyframes ink-run-pulse {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+
 /* Log stream (§7.2 #3) — new lines enter at translateY(3px) → 0 over 140ms. */
 @keyframes ink-log-line {
   from {

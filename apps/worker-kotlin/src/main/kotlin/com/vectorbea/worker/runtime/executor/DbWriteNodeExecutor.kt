@@ -58,6 +58,15 @@ class DbWriteNodeExecutor(
         const val DEFAULT_TIMEOUT_SECS = 30
 
         /**
+         * Cap on RETURNING rows kept as node output.
+         *
+         * A write's result set is normally the handful of rows it touched, but
+         * `DELETE FROM t RETURNING *` can be the whole table, and step outputs are
+         * persisted. Bounded so one statement cannot put a table into the run record.
+         */
+        const val MAX_RETURNED_ROWS = 1_000
+
+        /**
          * Everything Postgres said about the failure EXCEPT the row.
          *
          * THE BUG THIS FIXES: this executor reported `e.javaClass.simpleName` and
@@ -203,6 +212,23 @@ class DbWriteNodeExecutor(
         // See DbReadNodeExecutor: queryTimeout alone cannot unpark a thread whose
         // socket read never returns. The effective bound is the driver-level
         // socketTimeout forced by JdbcTimeouts in ClientDbPoolManager.
+        /*
+         * `execute()`, NOT `executeUpdate()`.
+         *
+         * THE BUG THIS FIXES: `executeUpdate` contracts to return a row COUNT, so the
+         * driver rejects any statement that produces rows -
+         *
+         *     [0100E] A result was returned when none was expected.
+         *
+         * `INSERT … RETURNING id` is idiomatic Postgres and the single most common way
+         * to write a row and learn its key, and it could not be run at all. The
+         * statement was valid, the table was right, and the error named neither.
+         *
+         * `execute()` reports which kind of result came back, so both shapes work and
+         * RETURNING rows become the node's output instead of being discarded.
+         */
+        var returnedRows: List<Map<String, Any?>> = emptyList()
+
         val affectedRows = try {
             com.vectorbea.worker.metrics.WorkerMetrics.timeBlocking {
             dataSource.connection.use { conn ->
@@ -211,7 +237,17 @@ class DbWriteNodeExecutor(
                     conn.prepareStatement(rawStatement).use { stmt ->
                         stmt.queryTimeout = timeoutSecs
                         params.forEachIndexed { i, param -> stmt.setObject(i + 1, param) }
-                        val affected = stmt.executeUpdate()
+
+                        val affected = if (stmt.execute()) {
+                            // RETURNING (or a write CTE that yields rows).
+                            stmt.resultSet.use { rs -> returnedRows = readRows(rs, MAX_RETURNED_ROWS) }
+                            // `updateCount` is -1 once a result set has been produced, so
+                            // the row count IS the number of rows the statement returned.
+                            returnedRows.size
+                        } else {
+                            stmt.updateCount
+                        }
+
                         conn.commit()
                         affected
                     }
@@ -242,6 +278,11 @@ class DbWriteNodeExecutor(
         val output = mapOf(
             "affectedRows" to affectedRows,
             "success"      to true,
+        ) + if (returnedRows.isEmpty()) emptyMap() else mapOf(
+            /* What RETURNING is FOR. Dropping these would make `INSERT … RETURNING id`
+               run and then throw away the id, which is the only reason to write it. */
+            "rows" to returnedRows,
+            "row"  to (returnedRows.firstOrNull() ?: emptyMap<String, Any?>()),
         )
 
         // Persist idempotency record
@@ -310,6 +351,39 @@ class DbWriteNodeExecutor(
 
     // ── Write statement validation ────────────────────────────────────────────
 
+    /** A result set as plain maps, bounded by [MAX_RETURNED_ROWS]. */
+    private fun readRows(rs: java.sql.ResultSet, limit: Int): List<Map<String, Any?>> {
+        val meta = rs.metaData
+        val columns = (1..meta.columnCount).map { meta.getColumnLabel(it) }
+        val rows = mutableListOf<Map<String, Any?>>()
+        while (rs.next() && rows.size < limit) {
+            rows += columns.withIndex().associate { (i, name) ->
+                name to normaliseColumn(rs.getObject(i + 1))
+            }
+        }
+        return rows
+    }
+
+    /**
+     * JDBC types the rest of the runtime can carry.
+     *
+     * Step outputs are serialised to JSON, and a `java.sql.Timestamp` or a pgjdbc
+     * `PGobject` serialises to something no downstream template can read. Strings are
+     * lossless here and every consumer already handles them.
+     */
+    private fun normaliseColumn(value: Any?): Any? = when (value) {
+        null                     -> null
+        is Number, is Boolean    -> value
+        is String                -> value
+        is java.sql.Timestamp    -> value.toInstant().toString()
+        is java.sql.Date         -> value.toLocalDate().toString()
+        is java.sql.Time         -> value.toString()
+        is java.util.UUID        -> value.toString()
+        is java.sql.Array        -> runCatching { (value.array as? Array<*>)?.map { normaliseColumn(it) } }
+            .getOrNull() ?: value.toString()
+        else                     -> value.toString()
+    }
+
     private fun validateWriteStatement(
         stmt: String,
         allowedTables: List<String>,
@@ -321,8 +395,18 @@ class DbWriteNodeExecutor(
             return "SELECT queries are not permitted in DB_WRITE nodes; use DB_QUERY instead"
         }
 
-        if (firstToken !in setOf("INSERT", "UPDATE", "DELETE", "UPSERT", "MERGE")) {
-            return "only INSERT/UPDATE/DELETE/UPSERT/MERGE are permitted in DB_WRITE nodes; got '$firstToken'"
+        /* A statement may lead with a CTE and still be a write:
+           `WITH moved AS (DELETE FROM a RETURNING *) INSERT INTO b SELECT * FROM moved`.
+           Judging it by its first token alone rejected a legitimate and fairly ordinary
+           form. The write verb still has to be present - a WITH that only ever SELECTs
+           belongs in a DB_QUERY node and is still refused below. */
+        val WRITE_VERBS = setOf("INSERT", "UPDATE", "DELETE", "UPSERT", "MERGE")
+        if (firstToken !in WRITE_VERBS) {
+            val isWriteCte = firstToken == "WITH" &&
+                WRITE_VERBS.any { verb -> Regex("(?i)\\b$verb\\b").containsMatchIn(trimmed) }
+            if (!isWriteCte) {
+                return "only INSERT/UPDATE/DELETE/UPSERT/MERGE are permitted in DB_WRITE nodes; got '$firstToken'"
+            }
         }
 
         // Block multi-statement

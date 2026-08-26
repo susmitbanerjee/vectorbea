@@ -708,19 +708,31 @@ class WorkflowRuntime(
                     if (guarded) stepGuard.markFailed(ctx.runId, node.id, attempt,
                         """{"reason":${jsonStr(result.reason.take(300))}}""")
                     if (attempt < maxAttempts) {
-                        val backoff = (node.retryPolicy.backoffMs *
-                            Math.pow(node.retryPolicy.backoffMultiplier, (attempt - 1).toDouble()))
-                            .toLong().coerceIn(100L, MAX_BACKOFF_MS)
+                        /* The policy owns the curve - fixed / linear / exponential, its
+                           cap, and whether to jitter - so the schedule the builder draws
+                           and the schedule executed here are the same function. */
+                        val backoff = node.retryPolicy
+                            .delayForAttempt(attempt, java.util.concurrent.ThreadLocalRandom.current())
+                            .coerceIn(100L, MAX_BACKOFF_MS)
                         log.warn("[runtime] node failed — retrying {}/{} after {}ms [nodeId={}, runId={}]: {}",
                             attempt, maxAttempts - 1, backoff, node.id, ctx.runId, result.reason.take(120))
                         emitEvent(ctx, EventType.RETRY_STARTED, "running", source,
                             title   = "Retrying: ${nodeLabel(node)} (attempt ${attempt + 1}/$maxAttempts)",
                             summary = "Previous attempt failed: ${result.reason.take(150)}. Backing off ${backoff}ms.",
                             stepId  = node.id)
-                        try { Thread.sleep(backoff) } catch (e: InterruptedException) {
-                            Thread.currentThread().interrupt()
-                            return NodeResult.Failed("Retry interrupted for node '${node.id}'")
-                        }
+                        /*
+                         * `delay`, not `Thread.sleep`.
+                         *
+                         * This function is `suspend` and runs on a bounded execution
+                         * pool; sleeping pins one of those threads for the whole
+                         * backoff, which is precisely what the NodeExecutor contract
+                         * forbids ("an implementation that blocks instead of suspends
+                         * pins a dispatcher thread and silently serialises everything
+                         * behind it"). It went unnoticed because the default policy is
+                         * `maxAttempts = 0` and this branch had never executed. Turning
+                         * retries on is what would have made it reachable.
+                         */
+                        kotlinx.coroutines.delay(backoff)
                     }
                 }
             }

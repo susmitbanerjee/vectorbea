@@ -227,6 +227,23 @@ export function CanvasMirror({ className }: { className?: string }) {
                       opacity={0.7}
                     />
                   ) : null}
+                  {/* Executing — a live halo, so the step running RIGHT NOW is
+                      findable while scanning rather than only distinguishable by
+                      its fill. `--status-live` is the token for "executing now"
+                      and is a distinct hue from brand iris, which §11 forbids
+                      using for status. */}
+                  {state === "executing" ? (
+                    <path
+                      d={cellPath(NODE_W + 8, NODE_H + 8)}
+                      transform="translate(-4 -4)"
+                      fill="none"
+                      stroke="var(--status-live)"
+                      strokeWidth={2}
+                      opacity={0.18}
+                      data-motion="decorative"
+                      className="motion-safe:animate-[ink-run-pulse_1.8s_ease-in-out_infinite]"
+                    />
+                  ) : null}
                   {state === "gated" ? (
                     <path
                       d={cellPath(NODE_W + 8, NODE_H + 8)}

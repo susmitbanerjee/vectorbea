@@ -245,6 +245,26 @@ function Output() {
   if (isFinal && runDetail?.errorJson) return <JsonViewer value={runDetail.errorJson} />;
   if (isFinal && runDetail?.outputJson) return <JsonViewer value={runDetail.outputJson} />;
 
+  /* A step that is STILL RUNNING has no output yet, which is a different fact
+     from having produced none. Both used to render "No output was captured for
+     this step." — so a healthy in-flight step looked like one that had returned
+     nothing, on the screen someone is watching precisely because they want to
+     know whether it is progressing. */
+  if (run.nodes[focusIndex]?.state === "executing") {
+    return (
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden
+          data-motion="decorative"
+          className="bg-status-live size-1.5 rounded-full motion-safe:animate-[ink-run-pulse_1.8s_ease-in-out_infinite]"
+        />
+        <Text variant="caption" tone="muted">
+          This step is still running — output appears when it completes.
+        </Text>
+      </div>
+    );
+  }
+
   return (
     <Text variant="caption" tone="muted">
       No output was captured for this step.

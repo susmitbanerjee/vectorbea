@@ -117,6 +117,28 @@ class DbReadNodeExecutor(
             return NodeResult.Failed("DB_QUERY node '${node.id}': cannot create DB pool: ${e.message}")
         }
 
+        /*
+         * The query and its parameters have to agree BEFORE the driver is asked.
+         *
+         * Same failure as the write path: binding into a query with no placeholders
+         * produced "The column index is out of range: 1, number of columns: 0", which
+         * names neither the query nor the count. Reads take the same guard so a SELECT
+         * tool fails with an instruction rather than a driver index.
+         */
+        val placeholders = SqlPlaceholders.analyse(rawQuery).questionMarks
+        if (params.size != placeholders) {
+            val hint = if (placeholders == 0) {
+                "The query has no bind placeholders, so it takes no parameters. " +
+                    "Use {{name}} templating to inline a value, or add ? placeholders to bind one."
+            } else {
+                "Supply exactly $placeholders value(s), in the order the ? placeholders appear."
+            }
+            return NodeResult.Failed(
+                "DB_QUERY node '${node.id}': the query has $placeholders bind placeholder(s) " +
+                    "but ${params.size} parameter(s) were supplied. $hint"
+            )
+        }
+
         emitEvent(context, node.id, EventType.DB_QUERY_STARTED, "running",
             title = "DB query started")
 
