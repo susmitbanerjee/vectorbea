@@ -3,6 +3,7 @@ package com.vectorbea.worker.db
 import com.vectorbea.worker.config.OutboundTimeouts
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -80,6 +81,32 @@ class JdbcTimeoutsTest {
         assertTrue(out.contains(";databaseName=app"), out)
         assertTrue(out.contains(";socketTimeout=${t.dbSocketTimeoutSeconds * 1_000}"), out)
         assertTrue(out.contains(";loginTimeout=${t.dbLoginTimeoutSeconds}"), out)
+    }
+
+    /* ── Server-side prepared statements ──────────────────────────────────────
+       pgjdbc promotes a statement to a NAMED server-side prepared statement after
+       five executions, and a transaction-mode pooler cannot carry a named
+       statement across the backends it multiplexes. A db_read node runs the same
+       SQL every time, so the fifth run of a workflow started failing with
+       "prepared statement S_1 already exists" — against Supabase's pooled URL,
+       PgBouncer and RDS Proxy, which is what those dashboards hand out. */
+
+    @Test
+    fun `postgres urls disable server-side prepared statements by default`() {
+        val out = JdbcTimeouts.applyTo("jdbc:postgresql://db.example.com:6543/app", "postgresql", t)
+        assertTrue(out.contains("prepareThreshold=0"), out)
+    }
+
+    @Test
+    fun `a tenant who sets prepareThreshold keeps their value`() {
+        // Unlike the timeouts, this is a default rather than a bound: it protects
+        // the tenant from a pooler, not the platform from the tenant. Somebody
+        // who named it is pointing at a direct connection and means it.
+        val out = JdbcTimeouts.applyTo(
+            "jdbc:postgresql://db.example.com:5432/app?prepareThreshold=5", "postgresql", t,
+        )
+        assertTrue(out.contains("prepareThreshold=5"), out)
+        assertFalse(out.contains("prepareThreshold=0"), out)
     }
 
     @Test

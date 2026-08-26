@@ -65,14 +65,14 @@ object DbTester {
        Redshift, RDS, Aurora and PlanetScale away with "not yet supported for
        testing" purely because nobody had added the string - a support gap that
        was never a capability gap. */
-    private val POSTGRES_WIRE = setOf(
+    internal val POSTGRES_WIRE = setOf(
         "postgres", "postgresql", "pgsql", "neon", "supabase", "timescale", "timescaledb",
         "cockroach", "cockroachdb", "yugabyte", "yugabytedb", "redshift", "citus",
         "aurora_postgresql", "aurora-postgresql", "rds_postgresql", "rds-postgresql",
         "cloudsql_postgresql", "alloydb", "digitalocean_postgres",
     )
 
-    private val MYSQL_WIRE = setOf(
+    internal val MYSQL_WIRE = setOf(
         "mysql", "mariadb", "planetscale", "singlestore", "vitess", "tidb",
         "aurora_mysql", "aurora-mysql", "rds_mysql", "rds-mysql", "cloudsql_mysql",
     )

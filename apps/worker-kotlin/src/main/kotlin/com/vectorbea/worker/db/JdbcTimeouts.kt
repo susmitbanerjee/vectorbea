@@ -57,6 +57,30 @@ object JdbcTimeouts {
                 "cancelSignalTimeout" to t.dbCancelSignalTimeoutSeconds.toString(),
                 // Detect a peer that vanished without an RST (the firewalled case).
                 "tcpKeepAlive" to "true",
+                /*
+                 * ── DEFAULT OFF, BECAUSE POOLERS CANNOT CARRY THEM ───────────
+                 *
+                 * pgjdbc promotes a statement to a named server-side prepared
+                 * statement once the same SQL has run five times. A db_read node
+                 * runs the same SQL on every execution, so the fifth run of a
+                 * workflow crosses that line — and a TRANSACTION-MODE POOLER
+                 * cannot carry a named statement across the backends it
+                 * multiplexes. Supabase's Supavisor (port 6543), PgBouncer and
+                 * RDS Proxy all work that way, and their pooled URL is what
+                 * those dashboards hand out.
+                 *
+                 * The failure is nastier than a plain error because it is
+                 * DELAYED: the connection tests green, the tool builds, the
+                 * first four runs succeed, and then the node starts failing with
+                 * "prepared statement S_1 already exists" for no visible reason.
+                 * Schema preview hit the same wall inside a single call, which is
+                 * where it was found.
+                 *
+                 * Unlike the timeouts around it this is a DEFAULT, not a ceiling:
+                 * a tenant who sets `prepareThreshold` explicitly is pointing at
+                 * a direct connection and knows what they want. See [mustOverride].
+                 */
+                "prepareThreshold" to "0",
             )
 
             "mysql", "mariadb" -> linkedMapOf(
@@ -93,9 +117,15 @@ object JdbcTimeouts {
         }
     }
 
+    /** Parameters this forces only when ABSENT — a default rather than a bound. */
+    private val DEFAULT_ONLY = setOf("preparethreshold")
+
     /** True when the caller-supplied value must be replaced by the policy value. */
     private fun mustOverride(existing: String?, key: String, provider: String, t: OutboundTimeouts): Boolean {
         if (existing == null) return true
+        // A tenant who named this one meant it. It protects them from a pooler,
+        // not the platform from them, so their choice stands.
+        if (key.lowercase() in DEFAULT_ONLY) return false
         val ceiling = ceilingFor(key, provider, t) ?: return true
         val current = existing.trim().toLongOrNull() ?: return true
         // <= 0 means "wait forever" for every driver we support.
@@ -129,8 +159,14 @@ object JdbcTimeouts {
             val existingKey = pairs.keys.firstOrNull { it.equals(key, ignoreCase = true) }
             val existingValue = existingKey?.let { pairs[it] }
             if (mustOverride(existingValue, key, provider, t)) {
-                existingKey?.let { pairs.remove(it) }
-                pairs[key] = value
+                /* Overwritten IN PLACE. Removing and re-adding moved the key to
+                   the end of the query string, so applying this twice produced a
+                   different URL each time — harmless until a second always-forced
+                   key was added after the first, at which point the two swapped
+                   on every pass. A LinkedHashMap keeps the position of a key it
+                   already has, so assigning through the existing spelling is what
+                   makes this idempotent. */
+                pairs[existingKey ?: key] = value
             }
         }
 
@@ -159,8 +195,8 @@ object JdbcTimeouts {
             val existingKey = pairs.keys.firstOrNull { it.equals(key, ignoreCase = true) }
             val existingValue = existingKey?.let { pairs[it] }
             if (mustOverride(existingValue, key, "sqlserver", t)) {
-                existingKey?.let { pairs.remove(it) }
-                pairs[key] = value
+                // In place, for the same reason as the query-string form above.
+                pairs[existingKey ?: key] = value
             }
         }
 

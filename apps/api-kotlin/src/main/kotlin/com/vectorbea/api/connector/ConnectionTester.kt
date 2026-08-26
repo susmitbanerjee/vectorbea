@@ -158,55 +158,14 @@ class ConnectionTester(private val secretService: SecretService) {
 
     // ── Database ──────────────────────────────────────────────────────────────
 
-    private fun testDatabase(conn: Connection, secret: String?): ConnectionTestResult {
-        val config = parseConfig(conn.configJson)
-        val dbType = conn.provider
-
-        // Secret may be: full connection string OR just the password
-        val (connUrl, password) = when {
-            secret != null && (secret.startsWith("postgres") || secret.startsWith("mysql") ||
-                secret.startsWith("mongodb") || secret.startsWith("jdbc:")) ->
-                secret to null   // full connection string
-            else ->
-                null to secret   // password only
-        }
-
-        return DbTester.test(DbTester.DbTestInput(
-            dbType = dbType,
-            connectionUrl = connUrl ?: config["connectionUrl"] as? String,
-            password = password,
-            username = config["username"] as? String ?: config["user"] as? String,
-            host = config["host"] as? String,
-            port = (config["port"] as? Number)?.toInt(),
-            database = config["database"] as? String ?: config["db"] as? String,
-            sslRequired = config["sslRequired"] as? Boolean,
-        ))
-    }
+    private fun testDatabase(conn: Connection, secret: String?): ConnectionTestResult =
+        DbTester.test(databaseInput(conn.provider, parseConfig(conn.configJson), secret))
 
     private fun testDatabaseUnsaved(
         provider: String,
         plaintextSecret: String?,
         config: Map<String, Any?>,
-    ): ConnectionTestResult {
-        val (connUrl, password) = when {
-            plaintextSecret != null && (plaintextSecret.startsWith("postgres") ||
-                plaintextSecret.startsWith("mysql") || plaintextSecret.startsWith("mongodb") ||
-                plaintextSecret.startsWith("jdbc:")) ->
-                plaintextSecret to null
-            else ->
-                null to plaintextSecret
-        }
-        return DbTester.test(DbTester.DbTestInput(
-            dbType = provider,
-            connectionUrl = connUrl ?: config["connectionUrl"] as? String,
-            password = password,
-            username = config["username"] as? String ?: config["user"] as? String,
-            host = config["host"] as? String,
-            port = (config["port"] as? Number)?.toInt(),
-            database = config["database"] as? String ?: config["db"] as? String,
-            sslRequired = config["sslRequired"] as? Boolean,
-        ))
-    }
+    ): ConnectionTestResult = DbTester.test(databaseInput(provider, config, plaintextSecret))
 
     // ── HTTP ──────────────────────────────────────────────────────────────────
 
@@ -345,6 +304,61 @@ class ConnectionTester(private val secretService: SecretService) {
                 "Object storage connection requires an endpoint or bucket URL. Add it first.")
         val url = if (endpoint.startsWith("http")) endpoint else "https://$endpoint"
         return HttpTester.testReachability(url)
+    }
+
+    companion object {
+        /* ══════════════════════════════════════════════════════════════════════
+           WHAT A SAVED DATABASE CONNECTION MEANS — resolved in exactly one place.
+
+           THE BUG THIS CLOSES. `SchemaPreviewRoutes` hand-rolled this same
+           mapping, and the two drifted. Testing a connection read
+           `config.connectionUrl` when the secret was a bare password; schema
+           preview did not, so it fell through to the host/port/database fields —
+           which a connection-string connection does not have — and
+           `resolvePostgresTarget` defaulted to `localhost:5432/postgres`. The
+           API then dialled ITS OWN loopback, was refused, and reported "Could
+           not connect to database — verify credentials and network access" about
+           a connection the user had just watched go green. Preview also dropped
+           `config.db` and `sslRequired` for the same reason: nobody updated the
+           copy.
+
+           `DbSchemaFetcher` already carries a comment about the previous round
+           of this — "Schema preview and test connection must agree about what a
+           connection string means. When they parsed it separately they
+           disagreed". They agreed about the URL and still disagreed about where
+           to find it. One function, both callers, no third copy.
+        ══════════════════════════════════════════════════════════════════════ */
+        fun databaseInput(
+            provider: String,
+            config: Map<String, Any?>,
+            secret: String?,
+        ): DbTester.DbTestInput {
+            /* The secret is either the whole connection string or just the
+               password, and which one is decided by how it starts. Anything that
+               is not a recognisable URL is treated as a password — including a
+               password that happens to begin with "postgres", which the URL
+               forms below cannot be confused with because they all carry "://". */
+            val looksLikeUrl = secret != null && (
+                secret.startsWith("postgres://") || secret.startsWith("postgresql://") ||
+                    secret.startsWith("mysql://") || secret.startsWith("mongodb://") ||
+                    secret.startsWith("mongodb+srv://") || secret.startsWith("jdbc:")
+                )
+
+            return DbTester.DbTestInput(
+                dbType = provider,
+                connectionUrl = (if (looksLikeUrl) secret else null)
+                    ?: config["connectionUrl"] as? String
+                    ?: config["connection_string"] as? String
+                    ?: config["url"] as? String,
+                password = if (looksLikeUrl) null else secret,
+                username = config["username"] as? String ?: config["user"] as? String,
+                host = config["host"] as? String,
+                port = (config["port"] as? Number)?.toInt()
+                    ?: (config["port"] as? String)?.toIntOrNull(),
+                database = config["database"] as? String ?: config["db"] as? String,
+                sslRequired = config["sslRequired"] as? Boolean,
+            )
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
