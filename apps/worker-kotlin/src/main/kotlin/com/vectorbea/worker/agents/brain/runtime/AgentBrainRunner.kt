@@ -47,6 +47,32 @@ class AgentBrainRunner(
     private val log = logger()
     private val mapper = jacksonObjectMapper()
 
+    internal companion object {
+        /** The `:tool-<n>` attempt counter in a synthetic tool node's id. */
+        private val ATTEMPT_SUFFIX = Regex(":tool-\\d+")
+
+        /**
+         * A tool failure with the attempt number taken out, so two identical failures
+         * compare equal.
+         *
+         * The synthetic node handed to the tool executor is named
+         * `<stepId>:tool-<iteration>`, and the executors put that id into their error
+         * text: `DB_WRITE node 'n-new-agent-2:tool-3': ...`. So the same failure reads
+         * differently every iteration purely because of the counter, and a naive
+         * equality check on the summary never fires - which is exactly how the first
+         * version of this stop condition failed to stop anything.
+         *
+         * The counter is the ONLY part normalised. Anything else that differs between
+         * two attempts - a different column, a different value, a different SQLSTATE -
+         * is a real difference and must keep the loop going.
+         *
+         * On the companion because it depends on no instance state, which also means a
+         * test can exercise it without standing up a runner and its collaborators.
+         */
+        internal fun failureSignature(summary: String): String =
+            summary.replace(ATTEMPT_SUFFIX, ":tool-N")
+    }
+
     /**
      * The SAME executor a `tool` node uses, so an agent calling a tool and a
      * workflow calling that tool do the same thing.
@@ -200,12 +226,48 @@ class AgentBrainRunner(
                         budget.toolCallUsed()
                         emitEvent(config, RunEventStore.EventType.AGENT_TOOL_SELECTED, "running",
                             "Calling tool: ${action.toolId}")
+
+                        /* The observation BEFORE this call, so a repeat can be spotted. */
+                        val previous = state.observations.lastOrNull()
+
                         val obs = executeTool(action, config, runtimeCtx, state)
                         state.addObservation(obs)
                         state.addMemory("obs_${state.iteration}_${action.toolId}", obs.sanitizedSummary)
                         emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED, "running",
                             obs.sanitizedSummary)
                         persistIterationComplete(iterationId, "completed", action, obs.sanitizedSummary, budget)
+
+                        /*
+                         * STOP WHEN THE SAME CALL FAILS THE SAME WAY TWICE.
+                         *
+                         * A tool that fails deterministically - bad SQL, a missing
+                         * column, a revoked credential - fails identically however many
+                         * times it is asked. The loop had no notion of that: it fed the
+                         * failure back as an observation and let the model try again
+                         * until max iterations, which for one reported run meant ten
+                         * iterations, ten LLM calls and ten identical errors before the
+                         * step gave up. Every one of those was paid for.
+                         *
+                         * Identical means SAME TOOL and SAME MESSAGE. If the model
+                         * changes its arguments and draws a different error it is
+                         * learning something, and it keeps its remaining iterations;
+                         * repeating itself verbatim is the case that cannot improve.
+                         *
+                         * The failure carries the tool's own message, so the run says
+                         * what was wrong with the call rather than that the agent
+                         * ran out of turns.
+                         */
+                        if (!obs.success && previous != null && !previous.success &&
+                            previous.actionType == "CALL_TOOL" &&
+                            previous.toolId == obs.toolId &&
+                            failureSignature(previous.sanitizedSummary) == failureSignature(obs.sanitizedSummary)
+                        ) {
+                            state.stopReason = AgentLoopState.StopReason.ERROR
+                            failureReason = "Tool ${obs.toolId} failed twice with the same error, so the " +
+                                "agent stopped rather than retrying it further: ${obs.sanitizedSummary}"
+                            emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
+                                "Stopped after an identical repeated tool failure: ${obs.sanitizedSummary}")
+                        }
                     }
 
                     AgentAction.ActionType.FINAL -> {

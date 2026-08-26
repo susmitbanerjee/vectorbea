@@ -56,6 +56,42 @@ class DbWriteNodeExecutor(
 
     companion object {
         const val DEFAULT_TIMEOUT_SECS = 30
+
+        /**
+         * Everything Postgres said about the failure EXCEPT the row.
+         *
+         * THE BUG THIS FIXES: this executor reported `e.javaClass.simpleName` and
+         * nothing else, so every write failure - syntax error, missing column,
+         * type mismatch, constraint violation - arrived as the single word
+         * "PSQLException". The run's error_json said
+         * `statement execution failed: PSQLException`, which names a Java class and
+         * not one fact about what went wrong. An agent retrying that tool got the
+         * same uninformative observation each time and had nothing to correct.
+         *
+         * `DbReadNodeExecutor` has always included `e.message`; only the write path
+         * dropped it, and the asymmetry is the giveaway that this was caution rather
+         * than intent - a write's error is the one that can quote the data being
+         * written.
+         *
+         * So the diagnosis is kept and the data is not. Postgres puts values in the
+         * DETAIL field (`Key (email)=(a@b.com) already exists`); the primary message
+         * and HINT are about the STATEMENT. Everything from `Detail:` on is dropped,
+         * and the SQLSTATE is prefixed because it is the part that is stable enough
+         * to look up and search for.
+         */
+        internal fun describeDbError(e: Throwable): String {
+            val sqlState = (e as? java.sql.SQLException)?.sqlState?.takeIf { it.isNotBlank() }
+
+            val primary = e.message
+                // Case-insensitive: pgjdbc renders "Detail:", the server logs "DETAIL:".
+                ?.split(Regex("(?i)\\bdetail\\s*:"), limit = 2)
+                ?.first()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: e.javaClass.simpleName
+
+            return if (sqlState != null) "[$sqlState] ${primary.take(300)}" else primary.take(300)
+        }
     }
 
     override suspend fun execute(
@@ -168,10 +204,11 @@ class DbWriteNodeExecutor(
             val durationMs = System.currentTimeMillis() - startMs
             com.vectorbea.worker.metrics.WorkerMetrics.tenantDbCallDurationSeconds
                 .observeMs(durationMs, "write", "error")
+            val described = describeDbError(e)
             log.warn("[dbwrite] statement failed [nodeId={}, durationMs={}]: {}",
-                node.id, durationMs, e.javaClass.simpleName)
+                node.id, durationMs, described)
             return NodeResult.Failed(
-                "DB_WRITE node '${node.id}': statement execution failed: ${e.javaClass.simpleName}"
+                "DB_WRITE node '${node.id}': statement execution failed: $described"
             )
         }
 
