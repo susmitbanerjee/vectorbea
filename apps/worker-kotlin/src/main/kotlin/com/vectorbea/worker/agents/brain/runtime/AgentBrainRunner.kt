@@ -504,7 +504,7 @@ class AgentBrainRunner(
             dataSource.connection.use { conn ->
                 val placeholders = config.allowedToolIds.joinToString(",") { "?" }
                 conn.prepareStatement(
-                    "SELECT id, name, description, config_json FROM tools WHERE id IN ($placeholders) AND workspace_id=? AND status='active'"
+                    "SELECT id, name, description, input_schema_json FROM tools WHERE id IN ($placeholders) AND workspace_id=? AND status='active'"
                 ).use { stmt ->
                     config.allowedToolIds.forEachIndexed { i, id -> stmt.setObject(i + 1, id) }
                     stmt.setObject(config.allowedToolIds.size + 1, config.workspaceId)
@@ -515,6 +515,16 @@ class AgentBrainRunner(
                                 id = rs.getString("id"),
                                 name = rs.getString("name"),
                                 description = rs.getString("description") ?: "",
+                                /* THE ARGUMENT NAMES. `ToolDescriptor` has carried an
+                                   `inputSchema` field since it was written and the
+                                   system prompt has always rendered it, but this query
+                                   never selected the column - it selected `config_json`
+                                   and then ignored that too - so every tool reached the
+                                   model as a name and a sentence with no parameters.
+                                   The model was being asked to call a tool and left to
+                                   guess what to pass it, which is how a tool call comes
+                                   back with the right intent and the wrong keys. */
+                                inputSchema = parseJsonObject(rs.getString("input_schema_json")),
                             ))
                         }
                     }
@@ -522,6 +532,13 @@ class AgentBrainRunner(
             }
         } catch (e: Exception) { log.warn("[brain] load tools failed: {}", e.message); emptyList() }
     }
+
+    /** A jsonb column as a map. Empty when absent or not an object. */
+    @Suppress("UNCHECKED_CAST")
+    private fun parseJsonObject(raw: String?): Map<String, Any?> =
+        if (raw.isNullOrBlank()) emptyMap()
+        else runCatching { mapper.readValue(raw, Map::class.java) as Map<String, Any?> }
+            .getOrDefault(emptyMap())
 
     // ── Event emission ────────────────────────────────────────────────────────
 

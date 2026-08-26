@@ -53,6 +53,30 @@ class AgentNodeExecutor(
     private val log    = logger()
     private val mapper = jacksonObjectMapper()
 
+    internal companion object {
+        /**
+         * Agent types whose whole point is calling tools, so they take the loop even
+         * with no tools granted yet - an empty grant list is a setup step, not a
+         * decision to run them as a single prompt.
+         */
+        val TOOL_CALLING_AGENT_TYPES = setOf("iterative_agent", "tool_agent")
+
+        /**
+         * Whether this step runs the tool-calling loop or a single model call.
+         *
+         * Extracted so the rule can be read and tested on its own. It decided
+         * silently and wrongly for a long time, and the symptom - a green run with an
+         * empty table - pointed at the tool, the connection and the SQL long before
+         * it pointed here.
+         */
+        internal fun shouldUseToolLoop(
+            agentType: String,
+            hasGrantedTools: Boolean,
+            brainEnabled: Boolean?,
+        ): Boolean = brainEnabled
+            ?: (agentType in TOOL_CALLING_AGENT_TYPES || hasGrantedTools)
+    }
+
     private val llmExecutor by lazy { LlmNodeExecutor(connectionResolver, eventStore) }
 
     override suspend fun execute(
@@ -72,11 +96,56 @@ class AgentNodeExecutor(
         val agent = loadAgent(agentId, ctx.workspaceId)
             ?: return NodeResult.Failed("Agent '$agentIdStr' not found or not accessible for node '${node.id}'")
 
-        // ── Route iterative_agent type to AgentBrainRunner ────────────────────
-        if (agent.agentType == "iterative_agent") {
+        /*
+         * ── Which path: the tool-calling loop, or a single LLM call? ──────────
+         *
+         * THE BUG THIS FIXES: this asked only `agentType == "iterative_agent"`.
+         * Everything else fell through to the single-shot path below, which has no
+         * tool loop at all - it builds one LLM request and returns the text.
+         *
+         * But the platform lets you grant tools to ANY agent type. So an agent whose
+         * instructions said "write the result to postgres", with the Postgres tool
+         * granted, called the model once, got prose back, and reported success. The
+         * run was green and the table was empty. Nothing in the event stream said the
+         * tool had been skipped, because from the executor's point of view nothing had
+         * gone wrong - it was never asked to call one.
+         *
+         * `tool_agent` is the same story with a name that makes it plainer: a type
+         * literally meaning "uses tools" could not call one.
+         *
+         * So the question is no longer "what is this agent labelled" but "is this
+         * agent set up to use tools". Granting a tool is the operator saying it should
+         * be used; an agent that ignores its granted tools is not a configuration
+         * anyone chose.
+         *
+         * `brainEnabled` on the node overrides in BOTH directions. The builder has
+         * written that key since the loop shipped (`WorkflowInspector` sets it when you
+         * pick an agent) and nothing has ever read it, so the toggle silently did
+         * nothing. Honouring it also leaves a way to force the cheap single-shot path
+         * for an agent that has tools but should not use them here.
+         */
+        val useBrain = shouldUseToolLoop(
+            agentType      = agent.agentType,
+            hasGrantedTools = agent.allowedToolIds.isNotEmpty(),
+            brainEnabled   = node.config["brainEnabled"] as? Boolean,
+        )
+
+        if (useBrain) {
             return executeIterativeAgent(agent, node, resolvedInputs, ctx)
         }
-        // All other types fall through to the single-shot LLM path below
+
+        /* Reachable only when `brainEnabled = false` was set explicitly on a node whose
+           agent does have tools. That is a legitimate choice, but a silent one, and
+           silence is what made the original bug so hard to see - so it is stated. */
+        if (agent.allowedToolIds.isNotEmpty()) {
+            emitEvent(ctx, node.id, EventType.AGENT_STARTED, "running",
+                title   = "Tool calling is off for this step",
+                summary = "Agent '${agent.name}' has ${agent.allowedToolIds.size} tool(s) granted, but " +
+                          "brainEnabled=false on node '${node.id}', so this is a single model call and " +
+                          "no tool will run.")
+        }
+
+        // Single-shot LLM path: one request, no tool loop.
 
         val connectionId = agent.llmConnectionId
             ?: return NodeResult.Failed(
@@ -330,7 +399,15 @@ class AgentNodeExecutor(
             maxIterations   = agent.maxIterations,
             maxToolCalls    = agent.maxToolCalls,
             maxCostCents    = agent.maxCostCents,
-            taskInstruction = node.config["taskInstruction"] as? String,
+            /* The same fallback chain the single-shot path uses. Without it, routing
+               an agent here that supplied its task through input mapping rather than
+               a node-level field would drop the task entirely and prompt the model
+               with "Complete the task based on the provided inputs." */
+            taskInstruction = node.config["taskInstruction"] as? String
+                ?: resolvedInputs["taskInstruction"] as? String
+                ?: resolvedInputs["task"] as? String
+                ?: resolvedInputs["prompt"] as? String
+                ?: resolvedInputs["input"] as? String,
             allowedToolIds  = agent.allowedToolIds.mapNotNull {
                 try { UUID.fromString(it) } catch (_: Exception) { null }
             }.toSet(),
