@@ -69,6 +69,54 @@ export function maybe<T extends z.ZodTypeAny>(schema: T) {
 export const jsonObject = z.record(z.string(), z.unknown());
 
 /**
+ * A `jsonb` column the API may hand back EITHER as JSON or as a string of JSON.
+ *
+ * WHY THIS EXISTS
+ * ───────────────
+ * Most routes parse their jsonb columns before responding. `RunRoutes` did not:
+ * `outputJson` and `errorJson` were read as raw column TEXT and passed straight
+ * into the response map, so they arrived as
+ * `"errorJson": "{\"code\":\"WORKER_ERROR\"}"` — a string. `jsonObject`
+ * rejected that with "Expected object, received string", which failed the WHOLE
+ * response, so the run detail screen could not open a failed run at all.
+ *
+ * The API side is fixed. This is not a duplicate of that fix — the web app ships
+ * from Vercel and the API from Railway, on separate deploys, so a browser will
+ * routinely be running against an API one deploy behind. Accepting both wire
+ * forms is what makes that ordering not matter.
+ *
+ * A string is parsed and its parsed value validated. Anything else is validated
+ * as-is. A string that is not JSON stays a string and fails the inner schema —
+ * genuine drift still surfaces as drift rather than being silently swallowed.
+ */
+export function jsonEncoded<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      return value;
+    }
+  }, schema);
+}
+
+/**
+ * Arbitrary JSON — object, array, or scalar — from a `jsonb` column.
+ *
+ * `jsonObject` is the right schema for columns the API writes as objects and
+ * only as objects (policies, schemas, configs). It is the wrong one for a
+ * column that carries whatever a node produced: `agent_runs.output_json` holds
+ * a workflow's final output, and a workflow whose last node returns a list
+ * stores a JSON array. Typing that as an object turns a legal run into an
+ * unopenable one.
+ *
+ * `unknown` rather than a union, because every consumer of these fields renders
+ * them through a JSON viewer that already takes `unknown`. Narrowing here would
+ * buy no type safety and cost the honest shape.
+ */
+export const jsonValue = z.unknown();
+
+/**
  * Numeric columns arrive as JSON numbers, but Jackson renders Postgres
  * `numeric` as a number and nulls stay null. Coerced because a cost of `0`
  * versus `"0"` should not be a contract failure.

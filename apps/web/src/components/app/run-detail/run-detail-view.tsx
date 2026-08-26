@@ -118,8 +118,11 @@ function RunDetailBody({ run, frozen, incident }: {
   frozen: boolean;
   incident: contracts.FailureIncident | null;
 }) {
-  const { select } = useReplay();
-  const diagnosis = React.useMemo(() => diagnoseRun(run, incident), [run, incident]);
+  const { select, detail } = useReplay();
+  const diagnosis = React.useMemo(
+    () => diagnoseRun(run, incident, detail),
+    [run, incident, detail],
+  );
 
   const [comparing, setComparing] = React.useState(false);
   const [showEvents, setShowEvents] = React.useState(false);

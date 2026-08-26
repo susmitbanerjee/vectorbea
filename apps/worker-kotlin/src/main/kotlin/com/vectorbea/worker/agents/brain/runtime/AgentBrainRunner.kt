@@ -4,10 +4,12 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.vectorbea.worker.agents.brain.model.*
 import com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder
 import com.vectorbea.worker.connector.ConnectionResolver
+import com.vectorbea.worker.connector.pool.ClientDbPoolManager
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.logging.logger
-import com.vectorbea.worker.runtime.executor.HttpNodeExecutor
+import com.vectorbea.worker.runtime.executor.LlmNodeExecutor
 import com.vectorbea.worker.runtime.executor.NodeResult
+import com.vectorbea.worker.runtime.executor.ToolNodeExecutor
 import com.vectorbea.worker.runtime.graph.RuntimeContext
 import com.vectorbea.worker.runtime.graph.WorkflowNode
 import java.sql.Timestamp
@@ -31,12 +33,59 @@ class AgentBrainRunner(
     private val dataSource: DataSource?,
     private val eventStore: RunEventStore,
     private val connectionResolver: ConnectionResolver,
+    /**
+     * Pool manager for TENANT databases, needed because an agent may call a
+     * database tool. Null only in tests that exercise no such tool; a null here
+     * means database tools report "not available" rather than being silently
+     * mis-executed as HTTP.
+     */
+    private val dbPoolManager: ClientDbPoolManager? = null,
     private val budgetGuard: AgentBudgetGuard = AgentBudgetGuard(),
     private val safetyGuard: AgentSafetyGuard = AgentSafetyGuard(),
     private val memoryStore: AgentMemoryStore = AgentMemoryStore(dataSource),
 ) {
     private val log = logger()
     private val mapper = jacksonObjectMapper()
+
+    /**
+     * The SAME executor a `tool` node uses, so an agent calling a tool and a
+     * workflow calling that tool do the same thing.
+     *
+     * This used to be a bare [com.vectorbea.worker.runtime.executor.HttpNodeExecutor],
+     * which meant every agent tool call was executed as an HTTP request no matter
+     * what the tool actually was. A Postgres tool resolved its `database`
+     * connection against an executor demanding `http` and came back
+     * "Connection 'X' has type 'database', expected 'http'" — recorded as one
+     * failed observation inside the loop, after which the agent carried on and
+     * the run still finished `succeeded`. Nothing was written and nothing said so.
+     *
+     * [ToolNodeExecutor] dispatches on the tool's own `type` (http / database /
+     * builtin_email / SaaS aliases), applies its `requires_approval` flag, and
+     * resolves `sqlTemplate` placeholders — none of which the HTTP path could do.
+     */
+    private val toolExecutor: ToolNodeExecutor? by lazy {
+        val ds = dataSource ?: return@lazy null
+        val pools = dbPoolManager ?: return@lazy null
+        ToolNodeExecutor(ds, connectionResolver, pools, eventStore)
+    }
+
+    /**
+     * The SAME executor an `llm` node uses.
+     *
+     * The loop previously built its own OpenAI request by hand, which broke in two
+     * ways. It appended `/chat/completions` to the connection's `baseUrl`, while
+     * every other caller in the platform (`LlmNodeExecutor`, `LlmTester`,
+     * `lib/server/execution.ts`) appends `/v1/chat/completions` — so a connection
+     * whose `baseUrl` is `https://api.openai.com`, which is the form those callers
+     * store, produced `https://api.openai.com/chat/completions` and a 404. And it
+     * spoke OpenAI's dialect to every provider, so an Anthropic connection got an
+     * OpenAI body and an `Authorization: Bearer` header posted to a path Anthropic
+     * does not serve — another 404.
+     *
+     * Delegating fixes both and inherits the provider throttle, the connection
+     * circuit breaker, replay recording and the cost/token metrics for free.
+     */
+    private val llmExecutor by lazy { LlmNodeExecutor(connectionResolver, eventStore) }
 
     data class RunResult(
         val finalOutput: Map<String, Any?>,
@@ -45,6 +94,21 @@ class AgentBrainRunner(
         val tokensUsed: Int,
         val estimatedCostCents: Double,
         val observations: List<AgentObservation>,
+        /**
+         * WHAT actually went wrong, when something did.
+         *
+         * The stop reason alone is a category, not a diagnosis. A run that died
+         * because the LLM connection was refused recorded
+         * `error_json: {"message": "Agent 'X' stopped with reason: ERROR after 1
+         * iterations."}` — which is what the run detail screen shows for a failed
+         * run, and it names nothing. The real cause ("HTTP request failed:
+         * ConnectException") was written to an AGENT_FAILED event and went no
+         * further, so the summary the screen leads with was the one place the
+         * answer was missing.
+         *
+         * Null when the loop ended cleanly.
+         */
+        val failureReason: String? = null,
     )
 
     suspend fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
@@ -60,6 +124,9 @@ class AgentBrainRunner(
         emitEvent(config, RunEventStore.EventType.AGENT_STARTED, "running",
             "Agent brain started — task: ${(config.taskInstruction ?: "").take(100)}")
 
+        /* Carries the cause out of the loop and into RunResult. See RunResult.failureReason. */
+        var failureReason: String? = null
+
         try {
             while (!state.isDone) {
                 budget.iterationStarted()
@@ -69,6 +136,7 @@ class AgentBrainRunner(
                 try { budgetGuard.checkOrThrow(budget, "before iteration ${state.iteration}") }
                 catch (e: BudgetExceededException) {
                     state.stopReason = AgentLoopState.StopReason.BUDGET_EXCEEDED
+                    failureReason = "Budget exceeded: ${e.message}"
                     emitEvent(config, RunEventStore.EventType.AGENT_BUDGET_EXCEEDED, "failed",
                         "Budget exceeded: ${e.message}")
                     break
@@ -85,7 +153,7 @@ class AgentBrainRunner(
                 val systemPrompt = AgentPromptBuilder.buildSystemPrompt(config, tools)
                 val userPrompt   = AgentPromptBuilder.buildUserPrompt(config, state)
 
-                val llmResult = callLlm(config, systemPrompt, userPrompt, state)
+                val llmResult = callLlm(config, systemPrompt, userPrompt, runtimeCtx)
                 budget.addTokens(llmResult.tokensUsed, llmResult.estimatedCostCents)
 
                 // Parse action from LLM response
@@ -181,6 +249,7 @@ class AgentBrainRunner(
         } catch (e: Exception) {
             log.error("[brain] unexpected error runId={}: {}", config.runId, e.message)
             if (state.stopReason == null) state.stopReason = AgentLoopState.StopReason.ERROR
+            failureReason = e.message?.take(300) ?: e.javaClass.simpleName
             emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed", "Agent error: ${e.message?.take(200)}")
         }
 
@@ -198,6 +267,11 @@ class AgentBrainRunner(
             tokensUsed         = budget.tokensUsed,
             estimatedCostCents = budget.estimatedCostCents,
             observations       = state.observations.toList(),
+            /* No explicit reason recorded? The last unsuccessful observation is the
+               next best evidence — for a loop that ran out of iterations while a
+               tool kept failing, it is the actual answer. */
+            failureReason      = failureReason
+                ?: state.observations.lastOrNull { !it.success }?.sanitizedSummary,
         )
     }
 
@@ -205,81 +279,56 @@ class AgentBrainRunner(
 
     private data class LlmCallResult(val rawContent: String, val tokensUsed: Int, val estimatedCostCents: Double)
 
-    private suspend fun callLlm(config: AgentBrainConfig, systemPrompt: String, userPrompt: String, state: AgentLoopState): LlmCallResult {
-        emitEvent(config, RunEventStore.EventType.LLM_CALL_STARTED, "running",
-            "LLM call iter=${state.iteration} model=${config.modelName}")
-
-        // Use the existing HTTP infrastructure to call the LLM via its connection
-        try {
-            val resolved = connectionResolver.resolve(config.llmConnectionId, config.workspaceId)
-            val apiKey   = resolved.secret?.useOnce { it } ?: throw RuntimeException("LLM connection secret missing")
-
-            val requestBody = mapper.writeValueAsString(mapOf(
-                "model"       to config.modelName,
-                "temperature" to config.temperature,
-                "max_tokens"  to config.maxTokens,
-                "messages" to listOf(
+    private suspend fun callLlm(
+        config: AgentBrainConfig,
+        systemPrompt: String,
+        userPrompt: String,
+        runtimeCtx: RuntimeContext,
+    ): LlmCallResult {
+        /* The synthetic node carries the AGENT's step id, not a made-up one, so the
+           LLM_CALL_* events the executor emits attach to the step the timeline
+           already shows rather than to a node nobody can find. */
+        val node = WorkflowNode(
+            id   = config.stepId,
+            type = "llm",
+            config = buildMap {
+                put("connectionId", config.llmConnectionId.toString())
+                put("model",        config.modelName)
+                put("temperature",  config.temperature)
+                put("maxTokens",    config.maxTokens)
+                put("timeoutMs",    config.timeoutMs)
+                put("messages", listOf(
                     mapOf("role" to "system", "content" to systemPrompt),
                     mapOf("role" to "user",   "content" to userPrompt),
-                ),
-            ))
+                ))
+            },
+        )
 
-            val baseUrl = resolved.record.configJson["baseUrl"]?.toString()
-                ?: inferBaseUrl(resolved.record.provider)
-            val url = "$baseUrl/chat/completions"
-
-            // Shared client. Building one per call left a selector thread behind
-            // on every agent iteration (HttpClient is not AutoCloseable on JDK 17)
-            // and carried no connect timeout at all.
-            val request = java.net.http.HttpRequest.newBuilder()
-                .uri(java.net.URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer $apiKey")
-                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
-
-            val budgetMs = com.vectorbea.worker.net.OutboundHttp.policy().clampTotalCallMs(config.timeoutMs)
-            val response = com.vectorbea.worker.metrics.WorkerMetrics.timeBlocking {
-                com.vectorbea.worker.net.OutboundHttp.send(
-                    request,
-                    totalCallMs = budgetMs,
-                    maxResponseBytes = 1_048_576L,
-                )
+        return when (val result = llmExecutor.execute(node, emptyMap(), runtimeCtx)) {
+            is NodeResult.Completed -> {
+                val content = result.output["content"] as? String ?: ""
+                val tokens  = (result.output["tokenCount"] as? Number)?.toInt() ?: 0
+                LlmCallResult(content, tokens, estimateCostCents(tokens, config.modelName))
             }
-            com.vectorbea.worker.metrics.WorkerMetrics.llmCallDurationSeconds.observeMs(
-                response.durationMs,
-                resolved.record.provider.lowercase(),
-                if (response.statusCode in 200..299) "ok" else "http_error",
-            )
-            if (response.statusCode !in 200..299)
-                throw RuntimeException("LLM API returned ${response.statusCode}")
 
-            @Suppress("UNCHECKED_CAST")
-            val parsed  = mapper.readValue(response.body, Map::class.java) as Map<String, Any?>
-            val choices = parsed["choices"] as? List<*> ?: throw RuntimeException("No choices in LLM response")
-            val msg     = ((choices[0] as Map<*, *>)["message"] as Map<*, *>)["content"] as? String ?: ""
+            /* A 429 is not a failure of the task, and it is not something the loop
+               can reason its way past. Surfacing the provider's own message keeps
+               "we were rate limited" distinguishable from "the agent could not do
+               it", which the previous generic RuntimeException("returned 429")
+               did not. */
+            is NodeResult.Throttled ->
+                throw LlmCallException("${result.provider} rate limited this call. ${result.message}")
 
-            @Suppress("UNCHECKED_CAST")
-            val usage   = parsed["usage"] as? Map<String, Any?> ?: emptyMap<String, Any?>()
-            val tokens  = (usage["total_tokens"] as? Int) ?: 0
-            val cost    = estimateCostCents(tokens, config.modelName)
+            is NodeResult.Failed ->
+                throw LlmCallException(result.reason)
 
-            val costUsd = cost / 100.0   // estimateCostCents returns cents → convert to USD
-            emitEvent(config, RunEventStore.EventType.LLM_CALL_COMPLETED, "running",
-                "LLM call completed tokens=$tokens cost=\$${"%.5f".format(costUsd)}",
-                tokenCount    = tokens,
-                estimatedCost = costUsd)
-            return LlmCallResult(msg, tokens, cost)
-        } catch (e: Exception) {
-            log.error("[brain] LLM call failed iter={}: {}", state.iteration, e.message)
-            throw e
+            else ->
+                throw LlmCallException("LLM call returned an unexpected result: ${result::class.simpleName}")
         }
     }
 
-    private fun inferBaseUrl(provider: String?): String = when {
-        provider?.contains("anthropic", ignoreCase = true) == true -> "https://api.anthropic.com/v1"
-        provider?.contains("azure", ignoreCase = true) == true     -> "https://api.openai.azure.com/v1"
-        else -> "https://api.openai.com/v1"
-    }
+    /** Raised when the LLM leg of an iteration cannot produce content. */
+    class LlmCallException(message: String) : RuntimeException(message)
 
     private fun estimateCostCents(tokens: Int, model: String): Double {
         val ratePerMillion = when {
@@ -327,69 +376,56 @@ class AgentBrainRunner(
             return AgentObservation(state.iteration, "CALL_TOOL", action.toolId, "Invalid tool ID format", false)
         }
 
-        return try {
-            // Load tool config from DB (gets connectionId and HTTP config)
-            val toolCfg = loadToolConfig(toolId, config.workspaceId)
-                ?: return AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                    "Tool $toolId not found or not accessible", false)
+        val executor = toolExecutor
+            ?: return AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                "Tool execution is not available on this worker", false)
 
-            // Build a synthetic HTTP node from the tool config
+        return try {
+            /* A `tool` node, not an `http` one. ToolNodeExecutor owns the lookup,
+               the type dispatch and the config remapping, so the agent path and the
+               workflow path cannot disagree about what calling a tool means. */
             val syntheticNode = WorkflowNode(
-                id     = "brain-tool-${state.iteration}-$toolId",
-                type   = "http",
-                config = toolCfg,
+                id     = "${config.stepId}:tool-${state.iteration}",
+                type   = "tool",
+                config = mapOf("toolId" to toolId.toString()),
             )
 
-            // Delegate to HttpNodeExecutor — no dbPoolManager needed for HTTP tools
-            val httpExec = HttpNodeExecutor(connectionResolver, eventStore)
             @Suppress("UNCHECKED_CAST")
-            val inputs = (action.toolInput ?: emptyMap<String, Any?>()) as Map<String, Any>
+            val inputs = (action.toolInput ?: emptyMap<String, Any?>())
+                .filterValues { it != null } as Map<String, Any>
 
-            when (val execResult = httpExec.execute(syntheticNode, inputs, runtimeCtx)) {
+            when (val execResult = executor.execute(syntheticNode, inputs, runtimeCtx)) {
                 is NodeResult.Completed -> {
                     val summary = buildToolObservationSummary(toolId, execResult.output)
-                    emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED, "running",
-                        "Tool $toolId: $summary")
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), summary, true)
                 }
+
                 is NodeResult.Failed -> {
                     val errSummary = "Tool $toolId failed: ${execResult.reason.take(200)}"
                     log.warn("[brain] tool execution failed toolId={}: {}", toolId, execResult.reason)
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false)
                 }
-                else -> AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                    "Tool $toolId returned unexpected result type", false)
+
+                /* A tool that needs a human is not a tool the agent may retry its
+                   way around, and it is not an error either. Reporting it as an
+                   unsuccessful observation stops the loop from looping on it while
+                   leaving the pending approval to be resolved out of band. */
+                is NodeResult.ApprovalPaused ->
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                        "Tool $toolId requires human approval before it can run", false)
+
+                is NodeResult.Throttled ->
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                        "Tool $toolId was rate limited by ${execResult.provider}", false)
+
+                is NodeResult.Unsupported ->
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                        "Tool $toolId has a type this worker cannot execute", false)
             }
         } catch (e: Exception) {
             val errSummary = "Tool $toolId failed: ${e.message?.take(200)}"
             log.warn("[brain] tool execution failed: {}", errSummary)
             AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false)
-        }
-    }
-
-    /** Load a tool's HTTP-compatible config from the DB for agent brain execution. */
-    private fun loadToolConfig(toolId: UUID, workspaceId: UUID): Map<String, Any>? {
-        if (dataSource == null) return null
-        return try {
-            dataSource.connection.use { conn ->
-                conn.prepareStatement(
-                    "SELECT config_json, connection_id FROM tools WHERE id=? AND workspace_id=? AND status='active'"
-                ).use { stmt ->
-                    stmt.setObject(1, toolId)
-                    stmt.setObject(2, workspaceId)
-                    val rs = stmt.executeQuery()
-                    if (!rs.next()) return@use null
-                    @Suppress("UNCHECKED_CAST")
-                    val configJson: Map<String, Any> = try {
-                        mapper.readValue(rs.getString("config_json") ?: "{}", Map::class.java) as Map<String, Any>
-                    } catch (_: Exception) { emptyMap() }
-                    val connectionId = rs.getString("connection_id")
-                    if (connectionId != null) configJson + mapOf("connectionId" to connectionId) else configJson
-                }
-            }
-        } catch (e: Exception) {
-            log.warn("[brain] loadToolConfig failed toolId={}: {}", toolId, e.message)
-            null
         }
     }
 

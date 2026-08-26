@@ -5,6 +5,7 @@ import com.vectorbea.api.api.pageParams
 import com.vectorbea.api.api.pathUUID
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.events.EventBus
+import com.vectorbea.api.http.mapper
 import com.vectorbea.api.http.toJson
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
@@ -89,9 +90,34 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
 )
 
 private fun AgentRun.toDetailResponse(): Map<String, Any?> = toResponse() + mapOf(
-    "outputJson" to outputJson,
-    "errorJson" to errorJson,
+    "outputJson" to decodeJsonColumn(outputJson),
+    "errorJson" to decodeJsonColumn(errorJson),
 )
+
+/**
+ * Render a `jsonb` column as JSON, not as a string containing JSON.
+ *
+ * The repository reads `output_json` / `error_json` with `getJsonbStringOrNull`, so
+ * what reaches here is the column's raw TEXT. Passing that straight into the response
+ * map made Jackson escape it, and the run detail arrived as
+ * `"errorJson": "{\"code\":\"WORKER_ERROR\"}"` — a string where every consumer
+ * expects an object. The web client validates this endpoint against its contract and
+ * rejected the whole response with "Expected object, received string", so a failed run
+ * could not be opened at all: the one screen whose entire purpose is showing why a run
+ * failed was the screen the failure made unreadable.
+ *
+ * Every other route already does this (`AgentRoutes`, `ToolRoutes`, `WorkflowRoutes`
+ * all parse their jsonb columns before responding); this was the outlier.
+ *
+ * Returns null when the column is null, and falls back to the raw string when it does
+ * not parse. The fallback is deliberate: a row written by something that did not store
+ * valid JSON is still worth showing to whoever is debugging it, and dropping it would
+ * hide the very evidence the screen exists for.
+ */
+private fun decodeJsonColumn(raw: String?): Any? {
+    if (raw == null) return null
+    return runCatching { mapper.readValue(raw, Any::class.java) }.getOrDefault(raw)
+}
 
 private fun RunEvent.toResponse(): Map<String, Any?> = mapOf(
     "id" to id.toString(),

@@ -58,7 +58,7 @@ class NodeExecutorRegistry(
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),
         // Reference executors — look up tool/agent definition from DB at runtime
         NodeType.TOOL      to ToolNodeExecutor(dataSource, connectionResolver, dbPoolManager, eventStore),
-        NodeType.AGENT     to AgentNodeExecutor(dataSource, connectionResolver, eventStore),
+        NodeType.AGENT     to AgentNodeExecutor(dataSource, connectionResolver, eventStore, dbPoolManager),
     )
 
     private val unsupported = UnsupportedNodeExecutor()

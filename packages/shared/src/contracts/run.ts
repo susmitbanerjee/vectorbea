@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDateTime, jsonObject, maybe, money, page, uuid } from "./primitives";
+import { isoDateTime, jsonEncoded, jsonValue, maybe, money, page, uuid } from "./primitives";
 
 /**
  * Run contracts.
@@ -95,9 +95,21 @@ export const runSummary = z.object({
 });
 export type RunSummary = z.infer<typeof runSummary>;
 
+/**
+ * A run plus the two payload columns the list endpoint leaves out.
+ *
+ * Both go through `jsonEncoded` because the API has shipped them BOTH ways: as
+ * JSON once `RunRoutes.toDetailResponse()` learned to decode the column, and as
+ * a string of JSON before that. Web and API deploy separately, so the browser is
+ * routinely a deploy ahead of or behind the API and has to read either.
+ *
+ * `jsonValue`, not `jsonObject`: these carry whatever the run produced. A
+ * workflow whose final node returns a list stores a JSON array, and demanding an
+ * object there fails the response for a run that did nothing wrong.
+ */
 export const runDetail = runSummary.extend({
-  outputJson: maybe(jsonObject),
-  errorJson: maybe(jsonObject),
+  outputJson: maybe(jsonEncoded(jsonValue)),
+  errorJson: maybe(jsonEncoded(jsonValue)),
 });
 export type RunDetail = z.infer<typeof runDetail>;
 

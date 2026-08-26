@@ -41,6 +41,13 @@ class AgentNodeExecutor(
     private val dataSource: DataSource,
     private val connectionResolver: ConnectionResolver,
     private val eventStore: RunEventStore,
+    /**
+     * Tenant-database pools, forwarded to [AgentBrainRunner] so an iterative
+     * agent can call a database tool. Without it the brain has no way to reach a
+     * tenant database and says so, instead of running the call down a path that
+     * cannot work.
+     */
+    private val dbPoolManager: com.vectorbea.worker.connector.pool.ClientDbPoolManager? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -304,6 +311,7 @@ class AgentNodeExecutor(
             dataSource         = dataSource,
             eventStore         = eventStore,
             connectionResolver = connectionResolver,
+            dbPoolManager      = dbPoolManager,
         )
 
         val config = AgentBrainConfig(
@@ -341,9 +349,18 @@ class AgentNodeExecutor(
                     ),
                 )
             } else {
+                /* Lead with WHAT went wrong, then the category. This string becomes
+                   the run's error_json, which is what the run detail screen shows
+                   for a failed run — "stopped with reason: ERROR after 1 iterations"
+                   told whoever opened it nothing at all, while the real cause sat in
+                   an event further down the timeline. */
+                val cause = result.failureReason?.takeIf { it.isNotBlank() }
                 NodeResult.Failed(
-                    "Agent '${agent.name}' stopped with reason: ${result.stopReason} " +
-                    "after ${result.iterationsUsed} iterations."
+                    buildString {
+                        append("Agent '${agent.name}' ")
+                        if (cause != null) append("failed: $cause") else append("did not produce a final output")
+                        append(" (stopReason=${result.stopReason}, iterations=${result.iterationsUsed})")
+                    }
                 )
             }
         } catch (e: BudgetExceededException) {

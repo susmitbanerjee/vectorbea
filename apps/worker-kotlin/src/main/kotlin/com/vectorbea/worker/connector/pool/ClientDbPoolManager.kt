@@ -104,14 +104,14 @@ open class ClientDbPoolManager(
         // Use it directly as the JDBC URL — credentials are embedded in the URL.
         // This avoids having to parse host/port/database/user separately.
         if (connectionMode == "connection_string" && secret != null && !secret.isCleared()) {
-            var jdbcUrl = ""
+            var parsed = ParsedConnectionString("", null, null)
             secret.useOnce { raw ->
-                jdbcUrl = normaliseJdbcUrl(raw, record.provider)
+                parsed = parseConnectionString(raw, record.provider)
             }
             // Force driver-level timeouts even when the tenant supplied the whole
             // URL — a connection string carrying `socketTimeout=0` would otherwise
             // opt this tenant out of the only bound that protects the others.
-            val guardedUrl = JdbcTimeouts.applyTo(jdbcUrl, record.provider, timeouts)
+            val guardedUrl = JdbcTimeouts.applyTo(parsed.jdbcUrl, record.provider, timeouts)
             return try {
                 val hk = HikariConfig().apply {
                     this.jdbcUrl = guardedUrl
@@ -120,6 +120,10 @@ open class ClientDbPoolManager(
                     maximumPoolSize = maxConnectionsPerPool
                     minimumIdle = 1
                     isReadOnly = readOnly
+                    // Credentials travel as pool properties, NEVER in the URL —
+                    // see [parseConnectionString].
+                    parsed.username?.let { this.username = it }
+                    parsed.password?.let { this.password = it }
                 }
                 applyBounds(hk)
                 logEffective(record, "conn-string")
@@ -277,6 +281,101 @@ open class ClientDbPoolManager(
             "jdbc:postgresql://" + url.substringAfter("://")
         url.startsWith("mysql://") -> "jdbc:mysql://" + url.substringAfter("://")
         else -> url
+    }
+
+    /** A tenant connection string, split into the parts a JDBC pool can actually use. */
+    internal data class ParsedConnectionString(
+        val jdbcUrl: String,
+        val username: String?,
+        val password: String?,
+    )
+
+    /**
+     * Turn a libpq-style connection string into a JDBC URL plus credentials.
+     *
+     * THE BUG THIS FIXES
+     * ──────────────────
+     * Connection-string mode stores what the user pastes — a full
+     * `postgresql://user:password@host:5432/db` — and used to hand that straight
+     * to the pool after only swapping the scheme for `jdbc:postgresql://`.
+     *
+     * pgjdbc does not accept credentials in the authority. It reads everything
+     * between `//` and the next `/` as the host spec, so `user:password@host`
+     * becomes the HOSTNAME, resolution fails, and the driver reports the
+     * generic "The connection attempt failed" — which reads like the database is
+     * unreachable, sending whoever is debugging it to check firewalls and
+     * security groups for a database that was never contacted. Every database
+     * tool and every db_read/db_write node on a connection-string connection
+     * failed this way. Verified against pgjdbc 42.7.4: the userinfo form fails,
+     * the same host with `user=`/`password=` connects.
+     *
+     * So the userinfo is lifted out and passed as pool credentials instead. It
+     * stays out of the URL deliberately: the URL is what appears in Hikari's
+     * exception messages and pool names, and a password in there is a password
+     * in the logs.
+     *
+     * Split at the LAST `@` and the FIRST `:` — the split a URI parser makes,
+     * and the one that keeps working when a password contains `@`. Both halves
+     * are percent-decoded, because a password with `@`, `:` or `/` in it can
+     * only reach us encoded.
+     */
+    internal fun parseConnectionString(raw: String, provider: String): ParsedConnectionString {
+        val url = normaliseJdbcUrl(raw.trim(), provider)
+
+        val schemeEnd = url.indexOf("//")
+        if (schemeEnd < 0) return ParsedConnectionString(url, null, null)
+
+        val authorityStart = schemeEnd + 2
+        val authorityEnd = url.length.let { len ->
+            val slash = url.indexOf('/', authorityStart).takeIf { it >= 0 } ?: len
+            val question = url.indexOf('?', authorityStart).takeIf { it >= 0 } ?: len
+            minOf(slash, question)
+        }
+        val authority = url.substring(authorityStart, authorityEnd)
+
+        val at = authority.lastIndexOf('@')
+        if (at < 0) return ParsedConnectionString(url, null, null)
+
+        val userInfo = authority.substring(0, at)
+        val hostPart = authority.substring(at + 1)
+        val colon = userInfo.indexOf(':')
+        val user = if (colon < 0) userInfo else userInfo.substring(0, colon)
+        val pass = if (colon < 0) null else userInfo.substring(colon + 1)
+
+        return ParsedConnectionString(
+            jdbcUrl  = url.substring(0, authorityStart) + hostPart + url.substring(authorityEnd),
+            username = user.takeIf { it.isNotBlank() }?.let { urlDecode(it) },
+            password = pass?.let { urlDecode(it) },
+        )
+    }
+
+    /**
+     * Percent-decode one userinfo component.
+     *
+     * Hand-rolled rather than `URLDecoder.decode`, which is a FORM decoder: it
+     * turns `+` into a space. A password containing `+` is ordinary, and silently
+     * replacing it produces an authentication failure nobody can explain from the
+     * error. Only `%XX` is decoded here; a malformed escape is left verbatim,
+     * because a password that merely contains a literal `%` should still work.
+     */
+    private fun urlDecode(value: String): String {
+        if (!value.contains('%')) return value
+        val out = java.io.ByteArrayOutputStream(value.length)
+        var i = 0
+        while (i < value.length) {
+            val c = value[i]
+            val hex = if (c == '%' && i + 2 < value.length) {
+                value.substring(i + 1, i + 3).toIntOrNull(16)
+            } else null
+            if (hex != null) {
+                out.write(hex)
+                i += 3
+            } else {
+                out.write(c.toString().toByteArray(Charsets.UTF_8))
+                i += 1
+            }
+        }
+        return out.toString(Charsets.UTF_8)
     }
 
     private fun driverFor(provider: String): String = when (provider.lowercase()) {

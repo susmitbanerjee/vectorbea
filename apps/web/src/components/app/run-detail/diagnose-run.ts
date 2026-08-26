@@ -49,6 +49,17 @@ export interface Diagnosis {
 export function diagnoseRun(
   run: Run,
   incident: contracts.FailureIncident | null,
+  /**
+   * The detail response, for its `errorJson`.
+   *
+   * An incident is only clustered for some failures, and the per-node error the
+   * ribbon carries is a state letter, not a message — so for an ordinary failed
+   * run BOTH earlier sources were empty and the card led with "This step failed
+   * without a structured error." while `agent_runs.error_json` held the actual
+   * sentence. On the card an operator reads first, that is the difference
+   * between a diagnosis and a shrug.
+   */
+  detail?: contracts.RunDetail | null,
 ): Diagnosis | null {
   const index = run.nodes.findIndex((node) => node.state === "failed");
   if (index === -1) return null;
@@ -73,10 +84,13 @@ export function diagnoseRun(
 
   return {
     /* The incident's summary is written for a person and is the best sentence
-       available; the node's own error is the fallback. */
+       available; the node's own error, then the run's own error_json, are the
+       fallbacks. The generic sentence is reserved for a run that genuinely
+       recorded nothing. */
     rootCause:
       incident?.summary
       ?? node.error?.message
+      ?? runErrorMessage(detail)
       ?? "This step failed without a structured error.",
     failedNode: { index, node },
     toolCall: node.error?.toolCall ?? null,
@@ -92,6 +106,24 @@ export function diagnoseRun(
     incidentId: incident?.id ?? run.incidentId ?? null,
     classification: incident?.category ?? classify(node.state),
   };
+}
+
+/**
+ * The human-readable half of `agent_runs.error_json`.
+ *
+ * The worker writes `{"code": "...", "message": "..."}`, so `message` is the
+ * sentence. The column is `jsonb` and nothing constrains it to that shape, so a
+ * plain string is used as-is and anything else is declined rather than
+ * stringified into `[object Object]` on the card.
+ */
+function runErrorMessage(detail: contracts.RunDetail | null | undefined): string | null {
+  const error = detail?.errorJson;
+  if (typeof error === "string") return error.trim() || null;
+  if (!error || typeof error !== "object" || Array.isArray(error)) return null;
+
+  const record = error as Record<string, unknown>;
+  const message = record.message ?? record.error ?? record.reason;
+  return typeof message === "string" && message.trim() ? message : null;
 }
 
 function classify(state: string): string {

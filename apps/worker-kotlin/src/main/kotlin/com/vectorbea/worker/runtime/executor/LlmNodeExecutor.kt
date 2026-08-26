@@ -692,7 +692,25 @@ class LlmNodeExecutor(
             throw LlmCallException("LLM response exceeded the ${e.limitBytes}-byte limit and was aborted")
         } catch (e: Exception) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(0, provider, "error")
-            throw LlmCallException("HTTP request failed: ${e.javaClass.simpleName}: ${e.message?.take(200)}")
+            /* `e.message` is null for exactly the failures that matter most here:
+               java.net.ConnectException and UnknownHostException from the JDK HTTP
+               client usually carry their detail on the cause, so the naive form
+               produced "ConnectException: null" — a message that says a connection
+               problem happened and refuses to say which. Walk to the first cause
+               that has something to say, and name the host, since "cannot reach
+               api.openai.com" and "cannot reach the base URL you typed" are
+               different problems with different fixes. */
+            val detail = generateSequence(e as Throwable) { it.cause }
+                .mapNotNull { it.message?.takeIf { m -> m.isNotBlank() } }
+                .firstOrNull()
+            val host = runCatching { URI.create(url).host }.getOrNull()
+            throw LlmCallException(
+                "HTTP request to ${host ?: "the provider"} failed: ${e.javaClass.simpleName}" +
+                    // Nothing anywhere in the chain had a message: the exception type
+                    // IS the whole diagnosis, and repeating it as its own detail
+                    // ("ConnectException: ConnectException") only adds noise.
+                    (detail?.let { ": ${it.take(200)}" } ?: "")
+            )
         }
 
         // 429 is not a failure, and treating it as one is how a rate limit becomes
