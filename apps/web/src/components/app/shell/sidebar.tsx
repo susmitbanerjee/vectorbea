@@ -9,6 +9,7 @@ import { cn } from "~/lib/cn";
 import { Tooltip } from "~/components/ui/tooltip";
 import { Kbd } from "~/components/ui/kbd";
 import { overlaySurface, overlayMotion, menuItem } from "~/components/ui/select";
+import { useSession } from "~/lib/auth/session-provider";
 import { NAV, type NavItem } from "./nav";
 import { CountRoll } from "./count-roll";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -291,6 +292,22 @@ function UserMenu({
   const email = user?.email ?? "";
   const avatarUrl = user?.avatarUrl;
 
+  /*
+   * ── SIGN OUT WAS A LINK TO THE SIGN-IN PAGE ──────────────────────────────
+   *
+   * `<Link href="/signin">Sign out</Link>`. It navigated. It cleared nothing —
+   * not the httpOnly cookie, not the in-memory token, not the localStorage copy
+   * the legacy layer keeps. The session survived every "sign out" in the
+   * product, and once /signin started redirecting a live session onward the
+   * button became visibly inert: click it, land back in the app.
+   *
+   * `useSession().signOut()` is the one implementation: it DELETEs the session
+   * cookie server-side, tears down the client caches, and lands on the marketing
+   * page.
+   */
+  const { signOut } = useSession();
+  const [signingOut, setSigningOut] = React.useState(false);
+
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger
@@ -336,8 +353,17 @@ function UserMenu({
             <Kbd keys="?" className="ml-auto" />
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="bg-surface-active my-1 h-px" />
-          <DropdownMenu.Item className={cn(menuItem, "text-status-failed data-[highlighted]:text-status-failed")} asChild>
-            <Link href={"/signin" as never}>Sign out</Link>
+          <DropdownMenu.Item
+            className={cn(menuItem, "text-status-failed data-[highlighted]:text-status-failed")}
+            disabled={signingOut}
+            /* `onSelect` rather than `onClick`: Radix closes the menu on select,
+               and an async handler on a click would race that unmount. */
+            onSelect={() => {
+              setSigningOut(true);
+              void signOut().finally(() => setSigningOut(false));
+            }}
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

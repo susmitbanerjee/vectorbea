@@ -95,6 +95,16 @@ export function SessionProvider({ children, initialSession = null }: SessionProv
 
   const teardown = React.useCallback(() => {
     clearAccessToken();
+    /*
+     * The LEGACY token too.
+     *
+     * Two auth layers coexist: this one keeps the token in module memory, and
+     * `@/lib/api/client` keeps a copy in localStorage for the Kotlin API's
+     * Authorization header. Clearing only the first left the second behind, so
+     * the departing user's JWT stayed in the browser and the next request from
+     * the legacy layer still carried it.
+     */
+    try { window.localStorage.removeItem("vectorbea-access-token"); } catch { /* storage blocked */ }
     setSession(null);
     // Every cached query was fetched as the departing user. Removing rather
     // than invalidating means nothing is served from cache to whoever signs in
@@ -105,7 +115,20 @@ export function SessionProvider({ children, initialSession = null }: SessionProv
   const signOut = React.useCallback(async () => {
     await signOutRequest();
     teardown();
-    router.replace("/signin");
+    /*
+     * The LANDING page, not the sign-in form.
+     *
+     * Signing out and being dropped on a sign-in form reads as a failed
+     * sign-out — the product is asking for the credential you just withdrew. It
+     * is also a loop now that /signin redirects a live session onward: a
+     * sign-out that failed to clear the cookie would bounce straight back into
+     * the app, which is exactly how the broken one behaved.
+     *
+     * `router.refresh()` is not optional. Every (app) page is `force-dynamic`
+     * and server-rendered against the cookie; without it the client cache would
+     * keep serving the departed user's rendered tree behind the navigation.
+     */
+    router.replace("/");
     router.refresh();
   }, [router, teardown]);
 

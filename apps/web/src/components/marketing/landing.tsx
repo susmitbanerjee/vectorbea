@@ -7,7 +7,7 @@ import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { RecoveryLoop } from "./recovery-loop";
 import { Reveal } from "./reveal";
-import { MarketingNavCta, MarketingPrimaryCta } from "./session-cta";
+import { MarketingNavCta } from "./session-cta";
 import { Wordmark } from "~/components/app/shell/wordmark";
 import { APPROVALS, RIBBON_SHAPES } from "~/mocks/fixtures";
 import {
@@ -85,9 +85,10 @@ function Hero() {
           >
             Compare
           </Link>
-          {/* The one visitor-dependent element on the page. Signed in, this is
-              a single "Go to the app" rather than two ways to ask somebody to
-              authenticate to a product they are already authenticated to. */}
+          {/* The ONLY visitor-dependent element on the page. Anonymous, it is
+              Sign in and Start free, exactly as it has always been — the first
+              landing is the same page it was. A live session swaps it for the
+              account avatar, and nothing else on the page moves. */}
           <MarketingNavCta />
         </div>
       </nav>
@@ -113,7 +114,9 @@ function Hero() {
             </Text>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <MarketingPrimaryCta label="Start free" />
+              <Button asChild size="lg" variant="primary">
+                <Link href={"/signup" as never}>Start free</Link>
+              </Button>
               <Button asChild size="lg" variant="secondary">
                 <Link href={"/docs" as never}>Read the docs</Link>
               </Button>
@@ -712,7 +715,9 @@ function Close() {
           duplicated. That is the whole pitch, and it takes about four minutes.
         </Text>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <MarketingPrimaryCta label="Start free" />
+          <Button asChild size="lg" variant="primary">
+            <Link href={"/signup" as never}>Start free</Link>
+          </Button>
           <Button asChild size="lg" variant="secondary">
             <Link href={"/book-demo" as never}>Book a walkthrough</Link>
           </Button>

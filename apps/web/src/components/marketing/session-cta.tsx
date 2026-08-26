@@ -1,52 +1,146 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import type { Route } from "next";
-import { Button, type ButtonSize } from "~/components/ui/button";
+import { Button } from "~/components/ui/button";
 import { useSessionHint } from "~/lib/auth/session";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE ONLY PART OF THE LANDING PAGE THAT DEPENDS ON WHO IS READING IT.
 
-   The landing page offered "Sign in" and "Start free" to everybody, including
-   people who had been signed in for a week. Following either one worked — both
-   routes now redirect a live session into the app — but being asked to sign in
-   to a product you are already signed in to reads as "it forgot me", and that is
-   the whole complaint.
+   Anonymous, this is "Sign in" and "Start free" — unchanged, and it is what the
+   server prerenders, so the first landing is the same page it has always been.
+   Nothing else on the page varies: the hero and the closing band still say
+   "Start free" to everybody, because a signed-in reader following one of those
+   is sent into the app by /signup anyway.
+
+   Signed in, the pair collapses to the account avatar with a menu. The reason
+   that reads better is that it answers a different question: "Sign in" asks you
+   to authenticate, while the avatar says the product already knows who you are
+   and offers the one thing you came for, which is the way in.
 
    WHY THIS IS ITS OWN FILE, when the rest of the landing is one module.
-   `landing.tsx` is a ~750-line SERVER component; the visitor-dependent bit needs
-   a hook, and `"use client"` is per-module, not per-component. Marking the whole
-   landing client-side would ship every one of those lines — nine sections, the
-   comparison table, the icon set — to the browser as interactive JS to change
-   two button labels. Isolating the three buttons keeps the page a server
-   component and the client bundle at roughly nothing.
-
-   The signed-out markup is what renders on the server, so it is what crawlers
-   and first paint get. That is correct for almost every visitor to this page,
-   and the swap for the rest happens on mount. See `useSessionHint` for why the
-   answer cannot arrive any earlier on a statically prerendered page.
+   `landing.tsx` is a ~750-line SERVER component; this needs hooks, and
+   `"use client"` is per-module, not per-component. Marking the whole landing
+   client-side would ship nine sections, the comparison table and the icon set to
+   the browser to change one corner of the nav.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-const APP_HOME = "/control" as Route;
+const APP_HOME = "/control";
+
+/**
+ * The menu is fetched only once there is somebody to show it to.
+ *
+ * It carries Radix DropdownMenu and the shared overlay styles — about 47 kB,
+ * which is a third again of this page's entire first load, for a control an
+ * anonymous visitor never sees. `ssr: false` because the identity behind it
+ * cannot exist during a prerender anyway.
+ */
+const AccountMenu = dynamic(
+  () => import("./account-menu").then((module) => module.AccountMenu),
+  { ssr: false },
+);
+
+/** What `GET /api/auth/session` answers with when there is a session. */
+export interface SessionIdentity {
+  email: string;
+  fullName: string | null;
+  avatarUrl: string | null;
+  /** Where this account's post-login landing is — workspace-scoped. */
+  redirectTo: string;
+}
+
+/**
+ * The signed-in reader's identity, or null.
+ *
+ * TWO STEPS, AND THE ORDER IS THE POINT. `useSessionHint` is a cookie read: it
+ * costs nothing and is false for almost every visitor to this page, so the fetch
+ * below never happens for them. Only a hinted visitor pays a request.
+ *
+ * `/api/auth/session` rather than `/api/auth/token`: it returns the display
+ * fields an avatar needs — name, email, picture — and the account's own landing
+ * path, and unlike the token endpoint it is not in the middleware's
+ * AUTH_RATE_PATHS, so reading it here cannot eat into the budget protecting real
+ * sign-ins.
+ *
+ * A 401 means the hint outlived the session. Returning null falls the nav back
+ * to Sign in / Start free, which is both correct and self-healing: that same
+ * request went through the middleware, which cleared the stale hint on its way
+ * past.
+ */
+function useSessionIdentity(): { identity: SessionIdentity | null; resolving: boolean } {
+  const hinted = useSessionHint();
+  const [identity, setIdentity] = React.useState<SessionIdentity | null>(null);
+  const [resolving, setResolving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!hinted) {
+      setIdentity(null);
+      return;
+    }
+
+    let live = true;
+    setResolving(true);
+
+    void fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then(
+        (
+          body: {
+            authenticated?: boolean;
+            redirectTo?: string;
+            user?: { email?: string; fullName?: string | null; avatarUrl?: string | null };
+          } | null,
+        ) => {
+          if (!live) return;
+          if (!body?.authenticated || !body.user?.email) {
+            setIdentity(null);
+            return;
+          }
+          setIdentity({
+            email: body.user.email,
+            fullName: body.user.fullName ?? null,
+            avatarUrl: body.user.avatarUrl ?? null,
+            // Never trust it off-site: this becomes an href. `//host` is
+            // protocol-relative and would leave the site.
+            redirectTo:
+              body.redirectTo?.startsWith("/") && !body.redirectTo.startsWith("//")
+                ? body.redirectTo
+                : APP_HOME,
+          });
+        },
+      )
+      .catch(() => {
+        // Offline, or the route is unreachable. The anonymous nav still works,
+        // and /signin will sort out a session that does exist.
+        if (live) setIdentity(null);
+      })
+      .finally(() => {
+        if (live) setResolving(false);
+      });
+
+    return () => {
+      live = false;
+    };
+  }, [hinted]);
+
+  return { identity, resolving };
+}
 
 /**
  * The nav pair, top right of the hero.
  *
- * Signed in collapses to ONE button rather than relabelling both: "Sign in" and
- * "Start free" are two ways to say the same thing to somebody who has an
- * account, and offering both would be the same forgetfulness in gentler words.
+ * The anonymous branch renders on the server and is what crawlers and first
+ * paint get. The signed-in branch can only arrive after mount — a prerendered
+ * page has one HTML for everybody — so the swap is inherent, not a delay that
+ * could be optimised away.
  */
 export function MarketingNavCta() {
-  const signedIn = useSessionHint();
+  const { identity, resolving } = useSessionIdentity();
 
-  if (signedIn) {
-    return (
-      <Button asChild size="sm" variant="primary">
-        <Link href={APP_HOME}>Go to the app</Link>
-      </Button>
-    );
-  }
+  if (identity) return <AccountMenu identity={identity} />;
 
   return (
     <>
@@ -56,32 +150,11 @@ export function MarketingNavCta() {
       <Button asChild size="sm" variant="primary">
         <Link href={"/signup" as Route}>Start free</Link>
       </Button>
+      {/* While the identity is in flight the anonymous pair stays put rather
+          than collapsing to a placeholder — the nav must not shift twice. */}
+      {resolving ? (
+        <span className="sr-only" role="status">Checking your session…</span>
+      ) : null}
     </>
-  );
-}
-
-/**
- * The page's primary call to action — the hero, and the closing band.
- *
- * `label` is the signed-OUT wording, which differs between the two ("Start
- * free" in the hero, whatever the closing band asks for). The signed-in wording
- * does not: there is one app and one way in, and varying how it is named would
- * make the same destination look like two.
- */
-export function MarketingPrimaryCta({
-  label,
-  size = "lg",
-}: {
-  label: string;
-  size?: ButtonSize;
-}) {
-  const signedIn = useSessionHint();
-
-  return (
-    <Button asChild size={size} variant="primary">
-      <Link href={signedIn ? APP_HOME : ("/signup" as Route)}>
-        {signedIn ? "Open the app" : label}
-      </Link>
-    </Button>
   );
 }
