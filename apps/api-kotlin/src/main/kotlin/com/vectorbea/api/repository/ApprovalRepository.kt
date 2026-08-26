@@ -34,6 +34,24 @@ data class Approval(
     val payloadJsonSanitized: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /*
+     * ── THE FIELDS P13 ASKED FOR, FINALLY READ ───────────────────────────────
+     *
+     * V027 added `sla_deadline_at`, `escalation_policy_json`,
+     * `decision_context_json`, `evidence_refs_json` and `confidence_score` to
+     * `run_approvals` specifically so an approval card could show a countdown,
+     * who may decide, and where each value came from. The columns were written
+     * and never selected, so the Approvals page filled the gap with constants —
+     * `slaMs: 1`, `approverGroup: "Not provided by API"`. They are selected now.
+     */
+    /** When the decision becomes late. Null when the gate declares no SLA. */
+    val slaDeadlineAt: Instant?,
+    /** `{onTimeout, approverGroup, slaMinutes}` as the canvas configured it. */
+    val escalationPolicyJson: String?,
+    /** Provenance for each value in the decision context. */
+    val evidenceRefsJson: String?,
+    /** The agent's own confidence, 0..1, when the gate came from confidence routing. */
+    val confidenceScore: Double?,
 )
 
 data class DecideApprovalRequest(
@@ -56,7 +74,9 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         a.resolved_by AS decided_by, a.created_at AS requested_at,
         a.resolved_at AS decided_at, a.decision_reason,
         COALESCE(a.decision_context_json, a.metadata_json) AS payload_json_sanitized,
-        a.created_at, a.updated_at
+        a.created_at, a.updated_at,
+        a.sla_deadline_at, a.escalation_policy_json, a.evidence_refs_json,
+        a.confidence_score
     """.trimIndent()
 
     /**
@@ -159,5 +179,9 @@ class ApprovalRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         payloadJsonSanitized = rs.getJsonbStringOrNull("payload_json_sanitized"),
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
+        slaDeadlineAt = rs.instantOrNull("sla_deadline_at"),
+        escalationPolicyJson = rs.getJsonbStringOrNull("escalation_policy_json"),
+        evidenceRefsJson = rs.getJsonbStringOrNull("evidence_refs_json"),
+        confidenceScore = rs.getObject("confidence_score")?.let { (it as? Number)?.toDouble() },
     )
 }

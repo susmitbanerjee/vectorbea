@@ -3,14 +3,24 @@ import { redirect } from "next/navigation";
 import type { Route } from "next";
 
 import { AuthScreen } from "~/components/app/auth/auth-screen";
-import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
+import { resolveSignedInDestination } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
-  title: "Create an account",
+  title: "Sign in",
   robots: { index: false, follow: false },
 };
 
+/**
+ * `/login` is the legacy path, kept because old links and bookmarks still point
+ * at it. It renders the SIGN-IN screen: it used to render `mode="signup"`, so
+ * an existing user following an old link was asked to create an account.
+ *
+ * The redirect-swallowing bug documented on `resolveSignedInDestination` was
+ * here too, in a slightly worse form — the inner `catch` called `redirect()`
+ * again, so a workspace-lookup failure sent people to `/control` by throwing
+ * through a handler that was about to swallow it anyway.
+ */
 export default async function LoginPage({
   searchParams,
 }: {
@@ -18,20 +28,8 @@ export default async function LoginPage({
 }) {
   const { next, error } = await searchParams;
 
-  // Don't redirect when an auth error is present — the user needs to see the
-  // error message and try a different sign-in method.
-  if (!error) {
-    const cookieStore = await cookies();
-    const user = await getAuthenticatedUserFromCookies(cookieStore);
-    if (user) {
-      try {
-        const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
-        redirect(destination as Route);
-      } catch {
-        redirect("/control");
-      }
-    }
-  }
+  const destination = error ? null : await resolveSignedInDestination(await cookies(), next);
+  if (destination) redirect(destination as Route);
 
-  return <AuthScreen mode="signup" next={next} error={error} />;
+  return <AuthScreen mode="signin" next={next} error={error} />;
 }

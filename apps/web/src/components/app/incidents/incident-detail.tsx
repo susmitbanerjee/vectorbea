@@ -2,11 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
+import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { formatCost, formatDuration } from "~/lib/format";
@@ -28,8 +30,13 @@ import { useApi } from "~/lib/api/api-provider";
 
 export function IncidentDetail({ incidentId }: { incidentId: string }) {
   const api = useApi();
+  const router = useRouter();
   const data = useIncidentsData();
   const incident = data.rows.find((item) => item.sourceIds.includes(incidentId));
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
 
   if (!incident) {
     return (
@@ -53,6 +60,37 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
   };
   const resolve = () => {
     void Promise.all(incident.sourceIds.map((id) => api.incidents.resolve(id, data.scope))).then(data.refetch);
+  };
+
+  /*
+   * Deleting an incident removes the RECORD, not the runs that produced it.
+   * Worth stating on the confirmation, because the affected-runs table below is
+   * the most visible thing on this page and it would be reasonable to fear that
+   * this clears run history too. It does not — `failure_incidents` is a
+   * diagnosis of runs that stay exactly where they are.
+   */
+  const remove = () => {
+    setDeleting(true);
+    setDeleteError(null);
+    const ids = incident.sourceIds.length > 0 ? incident.sourceIds : [incident.id];
+    void Promise.allSettled(ids.map((id) => api.incidents.remove(id, data.scope)))
+      .then(async (outcomes) => {
+        const failed = outcomes.filter((o) => o.status === "rejected");
+        if (failed.length === ids.length) {
+          const first = failed[0];
+          setDeleteError(
+            first?.status === "rejected" && first.reason instanceof Error
+              ? first.reason.message
+              : "The incident could not be deleted.",
+          );
+          return;
+        }
+        await data.refetch();
+        // Back to the list rather than staying on a page whose subject no
+        // longer exists — which would otherwise render "Incident not found".
+        router.push("/incidents" as Route);
+      })
+      .finally(() => setDeleting(false));
   };
 
   return (
@@ -83,8 +121,25 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             {incident.status !== "resolved" ? (
               <Button size="sm" variant="primary" onClick={resolve}>Resolve</Button>
             ) : null}
+            <Button size="sm" variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
           </>
         }
+      />
+
+      {deleteError ? (
+        <div role="alert" className="border-status-failed-border bg-status-failed-subtle mb-3 rounded-md border px-3 py-2">
+          <Text variant="body-sm" tone="inherit" className="text-status-failed">{deleteError}</Text>
+        </div>
+      ) : null}
+
+      <DestructiveConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this incident"
+        description={`${incident.signature} — ${incident.sourceIds.length} incident ${incident.sourceIds.length === 1 ? "record" : "records"} will be removed permanently. The ${incident.affectedRuns} affected ${incident.affectedRuns === 1 ? "run" : "runs"} are not touched; they stay in Runs with their history intact.`}
+        confirmLabel="Delete permanently"
+        pending={deleting}
+        onConfirm={remove}
       />
 
       <div className="grid gap-3 xl:grid-cols-[1fr_20rem]">

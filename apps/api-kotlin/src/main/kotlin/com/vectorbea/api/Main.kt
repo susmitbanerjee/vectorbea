@@ -302,6 +302,35 @@ fun main() {
     val runEventRepo = ds?.let { RunEventRepository(it) }
     val approvalRepo = ds?.let { ApprovalRepository(it) }
     val scheduleRepo = ds?.let { com.vectorbea.api.schedule.ScheduleRepository(it) }
+    val environmentRepo = ds?.let { com.vectorbea.api.repository.EnvironmentRepository(it) }
+
+    /*
+     * 6c. Workspace-scoped environment resolution.
+     *
+     * `requireEnvironmentId()` used to take `X-Environment-Id` on trust, and the
+     * only endpoint that ever gave a client one handed out the oldest
+     * workspace's environment to everybody. So a write either landed in another
+     * tenant or was refused outright, and the UI refused — which is why creating
+     * a tool reported that it might be registered in a different workspace.
+     *
+     * Installed here, once, so every route that requires an environment gets the
+     * same two guarantees: a foreign id is refused rather than written, and a
+     * missing one resolves to this workspace's own default rather than failing.
+     */
+    if (environmentRepo != null) {
+        com.vectorbea.api.api.EnvironmentScope.resolver = { workspaceId, requested ->
+            if (requested != null) {
+                environmentRepo.findById(requested, workspaceId)?.id
+                    ?: throw com.vectorbea.api.errors.ApiError.Forbidden(
+                        "Environment $requested does not belong to this workspace."
+                    )
+            } else {
+                (environmentRepo.firstByWorkspace(workspaceId)
+                    ?: environmentRepo.findOrCreate(workspaceId, BootstrapRoutes.DEFAULT_SLUG)).id
+            }
+        }
+        log.info("EnvironmentScope: workspace-scoped environment resolution enabled")
+    }
 
     // 7. Router + routes
     val router = Router()
@@ -322,7 +351,7 @@ fun main() {
     if (connectionRepo != null) {
         ConnectionRoutes(
             connectionRepo, cacheService, secretService, telemetry, auditLog,
-            com.vectorbea.api.repository.EnvironmentRepository(ds!!),
+            environmentRepo,
         ).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
@@ -420,7 +449,7 @@ fun main() {
         com.vectorbea.api.contract.ContractRoutes(ds, auditLog).register(router)
         // Confidence: the gate payload, the four reviewer actions, and calibration.
         com.vectorbea.api.confidence.ConfidenceRoutes(ds, auditLog).register(router)
-        BootstrapRoutes(ds).register(router)
+        BootstrapRoutes(ds, environmentRepo!!).register(router)
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
 
     if (appUserRepo != null) {

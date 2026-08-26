@@ -161,6 +161,9 @@ class WorkflowRuntime(
         /** Cap on a single backoff sleep between node retries. */
         private const val MAX_BACKOFF_MS = 30_000L
 
+        /** The operators `ConditionEvaluator` can actually evaluate. See [shouldSkip]. */
+        private val COMPARISON = Regex("""(==|!=|>=|<=|>|<)""")
+
         /** Node types with external side effects — guarded for idempotency. */
         private val GUARDED_NODE_TYPES = setOf(
             NodeType.LLM, NodeType.HTTP, NodeType.DB_QUERY,
@@ -557,6 +560,25 @@ class WorkflowRuntime(
         val nodeStartedAt = java.time.Instant.now()
         ctx.markRunning(node.id)
 
+        /*
+         * THE RIBBON NEVER SHOWED A RUNNING NODE.
+         *
+         * `RibbonWriter.State.EXECUTING` has existed since the ribbon shipped and
+         * had no writer: every call site recorded COMMITTED, GATED, FAILED or
+         * SKIPPED, all of which are TERMINAL for a node. So the cell for the node
+         * currently executing was not on the ribbon at all — the run detail header
+         * padded it out as `pending`, drawn as an empty outline with no motion,
+         * and a live run looked identical to a queued one until the node finished.
+         *
+         * Recorded here, at the same point `markRunning` moves the in-memory
+         * state, so the two cannot disagree. The upsert is keyed on the node id,
+         * so this entry is REPLACED by the terminal one a moment later rather than
+         * accumulating a second cell (see RibbonWriter.UPSERT_SQL), and
+         * `node_committed` is derived from the array so an executing entry never
+         * inflates the committed count.
+         */
+        recordRibbon(ctx, node.id, RibbonWriter.State.EXECUTING)
+
         // Emit STEP_SCHEDULED then STEP_STARTED
         emitEvent(ctx, EventType.STEP_SCHEDULED, "running", source,
             title   = "Scheduled: ${nodeLabel(node)}",
@@ -603,6 +625,34 @@ class WorkflowRuntime(
                 )
                 return ExecutionResult.Failed(reason)
             }
+
+        /*
+         * ── "SKIP IF" WAS A TEXT BOX WIRED TO NOTHING ────────────────────────
+         *
+         * The Advanced tab has offered a `skipIf` expression since it shipped and
+         * no code has ever read it: the node ran regardless. That is the most
+         * expensive way for a conditional to be wrong — the work happens, the
+         * side effects happen, and the author believes they were prevented.
+         *
+         * Evaluated HERE, after input resolution, because the expression is
+         * written against this node's inputs ("{{ input.amount }} < 100") and
+         * they do not exist until the mapping has run. `ConditionEvaluator` is
+         * the same pattern matcher branch edges use; no expression is ever eval'd
+         * as code.
+         */
+        if (shouldSkip(node, resolvedInputs)) {
+            ctx.markSkipped(node.id)
+            recordRibbon(ctx, node.id, RibbonWriter.State.SKIPPED)
+            emitEvent(ctx, EventType.STEP_SKIPPED, "running", source,
+                title   = "Skipped: ${nodeLabel(node)}",
+                summary = "skipIf matched, so this step did not run.",
+                stepId  = node.id)
+            // The run has to carry on past a skipped node, so its ordinary
+            // outgoing edges are selected exactly as if it had completed with no
+            // output. Without this the graph stalls with nothing runnable.
+            scheduler.selectEdgesAfterNode(node, emptyMap(), ctx)
+            return null
+        }
 
         if (isTransform) {
             emitEvent(ctx, EventType.INPUT_MAPPING_COMPLETED, "running", source,
@@ -1059,7 +1109,10 @@ class WorkflowRuntime(
         is NodeResult.Throttled -> {
             // The node stays PENDING, so the resume re-executes it. Safe because
             // a 429 means the provider did no work — there is nothing to
-            // duplicate by trying again.
+            // duplicate by trying again. The ribbon is put back to `pending` for
+            // the same reason: the entry recorded at start says `executing`, and a
+            // run parked on a provider's backoff is not executing anything.
+            recordRibbon(ctx, node.id, RibbonWriter.State.PENDING)
             emitEvent(ctx, EventType.RUN_YIELDED, "throttled", source,
                 title = "Paused — ${result.provider} rate limit",
                 summary = result.message, stepId = node.id)
@@ -1261,6 +1314,10 @@ class WorkflowRuntime(
         }
 
         is NodeResult.ApprovalPaused -> {
+            // Waiting on a person is `gated`, not `executing` — the ribbon's ember
+            // halo is the whole reason a reader can tell "stopped for a decision"
+            // from "still working" at a glance.
+            recordRibbon(ctx, node.id, RibbonWriter.State.GATED)
             emitEvent(ctx, EventType.APPROVAL_REQUESTED, "waiting_for_approval", source,
                 title   = "Approval required: ${nodeLabel(node)}",
                 summary = result.message,
@@ -1286,6 +1343,9 @@ class WorkflowRuntime(
         cancellationCheck: () -> Boolean = { false },
     ): ExecutionResult? {
         ctx.markRunning(parallelNode.id)
+        // Same reason as executeSingleNode: a fan-out that takes a while is a
+        // running node, and the ribbon has to say so while it runs.
+        recordRibbon(ctx, parallelNode.id, RibbonWriter.State.EXECUTING)
 
         // Find the corresponding JOIN node
         val joinNode = scheduler.findJoinForParallel(parallelNode, ctx.graph)
@@ -1309,11 +1369,16 @@ class WorkflowRuntime(
         when (parallelResult) {
             is NodeResult.Failed -> {
                 ctx.markFailed(parallelNode.id)
+                // The ribbon carries an `executing` entry for this node from the
+                // line above; leaving it there would show a permanently running
+                // cell on a run that has already stopped.
+                recordRibbon(ctx, parallelNode.id, RibbonWriter.State.FAILED)
                 return ExecutionResult.Failed("PARALLEL node ${parallelNode.id} failed: ${parallelResult.reason}")
             }
             is NodeResult.Completed -> {
                 ctx.setOutput(parallelNode.id, parallelResult.output)
                 ctx.markCompleted(parallelNode.id)
+                recordRibbon(ctx, parallelNode.id, RibbonWriter.State.COMMITTED)
                 // DO NOT call selectEdgesAfterNode here — that would mark ALL outgoing edges as
                 // selected in the parent context.  ctx.fork() copies selectedEdges, so every
                 // branch context would inherit all 4 PARALLEL→agent edges and each branch would
@@ -1731,7 +1796,9 @@ class WorkflowRuntime(
                     stmt.setString(4, nodeId)
                     stmt.setString(5, reasons.joinToString(" "))
                     stmt.setString(6, """{"source":"contract_gate"}""")
-                    stmt.setString(7, "Contract gate on '\$nodeId'")
+                    // The dollar was escaped, so every contract gate was titled
+                    // with the literal text "$nodeId" instead of the node.
+                    stmt.setString(7, "Contract gate on '" + nodeId + "'")
                     stmt.setString(8, """{"reasons":[${reasons.joinToString(",") { jsonStr(it) }}]}""")
                     stmt.executeUpdate()
                 }
@@ -1742,6 +1809,43 @@ class WorkflowRuntime(
             log.error("[contract] COULD NOT CREATE the approval gate for node {} - " +
                 "downstream side effects are NOT gated: {}", nodeId, it.message)
         }
+    }
+
+    /**
+     * Does this node's `skipIf` expression match?
+     *
+     * THE FAIL-OPEN DIRECTION MATTERS AND IT IS NOT THE EVALUATOR'S.
+     * `ConditionEvaluator` returns `true` for anything it cannot parse, because
+     * for an EDGE that means "follow it" and a graph must keep advancing. Reusing
+     * that default here would mean "skip the step", so a typo in the expression
+     * would silently omit the work. The expression is therefore only honoured
+     * when it is one of the forms the evaluator actually recognises; anything
+     * else runs the step and says so in the log.
+     */
+    private fun shouldSkip(node: WorkflowNode, resolvedInputs: Map<String, Any>): Boolean {
+        val raw = (node.config["skipIf"] as? String)?.trim()
+        if (raw.isNullOrEmpty()) return false
+
+        // The expression is written against this node's inputs, so `input.` and
+        // `output.` have to resolve against the same map. ConditionEvaluator
+        // strips `output.`/`result.` itself; `input.` is normalised here.
+        val expr = raw.removePrefix("{{").removeSuffix("}}").trim().replace("input.", "output.")
+
+        val recognised = COMPARISON.containsMatchIn(expr) ||
+            expr.equals("true", ignoreCase = true) ||
+            expr.equals("false", ignoreCase = true) ||
+            expr.startsWith("!") ||
+            resolvedInputs.containsKey(expr.removePrefix("output."))
+
+        if (!recognised) {
+            log.warn("[runtime] skipIf '{}' on node {} is not an expression this engine understands — " +
+                "running the step. Use a comparison such as output.amount < 100.", raw, node.id)
+            return false
+        }
+
+        val matched = com.vectorbea.worker.runtime.graph.ConditionEvaluator.evaluate(expr, resolvedInputs)
+        if (matched) log.info("[runtime] node skipped by skipIf [nodeId={}, expr={}]", node.id, raw)
+        return matched
     }
 
     /**

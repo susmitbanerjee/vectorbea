@@ -109,7 +109,16 @@ export function EmptyWorkspace({ className }: { className?: string }) {
               </Text>
             </div>
             <Button asChild size="sm" variant={i === 0 ? "primary" : "secondary"} className="shrink-0">
-              <Link href={step.action.href as Route}>{step.action.label}</Link>
+              {/* Only the docs step leaves the app; the others are in-app
+                  routes and must NOT open a second tab. */}
+              <Link
+                href={step.action.href as Route}
+                {...(step.action.href.startsWith("/docs")
+                  ? { target: "_blank", rel: "noreferrer" }
+                  : {})}
+              >
+                {step.action.label}
+              </Link>
             </Button>
           </li>
         ))}
@@ -123,6 +132,8 @@ export function EmptyWorkspace({ className }: { className?: string }) {
         </Text>
         <Link
           href={"/docs" as Route}
+          target="_blank"
+          rel="noreferrer"
           className={cn(
             "font-ui text-caption text-accent hover:text-accent-hover rounded-xs px-1",
             "transition-colors duration-fast outline-none focus-visible:focus-ring",

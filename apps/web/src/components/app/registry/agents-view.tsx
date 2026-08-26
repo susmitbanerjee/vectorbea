@@ -479,7 +479,11 @@ function AgentsState({
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           <Button variant="primary" size="sm" onClick={onCreate}>Register an agent</Button>
           <Button asChild variant="secondary" size="sm">
-            <Link href={"/docs/first-workflow" as Route}>Read the tutorial</Link>
+            {/* New tab: the docs are outside the app shell, and an empty
+                workspace is exactly when losing your place hurts most. */}
+            <Link href={"/docs/first-workflow" as Route} target="_blank" rel="noreferrer">
+              Read the tutorial
+            </Link>
           </Button>
         </div>
       </div>

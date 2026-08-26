@@ -131,10 +131,10 @@ export function GateCard({
             <Text variant="caption" tone="muted">
               {sla.tone === "breached" ? (
                 <span className="text-status-failed">
-                  SLA breached — escalated to {gate.escalatesTo}
+                  SLA breached — on timeout: {gate.escalatesTo}
                 </span>
               ) : (
-                <>{gate.approverGroup} → escalates to {gate.escalatesTo} at deadline</>
+                <>{gate.approverGroup} → on timeout: {gate.escalatesTo}</>
               )}
             </Text>
           </div> : null}

@@ -220,6 +220,7 @@ data class WorkflowGraph(
             val retryPolicy = readRetryPolicy(mergedConfig, data)
             val timeoutPolicy = readTimeoutPolicy(mergedConfig, data)
             val failurePolicy = readFailurePolicy(mergedConfig, data)
+            val checkpointPolicy = readCheckpointPolicy(mergedConfig, data)
 
             return WorkflowNode(
                 id            = rf.id,
@@ -230,6 +231,7 @@ data class WorkflowGraph(
                 outputMapping = outputMapping,
                 retryPolicy   = retryPolicy,
                 timeoutPolicy = timeoutPolicy,
+                checkpointPolicy = checkpointPolicy,
                 failurePolicy = failurePolicy,
             )
         }
@@ -387,10 +389,53 @@ data class WorkflowGraph(
                 ?: return FailurePolicy()
             val normalised = when (raw) {
                 "continue", "ignore", "skip"        -> "continue"
-                "follow_failure_edge", "failure_edge" -> "follow_failure_edge"
+                /*
+                 * "error-path" and "fallback" are two of the FOUR values the
+                 * Advanced tab offers, and neither was listed — so both fell to
+                 * the `else` and became "fail_run". Choosing "route to the error
+                 * path" in the inspector produced a node that ignored its error
+                 * edge and stopped the run, which is the opposite of what the
+                 * control says it does.
+                 *
+                 * `fallback` maps here too: the runtime's mechanism for running
+                 * something else instead IS the failure edge, and the fallback
+                 * node is its target. Silently failing the run was strictly
+                 * worse than following the edge the author drew.
+                 */
+                "follow_failure_edge", "failure_edge", "error_path", "fallback" -> "follow_failure_edge"
                 else                                 -> "fail_run"
             }
             return FailurePolicy(onFailure = normalised)
+        }
+
+        /**
+         * Whether this node commits a checkpoint after it completes.
+         *
+         * The Advanced tab has a "checkpoint" switch, and `WorkflowRuntime`
+         * honours `node.checkpointPolicy.enabled` in three places — after a
+         * completed node, before an approval pause, and on the gated path. The
+         * converter never populated it, so the switch was decorative: every node
+         * checkpointed regardless, including the ones an author had deliberately
+         * turned it off for.
+         *
+         * Defaults to enabled when unset. Durability is the product's whole
+         * proposition and losing it must be an explicit choice, never an
+         * omission.
+         */
+        private fun readCheckpointPolicy(config: Map<String, Any>, data: Map<String, Any?>): CheckpointPolicy {
+            @Suppress("UNCHECKED_CAST")
+            val legacy = data["checkpointPolicyJson"] as? Map<String, Any?>
+            val raw = config["checkpoint"]
+                ?: config["checkpointEnabled"]
+                ?: legacy?.get("enabled")
+                ?: return CheckpointPolicy()
+            val enabled = when (raw) {
+                is Boolean -> raw
+                is String  -> raw.trim().lowercase() !in setOf("false", "off", "0", "no")
+                is Number  -> raw.toInt() != 0
+                else       -> true
+            }
+            return CheckpointPolicy(enabled = enabled)
         }
 
         /** A config value as a Number, whether it arrived as one or as a string. */

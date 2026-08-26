@@ -11,15 +11,19 @@ import { isoDateTime, jsonObject, maybe, page, uuid } from "./primitives";
 /* ── Approvals ────────────────────────────────────────────────────────────── */
 
 /**
- * IMPORTANT: this reads the LEGACY `approvals` table.
+ * `GET /api/approvals`, from the AUTHORITATIVE `run_approvals` table.
  *
- * V027 migrated `run_approvals` to be authoritative and added the columns P13
- * needs — `sla_deadline_at`, `escalation_policy_json`, `decision_context_json`
- * (resolved values, not templates), `confidence_score`. `ApprovalRepository`
- * still queries the old `approvals` table, so NONE of those four reach the API.
+ * The gap this note used to record is closed. V027 made `run_approvals`
+ * authoritative and added `sla_deadline_at`, `escalation_policy_json`,
+ * `decision_context_json` (resolved values, never templates) and
+ * `confidence_score`; the repository selects them and `ApprovalRoutes` emits
+ * them, so the approvals screen no longer has to invent an SLA and an approver
+ * group. `payloadJsonSanitized` is `decision_context_json` when the gate defined
+ * one and `metadata_json` otherwise.
  *
- * The approvals screen is designed around exactly those fields. This is the
- * single largest shape gap in the audit; see API-GAPS.md.
+ * Note the writer side of the same bug: the APPROVAL node executor was still
+ * inserting into the legacy `approvals` table, so gates opened by a workflow
+ * never appeared on the page at all. Both halves now speak to `run_approvals`.
  */
 export const approval = z.object({
   id: uuid,
@@ -40,6 +44,14 @@ export const approval = z.object({
   payloadJsonSanitized: jsonObject.nullish(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
+  /** When the decision becomes late. Null = this gate declares no SLA. */
+  slaDeadlineAt: isoDateTime.nullish(),
+  /** `{ onTimeout, approverGroup, slaMinutes }` as configured on the canvas. */
+  escalationPolicy: jsonObject.nullish(),
+  /** Per-value provenance: `{ label: { expression, resolved } }`. */
+  evidenceRefs: jsonObject.nullish(),
+  /** 0..1, present when the gate came from confidence routing. */
+  confidenceScore: z.number().nullish(),
 });
 export type Approval = z.infer<typeof approval>;
 export const approvalPage = page(approval);

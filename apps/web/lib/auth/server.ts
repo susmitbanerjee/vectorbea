@@ -50,6 +50,46 @@ export async function getPostLoginRedirectForUser(
   return { redirectTo, organizations };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   "ALREADY SIGNED IN — WHERE DO THEY GO?"
+
+   `/signin`, `/signup` and `/login` each answered this themselves, and each got
+   it wrong in the same way: the `redirect()` call sat inside a `try/catch` that
+   existed to tolerate a missing JWT_SECRET. `redirect()` works by THROWING an
+   error carrying the digest `NEXT_REDIRECT`, so the catch swallowed it and the
+   page went on to render the sign-in form — to somebody who was already signed
+   in. Anything that took a user out of the app shell and back in through an auth
+   route therefore demanded a fresh sign-in for a session they still had.
+
+   One implementation, here, so the three pages cannot drift again: everything
+   that can throw happens inside this function, the answer comes back as a value,
+   and the page calls `redirect()` on it where nothing can intercept the throw.
+══════════════════════════════════════════════════════════════════════════════ */
+export async function resolveSignedInDestination(
+  cookieStore: Pick<ReadonlyRequestCookies, "get">,
+  next?: string,
+): Promise<string | null> {
+  try {
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+    if (!user) return null;
+    // Site-relative only. `//host` is protocol-relative and would leave the site,
+    // so it is rejected alongside absolute URLs.
+    if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+    try {
+      return (await getPostLoginRedirectForUser(user.id)).redirectTo;
+    } catch {
+      // The workspace lookup failed but the SESSION is valid, so the answer is
+      // still "into the app". Falling back to the sign-in form here is what
+      // turned a transient database blip into a forced re-login.
+      return "/control";
+    }
+  } catch {
+    // No JWT_SECRET, or the token is missing/invalid/expired. Genuinely signed
+    // out: the caller should render the form.
+    return null;
+  }
+}
+
 export async function loadProfileForUser(
   userId: string,
 ): Promise<{ email: string | null; full_name: string | null; avatar_url: string | null } | null> {

@@ -7,6 +7,7 @@ import { MonoId } from "~/components/ui/mono-id";
 import { CheckpointRibbon } from "~/components/app/ribbon/checkpoint-ribbon";
 import { RecoveryLoop } from "./recovery-loop";
 import { Reveal } from "./reveal";
+import { MarketingNavCta, MarketingPrimaryCta } from "./session-cta";
 import { Wordmark } from "~/components/app/shell/wordmark";
 import { APPROVALS, RIBBON_SHAPES } from "~/mocks/fixtures";
 import {
@@ -84,12 +85,10 @@ function Hero() {
           >
             Compare
           </Link>
-          <Button asChild size="sm" variant="secondary">
-            <Link href={"/signin" as never}>Sign in</Link>
-          </Button>
-          <Button asChild size="sm" variant="primary">
-            <Link href={"/signup" as never}>Start free</Link>
-          </Button>
+          {/* The one visitor-dependent element on the page. Signed in, this is
+              a single "Go to the app" rather than two ways to ask somebody to
+              authenticate to a product they are already authenticated to. */}
+          <MarketingNavCta />
         </div>
       </nav>
 
@@ -114,9 +113,7 @@ function Hero() {
             </Text>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button asChild size="lg" variant="primary">
-                <Link href={"/signup" as never}>Start free</Link>
-              </Button>
+              <MarketingPrimaryCta label="Start free" />
               <Button asChild size="lg" variant="secondary">
                 <Link href={"/docs" as never}>Read the docs</Link>
               </Button>
@@ -715,9 +712,7 @@ function Close() {
           duplicated. That is the whole pitch, and it takes about four minutes.
         </Text>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <Button asChild size="lg" variant="primary">
-            <Link href={"/signup" as never}>Start free</Link>
-          </Button>
+          <MarketingPrimaryCta label="Start free" />
           <Button asChild size="lg" variant="secondary">
             <Link href={"/book-demo" as never}>Book a walkthrough</Link>
           </Button>

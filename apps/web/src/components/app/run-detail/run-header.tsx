@@ -66,6 +66,21 @@ export function RunHeader({ run, retryCostUsd, onCompare, comparing }: RunHeader
   const retries = run.nodes.reduce((sum, n) => sum + ((n.attempt ?? 1) - 1), 0);
   const budgetShare = (run.costUsd / POLICY.dailyBudgetUsd) * 100;
 
+  /*
+   * THE SPINE DID NOT SAY WHAT WAS RUNNING.
+   *
+   * The Ribbon renders `executing` as a breathing cell — the same treatment the
+   * marketing recovery loop uses — but the worker never wrote that state, so a
+   * live run showed a row of committed cells followed by empty outlines and the
+   * caption above it read "Drag to replay" while the run was still moving. The
+   * worker now records `executing` on entry to every node
+   * (`WorkflowRuntime.executeSingleNode`), and this is the caption that names it:
+   * the cell answers "where", the line answers "what".
+   */
+  const executingIndex = run.nodes.findIndex((node) => node.state === "executing");
+  const executing = executingIndex >= 0 ? run.nodes[executingIndex] : null;
+  const gatedIndex = run.nodes.findIndex((node) => node.state === "gated");
+
   return (
     <header className="grid gap-3">
       {/* ── Identity ───────────────────────────────────────────────────────── */}
@@ -153,17 +168,47 @@ export function RunHeader({ run, retryCostUsd, onCompare, comparing }: RunHeader
       <div className="border-subtle bg-surface-raised rounded-lg border p-3">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <Text variant="eyebrow" tone="muted">Checkpoints</Text>
-          <Text variant="caption" tone={scrubbing ? "accent" : "muted"} aria-live="polite">
-            {scrubbing ? (
-              <>
-                Replaying step <span className="tabular">{focusIndex + 1}</span> of{" "}
-                <span className="tabular">{run.nodes.length}</span> ·{" "}
-                {run.nodes[focusIndex]?.name}
-              </>
-            ) : (
-              "Drag to replay · click a cell to inspect that step"
-            )}
-          </Text>
+          {scrubbing ? (
+            <Text variant="caption" tone="accent" aria-live="polite">
+              Replaying step <span className="tabular">{focusIndex + 1}</span> of{" "}
+              <span className="tabular">{run.nodes.length}</span> ·{" "}
+              {run.nodes[focusIndex]?.name}
+            </Text>
+          ) : executing ? (
+            /* The live line. Same vocabulary as the cell beneath it — the cell
+               breathes, this names the step it belongs to — so the two cannot
+               disagree about which node the run is on. */
+            <span className="flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                data-motion="decorative"
+                className="bg-status-live size-1.5 shrink-0 rounded-full motion-safe:animate-[ink-bloom_2s_ease-in-out_infinite]"
+              />
+              <Text variant="caption" tone="inherit" className="text-status-live" aria-live="polite">
+                Running step <span className="tabular">{executingIndex + 1}</span> of{" "}
+                <span className="tabular">{run.nodes.length}</span> · {executing.name}
+              </Text>
+            </span>
+          ) : gatedIndex >= 0 ? (
+            <Text variant="caption" tone="inherit" className="text-status-waiting" aria-live="polite">
+              Waiting for a decision at step <span className="tabular">{gatedIndex + 1}</span> ·{" "}
+              {run.nodes[gatedIndex]?.name}
+            </Text>
+          ) : run.status === "running" || run.status === "queued" ? (
+            /* Live, but no cell has claimed `executing` yet — the gap between the
+               run being claimed and its first node reporting, and every run that
+               predates the worker writing the state at all. Saying so beats
+               inventing a step, and beats "drag to replay" on a moving run. */
+            <Text variant="caption" tone="muted" aria-live="polite">
+              {run.status === "queued"
+                ? "Queued · no step has started yet"
+                : "Running · waiting for the next step to report"}
+            </Text>
+          ) : (
+            <Text variant="caption" tone="muted">
+              Drag to replay · click a cell to inspect that step
+            </Text>
+          )}
         </div>
 
         <CheckpointRibbon

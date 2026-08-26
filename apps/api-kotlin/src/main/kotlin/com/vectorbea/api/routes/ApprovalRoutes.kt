@@ -45,6 +45,21 @@ private fun Approval.toResponse(): Map<String, Any?> = mapOf(
     },
     "createdAt" to createdAt.toString(),
     "updatedAt" to updatedAt.toString(),
+    /*
+     * The gate's own terms, as the canvas configured them. Absent from this
+     * response until now, which is why the Approvals page hard-coded
+     * `slaMs: 1` and `approverGroup: "Not provided by API"` — it had nothing
+     * else to render. Null still means "this gate declares none", and the UI
+     * distinguishes that from "the API cannot tell you".
+     */
+    "slaDeadlineAt" to slaDeadlineAt?.toString(),
+    "escalationPolicy" to escalationPolicyJson?.let {
+        runCatching { mapper.readValue(it, Map::class.java) }.getOrNull()
+    },
+    "evidenceRefs" to evidenceRefsJson?.let {
+        runCatching { mapper.readValue(it, Map::class.java) }.getOrNull()
+    },
+    "confidenceScore" to confidenceScore,
 )
 
 private val log = LoggerFactory.getLogger(ApprovalRoutes::class.java)

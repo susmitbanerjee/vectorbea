@@ -88,6 +88,10 @@ object RbacGuard {
         // ── Incidents: acknowledging is triage, developer and up ─────────────
         "POST /api/failure-incidents/:id/mark-resolved"  to Permission.RUN_CANCEL,
         "POST /api/failure-incidents/mark-all-resolved"  to Permission.RUN_CANCEL,
+        // Deleting destroys the record rather than closing it, so it sits one
+        // tier above acknowledging: an incident is the evidence of an outage.
+        "DELETE /api/failure-incidents/:id"              to Permission.WORKFLOW_DELETE,
+        "POST /api/failure-incidents/delete-resolved"    to Permission.WORKFLOW_DELETE,
         "POST /api/incidents/dead-letters/:id/acknowledge" to Permission.RUN_CANCEL,
 
         // ── Connections hold credentials and blast radius: admin and up ──────

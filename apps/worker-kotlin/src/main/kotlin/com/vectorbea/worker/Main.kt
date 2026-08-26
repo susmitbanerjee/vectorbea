@@ -66,6 +66,14 @@ fun main() {
     val timeouts = com.vectorbea.worker.config.OutboundTimeouts.fromEnv()
     com.vectorbea.worker.net.OutboundHttp.configure(timeouts)
     timeouts.logEffectiveValues()
+    /*
+     * Pay the first-HTTPS-call cost here rather than inside the first agent
+     * node of the first run after a deploy. See OutboundHttp.prewarm — the JVM
+     * TLS stack, SecureRandom seeding and the shared client's threads all cost
+     * real time exactly once, and charging that to a user's run is what makes
+     * the first agent execution fail and the retry succeed.
+     */
+    com.vectorbea.worker.net.OutboundHttp.prewarm()
 
     // ── 2. Database ───────────────────────────────────────────────────────────
     val database = try {

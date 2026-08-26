@@ -130,7 +130,6 @@ export interface ArchitectSessionApi {
   environmentReady: boolean;
   environmentLoading: boolean;
   /** The only environment on offer belongs to another workspace, so it was refused. */
-  environmentForeign: boolean;
 
   setPrompt: (value: string) => void;
   setAnswer: (question: string, value: string) => void;
@@ -483,7 +482,6 @@ export function useArchitectSession(): ArchitectSessionApi {
     usageLoading: usageQuery.isPending && usageQuery.fetchStatus !== "idle",
     environmentReady: environment.environmentId !== null,
     environmentLoading: environment.loading,
-    environmentForeign: environment.foreign,
     setPrompt,
     setAnswer,
     goToStage,

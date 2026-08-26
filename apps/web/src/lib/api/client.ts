@@ -177,6 +177,30 @@ export interface BootstrapIds {
   environmentId?: string;
 }
 
+/** One row of `GET /api/environments`. */
+export interface EnvironmentSummary {
+  id: string;
+  workspaceId: string;
+  name: string;
+  slug: string;
+  type: string;
+}
+
+/**
+ * `GET /api/environments` — the environments of the workspace in the header,
+ * and only those.
+ *
+ * This is the endpoint the integration notes recorded as missing, and its
+ * absence is what made every write surface guess. `defaultEnvironmentId` is the
+ * one a write lands in when none is named, so a caller never has to infer it
+ * from list order.
+ */
+export interface EnvironmentList {
+  items: EnvironmentSummary[];
+  total: number;
+  defaultEnvironmentId: string;
+}
+
 /** One column, as `information_schema` describes it. */
 export interface SchemaColumn {
   name: string;
@@ -240,6 +264,7 @@ export interface VectorbeaClient {
 
   me(options?: RequestOptions): Promise<CurrentUser>;
   bootstrap(options?: RequestOptions): Promise<BootstrapIds>;
+  environments(scope?: Scope, options?: RequestOptions): Promise<EnvironmentList>;
   workspaces(options?: RequestOptions): Promise<Workspace[]>;
   controlMetrics(scope?: Scope, options?: RequestOptions): Promise<ControlMetrics>;
   controlActivity(
@@ -508,6 +533,16 @@ export interface VectorbeaClient {
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<FailureIncident>;
     resolve(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     resolveAll(scope?: Scope, options?: RequestOptions): Promise<{ resolved: number }>;
+    /**
+     * `DELETE /api/failure-incidents/:id` — removes the record.
+     *
+     * Distinct from `resolve`, which closes it and leaves the signature row on
+     * the page forever. Purging used to be resolve-only, so an incident raised
+     * by a misconfiguration during setup could never be got rid of.
+     */
+    remove(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /** `POST /api/failure-incidents/delete-resolved` — clears what is closed. */
+    deleteResolved(scope?: Scope, options?: RequestOptions): Promise<{ deleted: number }>;
   };
 
   debug: {
@@ -563,6 +598,9 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
     me: (options) => call<CurrentUser>("/api/me", { schema: contracts.me, ...options }),
 
     bootstrap: (options) => call<BootstrapIds>("/api/bootstrap", { ...options }),
+
+    environments: (scope, options) =>
+      call<EnvironmentList>("/api/environments", req(scope, undefined, options)),
 
     workspaces: async (options) => {
       const payload = await call<{ workspaces?: Workspace[] }>("/api/workspaces", {
@@ -953,6 +991,10 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<unknown>(`/api/failure-incidents/${id}/mark-resolved`, { method: "POST", ...req(scope, undefined, options) }),
       resolveAll: (scope, options) =>
         call<{ resolved: number }>("/api/failure-incidents/mark-all-resolved", { method: "POST", ...req(scope, undefined, options) }),
+      remove: (id, scope, options) =>
+        call<unknown>(`/api/failure-incidents/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      deleteResolved: (scope, options) =>
+        call<{ deleted: number }>("/api/failure-incidents/delete-resolved", { method: "POST", ...req(scope, undefined, options) }),
     },
 
     schedules: {

@@ -133,6 +133,53 @@ object RibbonWriter {
         }
     }
 
+    /**
+     * Flip every entry still marked `executing` on a run that has just stopped.
+     *
+     * A node records `executing` when it starts and its terminal state when it
+     * ends, so the only way an `executing` entry survives is that the run died
+     * between the two — a worker crash, a lease expiry, an error thrown outside
+     * the node's own failure handling. Left alone, that cell breathes forever on
+     * a run that finished hours ago, which is worse than showing nothing: it says
+     * work is in flight when no worker is holding the run.
+     *
+     * Best-effort and never throws: this runs while a failure is already being
+     * recorded, and a run must not fail to be marked failed because its summary
+     * could not be tidied.
+     */
+    fun sealExecuting(dataSource: DataSource, runId: UUID, state: State = State.FAILED) {
+        try {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """
+                    UPDATE agent_runs r
+                       SET ribbon_json = (
+                               SELECT COALESCE(jsonb_agg(
+                                          CASE WHEN e.value->>'s' = 'executing'
+                                               THEN jsonb_set(e.value, '{s}', to_jsonb(?::text))
+                                               ELSE e.value END
+                                          ORDER BY e.ordinality), '[]'::jsonb)
+                                 FROM jsonb_array_elements(r.ribbon_json)
+                                      WITH ORDINALITY AS e(value, ordinality)
+                           ),
+                           updated_at = now()
+                     WHERE r.id = ?
+                       AND EXISTS (
+                           SELECT 1 FROM jsonb_array_elements(r.ribbon_json) x
+                            WHERE x->>'s' = 'executing'
+                       )
+                    """.trimIndent()
+                ).use { stmt ->
+                    stmt.setString(1, state.wire)
+                    stmt.setObject(2, runId)
+                    stmt.executeUpdate()
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[ribbon] could not seal executing entries for run {}: {}", runId, e.message)
+        }
+    }
+
     /** Convenience for callers that are not already inside a transaction. */
     fun recordTransition(
         dataSource: DataSource,

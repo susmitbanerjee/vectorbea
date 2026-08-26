@@ -256,7 +256,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       );
       await data.refetch();
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : "The incident purge failed.");
+      setOperationError(error instanceof Error ? error.message : "The incidents could not be resolved.");
     } finally {
       setPurgingIncidents(false);
     }
@@ -461,8 +461,12 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
             <Button size="sm" variant="danger" onClick={() => setPurgeOpen(true)}>
               Purge queue
             </Button>
-            <Button size="sm" variant="danger" onClick={() => setIncidentPurgeOpen(true)}>
-              Purge incidents
+            {/* "Purge" called `mark-all-resolved`, which deletes nothing — the
+                verb on the button has to be the verb in the toast, and the toast
+                says "resolved". Deleting an incident lives on the Incidents page,
+                where the record being removed is the thing on screen. */}
+            <Button size="sm" variant="secondary" onClick={() => setIncidentPurgeOpen(true)}>
+              Resolve incidents
             </Button>
             <SavedViewsMenu
               views={views}
@@ -604,8 +608,8 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       <DestructiveConfirmDialog
         open={incidentPurgeOpen}
         onOpenChange={setIncidentPurgeOpen}
-        title="Purge incidents"
-        description="Every open incident in this workspace will be marked resolved. Incident records remain available for audit, and failed run history is not deleted."
+        title="Resolve every open incident"
+        description="Every open incident in this workspace is marked resolved. Nothing is deleted — the records stay available for audit under the resolved filter, and failed run history is untouched. To remove them, use Delete resolved on the Incidents page."
         confirmLabel="Resolve all incidents"
         pending={purgingIncidents}
         onConfirm={() => void purgeIncidents()}
@@ -700,7 +704,9 @@ function TableState({
             <Link href={"/workflows" as Route}>Run a workflow</Link>
           </Button>
           <Button asChild variant="secondary" size="sm">
-            <Link href={"/docs/first-workflow" as Route}>Read the tutorial</Link>
+            <Link href={"/docs/first-workflow" as Route} target="_blank" rel="noreferrer">
+              Read the tutorial
+            </Link>
           </Button>
         </div>
       </div>

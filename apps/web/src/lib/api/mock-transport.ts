@@ -212,6 +212,178 @@ function toApiRun(run: UiRun) {
   };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   FAILURE INCIDENTS
+
+   Missing entirely until now, so the Incidents screen — one of the four OBSERVE
+   surfaces — rendered "Could not load incidents." in the mode that exists to run
+   the product without a backend. The Runs page's incident band was empty for the
+   same reason.
+
+   Derived from the failed runs rather than from a separate fixture list, because
+   `useIncidentsData` GROUPS incidents by (category, code, component) and joins
+   them back to runs by `runId`. A list of invented incidents whose run ids match
+   nothing would group correctly and then show "0 affected runs", which is a
+   worse lie than showing none at all.
+══════════════════════════════════════════════════════════════════════════════ */
+
+/** The signatures a workspace realistically accumulates, cycled over failed runs. */
+const INCIDENT_SIGNATURES = [
+  {
+    category: "TOOL_CALL_FAILED",
+    code: "ECONNREFUSED",
+    severity: "critical",
+    summary: "Connection ‘Postgres Answers’ is refusing connections.",
+    recommendedAction:
+      "Check the connection's credentials and network access, then retry the affected runs from their last checkpoint.",
+    retryable: true,
+  },
+  {
+    category: "TIMEOUT",
+    code: "LLM_TIMEOUT",
+    severity: "high",
+    summary: "Model calls exceeded the node's timeout budget.",
+    recommendedAction: "Raise the node's timeout on the Advanced tab, or move this step to a faster model.",
+    retryable: true,
+  },
+  {
+    category: "AUTH_FAILURE",
+    code: "HTTP_401",
+    severity: "high",
+    summary: "The provider rejected the request: credentials are missing or expired.",
+    recommendedAction: "Rotate the connection's secret, then retry.",
+    retryable: false,
+  },
+] as const;
+
+function toApiIncident(run: UiRun, index: number) {
+  const signature = INCIDENT_SIGNATURES[index % INCIDENT_SIGNATURES.length];
+  const failedNode = run.nodes.find((node) => node.state === "failed");
+  return {
+    id: uuidFrom(`inc_${run.id}`),
+    runId: uuidFrom(run.id),
+    workflowId: uuidFrom(run.workflowId),
+    // The failing COMPONENT is what the Incidents page groups on and titles the
+    // row with; leaving it null is what collapses every incident into one
+    // "UNKNOWN · UNKNOWN" signature.
+    failedNodeId: failedNode?.id ?? null,
+    failedStepId: failedNode?.id ?? null,
+    failedAgentId: null,
+    failedToolId: null,
+    failedConnectionId: null,
+    category: signature.category,
+    code: signature.code,
+    severity: signature.severity,
+    summary: signature.summary,
+    technicalSummary: signature.summary,
+    recommendedAction: signature.recommendedAction,
+    retryable: signature.retryable,
+    autoReplaySafe: signature.retryable,
+    requiresHumanApproval: !signature.retryable,
+    remediationJson: null,
+    detectedAt: run.finishedAt ?? run.startedAt,
+    resolutionStatus: index % 5 === 0 ? "resolved" : "open",
+  };
+}
+
+/** Every incident this fixture workspace has, newest first. */
+const INCIDENT_ROWS = RUNS
+  .filter((run) => run.status === "failed")
+  .slice(0, 24)
+  .map(toApiIncident);
+
+/**
+ * Deletions are applied to this set rather than to `INCIDENT_ROWS`, so the
+ * delete controls on the Incidents page do something observable in mock mode
+ * instead of appearing to succeed and leaving the row in place.
+ */
+const DELETED_INCIDENT_IDS = new Set<string>();
+const RESOLVED_INCIDENT_IDS = new Set<string>();
+
+function liveIncidents() {
+  return INCIDENT_ROWS
+    .filter((incident) => !DELETED_INCIDENT_IDS.has(incident.id))
+    .map((incident) =>
+      RESOLVED_INCIDENT_IDS.has(incident.id)
+        ? { ...incident, resolutionStatus: "resolved" }
+        : incident,
+    );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   APPROVALS
+
+   Also missing, so the fourth OBSERVE screen said "Could not load approvals."
+
+   Built from the runs that are actually awaiting one, and carrying the fields
+   V027 added and the API now returns — `slaDeadlineAt`, `escalationPolicy`,
+   `evidenceRefs`. Those are the ones the screen used to fake (`slaMs: 1`,
+   `approverGroup: "Not provided by API"`), so a fixture that omitted them would
+   exercise the placeholder path rather than the real one and hide any
+   regression in it.
+══════════════════════════════════════════════════════════════════════════════ */
+
+function toApiApproval(run: UiRun, index: number) {
+  const gated = run.nodes.find((node) => node.state === "gated");
+  const requestedAt = new Date(Date.parse(run.startedAt));
+  const slaMinutes = [240, 60, 1440][index % 3];
+  const group = ["admin", "developer", "owner"][index % 3];
+  return {
+    id: uuidFrom(`apr_${run.id}`),
+    runId: uuidFrom(run.id),
+    workflowId: uuidFrom(run.workflowId),
+    stepId: gated?.id ?? "approval",
+    nodeId: gated?.id ?? "approval",
+    agentId: null,
+    status: "PENDING" as const,
+    title: gated?.name ?? "Approval gate",
+    message: `Approve ${run.workflowName} before it continues.`,
+    riskLevel: index % 3 === 0 ? "high" : "medium",
+    requestedBy: "workflow-worker",
+    decidedBy: null,
+    requestedAt: requestedAt.toISOString(),
+    decidedAt: null,
+    decisionReason: null,
+    // RESOLVED values, never templates — the distinction V027 exists for.
+    payloadJsonSanitized: {
+      Customer: "Northwind Trading Ltd",
+      "Refund amount": "£842.00",
+      "Original invoice": "INV-2026-04182",
+    },
+    createdAt: requestedAt.toISOString(),
+    updatedAt: requestedAt.toISOString(),
+    slaDeadlineAt: new Date(requestedAt.getTime() + slaMinutes * 60_000).toISOString(),
+    escalationPolicy: { onTimeout: "escalate", approverGroup: group, slaMinutes },
+    evidenceRefs: {
+      Customer: { expression: "{{ n1001.output.company_name }}", resolved: true },
+      "Refund amount": { expression: "{{ n1002.output.amount_due }}", resolved: true },
+      "Original invoice": { expression: "{{ n1002.output.number }}", resolved: true },
+    },
+    confidenceScore: null,
+  };
+}
+
+const APPROVAL_ROWS = RUNS
+  .filter((run) => run.status === "awaiting-approval")
+  .map(toApiApproval);
+
+/** Decisions made in this session, so approve/reject are observable in mock mode. */
+const APPROVAL_DECISIONS = new Map<string, { status: "APPROVED" | "REJECTED"; reason: string | null }>();
+
+function liveApprovals() {
+  return APPROVAL_ROWS.map((approval) => {
+    const decision = APPROVAL_DECISIONS.get(approval.id);
+    if (!decision) return approval;
+    return {
+      ...approval,
+      status: decision.status,
+      decidedBy: "operator@vectorbea.dev",
+      decidedAt: new Date().toISOString(),
+      decisionReason: decision.reason,
+    };
+  });
+}
+
 function toApiWorkflow(workflow: UiWorkflow) {
   return {
     id: uuidFrom(workflow.id),
@@ -1049,6 +1221,111 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "GET",
     "/api/bootstrap",
     () => ({ workspaceId: WORKSPACE_ID, environmentId: ENVIRONMENT_ID }),
+  ],
+
+  /* The workspace-scoped environment list. Shaped exactly as `BootstrapRoutes`
+     returns it, including `defaultEnvironmentId` — `useEnvironmentUuid` reads
+     that field first, so a mock that omitted it would exercise a fallback the
+     real transport never takes. */
+  [
+    "GET",
+    "/api/environments",
+    () => ({
+      items: [{
+        id: ENVIRONMENT_ID,
+        workspaceId: WORKSPACE_ID,
+        name: "Production",
+        slug: "production",
+        type: "production",
+      }],
+      total: 1,
+      defaultEnvironmentId: ENVIRONMENT_ID,
+    }),
+  ],
+
+  [
+    "GET",
+    "/api/approvals",
+    (_params, init) => {
+      const status = init.query?.status ? String(init.query.status).toUpperCase() : null;
+      const items = liveApprovals().filter((a) => !status || a.status === status);
+      return { items, total: items.length, page: 1, pageSize: items.length || 1 };
+    },
+  ],
+  [
+    "POST",
+    "/api/approvals/:id/approve",
+    (params) => {
+      APPROVAL_DECISIONS.set(params.id, { status: "APPROVED", reason: null });
+      return { decided: true };
+    },
+  ],
+  [
+    "POST",
+    "/api/approvals/:id/reject",
+    (params, init) => {
+      const reason = (init.body as { reason?: string } | undefined)?.reason ?? null;
+      APPROVAL_DECISIONS.set(params.id, { status: "REJECTED", reason });
+      return { decided: true };
+    },
+  ],
+
+  [
+    "GET",
+    "/api/failure-incidents",
+    (_params, init) => {
+      const status = init.query?.status ? String(init.query.status) : null;
+      const limit = Number(init.query?.limit ?? 50);
+      return liveIncidents()
+        .filter((incident) => !status || incident.resolutionStatus === status)
+        .slice(0, limit);
+    },
+  ],
+  [
+    "POST",
+    "/api/failure-incidents/mark-all-resolved",
+    () => {
+      const open = liveIncidents().filter((i) => i.resolutionStatus !== "resolved");
+      for (const incident of open) RESOLVED_INCIDENT_IDS.add(incident.id);
+      return { resolved: open.length };
+    },
+  ],
+  [
+    "POST",
+    "/api/failure-incidents/delete-resolved",
+    () => {
+      const resolved = liveIncidents().filter((i) => i.resolutionStatus === "resolved");
+      for (const incident of resolved) DELETED_INCIDENT_IDS.add(incident.id);
+      return { deleted: resolved.length };
+    },
+  ],
+  [
+    "GET",
+    "/api/failure-incidents/:id",
+    (params) => {
+      const found = liveIncidents().find((incident) => incident.id === params.id);
+      if (!found) return notFound(`/api/failure-incidents/${params.id}`);
+      return found;
+    },
+  ],
+  [
+    "POST",
+    "/api/failure-incidents/:id/mark-resolved",
+    (params) => {
+      RESOLVED_INCIDENT_IDS.add(params.id);
+      return { resolved: true };
+    },
+  ],
+  [
+    "DELETE",
+    "/api/failure-incidents/:id",
+    (params) => {
+      if (!liveIncidents().some((incident) => incident.id === params.id)) {
+        return notFound(`/api/failure-incidents/${params.id}`);
+      }
+      DELETED_INCIDENT_IDS.add(params.id);
+      return { deleted: true };
+    },
   ],
 
   [

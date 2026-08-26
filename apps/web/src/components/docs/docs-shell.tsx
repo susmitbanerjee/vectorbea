@@ -14,6 +14,7 @@ import { fuzzyRank, highlightRuns } from "~/lib/fuzzy";
 import { DOCS_NAV, DOCS_PAGES, docsPath, getDocsPage, type DocsPageMeta, type TocEntry } from "~/content/docs/registry";
 import { DOCS_BODIES } from "~/content/docs/bodies";
 import { WasThisHelpful } from "./primitives";
+import { useSessionHint } from "~/lib/auth/session";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    DOCS SHELL — three columns.
@@ -34,6 +35,32 @@ import { WasThisHelpful } from "./primitives";
 
 const VERSIONS = ["v1.4 (current)", "v1.3", "v1.2"];
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   THE DOCS WERE A ONE-WAY DOOR OUT OF THE PRODUCT.
+
+   Every empty state in the app — no connections, no tools, no agents, no runs —
+   offers "Read the tutorial", which lands here. This page lives outside the
+   `(app)` route group, so arriving means leaving the app shell: no sidebar, no
+   workspace, and a header whose only call to action was "Start free" pointing at
+   `/signup`. A brand-new user following the one link their empty screen offered
+   ended up on a sign-up page, which is how they were asked to authenticate again
+   ten seconds after signing in.
+
+   Three things fix that, and all three are needed:
+
+     1. In-app links to the docs open in a new tab, so the app is still there.
+     2. The auth pages no longer swallow their own redirect, so a signed-in
+        visitor who does reach /signup is sent into the app (see
+        `resolveSignedInDestination`).
+     3. THIS header stops offering "Start free" to somebody who already has an
+        account, and offers the way back instead.
+
+   `useSessionHint` reads the boolean the middleware mirrors out of the httpOnly
+   session cookie. It resolves after mount, which is the earliest a statically
+   prerendered page can know — and the signed-out default is the right first
+   paint for the anonymous readers these pages mostly serve.
+══════════════════════════════════════════════════════════════════════════════ */
+
 export function DocsShell({ slug }: { slug: string }) {
   const page = getDocsPage(slug);
   const Body = DOCS_BODIES[slug];
@@ -52,6 +79,7 @@ function DocsShellInner({
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [activeId, setActiveId] = React.useState<string>(page.toc[0]?.id ?? "");
   const [progress, setProgress] = React.useState(0);
+  const hasSession = useSessionHint();
 
   const flat = React.useMemo(() => DOCS_NAV.flatMap((g) => g.items), []);
   const index = flat.findIndex((p) => p.slug === page.slug);
@@ -113,7 +141,12 @@ function DocsShellInner({
 
       <header className="bg-surface-base border-subtle sticky top-0 z-sticky border-b print:hidden">
         <div className="mx-auto flex w-full max-w-[100rem] items-center gap-4 px-4 py-3 sm:px-6">
-          <Link href="/" className="rounded-sm outline-none focus-visible:focus-ring">
+          {/* Home for a reader who is signed in is the product, not the
+              marketing site. */}
+          <Link
+            href={(hasSession ? "/control" : "/") as Route}
+            className="rounded-sm outline-none focus-visible:focus-ring"
+          >
             <Wordmark />
           </Link>
           <Text variant="caption" tone="muted" className="hidden sm:block">Docs</Text>
@@ -144,8 +177,10 @@ function DocsShellInner({
               <Kbd keys="mod+k" />
             </button>
 
-            <Button asChild size="sm" variant="primary">
-              <Link href={"/signup" as never}>Start free</Link>
+            <Button asChild size="sm" variant={hasSession ? "secondary" : "primary"}>
+              <Link href={(hasSession ? "/control" : "/signup") as Route}>
+                {hasSession ? "Back to the app" : "Start free"}
+              </Link>
             </Button>
           </div>
         </div>

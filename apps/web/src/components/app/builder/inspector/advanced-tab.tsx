@@ -272,9 +272,15 @@ export function AdvancedTab({
       </Section>
 
       {/* ── Concurrency, conditional, cost ───────────────────────────────── */}
-      <Section title="Limits" help="Bounds on how hard this step may run.">
+      <Section
+        title="Limits"
+        help="Bounds on how hard this step may run. Skip if is enforced by the runtime; the other three are recorded and not yet applied."
+      >
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Max concurrency" help="Simultaneous executions of this step across the workspace.">
+          <Field
+            label="Max concurrency"
+            help="Simultaneous executions of this step across the workspace. Recorded, not yet enforced — the run pool bounds concurrency workspace-wide today, not per step."
+          >
             <Input
               type="number" min={1}
               value={config.maxConcurrency}
@@ -282,7 +288,10 @@ export function AdvancedTab({
               className="h-7 text-body-sm"
             />
           </Field>
-          <Field label="Rate limit" help="Executions per minute. Blank for none.">
+          <Field
+            label="Rate limit"
+            help="Executions per minute. Blank for none. Recorded, not yet enforced — provider rate limits are handled by backoff at the call site."
+          >
             <Input
               type="number" min={0}
               value={config.rateLimitPerMinute ?? ""}
@@ -294,7 +303,10 @@ export function AdvancedTab({
         </div>
 
         <div className="mt-2">
-          <Field label="Cost ceiling" help="USD per execution. The step is halted rather than allowed to exceed it.">
+          <Field
+            label="Cost ceiling"
+            help="USD per execution. Recorded, not yet enforced — the run-level budget ceiling is what currently halts spend."
+          >
             <Input
               type="number" min={0} step={0.001}
               value={config.costCeilingUsd ?? ""}
@@ -305,14 +317,22 @@ export function AdvancedTab({
           </Field>
           {config.costCeilingUsd ? (
             <Text variant="caption" tone="muted" className="mt-1 block">
-              Halts at {formatCost(config.costCeilingUsd)} and reports a budget breach rather than a
-              failure, so the run is distinguishable from a broken one.
+              Recorded as {formatCost(config.costCeilingUsd)}. Per-step ceilings are not enforced yet —
+              the run-level budget in workspace settings is what stops a run today.
             </Text>
           ) : null}
         </div>
 
         <div className="mt-2">
-          <Field label="Skip if" help="An expression. When it is true the step is skipped and the run continues.">
+          <Field
+            label="Skip if"
+            help={
+              "An expression evaluated against this step's resolved inputs. When it is true the " +
+              "step is skipped and the run continues down its normal edges. Comparisons only — " +
+              "input.amount < 100, or output.status == 'open' — and anything the engine cannot " +
+              "parse runs the step rather than silently omitting it."
+            }
+          >
             <Input
               value={config.skipIf}
               onChange={(e) => onChange({ skipIf: e.target.value })}

@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.RunEvent
+import com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.runtime.graph.*
@@ -43,6 +44,7 @@ class WorkflowRuntimeTest {
             runId: UUID, workspaceId: UUID, environmentId: UUID,
             nodeId: String, message: String, approvers: List<String>,
             resolvedInputs: Map<String, Any>,
+            gate: ApprovalGateConfig,
         ): String = UUID.randomUUID().toString()
     }
 
@@ -88,6 +90,73 @@ class WorkflowRuntimeTest {
             workflowVersionId = workflowVersionId,
             graph             = graph,
             inputJson         = input,
+        )
+    }
+
+    // ── skipIf ────────────────────────────────────────────────────────────────
+    //
+    // The Advanced tab has offered a `skipIf` expression since it shipped and no
+    // code read it: the step ran regardless, so an author who wrote a guard got
+    // the work AND the side effects they had asked to prevent.
+
+    @Test
+    fun `skipIf marks the node skipped and the run continues past it`(): Unit = runBlocking {
+        val trigger   = node("t1", NodeType.TRIGGER)
+        val transform = node("n1", NodeType.TRANSFORM, mapOf("skipIf" to "true"))
+        val end       = node("e1", NodeType.END)
+        val graph = WorkflowGraph(
+            nodes = listOf(trigger, transform, end),
+            edges = listOf(edge("e1", "t1", "n1"), edge("e2", "n1", "e1")),
+        )
+
+        val result = execute(graph)
+
+        assertInstanceOf(WorkflowRuntime.ExecutionResult.Succeeded::class.java, result)
+        val skipped = capturedEvents.filter { it.type == RunEventStore.EventType.STEP_SKIPPED }
+        assertEquals(1, skipped.size, "the guarded node should be skipped exactly once")
+        assertEquals("n1", skipped.first().stepId)
+        // The run must reach the end node — a skip that stalls the graph is worse
+        // than no skip at all.
+        assertTrue(capturedEvents.any { it.stepId == "e1" }, "the run should continue past the skipped node")
+    }
+
+    @Test
+    fun `a skipIf that does not match runs the node`(): Unit = runBlocking {
+        val trigger   = node("t1", NodeType.TRIGGER)
+        val transform = node("n1", NodeType.TRANSFORM, mapOf("skipIf" to "false"))
+        val end       = node("e1", NodeType.END)
+        val graph = WorkflowGraph(
+            nodes = listOf(trigger, transform, end),
+            edges = listOf(edge("e1", "t1", "n1"), edge("e2", "n1", "e1")),
+        )
+
+        execute(graph)
+
+        assertTrue(capturedEvents.none { it.type == RunEventStore.EventType.STEP_SKIPPED })
+        assertTrue(capturedEvents.any {
+            it.type == RunEventStore.EventType.STEP_COMPLETED && it.stepId == "n1"
+        })
+    }
+
+    @Test
+    fun `an expression the engine cannot parse runs the node rather than skipping it`(): Unit = runBlocking {
+        // ConditionEvaluator fails OPEN — an unparseable expression returns true,
+        // which for an EDGE means "follow it". Reusing that here would mean "skip
+        // the step", so a typo would silently omit the work. Failing to skip is
+        // recoverable and visible; wrongly skipping is neither.
+        val trigger   = node("t1", NodeType.TRIGGER)
+        val transform = node("n1", NodeType.TRANSFORM, mapOf("skipIf" to "amount is definitely small"))
+        val end       = node("e1", NodeType.END)
+        val graph = WorkflowGraph(
+            nodes = listOf(trigger, transform, end),
+            edges = listOf(edge("e1", "t1", "n1"), edge("e2", "n1", "e1")),
+        )
+
+        execute(graph)
+
+        assertTrue(
+            capturedEvents.none { it.type == RunEventStore.EventType.STEP_SKIPPED },
+            "an unreadable skipIf must not skip the step",
         )
     }
 

@@ -113,6 +113,56 @@ class NodePolicyTest {
         assertEquals("fail_run", node.failurePolicy.onFailure)
     }
 
+    @Test
+    fun `error-path routes to the failure edge rather than failing the run`() {
+        // "error-path" and "fallback" are two of the four values the Advanced tab
+        // offers, and neither was listed in the normalisation `when` — so both fell
+        // to the else and became "fail_run". Choosing "route to the error path"
+        // produced a node that ignored its error edge and stopped the run.
+        val node = parseOne(
+            """{"nodes":[{"id":"n1","type":"agent","config":{"errorPolicy":"error-path"}}],"edges":[]}"""
+        )
+        assertEquals("follow_failure_edge", node.failurePolicy.onFailure)
+    }
+
+    @Test
+    fun `fallback also follows the failure edge`() {
+        val node = parseOne(
+            """{"nodes":[{"id":"n1","type":"agent","config":{"errorPolicy":"fallback"}}],"edges":[]}"""
+        )
+        assertEquals("follow_failure_edge", node.failurePolicy.onFailure)
+    }
+
+    // ── Checkpoint policy ─────────────────────────────────────────────────────
+    //
+    // `WorkflowRuntime` has always consulted `node.checkpointPolicy.enabled`, and
+    // the Advanced tab has always offered the switch. `convertNode` never read it,
+    // so the switch was decorative: every node checkpointed regardless.
+
+    @Test
+    fun `checkpointing is on by default`() {
+        val node = parseOne("""{"nodes":[{"id":"n1","type":"agent","config":{}}],"edges":[]}""")
+        assertTrue(node.checkpointPolicy.enabled)
+    }
+
+    @Test
+    fun `the checkpoint switch is honoured when turned off`() {
+        val node = parseOne(
+            """{"nodes":[{"id":"n1","type":"agent","config":{"checkpoint":false}}],"edges":[]}"""
+        )
+        assertFalse(node.checkpointPolicy.enabled)
+    }
+
+    @Test
+    fun `an unparseable checkpoint value keeps durability on`() {
+        // Losing durability must be an explicit choice, never the result of a
+        // value this converter could not read.
+        val node = parseOne(
+            """{"nodes":[{"id":"n1","type":"agent","config":{"checkpoint":"yes"}}],"edges":[]}"""
+        )
+        assertTrue(node.checkpointPolicy.enabled)
+    }
+
     // ── The backoff curve ─────────────────────────────────────────────────────
 
     private val rng = ThreadLocalRandom.current()

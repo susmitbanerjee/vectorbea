@@ -200,6 +200,27 @@ class AgentNodeExecutor(
             (modelOverride  ?: agent.modelName)?.let  { put("model",       it) }
             (tempOverride   ?: agent.temperature)?.let { put("temperature", it) }
             (tokensOverride ?: agent.maxTokens)?.let  { put("maxTokens",   it) }
+            /*
+             * ── THE TWO BUDGETS DISAGREED, AND THE OUTER ONE WON ─────────────
+             *
+             * The synthetic node carried no `timeoutMs`, so `LlmNodeExecutor`
+             * fell back to its own 60s default while `WorkflowRuntime` wrapped
+             * this whole call in `withTimeoutOrNull(node.timeoutPolicy.timeoutMs)`
+             * — 30s for any node the Advanced tab had ever been opened on.
+             *
+             * The outer one fires first, and it cancels rather than reporting:
+             * the run records "Node 'x' timed out after 30000ms" and loses the
+             * provider's actual response, its status code, and its latency. The
+             * retry then succeeds because the TLS session, the connection and
+             * the JIT are all warm the second time — which is exactly the
+             * "first agent execution fails, retry succeeds" pattern.
+             *
+             * Passing the node's own budget down makes the HTTP client the thing
+             * that gives up, so the failure carries the provider's error instead
+             * of a cancellation, and the abort releases the socket rather than
+             * abandoning it.
+             */
+            node.timeoutPolicy.timeoutMs.takeIf { it > 0 }?.let { put("timeoutMs", innerBudgetMs(it)) }
         }
 
         val syntheticNode = node.copy(type = "llm", config = syntheticConfig)
@@ -236,6 +257,22 @@ class AgentNodeExecutor(
             title = "Agent ${if (enrichedResult is NodeResult.Completed) "completed" else "failed"}: ${agent.name}")
 
         return enrichedResult
+    }
+
+    /**
+     * The HTTP budget to give the model call, given the node's wall-clock budget.
+     *
+     * Deliberately SHORTER than the node's own timeout. If the two were equal the
+     * race would be arbitrary, and losing it means the coroutine is cancelled
+     * mid-flight: no status code, no provider message, no latency — just
+     * "timed out after Nms", which is the least useful thing a failed agent step
+     * can say. A tenth of the budget, capped at five seconds, is enough headroom
+     * for the client to abort cleanly and for this executor to return a real
+     * failure that the recovery classifier can categorise.
+     */
+    private fun innerBudgetMs(nodeTimeoutMs: Long): Long {
+        val headroom = (nodeTimeoutMs / 10).coerceAtMost(5_000L)
+        return (nodeTimeoutMs - headroom).coerceAtLeast(1_000L)
     }
 
     // ── Agent row ─────────────────────────────────────────────────────────────

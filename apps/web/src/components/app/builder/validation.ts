@@ -50,6 +50,19 @@ export const CATEGORY_LABEL: Record<IssueCategory, string> = {
 /** Risk tiers that may not run unattended in production. */
 const GATED_RISK = new Set(["high", "critical"]);
 
+/**
+ * Below this, a node's configured timeout is worth flagging.
+ *
+ * Mirrors `WorkflowRuntime.defaultTimeoutFor` — the budget the worker uses when
+ * a node declares none. Anything below its own class default is a deliberate
+ * tightening, and the canvas says so rather than letting it be discovered as an
+ * intermittent failure.
+ */
+const TIMEOUT_FLOOR_MS: Partial<Record<string, number>> = {
+  agent: 120_000,
+  llm: 90_000,
+};
+
 /** True when a node claims a tool at all, under any of the binding keys. */
 function bindsTool(config: Record<string, unknown>): boolean {
   return Boolean(
@@ -193,6 +206,35 @@ export function validateGraph(
         fix: "Choose an approver group, and set the SLA and timeout behaviour.",
       });
     }
+    /*
+     * A budget too small for the work the node does.
+     *
+     * The inspector used to default every node's `timeoutMs` to 30s and write it
+     * back on every save, so agent nodes quietly ran on a quarter of the 120s
+     * the worker gives them by default. A first agent call pays DNS, the TLS
+     * handshake and the model's own latency; a tool-calling agent pays that
+     * several times over. Thirty seconds is often not enough for the first
+     * attempt and comfortably enough for the retry — which reads as a flaky
+     * platform rather than as a budget that was set too low.
+     *
+     * A warning, not an error: a short budget is a legitimate choice for a fast
+     * model on a hot path, and the canvas must not refuse it. It just has to be
+     * a choice rather than a default nobody saw.
+     */
+    const declaredTimeoutMs = typeof config.timeoutMs === "number" ? config.timeoutMs : null;
+    const floorMs = TIMEOUT_FLOOR_MS[kind];
+    if (declaredTimeoutMs !== null && floorMs !== undefined && declaredTimeoutMs < floorMs) {
+      issues.push({
+        id: `tight-timeout-${id}`, category: "policy", severity: "warning", nodeId: id,
+        title: `‘${name}’ has ${Math.round(declaredTimeoutMs / 1000)}s to finish`,
+        detail:
+          `A first call pays connection setup and a cold provider on top of the work itself, ` +
+          `so ${Math.round(declaredTimeoutMs / 1000)}s frequently fails once and then succeeds on retry. ` +
+          `The worker allows ${Math.round(floorMs / 1000)}s for this kind of step by default.`,
+        fix: `Raise the timeout on the node's Advanced tab to at least ${Math.round(floorMs / 1000)}s, or lower the retry count if the short budget is deliberate.`,
+      });
+    }
+
     if (kind === "output" && !config.destination) {
       issues.push({
         id: `unbound-destination-${id}`, category: "binding", severity: "warning", nodeId: id,

@@ -141,6 +141,54 @@ class FailureIncidentRepository(private val ds: DataSource) {
         }
     }
 
+    /**
+     * Delete one incident permanently.
+     *
+     * Purging used to mean "mark every open incident resolved", which is the
+     * right default and the wrong only option: a resolved incident still occupies
+     * a signature row on the Incidents page forever, and there was no way to
+     * remove one that was noise — a misconfiguration during setup, a test run, a
+     * dependency that no longer exists. Resolving and deleting are different
+     * acts and both are now available.
+     *
+     * Workspace-scoped in the statement, not by the caller: an id alone must
+     * never be enough to delete another tenant's row.
+     */
+    fun delete(id: UUID, workspaceId: UUID): Boolean {
+        ds.connection.use { conn ->
+            conn.prepareStatement(
+                "DELETE FROM failure_incidents WHERE id=? AND workspace_id=?"
+            ).use { stmt ->
+                stmt.setObject(1, id); stmt.setObject(2, workspaceId)
+                val deleted = stmt.executeUpdate() > 0
+                if (deleted) log.info("[recovery] incident deleted id={} workspaceId={}", id, workspaceId)
+                return deleted
+            }
+        }
+    }
+
+    /**
+     * Delete every incident in the workspace whose resolution status is resolved.
+     *
+     * The companion to [markAllResolved], and the reason a purge finally clears
+     * the page: purge, then delete what the purge resolved. Anything still open
+     * is deliberately left alone — an unresolved incident is a live problem, and
+     * a button that silently deleted those would destroy the record of an
+     * outage while it was happening.
+     */
+    fun deleteResolved(workspaceId: UUID): Int {
+        ds.connection.use { conn ->
+            conn.prepareStatement(
+                "DELETE FROM failure_incidents WHERE workspace_id=? AND LOWER(resolution_status) = 'resolved'"
+            ).use { stmt ->
+                stmt.setObject(1, workspaceId)
+                val deleted = stmt.executeUpdate()
+                log.info("[recovery] resolved incidents deleted workspaceId={} count={}", workspaceId, deleted)
+                return deleted
+            }
+        }
+    }
+
     private fun mapRow(rs: java.sql.ResultSet) = FailureIncidentRow(
         id = UUID.fromString(rs.getString("id")),
         workspaceId = UUID.fromString(rs.getString("workspace_id")),

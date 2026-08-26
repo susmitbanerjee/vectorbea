@@ -523,10 +523,10 @@ function Overview({ connection, onDelete, onEdit }: { connection: ConnectionReco
           </Text>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button asChild size="xs" variant="secondary">
-              <Link href={"/docs/security" as Route}>Private runner setup</Link>
+              <Link href={"/docs/security" as Route} target="_blank" rel="noreferrer">Private runner setup</Link>
             </Button>
             <Button asChild size="xs" variant="ghost">
-              <Link href={"/docs/security" as Route}>Egress ranges</Link>
+              <Link href={"/docs/security" as Route} target="_blank" rel="noreferrer">Egress ranges</Link>
             </Button>
           </div>
         </Section>

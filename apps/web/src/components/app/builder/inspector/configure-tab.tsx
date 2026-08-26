@@ -741,19 +741,50 @@ function WaitConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkn
   );
 }
 
+/*
+ * THE APPROVER GROUPS WERE INVENTED.
+ *
+ * This dropdown offered "billing", "platform-ops", "growth" and "support-eng" —
+ * four names that exist nowhere in the product. Picking one wrote a string no
+ * executor read and no page could authorise against, which is the same class of
+ * bug the tool and agent pickers were fixed for: a selection that cannot be
+ * honoured is worse than no selection, because the canvas looks configured.
+ *
+ * The real vocabulary is the workspace role, checked by `RbacGuard` on
+ * `POST /api/approvals/:id/approve` (Permission.APPROVAL_DECIDE) and listed in
+ * `lib/server/workspace-members.ts`. Viewer is deliberately absent: a viewer
+ * cannot decide an approval, so offering it would configure a gate nobody is
+ * able to clear.
+ */
+const APPROVER_ROLES: { value: string; label: string }[] = [
+  { value: "developer", label: "Developer and above" },
+  { value: "admin", label: "Admin and above" },
+  { value: "owner", label: "Owner only" },
+];
+
 function ApprovalConfig({ node, set }: { node: VersionNode; set: (k: string, v: unknown) => void }) {
   const context = (node.config.contextFields as { label: string; expression: string }[] | undefined) ?? [];
+  const approverGroup = String(node.config.approverGroup ?? "");
+  /* A graph saved before this — or by the Architect — can name a group that is
+     not a role. Kept as an option rather than silently blanked, so opening the
+     node does not quietly discard what it was configured with. */
+  const options = APPROVER_ROLES.some((role) => role.value === approverGroup) || !approverGroup
+    ? APPROVER_ROLES
+    : [...APPROVER_ROLES, { value: approverGroup, label: `${approverGroup} (not a workspace role)` }];
 
   return (
     <>
       <Section title="Approvers" help="Who can decide, and what happens if nobody does.">
         <div className="grid gap-2">
-          <Field label="Approver group" help="Anyone in the group may decide. The first decision wins.">
+          <Field
+            label="Approver group"
+            help="A workspace role. Anyone with that role or higher may decide, and the first decision wins."
+          >
             <Select
-              options={["billing", "platform-ops", "growth", "support-eng"].map((g) => ({ value: g, label: g }))}
-              value={String(node.config.approverGroup ?? "")}
+              options={options}
+              value={approverGroup}
               onValueChange={(v) => set("approverGroup", v)}
-              placeholder="Choose a group"
+              placeholder="Anyone who can decide"
               aria-label="Approver group"
             />
           </Field>

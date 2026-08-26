@@ -481,10 +481,9 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
               ) : null}
 
               {blockedByEnvironment ? (
-                <ModalNote tone="danger" title="No environment resolved for this workspace">
-                  {environment.foreign
-                    ? "The environment the API returned belongs to a different workspace, so it was not used. Creating would write into the wrong tenant."
-                    : "The workspace environment could not be resolved, and the create endpoint requires it."}
+                <ModalNote tone="danger" title="This workspace's environment could not be read">
+                  GET /api/environments did not answer, so there is nothing to write against.
+                  Reload once the API is reachable — nothing you have entered is lost.
                 </ModalNote>
               ) : null}
 

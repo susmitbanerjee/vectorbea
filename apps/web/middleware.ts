@@ -70,6 +70,57 @@ function checkRateLimit(request: NextRequest): NextResponse | null {
   return res;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   THE SESSION HINT
+
+   The session cookie is httpOnly, so nothing on a page can read it. That is
+   correct and stays that way — but it left the PUBLIC pages unable to tell a
+   signed-in visitor from a stranger, so the landing page offered "Sign in" and
+   "Start free" to someone who had been signed in for a week, and the docs header
+   offered "Start free" as its only way back.
+
+   Three ways to answer "is there a session" on a static page, and why this one:
+
+     - Read it server-side. Correct, but `/` and every docs page are statically
+       prerendered (`○` in the build output); reading cookies would turn the
+       highest-traffic, most SEO-critical page into a per-request render, to
+       change a button label.
+     - Call `/api/auth/token`. Authoritative, but it is in AUTH_RATE_PATHS at ten
+       requests per IP per minute — one office behind a NAT browsing the landing
+       page would exhaust the budget that protects real sign-ins.
+     - Mirror the session cookie into a readable, NON-IDENTIFYING boolean. Costs
+       no request, no render, and is derived from the real cookie rather than
+       from localStorage, which only the legacy auth path ever wrote.
+
+   THIS IS PRESENTATION ONLY. It carries no identity, no token and no claim, and
+   nothing may authorise on it: a forged `vb_signed_in=1` buys a visitor exactly
+   one button label and a redirect back to /signin. Every gate stays on the
+   httpOnly cookie — `enforceAuth` below, and the server checks in the (app)
+   layout and on /signin, /signup and /login.
+══════════════════════════════════════════════════════════════════════════════ */
+const SESSION_HINT_COOKIE = "vb_signed_in";
+
+function syncSessionHint(request: NextRequest, response: NextResponse) {
+  const signedIn = Boolean(request.cookies.get(AUTH_COOKIE_NAME)?.value);
+  const hinted = request.cookies.get(SESSION_HINT_COOKIE)?.value === "1";
+
+  // Only written when the two disagree. Otherwise every request to every page
+  // and asset would carry a redundant Set-Cookie.
+  if (signedIn === hinted) return response;
+
+  response.cookies.set(SESSION_HINT_COOKIE, signedIn ? "1" : "", {
+    // Readable on purpose — that is the entire point. Nothing sensitive is in it.
+    httpOnly: false,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    // Matches the session cookie's own lifetime. If the session expires first,
+    // the next request through here clears the hint, so the two converge.
+    maxAge: signedIn ? 60 * 60 * 24 * 7 : 0,
+  });
+  return response;
+}
+
 function withSecurityHeaders(response: NextResponse) {
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -113,11 +164,11 @@ export async function middleware(request: NextRequest) {
   }
 
   const authRedirect = enforceAuth(request);
-  if (authRedirect) return withSecurityHeaders(authRedirect);
+  if (authRedirect) return withSecurityHeaders(syncSessionHint(request, authRedirect));
   // Pass pathname to server components via header (needed for beta gate in layout.tsx)
   const response = NextResponse.next();
   response.headers.set("x-pathname", request.nextUrl.pathname);
-  return withSecurityHeaders(response);
+  return withSecurityHeaders(syncSessionHint(request, response));
 }
 
 export const config = {

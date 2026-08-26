@@ -112,6 +112,7 @@ Legend: ✅ exists and matches · ⚠️ exists, shape differs · ❌ no endpoin
 |---|---|---|---|
 | GAP-01 | Checkpoint ribbon per run | ⚠️ | `agent_runs.ribbon_json`, `node_total`, `node_committed` **exist** (V027) and are worker-maintained in-transaction. `RunRoutes.AgentRun.toResponse()` **does not select them**. No N+1 risk — the column is there, the DTO ignores it. Roughly a five-line change. |
 | GAP-02 | `workflowName` on a run row | ⚠️ | List returns `workflowId` only. The Runs table shows a name, so today it needs one `/api/workflows` fetch and a client-side join. |
+| GAP-00 | Per-workspace environment list | ✅ | **Closed.** `GET /api/environments` (in `BootstrapRoutes`) returns the environments of the workspace in the header, plus `defaultEnvironmentId`. This was the gap behind every write surface refusing to submit: the only endpoint that returned an environment id was the unscoped `GET /api/bootstrap`, which handed the OLDEST workspace's environment to every caller, so the web app compared it against the active workspace and — correctly — declined to write. `requireEnvironmentId()` now resolves through `EnvironmentScope`, which refuses a foreign environment with 403 and resolves a missing one to the workspace's own default, so a brand-new workspace can register its first tool. |
 | GAP-03 | `environment` as a name | ⚠️ | Returns `environmentId` (UUID). UI filters by `"production" \| "staging" \| "development"`. Needs a name on the row or a resolvable environment list. |
 | GAP-13 | Run status vocabulary | ⚠️ | API: `completed`, `awaiting_approval`, `timed_out`. UI: `succeeded`, `awaiting-approval`. Reconciled in one place — `contracts.toUiRunStatus()`. |
 | GAP-14 | Cost/token field names | ⚠️ | API `estimatedCostUsd`/`totalTokens` vs fixture `costUsd`/`tokens`. |
@@ -140,8 +141,8 @@ Legend: ✅ exists and matches · ⚠️ exists, shape differs · ❌ no endpoin
 | # | Need | State | Detail |
 |---|---|---|---|
 | GAP-08 | Audit log read | ✅ | **Closed.** `GET /api/audit` (Next.js, `lib/server/audit-records.ts`) reads `public.audit_log` with workspace scoping, range/action/result/actor filters and a `COUNT` over the same predicates. There is still no Kotlin `AuditRoutes.kt`: the web app queries Postgres directly, as it already does for members, support and auth. Moving the read into the API later is a refactor, not a gap. |
-| GAP-09 | Approval decision context | ⚠️ | The largest single delta. V027 made `run_approvals` authoritative and added `sla_deadline_at`, `escalation_policy_json`, `decision_context_json` (**resolved** values, not templates) and `confidence_score`. `ApprovalRepository` **still queries the legacy `approvals` table**, so none of the four reach the API. The approvals screen is designed around exactly those fields. |
-| GAP-17 | Approval SLA countdown | ⚠️ | Part of GAP-09: `slaRemainingMs` has a column and no read path. |
+| GAP-09 | Approval decision context | ✅ | **Closed.** `ApprovalRepository` selects `sla_deadline_at`, `escalation_policy_json`, `evidence_refs_json` and `confidence_score`, and `ApprovalRoutes.toResponse` emits them. The WRITE side was the other half and was worse: `ApprovalStore` (worker) inserted into the legacy `approvals` table while the API read `run_approvals`, so a gate opened by an APPROVAL node never appeared on the Approvals page at all — only confidence and contract gates did, because those write `run_approvals` directly. Both sides now speak to `run_approvals`, and `ApprovalNodeExecutor` fills the V027 columns from the canvas inspector's own configuration (approver group, SLA minutes, timeout behaviour, decision-context bindings resolved against the node's inputs). `DashboardRepository`'s pending-approval tile was counting the legacy table too, and now counts the same one. |
+| GAP-17 | Approval SLA countdown | ✅ | **Closed with GAP-09.** `slaDeadlineAt` is written from the node's `slaMinutes` and returned; `use-approvals-data` computes the window from gate-open to deadline rather than the constants (`slaMs: 1`, `approverGroup: "Not provided by API"`) it used to hard-code. A gate with no SLA reports `slaAvailable: false` rather than a fake countdown. |
 | GAP-18 | Approval evidence steps | ❌ | UI `EvidenceStep` links each context field to the run node that produced it. No endpoint. |
 
 ### 3.5 Registry
@@ -178,7 +179,7 @@ gap that keeps it off, so the two cannot drift apart.
 | **GAP-20** `stepCount` zero | Return `null` on the list instead of `0`. A wrong number is worse than an absent one. | ~2 lines |
 | **GAP-21** heartbeat | Return the ISO timestamp; let the client format. | ~3 lines |
 | ~~**GAP-08** audit read~~ | Done. `GET /api/audit` serves `public.audit_log`; filtering and the total both run in the database. Offset paging, not cursor — the screen needs "page 7 of 249" and a total, which a cursor cannot give. | shipped |
-| **GAP-09** approvals | Point `ApprovalRepository` at `run_approvals` and expose the four V027 columns. The migration already did the hard part; leaving two approval tables live is also a correctness risk in its own right. | ~150 lines |
+| ~~**GAP-09** approvals~~ | Done. `ApprovalRepository` reads `run_approvals` and exposes the V027 columns; the worker's `ApprovalStore` writes them. The two-table split was the correctness risk this row predicted, and it was live: the API and the approval node were using different tables. | shipped |
 
 ### (b) Feature-flag off — real feature, needs real backend work
 
@@ -316,15 +317,23 @@ five with no blocking gap.
 
 ### 6.5 Approvals (P13)
 
-Blocked on **GAP-09**. `ApprovalRepository` reads the legacy `approvals` table,
-so `decision_context_json` (the resolved values), `sla_deadline_at`,
-`escalation_policy_json` and `confidence_score` never reach the API.
+**GAP-09 is closed.** Both halves of the two-table split are fixed: the API reads
+`run_approvals`, and the worker's `ApprovalStore` — which was still inserting into
+the legacy `approvals` table — writes it. That second half was the more damaging
+one: a gate opened by an APPROVAL node landed in a table nothing reads, so the run
+suspended and the Approvals page stayed empty.
 
-- Decision context → **(c) honest degraded state.** The brief is explicit: if the
-  API returns unfilled templates rather than resolved values, show that. Do not
-  fabricate.
-- SLA countdown → cannot be computed; there is no deadline to count down to.
-  **(b) flag off** (`approvalDecisionContext`).
+- Decision context → ✅ resolved values, written by `ApprovalNodeExecutor` from the
+  inspector's `contextFields` bindings and stored in `decision_context_json`. A
+  binding that resolves to nothing is recorded as `(unresolved)` rather than
+  dropped — a blank row tells the approver the gate is misconfigured; a missing
+  row looks like a gate that was given less context than it was.
+- Provenance → ✅ `evidence_refs_json` carries the expression behind each value, so
+  the card can answer "where did this number come from" without GAP-18's
+  per-node endpoint.
+- SLA countdown → ✅ computed from `sla_deadline_at`. A gate that declares no SLA
+  reports `slaAvailable: false` and the card draws no ring, rather than a
+  countdown against a fabricated window.
 - Approve / reject → ✅ endpoints exist. Reject reason is enforced client-side;
   server-side enforcement is **unverified** — `/api/approvals/:id/reject` accepts
   a body, but whether `reason` is required was not confirmed.

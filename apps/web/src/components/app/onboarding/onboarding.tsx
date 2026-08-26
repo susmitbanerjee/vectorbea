@@ -633,7 +633,7 @@ function StepReady({ state }: { state: OnboardingState }) {
           <Link href={"/control" as never}>Go to Control</Link>
         </Button>
         <Button asChild variant="secondary" size="lg">
-          <Link href={"/docs" as never}>Read the quickstart</Link>
+          <Link href={"/docs" as never} target="_blank" rel="noreferrer">Read the quickstart</Link>
         </Button>
       </div>
     </div>

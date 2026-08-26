@@ -92,6 +92,55 @@ object OutboundHttp {
             }
     }
 
+    /**
+     * Pay the first-HTTPS-call cost at startup instead of inside a node.
+     *
+     * THE COLD START THIS REMOVES. The first outbound TLS request a JVM makes is
+     * far more expensive than every one after it: the JSSE provider is loaded and
+     * initialised, `SecureRandom` is seeded (which on a container with little
+     * entropy can block for seconds), the cipher suites are negotiated for the
+     * first time, and none of that code has been JIT-compiled. On the node path
+     * that cost lands inside the node's wall-clock budget and inside the 5s
+     * connect timeout, so the FIRST agent step of the first run after a deploy
+     * fails and the retry — with everything warm — succeeds. That is the reported
+     * "cold start problem", and no timeout value fixes it, because the work is
+     * real; it just belongs at startup rather than in a user's run.
+     *
+     * Deliberately does no network I/O beyond a TLS handshake attempt against
+     * the loopback address, which fails immediately. What matters is that
+     * everything ABOVE the socket is initialised, and that happens whether or
+     * not the connection succeeds. Nothing is contacted, nothing is sent, and a
+     * worker with no egress warms up exactly as well as one with.
+     *
+     * Best-effort and non-blocking to the caller's correctness: any failure is
+     * logged at debug and startup continues.
+     */
+    fun prewarm() {
+        val started = System.nanoTime()
+        try {
+            // Building the client materialises the executor and the selector
+            // threads. This alone is a meaningful part of the first-call cost.
+            val ready = client
+            // Forces JSSE + SecureRandom initialisation. 127.0.0.1:1 refuses
+            // instantly on every platform, so this costs a failed connect, not a
+            // timeout — and the cost we are paying is everything that happens
+            // before the socket is reached.
+            val request = HttpRequest.newBuilder()
+                .uri(java.net.URI.create("https://127.0.0.1:1/"))
+                .timeout(Duration.ofMillis(250))
+                .GET()
+                .build()
+            runCatching { ready.send(request, HttpResponse.BodyHandlers.discarding()) }
+            // Independently of the socket: initialising a default SSLContext is
+            // the part that seeds SecureRandom, and it must happen even if the
+            // request above was rejected before reaching TLS.
+            runCatching { javax.net.ssl.SSLContext.getDefault().createSSLEngine() }
+            log.info("[http] outbound stack prewarmed in {}ms", (System.nanoTime() - started) / 1_000_000)
+        } catch (e: Throwable) {
+            log.debug("[http] prewarm skipped: {}", e.message)
+        }
+    }
+
     /** Result of a bounded exchange. */
     data class Result(
         val statusCode: Int,

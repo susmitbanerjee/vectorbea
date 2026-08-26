@@ -205,11 +205,9 @@ function BuilderInner({
        header, which tells the operator nothing they can act on. */
     if (!environment.environmentId) {
       toast.error(
-        environment.foreign
-          ? "The only environment this deployment can name belongs to a different workspace, so a run cannot be started here."
-          : environment.loading
-            ? "Still resolving this workspace's environment. Try again in a moment."
-            : "No environment resolved for this workspace, so the run cannot be started. Reload once the API is reachable.",
+        environment.loading
+          ? "Still resolving this workspace's environment. Try again in a moment."
+          : "This workspace's environment could not be read, so the run cannot be started. Reload once the API is reachable.",
       );
       return;
     }
@@ -245,7 +243,7 @@ function BuilderInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     triggering, data.save, data.saveError, dispatch, router,
-    environment.environmentId, environment.foreign, environment.loading,
+    environment.environmentId, environment.loading,
   ]);
 
   const handleTest = React.useCallback(() => {
@@ -463,8 +461,57 @@ function BuilderInner({
     const target = current.nodes.find((n) => n.node.id === nodeId);
     if (!target) return;
     const nextName = edits.name ?? target.node.name;
-    const nextConfig = edits.config ?? target.node.config;
-    if (nextName === target.node.name && nextConfig === target.node.config) return;
+
+    /*
+     * THE ADVANCED TAB WAS WRITE-ONLY.
+     *
+     * `edits.advanced` carries the retry count, backoff strategy, jitter, max
+     * delay, step timeout and error policy — and this callback used to persist
+     * only `edits.name` and `edits.config`, so every one of those was read on
+     * open, edited in local state and DROPPED on commit. The panel redrew its
+     * retry timeline as you typed and saved none of it.
+     *
+     * Written under the keys `WorkflowGraph.convertNode` reads, so the schedule
+     * the panel draws is the schedule the worker runs.
+     */
+    const advanced = edits.advanced;
+    const nextConfig: Record<string, unknown> = {
+      ...(edits.config ?? target.node.config),
+      retry: {
+        attempts: advanced.retry.attempts,
+        backoff: advanced.retry.backoff,
+        baseDelayMs: advanced.retry.baseDelayMs,
+        maxDelayMs: advanced.retry.maxDelayMs,
+        jitter: advanced.retry.jitter,
+      },
+      timeoutMs: advanced.timeoutMs,
+      errorPolicy: advanced.errorPolicy,
+      checkpoint: advanced.checkpoint,
+      ...(advanced.idempotencyKey ? { idempotencyKey: advanced.idempotencyKey } : {}),
+      ...(advanced.fallbackNodeId ? { fallbackNodeId: advanced.fallbackNodeId } : {}),
+      /*
+       * The Limits section. `skipIf` IS enforced — `WorkflowRuntime.shouldSkip`
+       * evaluates it against the node's resolved inputs before the step runs.
+       * The other three are stored but not yet enforced by any engine code, and
+       * the panel labels them as such rather than implying otherwise: storing
+       * them keeps what an author typed instead of discarding it on the next
+       * save, and the stored value is the spec the runtime will read when
+       * per-node concurrency, rate limiting and cost ceilings land.
+       */
+      ...(advanced.skipIf ? { skipIf: advanced.skipIf } : {}),
+      ...(advanced.maxConcurrency ? { maxConcurrency: advanced.maxConcurrency } : {}),
+      ...(advanced.rateLimitPerMinute !== null
+        ? { rateLimitPerMinute: advanced.rateLimitPerMinute }
+        : {}),
+      ...(advanced.costCeilingUsd !== null ? { costCeilingUsd: advanced.costCeilingUsd } : {}),
+    };
+
+    /* Compared BY VALUE, not by reference. The merged object above is new on
+       every commit, and dispatching unconditionally re-seeds the open panel —
+       the loop the previous reference check existed to prevent. */
+    const configUnchanged =
+      JSON.stringify(nextConfig) === JSON.stringify(target.node.config);
+    if (nextName === target.node.name && configUnchanged) return;
 
     dispatch({
       type: "replaceGraph",

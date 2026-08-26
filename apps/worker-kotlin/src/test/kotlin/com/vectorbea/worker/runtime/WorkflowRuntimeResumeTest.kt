@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.RunEvent
+import com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.runtime.graph.*
@@ -41,6 +42,7 @@ class WorkflowRuntimeResumeTest {
             runId: UUID, workspaceId: UUID, environmentId: UUID,
             nodeId: String, message: String, approvers: List<String>,
             resolvedInputs: Map<String, Any>,
+            gate: ApprovalGateConfig,
         ): String = UUID.randomUUID().toString()
     }
 

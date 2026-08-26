@@ -73,13 +73,19 @@ class DashboardRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                     OR created_at  >= NOW() - INTERVAL '24 hours')
                   AND token_count > 0
               ),
+              -- `run_approvals`, not `approvals`: V027 made the former
+              -- authoritative and every writer now targets it. Counting the
+              -- legacy table left the dashboard tile at zero while the
+              -- Approvals page listed pending gates. Status is compared
+              -- case-insensitively because rows migrated from `approvals`
+              -- carry the old lower-case vocabulary.
               pending_approvals AS (
                 SELECT COUNT(*) AS cnt
-                FROM approvals a
+                FROM run_approvals a
                 JOIN agent_runs r ON r.id = a.run_id
                 WHERE r.workspace_id = ?
                   ${if (environmentId != null) "AND r.environment_id = ?" else ""}
-                  AND a.status = 'pending'
+                  AND UPPER(a.status) = 'PENDING'
               ),
               total_runs AS (
                 SELECT COUNT(*) AS cnt

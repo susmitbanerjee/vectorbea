@@ -127,9 +127,8 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
     if (!environmentId) {
       setSaveState("error");
       setSaveError(
-        environment.foreign
-          ? "The only environment this deployment can name belongs to a different workspace, so this version cannot be written here. Your changes are still on the canvas."
-          : "No environment resolved, so the version cannot be written. Your changes are still on the canvas — reload once the API is reachable.",
+        "This workspace's environment could not be read, so the version cannot be written. " +
+          "Your changes are still on the canvas — reload once the API is reachable.",
       );
       return false;
     }

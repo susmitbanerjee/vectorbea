@@ -217,6 +217,11 @@ function FooterLink({
       <Link
         href={href as never}
         onClick={onNavigate}
+        /* The docs render outside the (app) route group, so following this link
+           in place unmounts the whole shell. A new tab keeps the workspace, the
+           canvas and any unsaved state where they were. */
+        target="_blank"
+        rel="noreferrer"
         className={cn(
           "flex items-center gap-2.5 rounded-sm px-2 py-1.5",
           "font-ui text-body-sm text-fg-muted",

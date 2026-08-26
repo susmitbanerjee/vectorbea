@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import type { Route } from "next";
 
 import { AuthScreen } from "~/components/app/auth/auth-screen";
-import { getAuthenticatedUserFromCookies, getPostLoginRedirectForUser } from "@/lib/auth/server";
+import { resolveSignedInDestination } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -11,6 +11,12 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
+/**
+ * Same fix as `/signin`: the redirect for an already-signed-in visitor used to
+ * be swallowed by the surrounding `try/catch`, so a signed-in user who followed
+ * a "Start free" link — the only call to action on the docs and marketing
+ * pages — was shown the sign-up form instead of being sent into the app.
+ */
 export default async function SignupPage({
   searchParams,
 }: {
@@ -18,22 +24,8 @@ export default async function SignupPage({
 }) {
   const { next, error } = await searchParams;
 
-  if (!error) {
-    try {
-      const cookieStore = await cookies();
-      const user = await getAuthenticatedUserFromCookies(cookieStore);
-      if (user) {
-        try {
-          const destination = next && next.startsWith("/") ? next : (await getPostLoginRedirectForUser(user.id)).redirectTo;
-          redirect(destination as Route);
-        } catch {
-          redirect("/control");
-        }
-      }
-    } catch {
-      // JWT_SECRET not configured or token invalid — show sign-up form
-    }
-  }
+  const destination = error ? null : await resolveSignedInDestination(await cookies(), next);
+  if (destination) redirect(destination as Route);
 
   return <AuthScreen mode="signup" next={next} error={error} />;
 }

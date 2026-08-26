@@ -1001,6 +1001,11 @@ class RunProcessor(
             }
 
             is WorkflowRuntime.ExecutionResult.Cancelled -> {
+                // A cancel lands between two node transitions, so the node that was
+                // in flight keeps its `executing` entry. `skipped` rather than
+                // `failed`: it did not fail, it was stopped — and the ribbon's
+                // dashed outline is what says so.
+                RibbonWriter.sealExecuting(dataSource, job.runId, RibbonWriter.State.SKIPPED)
                 updateRunCompleted(
                     runId = job.runId, status = "cancelled",
                     completedAt = Instant.now(), durationMs = durationMs, outputJson = null,
@@ -1212,6 +1217,10 @@ class RunProcessor(
                 properties = mapOf("durationMs" to durationMs))
         }
 
+        // A node that started and never reported still says `executing` on the
+        // ribbon. The run is over; the cell must stop breathing.
+        RibbonWriter.sealExecuting(dataSource, job.runId)
+
         runCatching {
             val run = loadRun(job.runId)
             updateRunCompleted(
@@ -1227,13 +1236,50 @@ class RunProcessor(
                     errorJsonSanitized = """{"message":${jsonString(sanitizedMessage)}}""",
                 ))
 
-                // Recovery Engine: classify failure and persist incident
+                /*
+                 * ── THE INCIDENT WAS RAISED WITHOUT ITS EVIDENCE ─────────────
+                 *
+                 * This used to pass the run ids, the sanitized message and the
+                 * literal code "WORKER_ERROR", and nothing else. Three
+                 * consequences, all visible on the Incidents page:
+                 *
+                 *  1. FailureClassifier had no HTTP status, no SQLSTATE, no node
+                 *     type and no event type to work with, so almost everything
+                 *     fell through the chain to UNKNOWN/UNKNOWN.
+                 *  2. failed_node_id, failed_tool_id and failed_connection_id were
+                 *     always NULL, so the UI's "failing component" fell back to the
+                 *     code — and every incident in the workspace collapsed into one
+                 *     signature row reading UNKNOWN · UNKNOWN.
+                 *  3. RecoveryPolicyEngine never learned a checkpoint existed, so it
+                 *     could not recommend resuming from one.
+                 *
+                 * The evidence has been in run_events all along — the STEP_FAILED
+                 * event carries the step, the ids and the sanitized error object.
+                 * [collectFailureEvidence] reads it.
+                 */
+                val evidence = collectFailureEvidence(job.runId)
                 val incidentId = recoveryService?.classifyAndPersist(
                     WorkerRecoveryService.TerminalFailureContext(
                         runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
                         workflowId = run.workflowId, workflowVersionId = run.workflowVersionId,
-                        errorMessage = sanitizedMessage, errorCode = "WORKER_ERROR",
-                        retryAttempt = job.retryCount, recentEventTypes = emptyList(),
+                        failedNodeId = evidence.nodeId,
+                        failedNodeType = evidence.nodeType,
+                        failedStepId = evidence.nodeId,
+                        failedAgentId = evidence.agentId,
+                        failedToolId = evidence.toolId,
+                        failedConnectionId = evidence.connectionId,
+                        errorMessage = sanitizedMessage,
+                        // Null rather than "WORKER_ERROR" when the node reported a
+                        // real one: an invented code shadows the message the
+                        // classifier chain actually reads.
+                        errorCode = evidence.errorCode,
+                        errorType = evidence.errorType,
+                        httpStatus = evidence.httpStatus,
+                        eventType = evidence.eventType,
+                        retryAttempt = evidence.retryAttempt ?: job.retryCount,
+                        checkpointAvailable = evidence.checkpointAvailable,
+                        checkpointId = evidence.checkpointId,
+                        recentEventTypes = evidence.recentEventTypes,
                     )
                 )
                 if (incidentId != null) {
@@ -1250,6 +1296,109 @@ class RunProcessor(
             log.error("[processor] could not write failure event [runId={}]: {}", job.runId, e.message)
         }
     }
+
+    /** What the run's own event log says about how it died. */
+    private data class FailureEvidence(
+        val nodeId: String? = null,
+        val nodeType: String? = null,
+        val agentId: UUID? = null,
+        val toolId: UUID? = null,
+        val connectionId: UUID? = null,
+        val errorCode: String? = null,
+        val errorType: String? = null,
+        val httpStatus: Int? = null,
+        val eventType: String? = null,
+        val retryAttempt: Int? = null,
+        val checkpointAvailable: Boolean = false,
+        val checkpointId: UUID? = null,
+        val recentEventTypes: List<String> = emptyList(),
+    )
+
+    /**
+     * Read the failure evidence the run already recorded.
+     *
+     * Three cheap queries rather than one join: the last failing event, the last
+     * ten event types (which is what tells the classifier "this run was retrying
+     * a tool call" rather than merely "it failed"), and whether a checkpoint
+     * exists — the single fact that decides whether the recommendation can be
+     * "resume" instead of "start again".
+     *
+     * Entirely best-effort. An incident with partial evidence is far better than
+     * no incident, and this runs on the failure path where the run is already
+     * lost — nothing here may throw.
+     */
+    private fun collectFailureEvidence(runId: UUID): FailureEvidence = try {
+        dataSource.connection.use { conn ->
+            var evidence = FailureEvidence()
+
+            conn.prepareStatement(
+                """SELECT type, step_id, agent_id, tool_id, connection_id, retry_attempt,
+                          error_json_sanitized::text AS error_json
+                     FROM run_events
+                    WHERE run_id = ?
+                      AND (status = 'failed' OR type LIKE '%FAILED%' OR type LIKE '%ERROR%')
+                    ORDER BY sequence DESC
+                    LIMIT 1"""
+            ).use { stmt ->
+                stmt.setObject(1, runId)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val error = parseErrorJson(rs.getString("error_json"))
+                        evidence = evidence.copy(
+                            eventType = rs.getString("type"),
+                            nodeId = rs.getString("step_id"),
+                            nodeType = error["nodeType"] as? String,
+                            agentId = rs.getString("agent_id")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                            toolId = rs.getString("tool_id")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                            connectionId = rs.getString("connection_id")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                            errorCode = (error["code"] ?: error["errorCode"])?.toString(),
+                            errorType = (error["errorType"] ?: error["type"])?.toString(),
+                            httpStatus = intOrNull(error["httpStatus"] ?: error["status"]),
+                            retryAttempt = (rs.getObject("retry_attempt") as? Number)?.toInt(),
+                        )
+                    }
+                }
+            }
+
+            val recent = mutableListOf<String>()
+            conn.prepareStatement(
+                "SELECT type FROM run_events WHERE run_id = ? ORDER BY sequence DESC LIMIT 10"
+            ).use { stmt ->
+                stmt.setObject(1, runId)
+                stmt.executeQuery().use { rs -> while (rs.next()) recent += rs.getString("type") }
+            }
+
+            conn.prepareStatement(
+                "SELECT id FROM run_checkpoints WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
+            ).use { stmt ->
+                stmt.setObject(1, runId)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val id = rs.getString("id")?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                        evidence = evidence.copy(checkpointAvailable = true, checkpointId = id)
+                    }
+                }
+            }
+
+            evidence.copy(recentEventTypes = recent)
+        }
+    } catch (e: Exception) {
+        log.warn("[processor] could not collect failure evidence [runId={}]: {}", runId, e.message)
+        FailureEvidence()
+    }
+
+    private fun intOrNull(value: Any?): Int? = when (value) {
+        is Number -> value.toInt()
+        is String -> value.toIntOrNull()
+        else -> null
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parseErrorJson(raw: String?): Map<String, Any?> = try {
+        if (raw.isNullOrBlank()) emptyMap()
+        else com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+            .readValue(raw, Map::class.java) as Map<String, Any?>
+    } catch (_: Exception) { emptyMap() }
 
     /** Sanitize an exception message for storage — no stack traces, no secrets. */
     private fun sanitizeError(e: Exception): String {

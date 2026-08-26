@@ -39,6 +39,12 @@ export const STATUS_STYLE: Record<IncidentStatus, string> = {
   muted: "text-fg-disabled border-subtle",
 };
 
+/** What the confirmation dialog is currently asking about. */
+type Confirming =
+  | { kind: "resolve-all" }
+  | { kind: "delete-resolved" }
+  | { kind: "delete"; incident: IncidentView };
+
 export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {}) {
   const api = useApi();
   const router = useRouter();
@@ -47,29 +53,96 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
   void (frozenProp ?? params.get("frozen") === "1");
   const data = useIncidentsData();
   const incidents = data.rows;
-  const [purgeOpen, setPurgeOpen] = React.useState(false);
-  const [purging, setPurging] = React.useState(false);
+  /*
+   * PURGING RESOLVED AND DELETED NOTHING.
+   *
+   * "Purge incidents" called `mark-all-resolved`, which closes every open
+   * incident and leaves every row exactly where it was — a resolved incident is
+   * still a signature row on this page, forever. So an incident raised by a
+   * misconfiguration during setup could be purged repeatedly and never go away,
+   * which is what "even if the incident is purged we are not able to delete it"
+   * describes.
+   *
+   * Resolving and deleting are now separate, because they answer different
+   * questions. Resolve says "this is handled" and keeps the record. Delete says
+   * "this was never a real problem" and removes it. Deletion only ever touches
+   * RESOLVED incidents in bulk — clearing an open one would destroy the evidence
+   * of an outage while it is still happening.
+   */
+  const [confirming, setConfirming] = React.useState<Confirming | null>(null);
+  const [pending, setPending] = React.useState(false);
   const [operationMessage, setOperationMessage] = React.useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-  const purgeIncidents = React.useCallback(async () => {
-    setPurging(true);
-    setOperationMessage(null);
-    try {
+  const plural = (n: number, one: string, many: string) =>
+    `${n.toLocaleString("en-GB")} ${n === 1 ? one : many}`;
+
+  const runOperation = React.useCallback(
+    async (work: () => Promise<string>, failure: string) => {
+      setPending(true);
+      setOperationMessage(null);
+      try {
+        const text = await work();
+        setConfirming(null);
+        setOperationMessage({ tone: "success", text });
+        await data.refetch();
+      } catch (error) {
+        setOperationMessage({
+          tone: "error",
+          text: error instanceof Error ? error.message : failure,
+        });
+      } finally {
+        setPending(false);
+      }
+    },
+    [data],
+  );
+
+  const resolveAll = React.useCallback(
+    () => runOperation(async () => {
       const result = await api.incidents.resolveAll(data.scope);
-      setPurgeOpen(false);
-      setOperationMessage({
-        tone: "success",
-        text: result.resolved === 0
-          ? "There were no open incidents to resolve."
-          : `${result.resolved.toLocaleString("en-GB")} ${result.resolved === 1 ? "incident was" : "incidents were"} resolved.`,
-      });
-      await data.refetch();
-    } catch (error) {
-      setOperationMessage({ tone: "error", text: error instanceof Error ? error.message : "The incident purge failed." });
-    } finally {
-      setPurging(false);
-    }
-  }, [api, data]);
+      return result.resolved === 0
+        ? "There were no open incidents to resolve."
+        : `${plural(result.resolved, "incident was", "incidents were")} resolved.`;
+    }, "The incidents could not be resolved."),
+    [api, data.scope, runOperation],
+  );
+
+  const deleteResolved = React.useCallback(
+    () => runOperation(async () => {
+      const result = await api.incidents.deleteResolved(data.scope);
+      return result.deleted === 0
+        ? "There were no resolved incidents to delete. Resolve them first, then clear them."
+        : `${plural(result.deleted, "resolved incident was", "resolved incidents were")} deleted.`;
+    }, "The resolved incidents could not be deleted."),
+    [api, data.scope, runOperation],
+  );
+
+  /* A row on this page is a SIGNATURE — several incident records sharing a
+     category, code and failing component. Deleting the row means deleting every
+     record behind it, which is why `sourceIds` exists and why the confirmation
+     names the count rather than saying "this incident". */
+  const deleteSignature = React.useCallback(
+    (incident: IncidentView) => runOperation(async () => {
+      const ids = incident.sourceIds.length > 0 ? incident.sourceIds : [incident.id];
+      const outcomes = await Promise.allSettled(
+        ids.map((id) => api.incidents.remove(id, data.scope)),
+      );
+      const failed = outcomes.filter((o) => o.status === "rejected").length;
+      if (failed === ids.length) {
+        const first = outcomes[0];
+        throw first?.status === "rejected" && first.reason instanceof Error
+          ? first.reason
+          : new Error("The incident could not be deleted.");
+      }
+      // A partial failure is reported as one, not silently rounded up to
+      // success: the row will still be on the page after the refetch and the
+      // reader needs to know why.
+      return failed === 0
+        ? `${plural(ids.length, "incident record was", "incident records were")} deleted.`
+        : `${ids.length - failed} of ${ids.length} incident records were deleted; ${failed} could not be.`;
+    }, "The incident could not be deleted."),
+    [api, data.scope, runOperation],
+  );
 
   const status = params.get("status") ?? "";
   const severity = params.get("severity") ?? "";
@@ -103,9 +176,14 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
         title="Incidents"
         description={`${totalRuns} failed runs across ${incidents.length} signatures. The signature is the problem; the runs are symptoms.`}
         actions={
-          <Button size="sm" variant="danger" onClick={() => setPurgeOpen(true)}>
-            Purge incidents
-          </Button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button size="sm" variant="secondary" onClick={() => setConfirming({ kind: "resolve-all" })}>
+              Resolve all
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setConfirming({ kind: "delete-resolved" })}>
+              Delete resolved
+            </Button>
+          </div>
         }
       />
 
@@ -157,26 +235,57 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
         </div>
       ) : (
         <ul className="grid gap-2">
-          {visible.map((incident) => <IncidentRow key={incident.id} incident={incident} />)}
+          {visible.map((incident) => (
+            <IncidentRow
+              key={incident.id}
+              incident={incident}
+              onDelete={() => setConfirming({ kind: "delete", incident })}
+            />
+          ))}
         </ul>
       )}
 
       <DestructiveConfirmDialog
-        open={purgeOpen}
-        onOpenChange={setPurgeOpen}
-        title="Purge incidents"
-        description="Every open incident in this workspace will be marked resolved. Incident records remain available for audit and can still be viewed with the resolved filter."
-        confirmLabel="Resolve all incidents"
-        pending={purging}
-        onConfirm={() => void purgeIncidents()}
+        open={confirming !== null}
+        onOpenChange={(open) => { if (!open) setConfirming(null); }}
+        title={
+          confirming?.kind === "resolve-all" ? "Resolve every open incident"
+            : confirming?.kind === "delete-resolved" ? "Delete every resolved incident"
+              : "Delete this incident"
+        }
+        description={
+          confirming?.kind === "resolve-all"
+            ? "Every open incident in this workspace is marked resolved. Nothing is deleted — the records stay available for audit under the resolved filter, and can be cleared afterwards with Delete resolved."
+            : confirming?.kind === "delete-resolved"
+              ? "Every incident already marked resolved is removed permanently. Open incidents are left alone: an incident that is still open is a live problem, and deleting it would destroy the record of an outage in progress."
+              : confirming?.kind === "delete"
+                ? `${confirming.incident.signature} — ${plural(confirming.incident.sourceIds.length || 1, "record", "records")} will be removed permanently. The runs that produced them are not affected.`
+                : ""
+        }
+        confirmLabel={
+          confirming?.kind === "resolve-all" ? "Resolve all incidents"
+            : confirming?.kind === "delete-resolved" ? "Delete resolved incidents"
+              : "Delete permanently"
+        }
+        pending={pending}
+        onConfirm={() => {
+          if (!confirming) return;
+          if (confirming.kind === "delete") void deleteSignature(confirming.incident);
+          else if (confirming.kind === "delete-resolved") void deleteResolved();
+          else void resolveAll();
+        }}
       />
     </PageContainer>
   );
 }
 
-function IncidentRow({ incident }: { incident: IncidentView }) {
+function IncidentRow({ incident, onDelete }: { incident: IncidentView; onDelete: () => void }) {
   return (
-    <li>
+    /* The delete control is a SIBLING of the link, not a child of it. Nesting an
+       interactive element inside an anchor is invalid, and it makes the button
+       navigate as well as fire — which on a destructive action is the worst
+       possible failure mode. */
+    <li className="relative">
       <Link
         href={`/incidents/${incident.id}` as Route}
         className={cn(
@@ -227,8 +336,30 @@ function IncidentRow({ incident }: { incident: IncidentView }) {
           </div>
 
           <Sparkline values={incident.sparkline} className="shrink-0" />
+          {/* Reserves the delete button's footprint so the sparkline is never
+              covered by it. */}
+          <span aria-hidden="true" className="w-7 shrink-0" />
         </div>
       </Link>
+
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete incident ${incident.signature}`}
+        title="Delete this incident"
+        className={cn(
+          "text-fg-disabled hover:text-status-failed absolute right-3 top-3 grid size-6 place-items-center rounded-xs",
+          "hover:bg-status-failed-subtle transition-colors duration-fast",
+          "outline-none focus-visible:focus-ring",
+        )}
+      >
+        <svg viewBox="0 0 12 12" className="size-3" aria-hidden="true" fill="none">
+          <path
+            d="M2.5 3.5h7M4.75 3.5V2.5h2.5v1M4.5 5.5v3M7.5 5.5v3M3.25 3.5l.4 5.6a.9.9 0 0 0 .9.9h2.9a.9.9 0 0 0 .9-.9l.4-5.6"
+            stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round"
+          />
+        </svg>
+      </button>
     </li>
   );
 }
