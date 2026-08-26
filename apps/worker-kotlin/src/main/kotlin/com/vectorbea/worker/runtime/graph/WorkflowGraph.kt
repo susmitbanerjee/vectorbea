@@ -87,13 +87,16 @@ data class WorkflowGraph(
 
         @Suppress("UNCHECKED_CAST")
         private fun convertNode(rf: RfNode): WorkflowNode {
-            // React Flow format: everything is inside `data`
-            val isReactFlow = rf.data.isNotEmpty()
             val data = rf.data
 
-            val label: String = if (isReactFlow) {
-                data["label"] as? String ?: rf.label
-            } else rf.label
+            /* No dialect flag. There used to be an `isReactFlow` derived from
+               `data.isNotEmpty()`, and branching on it is what silently emptied the
+               config of every node the current builder writes (see the note below).
+               Nothing here needs to know which builder wrote the node: the label is
+               either in `data.label` or at the top level, so take the first non-blank
+               of the two. */
+            val label: String =
+                (data["label"] as? String)?.takeIf { it.isNotBlank() } ?: rf.label
 
             // Helper: extract a nested config map from data by key, removing nulls
             fun configOf(key: String): Map<String, Any> =
@@ -107,61 +110,76 @@ data class WorkflowGraph(
                     .filterValues { it is String }
                     .mapValues { (_, v) -> v as String }
 
-            val config: Map<String, Any> = if (isReactFlow) {
-                when (rf.type) {
-                    "llm" -> {
-                        val cfg = configOf("llmConfig")
-                        // Convert LlmNodeConfig to the flat map LlmNodeExecutor expects.
-                        // Build messages list from systemPrompt + userPromptTemplate.
-                        val systemPrompt = cfg["systemPrompt"] as? String
-                        val userPrompt   = cfg["userPromptTemplate"] as? String
-                            ?: cfg["prompt"] as? String
-                        val messages     = buildLlmMessages(systemPrompt, userPrompt)
-                        cfg + mapOf("messages" to messages)
-                    }
-                    "http_tool" -> {
-                        // Frontend uses urlTemplate/bodyTemplate; HttpNodeExecutor reads url/body
-                        val cfg = configOf("httpToolConfig")
-                        val result = cfg.toMutableMap()
-                        (cfg["urlTemplate"] as? String)?.let { result["url"] = it }
-                        (cfg["bodyTemplate"] as? String)?.let { result["body"] = it }
-                        result
-                    }
-                    "db_read"   -> {
-                        // Frontend uses sqlTemplate; DbReadNodeExecutor reads query
-                        val cfg = configOf("dbReadConfig")
-                        val result = cfg.toMutableMap()
-                        (cfg["sqlTemplate"] as? String)?.let { result["query"] = it }
-                        result
-                    }
-                    "db_write"  -> {
-                        val cfg = configOf("dbWriteConfig")
-                        val result = cfg.toMutableMap()
-                        // Frontend uses sqlTemplate; DbWriteNodeExecutor reads statement
-                        (cfg["sqlTemplate"] as? String)?.let { result["statement"] = it }
-                        result
-                    }
-                    "tool"      -> configOf("toolConfig")
-                    "agent"     -> configOf("agentConfig")
-                    "transform" -> configOf("transformConfig")
-                    "branch"    -> configOf("branchConfig")
-                    "parallel"  -> configOf("parallelConfig")
-                    "join"      -> configOf("joinConfig")
-                    "trigger"   -> configOf("triggerConfig")
-                    "approval"  -> configOf("approvalConfig")
-                    "mcp_tool"  -> configOf("mcpToolConfig")
-                    "grpc_tool" -> configOf("grpcToolConfig")
-                    "graphql_tool" -> configOf("graphqlToolConfig")
-                    "webhook_wait" -> configOf("webhookWaitConfig")
-                    "timer"     -> configOf("timerConfig")
-                    "artifact"  -> configOf("artifactConfig")
-                    "checkpoint" -> configOf("checkpointConfig")
-                    "end"       -> configOf("endConfig")
-                    else        -> emptyMap()
-                }
-            } else {
-                // Internal format: config is already at top level
+            /*
+             * CONFIG IS MERGED FROM EVERY DIALECT, NEVER CHOSEN BETWEEN THEM.
+             *
+             * THE BUG THIS FIXES: this used to branch on `isReactFlow` - the mere
+             * presence of a non-empty `data` - and then read config ONLY from the
+             * type-specific `data.<type>Config` key, discarding the flat top-level
+             * `config` entirely.
+             *
+             * `src/lib/workflows/graph-codec.ts` writes the SUPERSET on purpose, and
+             * says so: flat `type`/`label`/`config` "for worker-kotlin's WorkflowNode"
+             * plus `position`/`data` for the canvas. But its `data` has no
+             * `agentConfig` - it carries `data.config` - so the branch matched the
+             * React Flow arm, looked for a key that was not there, and every node
+             * saved by that builder reached the executors with an EMPTY config.
+             *
+             * Agent nodes failed loudest ("missing required config: agentId") only
+             * because agentId is validated first. The same graph also silently
+             * stripped `toolId` from tool nodes, `connectionId` from llm nodes and the
+             * statement from db_write nodes.
+             *
+             * Merging is the only encoding-agnostic answer, and the three sources
+             * cannot conflict in practice: a graph written by one builder carries just
+             * one of them. Order is least-specific to most-specific, so where a legacy
+             * graph carries both a generic and a type-specific block, the block the
+             * type-specific inspector wrote still wins.
+             */
+            val flatConfig: Map<String, Any> =
                 rf.config.filterValues { it != null }.mapValues { (_, v) -> v!! }
+
+            val mergedConfig: Map<String, Any> =
+                dataLeafConfig(data) +                // Architect dialect: agentId/toolId on `data` itself
+                flatConfig +                          // internal dialect, and graph-codec's flat copy
+                configOf("config") +                  // graph-codec's canvas copy of the same map
+                configOf(dialectConfigKey(rf.type))   // legacy per-type inspector block
+
+            val config: Map<String, Any> = when (rf.type) {
+                "llm" -> {
+                    // Convert LlmNodeConfig to the flat map LlmNodeExecutor expects.
+                    // Build messages list from systemPrompt + userPromptTemplate.
+                    val systemPrompt = mergedConfig["systemPrompt"] as? String
+                    val userPrompt   = mergedConfig["userPromptTemplate"] as? String
+                        ?: mergedConfig["prompt"] as? String
+                    val messages     = buildLlmMessages(systemPrompt, userPrompt)
+                    // Only override when the prompts actually produced messages. A
+                    // config that already carries an explicit `messages` list - the
+                    // internal dialect, and what AgentNodeExecutor synthesises - must
+                    // keep it rather than be handed an empty one.
+                    if (messages.isNotEmpty()) mergedConfig + mapOf("messages" to messages)
+                    else mergedConfig
+                }
+                "http_tool" -> {
+                    // Frontend uses urlTemplate/bodyTemplate; HttpNodeExecutor reads url/body
+                    val result = mergedConfig.toMutableMap()
+                    (mergedConfig["urlTemplate"] as? String)?.let { result["url"] = it }
+                    (mergedConfig["bodyTemplate"] as? String)?.let { result["body"] = it }
+                    result
+                }
+                "db_read" -> {
+                    // Frontend uses sqlTemplate; DbReadNodeExecutor reads query
+                    val result = mergedConfig.toMutableMap()
+                    (mergedConfig["sqlTemplate"] as? String)?.let { result["query"] = it }
+                    result
+                }
+                "db_write" -> {
+                    // Frontend uses sqlTemplate; DbWriteNodeExecutor reads statement
+                    val result = mergedConfig.toMutableMap()
+                    (mergedConfig["sqlTemplate"] as? String)?.let { result["statement"] = it }
+                    result
+                }
+                else -> mergedConfig
             }
 
             // Input mapping resolution:
@@ -169,37 +187,24 @@ data class WorkflowGraph(
             //  2. data.toolConfig.inputMapping — tool-node inspector stores it here
             //  3. data.agentConfig.inputMapping — agent-node inspector
             //  4. rf.inputMapping — internal format fallback
-            val inputMapping: Map<String, String> = if (isReactFlow) {
-                mappingOf("inputMappingJson").ifEmpty {
-                    // Tool nodes: inspector writes to toolConfig.inputMapping
-                    @Suppress("UNCHECKED_CAST")
-                    (data["toolConfig"] as? Map<String, Any?>)
-                        ?.let { tc -> (tc["inputMapping"] as? Map<String, Any?>)
-                            ?.filterValues { it is String }
-                            ?.mapValues { (_, v) -> v as String } }
-                    // Agent nodes: inspector writes to agentConfig.inputMapping
-                        ?: (data["agentConfig"] as? Map<String, Any?>)
-                            ?.let { ac -> (ac["inputMapping"] as? Map<String, Any?>)
-                                ?.filterValues { it is String }
-                                ?.mapValues { (_, v) -> v as String } }
-                        ?: emptyMap()
-                }
-            } else rf.inputMapping
+            /* Same rule as config: take the first dialect that actually carries a
+               mapping, rather than deciding up front which dialect this graph is.
+               `mergedConfig` covers the flat and graph-codec forms, where the mapping
+               rides inside the node's own config, and the legacy per-type blocks
+               (toolConfig.inputMapping, agentConfig.inputMapping) are already folded
+               into it. */
+            val inputMapping: Map<String, String> =
+                mappingOf("inputMappingJson")
+                    .ifEmpty { rf.inputMapping }
+                    .ifEmpty { stringMap(mergedConfig["inputMapping"]) }
+                    // The Architect writes the plural spelling.
+                    .ifEmpty { stringMap(mergedConfig["inputMappings"]) }
 
-            val outputMapping: Map<String, String> = if (isReactFlow) {
-                mappingOf("outputMappingJson").ifEmpty {
-                    @Suppress("UNCHECKED_CAST")
-                    (data["toolConfig"] as? Map<String, Any?>)
-                        ?.let { tc -> (tc["outputMapping"] as? Map<String, Any?>)
-                            ?.filterValues { it is String }
-                            ?.mapValues { (_, v) -> v as String } }
-                        ?: (data["agentConfig"] as? Map<String, Any?>)
-                            ?.let { ac -> (ac["outputMapping"] as? Map<String, Any?>)
-                                ?.filterValues { it is String }
-                                ?.mapValues { (_, v) -> v as String } }
-                        ?: emptyMap()
-                }
-            } else rf.outputMapping
+            val outputMapping: Map<String, String> =
+                mappingOf("outputMappingJson")
+                    .ifEmpty { rf.outputMapping }
+                    .ifEmpty { stringMap(mergedConfig["outputMapping"]) }
+                    .ifEmpty { stringMap(mergedConfig["outputMappings"]) }
 
             return WorkflowNode(
                 id            = rf.id,
@@ -226,6 +231,78 @@ data class WorkflowGraph(
                 label     = label,
             )
         }
+
+        /**
+         * `data`'s own scalar entries, as a config source.
+         *
+         * `WorkflowArchitectService.compilePlanToGraphJson` is a THIRD dialect: it
+         * writes `agentId` and `toolId` directly onto `data`, alongside `label` and
+         * `nodeType`, with no wrapping block at all. So an Architect-generated
+         * workflow hit the same empty-config failure as the builder's, and would have
+         * kept hitting it after the builder was fixed.
+         *
+         * Structural canvas keys are excluded rather than merged: `label`/`nodeType`
+         * are read elsewhere, and the `*Config` / `*Json` blocks are nested maps with
+         * their own handling, so folding them in as config entries would put a map
+         * where an executor expects a value.
+         *
+         * Lowest priority in the merge. This source is the loosest of the three - it
+         * is whatever the canvas happened to put on the node - so anything a builder
+         * wrote deliberately into a config block outranks it.
+         */
+        private fun dataLeafConfig(data: Map<String, Any?>): Map<String, Any> =
+            data.filterKeys { key ->
+                key !in STRUCTURAL_DATA_KEYS &&
+                    !key.endsWith("Config") &&
+                    !key.endsWith("Json")
+            }
+                .filterValues { it != null }
+                .mapValues { (_, v) -> v!! }
+
+        /** Canvas metadata on `data` that is never node config. */
+        private val STRUCTURAL_DATA_KEYS = setOf(
+            "label", "name", "nodeType", "description", "position", "status",
+            "generatedByArchitect",
+        )
+
+        /**
+         * The `data` key a legacy per-type inspector wrote this node's config under.
+         *
+         * Only the React Flow builder ever used these; graph-codec writes
+         * `data.config` and the internal dialect writes a flat `config`. Returning a
+         * key that is simply absent for those graphs is correct - the merge skips it.
+         */
+        private fun dialectConfigKey(type: String): String = when (type) {
+            "llm" -> "llmConfig"
+            "http_tool" -> "httpToolConfig"
+            "db_read" -> "dbReadConfig"
+            "db_write" -> "dbWriteConfig"
+            "tool" -> "toolConfig"
+            "agent" -> "agentConfig"
+            "transform" -> "transformConfig"
+            "branch" -> "branchConfig"
+            "parallel" -> "parallelConfig"
+            "join" -> "joinConfig"
+            "trigger" -> "triggerConfig"
+            "approval" -> "approvalConfig"
+            "mcp_tool" -> "mcpToolConfig"
+            "grpc_tool" -> "grpcToolConfig"
+            "graphql_tool" -> "graphqlToolConfig"
+            "webhook_wait" -> "webhookWaitConfig"
+            "timer" -> "timerConfig"
+            "artifact" -> "artifactConfig"
+            "checkpoint" -> "checkpointConfig"
+            "end" -> "endConfig"
+            else -> type + "Config"
+        }
+
+        /** A nested `{key: string}` map, or empty when the value is not one. */
+        @Suppress("UNCHECKED_CAST")
+        private fun stringMap(value: Any?): Map<String, String> =
+            (value as? Map<String, Any?>)
+                ?.filterValues { it is String }
+                ?.mapValues { (_, v) -> v as String }
+                ?: emptyMap()
 
         private fun buildLlmMessages(systemPrompt: String?, userPrompt: String?): List<Map<String, Any>> {
             val messages = mutableListOf<Map<String, Any>>()
