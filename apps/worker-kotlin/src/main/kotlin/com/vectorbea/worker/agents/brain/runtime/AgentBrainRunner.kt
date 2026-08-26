@@ -121,6 +121,23 @@ class AgentBrainRunner(
         val estimatedCostCents: Double,
         val observations: List<AgentObservation>,
         /**
+         * Tool calls that failed, even when the agent went on to declare success.
+         *
+         * An agent can observe a tool failure and still return FINAL - the model
+         * decides it has enough to answer. The runtime then reported a clean
+         * `succeeded` run, which is how a workflow whose entire purpose was a database
+         * write finished green with nothing written, three separate times, each time
+         * with the real cause buried in one observation event mid-timeline.
+         *
+         * Kept so the step can carry it into its output and the run can say so. The
+         * status is deliberately NOT changed here: an agent that tried a tool, found it
+         * unavailable and produced a considered fallback is a legitimate success, and
+         * that judgement belongs to whoever designed the workflow. What is not
+         * legitimate is saying nothing.
+         */
+        val failedToolCalls: List<String> = emptyList(),
+
+        /**
          * WHAT actually went wrong, when something did.
          *
          * The stop reason alone is a category, not a diagnosis. A run that died
@@ -318,9 +335,22 @@ class AgentBrainRunner(
         // Persist memory entries
         memoryStore.persistAll(config, state)
 
+        val failedToolCalls = state.observations
+            .filter { it.actionType == "CALL_TOOL" && !it.success }
+            .map { it.sanitizedSummary }
+
         val finalStatus = if (state.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) "succeeded" else "failed"
-        emitEvent(config, RunEventStore.EventType.AGENT_COMPLETED, finalStatus,
-            "Agent finished — stopReason=${state.stopReason} iterations=${state.iteration}")
+
+        /* A "succeeded" that had failed tool calls is the case that has repeatedly
+           looked clean while nothing happened. Say it on the event the timeline leads
+           with, rather than leaving it to one observation further up. */
+        val toolNote = if (failedToolCalls.isNotEmpty())
+            " — ${failedToolCalls.size} tool call(s) FAILED: ${failedToolCalls.last().take(160)}"
+        else ""
+
+        emitEvent(config, RunEventStore.EventType.AGENT_COMPLETED,
+            if (finalStatus == "succeeded" && failedToolCalls.isNotEmpty()) "warning" else finalStatus,
+            "Agent finished — stopReason=${state.stopReason} iterations=${state.iteration}$toolNote")
 
         return RunResult(
             finalOutput        = state.finalOutput,
@@ -329,6 +359,7 @@ class AgentBrainRunner(
             tokensUsed         = budget.tokensUsed,
             estimatedCostCents = budget.estimatedCostCents,
             observations       = state.observations.toList(),
+            failedToolCalls    = failedToolCalls,
             /* No explicit reason recorded? The last unsuccessful observation is the
                next best evidence — for a loop that ran out of iterations while a
                tool kept failing, it is the actual answer. */

@@ -434,21 +434,58 @@ class ToolNodeExecutor(
             result.remove("params")
         }
 
-        // Resolve DB parameters for SQL that uses $1/$2 positional placeholders.
-        // Skip this block if the SQL used {{...}} inlining (params already removed above).
-        if (result["params"] != null || !result.containsKey("params")) {
-            val toolParameters = tool.configJson["parameters"] as? Map<*, *>
-            val sqlHasInlinedTemplates = (tool.configJson["sqlTemplate"] as? String)
-                ?.contains("{{") == true
-            if (!sqlHasInlinedTemplates) {
-                if (toolParameters != null && toolParameters.isNotEmpty()) {
-                    val paramList: List<Any?> = toolParameters.keys.map { key ->
-                        resolvedInputs[key?.toString()] ?: toolParameters[key]
-                    }
-                    result["params"] = paramList
-                } else if (resolvedInputs.isNotEmpty() && result["params"] == null) {
-                    result["params"] = resolvedInputs.values.toList()
+        /*
+         * ── Bind parameters, but only what the statement actually asks for ─────
+         *
+         * THE BUG THIS FIXES: this block used to end with
+         *
+         *     result["params"] = resolvedInputs.values.toList()
+         *
+         * for any SQL without `{{…}}` templates, with nothing checking whether the
+         * statement had placeholders to bind them to. `DbWriteNodeExecutor` then called
+         * `setObject(1, …)` on a statement with none and the driver answered
+         * "The column index is out of range: 1, number of columns: 0" - a description
+         * of the driver's predicament, not of the user's mistake, and the reason a
+         * perfectly ordinary tool could not be made to work by editing the SQL.
+         *
+         * A statement asking for nothing now gets nothing. The `?` count is the truth;
+         * `$1`-style SQL is rewritten into it, because this file's own comment has long
+         * described `$N` as the supported positional syntax while pgjdbc has only ever
+         * bound `?`.
+         *
+         * Note the guard this replaces read `result["params"] != null ||
+         * !result.containsKey("params")`, which is TRUE in both branches - the line
+         * above removes the key, so the "skip" the comment promised could never happen.
+         * Only the inner `sqlHasInlinedTemplates` check was doing the work.
+         */
+        val statementSql = result["statement"] as? String ?: result["query"] as? String
+        val templatesWereInlined = (tool.configJson["sqlTemplate"] as? String)?.contains("{{") == true
+
+        if (statementSql != null && !templatesWereInlined) {
+            // A `$1`-style statement binds nothing until it is rewritten.
+            val rewritten = SqlPlaceholders.rewriteDollarsToQuestionMarks(statementSql)
+            if (rewritten != null) {
+                result["statement"] = rewritten
+                result["query"]     = rewritten
+            }
+
+            val placeholders = SqlPlaceholders.analyse(rewritten ?: statementSql).questionMarks
+
+            if (placeholders == 0) {
+                // Nothing to bind. Supplying values here is what produced the driver's
+                // index error; a statement with no placeholders is complete as written.
+                result.remove("params")
+            } else {
+                val toolParameters = tool.configJson["parameters"] as? Map<*, *>
+                result["params"] = when {
+                    // A declared `parameters` map is an ordered contract.
+                    toolParameters != null && toolParameters.isNotEmpty() ->
+                        toolParameters.keys.map { key -> resolvedInputs[key?.toString()] ?: toolParameters[key] }
+                    // Otherwise fall back to the resolved inputs, in their own order.
+                    else -> resolvedInputs.values.toList()
                 }
+                // A count mismatch is checked where the binding happens, so the message
+                // can name both numbers rather than the driver's index.
             }
         }
 

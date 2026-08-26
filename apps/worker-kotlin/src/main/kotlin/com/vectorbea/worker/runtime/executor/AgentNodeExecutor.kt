@@ -423,6 +423,13 @@ class AgentNodeExecutor(
                         "_brainIterations"  to result.iterationsUsed,
                         "_brainTokens"      to result.tokensUsed,
                         "_brainStopReason"  to result.stopReason.name,
+                    ) + if (result.failedToolCalls.isEmpty()) emptyMap() else mapOf(
+                        /* The agent declared success having had tool calls fail. That is
+                           allowed - see RunResult.failedToolCalls - but it travels with
+                           the output so a downstream branch can test it and the run
+                           detail shows it, instead of the run simply reading green. */
+                        "_toolFailures"        to result.failedToolCalls.size,
+                        "_toolFailureMessages" to result.failedToolCalls.map { it.take(300) },
                     ),
                 )
             } else {

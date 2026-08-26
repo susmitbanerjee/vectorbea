@@ -162,6 +162,29 @@ class DbWriteNodeExecutor(
             else       -> listOf(p)
         }
 
+        /*
+         * The statement and the parameters have to agree BEFORE the driver is asked.
+         *
+         * Binding into a statement with no placeholders produced
+         * "The column index is out of range: 1, number of columns: 0", which names
+         * neither the statement nor the count and sent three rounds of debugging at
+         * the connection, the tool and the SQL in turn. Checking here costs one scan
+         * and lets the failure say what is actually wrong and what to write instead.
+         */
+        val placeholders = SqlPlaceholders.analyse(rawStatement).questionMarks
+        if (params.size != placeholders) {
+            val hint = if (placeholders == 0) {
+                "The statement has no bind placeholders, so it takes no parameters. " +
+                    "Use {{name}} templating to inline a value, or add ? placeholders to bind one."
+            } else {
+                "Supply exactly $placeholders value(s), in the order the ? placeholders appear."
+            }
+            return NodeResult.Failed(
+                "DB_WRITE node '${node.id}': the statement has $placeholders bind placeholder(s) " +
+                    "but ${params.size} parameter(s) were supplied. $hint"
+            )
+        }
+
         val timeoutSecs = (cfg["timeoutSeconds"] as? Number)?.toInt() ?: DEFAULT_TIMEOUT_SECS
 
         // ── Get pool and execute ──────────────────────────────────────────────
