@@ -56,6 +56,8 @@ RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/nu
 # exact path declared in settings.gradle.kts before Gradle evaluates it.
 # cache-bust: v3
 COPY apps/api-kotlin/src ./src
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/crypto /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/crypto
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract
 COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
 RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info --stacktrace 2>&1
