@@ -546,20 +546,36 @@ class AgentBrainRunner(
     private fun persistIterationStart(config: AgentBrainConfig, state: AgentLoopState): UUID {
         val id = UUID.randomUUID()
         if (dataSource == null) return id
-        try {
+        return try {
             dataSource.connection.use { conn ->
                 conn.prepareStatement(
-                    "INSERT INTO agent_iterations (id,workspace_id,environment_id,run_id,step_id,agent_id,iteration_number,status) VALUES(?,?,?,?,?,?,?,'running')"
+                    """INSERT INTO agent_iterations
+                       (id,workspace_id,environment_id,run_id,step_id,agent_id,iteration_number,status)
+                       VALUES(?,?,?,?,?,?,?,'running')
+                       ON CONFLICT (run_id,step_id,iteration_number) DO UPDATE SET
+                         status='running',
+                         action_type=NULL,
+                         thought_summary_sanitized=NULL,
+                         observation_summary_sanitized=NULL,
+                         tokens_used=0,
+                         estimated_cost_cents=0,
+                         started_at=now(),
+                         completed_at=NULL
+                       RETURNING id"""
                 ).use { stmt ->
                     stmt.setObject(1, id); stmt.setObject(2, config.workspaceId)
                     stmt.setObject(3, config.environmentId); stmt.setObject(4, config.runId)
                     stmt.setString(5, config.stepId); stmt.setObject(6, config.agentId)
                     stmt.setInt(7, state.iteration)
-                    stmt.executeUpdate()
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) rs.getObject("id", UUID::class.java) else id
+                    }
                 }
             }
-        } catch (e: Exception) { log.warn("[brain] persist iteration start failed: {}", e.message) }
-        return id
+        } catch (e: Exception) {
+            log.warn("[brain] persist iteration start failed: {}", e.message)
+            id
+        }
     }
 
     private fun persistIterationComplete(

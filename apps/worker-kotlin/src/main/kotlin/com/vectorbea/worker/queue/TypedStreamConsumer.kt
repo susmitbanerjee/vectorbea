@@ -351,15 +351,22 @@ class TypedStreamConsumer(
             val messages = claimed?.messages ?: return
             if (messages.isEmpty()) return
 
+            // A long-running agent can exceed pendingIdleMs while it is still
+            // healthy. XAUTOCLAIM also returns messages already owned by this
+            // consumer, so do not submit a second copy of work that is active
+            // in this JVM. Messages from dead/other consumers remain eligible.
+            val reclaimable = messages.filterNot { it.id in unackedMessageIds }
+            if (reclaimable.isEmpty()) return
+
             // Only take back what we can actually start; the rest stay pending
             // and are reclaimed on a later sweep.
             val room = router.availableCapacity(jobType)
             if (room <= 0) return
 
-            WorkerMetrics.pelReclaimed.inc(delta = messages.size.toLong())
-            WorkerMetrics.xautoclaimReclaimTotal.inc(delta = messages.size.toLong())
-            log.info("[queue:{}] reclaimed {} pending message(s) from idle workers", streamKey, messages.size)
-            messages.take(room).forEach { handleIncoming(it) }
+            WorkerMetrics.pelReclaimed.inc(delta = reclaimable.size.toLong())
+            WorkerMetrics.xautoclaimReclaimTotal.inc(delta = reclaimable.size.toLong())
+            log.info("[queue:{}] reclaimed {} pending message(s) from idle workers", streamKey, reclaimable.size)
+            reclaimable.take(room).forEach { handleIncoming(it) }
         } catch (e: Exception) {
             if (e.message?.contains("unknown command", ignoreCase = true) == true) {
                 log.debug("[queue:{}] XAUTOCLAIM not available (Redis < 6.2)", streamKey)
