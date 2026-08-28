@@ -67,7 +67,13 @@ SAFETY RULES:
 
         val observationsSection = if (state.observations.isNotEmpty()) {
             val obs = state.observations.takeLast(10).joinToString("\n") { o ->
-                "- Iter ${o.iterationNumber} [${o.actionType}${if (o.toolId != null) " tool=${o.toolId}" else ""}]: ${o.sanitizedSummary}"
+                val head = "- Iter ${o.iterationNumber} [${o.actionType}${if (o.toolId != null) " tool=${o.toolId}" else ""}]: ${o.sanitizedSummary}"
+                /* The result itself, not just the fact that there was one. Without this
+                   line the model is told a tool call succeeded and told the NAMES of the
+                   fields it returned, and is then expected to answer from data it has
+                   never been shown. It cannot, and it says so — after spending its whole
+                   iteration budget discovering it. */
+                if (o.payload != null) "$head\n  RESULT: ${o.payload}" else head
             }
             "\n\nPREVIOUS OBSERVATIONS:\n$obs"
         } else ""

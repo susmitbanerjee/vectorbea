@@ -35,4 +35,19 @@ data class AgentObservation(
     val sanitizedSummary: String,
     val success: Boolean = true,
     val tokensUsed: Int = 0,
+    /**
+     * WHAT THE TOOL ACTUALLY RETURNED, for the model to read on the next iteration.
+     *
+     * [sanitizedSummary] is a description OF a result ("Tool returned 3 field(s):
+     * status, body, headers") and it is what the timeline and the iteration record
+     * show. For a while it was also the only thing fed back into the prompt, which
+     * meant an agent could call a tool, be told the call succeeded and be told the
+     * names of the fields it returned — and never see a single value. Agents ran
+     * their whole iteration budget and then reported the data was missing, which it
+     * was: the runtime had fetched it and thrown it away.
+     *
+     * Sanitized and length-capped like the summary, and null for actions that
+     * produce no payload (THINK) and for calls that returned nothing.
+     */
+    val payload: String? = null,
 )

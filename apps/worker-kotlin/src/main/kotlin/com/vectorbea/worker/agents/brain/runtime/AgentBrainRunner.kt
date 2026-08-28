@@ -48,6 +48,17 @@ class AgentBrainRunner(
     private val mapper = jacksonObjectMapper()
 
     internal companion object {
+        /**
+         * How much of a tool result is handed back to the model, per observation.
+         *
+         * Every observation shown in the prompt carries one of these, so the ceiling on
+         * added context is this times the ten observations the prompt keeps — a few
+         * thousand tokens at worst, against a token budget the guard already enforces.
+         * Large enough for the row sets and API responses these tools actually return;
+         * small enough that one enormous response cannot eat the whole budget.
+         */
+        internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
+
         /** The `:tool-<n>` attempt counter in a synthetic tool node's id. */
         private val ATTEMPT_SUFFIX = Regex(":tool-\\d+")
 
@@ -540,7 +551,8 @@ class AgentBrainRunner(
             when (val execResult = executor.execute(syntheticNode, inputs, runtimeCtx)) {
                 is NodeResult.Completed -> {
                     val summary = buildToolObservationSummary(toolId, execResult.output)
-                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), summary, true)
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), summary, true,
+                        payload = renderToolPayload(execResult.output))
                 }
 
                 is NodeResult.Failed -> {
@@ -572,10 +584,32 @@ class AgentBrainRunner(
         }
     }
 
+    /**
+     * The one-line description of a tool result, for the timeline and the iteration
+     * record. Deliberately still just shape — the values travel in the observation's
+     * [AgentObservation.payload] instead of here, so that putting the data back in
+     * front of the model does not also write a copy of every tool result into
+     * `run_events` and inflate the run's history budget.
+     */
     private fun buildToolObservationSummary(toolId: UUID, result: Map<String, Any?>): String {
         val size = result.size
         val keys = result.keys.take(5).joinToString()
         return "Tool returned $size field(s): $keys"
+    }
+
+    /**
+     * The tool's result as JSON, sanitized and capped, for the next prompt.
+     *
+     * Serializing the whole output map rather than picking fields out of it is
+     * deliberate: tools here are HTTP calls, SQL queries and SaaS actions with no
+     * common result shape, and any guess about which field "the data" lives in would
+     * be wrong for some tool and would fail silently — which is the failure this
+     * whole function exists to end.
+     */
+    private fun renderToolPayload(result: Map<String, Any?>): String? {
+        if (result.isEmpty()) return null
+        val json = try { mapper.writeValueAsString(result) } catch (_: Exception) { result.toString() }
+        return safetyGuard.sanitizeToolOutput(json, MAX_TOOL_PAYLOAD_CHARS).takeIf { it.isNotBlank() }
     }
 
     // ── Schema validation ─────────────────────────────────────────────────────
