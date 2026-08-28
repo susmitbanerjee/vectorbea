@@ -214,6 +214,7 @@ class AgentBrainRunner(
                         "Invalid action: ${e.message}")
                     persistIterationComplete(iterationId, "failed", action, null, budget)
                     state.stopReason = AgentLoopState.StopReason.ERROR
+                    failureReason = "The agent produced an action the runtime could not execute: ${e.message}"
                     break
                 } catch (e: ToolNotAllowedException) {
                     log.warn("[brain] tool not allowed toolId={}: {}", e.toolId, e.message)
@@ -221,6 +222,7 @@ class AgentBrainRunner(
                         "Tool ${e.toolId} not allowed")
                     persistIterationComplete(iterationId, "failed", action, null, budget)
                     state.stopReason = AgentLoopState.StopReason.TOOL_NOT_ALLOWED
+                    failureReason = "The agent tried to call tool ${e.toolId}, which is not in its allowed tool list."
                     break
                 }
 
@@ -299,6 +301,8 @@ class AgentBrainRunner(
                                 "Final output failed schema validation")
                             persistIterationComplete(iterationId, "failed", action, "Schema invalid", budget)
                             state.stopReason = AgentLoopState.StopReason.SCHEMA_INVALID
+                            failureReason = "The agent's final output did not match the required output " +
+                                "schema. It returned: ${action.finalOutput.keys.take(8).joinToString().ifBlank { "no fields" }}"
                         }
                     }
 
@@ -311,9 +315,25 @@ class AgentBrainRunner(
 
                     AgentAction.ActionType.FAIL -> {
                         state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
-                        val reason = safetyGuard.sanitizeReasoningSummary(action.failReason) ?: sanitizedReason
+                        /* `sanitizeReasoningSummary` returns "" for a null or blank input, never
+                           null, so the elvis that used to stand here could not fire: an agent that
+                           chose FAIL without filling in `failReason` produced an empty reason, and
+                           the empty reason then travelled all the way to the run detail screen.
+                           Fall back through the fields the model actually filled in. */
+                        val reason = safetyGuard.sanitizeReasoningSummary(action.failReason)
+                            .ifBlank { sanitizedReason }
+                        /* THE AGENT SAID WHY. RECORD IT.
+                           This is the one stop reason where the cause is stated outright, and it
+                           was the one that lost it: `failureReason` stayed null, so RunResult fell
+                           through to its observation fallback, found nothing failed (the agent had
+                           only THOUGHT before giving up), and AgentNodeExecutor reported
+                           "did not produce a final output (stopReason=AGENT_FAILED)" — the model's
+                           own explanation discarded one frame above the screen that needed it. */
+                        failureReason = if (reason.isNotBlank())
+                            "The agent stopped and reported: $reason"
+                        else null
                         emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
-                            "Agent reported failure: $reason")
+                            "Agent reported failure: ${reason.ifBlank { "no reason given" }}")
                         persistIterationComplete(iterationId, "failed", action, reason, budget)
                     }
                 }
@@ -362,10 +382,40 @@ class AgentBrainRunner(
             failedToolCalls    = failedToolCalls,
             /* No explicit reason recorded? The last unsuccessful observation is the
                next best evidence — for a loop that ran out of iterations while a
-               tool kept failing, it is the actual answer. */
-            failureReason      = failureReason
-                ?: state.observations.lastOrNull { !it.success }?.sanitizedSummary,
+               tool kept failing, it is the actual answer. Failing that, name the stop
+               reason in words: every path out of this loop that is not FINAL_OUTPUT
+               now carries SOMETHING a person can read, because the alternative is the
+               caller printing "did not produce a final output" and the run detail
+               screen leading with a sentence that identifies nothing. */
+            failureReason      = if (state.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) null
+                                 else failureReason
+                                     ?: state.observations.lastOrNull { !it.success }?.sanitizedSummary
+                                     ?: describeStop(state.stopReason, config),
         )
+    }
+
+    /**
+     * A readable sentence for a stop reason, used only when nothing more specific was
+     * recorded. A stop reason is a category — "AGENT_FAILED", "MAX_ITERATIONS" — and a
+     * category shown on its own tells whoever opened the run nothing about their run.
+     */
+    private fun describeStop(reason: AgentLoopState.StopReason?, config: AgentBrainConfig): String = when (reason) {
+        AgentLoopState.StopReason.MAX_ITERATIONS ->
+            "The agent used all ${config.maxIterations} of its iterations without producing a final output. " +
+            "Raise the iteration limit or narrow the task."
+        AgentLoopState.StopReason.BUDGET_EXCEEDED ->
+            "The agent ran out of its token, cost or tool-call budget before finishing."
+        AgentLoopState.StopReason.AGENT_FAILED ->
+            "The agent reported it could not complete the task but gave no reason."
+        AgentLoopState.StopReason.APPROVAL_REQUESTED ->
+            "The agent asked for human approval before it could continue."
+        AgentLoopState.StopReason.TOOL_NOT_ALLOWED ->
+            "The agent tried to call a tool that is not in its allowed tool list."
+        AgentLoopState.StopReason.SCHEMA_INVALID ->
+            "The agent's final output did not match the required output schema."
+        AgentLoopState.StopReason.ERROR, null ->
+            "The agent stopped with an error that was not recorded."
+        AgentLoopState.StopReason.FINAL_OUTPUT -> ""
     }
 
     // ── LLM calling ──────────────────────────────────────────────────────────

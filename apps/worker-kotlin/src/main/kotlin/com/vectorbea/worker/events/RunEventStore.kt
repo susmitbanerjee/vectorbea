@@ -14,9 +14,10 @@ import javax.sql.DataSource
  * Thread-safety: all public methods are synchronised on the DataSource and
  * Lettuce connection (both thread-safe by design).
  *
- * Sequence: obtained atomically via `SELECT COALESCE(MAX(sequence),0)+1 …`
- * inside the same transaction as the INSERT, preventing duplicates under
- * concurrent workers.
+ * Sequence: assigned under a `FOR UPDATE` lock on the run's `agent_runs` row,
+ * held for the same transaction as the INSERT. The in-memory lock below only
+ * covers writers inside THIS process; the row lock is what makes the assignment
+ * safe against the API, which appends to the same run from another process.
  *
  * SECURITY: [RunEvent.metadataJsonSanitized] and [RunEvent.errorJsonSanitized]
  * must already be sanitized by the caller — this class stores them as-is.
@@ -269,6 +270,31 @@ open class RunEventStore(
         return dataSource.connection.use { conn ->
             conn.autoCommit = false
             try {
+                /*
+                 * ── SERIALIZE THE SEQUENCE ACROSS PROCESSES, NOT JUST THREADS ──
+                 *
+                 * `runLocks` orders event writers within this worker, and it is the
+                 * right tool for that (see [insertEvent]). It says nothing about the
+                 * API, which appends to `run_events` for the same run from a different
+                 * JVM — a cancel, an approval decision, a manual replay. Both sides ran
+                 * `SELECT MAX(sequence)+1` under READ COMMITTED, so both could read the
+                 * same MAX and both insert the same number: one won and the other took
+                 * a 23505 that the retry below papered over, at the cost of a warning
+                 * per cancelled run and an extra round trip.
+                 *
+                 * Where the constraint is absent — after V028 the partitioned table
+                 * carries only a plain index on (run_id, sequence) — nothing trips at
+                 * all and the duplicate is simply written, which breaks the
+                 * `?afterSequence=` cursor the run timeline pages on: two events share a
+                 * number and one of them is never delivered to the open stream.
+                 *
+                 * The row lock removes the race rather than detecting it. It costs
+                 * nothing extra to hold: the UPDATE below already locks this same row
+                 * for the rest of the transaction, so this only takes that lock sooner.
+                 * Both writers take it in the same order and touch no other row, so
+                 * there is no cycle to deadlock on.
+                 */
+                lockRun(conn, event.runId)
                 val seq = nextSequence(conn, event.runId)
                 conn.prepareStatement(INSERT_SQL).use { stmt ->
                     bindInsert(stmt, event, seq)
@@ -313,6 +339,21 @@ open class RunEventStore(
         size += event.metadataJsonSanitized?.length ?: 0
         size += event.errorJsonSanitized?.length ?: 0
         return size.coerceAtLeast(100)
+    }
+
+    /**
+     * Take the run's `agent_runs` row lock, so sequence assignment for this run is
+     * serialized cluster-wide.
+     *
+     * A missing row (a run deleted mid-flight) locks nothing and is not an error here:
+     * the event still gets written on a best-effort basis, exactly as before, and the
+     * unique-violation retry in [insertEvent] remains the backstop for that case.
+     */
+    private fun lockRun(conn: java.sql.Connection, runId: UUID) {
+        conn.prepareStatement("SELECT 1 FROM agent_runs WHERE id = ? FOR UPDATE").use { stmt ->
+            stmt.setObject(1, runId)
+            stmt.executeQuery().use { /* the lock is the point; the row is not read */ }
+        }
     }
 
     private fun nextSequence(conn: java.sql.Connection, runId: UUID): Int {
