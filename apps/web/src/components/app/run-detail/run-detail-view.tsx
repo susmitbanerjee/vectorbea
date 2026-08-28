@@ -108,15 +108,16 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
 
   return (
     <ReplayProvider run={run} events={data.events} detail={data.detail}>
-      <RunDetailBody run={run} frozen={frozen} incident={data.incident} />
+      <RunDetailBody run={run} frozen={frozen} incident={data.incident} onCancel={data.cancel} />
     </ReplayProvider>
   );
 }
 
-function RunDetailBody({ run, frozen, incident }: {
+function RunDetailBody({ run, frozen, incident, onCancel }: {
   run: Run;
   frozen: boolean;
   incident: contracts.FailureIncident | null;
+  onCancel: () => Promise<void>;
 }) {
   const { select, detail } = useReplay();
   const diagnosis = React.useMemo(
@@ -132,6 +133,20 @@ function RunDetailBody({ run, frozen, incident }: {
   const [rightWidth, setRightWidth] = React.useState(300);
   const [leftOpen, setLeftOpen] = React.useState(true);
   const [rightOpen, setRightOpen] = React.useState(true);
+  const [cancelling, setCancelling] = React.useState(false);
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
+
+  const cancelRun = React.useCallback(async () => {
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await onCancel();
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : "The cancellation request failed.");
+    } finally {
+      setCancelling(false);
+    }
+  }, [onCancel]);
 
   const drag = (
     axis: "x" | "y",
@@ -159,6 +174,9 @@ function RunDetailBody({ run, frozen, incident }: {
       <RunHeader
         run={run}
         retryCostUsd={diagnosis?.retryCostUsd ?? null}
+        onCancel={() => void cancelRun()}
+        cancelling={cancelling}
+        cancelError={cancelError}
         onCompare={() => setComparing((c) => !c)}
         comparing={comparing}
       />

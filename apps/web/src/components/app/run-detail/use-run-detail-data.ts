@@ -46,6 +46,7 @@ export interface RunDetailData {
   notFound: boolean;
   error: VectorbeaApiError | null;
   refetch: () => Promise<void>;
+  cancel: () => Promise<void>;
   scope: { workspaceId: string | null; environmentId: string | null };
 }
 
@@ -115,6 +116,13 @@ export function useRunDetailData(runId: string): RunDetailData {
   }, [live, runId]);
 
   const error = (run.error ?? null) as VectorbeaApiError | null;
+  const refetch = React.useCallback(async () => {
+    await Promise.all([run.refetch(), events.refetch()]);
+  }, [run, events]);
+  const cancel = React.useCallback(async () => {
+    await api.runs.cancel(runId, scope);
+    await refetch();
+  }, [api, runId, scope, refetch]);
 
   return {
     run: uiRun,
@@ -126,9 +134,8 @@ export function useRunDetailData(runId: string): RunDetailData {
     // API is unreachable" need different words and different remedies.
     notFound: error?.status === 404,
     error: error?.status === 404 ? null : error,
-    refetch: async () => {
-      await Promise.all([run.refetch(), events.refetch()]);
-    },
+    refetch,
+    cancel,
     scope,
   };
 }

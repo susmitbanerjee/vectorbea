@@ -56,11 +56,16 @@ const ENV_STYLE: Record<Run["environment"], string> = {
 export interface RunHeaderProps {
   run: Run;
   retryCostUsd: number | null;
+  onCancel: () => void;
+  cancelling: boolean;
+  cancelError: string | null;
   onCompare: () => void;
   comparing: boolean;
 }
 
-export function RunHeader({ run, retryCostUsd, onCompare, comparing }: RunHeaderProps) {
+export function RunHeader({
+  run, retryCostUsd, onCancel, cancelling, cancelError, onCompare, comparing,
+}: RunHeaderProps) {
   const { setScrub, select, focusIndex, scrubbing } = useReplay();
   const recovered = run.nodes.filter((n) => n.state === "recovered").length;
   const retries = run.nodes.reduce((sum, n) => sum + ((n.attempt ?? 1) - 1), 0);
@@ -128,7 +133,15 @@ export function RunHeader({ run, retryCostUsd, onCompare, comparing }: RunHeader
             </Button>
           ) : null}
           {run.status === "running" || run.status === "queued" ? (
-            <Button size="sm" variant="danger">Cancel</Button>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={onCancel}
+              loading={cancelling}
+              loadingLabel="Cancelling run"
+            >
+              Cancel
+            </Button>
           ) : null}
           <Button size="sm" variant="secondary">Retry from start</Button>
           <Button size="sm" variant={comparing ? "subtle" : "secondary"} onClick={onCompare} aria-pressed={comparing}>
@@ -143,6 +156,11 @@ export function RunHeader({ run, retryCostUsd, onCompare, comparing }: RunHeader
           <Button size="sm" variant="ghost" iconOnly aria-label="Copy link to this run">
             <ShareGlyph />
           </Button>
+          {cancelError ? (
+            <Text variant="caption" tone="inherit" className="text-status-failed" role="alert">
+              {cancelError}
+            </Text>
+          ) : null}
         </div>
       </div>
 
