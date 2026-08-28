@@ -7,7 +7,10 @@ import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.runtime.checkpoint.ApprovalDecision
+import com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
+import com.vectorbea.worker.runtime.checkpoint.decideOnApproval
 import com.vectorbea.worker.runtime.graph.RuntimeContext
 import com.vectorbea.worker.runtime.graph.WorkflowNode
 import java.util.UUID
@@ -51,6 +54,7 @@ class ToolNodeExecutor(
     private val dbReadExecutor  by lazy { DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore) }
     private val dbWriteExecutor by lazy { DbWriteNodeExecutor(connectionResolver, dbPoolManager,
         ApprovalStore(dataSource), eventStore) }
+    private val approvalStore by lazy { ApprovalStore(dataSource) }
 
     override suspend fun execute(
         node: WorkflowNode,
@@ -75,6 +79,28 @@ class ToolNodeExecutor(
         // Load tool definition — workspace-scoped
         val tool = loadTool(toolId, ctx.workspaceId)
             ?: return NodeResult.Failed("Tool '$toolIdStr' not found or not accessible for node '${node.id}'")
+
+        /*
+         * ── THE TOOL'S OWN requires_approval, ENFORCED FOR EVERY TOOL TYPE ───
+         *
+         * `requires_approval` was read from the tools table, copied into the synthetic
+         * config as `requireApproval`, and then honoured by exactly one executor:
+         * DbWriteNodeExecutor. Every other type ignored it. HttpNodeExecutor contains
+         * no approval handling at all, and `slack`, `email` and `crm` are stored as
+         * HTTP tools — so a tool flagged as needing approval fired its request,
+         * completed, and no approval was ever created for anyone to decide. The flag
+         * was on in the UI and off in the runtime.
+         *
+         * Gating here, at the boundary every tool type passes through, is the only
+         * place that covers them all. DB writes now meet a gate twice: this one opens
+         * it, and DbWriteNodeExecutor's finds the same row APPROVED under the same
+         * (runId, nodeId) key and proceeds — they compose rather than conflict.
+         *
+         * Before TOOL_CALL_STARTED deliberately: a call held at a gate has not started.
+         */
+        if (tool.requiresApproval) {
+            approvalGate(node, tool, resolvedInputs, ctx)?.let { return it }
+        }
 
         emitEvent(ctx, node.id, EventType.TOOL_CALL_STARTED, "running",
             title   = "Tool call started: ${tool.name}",
@@ -127,12 +153,91 @@ class ToolNodeExecutor(
         }
 
         val durationMs = System.currentTimeMillis() - startMs
-        val eventStatus = if (result is NodeResult.Completed) "success" else "failed"
+        /*
+         * A call held at an approval gate has not failed — it has not run yet.
+         *
+         * Everything that was not Completed was reported as `failed`, so a tool
+         * correctly waiting for a human showed up on the timeline as a red
+         * TOOL_CALL_COMPLETED status=failed. That is the "the tool call somehow
+         * returns an error" that sends people looking at the tool, the connection and
+         * the SQL, when nothing is wrong with any of them.
+         */
+        val eventStatus = when (result) {
+            is NodeResult.Completed       -> "success"
+            is NodeResult.ApprovalPaused  -> "waiting_for_approval"
+            is NodeResult.Throttled       -> "throttled"
+            else                          -> "failed"
+        }
+        val eventTitle = when (result) {
+            is NodeResult.Completed      -> "Tool call completed: ${tool.name}"
+            is NodeResult.ApprovalPaused -> "Tool call waiting for approval: ${tool.name}"
+            is NodeResult.Throttled      -> "Tool call rate limited: ${tool.name}"
+            else                         -> "Tool call failed: ${tool.name}"
+        }
         emitEvent(ctx, node.id, EventType.TOOL_CALL_COMPLETED, eventStatus,
-            title      = "Tool call ${if (result is NodeResult.Completed) "completed" else "failed"}: ${tool.name}",
+            title      = eventTitle,
             durationMs = durationMs)
 
         return result
+    }
+
+    /**
+     * The tool's approval gate: null to proceed, otherwise the result to return.
+     *
+     * Keyed on (runId, node.id) — the same key DbWriteNodeExecutor uses, and the key
+     * the resumed run looks the decision up by. For an agent's tool call `node.id` is
+     * the stable `<stepId>:tool:<toolId>`, so approving once is enough however many
+     * times the step re-executes.
+     */
+    private fun approvalGate(
+        node: WorkflowNode,
+        tool: ToolRow,
+        resolvedInputs: Map<String, Any>,
+        ctx: RuntimeContext,
+    ): NodeResult? {
+        val existing = runCatching { approvalStore.findApproval(ctx.runId, node.id) }
+            .getOrElse { e ->
+                log.error("[tool] approval lookup failed [nodeId={}]: {}", node.id, e.message)
+                /* Fail closed. A tool marked as needing approval must not run because the
+                   lookup broke — that is precisely the case where running it is worst. */
+                return NodeResult.Failed(
+                    "Tool '${tool.name}' requires approval and the approval could not be " +
+                    "checked: ${e.message?.take(200)}", retryable = false)
+            }
+
+        if (existing != null) {
+            /* The shared rule — see decideOnApproval in ApprovalStore.kt. The agent's own
+               gate reads the same row through the same function. */
+            return when (decideOnApproval(existing.status)) {
+                ApprovalDecision.GRANT  -> null
+                ApprovalDecision.REJECT -> NodeResult.Failed(
+                    "Tool '${tool.name}' was not approved" +
+                    (existing.resolvedBy?.let { " (decided by $it)" } ?: "") + ".",
+                    retryable = false)
+                ApprovalDecision.WAIT -> NodeResult.ApprovalPaused(
+                    approvalId = existing.id.toString(),
+                    message    = existing.message ?: "Waiting for approval to run '${tool.name}'")
+            }
+        }
+
+        // Nothing on file: open the gate.
+        val message = "Tool '${tool.name}' requires approval before it runs."
+        return NodeResult.ApprovalPaused(
+            approvalId = approvalStore.createPendingApproval(
+                runId          = ctx.runId,
+                workspaceId    = ctx.workspaceId,
+                environmentId  = ctx.environmentId,
+                nodeId         = node.id,
+                message        = message,
+                approvers      = emptyList(),
+                resolvedInputs = resolvedInputs,
+                gate = ApprovalGateConfig(
+                    title     = "Tool approval: ${tool.name}",
+                    riskLevel = tool.riskLevel ?: "medium",
+                ),
+            ),
+            message = message,
+        )
     }
 
     // ── Body string resolver ──────────────────────────────────────────────────

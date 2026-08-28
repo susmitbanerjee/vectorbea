@@ -68,27 +68,12 @@ class AgentBrainRunner(
         internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
 
         /**
-         * What an approval row's status means for the loop.
+         * The `:tool-<n>` counter that synthetic tool node ids used to carry.
          *
-         * Pulled out because it is the part that is easy to get quietly wrong and
-         * impossible to see going wrong: the API writes APPROVED / REJECTED (via
-         * `UPPER(?)`) and SENT_BACK, an EXPIRED gate must stop the run rather than open
-         * a second one, SENT_BACK is not a decision so it keeps waiting, and ANYTHING
-         * unrecognised has to mean WAIT. Never OPEN — an
-         * unknown status that fell through to "create a new approval" would open a
-         * fresh gate on every resume, and a run that re-asks forever looks exactly like
-         * a run nobody has got round to approving.
-         *
-         * On the companion because it depends on no instance state, so it can be
-         * exercised without a database.
+         * Kept, though ids are now keyed on the tool and carry no counter, because a
+         * run that started before this change can still be resumed against the old
+         * ids, and normalising a suffix that is no longer there costs nothing.
          */
-        internal fun decideOnApproval(status: String?): Decision = when (status?.trim()?.uppercase()) {
-            "APPROVED" -> Decision.GRANT
-            "REJECTED", "EXPIRED", "CANCELLED" -> Decision.REJECT
-            else -> Decision.WAIT
-        }
-
-        /** The `:tool-<n>` attempt counter in a synthetic tool node's id. */
         private val ATTEMPT_SUFFIX = Regex(":tool-\\d+")
 
         /**
@@ -254,12 +239,16 @@ class AgentBrainRunner(
             recalled.forEach { (key, value) -> state.addRecalledMemory(key, value) }
             log.info("[brain] resumed with {} memory entrie(s) runId={} step={}",
                 recalled.size, config.runId, config.stepId)
-            emitEvent(config, RunEventStore.EventType.AGENT_STARTED, "running",
-                "Agent resumed — recalled ${recalled.size} entrie(s) from earlier in this run")
         }
 
+        /* ONE start event. Emitting a second one to announce the recall made the
+           timeline show the agent starting twice, which reads as the step running
+           twice — the exact confusion this whole area keeps producing. */
         emitEvent(config, RunEventStore.EventType.AGENT_STARTED, "running",
-            "Agent brain started — task: ${(config.taskInstruction ?: "").take(100)}")
+            "Agent brain started — task: ${(config.taskInstruction ?: "").take(100)}" +
+                if (recalled.isNotEmpty())
+                    " (resumed — recalled ${recalled.size} entrie(s) from earlier in this run)"
+                else "")
 
         /* Carries the cause out of the loop and into RunResult. See RunResult.failureReason. */
         var failureReason: String? = null
@@ -355,20 +344,39 @@ class AgentBrainRunner(
                         /* The observation BEFORE this call, so a repeat can be spotted. */
                         val previous = state.observations.lastOrNull()
 
-                        val obs = executeTool(action, config, runtimeCtx, state)
+                        val outcome = executeTool(action, config, runtimeCtx, state)
+                        val obs = outcome.observation
                         state.addObservation(obs)
-                        /* The payload, not only the shape. Memory is what survives into
-                           the next execution of this step, so storing "Tool returned 2
-                           field(s)" here means a resumed agent knows it made the call and
-                           still has to make it again to see the answer. */
-                        state.addMemory(
-                            "obs_${state.iteration}_${action.toolId}",
-                            obs.payload?.let { "${obs.sanitizedSummary} RESULT: $it" }
-                                ?: obs.sanitizedSummary,
-                        )
+                        /* Not remembered when the call is only waiting on a gate: "waiting
+                           for approval" is true for the next few seconds, and recalling it
+                           on the resumed execution would tell the agent the tool is blocked
+                           at the exact moment it has been unblocked. */
+                        if (outcome.pause == null) {
+                            /* The payload, not only the shape. Memory is what survives into
+                               the next execution of this step, so storing "Tool returned 2
+                               field(s)" here means a resumed agent knows it made the call and
+                               still has to make it again to see the answer. */
+                            state.addMemory(
+                                "obs_${state.iteration}_${action.toolId}",
+                                obs.payload?.let { "${obs.sanitizedSummary} RESULT: $it" }
+                                    ?: obs.sanitizedSummary,
+                            )
+                        }
                         emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED, "running",
                             obs.sanitizedSummary)
                         persistIterationComplete(iterationId, "completed", action, obs.sanitizedSummary, budget)
+
+                        /* The tool needs a person. Park the whole step on that decision
+                           rather than letting the agent reason around a locked door. */
+                        if (outcome.pause != null) {
+                            state.stopReason = AgentLoopState.StopReason.APPROVAL_REQUESTED
+                            retryable       = false
+                            approvalId      = outcome.pause.approvalId
+                            approvalMessage = outcome.pause.message
+                            emitEvent(config, RunEventStore.EventType.AGENT_APPROVAL_REQUESTED,
+                                "waiting_for_approval",
+                                "Tool call needs approval before it can run: ${outcome.pause.message}")
+                        }
 
                         /*
                          * STOP WHEN THE SAME CALL FAILS THE SAME WAY TWICE.
@@ -390,7 +398,12 @@ class AgentBrainRunner(
                          * what was wrong with the call rather than that the agent
                          * ran out of turns.
                          */
-                        if (!obs.success && previous != null && !previous.success &&
+                        /* `outcome.pause == null` first: a paused call is an unsuccessful
+                           observation twice over if the agent already tried it, and without
+                           this the repeat check would overwrite APPROVAL_REQUESTED with
+                           ERROR and turn a waiting run back into a failed one. */
+                        if (outcome.pause == null &&
+                            !obs.success && previous != null && !previous.success &&
                             previous.actionType == "CALL_TOOL" &&
                             previous.toolId == obs.toolId &&
                             failureSignature(previous.sanitizedSummary) == failureSignature(obs.sanitizedSummary)
@@ -595,9 +608,6 @@ class AgentBrainRunner(
         )
     }
 
-    /** What an existing approval row means for the loop. */
-    internal enum class Decision { GRANT, REJECT, WAIT }
-
     /** What the approval gate says about this step, right now. */
     private sealed class ApprovalGate {
         data class Granted(val by: String?) : ApprovalGate()
@@ -640,11 +650,16 @@ class AgentBrainRunner(
                     ),
                     message = message,
                 )
-                else -> when (decideOnApproval(existing.status)) {
-                    Decision.GRANT  -> ApprovalGate.Granted(existing.resolvedBy)
-                    Decision.REJECT -> ApprovalGate.Rejected(existing.resolvedBy)
-                    Decision.WAIT   -> ApprovalGate.Pending(
-                        existing.id.toString(), existing.message ?: message)
+                /* The shared rule — see decideOnApproval in ApprovalStore.kt. The tool
+                   gate reads the same row through the same function, so the two cannot
+                   disagree about whether this run is approved. */
+                else -> when (com.vectorbea.worker.runtime.checkpoint.decideOnApproval(existing.status)) {
+                    com.vectorbea.worker.runtime.checkpoint.ApprovalDecision.GRANT ->
+                        ApprovalGate.Granted(existing.resolvedBy)
+                    com.vectorbea.worker.runtime.checkpoint.ApprovalDecision.REJECT ->
+                        ApprovalGate.Rejected(existing.resolvedBy)
+                    com.vectorbea.worker.runtime.checkpoint.ApprovalDecision.WAIT ->
+                        ApprovalGate.Pending(existing.id.toString(), existing.message ?: message)
                 }
             }
         } catch (e: Exception) {
@@ -768,27 +783,60 @@ class AgentBrainRunner(
 
     // ── Tool execution ────────────────────────────────────────────────────────
 
+    /**
+     * What a tool call produced: always an observation, plus the gate it is waiting on
+     * when the tool needs a human before it may run.
+     */
+    private data class ToolOutcome(
+        val observation: AgentObservation,
+        val pause: NodeResult.ApprovalPaused? = null,
+    )
+
     private suspend fun executeTool(
         action: AgentAction,
         config: AgentBrainConfig,
         runtimeCtx: RuntimeContext,
         state: AgentLoopState,
-    ): AgentObservation {
+    ): ToolOutcome {
         val toolId = try { UUID.fromString(action.toolId!!) }
         catch (_: Exception) {
-            return AgentObservation(state.iteration, "CALL_TOOL", action.toolId, "Invalid tool ID format", false)
+            return ToolOutcome(AgentObservation(
+                state.iteration, "CALL_TOOL", action.toolId, "Invalid tool ID format", false))
         }
 
         val executor = toolExecutor
-            ?: return AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                "Tool execution is not available on this worker", false)
+            ?: return ToolOutcome(AgentObservation(
+                state.iteration, "CALL_TOOL", toolId.toString(),
+                "Tool execution is not available on this worker", false))
 
         return try {
             /* A `tool` node, not an `http` one. ToolNodeExecutor owns the lookup,
                the type dispatch and the config remapping, so the agent path and the
                workflow path cannot disagree about what calling a tool means. */
+            /*
+             * ── THE ID IS AN APPROVAL KEY, SO IT MUST NOT MOVE ───────────────
+             *
+             * This was `<stepId>:tool-<iteration>`. Any gate the tool opens —
+             * DbWriteNodeExecutor's, today — files its approval row against this id,
+             * and `findApproval(runId, nodeId)` is how the resumed run finds the
+             * decision again.
+             *
+             * The agent step re-executes from iteration 1 on resume, so the same tool
+             * call lands on a DIFFERENT iteration number and therefore a different id.
+             * The approved row was filed under `:tool-4`; the resumed run looked up
+             * `:tool-2`, found nothing, and opened ANOTHER pending approval. Approving
+             * that one produced a third. The run could never get past the gate, and it
+             * died on "Cannot proceed due to tool approval requirement and iteration
+             * limit reached" with a pile of pending approvals behind it.
+             *
+             * Keyed on the tool instead: stable across iterations, across resumes and
+             * across re-executions of the step. The trade is one approval per (step,
+             * tool) — a second call to the SAME tool in the same step reuses the first
+             * decision — which is the bargain the agent's own gate already makes, and
+             * the only key available that survives re-execution.
+             */
             val syntheticNode = WorkflowNode(
-                id     = "${config.stepId}:tool-${state.iteration}",
+                id     = "${config.stepId}:tool:${toolId}",
                 type   = "tool",
                 config = mapOf("toolId" to toolId.toString()),
             )
@@ -798,38 +846,53 @@ class AgentBrainRunner(
                 .filterValues { it != null } as Map<String, Any>
 
             when (val execResult = executor.execute(syntheticNode, inputs, runtimeCtx)) {
-                is NodeResult.Completed -> {
-                    val summary = buildToolObservationSummary(toolId, execResult.output)
-                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), summary, true,
-                        payload = renderToolPayload(execResult.output))
-                }
+                is NodeResult.Completed -> ToolOutcome(
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                        buildToolObservationSummary(toolId, execResult.output), true,
+                        payload = renderToolPayload(execResult.output)))
 
                 is NodeResult.Failed -> {
                     val errSummary = "Tool $toolId failed: ${execResult.reason.take(200)}"
                     log.warn("[brain] tool execution failed toolId={}: {}", toolId, execResult.reason)
-                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false)
+                    ToolOutcome(AgentObservation(
+                        state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false))
                 }
 
-                /* A tool that needs a human is not a tool the agent may retry its
-                   way around, and it is not an error either. Reporting it as an
-                   unsuccessful observation stops the loop from looping on it while
-                   leaving the pending approval to be resolved out of band. */
-                is NodeResult.ApprovalPaused ->
+                /*
+                 * ── A TOOL WAITING ON A PERSON MUST STOP THE RUN ─────────────
+                 *
+                 * This used to become one unsuccessful observation and the loop carried
+                 * on. Nothing paused. The gate had already written a PENDING row, so an
+                 * approval appeared on the Approvals screen for a run that was still
+                 * executing, and the agent — told only "requires human approval" —
+                 * reasoned around it until it ran out of iterations and reported
+                 * "Cannot proceed due to tool approval requirement and iteration limit
+                 * reached". Approving the row did nothing, because nothing was waiting
+                 * for it.
+                 *
+                 * The pause travels out of the loop now, exactly as ASK_APPROVAL's does,
+                 * and the step returns NodeResult.ApprovalPaused so the runtime parks the
+                 * run against that row. On resume the tool is called again, its gate
+                 * finds the decision under the same key, and the write goes through.
+                 */
+                is NodeResult.ApprovalPaused -> ToolOutcome(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                        "Tool $toolId requires human approval before it can run", false)
+                        "Tool $toolId is waiting for approval before it can run", false),
+                    pause = execResult)
 
-                is NodeResult.Throttled ->
+                is NodeResult.Throttled -> ToolOutcome(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                        "Tool $toolId was rate limited by ${execResult.provider}", false)
+                        "Tool $toolId was rate limited by ${execResult.provider}", false))
 
-                is NodeResult.Unsupported ->
+                is NodeResult.Unsupported -> ToolOutcome(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                        "Tool $toolId has a type this worker cannot execute", false)
+                        "Tool $toolId has a type this worker cannot execute", false))
             }
         } catch (e: Exception) {
             val errSummary = "Tool $toolId failed: ${e.message?.take(200)}"
             log.warn("[brain] tool execution failed: {}", errSummary)
-            AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false)
+            ToolOutcome(AgentObservation(
+                state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false))
         }
     }
 

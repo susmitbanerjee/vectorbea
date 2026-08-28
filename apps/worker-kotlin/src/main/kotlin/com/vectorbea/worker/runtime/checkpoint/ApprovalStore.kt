@@ -20,6 +20,29 @@ data class ApprovalRow(
     val resolvedBy: String?,
 )
 
+/** What an existing approval row means for the caller waiting on it. */
+enum class ApprovalDecision { GRANT, REJECT, WAIT }
+
+/**
+ * What an approval row's status means.
+ *
+ * Lives beside [ApprovalRow] because it is a fact about the row, and because it has
+ * two callers that must not disagree: the agent brain's own ASK_APPROVAL gate and the
+ * tool gate in `ToolNodeExecutor`. Two copies of this rule drifting apart would mean a
+ * run that the agent considers approved and the tool considers pending.
+ *
+ * The API writes APPROVED / REJECTED (via `UPPER(?)`) and SENT_BACK. EXPIRED stops the
+ * run rather than opening a second gate. SENT_BACK is not a decision, so it waits. And
+ * ANYTHING unrecognised must WAIT — never "open a new gate", which on a step that
+ * re-executes would file a fresh approval on every resume, and a run that re-asks
+ * forever looks exactly like one nobody has got round to approving.
+ */
+fun decideOnApproval(status: String?): ApprovalDecision = when (status?.trim()?.uppercase()) {
+    "APPROVED" -> ApprovalDecision.GRANT
+    "REJECTED", "EXPIRED", "CANCELLED" -> ApprovalDecision.REJECT
+    else -> ApprovalDecision.WAIT
+}
+
 /**
  * The gate as the canvas configured it.
  *
