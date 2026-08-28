@@ -14,6 +14,7 @@ import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Checkbox } from "~/components/ui/choice";
+import { Select } from "~/components/ui/select";
 import { OptionCards } from "~/components/ui/option-card";
 import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
 import {
@@ -28,7 +29,8 @@ import { useScope } from "~/lib/workspace/workspace-provider";
 import type { ConnectionTestResult } from "~/lib/api/client";
 import {
   INTEGRATION_SEEDS, INTEGRATION_CATEGORY_LABEL, AUTH_LABEL,
-  type IntegrationCategory, type AuthMethod,
+  POOLING_LABEL, hostingFor, hostingEntry, detectHosting, detectPoolingMode,
+  type IntegrationCategory, type AuthMethod, type DbHostingOption, type PoolingMode,
 } from "~/content/integrations";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -106,30 +108,76 @@ function apiAuthTypeFor(method: AuthMethod): string {
   }
 }
 
-/** Canonical API bases, so a SaaS connection can be probed without asking for a URL. */
-const PROVIDER_ENDPOINTS: Partial<Record<ProviderId, { baseUrl: string; healthPath?: string }>> = {
-  slack: { baseUrl: "https://slack.com/api", healthPath: "/auth.test" },
-  gmail: { baseUrl: "https://gmail.googleapis.com", healthPath: "/gmail/v1/users/me/profile" },
-  hubspot: { baseUrl: "https://api.hubapi.com", healthPath: "/account-info/v3/details" },
-  github: { baseUrl: "https://api.github.com", healthPath: "/user" },
-  notion: { baseUrl: "https://api.notion.com/v1", healthPath: "/users/me" },
-  airtable: { baseUrl: "https://api.airtable.com/v0/meta", healthPath: "/bases" },
+/**
+ * Canonical API bases, so a SaaS connection can be probed without asking for a URL.
+ *
+ * NOTE THE ABSENCE OF HEALTH PATHS. They used to live here too, and drifted from
+ * the server's copy: this file sent GitHub `/user` while `ConnectionTester` used
+ * `/rate_limit`, and a GitHub App installation token is refused by one and
+ * accepted by the other. So the same credential could fail in this wizard and
+ * pass on the connection page. `SaasEndpoints` in ConnectionTester.kt now owns
+ * the probe outright — including the header Notion requires and the auth scheme
+ * Atlassian mandates, neither of which a client has any business deciding. What
+ * is left here is only what this screen needs in order to SHOW the user where
+ * their credential is going.
+ */
+const PROVIDER_ENDPOINTS: Partial<Record<ProviderId, { baseUrl: string }>> = {
+  slack: { baseUrl: "https://slack.com/api" },
+  gmail: { baseUrl: "https://gmail.googleapis.com" },
+  hubspot: { baseUrl: "https://api.hubapi.com" },
+  github: { baseUrl: "https://api.github.com" },
+  notion: { baseUrl: "https://api.notion.com" },
+  airtable: { baseUrl: "https://api.airtable.com" },
   jira: { baseUrl: "https://api.atlassian.com" },
-  "google-sheets": { baseUrl: "https://sheets.googleapis.com/v4" },
+  "google-sheets": { baseUrl: "https://sheets.googleapis.com" },
 };
 
-/** What the credential field is called, and what a valid one looks like. */
-function secretHint(integration: CatalogueEntry, method: AuthMethod): { label: string; placeholder: string; help: string } {
+/**
+ * Providers whose API lives on the CUSTOMER'S OWN host rather than a shared one.
+ *
+ * An Atlassian or Zendesk API token is worthless without the site it belongs to,
+ * and the probe has nowhere to send it. OAuth tokens do not need this — Atlassian
+ * will list the sites a token can reach — so it is asked for only when it is
+ * actually required.
+ */
+const PER_TENANT_HOST: Partial<Record<ProviderId, { label: string; placeholder: string; help: string }>> = {
+  jira: {
+    label: "Your Atlassian site",
+    placeholder: "https://your-team.atlassian.net",
+    help: "An API token is only valid against the site that issued it. Atlassian also requires the account email — put it in the name field's account, or use OAuth to skip both.",
+  },
+};
+
+/** The wire protocol a database catalogue entry speaks. */
+function wireFor(id: ProviderId): "postgres" | "mysql" {
+  return id === "mysql" ? "mysql" : "postgres";
+}
+
+/**
+ * What the credential field is called, and what a valid one looks like.
+ *
+ * The placeholder is the hosting product's own, because a generic
+ * `host:5432/database` is exactly the shape people get wrong: Aiven's port is
+ * never 3306, Supabase's pooler username is `postgres.<ref>`, and Neon's pooled
+ * endpoint carries a `-pooler` suffix. Showing the real shape is cheaper than
+ * explaining the failure afterwards.
+ */
+function secretHint(
+  integration: CatalogueEntry,
+  method: AuthMethod,
+  hosting?: DbHostingOption | null,
+): { label: string; placeholder: string; help: string } {
   if (method === "connection-string") {
-    const isPostgres = integration.id === "postgres";
+    const wire = wireFor(integration.id);
     return {
       label: "Connection string",
-      placeholder: isPostgres
-        ? "postgresql://user:password@host:5432/database"
-        : "mysql://user:password@host:3306/database",
-      help: isPostgres
-        ? "Supabase, Neon, RDS, Timescale and Cockroach all speak this. If you are on Supabase, use the connection-pooling URL — the direct db.<ref>.supabase.co host has no IPv4 address and cannot be reached from here."
-        : "PlanetScale, RDS and Aurora all speak this.",
+      placeholder: hosting?.placeholder
+        ?? (wire === "postgres"
+          ? "postgresql://user:password@host:5432/database"
+          : "mysql://user:password@host:3306/database"),
+      help: hosting?.whereToFind
+        ? `Find it under ${hosting.whereToFind}. It is encrypted at rest and never shown again.`
+        : "Encrypted at rest and never shown again.",
     };
   }
   if (method === "oauth") {
@@ -200,6 +248,19 @@ function CreateConnectionDialogBody({
   const [endpoint, setEndpoint] = React.useState("");
   const [readOnly, setReadOnly] = React.useState(true);
 
+  /* Where the database lives and how it is reached.
+     `hostingTouched` / `poolingTouched` are what stop the detector from
+     fighting the user: a pasted URL seeds both, and the moment somebody picks a
+     value by hand, editing the URL stops overwriting it. Without that, choosing
+     "session pooler" and then fixing a typo in the string silently reverted the
+     choice — and the difference between session and transaction pooling is
+     whether prepared statements work four runs later. */
+  const [hostingId, setHostingId] = React.useState<string | null>(null);
+  const [hostingTouched, setHostingTouched] = React.useState(false);
+  const [pooling, setPooling] = React.useState<PoolingMode | null>(null);
+  const [poolingTouched, setPoolingTouched] = React.useState(false);
+  const [detectedFromUrl, setDetectedFromUrl] = React.useState<string | null>(null);
+
   const [verifying, setVerifying] = React.useState(false);
   const [result, setResult] = React.useState<ConnectionTestResult | null>(null);
   const [verifyError, setVerifyError] = React.useState<string | null>(null);
@@ -221,17 +282,71 @@ function CreateConnectionDialogBody({
     setEndpoint(PROVIDER_ENDPOINTS[integration.id]?.baseUrl ?? "");
     setResult(null);
     setVerifyError(null);
+    // The hosting list is per wire protocol, so a Postgres choice is meaningless
+    // once the provider is MySQL. Default to the generic entry rather than null:
+    // "self-hosted" is a real answer, and an empty picker reads like a required
+    // field nobody explained.
+    const generic = hostingFor(wireFor(integration.id))[0] ?? null;
+    setHostingId(generic?.id ?? null);
+    setHostingTouched(false);
+    setPooling(generic?.modes[0] ?? null);
+    setPoolingTouched(false);
+    setDetectedFromUrl(null);
   }, [integration]);
+
+  const isDatabase = integration ? apiTypeFor(integration.id) === "database" : false;
+  const hosting = React.useMemo(() => hostingEntry(hostingId) ?? null, [hostingId]);
+  const hostingOptions = React.useMemo(
+    () => (integration && isDatabase ? hostingFor(wireFor(integration.id)) : []),
+    [integration, isDatabase],
+  );
+
+  /* READ THE URL RATHER THAN ASK ABOUT IT.
+     A pasted connection string already names the vendor and, on several
+     products, the pooling mode — port 6543 IS Supavisor's transaction mode.
+     Making somebody answer a question their own clipboard just answered is how
+     a three-field form becomes a five-field one for no gain. Detection only
+     seeds untouched fields; see the state declarations above. */
+  React.useEffect(() => {
+    if (!integration || !isDatabase || method !== "connection-string") return;
+    const trimmed = secret.trim();
+    if (!trimmed.includes("://")) return;
+
+    const wire = wireFor(integration.id);
+    const detected = detectHosting(trimmed, wire);
+    if (detected && !hostingTouched) setHostingId(detected.id);
+
+    const target = hostingTouched ? hosting : (detected ?? hosting);
+    const mode = detectPoolingMode(trimmed, target);
+    if (mode && !poolingTouched) setPooling(mode);
+
+    setDetectedFromUrl(
+      detected ? `${detected.label}${mode ? ` · ${POOLING_LABEL[mode]}` : ""}` : null,
+    );
+    // `hosting` is derived from hostingId and would re-run this on its own write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secret, integration, isDatabase, method, hostingTouched, poolingTouched]);
+
+  /* A mode that the newly-chosen product does not offer is not a mode. */
+  React.useEffect(() => {
+    if (!hosting) return;
+    setPooling((current) => (current && hosting.modes.includes(current) ? current : hosting.modes[0]));
+  }, [hosting]);
 
   const trimmedName = name.trim();
   const needsSecret = method !== "none";
-  const needsEndpoint = integration ? (integration.id === "http" || integration.id === "webhook") : false;
+  const tenantHost = integration && method === "api-key" ? PER_TENANT_HOST[integration.id] ?? null : null;
+  const needsEndpoint = integration
+    ? integration.id === "http" || integration.id === "webhook" || tenantHost !== null
+    : false;
 
   const stepErrors: (string | null)[] = [
     !integration ? "Pick what you are connecting to." : null,
     !trimmedName ? "Give the connection a name — workflows bind to it by name."
-      : needsSecret && !secret.trim() ? `Paste the ${secretHint(integration!, method).label.toLowerCase()}.`
-        : needsEndpoint && !endpoint.trim() ? "Enter the base URL Vectorbea should call."
+      : needsSecret && !secret.trim() ? `Paste the ${secretHint(integration!, method, hosting).label.toLowerCase()}.`
+        : needsEndpoint && !endpoint.trim()
+          ? tenantHost ? `Enter ${tenantHost.label.toLowerCase()} — an API token is only valid against the site that issued it.`
+            : "Enter the base URL Vectorbea should call."
           : null,
     null,
   ];
@@ -245,22 +360,36 @@ function CreateConnectionDialogBody({
     if (!integration) return null;
     const known = PROVIDER_ENDPOINTS[integration.id];
     const baseUrl = needsEndpoint ? endpoint.trim() : known?.baseUrl;
-    const isDatabase = apiTypeFor(integration.id) === "database";
+    // Health paths and vendor headers are the server's, not ours. See the note
+    // on PROVIDER_ENDPOINTS.
     return {
       type: apiTypeFor(integration.id),
       provider: apiProviderFor(integration.id),
       authType: apiAuthTypeFor(method),
       config: {
         ...(baseUrl ? { baseUrl } : {}),
-        ...(known?.healthPath ? { healthPath: known.healthPath } : {}),
-        // sslRequired is not a UI preference — every managed Postgres and MySQL
-        // in the catalogue mandates TLS, and offering to turn it off would only
-        // ever be used to work around a certificate problem by disabling the
-        // check that found it.
-        ...(isDatabase ? { connectionMode: "connection_string", sslRequired: true, readOnly } : {}),
+        ...(isDatabase
+          ? {
+              // `connectionMode` says how the CREDENTIAL WAS ENTERED, and the
+              // worker keys its whole connection-string path off this exact
+              // value. `poolingMode` is the separate axis — how the database is
+              // REACHED. Two names because they are two questions; overloading
+              // one key is how "connection_string" would have started meaning a
+              // pooling choice.
+              connectionMode: "connection_string",
+              poolingMode: pooling ?? "direct",
+              dbHosting: hosting?.id ?? undefined,
+              // sslRequired is not a UI preference — every managed Postgres and
+              // MySQL in the catalogue mandates TLS, and offering to turn it off
+              // would only ever be used to work around a certificate problem by
+              // disabling the check that found it.
+              sslRequired: true,
+              readOnly,
+            }
+          : {}),
       } as Record<string, unknown>,
     };
-  }, [integration, method, endpoint, needsEndpoint, readOnly]);
+  }, [integration, method, endpoint, needsEndpoint, readOnly, isDatabase, pooling, hosting]);
 
   async function verify() {
     if (!payload) return;
@@ -370,8 +499,24 @@ function CreateConnectionDialogBody({
               endpoint={endpoint}
               onEndpoint={(next) => { setEndpoint(next); setResult(null); }}
               needsEndpoint={needsEndpoint}
+              tenantHost={tenantHost}
               readOnly={readOnly}
               onReadOnly={setReadOnly}
+              isDatabase={isDatabase}
+              hosting={hosting}
+              hostingOptions={hostingOptions}
+              onHosting={(id) => {
+                setHostingId(id);
+                setHostingTouched(true);
+                setResult(null);
+              }}
+              pooling={pooling}
+              onPooling={(mode) => {
+                setPooling(mode);
+                setPoolingTouched(true);
+                setResult(null);
+              }}
+              detectedFromUrl={detectedFromUrl}
             />
           ) : null}
 
@@ -382,6 +527,14 @@ function CreateConnectionDialogBody({
                   <SummaryRow label="Provider" onEdit={() => setStep(0)}>{integration.name}</SummaryRow>
                   <SummaryRow label="Name" onEdit={() => setStep(1)}>{trimmedName}</SummaryRow>
                   <SummaryRow label="Method" onEdit={() => setStep(1)}>{AUTH_LABEL[method]}</SummaryRow>
+                  {isDatabase && hosting ? (
+                    <>
+                      <SummaryRow label="Hosting" onEdit={() => setStep(1)}>{hosting.label}</SummaryRow>
+                      <SummaryRow label="Connection mode" onEdit={() => setStep(1)}>
+                        {pooling ? POOLING_LABEL[pooling] : "Direct connection"}
+                      </SummaryRow>
+                    </>
+                  ) : null}
                   {payload?.config.baseUrl ? (
                     <SummaryRow label="Endpoint" mono onEdit={() => setStep(1)}>
                       {String(payload.config.baseUrl)}
@@ -577,7 +730,8 @@ function ProviderStep({
 
 function CredentialStep({
   integration, method, onMethod, name, onName, secret, onSecret,
-  endpoint, onEndpoint, needsEndpoint, readOnly, onReadOnly,
+  endpoint, onEndpoint, needsEndpoint, tenantHost, readOnly, onReadOnly,
+  isDatabase, hosting, hostingOptions, onHosting, pooling, onPooling, detectedFromUrl,
 }: {
   integration: CatalogueEntry;
   method: AuthMethod;
@@ -589,11 +743,18 @@ function CredentialStep({
   endpoint: string;
   onEndpoint: (value: string) => void;
   needsEndpoint: boolean;
+  tenantHost: { label: string; placeholder: string; help: string } | null;
   readOnly: boolean;
   onReadOnly: (value: boolean) => void;
+  isDatabase: boolean;
+  hosting: DbHostingOption | null;
+  hostingOptions: DbHostingOption[];
+  onHosting: (id: string) => void;
+  pooling: PoolingMode | null;
+  onPooling: (mode: PoolingMode) => void;
+  detectedFromUrl: string | null;
 }) {
-  const hint = secretHint(integration, method);
-  const isDatabase = apiTypeFor(integration.id) === "database";
+  const hint = secretHint(integration, method, hosting);
 
   return (
     <div className="grid gap-4">
@@ -622,17 +783,76 @@ function CredentialStep({
       <ModalDivider />
 
       {needsEndpoint ? (
-        <ModalSection title="Endpoint" description="The HTTPS base URL Vectorbea will call.">
-          <Field label="Base URL" required>
+        <ModalSection
+          title={tenantHost ? tenantHost.label : "Endpoint"}
+          description={tenantHost ? tenantHost.help : "The HTTPS base URL Vectorbea will call."}
+        >
+          <Field label={tenantHost ? tenantHost.label : "Base URL"} required>
             <Input
               type="url"
               value={endpoint}
               onChange={(event) => onEndpoint(event.target.value)}
-              placeholder="https://api.example.com"
+              placeholder={tenantHost ? tenantHost.placeholder : "https://api.example.com"}
               className="font-code text-mono-sm"
             />
           </Field>
         </ModalSection>
+      ) : null}
+
+      {isDatabase && hostingOptions.length > 0 ? (
+        <>
+          <ModalSection
+            title="Where it is hosted"
+            description="Decides the port, the username shape and whether TLS is mandatory. Vectorbea reads this off the connection string when it can."
+          >
+            <Field label="Hosting">
+              <Select
+                value={hosting?.id ?? hostingOptions[0].id}
+                onValueChange={onHosting}
+                options={hostingOptions.map((entry) => ({
+                  value: entry.id,
+                  label: entry.label,
+                  description: entry.whereToFind,
+                }))}
+              />
+            </Field>
+            {detectedFromUrl ? (
+              <Text variant="caption" tone="muted" className="flex items-center gap-1.5">
+                <Icon icon={CheckCircle} size="sm" decorative className="text-status-success" />
+                Detected {detectedFromUrl} from the connection string.
+              </Text>
+            ) : null}
+            {hosting?.caution ? <ModalNote tone="warning" title="Before you test">{hosting.caution}</ModalNote> : null}
+          </ModalSection>
+
+          <ModalDivider />
+
+          <ModalSection
+            title="Connection mode"
+            description="How the database is reached. This is not a preference — a transaction pooler cannot carry a server-side prepared statement, so picking the wrong one fails on the fifth run rather than the first."
+          >
+            {hosting && hosting.modes.length > 1 ? (
+              <OptionCards
+                label="Connection mode"
+                columns={1}
+                density="compact"
+                value={pooling}
+                onValueChange={(value) => onPooling(value as PoolingMode)}
+                options={hosting.modes.map((mode) => ({
+                  value: mode,
+                  label: POOLING_LABEL[mode],
+                  description: hosting.modeNotes[mode],
+                }))}
+              />
+            ) : hosting ? (
+              <ModalNote title={POOLING_LABEL[hosting.modes[0]]}>
+                {hosting.modeNotes[hosting.modes[0]] ?? "This product offers one way in, so there is nothing to choose."}
+              </ModalNote>
+            ) : null}
+          </ModalSection>
+
+          <ModalDivider />
+        </>
       ) : null}
 
       {method === "none" ? (

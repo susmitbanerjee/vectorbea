@@ -1,5 +1,8 @@
 package com.vectorbea.worker.connector.pool
 
+import com.vectorbea.dbcatalog.ConnectionMode
+import com.vectorbea.dbcatalog.DbProviders
+import com.vectorbea.dbcatalog.DbWire
 import com.vectorbea.worker.config.OutboundTimeouts
 import com.vectorbea.worker.connector.ConnectionRecord
 import com.vectorbea.worker.connector.SecretValue
@@ -111,7 +114,9 @@ open class ClientDbPoolManager(
             // Force driver-level timeouts even when the tenant supplied the whole
             // URL — a connection string carrying `socketTimeout=0` would otherwise
             // opt this tenant out of the only bound that protects the others.
-            val guardedUrl = JdbcTimeouts.applyTo(parsed.jdbcUrl, record.provider, timeouts)
+            val guardedUrl = JdbcTimeouts.applyTo(
+                withDriverParams(parsed.jdbcUrl, record), record.provider, timeouts,
+            )
             return try {
                 val hk = HikariConfig().apply {
                     this.jdbcUrl = guardedUrl
@@ -140,7 +145,9 @@ open class ClientDbPoolManager(
         }
 
         // ── Host/port mode ────────────────────────────────────────────────────
-        val jdbcUrl = JdbcTimeouts.applyTo(buildJdbcUrl(record), record.provider, timeouts)
+        val jdbcUrl = JdbcTimeouts.applyTo(
+            withDriverParams(buildJdbcUrl(record), record), record.provider, timeouts,
+        )
         val username = cfg["username"] as? String ?: ""
 
         return try {
@@ -215,7 +222,7 @@ open class ClientDbPoolManager(
         )
     }
 
-    private fun buildJdbcUrl(record: ConnectionRecord): String {
+    internal fun buildJdbcUrl(record: ConnectionRecord): String {
         val cfg = record.configJson
 
         // Allow an explicit jdbcUrl override in configJson (rare)
@@ -224,47 +231,144 @@ open class ClientDbPoolManager(
             return normaliseJdbcUrl(explicitUrl, record.provider)
         }
 
-        // Also handle a full libpq connection string stored as "connectionString" or "url"
+        /* A full connection string stored in config rather than as the secret.
+           The MySQL schemes were missing here: the test used to check only for
+           `postgresql://` and `postgres://`, so a MySQL connection string in
+           `config.url` was ignored and execution fell through to the host/port
+           branch — where `config.host` does not exist, so the pool dialled
+           `localhost:3306` and reported that the tenant's database refused the
+           connection. It had never been contacted. */
         val connStr = cfg["connectionString"] as? String ?: cfg["url"] as? String
-        if (!connStr.isNullOrBlank() &&
-            (connStr.startsWith("postgresql://") || connStr.startsWith("postgres://"))) {
+        if (!connStr.isNullOrBlank() && SCHEME_PREFIXES.any { connStr.startsWith(it) }) {
             return normaliseJdbcUrl(connStr, record.provider)
         }
 
         val host     = cfg["host"] as? String ?: "localhost"
         val port     = cfg["port"]?.toString()?.toIntOrNull() ?: defaultPortFor(record.provider)
         val database = cfg["database"] as? String ?: cfg["dbname"] as? String ?: ""
+        val provider = DbProviders.resolve(record.provider, host)
 
-        // sslMode resolution (in priority order):
-        //  1. Explicit string  cfg["sslMode"] = "require" / "disable" / etc.
-        //  2. Boolean flag     cfg["sslRequired"] = true  → "require"
-        //  3. Auto-detect:     non-local host             → "require"
-        //                      local / Docker host        → no SSL
-        val explicitSsl   = cfg["sslMode"] as? String
-        val sslRequiredBool = cfg["sslRequired"] as? Boolean
-        val sslMode = when {
-            !explicitSsl.isNullOrBlank() -> explicitSsl
-            sslRequiredBool == true      -> "require"
-            sslRequiredBool == false     -> null
-            isLocalHost(host)            -> null
-            else                         -> "require"
-        }
-
-        return when (record.provider.lowercase()) {
-            "postgresql", "postgres" -> {
-                val base = "jdbc:postgresql://$host:$port/$database"
-                if (!sslMode.isNullOrBlank()) "$base?sslmode=$sslMode" else base
-            }
-            "mysql" -> {
-                val base = "jdbc:mysql://$host:$port/$database"
-                if (!sslMode.isNullOrBlank()) "$base?sslMode=$sslMode" else base
-            }
-            "mariadb" -> "jdbc:mariadb://$host:$port/$database"
-            "sqlserver", "mssql" -> "jdbc:sqlserver://$host:$port;databaseName=$database"
-            else -> throw ClientDbPoolException(
-                "Unsupported DB provider '${record.provider}' for connection '${record.name}'"
+        return when (provider.wire) {
+            DbWire.SQLSERVER -> "jdbc:sqlserver://$host:$port;databaseName=$database"
+            DbWire.MONGODB -> throw ClientDbPoolException(
+                "MongoDB connections are not executable through the JDBC pool " +
+                    "(connection '${record.name}')"
             )
+            // Every Postgres- and MySQL-wire product shares one URL shape. The
+            // previous `when` listed four vendor NAMES and threw
+            // "Unsupported DB provider 'supabase'" for the rest — for
+            // connections the API had already tested and marked healthy.
+            else -> "${DbProviders.jdbcSchemeFor(provider.wire)}$host:$port/$database"
         }
+    }
+
+    /** Connection-string schemes recognised in `config.connectionString` / `config.url`. */
+    private val SCHEME_PREFIXES = listOf(
+        "postgresql://", "postgres://", "mysql://", "mariadb://", "jdbc:",
+    )
+
+    /**
+     * Add the TLS and pooling parameters this connection needs, without
+     * overwriting anything the tenant wrote themselves.
+     *
+     * WHY THIS IS SEPARATE FROM [buildJdbcUrl]. Both ways of reaching a database
+     * need it — the host/port form AND the pasted connection string — and the
+     * connection string is the one that used to miss out. A tenant pasting
+     * Aiven's `mysql://…?ssl-mode=REQUIRED` got a URL carrying a parameter
+     * Connector/J does not recognise and silently drops, so the connection ran
+     * at the driver's default `sslMode=PREFERRED` and downgraded to cleartext on
+     * any handshake trouble — which Aiven then refuses. See
+     * `DbProviders.mysqlSslMode`.
+     *
+     * A parameter already present in the URL always wins. Someone who wrote
+     * `sslmode=verify-full` asked for certificate verification, and quietly
+     * relaxing it would hide exactly the problem they were guarding against.
+     */
+    internal fun withDriverParams(jdbcUrl: String, record: ConnectionRecord): String {
+        val host = hostFromJdbcUrl(jdbcUrl)
+        val port = portFromJdbcUrl(jdbcUrl)
+        val cfg = record.configJson
+        // The same three-source rule the API tests with: hostname is evidence,
+        // `config.dbHosting` is the user's claim, `provider` fixes the wire.
+        val provider = DbProviders.resolveFor(record.provider, cfg["dbHosting"] as? String, host)
+            ?: DbProviders.resolve(record.provider, host)
+        if (provider.wire == DbWire.MONGODB) return jdbcUrl
+        /* `poolingMode` is the pooling choice; `connectionMode` is the older key
+           that records how the credential was ENTERED ("connection_string" /
+           "host_port") and is read only as a fallback, because a few connections
+           were saved with a pooling value in it. `ConnectionMode.parse` returns
+           null for the two entry-form values, so they fall through to the
+           detected default rather than being mistaken for a pooling mode. */
+        val mode = ConnectionMode.parse(cfg["poolingMode"] as? String)
+            ?: ConnectionMode.parse(cfg["connectionMode"] as? String)
+            ?: DbProviders.defaultMode(provider, host, port)
+
+        /* Local and Docker-network databases are the one place where insisting
+           on TLS is wrong: they are typically plaintext by design, and a forced
+           `require` turns a working dev connection into a handshake failure. */
+        val sslOverride = when {
+            cfg["sslRequired"] is Boolean -> cfg["sslRequired"] as Boolean
+            isLocalHost(host ?: "") -> false
+            else -> null
+        }
+
+        val separator = if (provider.wire == DbWire.SQLSERVER) ';' else '?'
+        val existing = existingParamKeys(jdbcUrl, separator)
+        val explicitSsl = (cfg["sslMode"] as? String)?.takeIf { it.isNotBlank() }
+
+        val params = LinkedHashMap<String, String>()
+        // An operator-supplied sslMode string is the most specific instruction
+        // there is, and predates this catalogue. It still wins.
+        if (explicitSsl != null && provider.wire == DbWire.POSTGRES && "sslmode" !in existing) {
+            params["sslmode"] = explicitSsl
+        } else if (explicitSsl != null && provider.wire == DbWire.MYSQL && "sslmode" !in existing) {
+            params["sslMode"] = explicitSsl
+        }
+        params.putAll(
+            DbProviders.driverParams(
+                provider = provider,
+                mode = mode,
+                sslRequiredOverride = sslOverride,
+                urlAlreadyCarries = existing + params.keys.map { it.lowercase() },
+            )
+        )
+        if (params.isEmpty()) return jdbcUrl
+
+        val joiner = if (provider.wire == DbWire.SQLSERVER) ";" else "&"
+        val head = if (jdbcUrl.contains(separator)) jdbcUrl else jdbcUrl + separator
+        val needsJoiner = jdbcUrl.contains(separator) && !jdbcUrl.endsWith(separator)
+        return head + (if (needsJoiner) joiner else "") +
+            params.entries.joinToString(joiner) { (k, v) -> "$k=$v" }
+    }
+
+    /** Parameter names already present in a JDBC URL, lower-cased. */
+    private fun existingParamKeys(jdbcUrl: String, separator: Char): Set<String> {
+        val index = jdbcUrl.indexOf(separator)
+        if (index < 0) return emptySet()
+        val tail = jdbcUrl.substring(index + 1)
+        val parts = if (separator == ';') tail.split(';') else tail.split('&')
+        return parts.mapNotNull { part ->
+            part.substringBefore('=').trim().lowercase().takeIf { it.isNotEmpty() }
+        }.toSet()
+    }
+
+    /** The host in a JDBC URL, for provider identification. Never the credentials. */
+    internal fun hostFromJdbcUrl(jdbcUrl: String): String? {
+        val start = jdbcUrl.indexOf("//").takeIf { it >= 0 }?.plus(2) ?: return null
+        val authority = jdbcUrl.substring(start)
+            .substringBefore('/').substringBefore('?').substringBefore(';')
+        val afterUser = authority.substringAfterLast('@')
+        return when {
+            afterUser.startsWith("[") -> afterUser.substringAfter('[').substringBefore(']')
+            else -> afterUser.substringBefore(':')
+        }.takeIf { it.isNotBlank() }
+    }
+
+    private fun portFromJdbcUrl(jdbcUrl: String): Int? {
+        val start = jdbcUrl.indexOf("//").takeIf { it >= 0 }?.plus(2) ?: return null
+        val authority = jdbcUrl.substring(start)
+            .substringBefore('/').substringBefore('?').substringBefore(';')
+        return authority.substringAfterLast('@').substringAfterLast(':').toIntOrNull()
     }
 
     /** Returns true for hosts that are local/Docker — SSL not required. */
@@ -275,12 +379,26 @@ open class ClientDbPoolManager(
                !h.contains('.')   // single-label names are Docker service names
     }
 
+    /**
+     * Turn any accepted connection-string form into a JDBC URL.
+     *
+     * The scheme the tenant pasted decides the wire when it is one we know — a
+     * `mysql://` string is MySQL whatever the `provider` column happens to say.
+     * When there is no scheme to go on (a bare `host:port/db`), the catalogue
+     * answers from the provider name instead. Previously the fallback returned
+     * the string untouched, which handed HikariCP something that was not a JDBC
+     * URL at all.
+     */
     private fun normaliseJdbcUrl(url: String, provider: String): String = when {
         url.startsWith("jdbc:") -> url
         url.startsWith("postgresql://") || url.startsWith("postgres://") ->
             "jdbc:postgresql://" + url.substringAfter("://")
-        url.startsWith("mysql://") -> "jdbc:mysql://" + url.substringAfter("://")
-        else -> url
+        url.startsWith("mysql://") || url.startsWith("mariadb://") ->
+            "jdbc:mysql://" + url.substringAfter("://")
+        url.contains("://") ->
+            DbProviders.jdbcSchemeFor(DbProviders.resolve(provider, null).wire) + url.substringAfter("://")
+        else ->
+            DbProviders.jdbcSchemeFor(DbProviders.resolve(provider, null).wire) + url
     }
 
     /** A tenant connection string, split into the parts a JDBC pool can actually use. */
@@ -378,21 +496,28 @@ open class ClientDbPoolManager(
         return out.toString(Charsets.UTF_8)
     }
 
-    private fun driverFor(provider: String): String = when (provider.lowercase()) {
-        "postgresql", "postgres" -> "org.postgresql.Driver"
-        "mysql"                  -> "com.mysql.cj.jdbc.Driver"
-        "mariadb"                -> "org.mariadb.jdbc.Driver"
-        "sqlserver", "mssql"     -> "com.microsoft.sqlserver.jdbc.SQLServerDriver"
-        else                     -> "org.postgresql.Driver" // fallback
-    }
+    /**
+     * The JDBC driver for a stored provider name.
+     *
+     * THE BUG THIS FIXES. This was a four-name `when` whose `else` returned the
+     * PostgreSQL driver. That default is not neutral — it is a wrong answer with
+     * a confident face. `planetscale`, `aiven_mysql`, `tidb` and `singlestore`
+     * all speak MySQL, and every one of them was handed pgjdbc, which fails the
+     * handshake in a way that reads like the tenant's database is broken.
+     * `mariadb` fared worse: it named a driver that has never been on the
+     * classpath. Resolution now goes through the same catalogue the API tests
+     * with, so the two cannot disagree about what a provider is.
+     *
+     * MariaDB is mapped to Connector/J deliberately. MariaDB speaks the MySQL
+     * wire protocol and Connector/J connects to it; naming
+     * `org.mariadb.jdbc.Driver` only produced a ClassNotFoundException, because
+     * that dependency was never declared.
+     */
+    internal fun driverFor(provider: String): String =
+        DbProviders.driverClassFor(DbProviders.resolve(provider, null).wire)
 
-    private fun defaultPortFor(provider: String): Int = when (provider.lowercase()) {
-        "postgresql", "postgres" -> 5432
-        "mysql"                  -> 3306
-        "mariadb"                -> 3306
-        "sqlserver", "mssql"     -> 1433
-        else                     -> 5432
-    }
+    private fun defaultPortFor(provider: String): Int =
+        DbProviders.resolve(provider, null).defaultPort
 }
 
 class ClientDbPoolException(message: String) : Exception(message)

@@ -117,6 +117,57 @@ class JdbcTimeoutsTest {
     }
 
     @Test
+    fun `every managed provider gets timeouts, not just the four hardcoded names`() {
+        /* THE BUG THIS PINS. `paramsFor` was a four-name `when` with
+           `else -> emptyMap()`, and `applyTo` short-circuits on an empty map.
+           So a connection stored as `supabase`, `neon`, `planetscale`,
+           `aiven_mysql`, `timescale` or `rds_postgresql` — most of the managed
+           database market — was opened with NO connectTimeout and NO
+           socketTimeout at all. This file's own header explains why that is the
+           one thing a tenant must never be able to have: an unbounded socket
+           read parks an execution slot for the lifetime of the process, and the
+           agent pool is two slots wide platform-wide. */
+        for (provider in listOf(
+            "supabase", "neon", "timescale", "cockroachdb", "rds_postgresql",
+            "aurora_postgresql", "redshift", "azure_postgresql",
+            "planetscale", "aiven_mysql", "tidb", "singlestore", "rds_mysql",
+        )) {
+            val params = JdbcTimeouts.paramsFor(provider, t)
+            assertTrue(params.isNotEmpty(), "$provider got no timeout parameters at all")
+            assertTrue(params.containsKey("connectTimeout"), "$provider has no connectTimeout")
+            assertTrue(params.containsKey("socketTimeout"), "$provider has no socketTimeout")
+
+            val out = JdbcTimeouts.applyTo("jdbc:postgresql://h/app", provider, t)
+            assertTrue(out.contains("socketTimeout="), "$provider: $out")
+        }
+    }
+
+    @Test
+    fun `Postgres-wire aliases keep pgjdbc's seconds unit`() {
+        /* The unit is chosen per driver: pgjdbc reads seconds, Connector/J reads
+           milliseconds. `supabase` used to miss the Postgres branch, so its
+           ceiling would have been read in milliseconds — making every value the
+           tenant supplied look a thousand times too large and forcing it down. */
+        val supabase = JdbcTimeouts.paramsFor("supabase", t)
+        val postgres = JdbcTimeouts.paramsFor("postgresql", t)
+        assertEquals(postgres, supabase)
+
+        val planetscale = JdbcTimeouts.paramsFor("planetscale", t)
+        val mysql = JdbcTimeouts.paramsFor("mysql", t)
+        assertEquals(mysql, planetscale)
+    }
+
+    @Test
+    fun `a tenant socketTimeout of zero is still overridden on a managed provider`() {
+        // "Wait forever" is exactly the opt-out this file exists to refuse, and
+        // it was reachable for every provider outside the old four-name list.
+        val out = JdbcTimeouts.applyTo(
+            "jdbc:postgresql://db.abc.supabase.co:5432/app?socketTimeout=0", "supabase", t,
+        )
+        assertFalse(out.contains("socketTimeout=0"), out)
+    }
+
+    @Test
     fun `clampTotalCallMs bounds a hostile node timeout`() {
         assertEquals(t.httpTotalCallCeilingMs, t.clampTotalCallMs(Long.MAX_VALUE / 4))
         assertEquals(t.httpDefaultTotalCallMs, t.clampTotalCallMs(null))

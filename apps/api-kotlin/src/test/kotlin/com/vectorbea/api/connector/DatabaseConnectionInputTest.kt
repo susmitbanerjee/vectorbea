@@ -149,17 +149,26 @@ class DatabaseConnectionInputTest {
 /**
  * Schema preview must accept every database the connection test accepts.
  *
- * They kept separate lists of supported databases. The tester's is keyed on the
- * WIRE PROTOCOL and covers Timescale, Cockroach, Redshift, RDS, Aurora, AlloyDB
+ * They kept separate lists of supported databases. The tester's was keyed on the
+ * WIRE PROTOCOL and covered Timescale, Cockroach, Redshift, RDS, Aurora, AlloyDB
  * and PlanetScale; the fetcher's carried four names. So those databases tested
  * green and then refused to list a table, which is indistinguishable from a
  * broken connection unless you happen to read the error carefully.
+ *
+ * Both now dispatch through `DbProviders`, so this walks the catalogue itself:
+ * anything added there in future is covered without editing this test, which is
+ * the failure mode that produced the drift in the first place.
  */
 class SchemaPreviewSupportTest {
 
     @Test
     fun `every wire-compatible database the tester accepts can be introspected`() {
-        for (name in DbTester.POSTGRES_WIRE + DbTester.MYSQL_WIRE) {
+        val wireCompatible = com.vectorbea.dbcatalog.DbProviders.ALL
+            .filter { it.wire == com.vectorbea.dbcatalog.DbWire.POSTGRES ||
+                it.wire == com.vectorbea.dbcatalog.DbWire.MYSQL }
+            .flatMap { listOf(it.id) + it.aliases }
+
+        for (name in wireCompatible) {
             val input = DbSchemaFetcher.SchemaInput(
                 dbType = name,
                 // Deliberately unroutable: the point is which BRANCH is taken,

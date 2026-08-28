@@ -22,14 +22,34 @@ export const snap = (value: number) => Math.round(value / LATTICE) * LATTICE;
 export function autoLayout(nodes: BuilderNode[], edges: BuilderEdge[]): BuilderGraph {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
+  /* ── SEPARATIONS ARE CHOSEN SO THE PITCH LANDS ON THE LATTICE ─────────────
+     Every position dagre returns is snapped to LATTICE below. That snap is only
+     harmless when the distance BETWEEN consecutive nodes is already a multiple
+     of it — otherwise successive nodes round in opposite directions and the row
+     develops a sawtooth.
+
+     It did. With ranksep 96 the horizontal pitch was 200 + 96 = 296, and 296 is
+     not a multiple of 16, so a ten-node workflow laid out at gaps of
+     288, 304, 288, 304 … — alternating by a whole 16px, plainly visible as
+     uneven spacing on a canvas whose entire promise is that things line up.
+     Vertically it was worse: 76 + 48 = 124 leaves a remainder of 12, so
+     parallel branches drifted a different amount at every rank.
+
+     So the pitch, not the gap, is what is picked:
+       horizontal  NODE_W 200 + 104 = 304 = 19 x 16
+       vertical    NODE_H  76 +  52 = 128 =  8 x 16
+     Both stay at least as generous as the values they replace, which is what
+     the edge labels on conditional arms needed the room for.
+
+     Changing NODE_W, NODE_H or LATTICE means re-deriving these. The test in
+     __tests__/builder-layout.test.ts fails if they stop dividing. */
   g.setGraph({
     rankdir: "LR",
-    // Generous separations: nodes are 200px wide and the edge labels on
-    // conditional arms need room, or they overlap the node they point at.
-    nodesep: 48,
-    ranksep: 96,
-    marginx: 24,
-    marginy: 24,
+    nodesep: LATTICE * 8 - NODE_SIZE.height,
+    ranksep: LATTICE * 19 - NODE_SIZE.width,
+    // Multiples of the lattice for the same reason.
+    marginx: LATTICE * 2,
+    marginy: LATTICE * 2,
   });
 
   for (const n of nodes) {

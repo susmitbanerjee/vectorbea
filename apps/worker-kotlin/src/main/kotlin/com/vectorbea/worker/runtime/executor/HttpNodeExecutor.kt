@@ -66,6 +66,47 @@ class HttpNodeExecutor(
         private val REDACTED_HEADER_NAMES = setOf(
             "authorization", "x-api-key", "api-key", "x-auth-token", "x-secret"
         )
+
+        /** A `{placeholder}` in the URL that nothing supplied a value for. */
+        class UnresolvedPathParam(val name: String) : Exception(name)
+
+        private val PATH_PARAM = Regex("""\{\{?\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}?\}""")
+
+        /**
+         * Fill `{name}` placeholders in a URL from the node's resolved inputs.
+         *
+         * WHY THIS EXISTS. A REST API puts its identifiers in the path — GitHub's
+         * pull request is `/repos/{owner}/{repo}/pulls/{number}`, Airtable's record
+         * is `/v0/{base}/{table}`. Without substitution the only tools that could be
+         * registered were ones whose every path segment was fixed forever, so "read
+         * a pull request" could read exactly one pull request. Body templates have
+         * been resolvable since the beginning; URLs simply never were, which quietly
+         * decided which integrations were expressible.
+         *
+         * VALUES ARE PATH-ENCODED, ALWAYS. These come from workflow inputs and, one
+         * step further back, from a model. An unencoded `../` or a `?` would climb
+         * out of the intended resource or graft a query string onto the request —
+         * turning "read issue N" into a call at a different path entirely. Encoding
+         * happens before the SSRF and allowed-path checks run, so those inspect the
+         * URL that will actually be sent.
+         *
+         * An unresolved placeholder FAILS rather than being left in place. A literal
+         * `{number}` in a path produces a 404 from the vendor, and a vendor 404 is
+         * the single least informative way to learn that an input mapping is missing.
+         */
+        fun substitutePathParams(url: String, resolvedInputs: Map<String, Any>): String {
+            if (!url.contains('{')) return url
+            return PATH_PARAM.replace(url) { match ->
+                val name = match.groupValues[1]
+                val value = resolvedInputs[name]
+                    ?: resolvedInputs[name.substringAfterLast('.')]
+                    ?: throw UnresolvedPathParam(name)
+                java.net.URLEncoder.encode(value.toString(), Charsets.UTF_8)
+                    // URLEncoder is a FORM encoder: it writes a space as `+`, which
+                    // is a literal plus inside a path segment. `%20` is the path form.
+                    .replace("+", "%20")
+            }
+        }
     }
 
     override suspend fun execute(
@@ -123,8 +164,17 @@ class HttpNodeExecutor(
         }
 
         // ── Build URL ─────────────────────────────────────────────────────────
-        val rawUrl = resolveUrl(cfg, resolvedInputs, baseUrl)
+        val templateUrl = resolveUrl(cfg, resolvedInputs, baseUrl)
             ?: return NodeResult.Failed("HTTP node '${node.id}': no URL provided (set 'url' in config or attach an HTTP connection with baseUrl)")
+
+        val rawUrl = try {
+            substitutePathParams(templateUrl, resolvedInputs)
+        } catch (e: UnresolvedPathParam) {
+            return NodeResult.Failed(
+                "HTTP node '${node.id}': the URL needs a value for '${e.name}' and the input did not " +
+                    "supply one. Map it from an earlier node, or bind it on the tool."
+            )
+        }
 
         // ── SSRF check ────────────────────────────────────────────────────────
         try {

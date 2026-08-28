@@ -1,6 +1,10 @@
 package com.vectorbea.api.connector
 
 import com.vectorbea.api.security.Redactor
+import com.vectorbea.dbcatalog.ConnectionMode
+import com.vectorbea.dbcatalog.DbProvider
+import com.vectorbea.dbcatalog.DbProviders
+import com.vectorbea.dbcatalog.DbWire
 import org.slf4j.LoggerFactory
 import java.sql.DriverManager
 import java.util.Properties
@@ -34,17 +38,36 @@ object DbTester {
         val port: Int?,
         val database: String?,
         val sslRequired: Boolean? = null,
+        /**
+         * `direct` / `session_pooler` / `transaction_pooler`, as chosen by the
+         * user. Null means "whatever this provider and host imply" — see
+         * [DbProviders.defaultMode].
+         */
+        val connectionMode: String? = null,
+        /**
+         * The hosting product the user picked — "supabase", "aiven_mysql", … .
+         *
+         * Separate from [dbType] rather than folded into it, because [dbType] is
+         * `connections.provider`, which the logo maps, the builder registry and
+         * the integrations page all read. Widening what that column may contain
+         * would have meant editing four unrelated lookup tables to add one
+         * vendor. The wire stays in [dbType]; the vendor lives here.
+         */
+        val dbHosting: String? = null,
     )
 
     fun test(input: DbTestInput): ConnectionTestResult {
         val start = System.currentTimeMillis()
         return try {
-            when (val kind = input.dbType.lowercase()) {
-                in POSTGRES_WIRE -> testPostgres(input, start)
-                in MYSQL_WIRE -> testMysql(input, start)
-                "mongodb" -> testMongoDB(input, start)
-                else -> ConnectionTestResult.failed(0, "UNSUPPORTED_DB",
-                    "Database type '$kind' is not yet supported for testing")
+            val provider = providerFor(input)
+                ?: return ConnectionTestResult.failed(0, "UNSUPPORTED_DB",
+                    "Database type '${input.dbType.lowercase()}' is not yet supported for testing")
+            when (provider.wire) {
+                DbWire.POSTGRES -> testPostgres(input, start)
+                DbWire.MYSQL -> testMysql(input, start)
+                DbWire.MONGODB -> testMongoDB(input, start)
+                DbWire.SQLSERVER -> ConnectionTestResult.failed(0, "DRIVER_NOT_AVAILABLE",
+                    "The SQL Server driver is not available in this build.")
             }
         } catch (e: Exception) {
             val latency = System.currentTimeMillis() - start
@@ -58,24 +81,87 @@ object DbTester {
         }
     }
 
-    /* -- Wire-protocol families ------------------------------------------------
-       Keyed on the WIRE PROTOCOL, not the vendor. Every product below speaks
-       PostgreSQL's or MySQL's protocol, so the stock JDBC driver already talks
-       to it. The previous four-name allowlist turned Timescale, Cockroach,
-       Redshift, RDS, Aurora and PlanetScale away with "not yet supported for
-       testing" purely because nobody had added the string - a support gap that
-       was never a capability gap. */
-    internal val POSTGRES_WIRE = setOf(
-        "postgres", "postgresql", "pgsql", "neon", "supabase", "timescale", "timescaledb",
-        "cockroach", "cockroachdb", "yugabyte", "yugabytedb", "redshift", "citus",
-        "aurora_postgresql", "aurora-postgresql", "rds_postgresql", "rds-postgresql",
-        "cloudsql_postgresql", "alloydb", "digitalocean_postgres",
-    )
+    /* -- Which product is at the other end -------------------------------------
+       Keyed on the WIRE PROTOCOL, not the vendor: every product in the catalogue
+       speaks PostgreSQL's or MySQL's protocol, so the stock JDBC driver already
+       talks to it.
 
-    internal val MYSQL_WIRE = setOf(
-        "mysql", "mariadb", "planetscale", "singlestore", "vitess", "tidb",
-        "aurora_mysql", "aurora-mysql", "rds_mysql", "rds-mysql", "cloudsql_mysql",
-    )
+       This used to be two literal `Set<String>` here. They were correct and they
+       were LOCAL, which is how the worker ended up with a four-name list of its
+       own that disagreed - a connection could test green here and be handed the
+       wrong driver, or no timeouts at all, the first time a run reached it. The
+       lists now live in `DbProviders`, which both services compile. */
+    internal fun providerFor(input: DbTestInput): DbProvider? =
+        DbProviders.resolveFor(input.dbType, input.dbHosting, hostOf(input))
+
+    /** The pooling mode to dial with: the user's choice, else what the host implies. */
+    internal fun modeFor(input: DbTestInput, provider: DbProvider): ConnectionMode =
+        ConnectionMode.parse(input.connectionMode)
+            ?: DbProviders.defaultMode(provider, hostOf(input), portOf(input))
+
+    /** The port being dialled, for mode detection only. */
+    internal fun portOf(input: DbTestInput): Int? {
+        input.port?.let { return it }
+        val url = input.connectionUrl?.takeIf { it.isNotBlank() }?.trim() ?: return null
+        val normalised = if (url.startsWith("jdbc:")) url.removePrefix("jdbc:") else url
+        val parsed = ConnectionUrl.parse(normalised) ?: return null
+        val authority = parsed.hostAndPath.substringBefore('/').substringBefore('?')
+        val afterBracket = if (authority.startsWith("[")) authority.substringAfter(']') else authority
+        return afterBracket.substringAfterLast(':', "").toIntOrNull()
+    }
+
+    /**
+     * Parameter names the connection string already carries.
+     *
+     * Anything named here is left exactly as the user wrote it. That is the
+     * whole contract of `urlAlreadyCarries`: a pasted `sslmode=verify-full` is
+     * an instruction, not a coincidence, and silently relaxing it would make the
+     * test pass on a connection the engine would later refuse.
+     */
+    internal fun urlParamKeys(jdbcUrl: String?): Set<String> =
+        urlParams(jdbcUrl).keys
+
+    /** The query parameters of a JDBC URL, keys lower-cased. Never the credentials. */
+    private fun urlParams(jdbcUrl: String?): Map<String, String> {
+        val query = jdbcUrl?.substringAfter('?', "")?.takeIf { it.isNotBlank() } ?: return emptyMap()
+        return query.split('&').mapNotNull { part ->
+            val key = part.substringBefore('=').trim().lowercase().takeIf { it.isNotEmpty() }
+                ?: return@mapNotNull null
+            key to part.substringAfter('=', "").trim()
+        }.toMap()
+    }
+
+    /**
+     * The Connector/J `sslMode` a MySQL URL is ASKING for, in whatever spelling.
+     *
+     * `ssl-mode` is the MySQL command-line option. `useSSL` is the pre-8.0
+     * Connector/J property, still all over vendor documentation. Neither is a
+     * recognised Connector/J 9 property, and an unrecognised parameter in a JDBC
+     * URL is discarded in silence — so both forms currently mean nothing at all
+     * to the driver while looking, to everyone reading the string, like they
+     * mean everything.
+     *
+     * Returns null when the URL says nothing, leaving the catalogue default in
+     * place. `sslMode` proper is not read here: `driverParams` has already left
+     * it untouched via `urlAlreadyCarries`.
+     */
+    internal fun mysqlSslModeFromUrl(jdbcUrl: String?): String? {
+        val params = urlParams(jdbcUrl)
+        params["ssl-mode"]?.uppercase()?.let { value ->
+            return when (value) {
+                "DISABLED", "PREFERRED", "REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY" -> value
+                else -> null
+            }
+        }
+        params["usessl"]?.lowercase()?.let { value ->
+            return when (value) {
+                "false", "0", "no" -> "DISABLED"
+                "true", "1", "yes" -> "REQUIRED"
+                else -> null
+            }
+        }
+        return null
+    }
 
     private val NETWORK_LEVEL_CODES = setOf(
         "NETWORK_UNREACHABLE", "CONNECTION_REFUSED", "DNS_FAILED", "TIMEOUT", "CONNECTION_ERROR",
@@ -155,7 +241,15 @@ object DbTester {
                 "This is a private network address, which a hosted API cannot route to. " +
                     "Expose the database, or run a private runner inside your network"
 
-            else -> null
+            /* The vendor's own remedy, named because the HOST named the vendor.
+               Almost every managed database refuses unknown clients by default —
+               Aiven per service, Azure per firewall rule, RDS per security
+               group, Cloud SQL per authorised network, DigitalOcean per trusted
+               source. All five produce an identical "could not be reached", and
+               all five have a different screen to go and fix it on. Guessing
+               which is not something the user should have to do when the
+               hostname already says. */
+            else -> DbProviders.byHost(h)?.networkHint
         }
     }
 
@@ -179,15 +273,47 @@ object DbTester {
      * Neither branch echoes the password, and the username is only referred to
      * by shape.
      */
+    /** The credential triple both resolvers produce, so guidance can read either. */
+    internal data class Credentials(
+        val username: String?,
+        val password: String?,
+        val alternatePassword: String?,
+    )
+
     internal fun credentialGuidance(code: String, input: DbTestInput): String? {
         if (code != "AUTH_FAILED") return null
-        val target = runCatching { resolvePostgresTarget(input) }.getOrNull()
+        /* Resolved through the wire the connection actually speaks. Reading a
+           `mysql://` URL with the Postgres resolver returned a target whose
+           username was null, so every MySQL authentication failure fell past all
+           four branches below and reported the bare "check credentials" — the
+           one wire where the guidance was needed most, because MySQL's own
+           `Access denied for user` says even less. */
+        val wire = providerFor(input)?.wire ?: DbWire.POSTGRES
+        val target = runCatching {
+            if (wire == DbWire.MYSQL) {
+                resolveMysqlTarget(input).let { Credentials(it.username, it.password, it.alternatePassword) }
+            } else {
+                resolvePostgresTarget(input).let { Credentials(it.username, it.password, it.alternatePassword) }
+            }
+        }.getOrNull()
         val host = hostOf(input)?.lowercase()
         val user = target?.username
 
         if (host != null && host.endsWith(".pooler.supabase.com") && user != null && !user.contains('.')) {
             return "Supabase's pooler expects the username \"postgres.<project-ref>\" rather than " +
                 "\"$user\" - the plain form only works against the direct db.<project-ref>.supabase.co host"
+        }
+        /* Azure's retired Single Server tier requires the username in the form
+           user@servername, and rejects the plain form as bad credentials rather
+           than as a malformed login. It is the same shape of trap as Supabase's
+           pooler above: two usernames, one screen apart, and an error that
+           blames the password. Only said when the username plainly lacks the
+           suffix, so a correctly-formed one is not second-guessed. */
+        if (host != null && host.endsWith(".database.azure.com") && user != null && !user.contains('@')) {
+            val server = host.substringBefore('.')
+            return "Azure Database Single Server requires the username \"$user@$server\". " +
+                "Flexible Server takes the plain \"$user\" - if you are on Flexible Server, " +
+                "the credentials are not the problem and the firewall rule is"
         }
         // Both readings of an ambiguous password have already been TRIED by the
         // time this runs (see attemptWithFallback), so neither was right and
@@ -266,19 +392,27 @@ object DbTester {
 
     private fun testPostgres(input: DbTestInput, start: Long): ConnectionTestResult {
         val target = resolvePostgresTarget(input)
+        val provider = providerFor(input) ?: DbProviders.generic(DbWire.POSTGRES)
+        val mode = modeFor(input, provider)
         return attemptWithFallback(target.password, target.alternatePassword) { password ->
             val props = Properties().apply {
                 setProperty("connectTimeout", CONNECT_TIMEOUT_SECONDS.toString())
                 setProperty("socketTimeout", QUERY_TIMEOUT_SECONDS.toString())
                 setProperty("loginTimeout", CONNECT_TIMEOUT_SECONDS.toString())
-                // SECURITY: SSL preferred but not required for test (may be self-signed in dev).
-                // An sslmode already present in the URL WINS: a user who wrote
-                // ?sslmode=verify-full asked for certificate verification, and
-                // silently downgrading them to "prefer" would make the test pass on
-                // a connection the engine would later refuse.
-                if (!target.jdbcUrl.contains("sslmode=", ignoreCase = true)) {
-                    setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
-                }
+                /* TLS and pooling parameters, from the catalogue. Anything the
+                   user already wrote into the URL is passed through untouched —
+                   see `urlParamKeys`. This is where a transaction-pooled
+                   connection picks up `prepareThreshold=0`: without it the test
+                   passes, and the node it feeds starts failing on its fifth run
+                   with `prepared statement "S_1" already exists`. Testing under
+                   different settings from the ones the run will use is how a
+                   green connection turns into a 3am page. */
+                for ((key, value) in DbProviders.driverParams(
+                    provider = provider,
+                    mode = mode,
+                    sslRequiredOverride = input.sslRequired,
+                    urlAlreadyCarries = urlParamKeys(target.jdbcUrl),
+                )) setProperty(key, value)
                 if (!target.username.isNullOrBlank()) setProperty("user", target.username)
                 if (!password.isNullOrBlank()) setProperty("password", password)
             }
@@ -369,12 +503,53 @@ object DbTester {
 
     // ── MySQL ─────────────────────────────────────────────────────────────────
 
+    /**
+     * Test a MySQL-wire database.
+     *
+     * THE AIVEN BUG, AND WHY IT LOOKED LIKE ANYTHING BUT TLS.
+     *
+     * This method used to set no TLS property at all. Postgres set `sslmode`
+     * from `input.sslRequired` one screen up; MySQL read the same flag and
+     * dropped it on the floor. The connect dialog has always sent
+     * `sslRequired: true` for every database, so the user had asked for TLS and
+     * the request never reached the driver.
+     *
+     * Nothing failed loudly, because Connector/J's default `sslMode=PREFERRED`
+     * usually negotiates TLS anyway. What it also does is fall back to CLEARTEXT
+     * whenever the handshake has any trouble — and Aiven, PlanetScale, TiDB and
+     * Azure all run with `require_secure_transport=ON`, so they close the
+     * cleartext connection. The error that surfaces is about the connection
+     * being dropped, with nothing anywhere pointing at TLS.
+     *
+     * The trap underneath it: Aiven's own connection string ends in
+     * `?ssl-mode=REQUIRED`. That is the MySQL **CLI** spelling. Connector/J's
+     * property is `sslMode`, and an unrecognised parameter in a JDBC URL is
+     * silently DISCARDED rather than rejected — verified directly against
+     * Connector/J 9.0.0. So the user pastes a string that says, in plain text,
+     * that TLS is required; every tool they can see agrees it says that; and the
+     * driver never receives it. DataGrip has its own SSL toggle, which is
+     * exactly why the same credentials connect there and not here.
+     */
     private fun testMysql(input: DbTestInput, start: Long): ConnectionTestResult {
         val target = resolveMysqlTarget(input)
+        val provider = providerFor(input) ?: DbProviders.generic(DbWire.MYSQL)
+        val mode = modeFor(input, provider)
         return attemptWithFallback(target.password, target.alternatePassword) { password ->
             val props = Properties().apply {
                 setProperty("connectTimeout", (CONNECT_TIMEOUT_SECONDS * 1000).toString())
                 setProperty("socketTimeout", (QUERY_TIMEOUT_SECONDS * 1000).toString())
+                for ((key, value) in DbProviders.driverParams(
+                    provider = provider,
+                    mode = mode,
+                    sslRequiredOverride = input.sslRequired,
+                    urlAlreadyCarries = urlParamKeys(target.jdbcUrl),
+                )) setProperty(key, value)
+                /* The CLI spelling, translated rather than ignored. `ssl-mode`
+                   and `useSSL` are what the vendor dashboards and older guides
+                   hand out, and the user meant them — so a pasted
+                   `ssl-mode=DISABLED` genuinely disables TLS instead of being
+                   overridden by the catalogue default two lines above. */
+                mysqlSslModeFromUrl(target.jdbcUrl)?.let { setProperty("sslMode", it) }
                 if (!target.username.isNullOrBlank()) setProperty("user", target.username)
                 if (!password.isNullOrBlank()) setProperty("password", password)
             }

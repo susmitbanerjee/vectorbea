@@ -1,5 +1,6 @@
 package com.vectorbea.api.connector
 
+import com.vectorbea.dbcatalog.DbWire
 import org.slf4j.LoggerFactory
 import java.sql.DriverManager
 import java.util.Properties
@@ -56,6 +57,17 @@ object DbSchemaFetcher {
          * chose.
          */
         val sslRequired: Boolean? = null,
+        /**
+         * The pooling mode, carried for the same reason [sslRequired] is.
+         *
+         * Introspection must negotiate exactly as the test did. A connection the
+         * user marked transaction-pooled has to be introspected with server-side
+         * prepared statements off, or preview fails on the fifth table against a
+         * connection whose test went green.
+         */
+        val connectionMode: String? = null,
+        /** The hosting product, carried for the same reason as [connectionMode]. */
+        val dbHosting: String? = null,
     )
 
     data class ColumnInfo(
@@ -99,6 +111,8 @@ object DbSchemaFetcher {
         port = port,
         database = database,
         sslRequired = sslRequired,
+        connectionMode = connectionMode,
+        dbHosting = dbHosting,
     )
 
     /** The tester's input, as a schema input. The two describe the same target. */
@@ -111,21 +125,25 @@ object DbSchemaFetcher {
         port = input.port,
         database = input.database,
         sslRequired = input.sslRequired,
+        connectionMode = input.connectionMode,
+        dbHosting = input.dbHosting,
     )
 
     /*
-     * DISPATCHED ON THE SAME SETS THE TESTER USES, and for the same reason it
-     * gives: the families are keyed on the WIRE PROTOCOL, not the vendor. This
-     * carried its own four-name allowlist — postgres, postgresql, neon,
-     * supabase — so Timescale, Cockroach, Redshift, RDS, Aurora, AlloyDB and
-     * PlanetScale could all be tested green and then refuse to list a table,
+     * DISPATCHED THROUGH THE SAME CATALOGUE THE TESTER USES, and for the same
+     * reason it gives: the families are keyed on the WIRE PROTOCOL, not the
+     * vendor. This carried its own four-name allowlist — postgres, postgresql,
+     * neon, supabase — so Timescale, Cockroach, Redshift, RDS, Aurora, AlloyDB
+     * and PlanetScale could all be tested green and then refuse to list a table,
      * purely because nobody had added the string here as well. Two lists that
-     * had to be edited together were only ever going to be edited once.
+     * had to be edited together were only ever going to be edited once, which is
+     * why there is now one list and it lives in `DbProviders`.
      */
     fun fetch(input: SchemaInput): SchemaResult {
-        return when (input.dbType.lowercase()) {
-            in DbTester.POSTGRES_WIRE -> fetchPostgres(input)
-            in DbTester.MYSQL_WIRE -> fetchMysql(input)
+        val provider = DbTester.providerFor(input.toTestInput())
+        return when (provider?.wire) {
+            DbWire.POSTGRES -> fetchPostgres(input)
+            DbWire.MYSQL -> fetchMysql(input)
             else -> throw UnsupportedOperationException(
                 "Schema preview is not yet supported for '${input.dbType}'. " +
                     "Supported: PostgreSQL-compatible and MySQL-compatible databases."
@@ -170,11 +188,17 @@ object DbSchemaFetcher {
                  * away, so there is nothing to gain from caching plans anyway.
                  */
                 setProperty("prepareThreshold", "0")
-                // Matches the tester exactly. Diverging here is how a connection
-                // that tested green failed to introspect.
-                if (!target.jdbcUrl.contains("sslmode=", ignoreCase = true)) {
-                    setProperty("sslmode", if (input.sslRequired == true) "require" else "prefer")
-                }
+                // TLS resolved through the same catalogue the tester uses.
+                // Diverging here is how a connection that tested green failed to
+                // introspect: `prefer` against a server that mandates TLS is a
+                // different conversation from the one the test had.
+                for ((key, value) in com.vectorbea.dbcatalog.DbProviders.driverParams(
+                    provider = DbTester.providerFor(input.toTestInput())
+                        ?: com.vectorbea.dbcatalog.DbProviders.generic(DbWire.POSTGRES),
+                    mode = com.vectorbea.dbcatalog.ConnectionMode.TRANSACTION_POOLER,
+                    sslRequiredOverride = input.sslRequired,
+                    urlAlreadyCarries = DbTester.urlParamKeys(target.jdbcUrl) + setOf("preparethreshold"),
+                )) setProperty(key, value)
                 if (!target.username.isNullOrBlank()) setProperty("user", target.username)
                 if (!password.isNullOrBlank()) setProperty("password", password)
             }
@@ -422,6 +446,18 @@ object DbSchemaFetcher {
             // Connector/J, set explicitly so a URL that turns it on cannot break
             // introspection through a pooler.
             setProperty("useServerPrepStmts", "false")
+            // TLS from the catalogue — the same fix as the connection tester.
+            // Without it introspection ran at Connector/J's default
+            // `sslMode=PREFERRED` and was refused by every managed MySQL that
+            // mandates TLS, on connections that had just tested green.
+            for ((key, value) in com.vectorbea.dbcatalog.DbProviders.driverParams(
+                provider = DbTester.providerFor(input.toTestInput())
+                    ?: com.vectorbea.dbcatalog.DbProviders.generic(DbWire.MYSQL),
+                mode = com.vectorbea.dbcatalog.ConnectionMode.TRANSACTION_POOLER,
+                sslRequiredOverride = input.sslRequired,
+                urlAlreadyCarries = DbTester.urlParamKeys(target.jdbcUrl) + setOf("useserverprepstmts"),
+            )) setProperty(key, value)
+            DbTester.mysqlSslModeFromUrl(target.jdbcUrl)?.let { setProperty("sslMode", it) }
             if (!target.username.isNullOrBlank()) setProperty("user", target.username)
             if (!password.isNullOrBlank()) setProperty("password", password)
         }

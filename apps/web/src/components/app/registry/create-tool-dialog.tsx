@@ -34,6 +34,10 @@ import {
   type SqlBuilderValue,
 } from "./sql-builder";
 import type { SchemaPreviewResult } from "~/lib/api/client";
+import {
+  operationsFor, operationById, inputSchemaFor,
+  type ProviderOperation, type OperationParam,
+} from "~/content/integrations";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    REGISTER A TOOL
@@ -93,6 +97,9 @@ const RISK_TIERS: { value: RiskLevel; label: string; markerClassName: string; bl
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
+/** So a catalogue default can raise the risk tier without ever lowering one. */
+const RISK_ORDER: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
 /**
  * Mirrors `Validation.FORBIDDEN_CONFIG_KEYS`.
  *
@@ -122,6 +129,150 @@ function parseObject(source: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   THE PARAMETERS OF ONE OPERATION — and where each of them is decided.
+
+   This is the screen the request in the brief is about: connect Gmail, and the
+   tool asks for a FROM and a TO rather than for a URL.
+
+   The binding toggle is not a convenience. `config` bakes the value into the
+   registered tool; `input` puts it in the schema and hands the choice to the
+   agent at call time. For `to` on an email tool those are two completely
+   different tools — one can mail your ops alias and nothing else, the other can
+   mail whoever appears in the model's context. The product has a word for that
+   already, so it is said in that word: blast radius.
+══════════════════════════════════════════════════════════════════════════════ */
+function OperationParams({
+  operation, values, onValue, bindings, onBinding,
+}: {
+  operation: ProviderOperation;
+  values: Record<string, string>;
+  onValue: (name: string, value: string) => void;
+  bindings: Record<string, "config" | "input">;
+  onBinding: (name: string, binding: "config" | "input") => void;
+}) {
+  const bindingOf = (param: OperationParam) => bindings[param.name] ?? param.binding;
+  const fixed = operation.params.filter((param) => bindingOf(param) === "config");
+  const perCall = operation.params.filter((param) => bindingOf(param) === "input");
+
+  return (
+    <div className="grid gap-4">
+      <ModalSection
+        title="Fixed when the tool is registered"
+        description="The agent cannot change these. Anything here is a bound the engine enforces on every call."
+      >
+        {fixed.length === 0 ? (
+          <ModalNote tone="warning" title="Nothing is fixed">
+            Every parameter is chosen by the agent at call time. That is legitimate for a read, and
+            worth a second look for anything that writes.
+          </ModalNote>
+        ) : (
+          <div className="grid gap-3">
+            {fixed.map((param) => (
+              <div key={param.name} className="grid gap-1.5">
+                <Field label={param.label} required={param.required} description={param.help}>
+                  {param.type === "text" || param.type === "json" ? (
+                    <Textarea
+                      mono={param.type === "json"}
+                      minRows={2}
+                      maxRows={5}
+                      value={values[param.name] ?? ""}
+                      onChange={(event) => onValue(param.name, event.target.value)}
+                      placeholder={param.placeholder}
+                    />
+                  ) : (
+                    <Input
+                      type={param.type === "number" ? "number" : "text"}
+                      value={values[param.name] ?? ""}
+                      onChange={(event) => onValue(param.name, event.target.value)}
+                      placeholder={param.placeholder}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  )}
+                </Field>
+                {param.bindable ? (
+                  <div className="flex justify-end">
+                    <Button size="xs" variant="ghost" onClick={() => onBinding(param.name, "input")}>
+                      Let the agent choose
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </ModalSection>
+
+      <ModalDivider />
+
+      <ModalSection
+        title="Supplied on every call"
+        description="These become the tool's input schema. The agent, or an earlier node, provides them."
+      >
+        {perCall.length === 0 ? (
+          <ModalNote title="Nothing is left to the caller">
+            Every value is fixed, so this tool does exactly one thing with exactly one set of
+            arguments. That is often the safest tool there is.
+          </ModalNote>
+        ) : (
+          <ul className="grid gap-1.5">
+            {perCall.map((param) => (
+              <li key={param.name} className="grid gap-0.5">
+                <div className="flex min-h-6 items-center justify-between gap-3">
+                  <Text variant="body-sm" tone="primary" className="min-w-0 truncate font-medium">
+                    {param.label}
+                    {param.required ? null : (
+                      <Text variant="caption" tone="disabled" className="ml-1.5">optional</Text>
+                    )}
+                  </Text>
+                  {param.bindable ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="shrink-0"
+                      onClick={() => onBinding(param.name, "config")}
+                    >
+                      Fix this value
+                    </Button>
+                  ) : null}
+                </div>
+                {param.help ? (
+                  <Text variant="caption" tone="muted" className="block leading-snug">{param.help}</Text>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </ModalSection>
+    </div>
+  );
+}
+
+/** Sentinel for "I want the raw request form" on a provider that has a catalogue. */
+const CUSTOM_REQUEST = "__custom__";
+
+/**
+ * The first registration-bound parameter left empty, said in the field's words.
+ *
+ * These are required because the request cannot be formed without them — a
+ * GitHub issue needs an owner and a repo before there is a URL to POST to — and
+ * because they are the ones the agent will NOT be able to supply later.
+ */
+function missingBoundParam(
+  operation: ProviderOperation,
+  values: Record<string, string>,
+  bindingOf: (param: OperationParam) => "config" | "input",
+): string | null {
+  for (const param of operation.params) {
+    if (!param.required || bindingOf(param) !== "config") continue;
+    if (!values[param.name]?.trim()) {
+      return `${operation.label} needs ${param.label.toLowerCase()} — it is fixed when the tool is registered, not chosen per call.`;
+    }
+  }
+  return null;
 }
 
 function validUrl(value: string): boolean {
@@ -168,6 +319,18 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   const [method, setMethod] = React.useState<string>("GET");
   const [url, setUrl] = React.useState("");
+
+  /* WHAT THIS TOOL ACTUALLY DOES, in the provider's own vocabulary.
+     `operationId` null with a provider that HAS operations means "custom
+     request" — the escape hatch back to the raw method/URL form. A catalogue
+     nobody can step outside of is a ceiling, not a help. */
+  const [operationId, setOperationId] = React.useState<string | null>(null);
+  const [operationValues, setOperationValues] = React.useState<Record<string, string>>({});
+  /* Per-parameter overrides of the catalogue's default binding. This is the
+     blast-radius decision: a Gmail tool whose `to` is bound here can email one
+     address forever, and the same tool with `to` on input can email anyone the
+     model can be talked into naming. */
+  const [bindings, setBindings] = React.useState<Record<string, "config" | "input">>({});
   const [sqlTemplate, setSqlTemplate] = React.useState("");
   const [writes, setWrites] = React.useState(false);
 
@@ -269,6 +432,55 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     return connections.filter((connection) => (spec.connectionTypes as string[]).includes(connection.type));
   }, [connections, spec.connectionTypes]);
 
+  /** The connection the tool will run as, resolved from the picker. */
+  const selectedConnection = React.useMemo(
+    () => connections.find((connection) => connection.id === connectionId) ?? null,
+    [connections, connectionId],
+  );
+
+  /**
+   * What this connection can be asked to do.
+   *
+   * Empty for a generic HTTP or webhook connection, which is the honest answer:
+   * Vectorbea has no idea what lives behind an arbitrary base URL, so the raw
+   * method/URL form is the right thing to show. It is NOT empty for Gmail,
+   * Slack, GitHub, Notion, Airtable, HubSpot, Sheets or Jira, and showing those
+   * users a blank URL field was asking them to know that Gmail's send endpoint
+   * is `POST /gmail/v1/users/me/messages/send` with a base64url RFC 2822 body.
+   */
+  const operations = React.useMemo(
+    () => (type === "http" ? operationsFor(selectedConnection?.provider) : []),
+    [type, selectedConnection?.provider],
+  );
+  const operation = React.useMemo(() => operationById(operationId) ?? null, [operationId]);
+  const usesCatalogue = operations.length > 0;
+
+  /** The binding in force for a parameter: the operator's choice, else the catalogue's. */
+  const bindingOf = React.useCallback(
+    (param: OperationParam) => bindings[param.name] ?? param.binding,
+    [bindings],
+  );
+
+  /* Switching connection invalidates an operation belonging to the previous
+     provider — a Slack operation on a Gmail connection would post a request
+     Gmail has never heard of. */
+  React.useEffect(() => {
+    setOperationId(null);
+    setOperationValues({});
+    setBindings({});
+  }, [connectionId]);
+
+  /* Choosing an operation seeds the request it issues. The method and path are
+     the vendor's, not the operator's, so they are set rather than asked for. */
+  React.useEffect(() => {
+    if (!operation) return;
+    setMethod(operation.method);
+    setUrl(operation.path);
+    setWrites(operation.writes);
+    setOperationValues({});
+    setBindings({});
+  }, [operation]);
+
   const selectedTable = React.useMemo(
     () => (schema?.tables ?? []).find((t) => `${t.schema}.${t.table}` === builder.table) ?? null,
     [schema, builder.table],
@@ -288,6 +500,22 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     setOutputSchema(JSON.stringify(generated.outputSchema, null, 2));
   }, [type, handWritten, generated]);
 
+  /* The operation owns the input schema for exactly the same reason the SQL
+     builder owns it for database tools: the parameters ARE the contract, and a
+     hand-written schema that disagrees with them is a runtime failure dressed
+     as a config file. */
+  React.useEffect(() => {
+    if (!operation) return;
+    setInputSchema(JSON.stringify(inputSchemaFor(operation, bindings), null, 2));
+  }, [operation, bindings]);
+
+  /* The vendor decides how dangerous the call is, so the tier starts there.
+     The operator may raise it; nothing here lowers a tier they chose. */
+  React.useEffect(() => {
+    if (!operation) return;
+    setRisk((current) => (RISK_ORDER[operation.risk] > RISK_ORDER[current] ? operation.risk : current));
+  }, [operation]);
+
   /** True while the builder owns the two schema documents. */
   const schemasAreGenerated = type === "database" && !handWritten;
 
@@ -296,11 +524,46 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const parsedInput = parseObject(inputSchema);
   const parsedOutput = parseObject(outputSchema);
 
+  /**
+   * The path with config-bound parameters already substituted.
+   *
+   * Input-bound ones stay as `{name}` placeholders and are filled at run time by
+   * `HttpNodeExecutor.substitutePathParams`, which URL-encodes them. Substituting
+   * a config value here rather than at run time is what makes the binding real:
+   * a value baked into the stored URL is one the agent has no way to move.
+   */
+  const operationUrl = React.useMemo(() => {
+    if (!operation) return url.trim();
+    let path = operation.path;
+    for (const param of operation.params) {
+      if (bindingOf(param) !== "config") continue;
+      const value = operationValues[param.name]?.trim();
+      if (!value) continue;
+      path = path.split(`{${param.name}}`).join(encodeURIComponent(value));
+    }
+    return path;
+  }, [operation, operationValues, bindingOf, url]);
+
   const config = React.useMemo<Record<string, unknown>>(() => {
     const base: Record<string, unknown> = { ...(parsedExtra ?? {}) };
     if (type === "http") {
       base.method = method;
-      base.url = url.trim();
+      base.url = operation ? operationUrl : url.trim();
+      if (operation) {
+        /* Recorded so the tool detail page, and anybody reading the row in two
+           months, can say WHICH operation this is rather than reverse-engineering
+           it from a URL. */
+        base.operationId = operation.id;
+        /* Parameters bound at registration. Not secrets — those are refused by
+           `validateConfigJsonNotContainsSecrets` and live on the connection. */
+        const bound: Record<string, string> = {};
+        for (const param of operation.params) {
+          if (bindingOf(param) !== "config") continue;
+          const value = operationValues[param.name]?.trim();
+          if (value) bound[param.name] = value;
+        }
+        if (Object.keys(bound).length > 0) base.boundParameters = bound;
+      }
     }
     if (type === "database") {
       base.sqlTemplate = sqlTemplate.trim();
@@ -319,7 +582,10 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       }
     }
     return base;
-  }, [parsedExtra, type, method, url, sqlTemplate, writes, handWritten, generated.parameters]);
+  }, [
+    parsedExtra, type, method, url, sqlTemplate, writes, handWritten, generated.parameters,
+    operation, operationUrl, operationValues, bindingOf,
+  ]);
 
   const forbiddenKey = forbiddenConfigKey(config);
   const timeoutValue = Number(timeoutMs);
@@ -330,8 +596,12 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     requiresConnection && !connectionId
       ? `A ${spec.label.toLowerCase()} tool runs as a connection. Pick one, or the API will refuse the create.`
       : null,
-    type === "http" && !validUrl(url)
-      ? "Enter the full endpoint URL, including https://."
+    type === "http" && usesCatalogue && !operation && operationId !== CUSTOM_REQUEST
+      ? "Pick what this tool does. Every option is one call to the connected account."
+      : type === "http" && operation
+        ? missingBoundParam(operation, operationValues, bindingOf)
+        : type === "http" && !validUrl(url)
+          ? "Enter the full endpoint URL, including https://."
       : type === "database" && !handWritten && generated.problem
         ? generated.problem
         : type === "database" && !sqlTemplate.trim()
@@ -454,7 +724,10 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     value:
       index === 0 ? (trimmedName || undefined)
         : index === 1 ? (connectionId ? connections.find((c) => c.id === connectionId)?.name : requiresConnection ? undefined : "None needed")
-          : index === 2 ? (type === "http" ? `${method} endpoint` : type === "database" ? "SQL template" : undefined)
+          : index === 2
+        ? (operation ? operation.label
+          : type === "http" ? `${method} endpoint`
+            : type === "database" ? "SQL template" : undefined)
             : index === 3 ? `${RISK_TIERS.find((tier) => tier.value === risk)?.label} risk${requiresApproval ? " · gated" : ""}`
               : undefined,
   }));
@@ -579,6 +852,22 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                     connections={compatible}
                     value={connectionId}
                     onValueChange={setConnectionId}
+                    /* Says what each connection will let you BUILD, which is the
+                       only thing that distinguishes them at this moment: for an
+                       HTTP tool every SaaS connection is type `http`, so the
+                       picker used to be a list of names with no consequence
+                       attached to picking one over another. */
+                    badgeFor={(connection) => {
+                      if (type !== "http") return null;
+                      const count = operationsFor(connection.provider).length;
+                      return count > 0 ? (
+                        <Text variant="caption" tone="muted">
+                          {count} {count === 1 ? "operation" : "operations"}
+                        </Text>
+                      ) : (
+                        <Text variant="caption" tone="disabled">custom request</Text>
+                      );
+                    }}
                     allowNone={!requiresConnection}
                     noneDescription="Run without credentials."
                     emptyTitle={`No compatible ${spec.label.toLowerCase()} connection`}
@@ -608,7 +897,69 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
           {step === 2 ? (
             <div className="grid gap-4">
-              {type === "http" ? (
+              {type === "http" && usesCatalogue ? (
+                <ModalSection
+                  title="What this tool does"
+                  description={`One call to the connected ${selectedConnection?.provider ?? "account"}. Everything below is the request Vectorbea will issue — you are choosing the capability, not writing the endpoint.`}
+                >
+                  <OptionCards
+                    label="Operation"
+                    columns={1}
+                    density="compact"
+                    value={operationId}
+                    onValueChange={setOperationId}
+                    options={[
+                      ...operations.map((entry) => ({
+                        value: entry.id,
+                        label: entry.label,
+                        description: (
+                          <span className="grid gap-0.5">
+                            <span>{entry.description}</span>
+                            <Text variant="caption" tone="disabled" className="block leading-snug">
+                              {entry.useCase}
+                            </Text>
+                          </span>
+                        ),
+                        badge: entry.writes ? (
+                          <Text variant="caption" tone="muted">writes</Text>
+                        ) : (
+                          <Text variant="caption" tone="disabled">reads</Text>
+                        ),
+                      })),
+                      {
+                        value: CUSTOM_REQUEST,
+                        label: "Custom request",
+                        description:
+                          "Write the method and URL by hand. The catalogue covers the common calls, not every call the API has.",
+                      },
+                    ]}
+                  />
+                </ModalSection>
+              ) : null}
+
+              {type === "http" && operation ? (
+                <>
+                  <ModalDivider />
+                  <OperationParams
+                    operation={operation}
+                    values={operationValues}
+                    onValue={(name, value) =>
+                      setOperationValues((current) => ({ ...current, [name]: value }))
+                    }
+                    bindings={bindings}
+                    onBinding={(name, binding) =>
+                      setBindings((current) => ({ ...current, [name]: binding }))
+                    }
+                  />
+                  <ModalNote title="The request this becomes">
+                    <span className="font-code text-mono-sm break-all">
+                      {method} {operationUrl}
+                    </span>
+                  </ModalNote>
+                </>
+              ) : null}
+
+              {type === "http" && (!usesCatalogue || operationId === CUSTOM_REQUEST) ? (
                 <ModalSection title="Endpoint" description="The request the adapter issues on every call.">
                   <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
                     <Field label="Method" required>

@@ -1,5 +1,7 @@
 package com.vectorbea.worker.db
 
+import com.vectorbea.dbcatalog.DbProviders
+import com.vectorbea.dbcatalog.DbWire
 import com.vectorbea.worker.config.OutboundTimeouts
 import com.zaxxer.hikari.HikariConfig
 
@@ -48,8 +50,20 @@ object JdbcTimeouts {
      * what is on the wire rather than what the policy intends.
      */
     fun paramsFor(provider: String, t: OutboundTimeouts): Map<String, String> =
-        when (provider.lowercase()) {
-            "postgresql", "postgres" -> linkedMapOf(
+        /*
+         * KEYED ON THE WIRE PROTOCOL, NOT THE VENDOR NAME.
+         *
+         * This used to be a four-name `when`, with `else -> emptyMap()`. Because
+         * `applyTo` short-circuits on an empty map, a connection stored as
+         * provider `supabase`, `neon`, `aiven_mysql`, `planetscale`, `timescale`
+         * or `rds_postgresql` received NO connectTimeout, NO socketTimeout and NO
+         * prepareThreshold — the exact opt-out this file's header says a tenant
+         * must never get, handed out silently to most of the managed-database
+         * market. `DbProviders.resolve` maps all of those onto the wire protocol
+         * they actually speak.
+         */
+        when (DbProviders.resolve(provider, null).wire) {
+            DbWire.POSTGRES -> linkedMapOf(
                 // pgjdbc units: seconds
                 "connectTimeout" to t.dbConnectTimeoutSeconds.toString(),
                 "socketTimeout" to t.dbSocketTimeoutSeconds.toString(),
@@ -83,20 +97,21 @@ object JdbcTimeouts {
                 "prepareThreshold" to "0",
             )
 
-            "mysql", "mariadb" -> linkedMapOf(
+            DbWire.MYSQL -> linkedMapOf(
                 // Connector/J and MariaDB units: milliseconds
                 "connectTimeout" to (t.dbConnectTimeoutSeconds * 1_000).toString(),
                 "socketTimeout" to (t.dbSocketTimeoutSeconds * 1_000).toString(),
                 "tcpKeepAlive" to "true",
             )
 
-            "sqlserver", "mssql" -> linkedMapOf(
+            DbWire.SQLSERVER -> linkedMapOf(
                 // loginTimeout: seconds; socketTimeout: milliseconds
                 "loginTimeout" to t.dbLoginTimeoutSeconds.toString(),
                 "socketTimeout" to (t.dbSocketTimeoutSeconds * 1_000).toString(),
             )
 
-            else -> emptyMap()
+            // Not a JDBC wire — there is no URL here to force parameters onto.
+            DbWire.MONGODB -> emptyMap()
         }
 
     /**
@@ -106,8 +121,11 @@ object JdbcTimeouts {
      */
     private fun ceilingFor(key: String, provider: String, t: OutboundTimeouts): Long? {
         // pgjdbc expresses connect/socket timeouts in seconds; every other driver
-        // here uses milliseconds. loginTimeout is seconds everywhere.
-        val unit = if (provider.lowercase() in setOf("postgresql", "postgres")) 1L else 1_000L
+        // here uses milliseconds. loginTimeout is seconds everywhere. Resolved
+        // through the catalogue so `neon` and `supabase` are recognised as
+        // pgjdbc — reading their ceiling in milliseconds would have made every
+        // supplied value look 1000x too large and forced it back down.
+        val unit = if (DbProviders.resolve(provider, null).wire == DbWire.POSTGRES) 1L else 1_000L
         return when (key.lowercase()) {
             "connecttimeout" -> t.dbConnectTimeoutSeconds * unit
             "sockettimeout" -> t.dbSocketTimeoutSeconds * unit
@@ -134,7 +152,8 @@ object JdbcTimeouts {
 
     // ── URL rewriting ─────────────────────────────────────────────────────────
 
-    private fun isSqlServer(provider: String) = provider.lowercase() in setOf("sqlserver", "mssql")
+    private fun isSqlServer(provider: String) =
+        DbProviders.resolve(provider, null).wire == DbWire.SQLSERVER
 
     private fun forceQueryParams(
         url: String,

@@ -58,19 +58,38 @@ dependencies {
 }
 
 /**
- * The contract expression language is shared with the worker.
+ * THREE THINGS ARE COMPILED BY BOTH SERVICES, for one reason.
  *
- * The API needs it for publish-time linting and the inspector's live testing; the
- * worker needs it to enforce contracts at runtime. Those two must agree EXACTLY —
- * an expression that lints clean in the editor and then fails to parse in the
- * worker is the worst possible outcome, because the author has already shipped.
+ * Each is a contract between what the API writes and what the worker later
+ * reads. A second implementation of any of them is a second opinion, and every
+ * one of these has the same failure mode: the API reports success, and the
+ * failure surfaces only when a run reaches it — long after whoever set it up has
+ * stopped looking.
  *
- * So the source is shared rather than duplicated. The alternative, a common module,
- * is more build machinery than two files justify; the alternative to that, copying
- * the files, guarantees they drift.
+ *  · CONTRACT LANGUAGE. The API lints expressions at publish time; the worker
+ *    enforces them at run time. An expression that lints clean in the editor and
+ *    then fails to parse in the worker is the worst outcome, because the author
+ *    has already shipped.
+ *
+ *  · SECRET ENCRYPTION. The API writes the ciphertext; the worker decrypts it
+ *    when a run needs the credential. Disagreeing about the wire format makes
+ *    EVERY credential in the product undecryptable at run time, while the
+ *    connection page goes on reporting them healthy — the API can read its own
+ *    output perfectly well.
+ *
+ *  · DATABASE PROVIDER CATALOGUE. The API decides whether a connection works;
+ *    the worker decides how to open it. While each kept its own idea of what
+ *    `provider = "supabase"` meant, a connection could test green and then be
+ *    handed the wrong JDBC driver, or no timeouts at all. See the header of
+ *    DbProviders.kt for the three copies that had already drifted apart.
+ *
+ * Sharing the source is deliberate. A common module is more build machinery than
+ * these files justify; copying them guarantees they drift.
  */
 sourceSets {
     main {
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/crypto")
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract")
         // Only the pure language files travel. ContractValidator is bound to the
         // worker's DataSource and its runtime concerns; the API has no business

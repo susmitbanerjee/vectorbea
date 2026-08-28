@@ -172,6 +172,16 @@ export interface ConnectionPickerProps {
   emptyTitle: string;
   emptyBody: React.ReactNode;
   disabled?: boolean;
+  /**
+   * Right-aligned marker per connection — "2 operations", "generic".
+   *
+   * Exists because "pick a connection" is not a question anybody can answer
+   * from a list of names. For an HTTP tool EVERY SaaS connection is type
+   * `http`, so the picker offered all of them with nothing to tell them apart
+   * and no hint that choosing Gmail would produce a very different next step
+   * from choosing a bare webhook.
+   */
+  badgeFor?: (connection: contracts.Connection) => React.ReactNode;
 }
 
 /**
@@ -193,6 +203,7 @@ export function ConnectionPicker({
   emptyTitle,
   emptyBody,
   disabled,
+  badgeFor,
 }: ConnectionPickerProps) {
   if (connections.length === 0) {
     return (
@@ -216,6 +227,7 @@ export function ConnectionPicker({
     ...connections.map((connection) => ({
       value: connection.id,
       label: connection.name,
+      badge: badgeFor?.(connection),
       description: (
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <span>{providerDisplayName(connection)}</span>

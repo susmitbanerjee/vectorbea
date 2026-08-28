@@ -143,6 +143,126 @@ class DbTesterTest {
         assertEquals("postgres.abc", target.username)
     }
 
+    /* ── The Aiven MySQL failure ──────────────────────────────────────────────
+       Aiven's console hands out `mysql://…?ssl-mode=REQUIRED`. That is the MySQL
+       CLI spelling; Connector/J's property is `sslMode`, and an unrecognised
+       parameter in a JDBC URL is DISCARDED IN SILENCE rather than rejected —
+       confirmed directly against Connector/J 9.0.0. So the string plainly says
+       TLS is required, everyone reading it agrees, and the driver never hears
+       it. DataGrip has its own SSL toggle, which is exactly why the same
+       credentials connect there and fail here. */
+
+    @Test
+    fun `the MySQL CLI spelling of ssl-mode is translated, not ignored`() {
+        assertEquals("REQUIRED", DbTester.mysqlSslModeFromUrl(
+            "jdbc:mysql://mysql-1.a.aivencloud.com:23861/defaultdb?ssl-mode=REQUIRED"))
+        assertEquals("DISABLED", DbTester.mysqlSslModeFromUrl(
+            "jdbc:mysql://host/db?ssl-mode=disabled"))
+        assertEquals("VERIFY_IDENTITY", DbTester.mysqlSslModeFromUrl(
+            "jdbc:mysql://host/db?ssl-mode=VERIFY_IDENTITY"))
+    }
+
+    @Test
+    fun `the pre-8 useSSL property is translated too`() {
+        // Still all over vendor documentation, and equally inert in Connector/J 9.
+        assertEquals("DISABLED", DbTester.mysqlSslModeFromUrl("jdbc:mysql://host/db?useSSL=false"))
+        assertEquals("REQUIRED", DbTester.mysqlSslModeFromUrl("jdbc:mysql://host/db?useSSL=true"))
+    }
+
+    @Test
+    fun `a URL that says nothing about TLS leaves the catalogue default in place`() {
+        assertNull(DbTester.mysqlSslModeFromUrl("jdbc:mysql://host/db"))
+        assertNull(DbTester.mysqlSslModeFromUrl("jdbc:mysql://host/db?connectTimeout=5000"))
+        assertNull(DbTester.mysqlSslModeFromUrl(null))
+        // Garbage is not guessed at.
+        assertNull(DbTester.mysqlSslModeFromUrl("jdbc:mysql://host/db?ssl-mode=YES_PLEASE"))
+    }
+
+    @Test
+    fun `an Aiven MySQL URL is recognised as MySQL despite the generic provider`() {
+        // The connect dialog can only say "mysql". The host says Aiven, and that
+        // is what carries the TLS policy and the IP-allowlist hint.
+        val input = DbTester.DbTestInput(
+            dbType = "mysql",
+            connectionUrl = "mysql://avnadmin:pw@mysql-1.a.aivencloud.com:23861/defaultdb?ssl-mode=REQUIRED",
+            password = null, username = null, host = null, port = null, database = null,
+        )
+        val provider = DbTester.providerFor(input)
+        assertNotNull(provider)
+        assertEquals("aiven_mysql", provider.id)
+        assertEquals(23861, DbTester.portOf(input))
+        assertEquals("mysql-1.a.aivencloud.com", DbTester.hostOf(input))
+    }
+
+    @Test
+    fun `the pooling mode is taken from the user's choice before the host`() {
+        val base = DbTester.DbTestInput(
+            dbType = "postgresql",
+            connectionUrl = "postgresql://u:p@aws-0-eu-west-2.pooler.supabase.com:6543/postgres",
+            password = null, username = null, host = null, port = null, database = null,
+        )
+        // Detected from port 6543.
+        assertEquals(
+            com.vectorbea.dbcatalog.ConnectionMode.TRANSACTION_POOLER,
+            DbTester.modeFor(base, DbTester.providerFor(base)!!),
+        )
+        // An explicit choice overrides the detection.
+        val chosen = base.copy(connectionMode = "session_pooler")
+        assertEquals(
+            com.vectorbea.dbcatalog.ConnectionMode.SESSION_POOLER,
+            DbTester.modeFor(chosen, DbTester.providerFor(chosen)!!),
+        )
+    }
+
+    @Test
+    fun `a network failure on a managed host names that vendor's own screen`() {
+        // "Could not be reached" is identical for all of these and the fix is on
+        // a different page for each one.
+        val aiven = DbTester.hostGuidance("CONNECTION_REFUSED", "mysql-1.a.aivencloud.com")
+        assertNotNull(aiven)
+        assertTrue(aiven.contains("Allowed IP"), aiven)
+
+        val azure = DbTester.hostGuidance("TIMEOUT", "srv.postgres.database.azure.com")
+        assertNotNull(azure)
+        assertTrue(azure.contains("Firewall"), azure)
+
+        val rds = DbTester.hostGuidance("TIMEOUT", "shop.abc.eu-west-1.rds.amazonaws.com")
+        assertNotNull(rds)
+        assertTrue(rds.contains("security group"), rds)
+    }
+
+    @Test
+    fun `Azure's user-at-server username trap is named on an auth failure`() {
+        val guidance = DbTester.credentialGuidance(
+            "AUTH_FAILED",
+            DbTester.DbTestInput(
+                dbType = "postgresql",
+                connectionUrl = "postgresql://appuser:pw@vbea-prod.postgres.database.azure.com:5432/app",
+                password = null, username = null, host = null, port = null, database = null,
+            ),
+        )
+        assertNotNull(guidance)
+        assertTrue(guidance.contains("appuser@vbea-prod"), guidance)
+    }
+
+    @Test
+    fun `MySQL auth guidance reads the MySQL URL rather than returning nothing`() {
+        /* `credentialGuidance` resolved every input with the POSTGRES resolver.
+           On a `mysql://` URL that produced a target with a null username, so
+           every branch fell through and MySQL got the bare "check credentials" —
+           on the one wire where the server's own message says least. */
+        val guidance = DbTester.credentialGuidance(
+            "AUTH_FAILED",
+            DbTester.DbTestInput(
+                dbType = "mysql",
+                connectionUrl = "mysql://appuser:pw@vbea.mysql.database.azure.com:3306/app",
+                password = null, username = null, host = null, port = null, database = null,
+            ),
+        )
+        assertNotNull(guidance)
+        assertTrue(guidance.contains("appuser@vbea"), guidance)
+    }
+
     @Test
     fun `sql states and nested network causes produce actionable errors`() {
         assertEquals(

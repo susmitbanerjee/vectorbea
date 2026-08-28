@@ -54,7 +54,7 @@ import com.vectorbea.api.secrets.EncryptedSecretService
 import com.vectorbea.api.secrets.NoOpSecretService
 import com.vectorbea.api.secrets.SecretRepository
 import com.vectorbea.api.secrets.SecretService
-import com.vectorbea.api.security.Encryption
+import com.vectorbea.crypto.Encryption
 import com.vectorbea.api.workers.WorkerHeartbeatRepository
 import org.slf4j.LoggerFactory
 
