@@ -34,8 +34,10 @@ class AgentMemoryStore(private val dataSource: DataSource?) {
         } catch (e: Exception) { log.warn("[memory] persist failed key={}: {}", key, e.message) }
     }
 
+    /** Writes entries created during THIS execution. Recalled ones are already stored. */
     fun persistAll(config: AgentBrainConfig, state: AgentLoopState) {
-        state.memoryEntries.forEach { persist(config, it.key, it.sanitizedSummary) }
+        state.memoryEntries.filterNot { it.recalled }
+            .forEach { persist(config, it.key, it.sanitizedSummary) }
     }
 
     fun load(runId: UUID, agentId: UUID): Map<String, String> {
@@ -47,7 +49,20 @@ class AgentMemoryStore(private val dataSource: DataSource?) {
                 ).use { stmt ->
                     stmt.setObject(1, runId); stmt.setObject(2, agentId)
                     val rs = stmt.executeQuery()
-                    buildMap { while (rs.next()) put(rs.getString("key"), rs.getString("value_json_sanitized")) }
+                    /* Values are stored as JSON, so a plain summary comes back as a
+                       QUOTED, escaped JSON string. Unwrap scalars — handing the model
+                       `"Tool returned 2 field(s): status, body"` complete with escapes is
+                       needlessly harder to read than the sentence itself. Objects and
+                       arrays are left as JSON, which is what they were. */
+                    buildMap {
+                        while (rs.next()) {
+                            val raw = rs.getString("value_json_sanitized") ?: continue
+                            val text = if (raw.startsWith("\"")) {
+                                runCatching { mapper.readValue(raw, String::class.java) }.getOrDefault(raw)
+                            } else raw
+                            put(rs.getString("key"), text)
+                        }
+                    }
                 }
             }
         } catch (e: Exception) { log.warn("[memory] load failed: {}", e.message); emptyMap() }

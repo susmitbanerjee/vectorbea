@@ -553,11 +553,18 @@ class RunProcessor(
             runId         = job.runId,
             workspaceId   = run.workspaceId,
             environmentId = run.environmentId,
-            type          = EventType.RETRY_STARTED,
+            /* A resume is not a retry — see EventType.RUN_RESUMED. */
+            type          = EventType.RUN_RESUMED,
             status        = "running",
             source        = "worker:$workerId",
             title         = "Run resumed from checkpoint",
-            summary       = "Resuming from checkpoint sequence ${snapshot.sequence}",
+            summary       = "Resuming from checkpoint sequence ${snapshot.sequence}" +
+                            /* The API sends `reason` and the worker parses it into
+                               triggeredBy — "approval", "timer". Worth naming: it is the
+                               difference between "someone approved it" and "a timer
+                               fired" on an otherwise identical line. */
+                            job.triggeredBy.takeIf { it.isNotBlank() && it != "unknown" }
+                                ?.let { " (resumed by: $it)" }.orEmpty(),
             retryAttempt  = job.retryCount,
             correlationId = job.streamMessageId,
         ))

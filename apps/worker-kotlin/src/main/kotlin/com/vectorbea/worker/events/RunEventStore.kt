@@ -166,6 +166,19 @@ open class RunEventStore(
         // Durable execution — cooperative yielding (durable, low-frequency timeline events)
         RUN_YIELDED("RUN_YIELDED"),
         RUN_REENQUEUED("RUN_REENQUEUED"),
+        /**
+         * A run picked up again from its checkpoint — after an approval decision, a
+         * timer, or a yield.
+         *
+         * Not RETRY_STARTED, which is what this used to be. Nothing had failed and
+         * nothing was being re-attempted, but the UI grades severity by name
+         * (`LogsTab`: any type containing "RETRY" renders `warn`), so approving a run
+         * and watching it continue normally produced a warning on the timeline and the
+         * question "why is it retrying?". The web layer has understood RUN_RESUMED all
+         * along — badge, icon, label, compact styling — and only the worker never sent
+         * one.
+         */
+        RUN_RESUMED("RUN_RESUMED"),
         // Scheduling-fairness signals. NOTE: these are operational and HIGH-FREQUENCY
         // under load — they are exposed ONLY via metrics/logs (WorkerMetrics.tenantThrottled
         // / poolSaturated) and MUST NOT be appendEvent'd to run_events per poll.

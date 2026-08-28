@@ -236,6 +236,28 @@ class AgentBrainRunner(
         )
         val state = AgentLoopState(config = config, budget = budget)
 
+        /*
+         * ── WHAT THIS AGENT ALREADY DID, BEFORE IT WAS INTERRUPTED ───────────
+         *
+         * The step re-executes from iteration 1 whenever the run resumes — after an
+         * approval, a timer, a yield. Loop state lives in memory, so the second pass
+         * started blind: same task, no observations, no memory, and it dutifully made
+         * the same LLM calls and re-ran the same tools it had already run. Watching a
+         * run get approved and then immediately repeat several minutes of work is
+         * exactly the "the agent keeps going after it finished" report.
+         *
+         * `AgentMemoryStore` had been writing these entries since the loop shipped and
+         * `load` had never been called from anywhere — the memory was write-only.
+         */
+        val recalled = memoryStore.load(config.runId, config.agentId)
+        if (recalled.isNotEmpty()) {
+            recalled.forEach { (key, value) -> state.addRecalledMemory(key, value) }
+            log.info("[brain] resumed with {} memory entrie(s) runId={} step={}",
+                recalled.size, config.runId, config.stepId)
+            emitEvent(config, RunEventStore.EventType.AGENT_STARTED, "running",
+                "Agent resumed — recalled ${recalled.size} entrie(s) from earlier in this run")
+        }
+
         emitEvent(config, RunEventStore.EventType.AGENT_STARTED, "running",
             "Agent brain started — task: ${(config.taskInstruction ?: "").take(100)}")
 
@@ -335,7 +357,15 @@ class AgentBrainRunner(
 
                         val obs = executeTool(action, config, runtimeCtx, state)
                         state.addObservation(obs)
-                        state.addMemory("obs_${state.iteration}_${action.toolId}", obs.sanitizedSummary)
+                        /* The payload, not only the shape. Memory is what survives into
+                           the next execution of this step, so storing "Tool returned 2
+                           field(s)" here means a resumed agent knows it made the call and
+                           still has to make it again to see the answer. */
+                        state.addMemory(
+                            "obs_${state.iteration}_${action.toolId}",
+                            obs.payload?.let { "${obs.sanitizedSummary} RESULT: $it" }
+                                ?: obs.sanitizedSummary,
+                        )
                         emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED, "running",
                             obs.sanitizedSummary)
                         persistIterationComplete(iterationId, "completed", action, obs.sanitizedSummary, budget)

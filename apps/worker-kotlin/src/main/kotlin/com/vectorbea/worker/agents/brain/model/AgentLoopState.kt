@@ -17,9 +17,27 @@ data class AgentLoopState(
     fun addMemory(key: String, value: Any?, sanitized: String? = null) {
         memoryEntries.add(MemoryEntry(key, value, sanitized ?: value.toString()))
     }
+
+    /**
+     * Add an entry read back from storage.
+     *
+     * Flagged so it is not written again on the way out. `agent_memory_entries` has no
+     * unique key on (run_id, agent_id, key) — its `ON CONFLICT DO NOTHING` can never
+     * fire — so re-persisting what was just loaded would double the rows on every
+     * resume, and a run that resumes repeatedly would keep doubling them.
+     */
+    fun addRecalledMemory(key: String, value: Any?) {
+        memoryEntries.add(MemoryEntry(key, value, value.toString(), recalled = true))
+    }
     val isDone get() = stopReason != null
 
-    data class MemoryEntry(val key: String, val value: Any?, val sanitizedSummary: String)
+    data class MemoryEntry(
+        val key: String,
+        val value: Any?,
+        val sanitizedSummary: String,
+        /** True when this was loaded from a previous execution — already stored. */
+        val recalled: Boolean = false,
+    )
 
     enum class StopReason {
         FINAL_OUTPUT, MAX_ITERATIONS, BUDGET_EXCEEDED, AGENT_FAILED,

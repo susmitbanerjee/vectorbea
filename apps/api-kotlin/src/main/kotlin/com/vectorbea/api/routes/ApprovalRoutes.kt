@@ -199,6 +199,11 @@ class ApprovalRoutes(
                     source        = "api:approval",
                     title         = "Approval ${decision}: ${approval.title}",
                     summary       = body.reason?.take(200),
+                    /* WHICH approval this decided. Two APPROVAL_APPROVED events on one
+                       run were indistinguishable on the timeline, so "was this approved
+                       twice, or were there two gates?" could not be answered from the
+                       event stream at all — and only one of those is a bug. */
+                    correlationId = id.toString(),
                 ))
             }.onFailure { e ->
                 log.warn("[approval] failed to append decision event: {}", e.message)
