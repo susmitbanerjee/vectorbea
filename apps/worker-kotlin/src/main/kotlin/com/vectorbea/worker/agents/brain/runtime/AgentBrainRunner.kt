@@ -40,6 +40,14 @@ class AgentBrainRunner(
      * mis-executed as HTTP.
      */
     private val dbPoolManager: ClientDbPoolManager? = null,
+    /**
+     * Where ASK_APPROVAL becomes a real pending approval instead of a dead end.
+     *
+     * Null only where there is no database to write one to, in which case an agent
+     * asking for approval fails with a message saying so — which is honest, and is
+     * still better than the silent failure this replaced.
+     */
+    private val approvalStore: com.vectorbea.worker.runtime.checkpoint.ApprovalStore? = null,
     private val budgetGuard: AgentBudgetGuard = AgentBudgetGuard(),
     private val safetyGuard: AgentSafetyGuard = AgentSafetyGuard(),
     private val memoryStore: AgentMemoryStore = AgentMemoryStore(dataSource),
@@ -58,6 +66,27 @@ class AgentBrainRunner(
          * small enough that one enormous response cannot eat the whole budget.
          */
         internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
+
+        /**
+         * What an approval row's status means for the loop.
+         *
+         * Pulled out because it is the part that is easy to get quietly wrong and
+         * impossible to see going wrong: the API writes APPROVED / REJECTED (via
+         * `UPPER(?)`) and SENT_BACK, an EXPIRED gate must stop the run rather than open
+         * a second one, SENT_BACK is not a decision so it keeps waiting, and ANYTHING
+         * unrecognised has to mean WAIT. Never OPEN — an
+         * unknown status that fell through to "create a new approval" would open a
+         * fresh gate on every resume, and a run that re-asks forever looks exactly like
+         * a run nobody has got round to approving.
+         *
+         * On the companion because it depends on no instance state, so it can be
+         * exercised without a database.
+         */
+        internal fun decideOnApproval(status: String?): Decision = when (status?.trim()?.uppercase()) {
+            "APPROVED" -> Decision.GRANT
+            "REJECTED", "EXPIRED", "CANCELLED" -> Decision.REJECT
+            else -> Decision.WAIT
+        }
 
         /** The `:tool-<n>` attempt counter in a synthetic tool node's id. */
         private val ATTEMPT_SUFFIX = Regex(":tool-\\d+")
@@ -163,6 +192,38 @@ class AgentBrainRunner(
          * Null when the loop ended cleanly.
          */
         val failureReason: String? = null,
+
+        /**
+         * Whether running this agent step again could plausibly end differently.
+         *
+         * The node-level retry policy exists for faults that are transient by nature —
+         * a refused connection, a dropped socket, a provider hiccup. It was being
+         * applied to every failure equally, including the ones this loop reached BY
+         * DECIDING: the agent weighed the task and declined, or it produced output that
+         * did not match its schema, or a tool failed identically twice. Re-running
+         * those replays the same prompt against the same state and reaches the same
+         * conclusion, having spent a second full agent budget to do it — and, because
+         * each attempt is several LLM calls, having pushed the run's per-tick execution
+         * budget over its limit, which is what makes a failed agent step yield and
+         * re-enqueue the whole run.
+         *
+         * So the loop says which kind of ending this was; [AgentBrainRunner] knows and
+         * the retry loop cannot infer it from an error string. Default true, because
+         * anything unrecognised is safer to retry than to abandon.
+         */
+        val retryable: Boolean = true,
+
+        /**
+         * The pending approval this run is waiting on, when [stopReason] is
+         * APPROVAL_REQUESTED.
+         *
+         * Present so the caller can return [NodeResult.ApprovalPaused] and let the
+         * runtime park the run against a real row in `run_approvals` — the same row the
+         * Approvals screen lists and decides. Without it an agent asking for a human
+         * had nowhere to put the question, and the ask was reported as a step failure.
+         */
+        val approvalId: String? = null,
+        val approvalMessage: String? = null,
     )
 
     suspend fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
@@ -181,6 +242,14 @@ class AgentBrainRunner(
         /* Carries the cause out of the loop and into RunResult. See RunResult.failureReason. */
         var failureReason: String? = null
 
+        /* Set false at each stop the loop reached by deciding something, as opposed to
+           by breaking. See RunResult.retryable. */
+        var retryable = true
+
+        /* The approval the loop is parked on, when it parks. See RunResult.approvalId. */
+        var approvalId: String? = null
+        var approvalMessage: String? = null
+
         try {
             while (!state.isDone) {
                 budget.iterationStarted()
@@ -191,6 +260,8 @@ class AgentBrainRunner(
                 catch (e: BudgetExceededException) {
                     state.stopReason = AgentLoopState.StopReason.BUDGET_EXCEEDED
                     failureReason = "Budget exceeded: ${e.message}"
+                    /* A retry gets the same budget and the same work to do with it. */
+                    retryable = false
                     emitEvent(config, RunEventStore.EventType.AGENT_BUDGET_EXCEEDED, "failed",
                         "Budget exceeded: ${e.message}")
                     break
@@ -234,6 +305,8 @@ class AgentBrainRunner(
                     persistIterationComplete(iterationId, "failed", action, null, budget)
                     state.stopReason = AgentLoopState.StopReason.TOOL_NOT_ALLOWED
                     failureReason = "The agent tried to call tool ${e.toolId}, which is not in its allowed tool list."
+                    /* A grant, not a glitch. Nothing changes until someone changes it. */
+                    retryable = false
                     break
                 }
 
@@ -293,6 +366,9 @@ class AgentBrainRunner(
                             failureSignature(previous.sanitizedSummary) == failureSignature(obs.sanitizedSummary)
                         ) {
                             state.stopReason = AgentLoopState.StopReason.ERROR
+                            /* The loop already proved this repeats. Proving it a third
+                               and fourth time is what the node retry would do. */
+                            retryable = false
                             failureReason = "Tool ${obs.toolId} failed twice with the same error, so the " +
                                 "agent stopped rather than retrying it further: ${obs.sanitizedSummary}"
                             emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
@@ -312,20 +388,86 @@ class AgentBrainRunner(
                                 "Final output failed schema validation")
                             persistIterationComplete(iterationId, "failed", action, "Schema invalid", budget)
                             state.stopReason = AgentLoopState.StopReason.SCHEMA_INVALID
+                            retryable = false
                             failureReason = "The agent's final output did not match the required output " +
                                 "schema. It returned: ${action.finalOutput.keys.take(8).joinToString().ifBlank { "no fields" }}"
                         }
                     }
 
                     AgentAction.ActionType.ASK_APPROVAL -> {
-                        state.stopReason = AgentLoopState.StopReason.APPROVAL_REQUESTED
-                        emitEvent(config, RunEventStore.EventType.AGENT_APPROVAL_REQUESTED, "running",
-                            "Agent requested human approval: $sanitizedReason")
-                        persistIterationComplete(iterationId, "completed", action, sanitizedReason, budget)
+                        /*
+                         * ── ASKING FOR A PERSON IS NOT FAILING ───────────────────
+                         *
+                         * This used to set APPROVAL_REQUESTED and stop, and the caller
+                         * turned every non-FINAL stop into NodeResult.Failed — so an
+                         * agent that correctly paused for a human produced a failed step,
+                         * a failed run, and no approval anywhere for anyone to decide.
+                         * The one action whose whole purpose is to wait was the one that
+                         * could not.
+                         *
+                         * The gate is keyed on (runId, stepId), exactly as the DB_WRITE
+                         * gate is. That matters because the agent step re-executes from
+                         * iteration 1 when the run resumes: the second time through, this
+                         * finds APPROVED and the loop carries on instead of asking again,
+                         * which is what would otherwise deadlock a resumed run.
+                         *
+                         * One consequence of that key, stated because it is a real limit:
+                         * an agent gets ONE approval per step. A second ASK_APPROVAL in
+                         * the same step sees the first decision. A per-question gate would
+                         * need a key that survives re-execution, and iteration numbers do
+                         * not.
+                         */
+                        when (val gate = resolveApprovalGate(config, sanitizedReason)) {
+                            is ApprovalGate.Granted -> {
+                                val summary = "Approval granted${gate.by?.let { " by $it" } ?: ""} — continuing."
+                                state.addObservation(AgentObservation(
+                                    state.iteration, "ASK_APPROVAL", sanitizedSummary = summary))
+                                state.addMemory("approval_${state.iteration}", summary)
+                                emitEvent(config, RunEventStore.EventType.APPROVAL_APPROVED, "running", summary)
+                                persistIterationComplete(iterationId, "completed", action, summary, budget)
+                                /* No stopReason: the loop keeps its remaining iterations
+                                   and the model sees the grant in its observations. */
+                            }
+
+                            is ApprovalGate.Rejected -> {
+                                state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                                retryable = false
+                                failureReason = "A reviewer rejected this step" +
+                                    (gate.by?.let { " (decided by $it)" } ?: "") +
+                                    ". The agent asked: $sanitizedReason"
+                                emitEvent(config, RunEventStore.EventType.APPROVAL_REJECTED, "failed",
+                                    failureReason!!)
+                                persistIterationComplete(iterationId, "failed", action, failureReason, budget)
+                            }
+
+                            is ApprovalGate.Pending -> {
+                                state.stopReason = AgentLoopState.StopReason.APPROVAL_REQUESTED
+                                /* Waiting on a person. Asking again immediately is not waiting. */
+                                retryable = false
+                                approvalId      = gate.approvalId
+                                approvalMessage = gate.message
+                                emitEvent(config, RunEventStore.EventType.AGENT_APPROVAL_REQUESTED,
+                                    "waiting_for_approval",
+                                    "Agent requested human approval: $sanitizedReason")
+                                persistIterationComplete(iterationId, "completed", action, sanitizedReason, budget)
+                            }
+
+                            is ApprovalGate.Unavailable -> {
+                                state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                                retryable = false
+                                failureReason = "The agent asked for human approval, but no approval could " +
+                                    "be created: ${gate.why}. The agent asked: $sanitizedReason"
+                                emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed", failureReason!!)
+                                persistIterationComplete(iterationId, "failed", action, failureReason, budget)
+                            }
+                        }
                     }
 
                     AgentAction.ActionType.FAIL -> {
                         state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                        /* The agent considered the task and declined it. That is an
+                           answer, not an outage. */
+                        retryable = false
                         /* `sanitizeReasoningSummary` returns "" for a null or blank input, never
                            null, so the elvis that used to stand here could not fire: an agent that
                            chose FAIL without filling in `failReason` produced an empty reason, and
@@ -352,6 +494,9 @@ class AgentBrainRunner(
                 // Check if max iterations reached after this iteration
                 if (!state.isDone && state.iteration >= config.maxIterations) {
                     state.stopReason = AgentLoopState.StopReason.MAX_ITERATIONS
+                    /* It had its full iteration budget and did not converge; a retry
+                       hands it the same budget and the same starting state. */
+                    retryable = false
                     emitEvent(config, RunEventStore.EventType.AGENT_MAX_ITERATIONS_REACHED, "failed",
                         "Max iterations reached (${config.maxIterations})")
                 }
@@ -370,7 +515,15 @@ class AgentBrainRunner(
             .filter { it.actionType == "CALL_TOOL" && !it.success }
             .map { it.sanitizedSummary }
 
-        val finalStatus = if (state.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) "succeeded" else "failed"
+        /* A pause is not an outcome yet. Reporting AGENT_COMPLETED status=failed for a
+           run parked on a human made the timeline say the agent had failed while the
+           approval sat waiting for someone to decide it. */
+        val waitingForApproval = state.stopReason == AgentLoopState.StopReason.APPROVAL_REQUESTED
+        val finalStatus = when {
+            state.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT -> "succeeded"
+            waitingForApproval -> "waiting_for_approval"
+            else -> "failed"
+        }
 
         /* A "succeeded" that had failed tool calls is the case that has repeatedly
            looked clean while nothing happened. Say it on the event the timeline leads
@@ -381,7 +534,10 @@ class AgentBrainRunner(
 
         emitEvent(config, RunEventStore.EventType.AGENT_COMPLETED,
             if (finalStatus == "succeeded" && failedToolCalls.isNotEmpty()) "warning" else finalStatus,
-            "Agent finished — stopReason=${state.stopReason} iterations=${state.iteration}$toolNote")
+            if (waitingForApproval)
+                "Agent paused for approval after ${state.iteration} iteration(s) — waiting on a decision"
+            else
+                "Agent finished — stopReason=${state.stopReason} iterations=${state.iteration}$toolNote")
 
         return RunResult(
             finalOutput        = state.finalOutput,
@@ -398,11 +554,74 @@ class AgentBrainRunner(
                now carries SOMETHING a person can read, because the alternative is the
                caller printing "did not produce a final output" and the run detail
                screen leading with a sentence that identifies nothing. */
-            failureReason      = if (state.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) null
+            failureReason      = if (state.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT ||
+                                     waitingForApproval) null
                                  else failureReason
                                      ?: state.observations.lastOrNull { !it.success }?.sanitizedSummary
                                      ?: describeStop(state.stopReason, config),
+            retryable          = retryable,
+            approvalId         = approvalId,
+            approvalMessage    = approvalMessage,
         )
+    }
+
+    /** What an existing approval row means for the loop. */
+    internal enum class Decision { GRANT, REJECT, WAIT }
+
+    /** What the approval gate says about this step, right now. */
+    private sealed class ApprovalGate {
+        data class Granted(val by: String?) : ApprovalGate()
+        data class Rejected(val by: String?) : ApprovalGate()
+        data class Pending(val approvalId: String, val message: String) : ApprovalGate()
+        data class Unavailable(val why: String) : ApprovalGate()
+    }
+
+    /**
+     * Find or open this step's approval.
+     *
+     * Deliberately the same shape as `DbWriteNodeExecutor.handleApprovalGate`: look up
+     * by (runId, nodeId) first, create only when nothing is there. Re-execution after a
+     * decision must find the decision, not open a second gate — otherwise approving a
+     * run produces another pending approval and the run never moves.
+     */
+    private fun resolveApprovalGate(config: AgentBrainConfig, reason: String): ApprovalGate {
+        val store = approvalStore
+            ?: return ApprovalGate.Unavailable("this worker has no database connection")
+
+        val message = "Agent '${config.agentName}' requested approval to continue. $reason"
+            .take(500)
+
+        return try {
+            when (val existing = store.findApproval(config.runId, config.stepId)) {
+                null -> ApprovalGate.Pending(
+                    approvalId = store.createPendingApproval(
+                        runId          = config.runId,
+                        workspaceId    = config.workspaceId,
+                        environmentId  = config.environmentId,
+                        nodeId         = config.stepId,
+                        message        = message,
+                        approvers      = emptyList(),
+                        /* Input KEYS only reach metadata_json; see createPendingApproval. */
+                        resolvedInputs = config.resolvedInput.filterValues { it != null }
+                            .mapValues { it.value!! },
+                        gate = com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig(
+                            title = "Agent approval: ${config.agentName}",
+                        ),
+                    ),
+                    message = message,
+                )
+                else -> when (decideOnApproval(existing.status)) {
+                    Decision.GRANT  -> ApprovalGate.Granted(existing.resolvedBy)
+                    Decision.REJECT -> ApprovalGate.Rejected(existing.resolvedBy)
+                    Decision.WAIT   -> ApprovalGate.Pending(
+                        existing.id.toString(), existing.message ?: message)
+                }
+            }
+        } catch (e: Exception) {
+            log.error("[brain] approval gate failed runId={} step={}: {}",
+                config.runId, config.stepId, e.message)
+            ApprovalGate.Unavailable(e.message?.take(200) ?: e.javaClass.simpleName)
+        }
     }
 
     /**

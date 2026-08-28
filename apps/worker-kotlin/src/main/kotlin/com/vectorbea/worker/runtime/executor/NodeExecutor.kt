@@ -54,8 +54,20 @@ sealed class NodeResult {
 
     companion object // allows extension functions
 
-    /** Node failed. [reason] is a sanitized message safe to persist. */
-    data class Failed(val reason: String) : NodeResult()
+    /**
+     * Node failed. [reason] is a sanitized message safe to persist.
+     *
+     * [retryable] is whether running this node again could plausibly end differently.
+     * Default true: a transport error, a refused connection, a provider hiccup — the
+     * faults the node's retry policy exists for. Set it false when the executor KNOWS
+     * the outcome is settled: an agent that considered the task and declined it, a
+     * tool the agent is not granted, output that failed its schema. Those cost a full
+     * execution to reproduce and reproduce identically, and on an agent step each
+     * attempt is several LLM calls — enough to push the run past its per-tick
+     * execution budget and make it yield and re-enqueue, so a doomed retry does not
+     * just waste money, it visibly churns the run.
+     */
+    data class Failed(val reason: String, val retryable: Boolean = true) : NodeResult()
 
     /**
      * Node requires human approval before continuing.

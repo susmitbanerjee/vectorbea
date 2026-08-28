@@ -757,6 +757,31 @@ class WorkflowRuntime(
                 is NodeResult.Failed -> {
                     if (guarded) stepGuard.markFailed(ctx.runId, node.id, attempt,
                         """{"reason":${jsonStr(result.reason.take(300))}}""")
+                    /*
+                     * A settled outcome is not retried, however many attempts the policy
+                     * allows.
+                     *
+                     * The policy answers "how many times", and it was the only thing
+                     * asked. Whether another attempt could END DIFFERENTLY is a separate
+                     * question, and only the executor can answer it: an agent that
+                     * weighed its task and declined, a tool that is not granted, output
+                     * that failed its schema. Those replay identically. Each replay of an
+                     * agent step is a whole brain loop — several LLM calls — so three
+                     * doomed attempts also exhaust the run's per-tick execution budget,
+                     * and the run yields and re-enqueues on top of it. That is the
+                     * "completed agent retries and then the run starts over" shape.
+                     *
+                     * Said on the STEP_FAILED event below rather than on one of its own: a
+                     * retry policy that visibly does nothing is its own support ticket, but
+                     * a second STEP_FAILED for one failed step would double-count in
+                     * everything that reads the timeline by event type.
+                     */
+                    if (!result.retryable && attempt < maxAttempts) {
+                        log.info("[runtime] node failed with a settled outcome — not retrying " +
+                            "[nodeId={}, runId={}, attemptsLeft={}]: {}",
+                            node.id, ctx.runId, maxAttempts - attempt, result.reason.take(120))
+                        return result
+                    }
                     if (attempt < maxAttempts) {
                         /* The policy owns the curve - fixed / linear / exponential, its
                            cap, and whether to jitter - so the schedule the builder draws
@@ -1278,10 +1303,20 @@ class WorkflowRuntime(
             recordRibbon(ctx, node.id, RibbonWriter.State.FAILED)
             val failEdges = scheduler.selectEdgesAfterFailure(node, ctx)
 
+            /* Why no retries happened, on the event that reports the failure. Without
+               this the timeline shows a node configured for 3 retries failing once with
+               no retry in sight, which reads as the retry policy being broken rather
+               than as the runtime declining to repeat a settled outcome. */
+            val retryNote = if (!result.retryable && node.retryPolicy.maxAttempts > 0)
+                "Not retried: this outcome would be identical on another attempt, so the " +
+                "${node.retryPolicy.maxAttempts} configured retry attempt(s) were skipped."
+            else null
+
             emitEvent(ctx, EventType.STEP_FAILED, "running", source,
-                title  = "Failed: ${nodeLabel(node)}",
-                stepId = node.id,
-                error  = """{"reason":${jsonStr(result.reason)},"nodeType":"${node.type}"}""")
+                title   = "Failed: ${nodeLabel(node)}",
+                summary = retryNote,
+                stepId  = node.id,
+                error   = """{"reason":${jsonStr(result.reason)},"nodeType":"${node.type}"}""")
 
             when {
                 node.failurePolicy.onFailure == "continue" -> {

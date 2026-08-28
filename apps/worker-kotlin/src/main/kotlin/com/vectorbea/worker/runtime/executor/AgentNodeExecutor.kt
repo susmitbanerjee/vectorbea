@@ -418,6 +418,9 @@ class AgentNodeExecutor(
             eventStore         = eventStore,
             connectionResolver = connectionResolver,
             dbPoolManager      = dbPoolManager,
+            /* So ASK_APPROVAL can open a real row in `run_approvals` — the same table
+               the Approvals screen reads and the same gate DB_WRITE nodes use. */
+            approvalStore      = com.vectorbea.worker.runtime.checkpoint.ApprovalStore(dataSource),
         )
 
         val config = AgentBrainConfig(
@@ -453,6 +456,30 @@ class AgentNodeExecutor(
 
         return try {
             val result = brainRunner.run(config, ctx)
+
+            /*
+             * A step waiting on a person is paused, not failed.
+             *
+             * Everything that was not FINAL_OUTPUT used to fall into the failure branch
+             * below, APPROVAL_REQUESTED included — so the one action whose purpose is to
+             * wait for a human ended the run instead. The runtime has handled
+             * ApprovalPaused all along: it parks the run as `waiting_for_approval`, marks
+             * the node GATED on the ribbon, and resumes when the decision arrives.
+             */
+            if (result.stopReason == AgentLoopState.StopReason.APPROVAL_REQUESTED &&
+                result.approvalId != null
+            ) {
+                return NodeResult.ApprovalPaused(
+                    approvalId = result.approvalId,
+                    message    = result.approvalMessage
+                        ?: "Agent '${agent.name}' is waiting for approval to continue.",
+                    metadata   = mapOf(
+                        "agentName"       to agent.name,
+                        "brainIterations" to result.iterationsUsed,
+                    ),
+                )
+            }
+
             if (result.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) {
                 NodeResult.Completed(
                     // result.finalOutput is Map<String,Any?> — filter nulls to satisfy Map<String,Any>
@@ -481,11 +508,17 @@ class AgentNodeExecutor(
                         append("Agent '${agent.name}' ")
                         if (cause != null) append("failed: $cause") else append("did not produce a final output")
                         append(" (stopReason=${result.stopReason}, iterations=${result.iterationsUsed})")
-                    }
+                    },
+                    /* The loop decides this, not the stop reason: StopReason.ERROR covers
+                       both a refused LLM connection (retry, by all means) and a tool that
+                       failed identically twice (retrying replays it). See
+                       RunResult.retryable. */
+                    retryable = result.retryable,
                 )
             }
         } catch (e: BudgetExceededException) {
-            NodeResult.Failed("Agent '${agent.name}' budget exceeded: ${e.message}")
+            /* The next attempt gets the same budget and the same work. */
+            NodeResult.Failed("Agent '${agent.name}' budget exceeded: ${e.message}", retryable = false)
         } catch (e: Exception) {
             NodeResult.Failed("Agent '${agent.name}' error: ${e.message?.take(300)}")
         }
