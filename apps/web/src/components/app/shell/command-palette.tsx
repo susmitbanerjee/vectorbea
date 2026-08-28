@@ -11,7 +11,7 @@ import { Kbd } from "~/components/ui/kbd";
 import { fuzzyRank, highlightRuns, looksLikeId } from "~/lib/fuzzy";
 import {
   PALETTE_ENTITIES, RECENT_ENTITY_IDS,
-  type PaletteEntity, type PaletteEntityType, type EnvironmentId,
+  type PaletteEntity, type PaletteEntityType,
 } from "~/mocks/shell";
 import {
   FanOutIcon, DurableRunIcon, AgentBrainIcon, ToolCallIcon, LeaseIcon,
@@ -80,13 +80,11 @@ interface Command {
 export interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  environment: EnvironmentId;
-  onEnvironmentChange: (env: EnvironmentId) => void;
   onOpenShortcuts: () => void;
 }
 
 export function CommandPalette({
-  open, onOpenChange, environment, onEnvironmentChange, onOpenShortcuts,
+  open, onOpenChange, onOpenShortcuts,
 }: CommandPaletteProps) {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
@@ -133,16 +131,6 @@ export function CommandPalette({
       id: "cmd_triggers", title: "Open Triggers", icon: CommitBoundaryIcon,
       keywords: "schedules webhooks cron", run: () => go("/triggers" as Route),
     },
-    ...(["production", "staging", "development"] as EnvironmentId[])
-      .filter((e) => e !== environment)
-      .map((e) => ({
-        id: `cmd_env_${e}`,
-        title: `Switch to ${e}`,
-        subtitle: e === "production" ? "Asks for confirmation" : undefined,
-        icon: WorkerIcon,
-        keywords: "environment env",
-        run: () => { onOpenChange(false); onEnvironmentChange(e); },
-      })),
     {
       id: "cmd_theme", title: "Toggle theme",
       subtitle: resolvedTheme === "dark" ? "Currently dark" : "Currently light",
@@ -153,7 +141,7 @@ export function CommandPalette({
       id: "cmd_shortcuts", title: "Keyboard shortcuts", icon: WorkerIcon,
       keywords: "keys help", run: () => { onOpenChange(false); onOpenShortcuts(); },
     },
-  ], [go, environment, onEnvironmentChange, onOpenChange, onOpenShortcuts, resolvedTheme, setTheme]);
+  ], [go, onOpenChange, onOpenShortcuts, resolvedTheme, setTheme]);
 
   /* ── Scope detection ──────────────────────────────────────────────────────
      Typing "run " enters the runs scope and clears the query. Handled on change

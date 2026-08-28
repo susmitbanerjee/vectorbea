@@ -22,6 +22,7 @@ import java.util.UUID
 data class RequestContext(
     val workspaceId: UUID,
     val environmentId: UUID?,
+    private val requestedEnvironmentId: UUID? = environmentId,
 ) {
     /**
      * The environment this write belongs to, ALWAYS inside [workspaceId].
@@ -48,9 +49,9 @@ data class RequestContext(
      */
     fun requireEnvironmentId(): UUID {
         val resolve = EnvironmentScope.resolver
-            ?: return environmentId
+            ?: return requestedEnvironmentId
                 ?: throw ApiError.ValidationError("X-Environment-Id header is required")
-        return resolve(workspaceId, environmentId)
+        return resolve(workspaceId, requestedEnvironmentId)
     }
 }
 
@@ -105,10 +106,21 @@ fun Request.context(): RequestContext {
             )
     }
 
+    // Environments are a legacy storage partition, not request scope. Keep a
+    // well-formed legacy value available only to hand-built route tests whose
+    // router has no server-side resolver; production reads are always scoped
+    // by the verified workspace and production writes resolve their partition
+    // from that workspace.
     val envRaw = header("x-environment-id") ?: query("environmentId")
-    val environmentId = envRaw?.toUUIDOrError("X-Environment-Id")
+    val requestedEnvironmentId = envRaw?.trim()?.let {
+        runCatching { UUID.fromString(it) }.getOrNull()
+    }
 
-    return RequestContext(workspaceId = workspaceId, environmentId = environmentId)
+    return RequestContext(
+        workspaceId = workspaceId,
+        environmentId = null,
+        requestedEnvironmentId = requestedEnvironmentId,
+    )
 }
 
 fun Request.pageParams(defaultLimit: Int = 50, maxLimit: Int = 100): PageParams {

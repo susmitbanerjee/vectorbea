@@ -204,7 +204,7 @@ function IdentityPanel({
   canEdit: boolean;
   onSaved: () => void;
 }) {
-  const { workspaceId, environmentId } = useScope();
+  const { workspaceId } = useScope();
   const [name, setName] = React.useState("");
   const [slug, setSlug] = React.useState("");
   const [status, setStatus] = React.useState<SaveState>(null);
@@ -324,7 +324,6 @@ function IdentityPanel({
               {workspace.ownerName ?? workspace.ownerEmail ?? "Not recorded"}
             </Fact>
             <Fact label="Created">{new Date(workspace.createdAt).toLocaleDateString()}</Fact>
-            <Fact label="Environment"><span className="capitalize">{environmentId}</span></Fact>
           </dl>
         </>
       ) : null}

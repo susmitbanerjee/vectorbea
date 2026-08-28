@@ -171,7 +171,6 @@ export function openRunStream(options: RunStreamOptions): RunStream {
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.workspaceId ? { "X-Workspace-Id": options.workspaceId } : {}),
-      ...(options.environmentId ? { "X-Environment-Id": options.environmentId } : {}),
     };
   }
 
@@ -217,7 +216,6 @@ export function openRunStream(options: RunStreamOptions): RunStream {
     const url = new URL(`${baseUrl}/api/runs/${runId}/stream`);
     if (token) url.searchParams.set("access_token", token);
     if (options.workspaceId) url.searchParams.set("workspaceId", options.workspaceId);
-    if (options.environmentId) url.searchParams.set("environmentId", options.environmentId);
 
     const factory =
       eventSourceFactory ??

@@ -217,19 +217,12 @@ function Describe({ session }: { session: ArchitectSessionApi }) {
   const exhausted = usage ? usage.remaining <= 0 : false;
   const tooShort = state.prompt.trim().length < MIN_PROMPT;
   const tooLong = state.prompt.length > MAX_PROMPT;
-  const blocked = exhausted || !session.environmentReady;
+  const blocked = exhausted;
 
   return (
     <div className="grid gap-3">
       {/* Quota BEFORE the prompt box, never after the effort. */}
       <QuotaBanner session={session} exhausted={exhausted} />
-
-      {!session.environmentReady && !session.environmentLoading ? (
-        <Notice tone="failed" title="No environment resolved">
-          The Architect creates real resources, which needs this workspace’s environment id — and the
-          API could not be reached to resolve it. Reload once the API is up; nothing has been lost.
-        </Notice>
-      ) : null}
 
       <Panel
         title="Describe the workflow"
@@ -998,7 +991,7 @@ function Review({ session }: { session: ArchitectSessionApi }) {
           variant="primary"
           size="sm"
           loading={state.busy === "building"}
-          disabled={state.busy !== null || !session.environmentReady}
+          disabled={state.busy !== null}
           onClick={() => void session.build()}
         >
           Build it

@@ -22,7 +22,6 @@ import { CommentLayer } from "./comments";
 import { useBuilderStore, type BuilderAction, type BuilderState } from "./store";
 import { useApi } from "~/lib/api/api-provider";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { validateGraph, summarise } from "./validation";
 import { autoLayout, snap } from "./layout";
 import { useKeyboardGraph } from "./keyboard-graph";
@@ -115,24 +114,11 @@ function BuilderInner({
   const api = useApi();
   const router = useRouter();
   const { workspaceId } = useScope();
-  /**
-   * STARTING A RUN IS A WRITE, AND WRITES NEED THE ENVIRONMENT HEADER.
-   *
-   * `RunRoutes.triggerRun` opens with `ctx.requireEnvironmentId()`, so a request
-   * without `X-Environment-Id` is refused before anything else is considered.
-   * The transport only sends that header when the id is a real UUID, so passing
-   * `environmentId: null` — as this did — omitted it entirely and every Run
-   * came back "x-environment-id header required".
-   *
-   * `useEnvironmentUuid` is the same resolver the save path uses, and its own
-   * documentation is explicit that a caller which needs to write should surface
-   * an unresolved environment rather than send the request. It is a cached
-   * bootstrap query, so reading it here costs nothing extra.
-   */
-  const environment = useEnvironmentUuid();
+  // Workspace is the only client-selected scope. The API maps writes to its
+  // workspace-owned legacy storage partition internally.
   const scope = React.useMemo(
-    () => ({ workspaceId, environmentId: environment.environmentId }),
-    [workspaceId, environment.environmentId],
+    () => ({ workspaceId, environmentId: null }),
+    [workspaceId],
   );
   const [store, dispatch] = useBuilderStore(graph);
   const { state } = store;
@@ -201,17 +187,6 @@ function BuilderInner({
   ) => {
     if (triggering) return;
 
-    /* Refused here rather than sent and rejected: the API's own message names a
-       header, which tells the operator nothing they can act on. */
-    if (!environment.environmentId) {
-      toast.error(
-        environment.loading
-          ? "Still resolving this workspace's environment. Try again in a moment."
-          : "This workspace's environment could not be read, so the run cannot be started. Reload once the API is reachable.",
-      );
-      return;
-    }
-
     setTriggering(kind);
     try {
       // Save first, so the run executes the graph the user is looking at.
@@ -243,7 +218,6 @@ function BuilderInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     triggering, data.save, data.saveError, dispatch, router,
-    environment.environmentId, environment.loading,
   ]);
 
   const handleTest = React.useCallback(() => {

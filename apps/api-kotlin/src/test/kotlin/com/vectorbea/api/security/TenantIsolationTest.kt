@@ -62,6 +62,39 @@ class TenantIsolationTest {
         assertEquals(workspaceA, ctx.workspaceId)
     }
 
+    @Test
+    fun `environment header cannot narrow workspace request scope`() {
+        val req = Request(
+            method = "GET",
+            path = "/api/workflows",
+            headers = mapOf(
+                "x-workspace-id" to workspaceA.toString(),
+                "x-environment-id" to workspaceB.toString(),
+            ),
+            principal = principalA(),
+        )
+
+        val ctx = req.context()
+
+        assertEquals(workspaceA, ctx.workspaceId)
+        assertEquals(null, ctx.environmentId)
+    }
+
+    @Test
+    fun `malformed legacy environment header is ignored`() {
+        val req = Request(
+            method = "GET",
+            path = "/api/workflows",
+            headers = mapOf(
+                "x-workspace-id" to workspaceA.toString(),
+                "x-environment-id" to "development",
+            ),
+            principal = principalA(),
+        )
+
+        assertEquals(null, req.context().environmentId)
+    }
+
     // ── 2. User B cannot access workspace A ──────────────────────────────────
 
     @Test

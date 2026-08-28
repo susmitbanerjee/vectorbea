@@ -114,20 +114,6 @@ async function readBody(response: Response): Promise<unknown> {
 }
 
 /**
- * Is this a real environment id?
- *
- * The API scopes on UUIDs; the UI carries a human-readable slug in the URL and
- * in localStorage. Anything that is not a UUID is a display value that leaked
- * into a request, and forwarding it is strictly worse than omitting it.
- */
-function isUuid(value: string | null | undefined): value is string {
-  return (
-    typeof value === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
-  );
-}
-
-/**
  * The live transport.
  *
  * Responsibilities, in the order they apply to a request:
@@ -184,16 +170,8 @@ export function createFetchTransport(options: FetchTransportOptions): Transport 
           ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
           ...(token ? { Authorization: "Bearer " + token } : {}),
           ...(init.workspaceId ? { "X-Workspace-Id": init.workspaceId } : {}),
-          // Only ever send a UUID. The workspace provider carries the
-          // environment as a SLUG ("development") for display and URL state,
-          // and sending that verbatim made the API reject every single
-          // workspace-scoped request with
-          //   400 "X-Environment-Id must be a valid UUID, got: development"
-          // — which is why no screen could show live data regardless of how it
-          // was wired. The header is optional on reads, so omitting an
-          // unresolved environment degrades to workspace scope instead of
-          // failing the request outright.
-          ...(isUuid(init.environmentId) ? { "X-Environment-Id": init.environmentId } : {}),
+          // Environment is no longer a client-selected scope. The API derives
+          // its legacy storage partition from the verified workspace on writes.
           ...init.headers,
         };
 

@@ -27,7 +27,6 @@ import { useApi } from "~/lib/api/api-provider";
 import { useApiMutation } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { SummaryList, SummaryRow, ConnectionPicker } from "./create-atoms";
 import {
   SqlBuilder, generateSql, EMPTY_BUILDER,
@@ -304,7 +303,6 @@ export interface CreateToolDialogProps {
 export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDialogProps) {
   const api = useApi();
   const scope = useScope();
-  const environment = useEnvironmentUuid();
   const queryClient = useQueryClient();
   const bodyRef = React.useRef<HTMLDivElement>(null);
 
@@ -633,7 +631,6 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const reachableIndex = firstBroken === -1 ? STEPS.length - 1 : firstBroken;
 
   const complete = reachableIndex === STEPS.length - 1;
-  const blockedByEnvironment = environment.unresolved;
 
   /* ── Validate against the API, without writing ──────────────────────────── */
   async function validate() {
@@ -642,7 +639,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     try {
       const result = await api.tools.testDraft(
         { type, connectionId, config, inputSchema: parsedInput ?? {}, outputSchema: parsedOutput ?? {} },
-        { workspaceId: scope.workspaceId, environmentId: environment.environmentId },
+        { workspaceId: scope.workspaceId, environmentId: null },
       );
       setValidation({ valid: result.valid, message: result.message });
     } catch (error) {
@@ -658,12 +655,6 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   /* ── Create ─────────────────────────────────────────────────────────────── */
   const create = useApiMutation<contracts.Tool, void>({
     mutationFn: async () => {
-      const environmentId = environment.environmentId;
-      // Guarded rather than trusted from the disabled button: `create` calls
-      // `requireEnvironmentId()`, and "X-Environment-Id header is required" is
-      // not a sentence an operator can act on.
-      if (!environmentId) throw new Error("No environment resolved for this workspace yet.");
-
       return api.tools.create(
         {
           name: trimmedName,
@@ -680,7 +671,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
           retryPolicy: {},
           status: lifecycle,
         },
-        { workspaceId: scope.workspaceId, environmentId },
+        { workspaceId: scope.workspaceId, environmentId: null },
       );
     },
     onSuccess: (tool) => {
@@ -1244,13 +1235,6 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 )}
               </ModalSection>
 
-              {blockedByEnvironment ? (
-                <ModalNote tone="danger" title="This workspace's environment could not be read">
-                  GET /api/environments did not answer, so there is nothing to write against.
-                  Reload once the API is reachable — nothing you have entered is lost.
-                </ModalNote>
-              ) : null}
-
               {create.error ? (
                 <ModalNote tone="danger" title="The tool was not registered">
                   {create.error.message}
@@ -1312,7 +1296,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
               size="sm"
               loading={busy}
               loadingLabel="Registering"
-              disabled={!complete || blockedByEnvironment}
+              disabled={!complete}
               onClick={() => create.mutate()}
               iconLeft={<Icon icon={Plus} size="sm" decorative />}
             >

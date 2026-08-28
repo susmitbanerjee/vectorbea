@@ -6,7 +6,6 @@ import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { describeArchitectFailure, type ArchitectFailure } from "~/lib/architect/errors";
 import { normalizeClarifyQuestions } from "~/lib/architect/types";
 import type {
@@ -126,11 +125,6 @@ export interface ArchitectSessionApi {
   state: ArchitectState;
   usage: ArchitectUsage | null;
   usageLoading: boolean;
-  /** Null until the environment resolves; every write needs it. */
-  environmentReady: boolean;
-  environmentLoading: boolean;
-  /** The only environment on offer belongs to another workspace, so it was refused. */
-
   setPrompt: (value: string) => void;
   setAnswer: (question: string, value: string) => void;
   goToStage: (stage: StageId) => void;
@@ -152,24 +146,15 @@ export function useArchitectSession(): ArchitectSessionApi {
   const api = useApi();
   const scope = useScope();
   const queryClient = useQueryClient();
-  const environment = useEnvironmentUuid();
 
   const [state, setState] = React.useState<ArchitectState>(EMPTY);
   const patch = React.useCallback((next: Partial<ArchitectState>) => {
     setState((current) => ({ ...current, ...next }));
   }, []);
 
-  /**
-   * The scope every architect call carries.
-   *
-   * `POST /api/architect/sessions` calls `requireEnvironmentId()` in all but
-   * name — it throws a validation error when the header is absent — so the
-   * resolved UUID goes on every call rather than the display slug the workspace
-   * provider holds.
-   */
   const writeScope = React.useMemo(
-    () => ({ workspaceId: scope.workspaceId, environmentId: environment.environmentId }),
-    [scope.workspaceId, environment.environmentId],
+    () => ({ workspaceId: scope.workspaceId, environmentId: null }),
+    [scope.workspaceId],
   );
 
   const usageQuery = useApiQuery({
@@ -480,8 +465,6 @@ export function useArchitectSession(): ArchitectSessionApi {
     state,
     usage: usageQuery.data ?? null,
     usageLoading: usageQuery.isPending && usageQuery.fetchStatus !== "idle",
-    environmentReady: environment.environmentId !== null,
-    environmentLoading: environment.loading,
     setPrompt,
     setAnswer,
     goToStage,

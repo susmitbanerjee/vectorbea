@@ -13,8 +13,7 @@ import { WorkspaceGate } from "./workspace-gate";
 import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsSheet } from "./shortcuts-sheet";
-import { EnvironmentRail } from "./environment";
-import { type EnvironmentId, type ShellCounts, type Workspace } from "~/mocks/shell";
+import { type ShellCounts, type Workspace } from "~/mocks/shell";
 import { useWorkspace } from "~/lib/workspace/workspace-provider";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
@@ -36,7 +35,6 @@ import { queryKeys } from "~/lib/api/keys";
 ══════════════════════════════════════════════════════════════════════════════ */
 
 const COLLAPSED_KEY = "vectorbea.shell.collapsed";
-const ENV_KEY = "vectorbea.shell.environment";
 const WORKSPACE_KEY = "vectorbea.shell.workspace";
 
 export interface AppShellProps {
@@ -59,7 +57,6 @@ function ShellInner({ children, user }: AppShellProps) {
   const pathname = usePathname();
 
   const [collapsed, setCollapsed] = React.useState(false);
-  const [environment, setEnvironment] = React.useState<EnvironmentId>("production");
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -73,8 +70,6 @@ function ShellInner({ children, user }: AppShellProps) {
     try {
       const c = window.localStorage.getItem(COLLAPSED_KEY);
       if (c !== null) setCollapsed(c === "true");
-      const e = window.localStorage.getItem(ENV_KEY);
-      if (e === "production" || e === "staging" || e === "development") setEnvironment(e);
     } catch {
       // Private mode or storage disabled — defaults are fine.
     }
@@ -86,11 +81,6 @@ function ShellInner({ children, user }: AppShellProps) {
 
   const toggleCollapsed = React.useCallback(() => {
     setCollapsed((prev) => { persist(COLLAPSED_KEY, String(!prev)); return !prev; });
-  }, []);
-
-  const changeEnvironment = React.useCallback((env: EnvironmentId) => {
-    setEnvironment(env);
-    persist(ENV_KEY, env);
   }, []);
 
   const changeWorkspace = React.useCallback((id: string) => {
@@ -150,11 +140,10 @@ function ShellInner({ children, user }: AppShellProps) {
     members: w.members,
     // The switcher separates owned from shared on this.
     role: w.role,
-    environment: environment,
   }));
   const workspace: Workspace =
     workspaceList.find((w) => w.id === workspaceId) ??
-    workspaceList[0] ?? { id: "", name: "No workspace", environment };
+    workspaceList[0] ?? { id: "", name: "No workspace" };
 
   /* ── Shortcuts ────────────────────────────────────────────────────────── */
   useShortcut({
@@ -205,8 +194,6 @@ function ShellInner({ children, user }: AppShellProps) {
 
   return (
     <div className="bg-surface-app text-fg-primary font-ui flex h-dvh overflow-hidden">
-      <EnvironmentRail environment={environment} />
-
       {/* Desktop sidebar. Below lg it is replaced by the drawer. */}
       <div className="hidden shrink-0 lg:block">{sidebar}</div>
 
@@ -259,8 +246,6 @@ function ShellInner({ children, user }: AppShellProps) {
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
-        environment={environment}
-        onEnvironmentChange={changeEnvironment}
         onOpenShortcuts={() => setShortcutsOpen(true)}
       />
       <ShortcutsSheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />

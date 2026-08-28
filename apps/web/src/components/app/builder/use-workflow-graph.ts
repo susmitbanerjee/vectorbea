@@ -7,7 +7,6 @@ import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { fromStoredGraph, toStoredGraph, triggerConfigFrom } from "~/lib/workflows/graph-codec";
 import type { BuilderGraph } from "~/lib/workflows/builder-graph";
 import { autoLayout } from "./layout";
@@ -58,7 +57,6 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
   const api = useApi();
   const scope = useScope();
   const queryClient = useQueryClient();
-  const environment = useEnvironmentUuid();
 
   const enabled = Boolean(scope.workspaceId) && Boolean(workflowId);
   const keyScope = { workspaceId: scope.workspaceId, environmentId: null };
@@ -123,16 +121,6 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
   const [lastSavedAt, setLastSavedAt] = React.useState<number | null>(null);
 
   const save = React.useCallback(async (next: BuilderGraph) => {
-    const environmentId = environment.environmentId;
-    if (!environmentId) {
-      setSaveState("error");
-      setSaveError(
-        "This workspace's environment could not be read, so the version cannot be written. " +
-          "Your changes are still on the canvas — reload once the API is reachable.",
-      );
-      return false;
-    }
-
     setSaveState("saving");
     setSaveError(null);
 
@@ -146,7 +134,7 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
           // unschedule a cron workflow.
           triggerConfig: triggerConfigFrom(next),
         },
-        { workspaceId: scope.workspaceId, environmentId },
+        { workspaceId: scope.workspaceId, environmentId: null },
       );
 
       setSaveState("saved");
@@ -167,7 +155,7 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
     }
     // `keyScope` is rebuilt each render; its contents are what matter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, environment.environmentId, queryClient, scope.workspaceId, workflowId]);
+  }, [api, queryClient, scope.workspaceId, workflowId]);
 
   /**
    * Marked dirty by the view when the store reports an edit.
@@ -192,6 +180,6 @@ export function useWorkflowGraph(workflowId: string): WorkflowGraphData {
     saveState,
     saveError,
     lastSavedAt,
-    canSave: environment.environmentId !== null,
+    canSave: Boolean(scope.workspaceId),
   };
 }

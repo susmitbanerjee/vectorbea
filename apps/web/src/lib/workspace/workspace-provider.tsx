@@ -8,16 +8,9 @@ import type { Route } from "next";
 import { useApi } from "~/lib/api/api-provider";
 import { isUnauthenticated } from "~/lib/api/errors";
 import { queryKeys } from "~/lib/api/keys";
-import { hasRole, normalizeRole, type Environment, type Workspace, type WorkspaceRole } from "./types";
+import { hasRole, normalizeRole, type Workspace, type WorkspaceRole } from "./types";
 
 const WORKSPACE_STORAGE_KEY = "vectorbea-workspace";
-const ENVIRONMENT_STORAGE_KEY = "vectorbea-environment";
-
-const ENVIRONMENTS: readonly Environment[] = ["development", "staging", "production"] as const;
-
-function isEnvironment(value: string | null): value is Environment {
-  return value !== null && (ENVIRONMENTS as readonly string[]).includes(value);
-}
 
 function readStored(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -59,7 +52,6 @@ export interface WorkspaceState {
   workspaces: Workspace[];
   workspaceId: string | null;
   workspace: Workspace | null;
-  environmentId: Environment;
   /**
    * Your role in the ACTIVE workspace, from `/api/me`.
    *
@@ -81,15 +73,6 @@ export interface WorkspaceState {
   retry(): void;
 
   setWorkspace(id: string): void;
-  /**
-   * Switch environment. Moving INTO production does not take effect
-   * immediately — it parks in `pendingEnvironment` for confirmation.
-   */
-  requestEnvironment(next: Environment): void;
-  pendingEnvironment: Environment | null;
-  confirmEnvironment(): void;
-  cancelEnvironment(): void;
-
   /** Invalidate every query below the current scope. */
   invalidateScope(): Promise<void>;
   /**
@@ -110,9 +93,9 @@ export interface WorkspaceProviderProps {
 }
 
 /**
- * Resolves workspace and environment, in priority order:
+ * Resolves workspace in priority order:
  *
- *   1. URL  (`?ws=…&env=…`)   — shareable and deep-linkable, so it wins
+ *   1. URL  (`?ws=…`)         — shareable and deep-linkable, so it wins
  *   2. localStorage           — the returning user's last choice
  *   3. the user's default     — first workspace the API returned
  *
@@ -219,8 +202,6 @@ export function WorkspaceProvider({
 
 
   const urlWorkspace = searchParams.get("ws");
-  const urlEnvironment = searchParams.get("env");
-
   /**
    * Workspaces the API has already rejected with a 403.
    *
@@ -231,8 +212,6 @@ export function WorkspaceProvider({
 
   const [resolving, setResolving] = React.useState(true);
   const [workspaceId, setWorkspaceId] = React.useState<string | null>(null);
-  const [environmentId, setEnvironmentId] = React.useState<Environment>("development");
-  const [pendingEnvironment, setPendingEnvironment] = React.useState<Environment | null>(null);
 
   const resolve = React.useCallback(() => {
     const allowed = resolvedWorkspaces.filter((w) => !forbidden.current.has(w.id));
@@ -245,10 +224,6 @@ export function WorkspaceProvider({
 
     setWorkspaceId(chosen);
 
-    const envCandidates = [urlEnvironment, readStored(ENVIRONMENT_STORAGE_KEY)];
-    const chosenEnv = envCandidates.find(isEnvironment) ?? "development";
-    setEnvironmentId(chosenEnv);
-
     /* Still waiting on the authoritative list: a workspace chosen from the seed
        is a guess, and committing to it is how the wrong one got sent.
 
@@ -257,32 +232,26 @@ export function WorkspaceProvider({
        resolving is a spinner with no end, which is the exact failure this gate
        exists to remove. */
     setResolving(meQuery.fetchStatus === "fetching" && meQuery.data === undefined);
-  }, [resolvedWorkspaces, urlWorkspace, urlEnvironment, resolvedDefault, meQuery.fetchStatus, meQuery.data]);
+  }, [resolvedWorkspaces, urlWorkspace, resolvedDefault, meQuery.fetchStatus, meQuery.data]);
 
   React.useEffect(() => {
     resolve();
   }, [resolve]);
 
-  const scope = React.useMemo(
-    () => ({ workspaceId, environmentId }),
-    [workspaceId, environmentId],
-  );
-
   const invalidateScope = React.useCallback(async () => {
-    // One call. Because workspace and environment sit at the front of every
-    // key, this prefix match reaches every list, detail and summary below them.
+    // One call. Workspace is the sole scope and authorization boundary.
     await queryClient.invalidateQueries({
-      queryKey: queryKeys.env(scope.workspaceId, scope.environmentId),
+      queryKey: queryKeys.env(workspaceId, null),
     });
-  }, [queryClient, scope.workspaceId, scope.environmentId]);
+  }, [queryClient, workspaceId]);
 
   /** Push the scope into the URL so it is shareable and survives a reload. */
   const syncUrl = React.useCallback(
-    (nextWorkspace: string | null, nextEnvironment: Environment) => {
+    (nextWorkspace: string | null) => {
       const params = new URLSearchParams(searchParams.toString());
       if (nextWorkspace) params.set("ws", nextWorkspace);
       else params.delete("ws");
-      params.set("env", nextEnvironment);
+      params.delete("env");
       // typedRoutes cannot know a runtime-built query string; the pathname it
       // is appended to came from usePathname and is already a real route.
       router.replace(`${pathname}?${params.toString()}` as Route, { scroll: false });
@@ -291,52 +260,28 @@ export function WorkspaceProvider({
   );
 
   const applyScope = React.useCallback(
-    async (nextWorkspace: string | null, nextEnvironment: Environment) => {
-      const previous = queryKeys.env(workspaceId, environmentId);
+    async (nextWorkspace: string | null) => {
+      const previous = queryKeys.env(workspaceId, null);
 
       setWorkspaceId(nextWorkspace);
-      setEnvironmentId(nextEnvironment);
       writeStored(WORKSPACE_STORAGE_KEY, nextWorkspace);
-      writeStored(ENVIRONMENT_STORAGE_KEY, nextEnvironment);
-      syncUrl(nextWorkspace, nextEnvironment);
+      syncUrl(nextWorkspace);
 
       // Drop the scope we just left. Removed rather than invalidated: nothing
       // should be able to paint production numbers under a staging heading
       // while a refetch is in flight.
       queryClient.removeQueries({ queryKey: previous });
     },
-    [queryClient, workspaceId, environmentId, syncUrl],
+    [queryClient, workspaceId, syncUrl],
   );
 
   const setWorkspace = React.useCallback(
     (id: string) => {
       if (id === workspaceId) return;
-      void applyScope(id, environmentId);
+      void applyScope(id);
     },
-    [applyScope, workspaceId, environmentId],
+    [applyScope, workspaceId],
   );
-
-  const requestEnvironment = React.useCallback(
-    (next: Environment) => {
-      if (next === environmentId) return;
-      // Production is the one switch that can turn a harmless click into a real
-      // consequence, so it asks first.
-      if (next === "production") {
-        setPendingEnvironment(next);
-        return;
-      }
-      void applyScope(workspaceId, next);
-    },
-    [applyScope, environmentId, workspaceId],
-  );
-
-  const confirmEnvironment = React.useCallback(() => {
-    if (!pendingEnvironment) return;
-    void applyScope(workspaceId, pendingEnvironment);
-    setPendingEnvironment(null);
-  }, [applyScope, pendingEnvironment, workspaceId]);
-
-  const cancelEnvironment = React.useCallback(() => setPendingEnvironment(null), []);
 
   const reportForbidden = React.useCallback(
     (rejected: string) => {
@@ -349,14 +294,14 @@ export function WorkspaceProvider({
       }
 
       const fallback = resolvedWorkspaces.find((w) => !forbidden.current.has(w.id))?.id ?? null;
-      void applyScope(fallback, environmentId);
+      void applyScope(fallback);
 
       // The rejection may be the seed's fault rather than the user's. Re-reading
       // memberships is what turns "403 forever" into "opens in a workspace you
       // are actually in".
       void queryClient.invalidateQueries({ queryKey: queryKeys.me() });
     },
-    [applyScope, environmentId, queryClient, resolvedWorkspaces],
+    [applyScope, queryClient, resolvedWorkspaces],
   );
 
   const retry = React.useCallback(() => {
@@ -400,32 +345,22 @@ export function WorkspaceProvider({
       workspaces: resolvedWorkspaces,
       workspaceId,
       workspace: resolvedWorkspaces.find((w) => w.id === workspaceId) ?? null,
-      environmentId,
       role,
       resolving,
       problem,
       retry,
       setWorkspace,
-      requestEnvironment,
-      pendingEnvironment,
-      confirmEnvironment,
-      cancelEnvironment,
       invalidateScope,
       reportForbidden,
     }),
     [
       resolvedWorkspaces,
       workspaceId,
-      environmentId,
       role,
       resolving,
       problem,
       retry,
       setWorkspace,
-      requestEnvironment,
-      pendingEnvironment,
-      confirmEnvironment,
-      cancelEnvironment,
       invalidateScope,
       reportForbidden,
     ],
@@ -443,9 +378,9 @@ export function useWorkspace(): WorkspaceState {
 }
 
 /** The scope every query key and API call needs. */
-export function useScope(): { workspaceId: string | null; environmentId: Environment } {
-  const { workspaceId, environmentId } = useWorkspace();
-  return React.useMemo(() => ({ workspaceId, environmentId }), [workspaceId, environmentId]);
+export function useScope(): { workspaceId: string | null; environmentId: null } {
+  const { workspaceId } = useWorkspace();
+  return React.useMemo(() => ({ workspaceId, environmentId: null }), [workspaceId]);
 }
 
 /**

@@ -26,16 +26,13 @@ export interface Workspace {
   members?: number;
   /** Your role in this workspace — the switcher groups owned vs shared on it. */
   role?: "owner" | "admin" | "developer" | "viewer";
-  environment: EnvironmentId;
 }
 
-export type EnvironmentId = "production" | "staging" | "development";
-
 export const WORKSPACES: Workspace[] = [
-  { id: "ws_acme", name: "Acme Platform", members: 24, environment: "production" },
-  { id: "ws_acme_eu", name: "Acme EU", members: 11, environment: "production" },
-  { id: "ws_sandbox", name: "Sandbox", members: 3, environment: "development" },
-  { id: "ws_billing", name: "Billing Ops", members: 8, environment: "staging" },
+  { id: "ws_acme", name: "Acme Platform", members: 24 },
+  { id: "ws_acme_eu", name: "Acme EU", members: 11 },
+  { id: "ws_sandbox", name: "Sandbox", members: 3 },
+  { id: "ws_billing", name: "Billing Ops", members: 8 },
 ];
 
 export const RECENT_WORKSPACE_IDS = ["ws_billing", "ws_sandbox"];

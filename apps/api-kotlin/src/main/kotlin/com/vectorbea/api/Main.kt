@@ -313,23 +313,17 @@ fun main() {
      * tenant or was refused outright, and the UI refused — which is why creating
      * a tool reported that it might be registered in a different workspace.
      *
-     * Installed here, once, so every route that requires an environment gets the
-     * same two guarantees: a foreign id is refused rather than written, and a
-     * missing one resolves to this workspace's own default rather than failing.
+     * Environment is now an internal storage partition only. Requests are
+     * workspace-scoped, RBAC is evaluated from that verified workspace, and
+     * every write resolves the workspace's internal partition here. A stale
+     * client header therefore cannot select, authorize, or reject a workspace.
      */
     if (environmentRepo != null) {
-        com.vectorbea.api.api.EnvironmentScope.resolver = { workspaceId, requested ->
-            if (requested != null) {
-                environmentRepo.findById(requested, workspaceId)?.id
-                    ?: throw com.vectorbea.api.errors.ApiError.Forbidden(
-                        "Environment $requested does not belong to this workspace."
-                    )
-            } else {
-                (environmentRepo.firstByWorkspace(workspaceId)
-                    ?: environmentRepo.findOrCreate(workspaceId, BootstrapRoutes.DEFAULT_SLUG)).id
-            }
+        com.vectorbea.api.api.EnvironmentScope.resolver = { workspaceId, _ ->
+            (environmentRepo.firstByWorkspace(workspaceId)
+                ?: environmentRepo.findOrCreate(workspaceId, BootstrapRoutes.DEFAULT_SLUG)).id
         }
-        log.info("EnvironmentScope: workspace-scoped environment resolution enabled")
+        log.info("EnvironmentScope: workspace-owned storage partition resolution enabled")
     }
 
     // 7. Router + routes

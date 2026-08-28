@@ -29,7 +29,6 @@ import { useApi } from "~/lib/api/api-provider";
 import { useApiMutation } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { useEnvironmentUuid } from "~/lib/workspace/use-environment-uuid";
 import { evaluateCron } from "~/lib/cron";
 import { SummaryList, SummaryRow } from "~/components/app/registry/create-atoms";
 
@@ -146,7 +145,6 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
   const api = useApi();
   const router = useRouter();
   const scope = useScope();
-  const environment = useEnvironmentUuid();
   const queryClient = useQueryClient();
   const bodyRef = React.useRef<HTMLDivElement>(null);
 
@@ -185,7 +183,6 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
   const firstBroken = stepErrors.findIndex((entry) => entry !== null);
   const reachableIndex = firstBroken === -1 ? STEPS.length - 1 : firstBroken;
   const complete = firstBroken === -1;
-  const blockedByEnvironment = environment.unresolved;
 
   /* ── Create ─────────────────────────────────────────────────────────────── */
 
@@ -199,9 +196,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
    */
   const create = useApiMutation<{ workflow: contracts.Workflow; versionFailure: string | null }, void>({
     mutationFn: async () => {
-      const environmentId = environment.environmentId;
-      if (!environmentId) throw new Error("No environment resolved for this workspace yet.");
-      const writeScope = { workspaceId: scope.workspaceId, environmentId };
+      const writeScope = { workspaceId: scope.workspaceId, environmentId: null };
 
       const workflow = await api.workflows.create(
         {
@@ -480,13 +475,6 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
                 </ModalNote>
               ) : null}
 
-              {blockedByEnvironment ? (
-                <ModalNote tone="danger" title="This workspace's environment could not be read">
-                  GET /api/environments did not answer, so there is nothing to write against.
-                  Reload once the API is reachable — nothing you have entered is lost.
-                </ModalNote>
-              ) : null}
-
               {create.error ? (
                 <ModalNote tone="danger" title="The workflow was not created">
                   {create.error.message}
@@ -550,7 +538,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
               size="sm"
               loading={busy}
               loadingLabel="Creating"
-              disabled={!complete || blockedByEnvironment}
+              disabled={!complete}
               onClick={() => create.mutate()}
             >
               {mode === "native" ? "Create and open builder" : "Create workflow"}
