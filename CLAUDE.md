@@ -38,7 +38,6 @@ Errors state what happened and how to fix it. Never "Something went wrong."
 - `npm run typecheck && npm run lint && npm run build` clean
 
 ---
-
 # Repo resolution — read this before applying the rules above
 
 The rules above are written against the abstract paths used in
@@ -109,3 +108,60 @@ incremental migration in `/docs/audit/CURRENT-STATE.md` §10 exists to resolve.
   Splitting them is the point of the revamp; never reintroduce a shared variable.
 
 Full baseline and migration order: `/docs/audit/CURRENT-STATE.md`.
+
+## Agent runtime work — standing rules
+
+Design docs: docs/AGENT-HARNESS-ARCHITECTURE.md, docs/AGENT-TRACE-AND-DEBUGGER.md,
+docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md.
+Read the relevant sections before changing runtime code. The docs explain WHY
+each guard exists; most were written after a production bug.
+
+### Invariants — never break these
+
+1. The model chooses; the runtime executes. No action is dispatched without
+   runtime validation against a grant list. A roster or tool list in a prompt
+   is documentation, not enforcement.
+2. Every durable key must survive re-execution. No iteration numbers, no
+   timestamps, no random IDs in approval keys or idempotency keys. A step
+   re-executes from iteration 1 on resume; any key that changes between
+   attempts opens a duplicate gate or a duplicate side effect.
+3. Terminal run state is durable in Postgres before the queue message is
+   acknowledged.
+4. Sanitization happens once, at the write boundary. RunEventStore, SpanWriter
+   and PayloadStore store what they are given. Raw provider responses, stack
+   traces, connection secrets and full payloads must never reach them.
+5. A child activation is never allocated more budget than its parent's
+   remaining budget.
+6. A ceiling breach is not a failure. CeilingExceeded stays a distinct
+   terminal state and always names the limit that was hit.
+7. Observability never blocks execution. Span and event writes use bounded
+   buffers and drop to a counter under pressure. A dropped span is a degraded
+   trace; a blocked write is an outage.
+8. Cross-workspace access is impossible. Agent, tool and roster lookups are
+   workspace-scoped at the same boundary, and fail closed if the check errors.
+9. One engine. A new orchestration pattern is a policy over the existing
+   primitives, never a second runtime.
+
+### Conventions
+
+- Migrations: Flyway, in apps/api-kotlin/src/main/resources/db/migration.
+  Forward-only. Never edit an applied migration. New columns are nullable or
+  have defaults; the API and worker deploy independently and must tolerate
+  schema skew in both directions.
+- Kotlin: match the surrounding style. No new dependencies without asking.
+- Feature flags: every new runtime behaviour ships behind an env-var flag,
+  defaulting to off, until its phase is signed off.
+- Behaviour changes require a doc update in the same commit.
+
+### Stop and ask instead of guessing
+
+Ask before proceeding if a change would touch:
+- the shape of an approval key, or decideOnApproval
+- the run status state machine or the status CAS
+- run lease acquisition or renewal
+- the event sequence assignment
+- idempotency key derivation
+- anything that alters what happens on resume
+
+These are the places where a plausible-looking change causes duplicate side
+effects in production. A wrong guess here is expensive; a question is cheap.

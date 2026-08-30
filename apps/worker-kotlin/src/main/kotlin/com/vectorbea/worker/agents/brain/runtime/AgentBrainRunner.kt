@@ -5,8 +5,10 @@ import com.vectorbea.worker.agents.brain.model.*
 import com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
+import com.vectorbea.worker.durable.StepExecutionGuard
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.runtime.StepOutputStore
 import com.vectorbea.worker.runtime.executor.LlmNodeExecutor
 import com.vectorbea.worker.runtime.executor.NodeResult
 import com.vectorbea.worker.runtime.executor.ToolNodeExecutor
@@ -51,6 +53,44 @@ class AgentBrainRunner(
     private val budgetGuard: AgentBudgetGuard = AgentBudgetGuard(),
     private val safetyGuard: AgentSafetyGuard = AgentSafetyGuard(),
     private val memoryStore: AgentMemoryStore = AgentMemoryStore(dataSource),
+    /**
+     * Idempotency for the loop's tool calls, keyed per (step, tool, arguments).
+     *
+     * Null only where there is no database to guard against, in which case tool
+     * calls execute unguarded — which is the behaviour that existed before this
+     * was wired, and is still correct for a runner with no persistence.
+     *
+     * Injectable so the regression test can exercise the skip path without a
+     * database; production leaves it null and gets one built from [dataSource].
+     */
+    stepGuard: StepExecutionGuard? = null,
+    /** Where a guarded tool call's result is stored and replayed from. See [stepGuard]. */
+    stepOutputStore: StepOutputStore? = null,
+    /**
+     * HTTP client for the loop's own LLM calls. Null in production, where
+     * [LlmNodeExecutor] uses the shared bounded client from `OutboundHttp`.
+     *
+     * Exists so a test can drive the loop against a scripted provider without a
+     * network. It is the narrowest seam available: [LlmNodeExecutor] already accepts
+     * an injectable client for exactly this reason, and the brain was the only
+     * caller with no way to pass one through.
+     */
+    private val llmHttpClient: java.net.http.HttpClient? = null,
+    /**
+     * Where full tool results and observation payloads are stored, so the loop can
+     * be rebuilt from them and the debugger can show what a tool actually returned.
+     *
+     * Null disables capture: refs stay null, reconstruction refuses on the missing
+     * action, and the loop behaves exactly as it did before V040.
+     */
+    private val payloadStore: com.vectorbea.worker.events.PayloadStore? = null,
+    /**
+     * Whether a resumed step may rebuild its loop. Defaults to the env flag; a
+     * parameter so a test can exercise both paths without mutating process
+     * environment, which JUnit cannot do portably and which would leak between
+     * tests sharing a JVM.
+     */
+    private val reconstructionEnabled: Boolean = RECONSTRUCTION_ENABLED,
 ) {
     private val log = logger()
     private val mapper = jacksonObjectMapper()
@@ -66,6 +106,25 @@ class AgentBrainRunner(
          * small enough that one enormous response cannot eat the whole budget.
          */
         internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
+
+        /**
+         * Rebuild a resumed agent's loop instead of replaying it.
+         *
+         * Default OFF. This changes what a resumed run does, which is the most
+         * expensive thing in this system to get wrong, so it ships dark and is turned
+         * on deliberately. Off, every path below behaves exactly as it did before.
+         */
+        internal val RECONSTRUCTION_ENABLED: Boolean =
+            System.getenv("AGENT_LOOP_RECONSTRUCTION_ENABLED")?.lowercase() == "true"
+
+        /**
+         * Store full tool results and observation payloads.
+         *
+         * Default ON, and safe to turn off in production: refs stop being written,
+         * reconstruction then declines and replays, and no run's outcome changes.
+         */
+        internal val PAYLOAD_CAPTURE_ENABLED: Boolean =
+            System.getenv("TRACE_PAYLOAD_CAPTURE")?.lowercase() != "false"
 
         /**
          * The `:tool-<n>` counter that synthetic tool node ids used to carry.
@@ -96,6 +155,117 @@ class AgentBrainRunner(
          */
         internal fun failureSignature(summary: String): String =
             summary.replace(ATTEMPT_SUFFIX, ":tool-N")
+
+        /**
+         * ── TWO KEYS OFF ONE TOOL CALL, AND WHY THEY DIFFER ──────────────────
+         *
+         * A tool call inside an agent step is keyed twice, for two different
+         * questions, and the answers are genuinely different:
+         *
+         *   approval  `<stepId>:tool:<toolId>`               — MAY this run?
+         *   guard     `<stepId>:tool:<toolId>:<argsHash>`    — HAS this already run?
+         *
+         * "May this run" is a question about the tool. A person approving
+         * `send_email` is approving the agent's use of that tool in that step, and
+         * they must be asked once. Keying it on the arguments would re-ask on every
+         * call, and — because the step replays from iteration 1 on resume — the
+         * arguments the model produces on the second pass need not be byte-identical
+         * to the first, so the resumed run could miss the decision and open a second
+         * gate forever. That is the bug [ATTEMPT_SUFFIX] documents, one level up.
+         *
+         * "Has this already run" is a question about the CALL. `search(a)` and
+         * `search(b)` are two calls; treating them as one would hand the second the
+         * first's cached output. So the arguments belong in this key and only this
+         * key.
+         *
+         * The hash is over [canonicalJson], not over the map's `toString` or a plain
+         * `writeValueAsString`, because this key must survive re-execution
+         * (durability invariant #2). A resumed step rebuilds its arguments by
+         * parsing the model's JSON afresh: key order can move and `1` can come back
+         * as `1.0`. Either would change a naive hash, and a guard key that changes
+         * between attempts silently stops deduplicating — the mechanism would look
+         * present and do nothing.
+         */
+        internal fun toolGuardNodeId(stepId: String, toolId: UUID, args: Map<String, Any?>): String =
+            "$stepId:tool:$toolId:${sha256Hex(canonicalJson(args)).take(32)}"
+
+        /** The approval key: keyed on the tool, never on the arguments. See [toolGuardNodeId]. */
+        internal fun toolApprovalNodeId(stepId: String, toolId: UUID): String =
+            "$stepId:tool:$toolId"
+
+        /**
+         * A JSON rendering that two runs of the same call agree on.
+         *
+         * Three normalisations, each closing a way the same call re-serialises
+         * differently:
+         *
+         *  - **Keys sorted.** `{"a":1,"b":2}` and `{"b":2,"a":1}` are the same call.
+         *    Jackson preserves the parse order, which follows the model's output.
+         *  - **Numbers normalised.** A whole number renders as `1` whether it arrived
+         *    as `Int`, `Long`, `Double` or `BigDecimal`; a fractional one renders via
+         *    [java.math.BigDecimal.stripTrailingZeros] so `1.50` and `1.5` agree.
+         *    Jackson parses bare JSON numbers to `Int` or `Double` depending on
+         *    magnitude and form, so this is the common case, not an exotic one.
+         *  - **Nulls dropped.** An absent key and an explicit `null` are the same
+         *    call. [executeTool] already filters nulls out before dispatch, so
+         *    keeping them here would key on something the tool never sees.
+         *
+         * Strings are escaped, never truncated: two calls differing only past a
+         * truncation point must not collide.
+         */
+        internal fun canonicalJson(value: Any?): String = when (value) {
+            null -> "null"
+            is Map<*, *> -> value.entries
+                .filter { it.value != null }
+                .map { (k, v) -> k.toString() to v }
+                .sortedBy { it.first }
+                .joinToString(",", "{", "}") { (k, v) -> "${quote(k)}:${canonicalJson(v)}" }
+            // Lists are ORDER-SENSITIVE and must stay so: [a,b] and [b,a] are
+            // different arguments to every tool that takes a list.
+            is List<*>       -> value.joinToString(",", "[", "]") { canonicalJson(it) }
+            is Array<*>      -> value.joinToString(",", "[", "]") { canonicalJson(it) }
+            is Number        -> canonicalNumber(value)
+            is Boolean       -> value.toString()
+            is String        -> quote(value)
+            else             -> quote(value.toString())
+        }
+
+        private fun canonicalNumber(n: Number): String {
+            val bd = when (n) {
+                is java.math.BigDecimal -> n
+                is java.math.BigInteger -> java.math.BigDecimal(n)
+                is Double, is Float -> {
+                    val d = n.toDouble()
+                    // NaN and the infinities have no BigDecimal form. They are not
+                    // valid JSON either, so they can only arrive from a hand-built
+                    // map; rendering the token keeps the hash total.
+                    if (d.isNaN() || d.isInfinite()) return d.toString()
+                    java.math.BigDecimal(d.toString())
+                }
+                else -> java.math.BigDecimal(n.toLong())
+            }
+            val stripped = bd.stripTrailingZeros()
+            return if (stripped.scale() <= 0) stripped.toBigInteger().toString()
+                   else stripped.toPlainString()
+        }
+
+        private fun quote(s: String): String {
+            val sb = StringBuilder(s.length + 2).append('"')
+            for (c in s) when (c) {
+                '"'  -> sb.append("\\\"")
+                '\\' -> sb.append("\\\\")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                else -> if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
+            }
+            return sb.append('"').toString()
+        }
+
+        private fun sha256Hex(s: String): String =
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(s.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
     }
 
     /**
@@ -121,6 +291,35 @@ class AgentBrainRunner(
     }
 
     /**
+     * Full-fidelity payload capture: injected, or built from [dataSource].
+     *
+     * Gated by TRACE_PAYLOAD_CAPTURE so it can be turned off in production without
+     * touching a run's outcome — refs simply stop being written, and reconstruction
+     * then declines and replays, which is the behaviour that shipped before this.
+     */
+    private val payloads: com.vectorbea.worker.events.PayloadStore? by lazy {
+        payloadStore
+            ?: if (!PAYLOAD_CAPTURE_ENABLED) null
+        else dataSource?.let {
+            com.vectorbea.worker.events.PayloadStore(
+                it, retentionDays = com.vectorbea.worker.events.RetentionLookup(it)::daysFor)
+        }
+    }
+
+    /** Rebuilds loop state from persisted iterations. See [AgentLoopReconstructor]. */
+    private val reconstructor: AgentLoopReconstructor by lazy {
+        AgentLoopReconstructor(dataSource, payloads)
+    }
+
+    /** The tool-call idempotency guard: injected, or built from [dataSource]. */
+    private val toolGuard: StepExecutionGuard? =
+        stepGuard ?: dataSource?.let { StepExecutionGuard(it) }
+
+    /** Where a guarded tool call's output is stored and replayed from. */
+    private val toolOutputs: StepOutputStore? =
+        stepOutputStore ?: dataSource?.let { StepOutputStore(it) }
+
+    /**
      * The SAME executor an `llm` node uses.
      *
      * The loop previously built its own OpenAI request by hand, which broke in two
@@ -136,7 +335,16 @@ class AgentBrainRunner(
      * Delegating fixes both and inherits the provider throttle, the connection
      * circuit breaker, replay recording and the cost/token metrics for free.
      */
-    private val llmExecutor by lazy { LlmNodeExecutor(connectionResolver, eventStore) }
+    private val llmExecutor by lazy {
+        /* The client is the ONLY seam a test needs: everything above it — prompt
+           assembly, provider dialect, response parsing, cost and token accounting,
+           LLM_CALL_* events — then runs for real against a scripted response, rather
+           than being stubbed out and therefore untested. Null in production, where
+           LlmNodeExecutor's own default (the shared, bounded OutboundHttp client)
+           applies and this construction is byte-for-byte what it always was. */
+        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore)
+        else LlmNodeExecutor(connectionResolver, eventStore, httpClient = llmHttpClient)
+    }
 
     data class RunResult(
         val finalOutput: Map<String, Any?>,
@@ -234,11 +442,90 @@ class AgentBrainRunner(
          * `AgentMemoryStore` had been writing these entries since the loop shipped and
          * `load` had never been called from anywhere — the memory was write-only.
          */
-        val recalled = memoryStore.load(config.runId, config.agentId)
-        if (recalled.isNotEmpty()) {
-            recalled.forEach { (key, value) -> state.addRecalledMemory(key, value) }
-            log.info("[brain] resumed with {} memory entrie(s) runId={} step={}",
-                recalled.size, config.runId, config.stepId)
+        /*
+         * ── CONTINUE, OR START OVER ──────────────────────────────────────────
+         *
+         * Reconstruction and memory recall solve the same problem at different
+         * fidelities, and they must not both run. Recall restores a flattened
+         * key/value summary of what happened; reconstruction restores the actual
+         * observations in order. Doing both puts each observation in front of the
+         * model TWICE, once as an observation and once as a memory entry — which
+         * reads to the model as the tool having been called twice, and is exactly
+         * the kind of false history that makes an agent's next decision wrong.
+         *
+         * So: reconstruct if we can, recall if we cannot. Never both.
+         */
+        val reconstruction = runCatching {
+            reconstructor.reconstruct(
+                config = config, state = state, budget = budget,
+                allowed = runtimeCtx.allowLoopReconstruction,
+                enabled = reconstructionEnabled,
+            )
+        }.getOrElse { e ->
+            /* A bug in reconstruction must not be able to fail a run. */
+            log.warn("[brain] reconstruction threw — falling back to replay: {}", e.message)
+            AgentLoopReconstructor.Outcome.Skipped(
+                AgentLoopReconstructor.SkipReason.READ_FAILED, e.message?.take(200))
+        }
+
+        var recalled: Map<String, Any?> = emptyMap()
+
+        when (reconstruction) {
+            is AgentLoopReconstructor.Outcome.Reconstructed -> {
+                emitEvent(config, RunEventStore.EventType.AGENT_LOOP_RECONSTRUCTED, "running",
+                    "Resumed at iteration ${reconstruction.resumeFromIteration} — " +
+                    "${reconstruction.observationsRestored} observation(s) restored, " +
+                    "no earlier work repeated")
+            }
+
+            is AgentLoopReconstructor.Outcome.Skipped -> {
+                /*
+                 * Only the reasons that mean "there WAS a transcript and we could not
+                 * use it" are worth an event or a snapshot. DISABLED,
+                 * NOT_A_CONTINUATION and NO_ITERATIONS are the ordinary path — a first
+                 * execution is not a degradation and must not read like one.
+                 */
+                val degraded = reconstruction.reason !in setOf(
+                    AgentLoopReconstructor.SkipReason.DISABLED,
+                    AgentLoopReconstructor.SkipReason.NOT_A_CONTINUATION,
+                    AgentLoopReconstructor.SkipReason.NO_PERSISTENCE,
+                    AgentLoopReconstructor.SkipReason.NO_ITERATIONS,
+                )
+                if (degraded) {
+                    /* Before the replay overwrites rows 1..N, keep them. See
+                       AgentLoopReconstructor.snapshotBeforeFallback. */
+                    val snapshotRef = runCatching {
+                        reconstructor.snapshotBeforeFallback(config)
+                    }.getOrNull()
+
+                    log.warn("[brain] loop reconstruction skipped ({}) run={} step={}: {}",
+                        reconstruction.reason, config.runId, config.stepId, reconstruction.detail)
+
+                    emitEvent(config, RunEventStore.EventType.AGENT_LOOP_RECONSTRUCTION_SKIPPED,
+                        "running",
+                        "Replaying from iteration 1 — could not rebuild loop state " +
+                        "(${reconstruction.reason})",
+                        metadataJson = mapper.writeValueAsString(buildMap {
+                            put("reason", reconstruction.reason.name)
+                            reconstruction.detail?.let { put("detail", it.take(300)) }
+                            snapshotRef?.let { put("transcriptSnapshotRef", it) }
+                        }))
+                }
+
+                /*
+                 * Memory recall — the pre-existing, lower-fidelity path. Unchanged,
+                 * and now explicitly the fallback rather than the only option.
+                 *
+                 * `AgentMemoryStore` had been writing these entries since the loop
+                 * shipped and `load` had never been called from anywhere.
+                 */
+                recalled = memoryStore.load(config.runId, config.agentId)
+                if (recalled.isNotEmpty()) {
+                    recalled.forEach { (key, value) -> state.addRecalledMemory(key, value) }
+                    log.info("[brain] resumed with {} memory entrie(s) runId={} step={}",
+                        recalled.size, config.runId, config.stepId)
+                }
+            }
         }
 
         /* ONE start event. Emitting a second one to announce the recall made the
@@ -246,9 +533,14 @@ class AgentBrainRunner(
            twice — the exact confusion this whole area keeps producing. */
         emitEvent(config, RunEventStore.EventType.AGENT_STARTED, "running",
             "Agent brain started — task: ${(config.taskInstruction ?: "").take(100)}" +
-                if (recalled.isNotEmpty())
-                    " (resumed — recalled ${recalled.size} entrie(s) from earlier in this run)"
-                else "")
+                when {
+                    reconstruction is AgentLoopReconstructor.Outcome.Reconstructed ->
+                        " (continued — rebuilt ${reconstruction.observationsRestored} observation(s), " +
+                        "resuming at iteration ${reconstruction.resumeFromIteration})"
+                    recalled.isNotEmpty() ->
+                        " (resumed — recalled ${recalled.size} entrie(s) from earlier in this run)"
+                    else -> ""
+                })
 
         /* Carries the cause out of the loop and into RunResult. See RunResult.failureReason. */
         var failureReason: String? = null
@@ -260,6 +552,28 @@ class AgentBrainRunner(
         /* The approval the loop is parked on, when it parks. See RunResult.approvalId. */
         var approvalId: String? = null
         var approvalMessage: String? = null
+
+        /*
+         * ── WHAT EVERY ITERATION SPAN HANGS OFF, READ EXACTLY ONCE ───────────
+         *
+         * The activation span when the harness opened one, the agent's step span
+         * otherwise — both answer to this step's node id, so one lookup covers both
+         * and this class needs to know nothing about activations.
+         *
+         * Read HERE and not inside the loop. Each iteration repoints that node id at
+         * ITSELF, so that the model and tool calls it makes find it as their parent;
+         * a lookup inside the loop would return the previous iteration and nest the
+         * iterations inside one another, turning a flat list of six into a ladder six
+         * deep.
+         */
+        val tracer = runtimeCtx.tracer
+        val loopParentSpan = tracer?.let { it.spanForNode(config.stepId) ?: it.tickSpanId }
+
+        /* The iteration currently open, so the paths that leave the loop without
+           finishing an iteration — a break, an exception — can still close it.
+           [IterationSpan.close] is close-once, so the ordinary paths that already
+           closed it are unaffected. */
+        var openIteration: IterationSpan? = null
 
         try {
             while (!state.isDone) {
@@ -284,6 +598,17 @@ class AgentBrainRunner(
 
                 val iterationId = persistIterationStart(config, state)
 
+                /* Opened alongside the row and closed alongside it, so the trace and
+                   the reconstruction can never disagree about whether an iteration
+                   failed — they are read side by side in the debugger, and a
+                   discrepancy between them reads as a bug in the run itself. */
+                val iterSpan = IterationSpan.open(tracer, loopParentSpan, state.iteration, config.stepId)
+                openIteration = iterSpan
+
+                /* Where the budget stood BEFORE this iteration, so its delta can be
+                   recorded. See BudgetMark. */
+                val budgetMark = BudgetMark.of(budget)
+
                 // Build prompt and call LLM
                 val tools = loadAllowedToolDescriptors(config)
                 val systemPrompt = AgentPromptBuilder.buildSystemPrompt(config, tools)
@@ -305,7 +630,7 @@ class AgentBrainRunner(
                     log.warn("[brain] invalid action iter={}: {}", state.iteration, e.message)
                     emitEvent(config, RunEventStore.EventType.AGENT_INVALID_ACTION, "running",
                         "Invalid action: ${e.message}")
-                    persistIterationComplete(iterationId, "failed", action, null, budget)
+                    persistIterationComplete(iterationId, iterSpan, "failed", action, null, budget, budgetMark)
                     state.stopReason = AgentLoopState.StopReason.ERROR
                     failureReason = "The agent produced an action the runtime could not execute: ${e.message}"
                     break
@@ -313,7 +638,7 @@ class AgentBrainRunner(
                     log.warn("[brain] tool not allowed toolId={}: {}", e.toolId, e.message)
                     emitEvent(config, RunEventStore.EventType.AGENT_TOOL_NOT_ALLOWED, "running",
                         "Tool ${e.toolId} not allowed")
-                    persistIterationComplete(iterationId, "failed", action, null, budget)
+                    persistIterationComplete(iterationId, iterSpan, "failed", action, null, budget, budgetMark)
                     state.stopReason = AgentLoopState.StopReason.TOOL_NOT_ALLOWED
                     failureReason = "The agent tried to call tool ${e.toolId}, which is not in its allowed tool list."
                     /* A grant, not a glitch. Nothing changes until someone changes it. */
@@ -333,7 +658,7 @@ class AgentBrainRunner(
                         state.addObservation(AgentObservation(state.iteration, "THINK", sanitizedSummary = summary))
                         state.addMemory("thought_${state.iteration}", sanitizedReason)
                         emitEvent(config, RunEventStore.EventType.AGENT_REFLECTION_CREATED, "running", summary)
-                        persistIterationComplete(iterationId, "completed", action, summary, budget)
+                        persistIterationComplete(iterationId, iterSpan, "completed", action, summary, budget, budgetMark)
                     }
 
                     AgentAction.ActionType.CALL_TOOL -> {
@@ -364,7 +689,21 @@ class AgentBrainRunner(
                         }
                         emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED, "running",
                             obs.sanitizedSummary)
-                        persistIterationComplete(iterationId, "completed", action, obs.sanitizedSummary, budget)
+                        /* The observation's payload is what the model reads next time,
+                           so it is stored separately from the full result: the rebuild
+                           needs the prompt-shaped version, the debugger needs the whole
+                           thing. */
+                        val obsRef = runCatching {
+                            obs.payload?.let {
+                                payloads?.capture(config.workspaceId, it,
+                                    com.vectorbea.worker.events.PayloadStore.TEXT)?.ref
+                            }
+                        }.getOrNull()
+                        persistIterationComplete(iterationId, iterSpan, "completed", action,
+                            obs.sanitizedSummary, budget, budgetMark,
+                            observationSuccess = obs.success,
+                            observationPayloadRef = obsRef,
+                            toolResultRef = outcome.resultRef)
 
                         /* The tool needs a person. Park the whole step on that decision
                            rather than letting the agent reason around a locked door. */
@@ -425,11 +764,11 @@ class AgentBrainRunner(
                             state.stopReason  = AgentLoopState.StopReason.FINAL_OUTPUT
                             emitEvent(config, RunEventStore.EventType.AGENT_FINAL_OUTPUT_CREATED, "running",
                                 "Final output ready — ${action.finalOutput.keys.take(5).joinToString()}")
-                            persistIterationComplete(iterationId, "completed", action, "Final output produced", budget)
+                            persistIterationComplete(iterationId, iterSpan, "completed", action, "Final output produced", budget, budgetMark)
                         } else {
                             emitEvent(config, RunEventStore.EventType.AGENT_OUTPUT_SCHEMA_INVALID, "running",
                                 "Final output failed schema validation")
-                            persistIterationComplete(iterationId, "failed", action, "Schema invalid", budget)
+                            persistIterationComplete(iterationId, iterSpan, "failed", action, "Schema invalid", budget, budgetMark)
                             state.stopReason = AgentLoopState.StopReason.SCHEMA_INVALID
                             retryable = false
                             failureReason = "The agent's final output did not match the required output " +
@@ -467,7 +806,7 @@ class AgentBrainRunner(
                                     state.iteration, "ASK_APPROVAL", sanitizedSummary = summary))
                                 state.addMemory("approval_${state.iteration}", summary)
                                 emitEvent(config, RunEventStore.EventType.APPROVAL_APPROVED, "running", summary)
-                                persistIterationComplete(iterationId, "completed", action, summary, budget)
+                                persistIterationComplete(iterationId, iterSpan, "completed", action, summary, budget, budgetMark)
                                 /* No stopReason: the loop keeps its remaining iterations
                                    and the model sees the grant in its observations. */
                             }
@@ -480,7 +819,7 @@ class AgentBrainRunner(
                                     ". The agent asked: $sanitizedReason"
                                 emitEvent(config, RunEventStore.EventType.APPROVAL_REJECTED, "failed",
                                     failureReason!!)
-                                persistIterationComplete(iterationId, "failed", action, failureReason, budget)
+                                persistIterationComplete(iterationId, iterSpan, "failed", action, failureReason, budget, budgetMark)
                             }
 
                             is ApprovalGate.Pending -> {
@@ -492,7 +831,7 @@ class AgentBrainRunner(
                                 emitEvent(config, RunEventStore.EventType.AGENT_APPROVAL_REQUESTED,
                                     "waiting_for_approval",
                                     "Agent requested human approval: $sanitizedReason")
-                                persistIterationComplete(iterationId, "completed", action, sanitizedReason, budget)
+                                persistIterationComplete(iterationId, iterSpan, "completed", action, sanitizedReason, budget, budgetMark)
                             }
 
                             is ApprovalGate.Unavailable -> {
@@ -501,7 +840,7 @@ class AgentBrainRunner(
                                 failureReason = "The agent asked for human approval, but no approval could " +
                                     "be created: ${gate.why}. The agent asked: $sanitizedReason"
                                 emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed", failureReason!!)
-                                persistIterationComplete(iterationId, "failed", action, failureReason, budget)
+                                persistIterationComplete(iterationId, iterSpan, "failed", action, failureReason, budget, budgetMark)
                             }
                         }
                     }
@@ -530,9 +869,17 @@ class AgentBrainRunner(
                         else null
                         emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
                             "Agent reported failure: ${reason.ifBlank { "no reason given" }}")
-                        persistIterationComplete(iterationId, "failed", action, reason, budget)
+                        persistIterationComplete(iterationId, iterSpan, "failed", action, reason, budget, budgetMark)
                     }
                 }
+
+                /* A backstop, not the normal path: every branch above finishes its
+                   iteration through persistIterationComplete, which closes the span
+                   with the status it wrote to the row. This catches a branch that
+                   ends an iteration without persisting one — an unfinished span is
+                   invisible in a waterfall and silently drops its children's
+                   self-time. */
+                iterSpan?.close(if (state.stopReason == null) "ok" else "error")
 
                 // Check if max iterations reached after this iteration
                 if (!state.isDone && state.iteration >= config.maxIterations) {
@@ -550,6 +897,14 @@ class AgentBrainRunner(
             failureReason = e.message?.take(300) ?: e.javaClass.simpleName
             emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed", "Agent error: ${e.message?.take(200)}")
         }
+
+        /* The loop is over however it got here. Close-once, so this fires only for an
+           iteration that was still open — a throw out of the middle of one. The
+           binding goes back to the parent either way: leaving this step's node id
+           pointing at a closed iteration span would give the NEXT thing that looks it
+           up a parent that has already ended. */
+        openIteration?.close("error")
+        tracer?.bindNode(config.stepId, loopParentSpan)
 
         // Persist memory entries
         memoryStore.persistAll(config, state)
@@ -790,6 +1145,21 @@ class AgentBrainRunner(
     private data class ToolOutcome(
         val observation: AgentObservation,
         val pause: NodeResult.ApprovalPaused? = null,
+        /**
+         * The FULL tool result in the payload store, if it was captured.
+         *
+         * ── THE CAP AND THE DURABILITY WERE THE SAME THING, AND SHOULD NOT BE ──
+         *
+         * [MAX_TOOL_PAYLOAD_CHARS] exists to bound what goes into the PROMPT: ten
+         * observations of a few thousand characters is a context budget anyone can
+         * reason about. It had also become the only version of the result that
+         * survived the iteration, so anything past 2000 characters was gone —
+         * unavailable to the debugger, and unavailable to a rebuild.
+         *
+         * Two consumers, two limits. The full result goes here; the capped version
+         * goes in [AgentObservation.payload] and into the prompt.
+         */
+        val resultRef: String? = null,
     )
 
     private suspend fun executeTool(
@@ -834,9 +1204,12 @@ class AgentBrainRunner(
              * tool) — a second call to the SAME tool in the same step reuses the first
              * decision — which is the bargain the agent's own gate already makes, and
              * the only key available that survives re-execution.
+             *
+             * The IDEMPOTENCY key is a different key over the same call, and carries
+             * the arguments. See [toolGuardNodeId] for why the two must not be one.
              */
             val syntheticNode = WorkflowNode(
-                id     = "${config.stepId}:tool:${toolId}",
+                id     = toolApprovalNodeId(config.stepId, toolId),
                 type   = "tool",
                 config = mapOf("toolId" to toolId.toString()),
             )
@@ -845,15 +1218,106 @@ class AgentBrainRunner(
             val inputs = (action.toolInput ?: emptyMap<String, Any?>())
                 .filterValues { it != null } as Map<String, Any>
 
-            when (val execResult = executor.execute(syntheticNode, inputs, runtimeCtx)) {
-                is NodeResult.Completed -> ToolOutcome(
-                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                        buildToolObservationSummary(toolId, execResult.output), true,
-                        payload = renderToolPayload(execResult.output)))
+            /*
+             * ── HAS THIS EXACT CALL ALREADY RUN? ─────────────────────────────
+             *
+             * The agent step replays from iteration 1 on resume, so without this
+             * every tool call the step already made is made AGAIN: the email sent
+             * before the approval gate is sent a second time when the approval comes
+             * back. The step-level guard in WorkflowRuntime does not cover this — it
+             * keys on the graph node and never sees the calls inside the loop, and it
+             * leaves the agent step's own row `running` across an approval pause, so
+             * the step re-executes by design.
+             *
+             * Keyed on the arguments as well as the tool, so two DIFFERENT calls to
+             * one tool are two operations and both run. `attemptGroup` rather than an
+             * iteration or attempt number for the same reason SideEffectGuard uses it:
+             * it moves only when a human asks for the work to happen again, so a
+             * resume dedupes and a deliberate re-run genuinely re-runs.
+             */
+            val guardNodeId = toolGuardNodeId(config.stepId, toolId, inputs)
+            val guard       = toolGuard
+            val cached      = if (guard == null) null else replayGuardedTool(
+                guard, guardNodeId, config, runtimeCtx, toolId, state)
+            if (cached != null) return cached
+
+            /*
+             * ── THE TOOL SPAN'S PARENT ──────────────────────────────────────
+             *
+             * ToolNodeExecutor resolves its parent from the node id it is handed,
+             * and this synthetic id — `<stepId>:tool:<toolId>` — was never
+             * registered, so every tool an agent called hung flat off the TICK
+             * span, beside the step that dispatched it rather than inside it.
+             *
+             * `spanForNode(config.stepId)` is the iteration currently running (see
+             * IterationSpan), so binding the synthetic id to it puts the tool call
+             * where it belongs. Unbound immediately after: the id is per (step,
+             * tool) and is reused by every later iteration that calls the same
+             * tool, so a stale entry would parent iteration five's call to
+             * iteration two's span.
+             */
+            val toolTracer = runtimeCtx.tracer
+            runCatching {
+                toolTracer?.spanForNode(config.stepId)?.let {
+                    toolTracer.bindNode(syntheticNode.id, it)
+                }
+            }
+
+            when (val execResult = try {
+                executor.execute(syntheticNode, inputs, runtimeCtx)
+            } finally {
+                runCatching { toolTracer?.bindNode(syntheticNode.id, null) }
+            }) {
+                is NodeResult.Completed -> {
+                    /* Recorded before the observation is built: the guard row and the
+                       output are what a resumed step reads instead of calling again,
+                       and both are best-effort — a failure to record costs a duplicate
+                       call on resume, never a wrong result now. */
+                    if (guard != null) {
+                        toolOutputs?.let { store ->
+                            runCatching {
+                                store.save(
+                                    runId = runtimeCtx.runId,
+                                    workspaceId = config.workspaceId,
+                                    environmentId = config.environmentId,
+                                    nodeId = guardNodeId,
+                                    nodeType = "tool",
+                                    rawOutput = execResult.output,
+                                    extractedOutput = null,
+                                    validatedOutput = null,
+                                )
+                            }.onFailure {
+                                log.warn("[brain] tool output persist failed [nodeId={}]: {}",
+                                    guardNodeId, it.message)
+                            }
+                        }
+                        guard.markCompleted(runtimeCtx.runId, guardNodeId, runtimeCtx.attemptGroup)
+                    }
+                    /* The full result, uncapped, before the prompt version is cut
+                       down. Best-effort: a payload that cannot be stored costs a
+                       debugging artefact and a future reconstruction, never this call. */
+                    val fullRef = runCatching {
+                        payloads?.capture(
+                            workspaceId = config.workspaceId,
+                            content = mapper.writeValueAsString(execResult.output),
+                            contentType = com.vectorbea.worker.events.PayloadStore.JSON,
+                        )?.ref
+                    }.getOrNull()
+
+                    ToolOutcome(
+                        AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                            buildToolObservationSummary(toolId, execResult.output), true,
+                            payload = renderToolPayload(execResult.output)),
+                        resultRef = fullRef)
+                }
 
                 is NodeResult.Failed -> {
                     val errSummary = "Tool $toolId failed: ${execResult.reason.take(200)}"
                     log.warn("[brain] tool execution failed toolId={}: {}", toolId, execResult.reason)
+                    /* Marked failed, not left running: `tryAcquire` reads a failed row as
+                       free to retry, so a resumed step calls the tool again — which is
+                       what should happen to a call that did not succeed. */
+                    guard?.markFailed(runtimeCtx.runId, guardNodeId, runtimeCtx.attemptGroup, null)
                     ToolOutcome(AgentObservation(
                         state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false))
                 }
@@ -894,6 +1358,58 @@ class AgentBrainRunner(
             ToolOutcome(AgentObservation(
                 state.iteration, "CALL_TOOL", toolId.toString(), errSummary, false))
         }
+    }
+
+    /**
+     * The cached outcome of this exact call, or null to go ahead and make it.
+     *
+     * Returns non-null only when the guard says this (step, tool, arguments) already
+     * completed AND the stored output can be read back. "Completed but no stored
+     * output" falls through and re-executes, the same trade
+     * [com.vectorbea.worker.runtime.WorkflowRuntime] makes: repeating a call is worse
+     * than a wrong answer only if the call has side effects, and returning an empty
+     * result the model then reasons over is a wrong answer every time.
+     *
+     * A guard failure is not a reason to skip: [StepExecutionGuard.tryAcquire] already
+     * fails open, and this reads its result rather than second-guessing it.
+     */
+    private fun replayGuardedTool(
+        guard: StepExecutionGuard,
+        guardNodeId: String,
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        toolId: UUID,
+        state: AgentLoopState,
+    ): ToolOutcome? {
+        val acq = guard.tryAcquire(
+            runId = runtimeCtx.runId,
+            workspaceId = config.workspaceId,
+            environmentId = config.environmentId,
+            nodeId = guardNodeId,
+            attempt = runtimeCtx.attemptGroup,
+        )
+        if (!acq.alreadyCompleted) return null
+
+        val cached = runCatching { toolOutputs?.loadRaw(runtimeCtx.runId, guardNodeId) }.getOrNull()
+        if (cached == null) {
+            log.warn("[brain] tool guard says completed but no stored output — re-executing " +
+                "[nodeId={}, runId={}]", guardNodeId, runtimeCtx.runId)
+            return null
+        }
+
+        log.info("[brain] tool call already completed with these arguments — using stored output " +
+            "[toolId={}, runId={}]", toolId, runtimeCtx.runId)
+        /* On config.stepId, not the guard id: the guard id is an internal key with an
+           argument hash in it, and an event filed against it would attach to a step no
+           screen can resolve. Same reasoning as the synthetic LLM node in callLlm. */
+        emitEvent(config, RunEventStore.EventType.STEP_SKIPPED, "running",
+            "Skipped re-execution of tool $toolId — already called with these arguments " +
+            "in this run; stored result reused (idempotency guard)")
+
+        return ToolOutcome(AgentObservation(
+            state.iteration, "CALL_TOOL", toolId.toString(),
+            buildToolObservationSummary(toolId, cached), true,
+            payload = renderToolPayload(cached)))
     }
 
     /**
@@ -974,18 +1490,131 @@ class AgentBrainRunner(
         }
     }
 
+    /**
+     * One iteration's span, and the registry swap it owns.
+     *
+     * ── WHY THIS IS AN OBJECT AND NOT TWO TRACER CALLS ──────────────────────
+     * An iteration ends in eleven places. Ten of them are branches of one `when`
+     * over the model's chosen action, and each already tells
+     * [persistIterationComplete] whether the iteration completed or failed —
+     * which is exactly what the span needs to say. Threading the close through
+     * that one function makes the two agree by construction, instead of by
+     * eleven people remembering.
+     *
+     * [close] is idempotent so the backstop at the foot of the loop and the one
+     * after it can fire unconditionally without double-writing a span or
+     * corrupting the parent's self-time accumulator.
+     *
+     * The object also owns the node-id binding it made: `llm_call` and
+     * `tool_call` spans find their parent by this step's node id, so the id
+     * points at the live iteration while it runs and goes back to the loop's
+     * parent when it ends. Owning both halves is what stops a close path from
+     * restoring the binding and forgetting the span, or the reverse.
+     */
+    private class IterationSpan private constructor(
+        private val tracer: com.vectorbea.worker.events.RunTracer,
+        private val spanId: UUID,
+        private val parentSpanId: UUID?,
+        private val index: Int,
+        private val stepId: String,
+    ) {
+        private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun close(status: String) {
+            if (!closed.compareAndSet(false, true)) return
+            runCatching {
+                tracer.close(
+                    spanId, "iteration", "iteration $index", status,
+                    stepId = stepId, iterationIndex = index,
+                )
+                tracer.bindNode(stepId, parentSpanId)
+            }
+        }
+
+        companion object {
+            /** Null tracer, tracing off, or a failed open all give the same no-op. */
+            fun open(
+                tracer: com.vectorbea.worker.events.RunTracer?,
+                parentSpanId: UUID?,
+                index: Int,
+                stepId: String,
+            ): IterationSpan? {
+                val t = tracer ?: return null
+                val id = runCatching {
+                    t.open("iteration", "iteration $index", parentSpanId)
+                }.getOrNull() ?: return null
+                runCatching { t.bindNode(stepId, id) }
+                return IterationSpan(t, id, parentSpanId, index, stepId)
+            }
+        }
+    }
+
+    /**
+     * A snapshot of the budget's consumption counters, for computing an iteration's
+     * delta.
+     *
+     * The cumulative totals on the row are the right thing for a progress display
+     * and the wrong thing for a rebuild: a reconstruction resuming at iteration 5
+     * needs what the budget stood at after 4, and a total may have been written by
+     * an attempt that was later abandoned. Deltas sum; totals do not.
+     */
+    private data class BudgetMark(val tokens: Int, val costCents: Double, val toolCalls: Int) {
+        companion object {
+            fun of(b: AgentBudget) = BudgetMark(b.tokensUsed, b.estimatedCostCents, b.toolCallsUsed)
+        }
+    }
+
     private fun persistIterationComplete(
         iterationId: UUID?,
+        /**
+         * Closed with the same verdict the row is given, here rather than at the
+         * eleven call sites — see [IterationSpan]. Null whenever tracing is off, and
+         * deliberately BEFORE the early return below: a row that could not be written
+         * because there is no data source still had a real iteration behind it, and
+         * an unclosed span would leave a hole in the waterfall.
+         */
+        span: IterationSpan?,
         status: String,
         action: AgentAction,
         observationSummary: String?,
         budget: AgentBudget,
+        /* Everything below is what makes the iteration reconstructible. All optional:
+           absent, the row is still a valid record and reconstruction declines on it. */
+        mark: BudgetMark? = null,
+        observationSuccess: Boolean? = null,
+        observationPayloadRef: String? = null,
+        toolResultRef: String? = null,
     ) {
+        span?.close(if (status == "completed") "ok" else "error")
         if (dataSource == null || iterationId == null) return
         try {
+            /* The action AS PARSED, with its arguments — the one field without which a
+               transcript can be displayed but not continued from. Sanitized: a tool
+               input can carry whatever the model put in it. */
+            val actionJson = runCatching {
+                mapper.writeValueAsString(mapOf(
+                    "type" to action.type.name,
+                    "toolId" to action.toolId,
+                    "toolInput" to action.toolInput,
+                    "reasoningSummary" to safetyGuard.sanitizeReasoningSummary(action.reasoningSummary),
+                    "failReason" to action.failReason?.take(500),
+                    "confidence" to action.confidence,
+                    /* Deliberately NOT finalOutput: a FINAL ends the loop, so no
+                       reconstruction ever needs to replay past it, and it can be large. */
+                ))
+            }.getOrNull()
+
             dataSource.connection.use { conn ->
                 conn.prepareStatement(
-                    "UPDATE agent_iterations SET status=?,action_type=?,thought_summary_sanitized=?,observation_summary_sanitized=?,tokens_used=?,estimated_cost_cents=?,completed_at=? WHERE id=?"
+                    """UPDATE agent_iterations SET
+                         status=?, action_type=?, thought_summary_sanitized=?,
+                         observation_summary_sanitized=?, tokens_used=?,
+                         estimated_cost_cents=?, completed_at=?,
+                         action_json_sanitized=?::jsonb, observation_success=?,
+                         observation_payload_ref=?, tool_result_ref=?,
+                         selected_tool_id=?, tokens_delta=?, cost_delta_cents=?,
+                         tool_calls_delta=?, loop_schema_version=?
+                       WHERE id=?"""
                 ).use { stmt ->
                     stmt.setString(1, status)
                     stmt.setString(2, action.type.name)
@@ -994,7 +1623,20 @@ class AgentBrainRunner(
                     stmt.setInt(5, budget.tokensUsed)
                     stmt.setBigDecimal(6, java.math.BigDecimal.valueOf(budget.estimatedCostCents))
                     stmt.setTimestamp(7, Timestamp.from(Instant.now()))
-                    stmt.setObject(8, iterationId)
+                    stmt.setString(8, actionJson)
+                    if (observationSuccess == null) stmt.setNull(9, java.sql.Types.BOOLEAN)
+                    else stmt.setBoolean(9, observationSuccess)
+                    stmt.setString(10, observationPayloadRef)
+                    stmt.setString(11, toolResultRef)
+                    val toolUuid = action.toolId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                    if (toolUuid == null) stmt.setNull(12, java.sql.Types.OTHER)
+                    else stmt.setObject(12, toolUuid)
+                    stmt.setInt(13, (budget.tokensUsed - (mark?.tokens ?: 0)).coerceAtLeast(0))
+                    stmt.setBigDecimal(14, java.math.BigDecimal.valueOf(
+                        (budget.estimatedCostCents - (mark?.costCents ?: 0.0)).coerceAtLeast(0.0)))
+                    stmt.setInt(15, (budget.toolCallsUsed - (mark?.toolCalls ?: 0)).coerceAtLeast(0))
+                    stmt.setInt(16, AgentLoopReconstructor.LOOP_SCHEMA_VERSION)
+                    stmt.setObject(17, iterationId)
                     stmt.executeUpdate()
                 }
             }
@@ -1054,6 +1696,12 @@ class AgentBrainRunner(
         summary: String,
         tokenCount: Int? = null,
         estimatedCost: Double? = null,
+        /**
+         * Structured detail for events whose reason matters more than their prose —
+         * the reconstruction skip carries its reason and its transcript snapshot ref
+         * here. Sanitized by the caller, per RunEventStore's contract.
+         */
+        metadataJson: String? = null,
     ) {
         try {
             eventStore.appendEvent(RunEventStore.RunEvent(
@@ -1070,6 +1718,7 @@ class AgentBrainRunner(
                 agentId       = config.agentId,
                 tokenCount    = tokenCount,
                 estimatedCost = estimatedCost,
+                metadataJsonSanitized = metadataJson,
             ))
         } catch (e: Exception) { log.warn("[brain] event emit failed type={}: {}", type, e.message) }
     }

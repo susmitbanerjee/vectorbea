@@ -410,6 +410,119 @@ function paged<T>(items: T[], init: RequestOptions) {
   return { items: items.slice(start, start + pageSize), total: items.length, page, pageSize };
 }
 
+
+// ── Trace fixtures ──────────────────────────────────────────────────────────
+
+const T0 = Date.parse("2026-08-30T09:00:00.000Z");
+const at = (ms: number) => new Date(T0 + ms).toISOString();
+
+function span(
+  id: string, parent: string | null, kind: string, name: string, status: string,
+  startMs: number, durMs: number, extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    spanId: uuidFrom(`span_${id}`),
+    parentSpanId: parent ? uuidFrom(`span_${parent}`) : null,
+    kind, name, status,
+    stepId: null, iterationIndex: null,
+    startedAt: at(startMs), endedAt: at(startMs + durMs),
+    durationMs: durMs, selfMs: durMs,
+    failureClass: null, isRootCause: false,
+    hasInput: kind === "llm_call" || kind === "tool_call",
+    hasOutput: kind === "llm_call" || kind === "tool_call",
+    tokensIn: null, tokensOut: null, costCents: null,
+    childCount: 0, children: [], truncated: false,
+    ...extra,
+  };
+}
+
+function mockTrace(runId: string) {
+  const toolCall = span("tool", "triage", "tool_call", "crm.search", "error", 78_000, 240, {
+    isRootCause: true, failureClass: "AUTH", stepId: "n-triage",
+  });
+  const llmCall = span("llm", "triage", "llm_call", "gpt-4o-mini", "ok", 12_000, 6_000, {
+    stepId: "n-triage", tokensIn: 4_100, tokensOut: 320, costCents: 8.4,
+  });
+  const triage = span("triage", "tick", "step", "triage", "error", 6_000, 74_000, {
+    stepId: "n-triage", selfMs: 2_000,
+    children: [llmCall, toolCall], childCount: 2,
+  });
+  const trigger = span("trigger", "tick", "step", "trigger", "ok", 5_000, 100, { stepId: "n-trigger" });
+  const notify = span("notify", "tick", "step", "notify", "skipped", 80_000, 0, { stepId: "n-notify" });
+  const tick = span("tick", "run", "tick", "tick", "error", 5_000, 76_000, {
+    selfMs: 1_900, children: [trigger, triage, notify], childCount: 3,
+  });
+  const queueWait = span("wq", "run", "wait", "wait:queue", "ok", 0, 5_000);
+  const approvalWait = span("wa", "run", "wait", "wait:approval", "ok", 81_000, 171_000);
+  const run = span("run", null, "run", "run", "error", 0, 252_000, {
+    selfMs: null, children: [queueWait, tick, approvalWait], childCount: 3,
+  });
+  return {
+    runId, depth: 9, totalSpans: 9, returnedSpans: 9, truncated: false,
+    spans: [run], traceComplete: true,
+  };
+}
+
+function mockRootCause(runId: string) {
+  return {
+    runId,
+    rootCause: span("tool", "triage", "tool_call", "crm.search", "error", 78_000, 240, {
+      isRootCause: true, failureClass: "AUTH", stepId: "n-triage",
+    }),
+    concurrentGroup: [uuidFrom("span_tool")],
+    concurrentLabel: null,
+    failureClass: "AUTH",
+    owner: "Workspace admin",
+    retry: "Not until the credential is fixed.",
+    rendersAsError: true,
+    ancestry: [],
+    sentence:
+      "Run failed because step **triage** could not complete **crm.search**. " +
+      "step `triage` → tool call `crm.search` returned **HTTP 403: token expired**. " +
+      "Class **AUTH** — A credential was rejected. Reconnect the integration. " +
+      "Workspace admin needs to act. Not until the credential is fixed.",
+  };
+}
+
+function mockCriticalPath(runId: string) {
+  return {
+    runId, totalMs: 252_000,
+    path: [
+      span("run", null, "run", "run", "error", 0, 252_000, { sharePct: null }),
+      span("wa", "run", "wait", "wait:approval", "ok", 81_000, 171_000, { sharePct: 67.9 }),
+    ],
+  };
+}
+
+function mockSpanDetail(spanId: string) {
+  const isTool = spanId === uuidFrom("span_tool");
+  return {
+    ...span(isTool ? "tool" : "llm", "triage",
+      isTool ? "tool_call" : "llm_call",
+      isTool ? "crm.search" : "gpt-4o-mini",
+      isTool ? "error" : "ok", isTool ? 78_000 : 12_000, isTool ? 240 : 6_000),
+    attributes: isTool
+      ? '{"tool_type":"http","http_status":403}'
+      : '{"type":"CALL_TOOL","toolId":"crm.search","toolInput":{"accountId":"A-8891"}}',
+    errorJson: isTool ? '{"reason":"HTTP 403: token expired"}' : null,
+    input: {
+      ref: "sha256:demo", sizeBytes: 12_400, contentType: "text/plain",
+      storage: "inline" as const, truncated: true,
+      redactions: '[{"label":"connection secret","count":1}]',
+      value: [
+        "You are a triage agent. Search the CRM for the account named in the ticket.",
+        "Authorization: [redacted: connection secret]",
+        "Account: A-8891",
+      ].join("\n"),
+    },
+    output: {
+      ref: "sha256:demo2", sizeBytes: 240, contentType: "application/json",
+      storage: "inline" as const, truncated: false, redactions: "[]",
+      value: isTool ? '{"error":"token expired"}' : '{"type":"CALL_TOOL","toolId":"crm.search"}',
+    },
+  };
+}
+
 function notFound(path: string): never {
   throw new VectorbeaApiError({
     message: `No mock handler for ${path}.`,
@@ -499,6 +612,18 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       return { ...toApiRun(run), outputJson: null, errorJson: null };
     },
   ],
+
+  /* ── Trace ────────────────────────────────────────────────────────────────
+     The Debug tab needs spans in demo mode for the same reason every other
+     screen has fixtures: a tab that 404s without a live API teaches people it is
+     broken. One failed run, shaped like a real one — a queue wait, a tick, two
+     steps, a model call, a tool call that 403s, and a long approval wait — so the
+     waterfall, the run map and the root-cause banner all have something true to
+     render. */
+  ["GET", "/api/runs/:id/trace", (params) => mockTrace(params.id)],
+  ["GET", "/api/runs/:id/trace/root-cause", (params) => mockRootCause(params.id)],
+  ["GET", "/api/runs/:id/trace/critical-path", (params) => mockCriticalPath(params.id)],
+  ["GET", "/api/runs/:id/trace/spans/:spanId", (params) => mockSpanDetail(params.spanId)],
 
   /* The run's event log. A run this fixture minted has exactly one event —
      it was queued — because nothing here executes it. */

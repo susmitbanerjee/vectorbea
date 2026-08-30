@@ -83,6 +83,13 @@ class RunProcessor(
      * live, which is the safe direction.
      */
     private val replayRuntimeFactory: ((com.vectorbea.worker.replay.ReplayContext) -> WorkflowRuntime)? = null,
+    /**
+     * Trace span writer, needed here only to flush before root-cause attribution.
+     * Null disables both.
+     */
+    private val spanWriter: com.vectorbea.worker.events.SpanWriter? = null,
+    /** Computes is_root_cause once, at terminalisation. Null disables attribution. */
+    private val rootCause: com.vectorbea.worker.events.RootCauseAttribution? = null,
 ) {
 
     /**
@@ -598,6 +605,11 @@ class RunProcessor(
             cancellationCheck = { isCancellationRequested(job.runId) },
             debugMode         = job.debugMode,
             workflowId        = run.workflowId,
+            /* A RESUME_RUN is the same logical execution continuing — after an
+               approval, a timer, a yield, or a crash-recovery re-enqueue. An agent
+               step in it may rebuild its loop from what it already did rather than
+               replaying, and paying for, every LLM call a second time. */
+            allowLoopReconstruction = true,
         )
 
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
@@ -684,6 +696,10 @@ class RunProcessor(
             cancellationCheck = { isCancellationRequested(job.runId) },
             debugMode         = job.debugMode,
             workflowId        = run.workflowId,
+            /* Explicit, though false is the default: somebody asked for this node to
+               run AGAIN. Reconstructing its previous loop would hand them the
+               previous answer, which is the opposite of a retry. */
+            allowLoopReconstruction = false,
         )
 
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()
@@ -1162,6 +1178,27 @@ class RunProcessor(
             }
         }
 
+    /**
+     * Attribute the failure once, here, because this is the one funnel every
+     * terminal state passes through.
+     *
+     * Ordering matters and is not obvious: the span buffer is flushed FIRST. Spans
+     * are written with up to 250ms of latency, so at the moment a run goes terminal
+     * the span that actually failed is frequently still in the queue. Attributing
+     * before the flush would walk an incomplete tree and blame a propagation span,
+     * or find no error spans at all and give up.
+     *
+     * Never throws. A run that has already finished must not be affected by our
+     * inability to explain it.
+     */
+    private fun attributeRootCause(runId: UUID, status: String) {
+        if (status != "failed") return
+        runCatching {
+            spanWriter?.flush()
+            rootCause?.attribute(runId)
+        }.onFailure { log.debug("[root-cause] skipped for {}: {}", runId, it.message) }
+    }
+
     private fun updateRunCompleted(
         runId: UUID,
         status: String,
@@ -1206,6 +1243,9 @@ class RunProcessor(
                     log.warn("[processor] terminal update skipped — run already terminal [runId={}, attemptedStatus={}]",
                         runId, status)
                 }
+                /* Only when THIS call won the transition. The CAS is what makes
+                   attribution run exactly once even under redelivery. */
+                if (updated) attributeRootCause(runId, status)
                 updated
             }
         }

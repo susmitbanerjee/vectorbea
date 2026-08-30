@@ -149,6 +149,15 @@ fun main() {
     val historyChecker = HistoryLimitChecker(database.dataSource)
     val stepGuard      = StepExecutionGuard(database.dataSource)
 
+    /*
+     * Trace span writer. Bounded buffer, dedicated thread, drops under pressure —
+     * it can make a trace incomplete but can never make a run slower or fail.
+     * TRACE_SPANS_ENABLED=false turns it off with no effect on any run outcome.
+     */
+    val spanWriter = com.vectorbea.worker.events.SpanWriter(
+        database.dataSource, redis.pubSubConnection)
+    spanWriter.start()
+
     // Per-tick cooperative-yield budget — bounds how much work a run does per
     // worker thread before it checkpoints and re-enqueues a RESUME_RUN.
     val executionBudget = ExecutionBudget.fromEnv()
@@ -213,6 +222,7 @@ fun main() {
         dbPoolManager      = dbPoolManager,
         debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
         stepGuard          = stepGuard,
+        spanWriter         = spanWriter,
         historyChecker     = historyChecker,
         executionBudget    = executionBudget,
         tenantDbDispatcher = tenantDbDispatcher,
@@ -244,6 +254,7 @@ fun main() {
             dbPoolManager      = dbPoolManager,
             debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
             stepGuard          = stepGuard,
+        spanWriter         = spanWriter,
             historyChecker     = historyChecker,
             executionBudget    = executionBudget,
             tenantDbDispatcher = tenantDbDispatcher,
@@ -309,6 +320,8 @@ fun main() {
         deadLetters     = deadLetterStore,
         timerScheduler  = { timerSchedulerRef },
         replayRuntimeFactory = replayRuntimeFactory,
+        spanWriter         = spanWriter,
+        rootCause          = com.vectorbea.worker.events.RootCauseAttribution(database.dataSource),
         // Durably re-enqueue continuation jobs after a yield (survives crash).
         // Routed to the run's OWN class stream, read from agent_runs — a
         // continuation must resume in the pool its first half occupied.
@@ -480,6 +493,24 @@ fun main() {
         enqueueJob = { job -> try { enqueueSystemJob(job) } catch (e: Exception) { log.warn("[crash-recovery] enqueue failed: {}", e.message) } },
     )
     crashRecovery.start()
+
+    /*
+     * Partition maintenance — creates next month's partitions before anything needs
+     * to write into them, for BOTH run_events and run_spans.
+     *
+     * run_events has needed this since V028: that migration shipped the ensure/drop
+     * functions and nothing ever called them, and the table has no DEFAULT partition,
+     * so an insert past the last pre-created month errors rather than degrading.
+     *
+     * Dropping expired partitions is OFF unless PARTITION_DROP_ENABLED=true — the
+     * job logs what it would drop first, so a cycle can be read before anything is
+     * destroyed.
+     */
+    val partitionMaintenance = com.vectorbea.worker.durable.PartitionMaintenance(
+        dataSource = database.dataSource,
+        redisCommands = redis.commands,
+    )
+    partitionMaintenance.start()
 
     // ── Metrics server ────────────────────────────────────────────────────────
     // §5.4: `job_queue_depth{workspace, priority}`. Sampled on scrape rather than

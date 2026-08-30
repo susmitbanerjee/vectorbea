@@ -106,6 +106,15 @@ class ToolNodeExecutor(
             title   = "Tool call started: ${tool.name}",
             summary = "type=${tool.type}")
 
+        /* Parent resolved from the node id this executor already holds — the step
+           span registered itself under it. Works for an agent's synthetic
+           `<stepId>:tool:<toolId>` node too, because the agent step registered that
+           id when it opened. */
+        val toolSpan = runCatching {
+            ctx.tracer?.open("tool_call", tool.name, ctx.tracer.spanForNode(node.id)
+                ?: ctx.tracer.tickSpanId)
+        }.getOrNull()
+
         val startMs = System.currentTimeMillis()
 
         // Build a synthetic WorkflowNode with the tool's resolved config so existing
@@ -178,8 +187,31 @@ class ToolNodeExecutor(
             title      = eventTitle,
             durationMs = durationMs)
 
+        runCatching {
+            ctx.tracer?.close(
+                toolSpan, "tool_call", tool.name,
+                status = when (result) {
+                    is NodeResult.Completed      -> "ok"
+                    is NodeResult.ApprovalPaused -> "paused"
+                    is NodeResult.Throttled      -> "paused"
+                    is NodeResult.Unsupported    -> "skipped"
+                    else                         -> "error"
+                },
+                stepId = node.id,
+                /* Attributes are for filtering and grouping — small, flat, already
+                   safe. The tool's actual result is bulk content and belongs in the
+                   payload store, not here. */
+                attributesJson = """{"tool_id":"$toolId","tool_type":${jsonStr(tool.type)}}""",
+                errorJson = (result as? NodeResult.Failed)
+                    ?.let { """{"reason":${jsonStr(it.reason.take(300))}}""" },
+            )
+        }
+
         return result
     }
+
+    private fun jsonStr(s: String): String =
+        "\"${s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")}\""
 
     /**
      * The tool's approval gate: null to proceed, otherwise the result to return.

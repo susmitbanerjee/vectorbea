@@ -100,6 +100,11 @@ class WorkflowRuntime(
      */
     private val tenantDbDispatcher: TenantDbDispatcher? = null,
     /** Exactly-once guard, handed to the executors that perform side effects. */
+    /**
+     * Trace span writer. Null disables tracing entirely — every `ctx.tracer?.` call
+     * becomes a no-op and no run behaves differently.
+     */
+    private val spanWriter: com.vectorbea.worker.events.SpanWriter? = null,
     private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
     /** Per-connection breaker, so a failing provider stops costing worker permits. */
     private val circuit: com.vectorbea.worker.net.ConnectionCircuit? = null,
@@ -311,13 +316,17 @@ class WorkflowRuntime(
             workflowInput = workflowInput,
             graph = graph,
             debugMode = debugMode,
+            tracer = tracerFor(runId, workspaceId),
         )
 
         // 4. Build per-run output view for cross-step template resolution
         val stepOutputView = InMemoryStepOutputView()
 
         // 5. Run the DAG
-        return runDag(graph, graphScheduler, ctx, source, stepOutputView, cancellationCheck)
+        val startedAtMs = System.currentTimeMillis()
+        val execResult = runDag(graph, graphScheduler, ctx, source, stepOutputView, cancellationCheck)
+        finishTrace(ctx, execResult, startedAtMs)
+        return execResult
     }
 
     /**
@@ -347,6 +356,9 @@ class WorkflowRuntime(
         cancellationCheck: () -> Boolean = { false },
         debugMode: Boolean = false,
         workflowId: UUID = workflowVersionId,
+        /* Set by RunProcessor from the job type. A continuation reconstructs; a
+           deliberate re-run does not. See RuntimeContext.allowLoopReconstruction. */
+        allowLoopReconstruction: Boolean = false,
     ): ExecutionResult {
         val graphScheduler = GraphScheduler(graph)
 
@@ -365,6 +377,8 @@ class WorkflowRuntime(
             graph                 = graph,
             debugMode             = debugMode,
             forceReexecuteNodeIds = pendingNodeIds,
+            allowLoopReconstruction = allowLoopReconstruction,
+            tracer = tracerFor(runId, workspaceId),
         )
 
         // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)
@@ -397,7 +411,10 @@ class WorkflowRuntime(
         log.info("[runtime] resuming run from checkpoint [runId={}, seq={}, pendingOverrides={}]",
             runId, snapshot.sequence, pendingNodeIds)
 
-        return runDag(graph, graphScheduler, ctx, source, stepOutputView, cancellationCheck)
+        val startedAtMs = System.currentTimeMillis()
+        val execResult = runDag(graph, graphScheduler, ctx, source, stepOutputView, cancellationCheck)
+        finishTrace(ctx, execResult, startedAtMs)
+        return execResult
     }
 
     // ── DAG execution loop ────────────────────────────────────────────────────
@@ -419,6 +436,27 @@ class WorkflowRuntime(
     ): ExecutionResult {
         val maxIterations = graph.nodes.size * 10 + 100 // safety cap
         val dagStartedAtMs = System.currentTimeMillis()
+
+        /*
+         * ── run, tick and wait spans ────────────────────────────────────────
+         *
+         * Opened here because runDag is the one place both execute() and resume()
+         * converge, so a tick is exactly one pass through it. `enforceBudget` marks
+         * the TOP-LEVEL call — a parallel branch re-enters this method with it false,
+         * and a branch is not a tick.
+         *
+         * The run span is (re)opened on every tick rather than only the first. The
+         * insert is idempotent on its derived id, so this costs one no-op write and
+         * removes the need for a worker to know whether it is the first to touch the
+         * run — which, after a crash or a yield, it cannot know cheaply.
+         */
+        if (enforceBudget) runCatching {
+            ctx.tracer?.let { t ->
+                t.openRunSpan("run", java.time.Instant.ofEpochMilli(dagStartedAtMs))
+                emitWaitSpanForGapBefore(ctx, t)
+                t.openTick("tick")
+            }
+        }
 
         // Per-tick cooperative-yield budget (null = unbounded / historical behavior).
         val tracker = if (enforceBudget) executionBudget?.let { ExecutionBudgetTracker(it) } else null
@@ -674,7 +712,38 @@ class WorkflowRuntime(
         else
             registry.executorFor(node)
 
+        /*
+         * The step span, and the registry entry executors resolve their parent from.
+         * Opened here rather than inside executeGuardedWithRetry so it covers the
+         * retries as well: a step that succeeded on attempt three took as long as all
+         * three attempts, and a waterfall that showed only the last one would be
+         * lying about where the time went.
+         *
+         * Every tracer call is wrapped: a fault in observability must not be able to
+         * change what this method returns.
+         */
+        val stepSpan = runCatching {
+            ctx.tracer?.open("step", nodeLabel(node), ctx.tracer.tickSpanId, nodeId = node.id)
+        }.getOrNull()
+
         val result = executeGuardedWithRetry(node, executor, resolvedInputs, ctx, source)
+
+        runCatching {
+            ctx.tracer?.close(
+                stepSpan, "step", nodeLabel(node),
+                status = when (result) {
+                    is NodeResult.Completed       -> "ok"
+                    is NodeResult.ApprovalPaused  -> "paused"
+                    is NodeResult.Throttled       -> "paused"
+                    is NodeResult.Unsupported     -> "skipped"
+                    is NodeResult.Failed          -> "error"
+                },
+                stepId = node.id, nodeId = node.id,
+                attributesJson = """{"nodeType":${jsonStr(node.type)}}""",
+                errorJson = (result as? NodeResult.Failed)
+                    ?.let { """{"reason":${jsonStr(it.reason.take(300))}}""" },
+            )
+        }
 
         captureNodeResultSnapshot(node, ctx, resolvedInputs, result, nodeStartedAt)
 
@@ -1585,6 +1654,15 @@ class WorkflowRuntime(
                 stepId               = stepId,
                 metadataJsonSanitized = meta,
                 errorJsonSanitized   = error,
+                /*
+                 * Which span this event happened inside, so any log line can be
+                 * located in the tree. Resolved from the step's registry entry when
+                 * the event names a step, else the tick — which is what makes
+                 * "show me the events for this span" answerable without timestamps.
+                 */
+                spanId = ctx.tracer?.let { t ->
+                    stepId?.let { t.spanForNode(it) } ?: t.tickSpanId
+                },
             ))
         }.onFailure { e ->
             log.warn("[runtime] failed to emit event [type={}, runId={}]: {}", type, ctx.runId, e.message)
@@ -1911,6 +1989,93 @@ class WorkflowRuntime(
 
     private fun jsonStr(s: String): String =
         "\"${s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")}\""
+
+    /**
+     * Close the tick, and close the run span only when the run is actually over.
+     *
+     * A yield or an approval pause ends the TICK but not the run — leaving the run
+     * span `running` is what lets the next tick's spans attach to it and what makes
+     * a multi-tick waterfall readable as one run rather than several.
+     */
+    private fun finishTrace(
+        ctx: RuntimeContext, result: ExecutionResult, startedAtMs: Long,
+    ) = runCatching {
+        val t = ctx.tracer ?: return@runCatching
+        t.closeTick(status = when (result) {
+            is ExecutionResult.Succeeded -> "ok"
+            is ExecutionResult.Failed, is ExecutionResult.CeilingExceeded -> "error"
+            else -> "paused"
+        })
+        val terminal = result is ExecutionResult.Succeeded ||
+            result is ExecutionResult.Failed ||
+            result is ExecutionResult.Cancelled ||
+            result is ExecutionResult.CeilingExceeded
+        if (terminal) {
+            t.closeRunSpan(
+                name = "run",
+                status = when (result) {
+                    is ExecutionResult.Succeeded -> "ok"
+                    is ExecutionResult.Cancelled -> "cancelled"
+                    else -> "error"
+                },
+                startedAt = java.time.Instant.ofEpochMilli(startedAtMs),
+            )
+        }
+        /* The registry holds in-flight work only; a tick that ended with spans still
+           open leaves nothing behind for the next one to trip over. */
+        t.clear()
+    }
+
+    /**
+     * The gap since this run was last touched, as an explicit `wait` span.
+     *
+     * A waterfall with an unexplained hole in it looks like the product hanging, and
+     * generates more support tickets than an error does. The reason comes from the
+     * status the run was parked in, which is already durable — the worker was not
+     * running during the gap, so this is the only moment it can be recorded.
+     */
+    private fun emitWaitSpanForGapBefore(
+        ctx: RuntimeContext, tracer: com.vectorbea.worker.events.RunTracer,
+    ) {
+        val ds = dataSource ?: return
+        runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement(
+                    "SELECT status, updated_at FROM agent_runs WHERE id = ?"
+                ).use { st ->
+                    st.setObject(1, ctx.runId)
+                    st.executeQuery().use { rs ->
+                        if (!rs.next()) return@use
+                        val prevStatus = rs.getString("status") ?: return@use
+                        val since = rs.getTimestamp("updated_at")?.toInstant() ?: return@use
+                        val reason = when (prevStatus) {
+                            "waiting_for_approval" -> "approval"
+                            "waiting_for_timer"    -> "timer"
+                            "yielded"              -> "throttle"
+                            "queued", "claimed"    -> "queue"
+                            "recovering"           -> "queue"
+                            else                   -> return@use   // not a wait
+                        }
+                        tracer.emitWait(reason, since, java.time.Instant.now())
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * One tracer per run execution, or null when tracing is off.
+     *
+     * `trace_id` is the run id, per the trace model: a run is a trace, and child runs
+     * (P4) will carry the ROOT run's id here so a dispatched subtree stays in one
+     * trace rather than starting a second one.
+     */
+    private fun tracerFor(runId: java.util.UUID, workspaceId: java.util.UUID):
+        com.vectorbea.worker.events.RunTracer? =
+        spanWriter?.let {
+            com.vectorbea.worker.events.RunTracer(it, traceId = runId, runId = runId,
+                workspaceId = workspaceId)
+        }
 }
 
 /** Extension to find the join node for a given parallel node. */

@@ -48,6 +48,20 @@ class AgentNodeExecutor(
      * cannot work.
      */
     private val dbPoolManager: com.vectorbea.worker.connector.pool.ClientDbPoolManager? = null,
+    /**
+     * Whether this executor routes agents through an activation.
+     *
+     * Defaults to the env flag; a parameter for the same reason
+     * [AgentBrainRunner.reconstructionEnabled] is one — the differential test has to
+     * run the SAME agent down BOTH paths in one JVM and compare, and process
+     * environment cannot be flipped between them portably.
+     */
+    private val activationsEnabled: Boolean = ACTIVATIONS_ENABLED,
+    /**
+     * Forwarded to [AgentBrainRunner]. Null in production, where the shared bounded
+     * client is used. See that parameter for why the seam exists.
+     */
+    private val llmHttpClient: java.net.http.HttpClient? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -60,6 +74,17 @@ class AgentNodeExecutor(
          * decision to run them as a single prompt.
          */
         val TOOL_CALLING_AGENT_TYPES = setOf("iterative_agent", "tool_agent")
+
+        /**
+         * Route the single-agent path through an activation.
+         *
+         * Default OFF. This phase must not change how a single-agent workflow
+         * behaves, and the only way to be sure of that is for the old path to
+         * remain reachable and unmodified until the differential evidence is
+         * signed off.
+         */
+        internal val ACTIVATIONS_ENABLED: Boolean =
+            System.getenv("AGENT_ACTIVATIONS_ENABLED")?.lowercase() == "true"
 
         /**
          * Whether this step runs the tool-calling loop or a single model call.
@@ -421,6 +446,7 @@ class AgentNodeExecutor(
             /* So ASK_APPROVAL can open a real row in `run_approvals` — the same table
                the Approvals screen reads and the same gate DB_WRITE nodes use. */
             approvalStore      = com.vectorbea.worker.runtime.checkpoint.ApprovalStore(dataSource),
+            llmHttpClient      = llmHttpClient,
         )
 
         val config = AgentBrainConfig(
@@ -453,6 +479,21 @@ class AgentNodeExecutor(
             }.toSet(),
             resolvedInput   = resolvedInputs,
         )
+
+        /*
+         * ── THE ACTIVATION PATH, BEHIND ITS FLAG ─────────────────────────────
+         *
+         * With AGENT_ACTIVATIONS_ENABLED the same brain runs, with the same
+         * config, under an activation row that reattaches on resume. Off, not one
+         * line of it executes and the path below is exactly what shipped.
+         *
+         * The result is mapped back to the SAME NodeResult shapes the old branch
+         * produced, because the whole promise of this phase is that a
+         * single-agent workflow cannot tell the difference.
+         */
+        if (activationsEnabled) {
+            return runActivation(agent, node, config, brainRunner, ctx)
+        }
 
         return try {
             val result = brainRunner.run(config, ctx)
@@ -518,6 +559,91 @@ class AgentNodeExecutor(
             }
         } catch (e: BudgetExceededException) {
             /* The next attempt gets the same budget and the same work. */
+            NodeResult.Failed("Agent '${agent.name}' budget exceeded: ${e.message}", retryable = false)
+        } catch (e: Exception) {
+            NodeResult.Failed("Agent '${agent.name}' error: ${e.message?.take(300)}")
+        }
+    }
+
+    /**
+     * Run this agent as an activation.
+     *
+     * Everything hard lives in [AgentHarness]; this maps its result back onto the
+     * NodeResult vocabulary the runtime already speaks. The mapping is one-to-one
+     * with the legacy branch above, which is what makes the differential test
+     * meaningful rather than decorative.
+     */
+    private suspend fun runActivation(
+        agent: AgentRow,
+        node: WorkflowNode,
+        config: com.vectorbea.worker.agents.brain.model.AgentBrainConfig,
+        brainRunner: AgentBrainRunner,
+        ctx: RuntimeContext,
+    ): NodeResult {
+        val harness = com.vectorbea.worker.agents.orchestration.AgentHarness(
+            store = com.vectorbea.worker.agents.orchestration.ActivationStore(dataSource),
+            brainRunner = brainRunner,
+        )
+
+        val request = com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationRequest(
+            runId = ctx.runId,
+            workspaceId = ctx.workspaceId,
+            environmentId = ctx.environmentId,
+            stepId = node.id,
+            agentId = UUID.fromString(agent.id),
+            agentName = agent.name,
+            resolvedTaskInstruction = config.taskInstruction,
+            /* The DEFINITION, pinned. Granted tool ids are deliberately absent:
+               a grant is policy and is re-read live on every execution so a
+               revoked tool takes effect on a paused run. */
+            agentSnapshot = mapOf(
+                "instructions" to agent.instructions,
+                "modelName" to agent.modelName,
+                "temperature" to agent.temperature,
+                "maxTokens" to agent.maxTokens,
+                "maxIterations" to agent.maxIterations,
+                "maxToolCalls" to agent.maxToolCalls,
+                "maxCostCents" to agent.maxCostCents,
+            ),
+            agentVersion = null,
+            budgetAllocated = mapOf(
+                "maxIterations" to agent.maxIterations,
+                "maxToolCalls" to agent.maxToolCalls,
+                "maxCostCents" to agent.maxCostCents,
+            ),
+            /* The pinned instruction is substituted here and nowhere else, so the
+               rest of the config is built exactly as the legacy path builds it. */
+            buildConfig = { instruction -> config.copy(taskInstruction = instruction) },
+        )
+
+        return try {
+            when (val r = harness.activate(request, ctx)) {
+                is com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationResult.Completed ->
+                    NodeResult.Completed(output = r.output)
+
+                is com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationResult.Paused ->
+                    NodeResult.ApprovalPaused(
+                        approvalId = r.approvalId,
+                        message = r.message,
+                        metadata = mapOf(
+                            "agentName" to agent.name,
+                            "brainIterations" to r.iterationsUsed,
+                        ),
+                    )
+
+                is com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationResult.Failed ->
+                    NodeResult.Failed(r.reason, retryable = r.retryable)
+
+                /* Unreachable in this phase and NOT defaulted: when P7 starts
+                   constructing these, the compiler points at every place that has
+                   to learn about them. */
+                is com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationResult.Delegated,
+                is com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationResult.Transferred ->
+                    NodeResult.Failed(
+                        "Agent '${agent.name}' attempted a delegation, which this " +
+                        "version of the runtime cannot execute.", retryable = false)
+            }
+        } catch (e: BudgetExceededException) {
             NodeResult.Failed("Agent '${agent.name}' budget exceeded: ${e.message}", retryable = false)
         } catch (e: Exception) {
             NodeResult.Failed("Agent '${agent.name}' error: ${e.message?.take(300)}")

@@ -245,6 +245,17 @@ object WorkerMetrics {
     internal val tenantThrottled  = WCounter("worker_tenant_throttled",  "Times a tenant was throttled",               emptyList())
     internal val poolSaturated    = WCounter("worker_pool_saturated",    "Times a pool had no capacity for a ready job", listOf("pool"))
     internal val runYields        = WCounter("worker_run_yields",        "Runs that yielded mid-execution (budget exhausted)", listOf("reason"))
+
+    /**
+     * Spans that never reached Postgres, by cause.
+     *
+     * Two causes, deliberately separate, because they call for different responses:
+     * `buffer_full` means the writer is behind and the fix is throughput;
+     * `write_failed` means the table rejected the batch and the fix is the database.
+     * Either being non-zero means a trace is incomplete and the UI must say so.
+     */
+    internal val spansDropped     = WCounter("worker_trace_spans_dropped",   "Spans discarded before reaching Postgres",  listOf("cause"))
+    internal val spansWritten     = WCounter("worker_trace_spans_written",   "Spans durably written to run_spans",        emptyList())
     internal val runReenqueued    = WCounter("worker_run_reenqueued",    "RESUME_RUN jobs re-enqueued after a yield",   emptyList())
     // Histogram: per-tick execution duration
     internal val runTickDuration  = WHistogram("worker_run_tick_duration_ms", "Duration of a single run execution tick", listOf("job_type"))

@@ -49,6 +49,32 @@ class RuntimeContext(
      * Recorded on side effects so an incident can be traced to a worker+lease.
      */
     val leaseToken: String? = null,
+    /**
+     * Whether an agent step may rebuild its loop from persisted iterations instead
+     * of replaying from iteration 1.
+     *
+     * TRUE FOR A CONTINUATION, FALSE FOR A FRESH START. A RESUME_RUN — after an
+     * approval, a timer, a yield, or a crash-recovery re-enqueue — is the same
+     * logical execution picking up where it stopped, and repeating the LLM calls it
+     * already paid for is pure waste. A RETRY_NODE or a REPLAY_RUN is not: someone
+     * asked for the work to happen AGAIN, and a replay in particular exists to
+     * re-exercise the provider calls that reconstruction would skip.
+     *
+     * Passed explicitly rather than derived from [attemptGroup], which would be the
+     * natural home for it, because attemptGroup is currently always 0 — nothing
+     * increments it — and fixing that changes idempotency key derivation, which is
+     * its own decision. When it is wired, this flag should be derived from it and
+     * this parameter deleted.
+     */
+    val allowLoopReconstruction: Boolean = false,
+    /**
+     * Trace bookkeeping for this run execution, or null when tracing is off.
+     *
+     * Carried here because it is the one object every layer already receives.
+     * Observability only: nothing reads it to make a decision, and every call
+     * through it is null-safe, so a run behaves identically with it absent.
+     */
+    val tracer: com.vectorbea.worker.events.RunTracer? = null,
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()

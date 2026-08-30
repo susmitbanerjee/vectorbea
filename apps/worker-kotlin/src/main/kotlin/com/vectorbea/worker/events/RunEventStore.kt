@@ -65,6 +65,19 @@ open class RunEventStore(
         val metadataJsonSanitized: String? = null,
         /** Must be sanitized — no stack traces, no connection strings */
         val errorJsonSanitized: String? = null,
+        /**
+         * The span this event happened inside, so a log line can be located in the
+         * trace tree. Nullable and unenforced: an event written before tracing
+         * existed, or with tracing off, simply has none.
+         *
+         * Deliberately NOT a foreign key to `run_spans`. That table is partitioned by
+         * `created_at`, and a foreign key into a partitioned table must include the
+         * partition key — the same rule that forces run_spans' composite primary key.
+         * V028 already had to drop an FK for exactly this reason.
+         */
+        val spanId: UUID? = null,
+        /** Unwritten until P6 introduces activations. */
+        val activationId: UUID? = null,
     )
 
     enum class EventType(val value: String) {
@@ -201,6 +214,22 @@ open class RunEventStore(
         AGENT_INVALID_ACTION("AGENT_INVALID_ACTION"),
         AGENT_APPROVAL_REQUESTED("AGENT_APPROVAL_REQUESTED"),
         AGENT_PLAN_CREATED("AGENT_PLAN_CREATED"),
+
+        /**
+         * Loop reconstruction declined and the step replayed from iteration 1.
+         *
+         * SKIPPED, not FAILED, and the distinction is not cosmetic: the timeline
+         * grades event names, and a run that fell back is usually going to SUCCEED —
+         * just more expensively. Naming it FAILED paints a red row on a green run and
+         * sends someone looking for a break that is not there. Same reasoning as
+         * RUN_RESUMED rather than RETRY_STARTED.
+         *
+         * The reason and the transcript snapshot ref travel in the metadata.
+         */
+        AGENT_LOOP_RECONSTRUCTION_SKIPPED("AGENT_LOOP_RECONSTRUCTION_SKIPPED"),
+
+        /** Loop state was rebuilt; the step resumed mid-loop instead of replaying. */
+        AGENT_LOOP_RECONSTRUCTED("AGENT_LOOP_RECONSTRUCTED"),
     }
 
     /**
@@ -403,7 +432,9 @@ open class RunEventStore(
         setNullableString(stmt, i++, event.traceId)
         setNullableInt(stmt, i++, event.retryAttempt)
         setNullableJsonb(stmt, i++, event.metadataJsonSanitized)
-        setNullableJsonb(stmt, i, event.errorJsonSanitized)
+        setNullableJsonb(stmt, i++, event.errorJsonSanitized)
+        setNullableUuid(stmt, i++, event.spanId)
+        setNullableUuid(stmt, i, event.activationId)
     }
 
     // ── Redis publish ─────────────────────────────────────────────────────────
@@ -469,13 +500,15 @@ open class RunEventStore(
                 duration_ms, step_id, agent_id, model_name,
                 title, summary, token_count, estimated_cost,
                 correlation_id, trace_id, retry_attempt,
-                metadata_json_sanitized, error_json_sanitized
+                metadata_json_sanitized, error_json_sanitized,
+                span_id, activation_id
             ) VALUES (
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?,
+                ?, ?,
                 ?, ?
             )
         """.trimIndent()

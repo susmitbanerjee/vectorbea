@@ -352,8 +352,19 @@ merged into the node output so downstream expressions can reference them.
 
 ### Iterative agent brain
 
-When `agents.type = 'iterative_agent'`, `AgentBrainRunner` executes a bounded
-loop:
+> Depth: [AGENT-BRAIN-EXECUTION.md](./AGENT-BRAIN-EXECUTION.md) traces the loop,
+> its budgets, approvals, memory and stop reasons in full. The summary below is
+> the shape only.
+
+The loop runs when the agent is **set up to use tools**, not merely when it is
+labelled as one:
+
+```kotlin
+brainEnabled ?: (agentType in {"iterative_agent","tool_agent"} || hasGrantedTools)
+```
+
+`brainEnabled` on the node overrides in both directions. `AgentBrainRunner` then
+executes a bounded loop:
 
 ```mermaid
 flowchart LR
@@ -362,7 +373,7 @@ flowchart LR
     PARSE --> SAFE[Validate action and tool grant]
     SAFE --> DECIDE{Action}
     DECIDE -->|THINK| OBS[Record sanitized observation]
-    DECIDE -->|CALL_TOOL| TOOL[Execute allowed HTTP tool]
+    DECIDE -->|CALL_TOOL| TOOL[Execute allowed tool via ToolNodeExecutor]
     TOOL --> OBS
     OBS --> PLAN
     DECIDE -->|FINAL| OUT[Validate final output]
@@ -381,10 +392,16 @@ The model does not enforce its own safety boundaries. Runtime code enforces:
 Iterations are recorded in `agent_iterations`, and sanitized memory/observations
 are persisted for debugging.
 
-An iterative agent's `ASK_APPROVAL` action currently stops the brain loop but
-does not create the same resumable workflow gate as an explicit `approval` graph
-node. `AgentNodeExecutor` treats every stop reason other than `FINAL_OUTPUT` as a
-node failure. Use an explicit approval node for a durable human-in-the-loop pause.
+`ASK_APPROVAL` opens a real gate. The loop creates or finds a row in
+`run_approvals` keyed on `(runId, stepId)`, the step returns
+`NodeResult.ApprovalPaused`, and the run parks as `waiting_for_approval` until a
+decision arrives — the same durable pause an explicit `approval` node gives. A
+tool whose `requires_approval` is set gates the same way, keyed on
+`<stepId>:tool:<toolId>`, and both read the row through one shared rule.
+
+Of the other stop reasons, only `FINAL_OUTPUT` completes the node; the rest fail
+it, each carrying a stated cause, and only a genuine error is retried. See
+[AGENT-BRAIN-EXECUTION.md §7](./AGENT-BRAIN-EXECUTION.md#7-agentbrainrunner--the-loop).
 
 Relevant code:
 

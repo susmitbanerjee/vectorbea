@@ -16,13 +16,21 @@ import javax.sql.DataSource
  * This prevents duplicate external side effects (HTTP POSTs, DB writes, etc.)
  * after a worker crash and recovery.
  *
- * Usage:
- *   val guard = stepExecutionGuard.tryAcquire(runId, nodeId, attempt)
- *   if (guard.alreadyCompleted) return guard.cachedResult
+ * This guard answers "has this already run", never "may this run" — see
+ * [com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.toolGuardNodeId] for
+ * why a call that is also gated by an approval needs two different keys.
+ *
+ * Usage — note the guard reports only the VERDICT, and the caller fetches the
+ * output itself. There is no `cachedResult` on [AcquireResult]: the output lives in
+ * [com.vectorbea.worker.runtime.StepOutputStore], keyed by the same `nodeId`, and a
+ * verdict of ALREADY_COMPLETED with no stored output means re-execute.
+ *
+ *   val guard = stepExecutionGuard.tryAcquire(runId, workspaceId, environmentId, nodeId, attempt)
+ *   if (guard.alreadyCompleted) stepOutputStore.loadRaw(runId, nodeId)?.let { return it }
  *   // ... execute node ...
  *   stepExecutionGuard.markCompleted(runId, nodeId, attempt)
  */
-class StepExecutionGuard(private val dataSource: DataSource) {
+open class StepExecutionGuard(private val dataSource: DataSource) {
     private val log = logger()
 
     enum class AcquireStatus { ACQUIRED, ALREADY_COMPLETED, ALREADY_RUNNING }
@@ -39,7 +47,7 @@ class StepExecutionGuard(private val dataSource: DataSource) {
      * ALREADY_COMPLETED if a previous run already succeeded,
      * ALREADY_RUNNING if another thread is executing right now.
      */
-    fun tryAcquire(
+    open fun tryAcquire(
         runId: UUID, workspaceId: UUID, environmentId: UUID,
         nodeId: String, attempt: Int, idempotencyKey: String? = null,
     ): AcquireResult {
@@ -86,15 +94,15 @@ class StepExecutionGuard(private val dataSource: DataSource) {
         }
     }
 
-    fun markCompleted(runId: UUID, nodeId: String, attempt: Int) {
+    open fun markCompleted(runId: UUID, nodeId: String, attempt: Int) {
         update(runId, nodeId, attempt, "succeeded", null)
     }
 
-    fun markFailed(runId: UUID, nodeId: String, attempt: Int, errorJson: String?) {
+    open fun markFailed(runId: UUID, nodeId: String, attempt: Int, errorJson: String?) {
         update(runId, nodeId, attempt, "failed", errorJson)
     }
 
-    fun markSkipped(runId: UUID, nodeId: String, attempt: Int) {
+    open fun markSkipped(runId: UUID, nodeId: String, attempt: Int) {
         update(runId, nodeId, attempt, "skipped", null)
     }
 

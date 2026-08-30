@@ -461,6 +461,12 @@ fun main() {
         FailureIncidentRoutes(FailureIncidentRepository(ds)).register(router)
         DurableRunRoutes(ds, workflowQueue).register(router)
         AgentIterationRoutes(ds).register(router)
+        /* The read side of the trace: span tree, root cause, critical path, live
+           stream. Read-only and workspace-scoped; nothing here can affect a run.
+           Registered only when the run repository is available — every endpoint
+           resolves the run through it to enforce workspace scoping, so without it
+           the routes could not fail closed and must not exist at all. */
+        runRepo?.let { com.vectorbea.api.routes.TraceRoutes(ds, it, redis).register(router) }
     } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
     // 7b. Cron scheduler — fires due workflow schedules onto the queue

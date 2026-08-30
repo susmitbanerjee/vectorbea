@@ -159,6 +159,14 @@ class LlmNodeExecutor(
             title = "LLM call started",
             summary = "provider=$provider model=$model")
 
+        /* An agent's loop calls this with the AGENT STEP's node id, so every
+           iteration's llm_call parents to that step — which is what makes "this step
+           took 40s across six model calls" answerable in one look. */
+        val llmSpan = runCatching {
+            context.tracer?.open("llm_call", model,
+                context.tracer.spanForNode(node.id) ?: context.tracer.tickSpanId)
+        }.getOrNull()
+
         val startMs = System.currentTimeMillis()
         val capture = CallCapture()
 
@@ -411,6 +419,14 @@ class LlmNodeExecutor(
             // confidence score.
             meta = if (groundingCounts.isEmpty()) null
                    else runCatching { mapper.writeValueAsString(groundingCounts) }.getOrNull())
+
+        runCatching {
+            context.tracer?.close(
+                llmSpan, "llm_call", model, status = "ok", stepId = node.id,
+                attributesJson = """{"provider":${jsonAttr(provider)},"model":${jsonAttr(model)}}""",
+                tokensIn = result.tokensIn, tokensOut = result.tokensOut,
+            )
+        }
 
         // With a schema declared, the structured object IS the output.
         //
@@ -885,6 +901,11 @@ class LlmNodeExecutor(
         }
         return (tokens / 1_000_000.0) * usdPerMillion
     }
+
+    /** A JSON string literal for a span attribute value. Escapes, never truncates. */
+    private fun jsonAttr(v: String?): String =
+        if (v == null) "null"
+        else "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\""
 
     private fun emitEvent(
         ctx: RuntimeContext,
