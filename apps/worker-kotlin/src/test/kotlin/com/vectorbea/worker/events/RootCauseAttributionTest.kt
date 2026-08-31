@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * Which of a failed run's error spans is the one that actually broke.
@@ -20,20 +21,20 @@ import kotlin.test.assertTrue
  * broke because "the tick failed", which is true and worthless.
  */
 @Timeout(value = 20, unit = TimeUnit.SECONDS)
+@Tag("integration")
 class RootCauseAttributionTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dsOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 5
-        }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT is_root_cause FROM run_spans LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) { null }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dsOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     private fun workspace(ds: DataSource): UUID {
         val ws = UUID.randomUUID()

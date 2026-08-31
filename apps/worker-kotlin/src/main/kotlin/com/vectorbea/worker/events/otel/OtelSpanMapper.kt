@@ -76,7 +76,12 @@ object OtelSpanMapper {
         val durationMs: Int?,
         val selfMs: Int?,
         val attributesJson: String?,
-        val errorJson: String?,
+        /* `run_spans.error_json` is deliberately ABSENT.
+           It was here, read from the database and correctly never exported —
+           which made it a sanitized-for-us error body sitting one careless edit
+           away from an outbound path to a third party. A field that must never
+           be exported has no business on the type that models the export. The
+           failure CLASS below is what leaves the building. */
         val failureClass: String?,
         val isRootCause: Boolean,
         val tokensIn: Int?,
@@ -122,6 +127,56 @@ object OtelSpanMapper {
         "activation" to "invoke_agent",
         "handoff" to "invoke_agent",
     )
+
+    /**
+     * The span attributes that may leave the building, and nothing else.
+     *
+     * ── WHY AN ALLOWLIST AND NOT PASSTHROUGH ────────────────────────────────
+     * This used to promote every key of `attributes_json` to `vectorbea.*`. That
+     * was governed by a convention — "attributes are small, flat filter keys,
+     * never payload" — which is true today and enforced by nothing. On an
+     * internal table a broken convention is a mess. On an EGRESS to a customer's
+     * observability vendor it is a disclosure, and it would happen the first time
+     * somebody put a useful-looking string on a span without thinking about where
+     * spans go.
+     *
+     * So the set is closed. Adding an exportable attribute is a deliberate edit
+     * here, in a file whose whole subject is what we send to third parties,
+     * rather than an emergent consequence of an edit somewhere else.
+     *
+     * Everything unlisted is dropped and COUNTED — see [droppedAttributes]. A
+     * silent drop would replace one invisible problem with another: an operator
+     * who cannot see an attribute needs to know whether it was never recorded or
+     * refused at the boundary.
+     */
+    val EXPORTABLE_ATTRIBUTES: Set<String> = setOf(
+        // §7 — what the context assembler had to drop to fit the prompt.
+        "context_truncated", "context_dropped_sections", "context_over_budget",
+        "context_chars", "context_char_budget",
+        // §8 — the budget tree.
+        "budget_clamped", "budget_clamped_dimensions",
+        // §5/§6 — the shape of a team.
+        "depth", "role", "contract_hash", "join_group_id", "policy",
+        "handoff_kind", "stop_reason", "failure_class",
+        // Loop mechanics.
+        "iteration", "attempt", "tool_id", "tool_type", "activation_id",
+        // §12.3 — placement and transport.
+        "placement", "lane",
+    )
+
+    /**
+     * Attributes refused at the boundary, by key.
+     *
+     * A counter rather than a log line per drop: one unlisted key on a
+     * high-volume span kind would otherwise produce a log entry per span.
+     */
+    private val droppedAttributes = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
+    /** What was refused, for the metric and for tests. */
+    fun droppedAttributeCounts(): Map<String, Long> =
+        droppedAttributes.mapValues { it.value.get() }
+
+    internal fun resetDroppedAttributes() = droppedAttributes.clear()
 
     private val SPAN_KIND = mapOf(
         "llm_call" to SpanKind.CLIENT,     // an outbound call to a provider
@@ -225,14 +280,21 @@ object OtelSpanMapper {
         if (row.isRootCause) b.put("vectorbea.is_root_cause", true)
         row.costCents?.let { b.put("vectorbea.cost_cents", it) }
 
-        /* Everything the span recorded, promoted individually rather than as one
-           JSON blob. `budget_clamped`, `context_truncated`, `depth`, `role`,
-           `contract_hash` — all of these are things somebody filters or groups by,
-           and a backend cannot query inside an opaque string. Scalars only: a
-           nested object has no attribute representation, and flattening one
-           invents key names nobody documented. */
+        /* The allowlisted span attributes, promoted individually rather than as
+           one JSON blob — `budget_clamped`, `context_truncated`, `depth`, `role`
+           are things somebody filters or groups by, and a backend cannot query
+           inside an opaque string. Scalars only: a nested object has no attribute
+           representation, and flattening one invents key names nobody documented.
+
+           `provider` and `model` are not in the set because they are already out
+           as `gen_ai.system` and `gen_ai.request.model`. One fact, one key. */
         attrs?.fields()?.forEach { (key, value) ->
             if (key == "provider" || key == "model") return@forEach
+            if (key !in EXPORTABLE_ATTRIBUTES) {
+                droppedAttributes.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicLong() }
+                    .incrementAndGet()
+                return@forEach
+            }
             putScalar(b, "vectorbea.$key", value)
         }
         return b.build()

@@ -13,6 +13,7 @@ import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * A resumed agent step CONTINUES instead of starting over.
@@ -31,24 +32,20 @@ import kotlin.test.assertTrue
  * infrastructure — see AgentToolGuardIntegrationTest for the same convention.
  */
 @Timeout(value = 20, unit = TimeUnit.SECONDS)
+@Tag("integration")
 class AgentLoopReconstructionTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dsOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 5
-        }
-        ds.connection.use { c ->
-            // V040 must be applied, or this is "not applicable" rather than "failing".
-            c.prepareStatement(
-                "SELECT action_json_sanitized FROM agent_iterations LIMIT 1"
-            ).use { it.executeQuery() }
-            c.prepareStatement("SELECT 1 FROM run_payloads LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) { null }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dsOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     private fun fixture(ds: DataSource, reconstruction: Boolean = true) =
         AgentBrainFixture(dataSource = ds, reconstructionEnabled = reconstruction).also { it.seed() }

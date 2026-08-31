@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * §11's placement rule. Pure, so exhaustively.
@@ -21,6 +22,7 @@ import kotlin.test.assertTrue
  * which property wins, so each case here pins one clause against the ones below
  * it rather than testing them in isolation.
  */
+@Tag("integration")
 class ActivationPlacementTest {
 
     private fun pending(
@@ -114,24 +116,20 @@ class ActivationPlacementTest {
  *
  * Skips when no database is reachable.
  */
+@Tag("integration")
 class ChildRunDispatcherTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 15
-        }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT parent_run_id FROM agent_runs LIMIT 1").use { it.executeQuery() }
-            c.prepareStatement("SELECT child_vtime_penalty FROM workspace_usage_policies LIMIT 1")
-                .use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     private class World(
         val workspaceId: UUID = UUID.randomUUID(),

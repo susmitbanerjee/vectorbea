@@ -47,7 +47,7 @@ class OtelSpanMapperTest {
         attempt = 1,
         startedAt = Instant.parse("2026-08-31T10:00:00Z"), endedAt = endedAt,
         durationMs = 2_000, selfMs = 1_500,
-        attributesJson = attributesJson, errorJson = null, failureClass = failureClass,
+        attributesJson = attributesJson, failureClass = failureClass,
         isRootCause = false, tokensIn = tokensIn, tokensOut = tokensOut, costCents = 1.25,
     )
 
@@ -199,10 +199,66 @@ class OtelSpanMapperTest {
     /** A nested object has no attribute representation; inventing key names for it would. */
     @Test
     fun `nested objects and nulls are skipped rather than flattened`() {
-        val a = attrs(row(attributesJson = """{"nested":{"a":1},"nothing":null,"kept":"yes"}"""))
-        assertNull(a["vectorbea.nested"])
-        assertNull(a["vectorbea.nothing"])
-        assertEquals("yes", a["vectorbea.kept"])
+        /* `role` is on the allowlist, so it isolates the SHAPE rule from the
+           allowlist rule — a test using an unlisted key here would pass for the
+           wrong reason. */
+        val a = attrs(row(attributesJson = """{"role":{"a":1},"depth":null,"contract_hash":"abc"}"""))
+        assertNull(a["vectorbea.role"], "an object has no attribute representation")
+        assertNull(a["vectorbea.depth"], "a null is absent, not empty")
+        assertEquals("abc", a["vectorbea.contract_hash"])
+    }
+
+    // ── The export allowlist (M1b) ────────────────────────────────────────────
+
+    /**
+     * Attributes leave the building only if they are on the list.
+     *
+     * Passthrough governed by convention — "attributes are small flat filter
+     * keys, never payload" — is true today and enforced by nothing. On an
+     * internal table that is a mess; on an egress to a customer's observability
+     * vendor it is a disclosure, and it would arrive the first time somebody put
+     * a useful-looking string on a span without thinking about where spans go.
+     */
+    @Test
+    fun `an attribute not on the allowlist is dropped`() {
+        OtelSpanMapper.resetDroppedAttributes()
+        val a = attrs(row(attributesJson =
+            """{"budget_clamped":true,"prompt_text":"the whole prompt","user_email":"a@b.c"}"""))
+
+        assertEquals(true, a["vectorbea.budget_clamped"], "an allowlisted key must get through")
+        assertNull(a["vectorbea.prompt_text"])
+        assertNull(a["vectorbea.user_email"])
+        assertTrue(a.keys.none { it.contains("prompt_text") || it.contains("user_email") },
+            "an unlisted key reached the exported attributes under some other name")
+    }
+
+    /**
+     * A refusal is counted, not silent.
+     *
+     * An operator who cannot find an attribute needs to know whether it was never
+     * recorded or refused at the boundary — those send them to different places.
+     */
+    @Test
+    fun `a dropped attribute is counted by key`() {
+        OtelSpanMapper.resetDroppedAttributes()
+        repeat(3) { attrs(row(attributesJson = """{"mystery_field":1}""")) }
+        assertEquals(3L, OtelSpanMapper.droppedAttributeCounts()["mystery_field"])
+    }
+
+    /**
+     * The two families §2 calls out — what the assembler dropped, and what the
+     * budget clamped — must survive the allowlist. They are the whole reason the
+     * `vectorbea.*` namespace is exported at all.
+     */
+    @Test
+    fun `the attributes that explain a thin answer are all exportable`() {
+        listOf(
+            "context_truncated", "context_dropped_sections", "context_over_budget",
+            "budget_clamped", "budget_clamped_dimensions",
+        ).forEach {
+            assertTrue(it in OtelSpanMapper.EXPORTABLE_ATTRIBUTES,
+                "$it explains a thin answer and must be exportable")
+        }
     }
 
     @Test

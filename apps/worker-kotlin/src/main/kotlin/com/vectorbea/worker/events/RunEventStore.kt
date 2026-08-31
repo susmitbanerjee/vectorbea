@@ -349,6 +349,22 @@ open class RunEventStore(
          * cannot disagree about what the model was shown.
          */
         AGENT_CONTEXT_BUDGET_EXCEEDED("AGENT_CONTEXT_BUDGET_EXCEEDED"),
+
+        /**
+         * A run linked as a child of this one belongs to another workspace, and
+         * was excluded from the OTLP export.
+         *
+         * `agent_runs.parent_run_id` has no foreign key (V045, deliberately), so
+         * nothing in the schema prevents this. Following such a link would ship
+         * another tenant's span names and run ids to THIS tenant's observability
+         * vendor — outbound, to a third party, unrecoverable.
+         *
+         * The export is correct and complete without it, which is why this is a
+         * warning rather than a failure. It is an event at all because the link
+         * itself is a bug in whatever wrote it, and the run ids on both sides are
+         * the only handle anybody has on finding that writer.
+         */
+        TRACE_EXPORT_CROSS_WORKSPACE("TRACE_EXPORT_CROSS_WORKSPACE"),
     }
 
     /**

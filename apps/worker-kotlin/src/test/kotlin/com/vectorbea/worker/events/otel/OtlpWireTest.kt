@@ -97,7 +97,7 @@ class OtlpWireTest {
                 startedAt = Instant.now().minusSeconds(2), endedAt = Instant.now(),
                 durationMs = 2_000, selfMs = 2_000,
                 attributesJson = """{"provider":"anthropic","model":"claude-opus-5"}""",
-                errorJson = null, failureClass = null, isRootCause = false,
+                failureClass = null, isRootCause = false,
                 tokensIn = 100, tokensOut = 20, costCents = 0.5,
             ), resource))
 

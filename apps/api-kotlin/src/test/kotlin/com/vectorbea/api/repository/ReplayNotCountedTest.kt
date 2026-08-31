@@ -6,6 +6,7 @@ import java.util.UUID
 import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.Tag
 
 /**
  * A replay is a debugging tool, not production traffic.
@@ -20,23 +21,20 @@ import kotlin.test.assertEquals
  *
  * Skips when no database is reachable.
  */
+@Tag("integration")
 class ReplayNotCountedTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 15
-        }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT source_run_id, execution_mode_kind FROM agent_runs LIMIT 1")
-                .use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.api.testsupport.Infra.postgres
 
     private class World(
         val workspaceId: UUID = UUID.randomUUID(),

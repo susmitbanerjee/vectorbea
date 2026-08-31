@@ -14,6 +14,8 @@ import com.vectorbea.worker.net.ConnectionCircuit
 import com.vectorbea.worker.replay.ModelCallRecorder
 import com.vectorbea.worker.net.OutboundHttp
 import com.vectorbea.worker.net.ProviderThrottle
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import com.vectorbea.worker.runtime.graph.RuntimeContext
 import com.vectorbea.worker.runtime.graph.WorkflowNode
 import java.net.URI
@@ -298,17 +300,60 @@ class LlmNodeExecutor(
                        Throttled releases the permit and re-enqueues on a timer, so
                        this costs a yield — exactly what §12.4 asks for. */
                     WorkerMetrics.providerCapacityExhaustedTotal.inc(provider, model)
+                    /*
+                     * NAME THE LIMIT AND WHERE TO CHANGE IT — invariant 6.
+                     *
+                     * "Waiting for anthropic capacity" tells an operator nothing
+                     * they can act on: not which number was hit, not whether it
+                     * is ours or the provider's, not where it lives. All three
+                     * are known here, and a limit nobody can find is a limit that
+                     * gets worked around by disabling the feature.
+                     */
+                    val limitMsg =
+                        "Reached this workspace's own limit of ${c.capacity} tokens/minute " +
+                        "for $provider/$model (not a provider 429). Retrying in " +
+                        "${c.retryAfterMs}ms. Raise it with PROVIDER_TPM_OVERRIDES=" +
+                        "$provider:$model=<tokens per minute>, or PROVIDER_TPM_DEFAULT."
                     emitEvent(context, node.id, EventType.NODE_FAILED, "throttled",
-                        title = "Waiting for $provider capacity",
-                        summary = "The workspace's $model budget is spent; retrying in " +
-                            "${c.retryAfterMs}ms")
-                    log.info("[llm] capacity exhausted [provider={}, model={}, retryAfterMs={}]",
-                        provider, model, c.retryAfterMs)
-                    return NodeResult.Throttled(provider, c.retryAfterMs,
-                        "Waiting for $provider capacity to free up.")
+                        title = "Reached the $model capacity limit",
+                        summary = limitMsg)
+                    log.info("[llm] capacity exhausted [provider={}, model={}, limitTpm={}, retryAfterMs={}]",
+                        provider, model, c.capacity, c.retryAfterMs)
+                    return NodeResult.Throttled(provider, c.retryAfterMs, limitMsg)
                 }
                 else -> null
             }
+
+        /*
+         * ── EVERY LEASE IS SETTLED EXACTLY ONCE, ON EVERY EXIT ──────────────
+         *
+         * The explicit paths below call this with the right amount. The `finally`
+         * is what catches the ones that are not paths at all — most importantly
+         * `CancellationException`, which the worker throws ROUTINELY: a tick
+         * deadline cancels in-flight work, and every cancelled model call used to
+         * leak its whole reservation. A workspace that yields often could leak
+         * faster than the bucket refills, refuse its own batch work, and look for
+         * all the world like a slow provider.
+         *
+         * `compareAndSet` rather than a null check because the finally and a
+         * catch can both reach it, and settling twice returns the tokens twice.
+         */
+        val settled = java.util.concurrent.atomic.AtomicBoolean(false)
+        suspend fun settleOnce(actualTokens: Long) {
+            val l = lease ?: return
+            if (!settled.compareAndSet(false, true)) return
+            /*
+             * ── NonCancellable IS THE WHOLE FIX ─────────────────────────────
+             *
+             * A bare `finally` is not enough and fails in a way that looks fixed.
+             * Once a coroutine is cancelled every suspension point inside it
+             * throws immediately, so cleanup that suspends never completes —
+             * and this cleanup talks to Redis. `withContext(NonCancellable)`
+             * gives the block a job that is not cancelled, which is the only way
+             * a suspending release survives the cancellation that triggered it.
+             */
+            withContext(NonCancellable) { capacity?.settle(l, actualTokens) }
+        }
 
         val result = try {
             resolved.secret.use { secret ->
@@ -332,7 +377,7 @@ class LlmNodeExecutor(
                     .also { circuit?.onSuccess(connectionId) }
             }
         } catch (e: ConnectionCircuit.CircuitOpenException) {
-            lease?.let { capacity?.release(it) }
+            settleOnce(lease?.reserved ?: 0)   // nothing was sent; return it whole
             recordCall("error", error = "circuit open")
             emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
                 title = "Connection paused", summary = e.message)
@@ -341,7 +386,7 @@ class LlmNodeExecutor(
             /* The provider refused, so it spent nothing on our behalf — give the
                whole reservation back. Keeping it would compound the outage: the
                bucket would stay drawn for a call that never happened. */
-            lease?.let { capacity?.release(it) }
+            settleOnce(lease?.reserved ?: 0)
             // Hand the scheduling decision up. Suspending releases the permit;
             // sleeping here would hold it for the provider's whole backoff.
             recordCall("throttled", error = "provider rate limited")
@@ -354,26 +399,40 @@ class LlmNodeExecutor(
                 provider, node.id, if (decision.suspend) "suspending" else "backing off",
                 decision.delayMs)
             return NodeResult.Throttled(provider, decision.delayMs, decision.userMessage(provider))
+            /* Reached only when nothing above settled — cancellation, or a
+               throwable this method does not name. Half, for the same reason
+               LlmCallException returns half: the request may or may not have
+               reached the provider, and both "return everything" and "return
+               nothing" are wrong in one direction. The bucket self-corrects
+               within a refill window either way. */
         } catch (e: LlmCallException) {
             /* A failed call may still have consumed input tokens at the provider.
                Returning HALF is a deliberate compromise over the two wrong
                answers: returning everything under-counts a real spend, and
                returning nothing over-counts a request that never reached the
                model. The bucket self-corrects within a refill window either way. */
-            lease?.let { capacity?.settle(it, it.reserved / 2) }
+            settleOnce((lease?.reserved ?: 0) / 2)
             val durationMs = System.currentTimeMillis() - startMs
             recordCall("error", error = e.message?.take(500))
             circuit?.onFailure(connectionId, e.message ?: "LLM call failed")
             log.warn("[llm] call failed [nodeId={}, provider={}, durationMs={}]: {}",
                 node.id, provider, durationMs, e.message)
             return NodeResult.Failed("LLM call failed for node '${node.id}': ${e.message}")
+        } finally {
+            /* The guarantee. Every named path above has already settled and
+               `settleOnce` is idempotent, so this fires only for the exits this
+               method does not name — cancellation, chiefly. Half, for the same
+               reason LlmCallException returns half: the request may or may not
+               have reached the provider, and both "return everything" and
+               "return nothing" are wrong in one direction. */
+            settleOnce((lease?.reserved ?: 0) / 2)
         }
 
         /* Settle against the real cost. A surplus goes back for the next caller;
            a shortfall is debited and can drive the bucket negative, which is a
            legitimate state — an estimate that was badly low SHOULD make the next
            caller wait. */
-        lease?.let { capacity?.settle(it, (result.tokenCount ?: 0).toLong()) }
+        settleOnce((result.tokenCount ?: 0).toLong())
 
         val durationMs = System.currentTimeMillis() - startMs
         val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }

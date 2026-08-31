@@ -99,6 +99,28 @@ class ProviderCapacityBucket(
      */
     private val burstFraction: Double =
         System.getenv("PROVIDER_CAPACITY_BURST")?.toDoubleOrNull()?.coerceIn(0.05, 1.0) ?: 0.2,
+    /**
+     * How long a reservation may stay outstanding before it returns itself.
+     *
+     * ── WHY EXPIRY EXISTS WHEN RELEASE IS EXPLICIT ─────────────────────────
+     * `LlmNodeExecutor` settles every lease in a `finally`, under
+     * `NonCancellable`, so a cancelled call gives its tokens back. That covers
+     * every path the process survives — and none of the ones it does not. SIGKILL
+     * during a rolling deploy, an OOM, a lost lease: the tokens are drawn, the
+     * JVM that owed them is gone, and nothing will ever return them.
+     *
+     * Without a TTL the bucket ratchets down until it refills past the loss,
+     * which for a workspace that crashes regularly is a permanent tax that looks
+     * like a provider being slow.
+     *
+     * So release is the FAST path and expiry is the BACKSTOP. Two minutes: longer
+     * than any provider call this worker will make (the ceiling is
+     * `OutboundHttp.clampTotalCallMs`), short enough that a crash costs one
+     * window rather than an afternoon.
+     */
+    private val leaseTtlMs: Long =
+        System.getenv("PROVIDER_CAPACITY_LEASE_TTL_MS")?.toLongOrNull()?.coerceIn(1_000, 3_600_000)
+            ?: 120_000L,
 ) {
     private val log = logger()
 
@@ -156,6 +178,15 @@ class ProviderCapacityBucket(
         val key: String,
         val reserved: Long,
         val capacity: Long,
+        /**
+         * Identifies this reservation among the outstanding ones.
+         *
+         * Needed because expiry has to reclaim a SPECIFIC amount: the backstop
+         * sweeps leases whose deadline has passed and returns exactly what each
+         * drew. A bucket that only tracked a total could not tell which part of
+         * it was abandoned.
+         */
+        val id: String = java.util.UUID.randomUUID().toString(),
     )
 
     sealed class Outcome {
@@ -197,9 +228,11 @@ class ProviderCapacityBucket(
         val floor = if (interactive) 0L else (depth * interactiveFloor).toLong()
 
         return try {
+            val lease = Lease(key, want, depth)
             val (granted, retryMs) = b.reserve(
-                key, depth, refillPerMinuteOf(capacity), want, floor, System.currentTimeMillis())
-            if (granted) Outcome.Granted(Lease(key, want, depth))
+                key, depth, refillPerMinuteOf(capacity), want, floor,
+                System.currentTimeMillis(), lease.id, leaseTtlMs)
+            if (granted) Outcome.Granted(lease)
             else Outcome.Exhausted(retryMs.coerceAtLeast(1L), capacity)
         } catch (e: Exception) {
             /* FAIL OPEN. A bucket that cannot be reached must not stop the fleet
@@ -221,9 +254,12 @@ class ProviderCapacityBucket(
     fun settle(lease: Lease, actualTokens: Long): Long {
         val b = backend ?: return 0
         val delta = lease.reserved - actualTokens.coerceAtLeast(0L)
-        if (delta == 0L) return 0
         return try {
-            b.settle(lease.key, delta, lease.capacity)
+            /* Called even when delta is zero, because settling also RETIRES the
+               lease. Skipping the call would leave it outstanding for the reaper
+               to return a second time — the bucket would grow past its depth on
+               every perfectly-estimated call. */
+            b.settle(lease.key, lease.id, delta, lease.capacity)
             delta
         } catch (e: Exception) {
             log.warn("[capacity] settle failed for {} — {} token(s) stay drawn: {}",
@@ -263,7 +299,9 @@ class ProviderCapacityBucket(
         /**
          * Refill, then reserve if the draw leaves the bucket at or above the floor.
          *
-         * ARGV: depth, refillPerMinute, want, floor, nowMs, ttlSeconds
+         * KEYS: bucket hash, lease ZSET
+         * ARGV: depth, refillPerMinute, want, floor, nowMs, keyTtlSeconds,
+         *       leaseId, leaseTtlMs
          * Returns: {granted 0|1, retryAfterMs}
          *
          * Atomic by virtue of being one script: the read-modify-write of `tokens`
@@ -277,12 +315,14 @@ class ProviderCapacityBucket(
          * test is the only thing keeping them honest — change one, change both.
          */
         val RESERVE_LUA = """
-            local depth  = tonumber(ARGV[1])
-            local refill = tonumber(ARGV[2])
-            local want   = tonumber(ARGV[3])
-            local floor  = tonumber(ARGV[4])
-            local now    = tonumber(ARGV[5])
-            local ttl    = tonumber(ARGV[6])
+            local depth    = tonumber(ARGV[1])
+            local refill   = tonumber(ARGV[2])
+            local want     = tonumber(ARGV[3])
+            local floor    = tonumber(ARGV[4])
+            local now      = tonumber(ARGV[5])
+            local ttl      = tonumber(ARGV[6])
+            local leaseId  = ARGV[7]
+            local leaseTtl = tonumber(ARGV[8])
 
             local tokens = tonumber(redis.call('HGET', KEYS[1], 'tokens'))
             local ts     = tonumber(redis.call('HGET', KEYS[1], 'ts'))
@@ -290,6 +330,21 @@ class ProviderCapacityBucket(
               tokens = depth
               ts = now
             end
+
+            -- ── THE CRASH BACKSTOP ────────────────────────────────────────
+            -- Return every lease whose deadline has passed. A worker killed
+            -- mid-call never settles, and without this its tokens stay drawn for
+            -- the life of the key. Swept lazily, on the next caller's reserve,
+            -- because the next caller is exactly who benefits from them.
+            --
+            -- The member encodes the amount (`id:amount`) so one ZSET is enough:
+            -- a parallel hash would need its own expiry and could disagree.
+            local dead = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now)
+            for i = 1, #dead do
+              local amount = tonumber(string.match(dead[i], ':(%d+)$'))
+              if amount then tokens = tokens + amount end
+            end
+            if #dead > 0 then redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now) end
 
             -- Continuous refill, capped at the bucket's DEPTH. Never above it: a
             -- bucket that accumulated while idle would let a burst exceed the
@@ -305,6 +360,7 @@ class ProviderCapacityBucket(
             if tokens - want >= floor then
               tokens = tokens - want
               granted = 1
+              redis.call('ZADD', KEYS[2], now + leaseTtl, leaseId .. ':' .. want)
             else
               -- How long until (tokens + refill) - want >= floor.
               local deficit = (floor + want) - tokens
@@ -314,6 +370,7 @@ class ProviderCapacityBucket(
 
             redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', ts)
             redis.call('EXPIRE', KEYS[1], ttl)
+            redis.call('EXPIRE', KEYS[2], ttl)
             return { granted, retry }
         """.trimIndent()
 
@@ -327,8 +384,24 @@ class ProviderCapacityBucket(
          * for it.
          */
         val SETTLE_LUA = """
-            local delta = tonumber(ARGV[1])
-            local depth = tonumber(ARGV[2])
+            local delta   = tonumber(ARGV[1])
+            local depth   = tonumber(ARGV[2])
+            local leaseId = ARGV[3]
+
+            -- Retire the lease FIRST, and only apply the settlement if it was
+            -- still outstanding. Without that check a settle racing its own
+            -- expiry returns the tokens twice and the bucket drifts above depth.
+            local removed = 0
+            local members = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', '+inf')
+            for i = 1, #members do
+              if string.sub(members[i], 1, #leaseId + 1) == leaseId .. ':' then
+                redis.call('ZREM', KEYS[2], members[i])
+                removed = 1
+                break
+              end
+            end
+            if removed == 0 then return 0 end
+
             local tokens = tonumber(redis.call('HGET', KEYS[1], 'tokens'))
             if tokens == nil then return 0 end
             tokens = math.min(depth, tokens + delta)
@@ -348,13 +421,20 @@ class ProviderCapacityBucket(
  * weaker; it is not nothing.
  */
 interface CapacityBackend {
-    /** Returns granted, and when to retry if not. */
+    /**
+     * Reserve [want], recording the lease so it can expire if never settled.
+     *
+     * Reclaims any lease already past its deadline first — a lazy reaper, so
+     * there is no background job and the cost lands on the next caller, who is
+     * the one who benefits from the reclaimed tokens.
+     */
     fun reserve(
         key: String, depth: Long, refillPerMinute: Long, want: Long, floor: Long, nowMs: Long,
+        leaseId: String, ttlMs: Long,
     ): Pair<Boolean, Long>
 
-    /** Return (positive) or take (negative) tokens, capped at [depth]. */
-    fun settle(key: String, delta: Long, depth: Long)
+    /** Retire [leaseId] and return (positive) or take (negative) tokens. */
+    fun settle(key: String, leaseId: String, delta: Long, depth: Long)
 }
 
 /**
@@ -366,7 +446,29 @@ interface CapacityBackend {
  * without a Redis to run it in.
  */
 internal object BucketMath {
-    data class State(var tokens: Double, var ts: Long)
+    /** `leases` maps lease id to (amount, deadline). See [expire]. */
+    data class State(
+        var tokens: Double,
+        var ts: Long,
+        val leases: MutableMap<String, Pair<Long, Long>> = LinkedHashMap(),
+    )
+
+    /**
+     * Return every lease whose deadline has passed. The crash backstop.
+     *
+     * Runs before the refill on every reserve, so an abandoned reservation costs
+     * at most its TTL rather than forever.
+     */
+    fun expire(st: State, nowMs: Long): Long {
+        var reclaimed = 0L
+        val it = st.leases.entries.iterator()
+        while (it.hasNext()) {
+            val (amount, deadline) = it.next().value
+            if (deadline <= nowMs) { reclaimed += amount; it.remove() }
+        }
+        st.tokens += reclaimed
+        return reclaimed
+    }
 
     /** Refill in place, capped at the bucket's depth. */
     fun refill(st: State, depth: Long, refillPerMinute: Long, nowMs: Long) {
@@ -377,13 +479,31 @@ internal object BucketMath {
         }
     }
 
+    /**
+     * Retire a lease and apply its settlement — but only if it was still
+     * outstanding.
+     *
+     * The guard is not defensive tidiness: a settle racing its own expiry would
+     * otherwise return the tokens twice and drift the bucket above its depth.
+     * The Lua does the same check, and the parity test is what keeps them equal.
+     */
+    fun settle(st: State, leaseId: String, delta: Long, depth: Long) {
+        if (st.leases.remove(leaseId) == null) return
+        st.tokens = minOf(depth.toDouble(), st.tokens + delta)
+    }
+
     /** Draw [want], if that leaves the bucket at or above [floor]. */
     fun reserve(
         st: State, depth: Long, refillPerMinute: Long, want: Long, floor: Long, nowMs: Long,
+        leaseId: String = "", ttlMs: Long = 0,
     ): Pair<Boolean, Long> {
+        /* Reclaim before refilling, so tokens returned by an expired lease are
+           subject to the same depth cap as everything else. */
+        expire(st, nowMs)
         refill(st, depth, refillPerMinute, nowMs)
         return if (st.tokens - want >= floor) {
             st.tokens -= want
+            if (leaseId.isNotEmpty()) st.leases[leaseId] = want to (nowMs + ttlMs)
             true to 0L
         } else {
             val deficit = (floor + want) - st.tokens
@@ -397,21 +517,26 @@ internal object BucketMath {
 class RedisCapacityBackend(private val redis: RedisCommands<String, String>) : CapacityBackend {
     override fun reserve(
         key: String, depth: Long, refillPerMinute: Long, want: Long, floor: Long, nowMs: Long,
+        leaseId: String, ttlMs: Long,
     ): Pair<Boolean, Long> {
         @Suppress("UNCHECKED_CAST")
         val res = redis.eval<List<Any>>(
             ProviderCapacityBucket.RESERVE_LUA, ScriptOutputType.MULTI,
-            arrayOf(key),
+            /* TWO keys, so the bucket and its lease set hash to the same slot in a
+               cluster — `{workspace}` in the key already guarantees that, and
+               declaring both is what makes it checkable. */
+            arrayOf(key, "$key:leases"),
             depth.toString(), refillPerMinute.toString(), want.toString(), floor.toString(),
             nowMs.toString(), ProviderCapacityBucket.TTL_SECONDS.toString(),
+            leaseId, ttlMs.toString(),
         )
         return ((res[0] as Long) == 1L) to (res[1] as Long)
     }
 
-    override fun settle(key: String, delta: Long, depth: Long) {
+    override fun settle(key: String, leaseId: String, delta: Long, depth: Long) {
         redis.eval<Long>(
             ProviderCapacityBucket.SETTLE_LUA, ScriptOutputType.INTEGER,
-            arrayOf(key), delta.toString(), depth.toString(),
+            arrayOf(key, "$key:leases"), delta.toString(), depth.toString(), leaseId,
         )
     }
 }
@@ -431,15 +556,16 @@ class InProcessCapacityBackend : CapacityBackend {
 
     override fun reserve(
         key: String, depth: Long, refillPerMinute: Long, want: Long, floor: Long, nowMs: Long,
+        leaseId: String, ttlMs: Long,
     ): Pair<Boolean, Long> {
         val st = stateFor(key, depth, nowMs)
         return synchronized(st) {
-            BucketMath.reserve(st, depth, refillPerMinute, want, floor, nowMs)
+            BucketMath.reserve(st, depth, refillPerMinute, want, floor, nowMs, leaseId, ttlMs)
         }
     }
 
-    override fun settle(key: String, delta: Long, depth: Long) {
+    override fun settle(key: String, leaseId: String, delta: Long, depth: Long) {
         val st = states[key] ?: return
-        synchronized(st) { st.tokens = minOf(depth.toDouble(), st.tokens + delta) }
+        synchronized(st) { BucketMath.settle(st, leaseId, delta, depth) }
     }
 }

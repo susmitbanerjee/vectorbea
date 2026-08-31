@@ -19,6 +19,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * P6's one promise, tested: routing a single-agent step through an activation
@@ -41,6 +42,7 @@ import kotlin.test.assertTrue
  * Skips when no database is reachable — a run through the executor needs a real
  * `agents` row, and stubbing that would be testing the stub.
  */
+@Tag("integration")
 class AgentActivationIntegrationTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
@@ -48,21 +50,14 @@ class AgentActivationIntegrationTest {
 
     private val stepId = "n-agent-1"
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 10
-        }
-        ds.connection.use { c ->
-            /* V042 and V041. An older schema is "not applicable", not "failing". */
-            c.prepareStatement("SELECT 1 FROM agent_activations LIMIT 1").use { it.executeQuery() }
-            c.prepareStatement("SELECT 1 FROM run_spans LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
-
-    // ── One workspace, one agent, and a run per case ─────────────────────────
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     /**
      * The FK chain plus an `agents` row.

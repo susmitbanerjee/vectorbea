@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
 import kotlin.test.Test
+import org.junit.jupiter.api.Tag
 
 /**
  * §12.2 — the before/after measurement for the event sequence change.
@@ -38,14 +39,22 @@ import kotlin.test.Test
  * expensive in production and is invisible in a benchmark that only writes
  * events.
  *
- * Opt-in — it writes ~15k rows and takes tens of seconds. Run it with:
+ * ── OPT-IN VIA A TAG, NOT VIA assumeTrue ────────────────────────────────────
+ * It writes ~60k rows across four passes and takes minutes, so it is excluded
+ * from both tiers by the `benchmark` tag. That exclusion lives in the build file
+ * where it is visible, rather than in an `assumeTrue(System.getenv(...))` that
+ * reports a PASS for a measurement nobody took.
  *
- *     EVENT_LOAD_TEST=true ./gradlew :worker-kotlin:test --tests '*EventWriteLoadTest'
+ *     ./gradlew :worker-kotlin:benchmark
  */
+@Tag("integration")
+@Tag("benchmark")
 class EventWriteLoadTest {
 
-    private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
-        ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
+    /* From [Infra], not a hard-coded port: this class opens SEVERAL DataSources
+       on purpose — one per simulated process — and they all have to point at the
+       same database Infra migrated. */
+    private val jdbcUrl = com.vectorbea.worker.testsupport.Infra.postgresUrl
 
     /** A five-agent team: five members, six iterations each, five events per iteration. */
     private val runs = System.getenv("LOAD_RUNS")?.toIntOrNull() ?: 100
@@ -62,9 +71,6 @@ class EventWriteLoadTest {
         connectionTimeout = 30_000
         poolName = "load-$size-${UUID.randomUUID().toString().take(6)}"
     })
-
-    private fun enabled(): Boolean =
-        System.getenv("EVENT_LOAD_TEST")?.lowercase() == "true"
 
     // ── Fixture ───────────────────────────────────────────────────────────────
 
@@ -292,7 +298,6 @@ class EventWriteLoadTest {
 
     @Test
     fun `event write throughput before and after`() {
-        assumeTrue(enabled(), "set EVENT_LOAD_TEST=true to run the load test")
 
         val results = mutableListOf<Result>()
         listOf(

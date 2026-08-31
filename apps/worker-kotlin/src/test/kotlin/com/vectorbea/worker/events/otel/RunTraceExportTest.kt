@@ -14,7 +14,9 @@ import java.util.UUID
 import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * §9 acceptance — a team run leaves as ONE trace, with parent/child intact across
@@ -35,18 +37,20 @@ import kotlin.test.assertTrue
  * sampling decision, the recursive run walk, the reparenting query and the whole
  * attribute mapping. Skips when no database is reachable.
  */
+@Tag("integration")
 class RunTraceExportTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dsOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply { setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 30 }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT 1 FROM workspace_otel_exports LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) { null }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dsOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     /** Records what would have gone on the wire. */
     private class Recording : SpanExporter {
@@ -311,6 +315,115 @@ class RunTraceExportTest {
             assertEquals(14, r.exported, "a run with a failed step must be exported at any rate")
             assertTrue(rec.spans.any { it.status.statusCode == io.opentelemetry.api.trace.StatusCode.ERROR })
         } finally {
+            cleanup(ds, t)
+        }
+    }
+
+    // ── Cross-workspace containment ───────────────────────────────────────────
+
+    /**
+     * M1(a). A child run belonging to another workspace is DROPPED, and said so.
+     *
+     * `agent_runs.parent_run_id` has no foreign key — V045 says so and says why —
+     * so nothing in the schema stops it pointing at another tenant's run.
+     * Following it would put that tenant's agent names, step names and run ids
+     * into THIS tenant's Grafana Tempo: outbound, to a third party, and not
+     * recoverable once sent.
+     *
+     * The export must still succeed for the workspace that owns it. Failing the
+     * whole export would turn one bad row into a total loss of observability for
+     * a tenant who did nothing wrong.
+     */
+    @Test
+    fun `a child in another workspace is excluded and announced`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database"); ds!!
+        val t = seed(ds)
+        val intruder = UUID.randomUUID()
+        val intruderRun = UUID.randomUUID()
+        try {
+            /* A whole second tenant, and one of its runs claiming to be a child of
+               the first tenant's run. */
+            ds.connection.use { c ->
+                c.prepareStatement("INSERT INTO workspaces (id,name,slug) VALUES (?,?,?)").use {
+                    it.setObject(1, intruder); it.setString(2, "other")
+                    it.setString(3, "other-$intruder"); it.executeUpdate()
+                }
+                c.prepareStatement(
+                    "INSERT INTO environments (id,workspace_id,name,slug,type) " +
+                    "VALUES (?,?,'t','t','development')"
+                ).use { it.setObject(1, intruder); it.setObject(2, intruder); it.executeUpdate() }
+                c.prepareStatement(
+                    "INSERT INTO workflows (id,workspace_id,environment_id,name,slug,status) " +
+                    "VALUES (?,?,?,'t',?,'active')"
+                ).use {
+                    it.setObject(1, intruder); it.setObject(2, intruder); it.setObject(3, intruder)
+                    it.setString(4, "wf-$intruder"); it.executeUpdate()
+                }
+                c.prepareStatement(
+                    "INSERT INTO workflow_versions (id,workflow_id,version,graph_json) " +
+                    "VALUES (?,?,1,'{}')"
+                ).use { it.setObject(1, intruder); it.setObject(2, intruder); it.executeUpdate() }
+                c.prepareStatement(
+                    "INSERT INTO agent_runs (id,workspace_id,environment_id,workflow_id," +
+                    " workflow_version_id,status,duration_ms,parent_run_id) " +
+                    "VALUES (?,?,?,?,?,'succeeded',1000,?)"
+                ).use {
+                    it.setObject(1, intruderRun); it.setObject(2, intruder); it.setObject(3, intruder)
+                    it.setObject(4, intruder); it.setObject(5, intruder)
+                    it.setObject(6, t.parentRun)   // the cross-workspace link
+                    it.executeUpdate()
+                }
+                c.prepareStatement(
+                    "INSERT INTO run_spans (span_id,trace_id,run_id,parent_span_id,workspace_id," +
+                    " kind,name,status,started_at,created_at) " +
+                    "VALUES (?,?,?,NULL,?,'run','SECRET-TENANT-B-SPAN','ok', now(), now())"
+                ).use {
+                    it.setObject(1, SpanWriter.runSpanId(intruderRun))
+                    it.setObject(2, intruderRun); it.setObject(3, intruderRun)
+                    it.setObject(4, intruder); it.executeUpdate()
+                }
+            }
+
+            val rec = Recording()
+            val events = com.vectorbea.worker.testsupport.RecordingEventStore()
+            val exporter = RunTraceExporter(
+                dataSource = ds, config = configWith(ds, rec),
+                sampler = TraceSampler(rateFor = { 1.0 }, graceWindow = Duration.ZERO),
+                enabled = true, events = events)
+
+            val r = exporter.exportRun(t.parentRun, t.workspaceId)
+
+            // The owning workspace's trace is exported in full, unaffected.
+            assertEquals(14, r.exported)
+            assertEquals(3, r.runs, "the intruder must not be counted as part of the tree")
+
+            // Not one span of the other tenant's went out.
+            assertTrue(rec.spans.none { it.name.contains("SECRET-TENANT-B-SPAN") },
+                "a span from another workspace reached the exporter")
+            val exportedRunIds = rec.spans.mapNotNull {
+                it.attributes.asMap().entries.firstOrNull { e -> e.key.key == "vectorbea.run_id" }
+                    ?.value as String?
+            }.toSet()
+            assertFalse(intruderRun.toString() in exportedRunIds,
+                "the intruder run's spans were exported")
+
+            // And it was announced, naming both sides.
+            val ev = events.events.single {
+                it.type == com.vectorbea.worker.events.RunEventStore.EventType.TRACE_EXPORT_CROSS_WORKSPACE
+            }
+            assertEquals(t.parentRun, ev.runId, "filed on the run somebody is looking at")
+            assertEquals(t.workspaceId, ev.workspaceId)
+            assertTrue(ev.summary!!.contains(intruderRun.toString()),
+                "the event must name the foreign run — it is the only handle on it")
+        } finally {
+            runCatching {
+                ds.connection.use { c ->
+                    c.prepareStatement("DELETE FROM run_spans WHERE workspace_id=?")
+                        .use { it.setObject(1, intruder); it.executeUpdate() }
+                    c.prepareStatement("DELETE FROM workspaces WHERE id=?")
+                        .use { it.setObject(1, intruder); it.executeUpdate() }
+                }
+            }
             cleanup(ds, t)
         }
     }

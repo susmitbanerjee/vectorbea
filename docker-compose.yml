@@ -59,6 +59,34 @@ services:
       retries: 10
       start_period: 5s
 
+  # ── Jaeger (OTLP collector + query API) ─────────────────────────────────────
+  #
+  # The integration tier's OTLP destination. `all-in-one` rather than a bare
+  # collector because a test that only proves a POST returned 200 has not proved
+  # ingestion — the query API on 16686 is what lets it assert the trace tree
+  # actually arrived and is shaped correctly.
+  #
+  # In the `test` profile, so `docker compose up` for ordinary local dev does not
+  # start it. Bring the tier up with:
+  #
+  #   docker compose --profile test up -d postgres redis jaeger
+  #
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    profiles: ["test"]
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_OTLP_PORT:-4318}:4318"    # OTLP/HTTP ingest
+      - "${JAEGER_QUERY_PORT:-16686}:16686" # query API + UI
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:16686/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
   # ── Kotlin API ──────────────────────────────────────────────────────────────
   api:
     build:

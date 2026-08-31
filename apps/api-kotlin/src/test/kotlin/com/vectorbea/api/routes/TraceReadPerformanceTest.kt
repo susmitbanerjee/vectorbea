@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * A wide trace has to load fast enough to open a page with.
@@ -25,20 +26,20 @@ import kotlin.test.assertTrue
  * truncated result are not where a wide trace goes wrong.
  */
 @Timeout(value = 60, unit = TimeUnit.SECONDS)
+@Tag("integration")
 class TraceReadPerformanceTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dsOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 10
-        }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT 1 FROM run_spans LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) { null }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dsOrNull(): DataSource? = com.vectorbea.api.testsupport.Infra.postgres
 
     /**
      * A realistically SHAPED trace, not 2000 siblings.

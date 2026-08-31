@@ -20,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * A budget clamp, all the way to a row in `run_spans`.
@@ -33,6 +34,7 @@ import kotlin.test.assertTrue
  *
  * Skips when no database is reachable.
  */
+@Tag("integration")
 class BudgetClampSpanTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
@@ -40,18 +42,14 @@ class BudgetClampSpanTest {
 
     private val stepId = "n-agent-1"
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 10
-        }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT 1 FROM run_spans LIMIT 1").use { it.executeQuery() }
-            c.prepareStatement("SELECT 1 FROM agent_activations LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     private class World(
         val workspaceId: UUID = UUID.randomUUID(),

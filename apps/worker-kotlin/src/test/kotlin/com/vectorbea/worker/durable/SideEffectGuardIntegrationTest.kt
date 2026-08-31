@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * Proves the dedupe path actually fires.
@@ -39,26 +40,20 @@ import kotlin.test.assertTrue
  * Skips when no database is reachable, so the normal `gradle test` stays green
  * without infrastructure.
  */
+@Tag("integration")
 class SideEffectGuardIntegrationTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
         ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl)
-            connectTimeout = 2
-            socketTimeout = 5
-        }
-        ds.connection.use { c ->
-            // Also require the V022 table — an older schema means "not applicable"
-            // rather than "failing".
-            c.prepareStatement("SELECT 1 FROM side_effects LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     /** Minimal FK chain so a side_effects row can exist. */
     private fun seedRun(ds: DataSource): Pair<UUID, UUID> {

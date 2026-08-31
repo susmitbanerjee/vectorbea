@@ -17,6 +17,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * The tool-call idempotency guard against a real `step_executions` table.
@@ -35,6 +36,7 @@ import kotlin.test.assertTrue
  * Skips when no database is reachable, so the normal `gradle test` stays green
  * without infrastructure.
  */
+@Tag("integration")
 class AgentToolGuardIntegrationTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
@@ -43,20 +45,14 @@ class AgentToolGuardIntegrationTest {
     private val stepId = "n-agent-1"
     private val toolId = UUID.fromString("11111111-2222-3333-4444-555555555555")
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 5
-        }
-        ds.connection.use { c ->
-            // Both tables the guard path touches. An older schema is "not applicable"
-            // rather than "failing".
-            c.prepareStatement("SELECT 1 FROM step_executions LIMIT 1").use { it.executeQuery() }
-            c.prepareStatement("SELECT 1 FROM step_outputs LIMIT 1").use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     /** Minimal FK chain so a step_executions row can exist. */
     private fun seedRun(ds: DataSource): Triple<UUID, UUID, UUID> {

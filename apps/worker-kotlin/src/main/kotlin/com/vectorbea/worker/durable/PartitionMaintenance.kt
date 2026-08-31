@@ -57,6 +57,16 @@ class PartitionMaintenance(
     private val dropEnabled: Boolean =
         System.getenv("PARTITION_DROP_ENABLED")?.lowercase() == "true",
     /**
+     * How long a finished run's event-sequence counter is kept.
+     *
+     * Days rather than minutes: a late cancel, an approval decision or a replay
+     * can append to a run well after the worker considers it done, and a counter
+     * deleted too early re-seeds from `MAX(sequence)` — which is only correct
+     * while that run's partition still exists.
+     */
+    private val seqCounterKeepDays: Int =
+        System.getenv("RUN_EVENT_SEQ_KEEP_DAYS")?.toIntOrNull()?.coerceIn(1, 365) ?: 7,
+    /**
      * Exports closed partitions to the warm tier before they are dropped.
      *
      * Null means no tiering: the drop then behaves exactly as it did before
@@ -124,6 +134,7 @@ class PartitionMaintenance(
                 reportOrDropExpired(table)
             }
             reportDefaultPartition()
+            pruneEventSequenceCounters()
         } catch (e: Exception) {
             log.error("[partitions] maintenance tick failed: {}", e.message)
         }
@@ -237,6 +248,43 @@ class PartitionMaintenance(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Drop `run_event_seq` rows for runs that finished days ago.
+     *
+     * ── WHY THIS CALL SITE EXISTS AT ALL ────────────────────────────────────
+     * `run_event_seq_prune()` shipped in V046 with no caller, and V046's own
+     * table comment claimed it was pruned. That is the third time: V028 shipped
+     * `run_events_ensure_partition()` and `run_events_drop_expired_partitions()`
+     * the same way, and this class was written to fix exactly that. Writing the
+     * function and never calling it is evidently the easy mistake to make here,
+     * which is why `MigrationFunctionCallersTest` now fails the build for it.
+     *
+     * One row per run, and only while the counter mode is on — but "only while
+     * the flag is on" is a reason to make sure the cleanup works before the flag
+     * flips, not a reason to skip it.
+     */
+    private fun pruneEventSequenceCounters() {
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement("SELECT run_event_seq_prune(?)").use { st ->
+                    st.setInt(1, seqCounterKeepDays)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            val n = rs.getInt(1)
+                            if (n > 0) log.info("[partitions] pruned {} run_event_seq row(s)", n)
+                        }
+                    }
+                }
+            }
+        }.onFailure {
+            /* A database that predates V046 has no such function. Debug, not
+               warn: on a mixed fleet this is expected until the migration lands,
+               and an hourly warning for an expected state is how real warnings
+               get filtered out. */
+            log.debug("[partitions] run_event_seq prune skipped: {}", it.message)
         }
     }
 

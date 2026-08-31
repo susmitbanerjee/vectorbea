@@ -11,6 +11,7 @@ import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * §12.2 — the event sequence lock, moved off the run row and taken N× less often.
@@ -40,10 +41,13 @@ import kotlin.test.assertTrue
  *
  * Skips when no database is reachable.
  */
+@Tag("integration")
 class EventSequenceContentionTest {
 
-    private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
-        ?: "jdbc:postgresql://127.0.0.1:15432/vectorbea?user=vectorbea&password=vectorbea"
+    /* From [Infra], not a hard-coded port: this class opens SEVERAL DataSources
+       on purpose — one per simulated process — and they all have to point at the
+       same database Infra migrated. */
+    private val jdbcUrl = com.vectorbea.worker.testsupport.Infra.postgresUrl
 
     /** A fresh pool per writer — one session each, exactly as two services have. */
     private fun newDataSource(): DataSource = PGSimpleDataSource().apply {

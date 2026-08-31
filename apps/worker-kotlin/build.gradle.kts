@@ -93,6 +93,20 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.11.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
+    // ── Testcontainers: the integration tier's infrastructure ────────────────
+    // Postgres, Redis and an OTLP collector, started per suite and thrown away.
+    //
+    // These exist because the alternative was `assumeTrue(reachable) else skip`,
+    // and a skipped test reads as green. Five acceptance criteria accumulated
+    // behind that pattern before anyone noticed none of them had ever run.
+    //
+    // Redis and Jaeger use the core GenericContainer rather than a module each:
+    // both need one port and a readiness check, and a module per image is three
+    // more artifacts to keep in step for no behaviour.
+    testImplementation("org.testcontainers:testcontainers:1.20.4")
+    testImplementation("org.testcontainers:junit-jupiter:1.20.4")
+    testImplementation("org.testcontainers:postgresql:1.20.4")
+
     // BlockHound: fails a test the moment a blocking call runs on a coroutine
     // dispatcher. One such call serialises everything behind it and is otherwise
     // invisible — the system just quietly stops scaling.
@@ -103,8 +117,74 @@ kotlin {
     jvmToolchain(17)
 }
 
+/*
+ * ── TWO TIERS, AND WHY THE DEFAULT IS THE NARROW ONE ────────────────────────
+ *
+ * `test`            — unit only. No containers, no network, runs everywhere.
+ * `integrationTest` — everything, including the container-backed tests.
+ *
+ * The split is a JUnit TAG rather than a second source set. The container-backed
+ * tests sit beside the unit tests they extend — `AgentToolGuardKeyTest` proves
+ * the key shape and `AgentToolGuardIntegrationTest` proves the behaviour of that
+ * shape in Postgres — and moving one of each pair into `src/integrationTest`
+ * would separate things that are read together, for the benefit of a build-file
+ * distinction.
+ *
+ * `integrationTest` runs BOTH tiers deliberately. An integration run that
+ * skipped the unit tests would be a second, weaker suite; what is wanted is the
+ * full one.
+ *
+ * Neither task caches its result on a passing run: a container-backed test that
+ * passed yesterday against a container that no longer exists is not evidence.
+ */
+/*
+ * The migration directory is an INPUT to the tests.
+ *
+ * `MigrationFunctionCallersTest` reads `apps/api-kotlin/.../db/migration` from
+ * disk, and Gradle cannot know that. Without this, adding a migration leaves the
+ * test task up-to-date and the check silently does not run — which is precisely
+ * the failure mode it was written to catch, reproduced one level up. Verified by
+ * adding a caller-less function and watching the suite stay green.
+ */
+tasks.withType<Test>().configureEach {
+    inputs.dir(file("../api-kotlin/src/main/resources/db/migration"))
+        .withPropertyName("dbMigrations")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform { excludeTags("integration", "benchmark") }
+}
+
+val integrationTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the whole suite, including tests that require Docker."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    /* `benchmark` is excluded here too: a measurement is not a pass/fail check,
+       and a two-minute load test on every merge is how an integration tier gets
+       turned off. `./gradlew benchmark` runs them deliberately. */
+    useJUnitPlatform { excludeTags("benchmark") }
+    /* Never up-to-date. The inputs a container-backed test really depends on —
+       a running daemon, a pulled image — are not on any Gradle input path, so
+       Gradle's answer to "has anything changed" is always wrong here. */
+    outputs.upToDateWhen { false }
+    shouldRunAfter(tasks.test)
+
+    /*
+     * Docker Desktop on Windows no longer creates the standard
+     * `npipe:////./pipe/docker_engine`; its active context is `desktop-linux`,
+     * whose endpoint is `dockerDesktopLinuxEngine`. Testcontainers probes the
+     * standard one and reports "Could not find a valid Docker environment",
+     * which reads as "Docker is not installed" when it is running fine.
+     *
+     * Set only on Windows, and only when the developer has not chosen their own
+     * DOCKER_HOST. On Linux and macOS the default socket is found without help,
+     * so CI is untouched.
+     */
+    if (System.getProperty("os.name").startsWith("Windows") && System.getenv("DOCKER_HOST") == null) {
+        environment("DOCKER_HOST", "npipe:////./pipe/dockerDesktopLinuxEngine")
+    }
 }
 
 // ── Fat jar via Shadow — merges service files correctly ───────────────────────
@@ -157,4 +237,16 @@ tasks.named("assemble") {
 
 tasks.named<JavaExec>("run") {
     jvmArgs("-Xms64m", "-Xmx512m")
+}
+
+val benchmark by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the load and throughput measurements. Needs Docker."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("benchmark") }
+    outputs.upToDateWhen { false }
+    if (System.getProperty("os.name").startsWith("Windows") && System.getenv("DOCKER_HOST") == null) {
+        environment("DOCKER_HOST", "npipe:////./pipe/dockerDesktopLinuxEngine")
+    }
 }

@@ -186,9 +186,9 @@ class ProviderCapacityBucketTest {
         val broken = object : CapacityBackend {
             override fun reserve(
                 key: String, depth: Long, refillPerMinute: Long,
-                want: Long, floor: Long, nowMs: Long,
+                want: Long, floor: Long, nowMs: Long, leaseId: String, ttlMs: Long,
             ): Pair<Boolean, Long> = throw RuntimeException("redis down")
-            override fun settle(key: String, delta: Long, depth: Long) =
+            override fun settle(key: String, leaseId: String, delta: Long, depth: Long) =
                 throw RuntimeException("redis down")
         }
         val b = bucket(capacity = 1_000, backend = broken)
@@ -285,16 +285,20 @@ class ProviderCapacityBucketTest {
      * The Lua and [BucketMath] are the same arithmetic written twice, and this is
      * the only thing that keeps them in step.
      *
-     * Skips without a Redis. That is a real gap, not a resolved one: on a machine
-     * with no Redis the Lua in `RESERVE_LUA` is never executed by anything, so a
-     * typo in it would ship. Run the suite with a Redis before trusting the
-     * distributed path.
+     * ── THIS TEST USED TO SKIP, AND THAT WAS THE WHOLE PROBLEM ─────────────
+     * It opened `assumeTrue(redis != null, "the Lua path is NOT covered")`, which
+     * is a PASS on every machine without a Redis — including CI, which has never
+     * had one. The Lua in `RESERVE_LUA` was therefore executed by nothing,
+     * anywhere, ever: a typo in it would have shipped and only shown up as a
+     * fleet that stopped rate-limiting itself.
+     *
+     * It is now tagged `integration` and takes its Redis from [Infra], which
+     * throws rather than skips.
      */
+    @org.junit.jupiter.api.Tag("integration")
     @Test
     fun `the redis backend agrees with the in-process one`() {
-        val redis = redisOrNull()
-        org.junit.jupiter.api.Assumptions.assumeTrue(redis != null,
-            "no Redis on 127.0.0.1:6379 — the Lua path is NOT covered by this run")
+        val redis = com.vectorbea.worker.testsupport.Infra.redis()
         val key = "captest:${UUID.randomUUID()}"
         val inProc = InProcessCapacityBackend()
         val onRedis = RedisCapacityBackend(redis!!)
@@ -303,25 +307,18 @@ class ProviderCapacityBucketTest {
             repeat(50) { i ->
                 now += 500
                 val want = 50L + i * 7
-                val a = inProc.reserve(key, 1_000, 800, want, 200, now)
-                val b = onRedis.reserve(key, 1_000, 800, want, 200, now)
+                val leaseId = "lease-$i"
+                val a = inProc.reserve(key, 1_000, 800, want, 200, now, leaseId, 60_000)
+                val b = onRedis.reserve(key, 1_000, 800, want, 200, now, leaseId, 60_000)
                 assertEquals(a.first, b.first, "granted disagreed at step $i")
                 if (!a.first) assertEquals(a.second, b.second, "retryAfterMs disagreed at step $i")
                 if (a.first) {
-                    inProc.settle(key, want / 2, 1_000)
-                    onRedis.settle(key, want / 2, 1_000)
+                    inProc.settle(key, leaseId, want / 2, 1_000)
+                    onRedis.settle(key, leaseId, want / 2, 1_000)
                 }
             }
         } finally {
             runCatching { redis.del(key) }
         }
-    }
-
-    private fun redisOrNull(): io.lettuce.core.api.sync.RedisCommands<String, String>? = try {
-        val url = System.getenv("TEST_REDIS_URL") ?: "redis://127.0.0.1:6379"
-        val client = io.lettuce.core.RedisClient.create(url)
-        client.connect().sync().also { it.ping() }
-    } catch (_: Exception) {
-        null
     }
 }

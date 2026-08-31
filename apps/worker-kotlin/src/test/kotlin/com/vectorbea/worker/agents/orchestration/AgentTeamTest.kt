@@ -18,6 +18,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Tag
 
 /**
  * Teams, one policy at a time, driven end to end.
@@ -30,6 +31,7 @@ import kotlin.test.assertTrue
  *
  * Skips when no database is reachable.
  */
+@Tag("integration")
 class AgentTeamTest {
 
     private val jdbcUrl = System.getenv("TEST_DATABASE_URL")
@@ -37,18 +39,14 @@ class AgentTeamTest {
 
     private val stepId = "n-team"
 
-    private fun dataSourceOrNull(): DataSource? = try {
-        val ds = PGSimpleDataSource().apply {
-            setURL(jdbcUrl); connectTimeout = 2; socketTimeout = 20
-        }
-        ds.connection.use { c ->
-            c.prepareStatement("SELECT join_group_id FROM agent_handoffs LIMIT 1")
-                .use { it.executeQuery() }
-        }
-        ds
-    } catch (_: Exception) {
-        null
-    }
+    /**
+     * The database, or a thrown exception naming what is missing.
+     *
+     * This used to probe a hard-coded localhost port and return null, which
+     * turned every test in this class into a silent pass on any machine
+     * without it. See [Infra].
+     */
+    private fun dataSourceOrNull(): DataSource? = com.vectorbea.worker.testsupport.Infra.postgres
 
     private class World(
         val workspaceId: UUID = UUID.randomUUID(),

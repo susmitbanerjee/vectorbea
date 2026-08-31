@@ -1,6 +1,7 @@
 package com.vectorbea.worker.events.otel
 
 import com.vectorbea.worker.durable.archive.TraceSampler
+import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.SpanWriter
 import com.vectorbea.worker.logging.logger
 import io.opentelemetry.sdk.trace.data.SpanData
@@ -64,6 +65,12 @@ class RunTraceExporter(
     /** Spans per OTLP request. */
     private val batchSize: Int =
         System.getenv("OTEL_TRACE_EXPORT_BATCH")?.toIntOrNull()?.coerceIn(1, 2_000) ?: 512,
+    /**
+     * Where a cross-workspace link is announced. Null leaves the log line and
+     * drops the event — the right shape for a unit test, the wrong one for
+     * production.
+     */
+    private val events: RunEventStore? = null,
     /**
      * Traces waiting to be shipped.
      *
@@ -143,11 +150,28 @@ class RunTraceExporter(
            failure is almost always in a child, and asking only whether the top run
            has a failed span would sample out precisely the traces somebody is
            about to go looking for. */
-        val runIds = traceRuns(runId)
+        val tree = traceRuns(runId, workspaceId)
+        val runIds = tree.runIds
+
+        /*
+         * ── A DESCENDANT IN ANOTHER WORKSPACE IS DROPPED AND ANNOUNCED ──────
+         *
+         * `agent_runs.parent_run_id` has no foreign key — V045 says so, and says
+         * why — so nothing in the schema prevents it pointing at a run in another
+         * tenant. Following it would ship that tenant's agent names, step names
+         * and run ids to THIS tenant's OTLP endpoint: outbound, to a third party,
+         * unrecoverable once sent.
+         *
+         * Dropped rather than exported, and LOUD rather than silent — a
+         * cross-workspace parent link is itself a bug, and the run ids on both
+         * sides are the only handle on the writer that created it.
+         */
+        if (tree.foreign.isNotEmpty()) reportForeign(runId, workspaceId, tree.foreign)
+
         val decision = sampler.decide(factsFor(runId, runIds) ?: return Result(0, 0, "no run"))
         if (!decision.kept) return Result(0, 0, "sampled out")
 
-        val rows = spansFor(runIds)
+        val rows = spansFor(runIds, workspaceId)
         if (rows.isEmpty()) return Result(0, runIds.size, "no spans")
 
         val destination = config.destinationFor(row) ?: return Result(0, 0, "no exporter")
@@ -197,25 +221,77 @@ class RunTraceExporter(
      * without both is one bad row away from running until the connection times
      * out. The cap is generous — real depth is bounded by `TeamLimits.maxDepth`.
      */
-    private fun traceRuns(rootId: UUID): List<UUID> = dataSource.connection.use { c ->
+    /** The runs in the trace, and the ones refused for belonging elsewhere. */
+    internal data class Tree(val runIds: List<UUID>, val foreign: List<UUID>)
+
+    internal fun traceRuns(rootId: UUID, workspaceId: UUID): Tree = dataSource.connection.use { c ->
         c.prepareStatement(
             """
-            WITH RECURSIVE tree(id, depth) AS (
-                SELECT id, 0 FROM agent_runs WHERE id = ?
+            WITH RECURSIVE tree(id, workspace_id, depth) AS (
+                SELECT id, workspace_id, 0 FROM agent_runs WHERE id = ? AND workspace_id = ?
                 UNION
-                SELECT r.id, t.depth + 1
+                SELECT r.id, r.workspace_id, t.depth + 1
                   FROM agent_runs r JOIN tree t ON r.parent_run_id = t.id
-                 WHERE t.depth < 32
+                 WHERE t.depth < 32 AND t.workspace_id = ?
             )
-            SELECT id FROM tree
+            SELECT id, workspace_id = ? AS same_workspace FROM tree
             """.trimIndent()
         ).use { st ->
-            st.setObject(1, rootId)
+            st.setObject(1, rootId); st.setObject(2, workspaceId)
+            st.setObject(3, workspaceId); st.setObject(4, workspaceId)
             st.executeQuery().use { rs ->
-                buildList { while (rs.next()) add(rs.getObject(1) as UUID) }
+                val mine = mutableListOf<UUID>()
+                val theirs = mutableListOf<UUID>()
+                while (rs.next()) {
+                    val id = rs.getObject(1) as UUID
+                    if (rs.getBoolean(2)) mine += id else theirs += id
+                }
+                /* Foreign runs are enumerated but never descended into: the
+                   recursion only continues from rows already in this workspace,
+                   so a chain cannot walk A -> B -> C one hop at a time. One hop
+                   is enough to NAME the bad link, which is all the report needs. */
+                Tree(mine, theirs)
             }
         }
     }
+
+    /**
+     * A cross-workspace parent link, announced.
+     *
+     * Filed on the ROOT's run, because that is the run somebody is looking at,
+     * and with both ids in the summary because the foreign run id is the only
+     * handle on the other half. `warning`, not `failed`: the export is correct
+     * and complete for this workspace — what is wrong is the data it walked over.
+     */
+    private fun reportForeign(rootId: UUID, workspaceId: UUID, foreign: List<UUID>) {
+        log.error("[otel-export] refusing to export {} run(s) from another workspace " +
+            "[rootRun={}, workspace={}, foreign={}] — a cross-workspace parent_run_id is a bug",
+            foreign.size, rootId, workspaceId, foreign.take(10))
+        runCatching {
+            val env = environmentOf(rootId) ?: return
+            events?.appendEvent(RunEventStore.RunEvent(
+                runId = rootId,
+                workspaceId = workspaceId,
+                environmentId = env,
+                type = RunEventStore.EventType.TRACE_EXPORT_CROSS_WORKSPACE,
+                status = "warning",
+                source = "otel-export",
+                title = "Cross-workspace run link",
+                summary = "${foreign.size} run(s) linked as children of this one belong to " +
+                    "another workspace and were excluded from the trace export: " +
+                    foreign.take(5).joinToString(),
+            ))
+        }
+    }
+
+    private fun environmentOf(runId: UUID): UUID? = runCatching {
+        dataSource.connection.use { c ->
+            c.prepareStatement("SELECT environment_id FROM agent_runs WHERE id = ?").use { st ->
+                st.setObject(1, runId)
+                st.executeQuery().use { rs -> if (rs.next()) rs.getObject(1) as UUID? else null }
+            }
+        }
+    }.getOrNull()
 
     /**
      * The facts for a logical trace, aggregated over EVERY run in it.
@@ -266,19 +342,28 @@ class RunTraceExporter(
             }
         }
 
-    private fun spansFor(runIds: List<UUID>): List<OtelSpanMapper.Row> =
+    /**
+     * The spans of those runs, scoped to the workspace a second time.
+     *
+     * `traceRuns` already refused foreign runs, so this predicate is redundant
+     * today. It is here because these two queries ARE the outbound boundary, and
+     * they should not both depend on one of them being right: a future edit that
+     * widens the walk would otherwise silently widen the export.
+     */
+    private fun spansFor(runIds: List<UUID>, workspaceId: UUID): List<OtelSpanMapper.Row> =
         dataSource.connection.use { c ->
             c.prepareStatement(
                 """
                 SELECT span_id, trace_id, run_id, parent_span_id, workspace_id, kind, name,
                        status, step_id, activation_id, iteration_index, attempt,
                        started_at, ended_at, duration_ms, self_ms, attributes_json::text,
-                       error_json::text, failure_class, is_root_cause,
+                       failure_class, is_root_cause,
                        tokens_in, tokens_out, cost_cents
-                  FROM run_spans WHERE run_id = ANY(?) ORDER BY started_at
+                  FROM run_spans WHERE run_id = ANY(?) AND workspace_id = ? ORDER BY started_at
                 """.trimIndent()
             ).use { st ->
                 st.setArray(1, c.createArrayOf("uuid", runIds.toTypedArray()))
+                st.setObject(2, workspaceId)
                 st.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) add(OtelSpanMapper.Row(
@@ -299,12 +384,14 @@ class RunTraceExporter(
                             durationMs = rs.getObject(15)?.let { (it as Number).toInt() },
                             selfMs = rs.getObject(16)?.let { (it as Number).toInt() },
                             attributesJson = rs.getString(17),
-                            errorJson = rs.getString(18),
-                            failureClass = rs.getString(19),
-                            isRootCause = rs.getBoolean(20),
-                            tokensIn = rs.getObject(21)?.let { (it as Number).toInt() },
-                            tokensOut = rs.getObject(22)?.let { (it as Number).toInt() },
-                            costCents = rs.getObject(23)?.let { (it as Number).toDouble() },
+                            /* 18 was error_json. Dropped from the SELECT, not just
+                               from the mapping: a sanitized-for-us error body has
+                               no reason to be in memory on an egress path. */
+                            failureClass = rs.getString(18),
+                            isRootCause = rs.getBoolean(19),
+                            tokensIn = rs.getObject(20)?.let { (it as Number).toInt() },
+                            tokensOut = rs.getObject(21)?.let { (it as Number).toInt() },
+                            costCents = rs.getObject(22)?.let { (it as Number).toDouble() },
                         ))
                     }
                 }

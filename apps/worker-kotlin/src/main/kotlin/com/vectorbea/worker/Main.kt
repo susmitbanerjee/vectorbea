@@ -380,6 +380,7 @@ fun main() {
         config = traceExportConfig,
         sampler = com.vectorbea.worker.events.otel.RunTraceExporter
             .samplerForExport(database.dataSource),
+        events = eventStore,
     )
 
     val processor = RunProcessor(
